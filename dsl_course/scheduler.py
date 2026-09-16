@@ -695,7 +695,9 @@ def _config_faults(
     # and holds them overnight without knowing anything about this file in particular.
     collect(
         config_digest.GRADING_CONFIG,
-        lambda found: grading_config_faults(course_org, sched, found, listing),
+        lambda found: grading_config_faults(
+            course_org, cohort_org, sched, found, listing
+        ),
     )
     return out
 

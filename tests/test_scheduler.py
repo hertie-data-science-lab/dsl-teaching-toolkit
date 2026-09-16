@@ -1443,7 +1443,7 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch)
     monkeypatch.setattr(
         scheduler,
         "grading_config_faults",
-        lambda course, sched, found, listing: seen.update(digest=listing),
+        lambda course, cohort, sched, found, listing: seen.update(digest=listing),
     )
     monkeypatch.setattr(
         scheduler,
@@ -2945,7 +2945,7 @@ def _config_preflight(
     monkeypatch.setattr(
         scheduler,
         "grading_config_faults",
-        lambda course, sched, found, listing: found.extend(spec_faults or []),
+        lambda course, cohort, sched, found, listing: found.extend(spec_faults or []),
     )
     monkeypatch.setattr(
         scheduler.config_digest,

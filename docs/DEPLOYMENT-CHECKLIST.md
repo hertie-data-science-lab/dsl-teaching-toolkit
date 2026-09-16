@@ -31,6 +31,12 @@ Accompanies the e2e [worked example](../example-course/).
 | *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
 | *(optional)* | 9. Check cohort setup | course workflow, per cohort | course `.github` → **Check cohort setup** | `cohort_org` | what's configured, what's missing, an edit link per gap |
 
+> **Member privileges (once, and only if any assignment uses `visibility: student_choice`).**
+> Cohort org → Settings → Member privileges: **Allow members to change repository
+> visibilities** ON, **Allow members to delete or transfer repositories** OFF. Both are
+> web-only - no API call sets them - so the toolkit reads them and the cohort's
+> *grading_config.yml* digest faults while either is wrong.
+
 ## Inputs by file
 
 > NB: all these `classroom-config/` files are kept in a private repo (PII stays there; not leaked publicly).

@@ -5540,7 +5540,7 @@ def _collect_configs(monkeypatch, text=BROKEN_CONFIG, grading=None, legacy=None)
     monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: legacy)
     found: list = []
     grades.grading_config_faults(
-        "Course-Org", _sched_one_assignment(grading), found, {}
+        "Course-Org", "Cohort-Org", _sched_one_assignment(grading), found, {}
     )
     return found
 
@@ -5571,7 +5571,9 @@ def test_a_template_that_could_not_be_read_reports_none_of_them(monkeypatch):
     monkeypatch.setattr(grades, "_grading_text", _boom)
     found: list = []
     with pytest.raises(RuntimeError):
-        grades.grading_config_faults("Course-Org", _sched_one_assignment(), found, {})
+        grades.grading_config_faults(
+            "Course-Org", "Cohort-Org", _sched_one_assignment(), found, {}
+        )
     assert found == []
 
 
@@ -5605,7 +5607,7 @@ def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=No
     )
     found: list = []
     listing = None if rows is None else {r["name"]: r for r in rows}
-    grades.grading_config_faults("Course-Org", sched, found, listing)
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, listing)
     return found
 
 
@@ -5710,3 +5712,126 @@ def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):
     )
     (fault,) = found
     assert "1 of 1 are not public" in fault.what
+
+
+def test_a_student_choice_assignment_is_exempt_from_the_consistency_check(monkeypatch):
+    # The STUDENT owns the flag on this shape, so twenty private repos and four public
+    # ones is the assignment working as written. Exempted by the vocabulary's own
+    # predicate (`course.visibility_is_students`), never by a name spelt in the check.
+    monkeypatch.setattr(grades.gh_teams, "org_settings", lambda org: {})
+    assert (
+        _visibility_run(
+            monkeypatch,
+            "visibility: student_choice\n",
+            _cohort_rows(("a3-ada", "private"), ("a3-ben", "public")),
+        )
+        == []
+    )
+
+
+# ------------------------- the org settings `visibility: student_choice` stands on
+#
+# That shape makes each student an `admin` of their own repo, because `admin` is the only
+# permission carrying GitHub's visibility control - and admin carries more than that. The
+# two switches that take the rest back are WEB-ONLY: `GET /orgs/{org}` reports them and
+# `PATCH /orgs/{org}` does not accept them, so the toolkit reads them and says so.
+
+_GOOD_ORG = {
+    "members_can_delete_repositories": False,
+    "members_can_change_repo_visibility": True,
+}
+
+
+def _org_run(
+    monkeypatch, settings, *, config="visibility: student_choice\n", rows=None
+):
+    """`grading_config_faults` over one handed-out assignment, with the org's own answer.
+
+    Returns `(faults, how many times the org was read)`."""
+    reads: list[str] = []
+
+    def _settings(org):
+        reads.append(org)
+        return settings
+
+    monkeypatch.setattr(grades.gh_teams, "org_settings", _settings)
+    found = _visibility_run(
+        monkeypatch,
+        config,
+        _cohort_rows(("a3-ada", "private")) if rows is None else rows,
+    )
+    return found, reads
+
+
+def test_a_cohort_whose_members_may_delete_their_repos_is_a_fault(monkeypatch):
+    found, reads = _org_run(
+        monkeypatch, {**_GOOD_ORG, "members_can_delete_repositories": True}
+    )
+    (fault,) = found
+    assert fault.where == grades.ORG_SETTINGS
+    assert "delete or transfer repositories** is ON" in fault.what
+    assert "change repository visibilities" not in fault.what
+    assert "settings/member_privileges" in fault.fix()
+    assert "DEPLOYMENT-CHECKLIST.md" in fault.fix()
+    assert reads == ["Cohort-Org"]
+
+
+def test_a_cohort_whose_members_may_not_publish_is_the_other_fault(monkeypatch):
+    # The shape does nothing for the student at all here: they hold admin and the org
+    # refuses the one thing admin was granted for.
+    found, _reads = _org_run(
+        monkeypatch, {**_GOOD_ORG, "members_can_change_repo_visibility": False}
+    )
+    (fault,) = found
+    assert "change repository visibilities** is OFF" in fault.what
+    assert "delete or transfer" not in fault.what
+
+
+def test_both_switches_wrong_is_still_one_fault(monkeypatch):
+    # The two are one problem - this org was never set up - and one issue key, so it is
+    # announced once, mailed once and cleared once.
+    found, _reads = _org_run(
+        monkeypatch,
+        {
+            "members_can_delete_repositories": True,
+            "members_can_change_repo_visibility": False,
+        },
+    )
+    (fault,) = found
+    assert "delete or transfer" in fault.what and "visibilities" in fault.what
+
+
+def test_a_correctly_configured_org_says_nothing(monkeypatch):
+    assert _org_run(monkeypatch, _GOOD_ORG) == ([], ["Cohort-Org"])
+
+
+def test_an_org_that_reports_neither_switch_is_not_a_fault(monkeypatch):
+    # A payload that omits a key has said nothing about it. Truthiness here would red
+    # every cohort on an account tier that does not carry the field.
+    assert _org_run(monkeypatch, {}) == ([], ["Cohort-Org"])
+
+
+def test_an_org_that_could_not_be_read_reports_nothing(monkeypatch):
+    assert _org_run(monkeypatch, None) == ([], ["Cohort-Org"])
+
+
+@pytest.mark.parametrize(
+    "config", ["", "visibility: public\n", "submit_via: external\n"]
+)
+def test_a_cohort_with_no_such_assignment_never_reads_the_org(monkeypatch, config):
+    # One GET per cohort per digest run, and none at all where the question does not
+    # apply: an org with no student-owned repo in it is not misconfigured.
+    _found, reads = _org_run(
+        monkeypatch, {"members_can_delete_repositories": True}, config=config
+    )
+    assert reads == []
+
+
+def test_an_assignment_that_has_created_no_repos_yet_never_reads_the_org(monkeypatch):
+    # Nobody holds admin on anything until the repos exist.
+    _found, reads = _org_run(
+        monkeypatch,
+        {"members_can_delete_repositories": True},
+        rows=[repo_row("a3", isTemplate=True)],
+    )
+    assert reads == []

@@ -38,7 +38,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from . import mailer, roster, schedule
+from . import gh_teams, mailer, roster, schedule
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import (
     ASSIGNMENT_TYPES,
@@ -1523,7 +1523,11 @@ def _spec_fix(dropped: Dropped) -> str:
 
 
 def grading_config_faults(
-    course_org: str, sched, found: list[ConfigFault], listing: dict[str, dict] | None
+    course_org: str,
+    cohort_org: str,
+    sched,
+    found: list[ConfigFault],
+    listing: dict[str, dict] | None,
 ) -> None:
     """Every assignment this cohort's plan declares, and everything in its definition that
     will not grade as written.
@@ -1537,11 +1541,21 @@ def grading_config_faults(
     holds, and it is read for one check: an assignment whose `visibility:` no longer
     describes the repos it handed out (see `_visibility_faults`). None is "we could not
     look", and that check reports nothing - it is not worth dropping a whole file's digest
-    for, since every other fault in it was read from the template. Everything else here is
-    the definition alone, which lives in the course org. Nothing is appended until every
+    for, since every other fault in it was read from the template.
+
+    `cohort_org` is read for one more thing, and only where a definition asks for it: an
+    assignment that hands the visibility flag to its students depends on two settings of
+    the ORG, which cannot be set through the API at all (`_org_settings_faults`). One GET
+    for the whole plan, and none at all for a cohort with no such assignment.
+
+    Everything else here is the definition alone, which lives in the course org. Nothing is appended until every
     template has been read: a read that failed is "we could not look", and the digest
     closes what it is not handed."""
     faults: list[ConfigFault] = []
+    # Whether any assignment under this plan has handed the visibility flag to its
+    # students, which is what makes the org's own two switches worth an API read - see
+    # `_org_settings_faults`.
+    hands_the_flag_over = False
     # THE submission-repo rule over the whole listing, computed once for the plan rather
     # than once per assignment: it sorts every repo in the org, and a cohort carrying six
     # assignments used to pay for that six times over the same rows.
@@ -1569,6 +1583,16 @@ def grading_config_faults(
         faults += grading_spec_faults(
             slug, template, course_org, text, fires, handed_out
         )
+        if (
+            handed_out
+            and load_grading_spec(course_org, template).visibility_is_students
+        ):
+            hands_the_flag_over = True
+    # ONE read of the org, after every template has been parsed and only when something
+    # in this cohort actually depends on it: an org with no such assignment is not
+    # misconfigured, it is an org the question does not apply to.
+    if hands_the_flag_over:
+        faults += _org_settings_faults(cohort_org)
     found.extend(faults)
 
 
@@ -1590,9 +1614,13 @@ def _visibility_faults(
 
     The listing's word against the file's, compared as both are written - they are the same
     vocabulary. A shape whose repos are legitimately a MIXTURE, because the students own
-    the flag, is exempted by its own predicate in `course.py` when it ships, never by a
-    name spelt here."""
-    if not spec.creates_unit_repos:
+    the flag, is exempted by its own predicate in `course.py`, never by a name spelt
+    here."""
+    if not spec.creates_unit_repos or spec.visibility_is_students:
+        # `student_choice` says the STUDENT decides, so twenty private repos and four
+        # public ones is the assignment working - `course.visibility_is_students`. The
+        # thing that CAN be wrong about it is the org, not the file: see
+        # `_org_settings_faults`.
         return []
     wrong = [r for r in rows if r.get("visibility") != spec.visibility]
     if not wrong:
@@ -1614,6 +1642,60 @@ def _visibility_faults(
             fix=f"set `visibility:` back to what those repos are, or make each of them "
             f"{spec.visibility} by hand from its GitHub Settings - the toolkit never "
             f"re-opens a repo it has already created",
+        )
+    ]
+
+
+# WHERE the org-settings fault sits in the digest's state. ONE key for the whole cohort
+# and not one per assignment: the two switches belong to the org, so three `student_choice`
+# assignments under one plan are three readings of one problem, and three keys would mail
+# about it three times and clear it three times.
+ORG_SETTINGS = "org settings"
+
+
+def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
+    """The org's own two switches, against what `visibility: student_choice` needs of them.
+
+    That shape gives the student `admin` on their own repo, because `admin` is the only
+    permission carrying GitHub's visibility control. It carries other things too, and the
+    org is the only place they can be taken back - so the shape is safe exactly where
+    members may change a repo's visibility and may NOT delete or transfer one.
+
+    READ-only, both of them: they are reported by `GET /orgs/{org}` and absent from
+    `PATCH /orgs/{org}` (they are web-only settings), so the maintainer sets them once per
+    cohort org and this is what notices when nobody did. Explicit `is True` / `is False`,
+    never truthiness: a plan whose payload omits a key has said nothing about it, and
+    faulting on a missing field would red every cohort on an account tier that does not
+    carry it."""
+    settings = gh_teams.org_settings(cohort_org)
+    if settings is None:
+        return []  # we could not look; `org_settings` has already said why
+    wrong = []
+    if settings.get(gh_teams.MEMBERS_CAN_DELETE) is True:
+        wrong.append(
+            "**Allow members to delete or transfer repositories** is ON, so a student "
+            "can delete or move their own submission"
+        )
+    if settings.get(gh_teams.MEMBERS_CAN_PUBLISH) is False:
+        wrong.append(
+            "**Allow members to change repository visibilities** is OFF, so no student "
+            "can publish their work and the shape does nothing for them"
+        )
+    if not wrong:
+        return []
+    return [
+        ConfigFault(
+            ORG_SETTINGS,
+            f"an assignment in this cohort is handed out with "
+            f"`visibility: student_choice`, which makes each student an admin of their "
+            f"own repo - and {' and '.join(wrong)}",
+            file=GRADING_FILE,
+            fix_text=(
+                f"on https://github.com/organizations/{cohort_org}/settings/"
+                f"member_privileges turn that switch the other way. Both are web-only "
+                f"org settings - the toolkit can read them and not set them - and they "
+                f"are the one-time cohort-org step in docs/DEPLOYMENT-CHECKLIST.md"
+            ),
         )
     ]
 
