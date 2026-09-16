@@ -47,34 +47,38 @@ title: page.title
     only the repos they can see, so the filter lands on their own. Absent while the
     assignment is pending - there is nothing at the other end of it yet.
     {%- endcomment -%}
-    {% if page.repo_url %}
-    <div class="callout">
-      <p><a class="btn" data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}">Open your private {% unless page.submit_external %}submission {% endunless %}repo on GitHub</a></p>
-      {%- comment -%}
-      `escape`: `repo_name` is a SHAPE, `<slug>-<your-handle>`, and those angle brackets
-      make `<your-handle>` an unknown HTML tag that the browser silently drops - so the
-      name rendered as `assignment-1-` with the useful half missing.
+    {%- comment -%}
+    Three shapes, and they share no sentence.
 
-      `submit_external` (site.py, off the assignment's own grading_config.yml): the work is
-      handed in off GitHub - Moodle, Kaggle, in class - and the repo carries the brief and
-      nothing else. The sentence below used to print off `repo_url` alone, so a Moodle
-      assignment told the whole cohort that a push to `main` was its submission. Where the
-      work actually goes is the brief's to say: the toolkit is never told.
-      {%- endcomment -%}
-      {%- comment -%}
-      `data-dsl-repo`: the repo SHAPE, and the one thing on the page that a reader with a
-      profile can be told exactly. open_in.html rewrites every one of these to the real
-      name (`assignment-1-jane`) and repoints every `data-dsl-repo-url` beside them at that
-      repo, so a student stops reading `<your-handle>` and substituting themselves. Marked
-      rather than matched on the prose, because the sentences around them are reworded.
-      {%- endcomment -%}
-      {% if page.submit_external %}
-      <p>Handed in outside GitHub - <code data-dsl-repo>{{ page.repo_name | escape }}</code> carries the brief.
-      See it for where to submit.</p>
-      {% else %}
+    `submit_external` (site.py, off the assignment's own grading_config.yml): the work is
+    handed in off GitHub - Moodle, Kaggle, in class - and NO repo is created for it at all.
+    So there is nothing to open and nothing to name: the brief below says where the work
+    goes, and `submit_url` puts a button on it when the assignment names an address. This
+    block used to print off `repo_url` alone, so a Moodle assignment told the whole cohort
+    that a push to `main` was its submission.
+
+    `escape`: `repo_name` is a SHAPE, `<slug>-<your-handle>`, and those angle brackets make
+    `<your-handle>` an unknown HTML tag that the browser silently drops - so the name
+    rendered as `assignment-1-` with the useful half missing.
+
+    `data-dsl-repo`: the repo SHAPE, and the one thing on the page that a reader with a
+    profile can be told exactly. open_in.html rewrites every one of these to the real name
+    (`assignment-1-jane`) and repoints every `data-dsl-repo-url` beside them at that repo,
+    so a student stops reading `<your-handle>` and substituting themselves. Marked rather
+    than matched on the prose, because the sentences around them are reworded.
+    {%- endcomment -%}
+    {% if page.submit_external %}
+    <div class="callout">
+      {% if page.submit_url %}
+      <p><a class="btn" target="_blank" rel="noopener" href="{{ page.submit_url }}">Submit on {{ page.submit_host }}</a></p>
+      {% endif %}
+      <p>Handed in outside GitHub - no repository is created for this assignment. See the brief for what to hand in.</p>
+    </div>
+    {% elsif page.repo_url %}
+    <div class="callout">
+      <p><a class="btn" data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}">Open your private submission repo on GitHub</a></p>
       <p>Your work goes in <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit as you go, and
       push to <code>main</code> - that push is your submission.</p>
-      {% endif %}
     </div>
     {% endif %}
 
@@ -113,15 +117,16 @@ title: page.title
   And again under the brief, quietly: a student who has just finished reading the task is
   at the point of starting it, and should not have to scroll back up for the link.
   {%- endcomment -%}
-  {% if page.repo_url %}
+  {% if page.submit_external %}
+  {% if page.submit_url %}
   <p class="post-meta">
-    {% if page.submit_external %}
-    Handed in outside GitHub - see
-    <a data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}"><code data-dsl-repo>{{ page.repo_name | escape }}</code></a> for where to submit.
-    {% else %}
+    Hand in at <a target="_blank" rel="noopener" href="{{ page.submit_url }}">{{ page.submit_host }}</a>.
+  </p>
+  {% endif %}
+  {% elsif page.repo_url %}
+  <p class="post-meta">
     Submit by pushing to <code>main</code> in
     <a data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}"><code data-dsl-repo>{{ page.repo_name | escape }}</code></a>.
-    {% endif %}
   </p>
   {% endif %}
 

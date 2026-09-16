@@ -424,6 +424,8 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "repo_url",
         "repo_name",
         "submit_external",
+        "submit_url",
+        "submit_host",
         "due_event",
     ],
 )
@@ -441,11 +443,12 @@ def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
     assert flag in read, f"nothing renders {flag}"
 
 
-# The `{% if ...submit_external %}...{% else %}...{% endif %}` either template wraps its
-# where-to-submit wording in.
+# The `{% if ...submit_external %}...{% elsif ... %}...{% endif %}` either template wraps
+# its where-to-submit wording in. Three shapes now, so the branch is an `elsif`: an
+# external assignment has no repo, a github one has, and a pending one has neither.
 _EXTERNAL_BRANCH = re.compile(
     r"{%-?\s*if\s+[\w.]*\bsubmit_external\s*-?%}(?P<external>.*?)"
-    r"{%-?\s*else\s*-?%}(?P<github>.*?){%-?\s*endif\s*-?%}",
+    r"{%-?\s*elsif\b(?P<github>.*?){%-?\s*endif\s*-?%}",
     re.DOTALL,
 )
 
@@ -455,20 +458,38 @@ _EXTERNAL_BRANCH = re.compile(
 )
 def test_only_a_github_assignment_is_told_to_submit_by_pushing(rel):
     # The two places that say where the work goes. Both printed the push sentence off
-    # `repo_url` alone, so an assignment handed in on Moodle - whose repo carries the
-    # brief and nothing else - told the cohort to push to `main`. The state is the
-    # assignment's own definition's to declare, so every word of the push wording has to
-    # sit behind the flag that carries it.
+    # `repo_url` alone, so an assignment handed in on Moodle told the cohort to push to
+    # `main`; and both then named a repo for it, which since the handout stopped creating
+    # one does not exist. The state is the assignment's own definition's to declare, so
+    # every word about a repo has to sit behind the flag that carries it.
     body = _strip_comments(_templates()[rel])
     halves = [(m["external"], m["github"]) for m in _EXTERNAL_BRANCH.finditer(body)]
     assert halves, f"{rel} does not branch on submit_external"
     for external, _github in halves:
-        assert "outside GitHub" in external, f"{rel} says nothing in the external case"
-    for phrase in ("push", "Submit via"):
+        assert "submit_url" in external or "outside GitHub" in external, (
+            f"{rel} says nothing in the external case"
+        )
+    for phrase in ("push", "Submit via", "repo_name", "repo_url"):
         behind = sum(github.count(phrase) for _external, github in halves)
         assert body.count(phrase) == behind, (
             f"{rel} says {phrase!r} outside the submit_external branch"
         )
+
+
+def test_an_external_assignments_page_has_no_repo_for_a_profile_to_rewrite(generated):
+    # `open_in.html` rewrites every `data-dsl-repo` on a page to the reader's OWN repo
+    # name, off `page.repo_name`. An external assignment has neither, so there is nothing
+    # to substitute into - and a marker left outside the github branch would render as
+    # `-jane` with nothing in front of it.
+    body = _strip_comments(_templates()["_layouts/assignment.html"])
+    halves = [(m["external"], m["github"]) for m in _EXTERNAL_BRANCH.finditer(body)]
+    behind = sum(github.count("data-dsl-repo") for _external, github in halves)
+    assert body.count("data-dsl-repo") == behind
+    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
+    assert page["submit_external"] is True
+    assert "repo_name" not in page and "repo_url" not in page
+    assert page["submit_host"] == "moodle.example.edu"
+    assert "repo_name" not in page["due_event"]
 
 
 # ---------------------------------------------------------------------------

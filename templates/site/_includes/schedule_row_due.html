@@ -28,16 +28,19 @@ other end of it. `escape`, because the shape's `<your-handle>` would otherwise r
 tag and vanish.
 
 `submit_external` (site.py, off the assignment's own grading_config.yml) is an assignment
-handed in off GitHub - Moodle, Kaggle, in class - whose repo carries the brief and nothing
-else. This row said "Submit via" for those too, which is the one thing the repo is not for.
+handed in off GitHub - Moodle, Kaggle, in class - for which NO repo is created at all, so
+there is no name to print here. `submit_url` is the address the assignment names, and is
+written only once the brief is out. This row said "Submit via <repo>" for those too, which
+is the one thing there is not.
 {%- endcomment -%}
 <div class="col col-4 markdown-content" data-label="Details">
-    {%- if include.event.repo_name -%}
     {%- if include.event.submit_external -%}
-    Handed in outside GitHub - the brief is in
-    {%- else -%}
-    Submit via
+    Handed in outside GitHub
+    {%- if include.event.submit_url %} - <a href="{{ include.event.submit_url }}">{{ include.event.submit_host }}</a>
+    {%- else %} - see the brief
     {%- endif -%}
+    {%- elsif include.event.repo_name -%}
+    Submit via
     {%- if include.event.repo_url %} <a href="{{ include.event.repo_url }}"><code>{{ include.event.repo_name | escape }}</code></a>
     {%- else %} <code>{{ include.event.repo_name | escape }}</code>
     {%- endif -%}

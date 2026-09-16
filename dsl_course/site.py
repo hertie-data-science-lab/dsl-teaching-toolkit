@@ -1077,8 +1077,15 @@ def _assignment_entry(
     # template per process; the cohort's schedule.yml, which the site used to read it
     # from for free, no longer has a say.
     spec = load_grading_spec(course_org, repo)
-    repo_name = submission_repo(
-        slug, "<your-team>" if spec.is_group else "<your-handle>"
+    # `submit_via: external` creates NO repo: the work is handed in off GitHub (Moodle,
+    # Kaggle, in class). So there is no name to print and nothing to link, and the page
+    # says where the work goes instead - the brief always, and a button when the
+    # assignment names an address.
+    external = spec.submit_external
+    repo_name = (
+        ""
+        if external
+        else submission_repo(slug, "<your-team>" if spec.is_group else "<your-handle>")
     )
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so
@@ -1094,19 +1101,22 @@ def _assignment_entry(
     # `repo_url` only once there is something at the other end of it. So the theme tests
     # the flag for state and the URL only for "have I somewhere to link", rather than
     # inferring one from the other.
-    repo_lines = [f'repo_name: "{q(repo_name)}"']
-    # The same spec, again: `submit_via: external` means the work is handed in off GitHub
-    # (Moodle, Kaggle, in class) and the repo carries only the brief. Off the flag the
-    # theme says so; without it both the page and the due row told a Moodle cohort to
-    # submit by pushing to `main`. Written whatever the handout state, because the shape
-    # it describes - like `repo_name` - is the spec's and is known before anything ships.
-    if spec.submit_external:
-        repo_lines.append("submit_external: true")
-    if out:
-        repo_lines.insert(
-            0,
-            f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"',
-        )
+    # The shape is the SPEC's and is known before anything ships, so the flag is written
+    # whatever the handout state; the address behind it is a place to go NOW, so like
+    # `repo_url` it waits until there is something to go there for. Without the flag both
+    # the page and the due row told a Moodle cohort to submit by pushing to `main`.
+    if external:
+        repo_lines = ["submit_external: true"]
+        if out and spec.submit_url:
+            repo_lines.append(f'submit_url: "{q(spec.submit_url)}"')
+            repo_lines.append(f'submit_host: "{q(spec.submit_host)}"')
+    else:
+        repo_lines = [f'repo_name: "{q(repo_name)}"']
+        if out:
+            repo_lines.insert(
+                0,
+                f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"',
+            )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1138,7 +1148,9 @@ def _assignment_entry(
         # inside italics. They render in the same table column and on adjacent tabs, so
         # they read as one status vocabulary or as two.
         body = (
-            f"_**{title} is not yet released** - your private "
+            f"_**{title} is not yet released** - the brief appears here when it is._"
+            if external
+            else f"_**{title} is not yet released** - your private "
             f"`{repo_name}` repo appears when it is._"
         )
     title = q(title)

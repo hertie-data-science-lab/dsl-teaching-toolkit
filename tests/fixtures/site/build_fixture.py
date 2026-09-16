@@ -42,9 +42,11 @@ BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
 COHORT_ORG = "hertie-dsl-fixture-f2026"
 MATERIALS = "course-materials"
-# Handed in off GitHub (`submit_via: external`), so its page and its due row must not tell
-# the cohort to push to `main`.
+# Handed in off GitHub (`submit_via: external`), so NO repo is created for it: its page and
+# its due row must name none, and must not tell the cohort to push to `main`. It names a
+# `submit_url`, which is what puts the `Submit on <host>` button on both.
 EXTERNAL = "assignment-3-f2026"
+EXTERNAL_URL = "https://moodle.example.edu/mod/assign/view.php?id=EXAMPLE"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
 # by construction rather than by when CI happens to run.
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=BERLIN)
@@ -123,7 +125,9 @@ def _grading_spec(_org: str, repo: str):
     individual, so the empty file's defaults are otherwise exactly right - it is stubbed
     only because the read would otherwise go to GitHub."""
     return grades.parse_grading_spec(
-        "submit_via: external\n" if repo == EXTERNAL else ""
+        f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
+        if repo == EXTERNAL
+        else ""
     )
 
 
@@ -198,7 +202,11 @@ def _lectures(hosted: dict) -> dict[str, str]:
 
 def _assignments() -> dict[str, str]:
     """One handed out (repo link, brief, README-derived name), one still pending, and one
-    handed in off GitHub - the three ways an assignment says where the work goes."""
+    handed in off GitHub - the three ways an assignment says where the work goes.
+
+    The external one is handed out by its PIN rather than by a frozen cohort template:
+    that handout creates no repos at all, so `handed_out` never carries its name and
+    `site._assignment_entry`'s other half is what publishes the brief."""
     return {
         "01-assignment-1.md": site._assignment_entry(
             COURSE_ORG,
@@ -223,7 +231,6 @@ def _assignments() -> dict[str, str]:
             EXTERNAL,
             datetime(2026, 12, 8, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 30, 9, 0, tzinfo=BERLIN),
-            handed_out=frozenset({"assignment-3"}),
             now=NOW,
         ),
     }

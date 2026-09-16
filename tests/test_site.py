@@ -509,30 +509,59 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     assert 'repo_name: "assignment-3-<your-team>"' in out
 
 
-def test_an_assignment_handed_in_off_github_says_so(monkeypatch):
-    # `submit_via: external` means Moodle, Kaggle or in class: nothing is ever collected
-    # from the repo, which carries the brief. The page and the due row said "push to
-    # `main`" for these too, because the theme printed that off `repo_url` alone. At BOTH
-    # levels, since the due row is a sub-hash that cannot see its parent's fields.
+def _external_entry(monkeypatch, config: str, **kw) -> str:
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Moodle essay\nThe brief."
     )
     monkeypatch.setattr(
-        site,
-        "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: external\n"),
+        site, "load_grading_spec", lambda *a: grades.parse_grading_spec(config)
     )
-    out = site._assignment_entry(
+    return site._assignment_entry(
         "Course",
         "Cohort-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-        handed_out=frozenset({"assignment-1"}),
+        **kw,
+    )
+
+
+def test_an_assignment_handed_in_off_github_names_no_repo_at_all(monkeypatch):
+    # `submit_via: external` means Moodle, Kaggle or in class, and the handout creates no
+    # repo for it. The page and the due row said "push to `main`" for these too, because
+    # the theme printed that off `repo_url` alone, and then named a repo that does not
+    # exist. At BOTH levels, since the due row is a sub-hash that cannot see its parent's.
+    out = _external_entry(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
     )
     assert out.count("submit_external: true") == 2
-    # the repo is still named and still linked - the brief is in it
-    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
-    assert out.count("repo_url:") == 2
+    assert "repo_name" not in out and "repo_url" not in out
+
+
+def test_an_external_assignment_carries_the_address_it_is_handed_in_at(monkeypatch):
+    # `submit_url` is the one thing the toolkit is ever told about a handover it does not
+    # see. The host rides along so the button can say where it goes before it is pressed.
+    out = _external_entry(
+        monkeypatch,
+        "submit_via: external\nsubmit_url: https://moodle.example.edu/x?id=7\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count('submit_url: "https://moodle.example.edu/x?id=7"') == 2
+    assert out.count('submit_host: "moodle.example.edu"') == 2
+
+
+def test_a_pending_external_assignment_offers_nowhere_to_submit_yet(monkeypatch):
+    # The address is a place to go NOW, so - like `repo_url` - it waits until the brief
+    # that explains what to take there is out. The shape itself is the plan's and is
+    # written either way.
+    out = _external_entry(
+        monkeypatch,
+        "submit_via: external\nsubmit_url: https://moodle.example.edu/x?id=7\n",
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert out.count("submit_external: true") == 2
+    assert "submit_url" not in out
+    assert "is not yet released** - the brief appears here when it is." in out
 
 
 def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
