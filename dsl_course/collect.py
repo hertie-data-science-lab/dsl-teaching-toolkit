@@ -336,10 +336,20 @@ def autograde_path(slug: str) -> str:
     return f"{AUTOGRADE_DIR}/{slug}"
 
 
+# What the file is sorted on: the repo, then the folder inside it. Named off the columns
+# rather than by position, and by the two that IDENTIFY a row rather than by the whole
+# tuple - sorting on everything put a drop box's unsubmitted folders first and its
+# submitted ones in sha order, which is stable but not readable.
+_SNAPSHOT_ORDER = (SNAPSHOT_FIELDS.index("repo"), SNAPSHOT_FIELDS.index("path"))
+
+
 def dump_snapshots(rows: list[tuple[str, ...]]) -> str:
-    """Serialise `SNAPSHOT_FIELDS`-shaped rows to snapshot CSV text, sorted so the file is
-    stable and diffable."""
-    return dump_csv(SNAPSHOT_FIELDS, sorted(rows))
+    """Serialise `SNAPSHOT_FIELDS`-shaped rows to snapshot CSV text, sorted by repo and
+    then by folder so the file is stable and diffable however the units were walked."""
+    return dump_csv(
+        SNAPSHOT_FIELDS,
+        sorted(rows, key=lambda row: [row[i] for i in _SNAPSHOT_ORDER]),
+    )
 
 
 @dataclass(frozen=True)

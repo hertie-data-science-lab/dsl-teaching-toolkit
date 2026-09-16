@@ -432,6 +432,18 @@ def test_snapshot_csv_round_trips_and_keeps_a_blank_sha():
         "repo,sha,recorded_at,submitted_at,submitted_source,path,note"
     )
     assert text.splitlines()[1].startswith("assignment-1-anna,")  # repo-sorted, stable
+    # And a drop box's rows, which all carry ONE repo, are ordered by the folder inside it
+    # rather than by whichever of them happens to have a sha.
+    shared = collect.dump_snapshots(
+        [
+            ("a3-submissions", SHA, "", "", "", "ben-k/", ""),
+            ("a3-submissions", "", "", "", "", "ada-l/", ""),
+        ]
+    )
+    assert [line.split(",")[5] for line in shared.splitlines()[1:]] == [
+        "ada-l/",
+        "ben-k/",
+    ]
     assert collect.parse_snapshots(text) == {
         "assignment-1-anna": SHA,
         "assignment-1-ben": "",
