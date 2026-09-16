@@ -69,6 +69,21 @@ def _team_lock_is_current(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def gradebooks(monkeypatch):
+    """A gradebook per onboarded student, provisioned beside the handout so the brief can
+    point at one from the day it is published. What one CONTAINS has its own tests
+    (tests/test_grading_view.py); a handout test only needs to see that it was asked for,
+    and never to reach the roster in the org."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        assign.grades,
+        "ensure_gradebooks",
+        lambda org, dry_run=False: calls.append(org) or 0,
+    )
+    return calls
+
+
+@pytest.fixture(autouse=True)
 def sheet_writes(monkeypatch):
     """provision_all creates the assignment's grading sheet once the handout has landed.
 
@@ -2307,3 +2322,124 @@ def test_the_marker_changes_when_the_correction_does():
 
     assert marker(AS_HANDED_OUT) != marker(FIXED)
     assert marker(AS_HANDED_OUT) == marker(AS_HANDED_OUT)
+
+
+# ------------------------------------------- an assignment handed in somewhere else
+#
+# `submit_via: external` creates NOTHING in the cohort org: no frozen template, no repo per
+# student, no Feedback issue. What it still owes the cohort is the record of the handout,
+# the grading sheet, a gradebook each and the site.
+
+
+def _boom(*a, **k):
+    raise AssertionError("an external handout writes this")
+
+
+def _external(monkeypatch, tmp_path, *, rows=(), recorded=False, group=""):
+    """`provision_all` over an external assignment, with every write recorded."""
+    effects: dict = {"handout": [], "marker": [], "site": [], "template": []}
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec(
+            "submit_via: external\n" + group
+        ),
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("an external assignment must create no repos")
+
+    monkeypatch.setattr(assign, "ensure_cohort_template", boom)
+    monkeypatch.setattr(assign, "provision_one", boom)
+    monkeypatch.setattr(assign, "generate_from_template", boom)
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda org, slug, stamp=None: effects["handout"].append(slug),
+    )
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site",
+        lambda course, cohort: effects["site"].append(cohort),
+    )
+    monkeypatch.setattr(assign, "handout_recorded", lambda org, slug: recorded)
+    monkeypatch.setattr(
+        assign,
+        "record_external_handout",
+        lambda org, slug, units: effects["marker"].append((slug, units)) or True,
+    )
+    path = _roster_file(
+        tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
+    )
+    effects["result"] = assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
+    )
+    return effects
+
+
+def test_an_external_handout_creates_no_repos_and_still_records_itself(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    out = _external(monkeypatch, tmp_path)
+    assert out["result"] == (0, True)
+    # The schedule is what the site reads to publish the brief: there is no cohort
+    # template repo for `discovery.handed_out_assignments` to find.
+    assert out["handout"] == ["assignment-1"]
+    assert out["marker"] == [("assignment-1", 1)]
+    assert out["site"] == ["COHORT"]
+    assert gradebooks == ["COHORT"]
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["units"] == [("ada-l", ["ada-l"])]
+
+
+def test_a_second_tick_of_an_external_handout_hands_nothing_out_again(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    # `due_releases` is cumulative: this fires four times an hour for the rest of the term.
+    out = _external(monkeypatch, tmp_path, recorded=True)
+    assert out["result"] == (0, False)
+    assert out["site"] == [] and out["marker"] == [] and gradebooks == []
+    # The sheet is the exception: it is the only pass that knows this assignment's units
+    # before its due date, and a late onboarder has no repo to make the tick `changed`.
+    assert len(sheet_writes) == 1
+
+
+def test_an_external_group_handout_forms_teams_and_keys_the_sheet_on_them(
+    tmp_path, monkeypatch, sheet_writes
+):
+    monkeypatch.setattr(
+        assign.teams,
+        "load",
+        lambda org: {"assignment-1": {"team-alpha": ["ada-l", "ben-k"]}},
+    )
+    out = _external(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+        group="type: group\n",
+    )
+    assert out["result"] == (0, True)
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["is_group"] is True
+    assert sheet["units"] == [("team-alpha", ["ada-l", "ben-k"])]
+
+
+def test_an_external_dry_run_writes_nothing_at_all(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec("submit_via: external\n"),
+    )
+    for name in ("ensure_cohort_template", "provision_one", "record_external_handout"):
+        monkeypatch.setattr(assign, name, _boom)
+    monkeypatch.setattr("dsl_course.schedule.record_handout", _boom)
+    monkeypatch.setattr("dsl_course.site.sync_site", _boom)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+
+    assert assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, dry_run=True
+    ) == (0, False)
+    assert sheet_writes == [] and gradebooks == []

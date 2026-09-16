@@ -95,6 +95,14 @@ from .workflows_place import NEVER_IN_STUDENT_REPOS
 # at all, and nothing would ever notice. Deleting the file re-releases it.
 SOLUTION_RECORD_DIR = "solutions"
 
+# The cohort-side record that an assignment submitted OFF GitHub was handed out, in
+# classroom-config. The github arm already has one - the frozen cohort template repo, which
+# is what `discovery.handed_out_assignments` reads - and an external handout creates no
+# repos at all, so nothing in the org says it happened. `due_releases` is cumulative, so
+# without this the handout could not tell its first run from its thousandth: the gradebooks
+# and the site would be redone four times an hour for the rest of the term.
+HANDOUT_RECORD_DIR = "handouts"
+
 
 def _wait_for_content(
     org: str, repo: str, attempts: int = 12, delay: float = 1.5
@@ -1023,12 +1031,122 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
     )
 
 
+def handout_record_path(slug: str) -> str:
+    """Where the write-once record of an external handout lives."""
+    return f"{HANDOUT_RECORD_DIR}/{slug}.json"
+
+
+def handout_recorded(cohort_org: str, slug: str) -> bool:
+    """Whether this cohort has already been given `slug` as an external assignment."""
+    return file_exists(cohort_org, CONFIG_REPO, handout_record_path(slug))
+
+
+def record_external_handout(cohort_org: str, slug: str, units: int) -> bool:
+    """Write that record. Returns whether it actually landed.
+
+    Written LAST, after the sheet, the gradebooks and the site: a tick that could not
+    finish must do the work again on the next one rather than leave a marker claiming a
+    handout that half happened."""
+    return put_file(
+        cohort_org,
+        CONFIG_REPO,
+        handout_record_path(slug),
+        json.dumps(
+            {"assignment": slug, "units": units, "handed_out": "by dsl-course"},
+            indent=2,
+        ).encode()
+        + b"\n",
+        f"chore: record the {slug} handout (submitted off GitHub)",
+    )
+
+
 # provision_one statuses that mean the model solution did NOT reach that unit's repo, and
 # so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
 # push (a dead handle, an unreachable team, a Feedback issue that would not open) and is
 # persistent, so withholding the marker for one would re-clone every submission repo every
 # hour for the rest of the term - the exact cost the marker exists to prevent.
 _SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
+
+
+def _release_external(
+    master_org: str,
+    template: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    key: str,
+    slug: str,
+    *,
+    group: bool,
+    sheet_units: list[tuple[str, list[str]]],
+) -> tuple[int, bool]:
+    """Hand out an assignment that is submitted somewhere else: no repos at all.
+
+    `submit_via: external` means the work reaches us off GitHub - Moodle, Kaggle, in class
+    - so there is nothing to generate, nothing to grant and nothing to collect. What a
+    handout still owes the cohort is everything AROUND the work: the moment recorded in
+    schedule.yml (which is also what publishes the brief, since `site._assignment_entry`
+    gates it on `handed_out or pinned_out` and there is no repo for the first half to
+    find), a grading sheet with every unit in it, a private gradebook per student for the
+    feedback to land in, and the site.
+
+    Returns `(exit code, whether this run handed anything out)`, like `provision_all`.
+    """
+    # Read BEFORE anything is written, stamped after: a tick that could not finish redoes
+    # the work rather than recording a handout that half happened.
+    first = not handout_recorded(cohort_org, slug)
+    # The schedule is the one record of WHEN each assignment went out, whether the cron
+    # released it or a person pressed the button - exactly as on the github path.
+    schedule.record_handout(cohort_org, key)
+    failed = False
+    if first and group:
+        # The Join-team form's mirror: a group assignment forms teams whether or not it
+        # hands out a repo, and the form's readers cannot see schedule.yml.
+        grades.write_team_lock(
+            cohort_org=cohort_org, course_org=master_org, sched=sched
+        )
+    # The sheet arrives WITH the handout and stays current after it. Run on every tick,
+    # not only the first: this is the only pass that knows an external assignment's units
+    # before its due date, and there is no new repo to make a late onboarder's tick
+    # `changed` the way there is on the github path. It costs one contents read - the
+    # write itself is skipped whenever the rows and the header have not moved.
+    if not sync_sheet(
+        master_org,
+        cohort_org,
+        sched,
+        key,
+        slug,
+        template,
+        is_group=group,
+        now=datetime.now(timezone.utc),
+        units=sheet_units,
+    ):
+        log_err(
+            f"  ! could not write the grading sheet for {slug} - the hourly refresh "
+            f"creates it on a later tick"
+        )
+    if not first:
+        return 0, False
+    # The gradebook is where this shape's feedback goes, and the brief points at it from
+    # the day it is published - so it exists from the handout rather than from the first
+    # distribute.
+    if grades.ensure_gradebooks(cohort_org):
+        failed = True
+    try:
+        site.sync_site(master_org, cohort_org)
+    except (RuntimeError, yaml.YAMLError) as exc:
+        log_err(
+            f"site sync failed after handing out {slug} - the brief is out; the site "
+            f"refreshes on the next Sync site or scheduler tick: {exc}"
+        )
+        failed = True
+    if not record_external_handout(cohort_org, slug, len(sheet_units)):
+        log_err(
+            f"{slug} was handed out, but its write-once record could not be written to "
+            f"{cohort_org}/{CONFIG_REPO} - until it is, every tick re-syncs the site and "
+            f"re-lists the cohort's gradebooks"
+        )
+        failed = True
+    return (1 if failed else 0), True
 
 
 def provision_all(
@@ -1204,16 +1322,32 @@ def provision_all(
         feedback_bodies = {repo: body for repo, _handles, _team in units}
         what = f"{len(units)} student(s)"
 
+    # `submit_via: external` is handed in off GitHub, so this whole path - the frozen
+    # cohort template, the repo per unit, the Feedback issue, the model solution - has
+    # nothing to act on. What the cohort is still owed is below.
+    external = gspec.submit_external
     log_step(
-        f"Releasing {slug} to {cohort_org}: freeze cohort template, then provision "
-        f"{what}{' + solution' if solution else ''}"
+        f"Releasing {slug} to {cohort_org}: "
+        + (
+            f"record the handout for {what} - submitted off GitHub, no repos"
+            if external
+            else f"freeze cohort template, then provision {what}"
+            + (" + solution" if solution else "")
+        )
     )
     if skipped:
         log(f"  ({skipped} not-yet-onboarded row(s) skipped)")
     if auditing:
         log(f"  ({auditing} auditor row(s) skipped - read-only, no assignment repos)")
+    if external and solution:
+        # Nowhere to push it: the model answer stays on the template's solution branch,
+        # which is where the teaching team reads it from anyway.
+        log(f"  (no model solution to push - {slug} creates no submission repos)")
 
     if dry_run:
+        if external:
+            log(f"    DRY-RUN  no repos; record the handout and the sheet for {what}")
+            return 0, False
         log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
         for repo, handles, team in units:
             via = f" (team {team})" if team else ""
@@ -1221,6 +1355,18 @@ def provision_all(
                 f"    DRY-RUN  {cohort_org}/{repo}{via}  <- {', '.join('@' + h for h in handles)}"
             )
         return 0, False
+
+    if external:
+        return _release_external(
+            master_org,
+            template,
+            cohort_org,
+            sched,
+            key,
+            slug,
+            group=group,
+            sheet_units=sheet_units,
+        )
 
     # ONE listing of the cohort, taken before anything is created, answers "is it already
     # there?" for the template below and for every unit in stage 2.
@@ -1296,6 +1442,11 @@ def provision_all(
         grades.write_team_lock(
             cohort_org=cohort_org, course_org=master_org, sched=sched
         )
+        # A gradebook per onboarded student, from the handout rather than from the first
+        # distribute: the brief points at "your gradebook" from the day it is published,
+        # and a student who onboarded this hour has just been given their repo. Idempotent
+        # and one listing, on the same `changed` gate as everything else here.
+        grades.ensure_gradebooks(cohort_org)
 
     # The grading sheet arrives WITH the handout: every row present, every human field
     # blank, and a header saying which fields the toolkit fills and when. A sheet that only
