@@ -4,7 +4,7 @@ Every message the onboarding bot posts back to a student, extracted from the JS 
 literals inside `templates/welcome/onboard.yml`, `templates/welcome/team-formation.yml`
 and the helper they share, `templates/welcome/_shared-script.js`.
 
-**24 distinct replies** - 11 on Join course, 13 on Join team. Messages assembled from two
+**28 distinct replies** - 11 on Join course, 17 on Join team. Messages assembled from two
 or more source fragments (`... ` + `...`) are shown here as the student receives them, on
 one line.
 
@@ -12,7 +12,7 @@ one line.
 the template literals. Keep the `${...}` placeholders intact (they interpolate at runtime).
 
 `${handle}` = student's GitHub login · `${org}` = cohort org · `${assignment}`, `${team}`,
-`${cap}`, `${attempt}`, `${e.status}`, `${unresolved.length}` as named.
+`${cap}`, `${size}`, `${attempt}`, `${e.status}`, `${unresolved.length}` as named.
 
 **How a reply gets posted.** Every failure path goes through one `fail(msg, label)` helper
 in `_shared-script.js`: it posts `msg` as an issue comment, adds `label`, and calls
@@ -26,6 +26,8 @@ their comment, add their label and close the issue inline.
 
 Workflow `Onboard student`, routed by the form's own `onboarding` label
 (`templates/welcome/ISSUE_TEMPLATE/01-join-course.yml`).
+
+Unchanged since the last render - `onboard.yml` and `_shared-script.js` have not moved.
 
 ### A1 · Success - normal enrolment
 *Trigger: code matched, roster row written, org membership + role team granted.*
@@ -135,6 +137,15 @@ Thanks @${handle} - something went wrong on my side (`${e.status || e.name}`). P
 Workflow `Form team`, routed by the form's own `team-formation` label
 (`templates/welcome/ISSUE_TEMPLATE/02-join-team.yml`).
 
+**Reworked since the last render.** What an assignment allows - whether a team may form at
+all, and how big - used to be scraped line-by-line out of the cohort's own
+`classroom-config/schedule.yml`. It is now read from a second private file the toolkit
+writes, `classroom-config/assignments.lock.yml` - a machine-written mirror of the
+assignment template's `grading_config.yml`, which lives in the course org and this
+cohort-scoped token cannot reach. The old single "not an assignment yet" message is now
+five distinct messages (B8-B12) for five distinct states of that lookup, only one of which
+is the same fact the old message reported.
+
 ### B1 · Success - team recorded
 *Trigger: the row was appended to `teams.csv`.*
 Label `team-recorded` · title -> `Join team: ${handle}` · issue closed
@@ -190,19 +201,47 @@ course), and the author is on it as an `auditor` - read-only, so they never rece
 assignment repo. Neutral on purpose: this issue is public and permanent, and saying which
 of the two it was would publish the author's enrolment role.* Label `needs-review`
 ```
-Thanks @${handle} - I can't find you on the course enrolment roster yet. Please open a **Join course** issue first to onboard, then come back to join a team. If you have already joined, contact the teaching team.
+Thanks @${handle} - I can't find you on the roster yet. Please open a **Join course** issue first to onboard, then come back to join a team. If you have already joined, contact the teaching team.
+```
+> Reworded since the last render: was "I can't find you on the **course enrolment**
+> roster yet" - now just "the roster".
+
+### B8 · Assignment lock file missing
+*Trigger: `classroom-config/assignments.lock.yml` does not exist at all - a cohort the
+toolkit has not written one for yet.* Label `needs-review`
+> Names a private file the student cannot open.
+```
+Thanks @${handle} - I can't read this cohort's assignment list (`classroom-config/assignments.lock.yml` isn't there). A maintainer will action this.
 ```
 
-### B8 · Assignment not declared as a group assignment
-*Trigger: the slug is not under `assignments:` in the cohort's schedule, there is no
-schedule at all, or the entry declares a `type:` that is not `group`. Without this one
-student could mint any number of real GitHub teams under names of their choosing.*
+### B9 · Assignment not declared in the lock
+*Trigger: the slug is not a key under the lock file at all.* Label `needs-review`
+```
+Thanks @${handle} - `${assignment}` isn't an assignment in this cohort yet. Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.
+```
+
+### B10 · Individual assignment - no teams
+*Trigger: the lock entry's `team_formation` is `none`.* Label `needs-review`
+```
+Thanks @${handle} - `${assignment}` is an individual assignment - no teams.
+```
+
+### B11 · Teams assigned by the instructor
+*Trigger: the lock entry's `team_formation` is anything other than `self_select` - today
+that is `assigned`, and equally a value written by a newer toolkit than this workflow
+knows about. Both mean the same thing to a student: wait to be added.* Label `needs-review`
+```
+Thanks @${handle} - teams for `${assignment}` are assigned by the instructor. The teaching team will add you to one; there is nothing for you to do here.
+```
+
+### B12 · No team-size cap recorded
+*Trigger: the lock entry allows self-selection but carries no usable `max_team_size`.*
 Label `needs-review`
 ```
-Thanks @${handle} - `${assignment}` isn't an assignment in this cohort's schedule yet. Check the slug with the teaching team - they can add it to the cohort's schedule.
+Thanks @${handle} - `${assignment}` has no team-size cap recorded. A maintainer will action this.
 ```
 
-### B9 · `teams.csv` header missing a required column
+### B13 · `teams.csv` header missing a required column
 Label `needs-review`
 > Names a private file (`classroom-config/teams.csv`) and its columns - the student cannot
 > open either.
@@ -210,21 +249,26 @@ Label `needs-review`
 Thanks @${handle} - `teams.csv` is missing a required column (`assignment`, `team`, `github_handle`). A maintainer will action this.
 ```
 
-### B10 · Already in a different team for this assignment
+### B14 · Already in a different team for this assignment
 *Trigger: one team per student per assignment.* Label `needs-review`
 ```
 You're already in team **${cell(mine, iTeam)}** for `${assignment}` @${handle}. Contact the teaching team to switch teams.
 ```
 
-### B11 · Team is full
-*Trigger: member count has hit `max_team_size` for this assignment, or the default of 5.
+### B15 · Team is full
+*Trigger: member count has hit the lock file's `max_team_size` for this assignment.
 Re-checked inside the write loop, so two students committing at the same moment cannot
 put a team over its cap.* Label `needs-review`
 ```
-Team **${team}** for `${assignment}` is full (${cap} member${cap === 1 ? '' : 's'}). Pick another team name.
+Thanks @${handle} - **${team}** already has ${size} member${size === 1 ? '' : 's'} (the cap for `${assignment}` is ${cap}). Pick another team name.
 ```
+> Reworded since the last render: was "Team **${team}** for `${assignment}` is full (${cap}
+> members - the cap the teaching team set via `max_team_size` in
+> classroom-config/schedule.yml)." - dropped the `schedule.yml` mention (the cap now lives
+> in the lock file, not there), gained the `Thanks @handle` opener and the current member
+> count.
 
-### B12 · Team write failed after retries
+### B16 · Team write failed after retries
 *Trigger: 8 attempts exhausted, or a non-retryable error (not a 409, not the 422
 create-on-first-use race, not a 403 naming the secondary rate limit).* Label `needs-review`
 > Leaks the raw HTTP status (`${e.status}`).
@@ -232,7 +276,7 @@ create-on-first-use race, not a 403 naming the secondary rate limit).* Label `ne
 Thanks @${handle} - I couldn't record your team after ${attempt} attempt(s) (`${e.status}`). A maintainer will action this.
 ```
 
-### B13 · Unexpected failure (catch-all)
+### B17 · Unexpected failure (catch-all)
 *Trigger: the outer `catch`.* Label `needs-review`
 > Leaks the raw HTTP status / error name.
 ```
@@ -245,25 +289,32 @@ Thanks @${handle} - something went wrong on my side (`${e.status || e.name}`). A
 
 1. **Three success openers**: `Welcome **@handle**` (A1), `Thanks **@handle**` (A2),
    `Done **@handle**` (B1). Pick one register?
-2. **Three messages skip the `Thanks @handle` opener**: B2, B10, B11 - they open with
-   `You're already ...` / `Team **x** ...`. Deliberate or drift?
-3. **Three escalation phrasings, split by workflow rather than by cause.** `onboard.yml`
-   says **"Contact the instructor(s) for this course"** for infrastructure faults (A5, A6,
-   A10, A11); `team-formation.yml` says **"A maintainer will action this"** for the same
-   class of fault (B3, B6, B9, B12, B13); and both say **"contact the teaching team"** for
-   student-actionable ones. A9 is in `onboard.yml` but uses the maintainer wording. Three
-   words for the same audience - worth collapsing to two.
-4. **Four messages leak a raw HTTP status** to a student (A9, A11, B12, B13). Say if you
+2. **Two messages skip the `Thanks @handle` opener**: B2, B14 - they open with
+   `You're already ...`. (B15, the team-full message, used to skip it as well; it now
+   opens with `Thanks @handle` like everything else, so this is down from three.)
+3. **Escalation phrasing still splits by workflow rather than by cause, and the split has
+   widened.** `onboard.yml` says **"Contact the instructor(s) for this course"** for
+   infrastructure faults (A5, A6, A10, A11); `team-formation.yml` says **"A maintainer will
+   action this"** for the same class of fault, now in seven places (B3, B6, B8, B12, B13,
+   B16, B17) rather than five; and both say **"contact the teaching team"** for
+   student-actionable ones. A9 is in `onboard.yml` but uses the maintainer wording. B9, B10
+   and B11 - the three newest messages - use neither phrase: they state the fact and stop,
+   with no explicit escalation at all. Worth deciding whether those three should point
+   somewhere too.
+4. **Four messages leak a raw HTTP status** to a student (A9, A11, B16, B17). Say if you
    want `(\`${e.status}\`)` dropped from the student-facing text; it is already in the
    Actions annotation faculty read.
-5. **Four messages name something behind the private gate** - `DSL_BOT_TOKEN` (A5, B3),
-   the roster's column layout (A6, B6), `teams.csv` (B9). A student can act on none of it.
-6. **Two messages are shared constants with several triggers** (A7's `NO_MATCH`, B5's
+5. **Five messages name something behind a private gate** - `DSL_BOT_TOKEN` (A5, B3),
+   the roster's column layout (A6, B6), `teams.csv` (B13), and now
+   `classroom-config/assignments.lock.yml` (B8). A student can act on none of it.
+6. **Three messages are shared constants with several triggers** (A7's `NO_MATCH`, B5's
    `NAME_TAKEN`, B7's `NOT_A_PARTICIPANT`) - reworded once, they change everywhere. That
    is deliberate: each is reason-free so that the reply cannot be used as an oracle from a
    public issue.
-7. **The cohort's private schedule path is no longer named** in B8 or B11. If you want a
-   student pointed at *where* the cap comes from, it has to be a page they can open.
+7. **The cohort's schedule path is back**, in a different message. B9 (assignment not
+   declared) still points a student at `classroom-config/schedule.yml`, even though
+   whether a team may form at all is now decided by the lock file, not the schedule - worth
+   checking that pointer is still the right one to give.
 
 ## Labels applied
 
