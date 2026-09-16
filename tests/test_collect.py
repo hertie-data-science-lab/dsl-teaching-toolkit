@@ -7,6 +7,7 @@ answer, so the pin's every branch is pinned down here with git/gh stubbed.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -150,6 +151,20 @@ def test_student_choice_is_accepted_vocabulary_and_refused_until_it_is_implement
     assert spec.visibility == "private" and spec.has_feedback_issue
     assert (
         "`visibility: student_choice` is not supported yet" in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize("submit_via", course.SUBMIT_VIA)
+@pytest.mark.parametrize("visibility", course.VISIBILITIES)
+def test_the_feedback_channel_over_every_pair_the_vocabulary_allows(
+    submit_via, visibility
+):
+    # The whole truth table, off the vocabulary itself rather than a list beside it: the
+    # issue lives in the unit's own repo, so it exists exactly where there is one that
+    # only that unit can read. Every other pair is answered by the gradebook, and adding
+    # a word to either tuple without deciding this is what the parametrisation forbids.
+    assert course.has_feedback_issue(submit_via, visibility) is (
+        submit_via == "github" and visibility == "private"
     )
 
 
@@ -5642,6 +5657,31 @@ def test_a_listing_that_could_not_be_read_reports_nothing_and_keeps_the_rest(
     found, _ = _visibility_run(monkeypatch, "visibility: public\nmystery: 4\n", None)
     assert [f.field for f in found] == ["mystery"]
     assert "could not list" in capsys.readouterr().err
+
+
+def test_student_choice_is_exempt_because_a_mixture_is_the_point(monkeypatch):
+    # The students own the flag on that shape, so a cohort of 20 private repos and 4
+    # public ones is the CORRECT state - a fault about it would fire on every tick for
+    # ever. The parse still refuses the word back to `private` until its own phase, which
+    # is why this is asserted against the spec directly: this is the arm that has to hold
+    # the day it stops.
+    spec = dataclasses.replace(
+        grades.parse_grading_spec(""), visibility="student_choice"
+    )
+    assert (
+        grades._visibility_faults(
+            spec,
+            "a3",
+            "assignment-3-f2026",
+            "Course-Org",
+            {},
+            DUE_AT,
+            lambda: (_ for _ in ()).throw(
+                AssertionError("an exempt assignment is never listed")
+            ),
+        )
+        == []
+    )
 
 
 def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):

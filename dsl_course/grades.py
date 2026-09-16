@@ -1615,11 +1615,12 @@ def _visibility_faults(
     describes repos that do not exist. Nothing else notices, which is why this is a fault
     and not a log line.
 
-    Only the visibilities that make a UNIFORM set of repos are compared. `student_choice` -
-    which the parse refuses back to `private` until its own phase - is deliberately outside
-    that set: the students own the flag there, so a mixture is the correct state and a
-    fault about it would fire on every tick for ever."""
-    if not spec.creates_unit_repos or spec.visibility not in OFFERED_VISIBILITIES:
+    Only the visibilities that make a UNIFORM set of repos are compared, and
+    `student_choice` is deliberately not one: the students own the flag there, so a mixture
+    is the CORRECT state and a fault about it would fire on every tick for ever. The parse
+    refuses that word back to `private` until its own phase ships, so the exemption is
+    named here rather than left to that - it is what has to hold the day it stops."""
+    if not spec.creates_unit_repos or spec.visibility == "student_choice":
         return []
     rows = handed_out()
     if not rows:
