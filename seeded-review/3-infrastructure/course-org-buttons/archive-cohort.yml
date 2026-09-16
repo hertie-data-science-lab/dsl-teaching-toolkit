@@ -1,40 +1,45 @@
 # SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is
 # re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).
-name: Release assignment
+name: Archive cohort
 
-# Generates one private repo per onboarded student from the chosen assignment template
-# repo (native template-generate). The assignment dropdown lists the course org's
-# assignment-* template repos; refresh repopulates it.
+# End of term. The scheduler runs this by itself ONLY for a cohort whose schedule.yml
+# writes an `archive:` block (its `date:` defaults to semester_end + 60 days). Archiving is
+# opt-in, so this button closes a cohort out early - and is the only way to close out one
+# that wrote no block. It offers the cohort's edits back to this org as a pull request
+# first, closes the toolkit's open notices, syncs the website one last time, then ARCHIVES
+# every repo in the cohort org - students' work, `welcome` so a finished term cannot still
+# be joined, the released materials, the website, `.github` - writes the teardown record
+# into the private classroom-config and archives that last, which is what tells every
+# nightly sweep the cohort is finished.
+# NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
+# students keep read access to their own work, and un-archiving a repo from its own
+# Settings page brings it back exactly as it was. Membership and teams are untouched.
+# `dry_run` defaults to true and prints counts only. A real run refuses until the cohort's
+# archive date has arrived; `force` says so by hand, which is how a cohort with no
+# `archive:` block - and so no date - is closed out.
+# A run that dies half way is resumed by running it again - see docs/10.
 
 on:
   workflow_dispatch:
     inputs:
-      course_source_repo:
-        description: "1. Course-org repo to hand out from"
-        required: true
-        type: choice
-        options:
-          - assignment-1
-          - assignment-2
-          - assignment-4-project
       cohort_org:
-        description: "2. Target cohort org"
+        description: "Cohort org"
         required: true
         type: choice
         default: "hertie-dsl-demo-f2026"
         options:
           - hertie-dsl-demo-f2026
-      include_solution:
-        description: "3. Also push the model solution from the template's solution branch into every student repo"
-        type: boolean
-        default: false
       dry_run:
-        description: "4. Preview only - list the repos that would be created, create nothing"
+        description: "Preview the teardown - freeze nothing, open no pull request"
+        type: boolean
+        default: true
+      force:
+        description: "Close out before the cohort's archive date"
         type: boolean
         default: false
 
 concurrency:
-  group: ${{ github.repository }}-release-assignment
+  group: ${{ github.repository }}-archive-cohort
   cancel-in-progress: false
 
 permissions: {}
@@ -59,10 +64,10 @@ jobs:
           cat /tmp/gherr || true
           exit 1
 
-  provision:
+  archive-cohort:
     needs: check-team
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
@@ -78,17 +83,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Provision
+      - name: Archive cohort
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          MASTER_ORG: ${{ github.repository_owner }}
+          COURSE_ORG: ${{ github.repository_owner }}
           COHORT_ORG: ${{ inputs.cohort_org }}
-          COURSE_SOURCE_REPO: ${{ inputs.course_source_repo }}
-          INC_SOL: ${{ inputs.include_solution }}
           DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
         run: |
           gh auth setup-git
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
-          [ "$INC_SOL" = "true" ] && args+=(--solution)
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.assign "${args[@]}"
+          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
+          if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
+          [ "$FORCE" = "true" ] && args+=(--force)
+          python3 -m dsl_course.teardown "${args[@]}"

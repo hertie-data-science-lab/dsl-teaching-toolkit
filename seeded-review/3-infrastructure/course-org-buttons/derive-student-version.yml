@@ -1,40 +1,36 @@
 # SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is
 # re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).
-name: Release assignment
+name: Derive student version
 
-# Generates one private repo per onboarded student from the chosen assignment template
-# repo (native template-generate). The assignment dropdown lists the course org's
-# assignment-* template repos; refresh repopulates it.
+# ONE authored file, two branches. Keep the notebook you actually teach from on the
+# template's `solution` branch, under `solution/`, with the answers fenced off in the
+# nbgrader/Otter vocabulary: `### BEGIN SOLUTION` / `### END SOLUTION`, a `solution` cell
+# tag, or an Rmd/qmd chunk with `solution=TRUE`. This reads that branch and writes the
+# fenced-out version onto `main` - the only branch template-generate copies into a student
+# repo - so the starter is never maintained by hand beside the answer it is meant to be
+# missing. It never writes to `solution`, and a file with nothing fenced in it is never
+# written at all: the "starter" derived from that would be the model answer.
+# `dry_run` defaults to true and prints the file list and the counts, never the content.
+# See docs/03-add-assignment-to-course.md.
 
 on:
   workflow_dispatch:
     inputs:
       course_source_repo:
-        description: "1. Course-org repo to hand out from"
+        description: "Assignment template to derive the student starter for"
         required: true
         type: choice
         options:
           - assignment-1
           - assignment-2
           - assignment-4-project
-      cohort_org:
-        description: "2. Target cohort org"
-        required: true
-        type: choice
-        default: "hertie-dsl-demo-f2026"
-        options:
-          - hertie-dsl-demo-f2026
-      include_solution:
-        description: "3. Also push the model solution from the template's solution branch into every student repo"
-        type: boolean
-        default: false
       dry_run:
-        description: "4. Preview only - list the repos that would be created, create nothing"
+        description: "Preview only - list the files and how much would be stripped out of each"
         type: boolean
-        default: false
+        default: true
 
 concurrency:
-  group: ${{ github.repository }}-release-assignment
+  group: ${{ github.repository }}-derive-student-version
   cancel-in-progress: false
 
 permissions: {}
@@ -59,7 +55,7 @@ jobs:
           cat /tmp/gherr || true
           exit 1
 
-  provision:
+  derive:
     needs: check-team
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -78,17 +74,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Provision
+      - name: Derive student version
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          MASTER_ORG: ${{ github.repository_owner }}
-          COHORT_ORG: ${{ inputs.cohort_org }}
+          COURSE_ORG: ${{ github.repository_owner }}
           COURSE_SOURCE_REPO: ${{ inputs.course_source_repo }}
-          INC_SOL: ${{ inputs.include_solution }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          gh auth setup-git
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
-          [ "$INC_SOL" = "true" ] && args+=(--solution)
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.assign "${args[@]}"
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO")
+          if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
+          python3 -m dsl_course.derive "${args[@]}"

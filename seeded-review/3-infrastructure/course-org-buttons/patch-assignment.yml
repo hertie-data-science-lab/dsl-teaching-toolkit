@@ -1,40 +1,53 @@
 # SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is
 # re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).
-name: Release assignment
+name: Patch released assignment
 
-# Generates one private repo per onboarded student from the chosen assignment template
-# repo (native template-generate). The assignment dropdown lists the course org's
-# assignment-* template repos; refresh repopulates it.
+# A broken cell, a wrong path, a dataset that moved - after the assignment went out.
+# Commit the fix to the TEMPLATE's default branch first, then run this: it pushes that
+# file (or folder) into every submission repo of the assignment, as a NEW COMMIT on each
+# student's own branch, and posts a note on each Feedback issue telling them to pull.
+# It never force-pushes, and it never replaces a file a student has already changed
+# unless `overwrite` says so - their version is kept and counted instead.
+# The frozen cohort-side hand-out is patched too, so a student who onboards tomorrow is
+# given the corrected file rather than the one everyone else was just patched off.
+# `dry_run` defaults to true. See docs/09-release-assignment-to-cohort.md.
 
 on:
   workflow_dispatch:
     inputs:
+      cohort_org:
+        description: "Cohort org holding the submission repos"
+        required: true
+        type: choice
+        default: "hertie-dsl-demo-f2026"
+        options:
+          - hertie-dsl-demo-f2026
       course_source_repo:
-        description: "1. Course-org repo to hand out from"
+        description: "Assignment template holding the corrected file"
         required: true
         type: choice
         options:
           - assignment-1
           - assignment-2
           - assignment-4-project
-      cohort_org:
-        description: "2. Target cohort org"
+      path:
+        description: "File or folder on the template's default branch to push (e.g. starter.ipynb, or data/)"
         required: true
-        type: choice
-        default: "hertie-dsl-demo-f2026"
-        options:
-          - hertie-dsl-demo-f2026
-      include_solution:
-        description: "3. Also push the model solution from the template's solution branch into every student repo"
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
+      overwrite:
+        description: "Replace the file even where the student has already changed it (their work on that file is lost)"
         type: boolean
         default: false
       dry_run:
-        description: "4. Preview only - list the repos that would be created, create nothing"
+        description: "Preview only - count the repos that would be patched, write nothing"
         type: boolean
-        default: false
+        default: true
 
 concurrency:
-  group: ${{ github.repository }}-release-assignment
+  group: ${{ github.repository }}-patch-assignment
   cancel-in-progress: false
 
 permissions: {}
@@ -59,10 +72,10 @@ jobs:
           cat /tmp/gherr || true
           exit 1
 
-  provision:
+  patch:
     needs: check-team
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
@@ -78,17 +91,20 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Provision
+      - name: Patch released assignment
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           MASTER_ORG: ${{ github.repository_owner }}
           COHORT_ORG: ${{ inputs.cohort_org }}
           COURSE_SOURCE_REPO: ${{ inputs.course_source_repo }}
-          INC_SOL: ${{ inputs.include_solution }}
+          PATH_INPUT: ${{ inputs.path }}
+          SLUG: ${{ inputs.slug }}
+          OVERWRITE: ${{ inputs.overwrite }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           gh auth setup-git
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
-          [ "$INC_SOL" = "true" ] && args+=(--solution)
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --patch-path "$PATH_INPUT")
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
+          [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
+          if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
           python3 -m dsl_course.assign "${args[@]}"

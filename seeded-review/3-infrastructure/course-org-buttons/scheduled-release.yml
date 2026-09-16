@@ -14,14 +14,16 @@ name: Scheduled release
 # by `repository_dispatch` from an external dispatcher (every 15 minutes, off-box), and each
 # driver covers the other's outage. Both arrive here as an ordinary run; nothing downstream
 # cares which, because every action is dated and fire-once. The off-peak minutes stay as they
-# are - GitHub drops scheduled runs at the top of the hour, so `0 * * * *` was delivered 6
-# times a day, not 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is
-# negligible.
+# are - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
+# 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is negligible.
 #
-# TWO JOBS, because a grading pass can run for two hours and must not hold up a release due
-# meanwhile. `release` walks every cohort (fast: dated copies and repo provisioning);
-# `autograde` is one matrix leg per cohort, each queued only against itself, and runs even
-# when the release job failed - one cohort's fault is nobody else's wait.
+# THREE JOBS. `release` walks every cohort (fast: dated copies and repo provisioning) and is
+# separate because a grading pass can run for two hours and must not hold up a release due
+# meanwhile. `autograde` is one matrix leg per cohort, each queued only against itself, and
+# runs even when the release job failed - one cohort's fault is nobody else's wait. And
+# `autograde-report` files/closes the grading legs' failure issues from a runner of its own,
+# because `autograde` executes the STUDENTS' code and a step after that one holding the bot
+# token would run whatever they left in $GITHUB_ENV, as the org owner.
 
 on:
   schedule:
@@ -51,6 +53,12 @@ jobs:
         with:
           repository: hertie-data-science-lab/dsl-teaching-toolkit
           ref: release
+          # No credential left behind in $GITHUB_WORKSPACE/.git/config. Nothing here ever
+          # pushes to the checkout - the central repo is public and read-only to these
+          # jobs, and every write goes through `gh`/`gh auth setup-git` against ANOTHER
+          # repo - so the persisted header buys nothing, and the grading jobs run the
+          # student's own code with this directory on disk.
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
@@ -78,12 +86,15 @@ jobs:
 # A source the plan cites and the org has not got is emailed to the people git names for
 # it, from this step (see dsl_course.notify) - so the release pass carries the transport
 # alongside the token. Without it the digest issue's @mention is the only channel, which
-# reaches whoever happens to read GitHub notifications that week.
+# reaches whoever happens to read GitHub notifications that week. This pass also pre-flights
+# the COURSE org's own dsl-course.yml and cohort registry, whose mail goes to the course
+# admins instead - a second address list, read only here and by Sync membership.
           GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
           GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
           GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
           DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
+          DSL_COURSE_ADMIN_EMAILS: ${{ secrets.DSL_COURSE_ADMIN_EMAILS }}
         run: |
           gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,
@@ -166,6 +177,9 @@ jobs:
             gh issue close "$n" --repo "$REPO" --comment "Recovered: $RUN_URL"
           done
   autograde:
+    # Named, because `autograde-report` below looks its legs up by name through the jobs
+    # API - a string this file declares rather than one GitHub composes from the matrix.
+    name: autograde ${{ matrix.cohort }}
     needs: [release]
     # always(), because grading is gated on the durable snapshot marker, not on this run's
     # release pass: a red release must not silently skip a cohort's grading. The output test
@@ -187,10 +201,27 @@ jobs:
         with:
           repository: hertie-data-science-lab/dsl-teaching-toolkit
           ref: release
+          # No credential left behind in $GITHUB_WORKSPACE/.git/config. Nothing here ever
+          # pushes to the checkout - the central repo is public and read-only to these
+          # jobs, and every write goes through `gh`/`gh auth setup-git` against ANOTHER
+          # repo - so the persisted header buys nothing, and the grading jobs run the
+          # student's own code with this directory on disk.
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - name: Create the account graded code runs as
+        run: |
+          id -u dsl-sandbox >/dev/null 2>&1 \
+            || sudo useradd --system --no-create-home --shell /usr/sbin/nologin dsl-sandbox
+          sudo -n -u dsl-sandbox true
+      # THE LAST STEP OF THIS JOB, and it has to stay that way. It executes the students'
+      # own notebooks, `run.sh` and hidden tests, and the runner sources whatever a step
+      # leaves in $GITHUB_ENV / $GITHUB_PATH before it starts the next one - so a step
+      # after this one holding secrets.DSL_BOT_TOKEN would run student code as the org
+      # owner. The failure issue, the mail and the recovery close therefore live in
+      # `autograde-report`, on a runner of their own. Held there by a renderer test.
       - name: Autograde every passed deadline
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
@@ -201,11 +232,64 @@ jobs:
           gh auth setup-git
           args=(--course-org "$COURSE" --cohort-org "$COHORT" --autograde-only)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.scheduler "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/run.log"
-          exit "${PIPESTATUS[0]}"
+          python3 -m dsl_course.scheduler "${args[@]}"
+  autograde-report:
+    # What the grading job may not do for itself. One leg per cohort, exactly like the
+    # matrix it reports on, so each cohort keeps its own failure issue and a green cohort
+    # never closes a red one's.
+    needs: [release, autograde]
+    if: always() && needs.release.outputs.cohorts != '' && needs.release.outputs.cohorts != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        cohort: ${{ fromJSON(needs.release.outputs.cohorts) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: hertie-data-science-lab/dsl-teaching-toolkit
+          ref: release
+          # No credential left behind in $GITHUB_WORKSPACE/.git/config. Nothing here ever
+          # pushes to the checkout - the central repo is public and read-only to these
+          # jobs, and every write goes through `gh`/`gh auth setup-git` against ANOTHER
+          # repo - so the persisted header buys nothing, and the grading jobs run the
+          # student's own code with this directory on disk.
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: How this cohort's grading leg ended
+        id: graded
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+          COHORT: ${{ matrix.cohort }}
+        run: |
+          # The leg's `name:` is `autograde <cohort>`, set explicitly on the job so this
+          # lookup matches a string the workflow declares rather than one GitHub composes.
+          # `|| true` and a `head`: under `bash -e` a transient search failure would
+          # otherwise abort the job that exists to report, and a re-run reads its OWN
+          # attempt.
+          row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \
+            --jq ".jobs[] | select(.name == \"autograde $COHORT\") | \"\(.conclusion) \(.id)\"" | head -n 1) || true
+          if [ -z "$row" ]; then
+            # No leg for this cohort in this attempt - a cohort registered between the two
+            # jobs, or a matrix leg GitHub never started. Nothing happened, so nothing is
+            # filed and nothing is closed.
+            echo "no grading leg for this cohort in this run - nothing to report"
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "graded leg concluded: ${row%% *}"
+          echo "result=${row%% *}" >> "$GITHUB_OUTPUT"
+          echo "job_id=${row##* }" >> "$GITHUB_OUTPUT"
       - name: Report an unattended failure as an issue
         id: notice
-        if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch'
+        if: steps.graded.outputs.result != 'success' && steps.graded.outputs.result != 'skipped' && github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           WORKFLOW: ${{ github.workflow }}
@@ -249,22 +333,25 @@ jobs:
           gh issue comment "${existing%% *}" --repo "$REPO" --body "$note"
           echo "report=true" >> "$GITHUB_OUTPUT"
       - name: Email the maintainer the failed step's log
-        if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
+        if: steps.graded.outputs.result != 'success' && steps.graded.outputs.result != 'skipped' && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
         env:
           WORKFLOW: ${{ github.workflow }}
           COURSE: ${{ github.repository_owner }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          JOB_ID: ${{ steps.graded.outputs.job_id }}
           GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
           GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
           GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
           DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
         run: |
-          tail -n 30 "$RUNNER_TEMP/run.log" 2>/dev/null \
+          gh api "repos/$REPO/actions/jobs/$JOB_ID/logs" 2>/dev/null | tail -n 30 \
             | python3 -m dsl_course.notify run-failed --course-org "$COURSE" \
                 --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
       - name: Close the failure issue once a run succeeds
-        if: success()
+        if: steps.graded.outputs.result == 'success'
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           WORKFLOW: ${{ github.workflow }}

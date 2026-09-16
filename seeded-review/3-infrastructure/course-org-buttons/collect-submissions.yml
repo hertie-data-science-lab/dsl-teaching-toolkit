@@ -28,6 +28,10 @@ on:
           - assignment-1
           - assignment-2
           - assignment-4-project
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
       dry_run:
         description: "Preview only - show what WOULD be refreshed"
         type: boolean
@@ -68,18 +72,31 @@ jobs:
         with:
           repository: hertie-data-science-lab/dsl-teaching-toolkit
           ref: release
+          # No credential left behind in $GITHUB_WORKSPACE/.git/config. Nothing here ever
+          # pushes to the checkout - the central repo is public and read-only to these
+          # jobs, and every write goes through `gh`/`gh auth setup-git` against ANOTHER
+          # repo - so the persisted header buys nothing, and the grading jobs run the
+          # student's own code with this directory on disk.
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - name: Create the account graded code runs as
+        run: |
+          id -u dsl-sandbox >/dev/null 2>&1 \
+            || sudo useradd --system --no-create-home --shell /usr/sbin/nologin dsl-sandbox
+          sudo -n -u dsl-sandbox true
       - name: Collect submissions
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           MASTER_ORG: ${{ github.repository_owner }}
           COHORT_ORG: ${{ inputs.cohort_org }}
           COURSE_SOURCE_REPO: ${{ inputs.course_source_repo }}
+          SLUG: ${{ inputs.slug }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --refresh-only)
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.collect "${args[@]}"

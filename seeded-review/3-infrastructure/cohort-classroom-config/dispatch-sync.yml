@@ -10,6 +10,9 @@ name: Dispatch membership sync
 # manual click. people.yml is included so granting or revoking an instructor/TA lands
 # at once rather than waiting for the daily cron; a start/end date lapsing with no
 # edit that day still needs the cron, since nothing pushes on a date rolling over.
+# schedule.yml is included because Sync membership also rewrites assignments.lock.yml,
+# the mirror the Join-team form reads: adding an assignment used to wake nothing at all,
+# so the form went on answering off the previous day's list until the 06:13 cron.
 #
 # Reads the course org from THIS cohort's own dsl-course.yml (single source of truth -
 # no course-org name baked in at bootstrap time). Fires a `repository_dispatch` (not
@@ -25,6 +28,7 @@ on:
       - students.csv
       - teams.csv
       - people.yml
+      - schedule.yml
 
 # Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and
 # dispatching to the course org - neither of which the ambient token can do), so the

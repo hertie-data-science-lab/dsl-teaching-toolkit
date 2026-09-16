@@ -5,8 +5,15 @@ name: Dispatch scheduled release
 # Seeded into a cohort's private classroom-config repo as
 # .github/workflows/dispatch-scheduled-release.yml (sibling of dispatch-sync-site.yml,
 # which refreshes the website). Its only job: fire the course org's Scheduled release
-# whenever schedule.yml changes here, so an edited release, handout, freeze or solution
-# moment takes effect NOW rather than at the next cron tick.
+# whenever one of this repo's hand-edited files changes here, so an edited release,
+# handout, freeze or solution moment takes effect NOW rather than at the next cron tick.
+#
+# The other three files are here because the same run checks them: the scheduler's
+# pre-flight reads people.yml, students.csv and teams.csv and opens (or closes) a digest
+# issue per file, so a push that leaves one of them unreadable is mailed to whoever pushed
+# it within the minute instead of at the top of the hour. Grading sheets are deliberately
+# NOT here - they are edited all day by a grader working through a pile of marks, and a
+# release run per save is a cost with nothing to show for it; the hourly tick has them.
 #
 # Why a push trigger at all: the scheduler's own `schedule:` cron is delivered
 # best-effort by GitHub - a few per cent of fires arrive, and observed gaps run to
@@ -25,6 +32,9 @@ on:
     branches: [main]
     paths:
       - schedule.yml
+      - people.yml
+      - students.csv
+      - teams.csv
 
 # Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and
 # dispatching to the course org - neither of which the ambient token can do), so the
