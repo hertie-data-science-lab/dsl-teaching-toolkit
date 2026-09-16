@@ -3074,3 +3074,14 @@ def test_a_shared_handout_writes_the_sheet_and_the_site_like_any_other(
     # And the handout is recorded ungated, like every shape that creates a repo: a first
     # tick with nobody onboarded is still the moment the assignment went out.
     assert drop_box["handout"] == ["assignment-1"]
+
+
+def test_patch_targets_finds_the_shared_drop_box(monkeypatch):
+    # `--patch-path` has no arm of its own for this shape: the drop box derives from the
+    # cohort template by name, which is the same rule that finds a repo per unit.
+    listing = [
+        repo_row("assignment-3", isTemplate=True),
+        repo_row("assignment-3-submissions"),
+        repo_row("assignment-3-archived", archived=True),
+    ]
+    assert assign.patch_targets(listing, "assignment-3") == ["assignment-3-submissions"]

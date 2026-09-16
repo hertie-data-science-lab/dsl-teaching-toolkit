@@ -662,3 +662,25 @@ def test_repo_teams_cannot_answer_when_the_listing_fails(monkeypatch, capsys):
     monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
     assert access.repo_teams("Cohort", "assignment-3-submissions") is None
     assert "could not read which teams can see" in capsys.readouterr().err
+
+
+def test_a_shared_drop_box_takes_the_read_floor_like_any_student_repo():
+    # `<slug>-submissions` derives from the frozen cohort template by NAME, so the rule
+    # that recognises a student repo already covers it - no new rule, and therefore no
+    # rule to forget. The floor is what keeps faculty off a push on the cohort's work:
+    # marking happens in classroom-config, so a commit here would reach no gradebook.
+    listing = [
+        repo_row("assignment-3", isTemplate=True),
+        repo_row("assignment-3-submissions"),
+    ]
+    protected = discovery.student_repo_names(listing)
+    assert "assignment-3-submissions" in protected
+    assert (
+        access.faculty_floor("assignment-3-submissions", "cohort", protected)
+        is access.FACULTY_READ_ACCESS
+    )
+    # And the same rule is what keeps it off the public org landing page and out of the
+    # content listing, where it would be read as a repo faculty author in.
+    derived = discovery.classify_repos(listing)
+    row = next(r for r in listing if r["name"] == "assignment-3-submissions")
+    assert discovery.is_student_repo(row, derived)

@@ -5812,6 +5812,33 @@ def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):
     assert "1 of 1 are not public" in fault.what
 
 
+def test_a_public_drop_box_is_a_fault_like_any_other_published_repo(monkeypatch):
+    # `submit_via: shared` makes no repo per unit and still makes a repo, so `visibility:`
+    # describes it exactly as it describes the many - and a drop box the listing says the
+    # world can read is the whole cohort's work published. The check asks `creates_repos`
+    # for that reason, never `creates_unit_repos`.
+    found = _visibility_run(
+        monkeypatch,
+        "submit_via: shared\n",
+        _cohort_rows(("a3-submissions", "public")),
+    )
+    (fault,) = found
+    assert "1 of 1 are not private" in fault.what
+
+
+def test_an_external_assignment_has_no_repos_to_compare(monkeypatch):
+    # Nothing is created, so there is nothing for a visibility to describe - and the file
+    # would have had its own `visibility:` line dropped at the parse anyway.
+    assert (
+        _visibility_run(
+            monkeypatch,
+            "submit_via: external\n",
+            _cohort_rows(("a3-ada", "public")),
+        )
+        == []
+    )
+
+
 def test_a_student_choice_assignment_is_exempt_from_the_consistency_check(monkeypatch):
     # The STUDENT owns the flag on this shape, so twenty private repos and four public
     # ones is the assignment working as written. Exempted by the vocabulary's own
