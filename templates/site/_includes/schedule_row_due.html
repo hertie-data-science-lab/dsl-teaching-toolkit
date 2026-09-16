@@ -44,5 +44,11 @@ those too, which is the one thing there is not.
     {%- if include.event.repo_url %} <a href="{{ include.event.repo_url }}"><code>{{ include.event.repo_name | escape }}</code></a>
     {%- else %} <code>{{ include.event.repo_name | escape }}</code>
     {%- endif -%}
+    {%- comment -%}
+    `visibility` rides on the sub-hash for the same reason the repo name does. One word,
+    because the row is a glance: the assignment's own page carries the sentence about what
+    a public repo means for what a student may commit into it.
+    {%- endcomment -%}
+    {%- if include.event.visibility == "public" %} (public){%- endif -%}
     {%- endif -%}
 </div>

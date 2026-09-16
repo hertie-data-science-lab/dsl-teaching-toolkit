@@ -426,6 +426,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "submit_via",
         "submit_url",
         "submit_host",
+        "visibility",
         "due_event",
     ],
 )
@@ -454,6 +455,36 @@ def test_an_external_assignments_page_has_no_repo_for_a_profile_to_rewrite(gener
     assert page["submit_host"] == "moodle.example.edu"
     assert page["due_event"]["submit_via"] == "external"
     assert "repo_name" not in page["due_event"]
+
+
+def test_a_public_assignments_page_warns_before_the_first_push(generated):
+    # The one callout that has to be read BEFORE a student pushes: the repo is
+    # world-readable from hand-out, so "commit nothing you would not publish" belongs on
+    # the page and not in the brief. It is also the one with no Feedback issue, which is
+    # why it - alone - names the gradebook.
+    page = _front_matter(generated["collections"]["_assignments"]["04-assignment-4.md"])
+    assert page["visibility"] == "public"
+    assert page["due_event"]["visibility"] == "public"
+    assert page["repo_name"] == "assignment-4-<your-handle>"
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    assert 'elsif page.visibility == "public"' in layout
+    flat = " ".join(layout.split())
+    assert "is <b>public</b>: anyone on the internet can read it." in flat
+    assert (
+        "your private gradebook <code>grades-&lt;your-handle&gt;</code>, not here."
+        in flat
+    )
+    assert "Open your private submission repo" in layout  # the private arm is untouched
+
+
+def test_a_pending_external_assignments_page_offers_nowhere_to_go(generated):
+    # Pending AND external: the brief is embargoed until hand-out, so there is no repo to
+    # name and not yet an address to name either - the page must say only that.
+    page = _front_matter(generated["collections"]["_assignments"]["05-assignment-5.md"])
+    assert page["handout_pending"] is True
+    assert page["submit_via"] == "external"
+    assert not {"repo_name", "repo_url", "submit_url", "visibility"} & set(page)
+    assert not {"repo_name", "submit_url"} & set(page["due_event"])
 
 
 # ---------------------------------------------------------------------------

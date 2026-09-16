@@ -65,6 +65,15 @@ title: page.title
     so a student stops reading `<your-handle>` and substituting themselves. Marked rather
     than matched on the prose, because the sentences around them are reworded.
     {%- endcomment -%}
+    {%- comment -%}
+    `visibility` (site.py, off the same grading_config.yml) branches the GitHub half in
+    two. A `public` assignment is portfolio work - a hackathon, a showcase - and the whole
+    internet can read the repo from the moment it is handed out, so the callout that a
+    student reads BEFORE their first push is where that has to be said; saying it in the
+    brief alone leaves it to whoever wrote the brief. It also has no Feedback issue
+    (`course.has_feedback_issue`: a thread in a public repo is a published mark), which is
+    why this is the one callout that names the gradebook.
+    {%- endcomment -%}
     {% if page.submit_via == "external" or page.repo_url %}
     <div class="callout">
       {% if page.submit_via == "external" %}
@@ -72,6 +81,12 @@ title: page.title
       <p><a class="btn" target="_blank" rel="noopener" href="{{ page.submit_url }}">Submit on {{ page.submit_host }}</a></p>
       {% endif %}
       <p>Handed in outside GitHub - no repository is created for this assignment. See the brief for what to hand in.</p>
+      {% elsif page.visibility == "public" %}
+      <p><a class="btn" data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}">Open your submission repo on GitHub</a></p>
+      <p>Your repo <code data-dsl-repo>{{ page.repo_name | escape }}</code> is <b>public</b>: anyone on the internet can
+      read it. Push to <code>main</code> as usual, but commit nothing you would not publish and no data you were told
+      to keep private. Your grade and feedback arrive in your private gradebook <code>grades-&lt;your-handle&gt;</code>,
+      not here.</p>
       {% else %}
       <p><a class="btn" data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}">Open your private submission repo on GitHub</a></p>
       <p>Your work goes in <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit as you go, and

@@ -564,6 +564,59 @@ def test_a_pending_external_assignment_offers_nowhere_to_submit_yet(monkeypatch)
     assert "is not yet released** - the brief appears here when it is." in out
 
 
+def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
+    # Who may READ the repo is part of its shape, so it rides beside the name at both
+    # levels - the due row is a sub-hash that cannot see its parent's fields. The theme
+    # swaps the whole callout on it: a student has to know the repo is world-readable
+    # BEFORE their first push, not from the brief afterwards.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A1\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("visibility: public\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count('visibility: "public"') == 2
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
+
+
+def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
+    # `visibility:` is the plan's and is known before anything ships, so it is written
+    # while the assignment is pending too - and the placeholder line says `public` where
+    # it says `private` for every other assignment, rather than promising the wrong thing.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("visibility: public\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert out.count('visibility: "public"') == 2
+    assert "your public `assignment-1-<your-handle>` repo appears when it is." in out
+
+
+def test_an_external_assignment_declares_no_visibility(monkeypatch):
+    # `visibility:` describes a repo and this shape creates none - the parse drops the key
+    # there - so a page that carried it would describe something nobody made.
+    out = _external_entry(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
+    )
+    assert "visibility" not in out
+
+
 def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
     # The default, and the wording the theme has always printed: the repo IS the
     # submission, so nothing about the page changes.

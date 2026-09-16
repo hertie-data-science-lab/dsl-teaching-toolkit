@@ -1108,6 +1108,13 @@ def _assignment_entry(
                 f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"'
             )
         repo_lines.append(f'repo_name: "{q(repo_name)}"')
+        # Beside the name and on the same terms - who may READ that repo is part of its
+        # shape, it is the plan's to declare, and it is known before anything ships. Only
+        # where there IS a repo: `external` creates none, and the parse drops the key
+        # there, so writing it would have the page describe something nobody made. The
+        # theme swaps the whole callout on it, because a world-readable repo has to say so
+        # before a student pushes into it and not after.
+        repo_lines.append(f'visibility: "{spec.visibility}"')
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1141,8 +1148,9 @@ def _assignment_entry(
         body = (
             f"_**{title} is not yet released** - the brief appears here when it is._"
             if external
-            else f"_**{title} is not yet released** - your private "
-            f"`{repo_name}` repo appears when it is._"
+            else f"_**{title} is not yet released** - your "
+            f"{'public' if spec.is_public else 'private'} `{repo_name}` repo appears "
+            f"when it is._"
         )
     title = q(title)
     # After the branch above, which is where a released entry learns its name from the

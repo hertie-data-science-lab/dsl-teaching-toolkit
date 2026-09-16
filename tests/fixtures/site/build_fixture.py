@@ -14,7 +14,8 @@ not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
-handed-out assignment, a pending one, one handed in off GitHub, a dated exam and a TBC
+handed-out assignment, a pending one, one handed in off GitHub, one handed in off GitHub
+that is not out yet, one whose repos are public, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
 an All Materials index nested three directories deep, and - within the released session -
 a published file linked to the site's own hosted copy beside an unpublished one linked to
@@ -47,6 +48,13 @@ MATERIALS = "course-materials"
 # `submit_url`, which is what puts the `Submit on <host>` button on both.
 EXTERNAL = "assignment-3-f2026"
 EXTERNAL_URL = "https://moodle.example.edu/mod/assign/view.php?id=EXAMPLE"
+# Portfolio work (`visibility: public`): the same repo per student, world-readable from
+# hand-out, and no Feedback issue - so its page and its due row have to say so before a
+# student pushes anything into it.
+PUBLIC = "assignment-4-f2026"
+# External AND still pending, which is the pair of states that reaches no reader: the
+# brief is embargoed until hand-out, so the page may not yet say where the work goes.
+EXTERNAL_PENDING = "assignment-5-f2026"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
 # by construction rather than by when CI happens to run.
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=BERLIN)
@@ -124,11 +132,11 @@ def _grading_spec(_org: str, repo: str):
     says whether the work is handed in on GitHub at all. The fixture's assignments are
     individual, so the empty file's defaults are otherwise exactly right - it is stubbed
     only because the read would otherwise go to GitHub."""
-    return grades.parse_grading_spec(
-        f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
-        if repo == EXTERNAL
-        else ""
-    )
+    if repo in (EXTERNAL, EXTERNAL_PENDING):
+        return grades.parse_grading_spec(
+            f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
+        )
+    return grades.parse_grading_spec("visibility: public\n" if repo == PUBLIC else "")
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
@@ -201,11 +209,12 @@ def _lectures(hosted: dict) -> dict[str, str]:
 
 
 def _assignments() -> dict[str, str]:
-    """One handed out (repo link, brief, README-derived name), one still pending, and one
-    handed in off GitHub - the three ways an assignment says where the work goes.
+    """Every way an assignment says where the work goes: one handed out (repo link, brief,
+    README-derived name), one still pending, one handed in off GitHub, one handed in off
+    GitHub but not out yet, and one whose repos are public.
 
-    The external one is handed out by its PIN rather than by a frozen cohort template:
-    that handout creates no repos at all, so `handed_out` never carries its name and
+    The external ones are handed out by their PIN rather than by a frozen cohort template:
+    that handout creates no repos at all, so `handed_out` never carries their name and
     `site._assignment_entry`'s other half is what publishes the brief."""
     return {
         "01-assignment-1.md": site._assignment_entry(
@@ -231,6 +240,23 @@ def _assignments() -> dict[str, str]:
             EXTERNAL,
             datetime(2026, 12, 8, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 30, 9, 0, tzinfo=BERLIN),
+            now=NOW,
+        ),
+        "04-assignment-4.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            PUBLIC,
+            datetime(2026, 12, 15, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handed_out=frozenset({"assignment-4"}),
+            now=NOW,
+        ),
+        "05-assignment-5.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            EXTERNAL_PENDING,
+            datetime(2026, 12, 22, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 11, 10, 9, 0, tzinfo=BERLIN),
             now=NOW,
         ),
     }
