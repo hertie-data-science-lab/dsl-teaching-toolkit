@@ -148,6 +148,80 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     return False
 
 
+def set_visibility(
+    org: str, name: str, visibility: str, *, person: bool = False
+) -> bool:
+    """Make an existing repo `private` or `public`. Idempotent (GitHub accepts the
+    visibility a repo already has).
+
+    A PATCH of its own because `POST /repos/{o}/{r}/generate` takes `private` and nothing
+    else: a repo generated from a template is born private, and an assignment whose
+    `visibility:` says `public` is that repo flipped immediately afterwards. So the flip
+    belongs to the CREATE path alone - re-PATCHing a repo that already exists would undo,
+    on every quarter-hourly tick, whatever a person had deliberately changed.
+
+    `person=True` when the repo is somebody's, so the failure line names it only in the
+    verbose log (see `log.log_err_person`)."""
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{org}/{name}",
+        "--field",
+        f"visibility={visibility}",
+    )
+    if code == 0:
+        return True
+    _failed_on(
+        person,
+        f"could not set a repo's visibility in {org}",
+        f"could not make {org}/{name} {visibility}: {out[:160]}",
+    )
+    return False
+
+
+def enable_secret_scanning(org: str, name: str) -> bool:
+    """Turn secret scanning AND its push protection on for a PUBLIC repo.
+
+    Both together, because only the pair is worth having: scanning finds a committed
+    credential after the fact, push protection is what stops it reaching a repo the whole
+    internet can read in the first place. Called where a public student repo is created -
+    a student who commits an API key into portfolio work has published it.
+
+    PUBLIC repos only. On GitHub Free the features exist for public repositories and are
+    an Advanced Security purchase for private ones, so the same call against a private
+    repo is a 422 for ever.
+
+    `security_and_analysis` is a NESTED body, which `--field` cannot express, so it goes in
+    over stdin with an explicit `--method PATCH` - which is also what keeps the call inside
+    the write pacer (`ghcli._is_mutating` reads the method).
+
+    A refusal is a warning and never a counted failure: the repo is handed out, the student
+    has it, and reddening a handout because a security feature is unavailable on this plan
+    would hold a cohort's work hostage to a setting nobody here can buy."""
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{org}/{name}",
+        "--input",
+        "-",
+        stdin=json.dumps(
+            {
+                "security_and_analysis": {
+                    "secret_scanning": {"status": "enabled"},
+                    "secret_scanning_push_protection": {"status": "enabled"},
+                }
+            }
+        ),
+    )
+    if code == 0:
+        return True
+    # No name: a public submission repo is `<slug>-<handle>`, and this log is public.
+    log(f"  [warn] a public repo in {org} has no secret scanning: {out[:120]}")
+    return False
+
+
 def allow_forking(org: str, name: str) -> bool:
     """Let a private repo be forked. Idempotent, and a NO-OP unless there is work to do.
 
