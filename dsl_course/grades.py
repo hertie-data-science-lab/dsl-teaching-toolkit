@@ -113,12 +113,12 @@ COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance v
 # first of them starts mattering.
 #
 # Not every assignment has a Feedback issue to read: an assignment handed in off GitHub
-# creates no repo at all, and a shared or public one is not private to the student. This
-# page is the channel every shape writes to, so it says so under the line that says the
-# repo is theirs.
+# creates no repo at all, a shared or public one is not private to the student, and one
+# they may publish themselves could stop being private at any moment. This page is the
+# channel every shape writes to, so it says so under the line that says the repo is theirs.
 _CHANNEL_NOTE = (
-    "Feedback for assignments handed in outside GitHub, in a shared repo or in a public "
-    "repo appears here and nowhere else."
+    "Feedback for assignments handed in outside GitHub, in a shared repo, or in a repo "
+    "that is public or yours to publish appears here and nowhere else."
 )
 # A cohort org is closed out at the end of the term, so the answer to "can I show this to
 # an employer?" is a recipe rather than a setting - and it belongs where the student is
