@@ -36,6 +36,7 @@ import sys
 from datetime import UTC, datetime
 
 from . import mailer, roster
+from .course import course_phrase
 from .discovery import (
     COHORTS_PATH,
     cohort_is_live,
@@ -199,7 +200,7 @@ def code_message(
     read live from the course org's dsl-course.yml, which a half-configured course may
     not carry yet; the wording then falls back to "the course" rather than emailing a
     blank."""
-    course = f"the {course_name} course" if course_name else "the course"
+    course = course_phrase(course_name)
     subject = (
         f"Your enrolment code for {course_name}"
         if course_name
@@ -211,7 +212,7 @@ def code_message(
         f"  {welcome_url}\n\n"
         f"and paste this enrolment code when asked:\n\n"
         f"    {student.enrol_code}\n\n"
-        f"Whichever GitHub account opens the issue is linked to your hertie email "
+        f"Whichever GitHub account opens the issue is linked to your Hertie email "
         f"address automatically.\n"
     )
     return (student.hertie_email, subject, body)

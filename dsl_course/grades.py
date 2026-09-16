@@ -53,6 +53,7 @@ from .course import (
     SOLUTION_BRANCH,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
+    course_phrase,
     feedback_issue_body,
     receipt_body,
     resolve_is_group,
@@ -102,7 +103,7 @@ COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance v
 # `render_readme` on the first distribute.
 _STARTER_README = (
     "# Your gradebook\n\n"
-    "This private repository is accessible only to you. Grades and feedback for each "
+    "This private repository is viewable only by you. Grades and feedback for each "
     "piece of assessment appear in `grades.yml` as the course progresses.\n\n"
     "## What each field means\n\n"
     "| Field | Meaning |\n"
@@ -3490,14 +3491,14 @@ def update_message(
 
     The course goes in the SUBJECT as well as the body: the inbox list is where a student
     taking several of these actually tells them apart, and by the time they have opened it
-    the body is redundant. A course that carries no name yet keeps the generic wording
-    rather than emailing a blank."""
+    the body is redundant. A course with no name yet degrades to `course_phrase`'s plain
+    "the course" in the body, and to the generic subject - never a blank, and never a
+    literal placeholder."""
     url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{student.github_handle}"
-    course_suffix = f" for {course_name}" if course_name else ""
     body = (
         f"Hello {student.name or 'there'},\n\n"
-        f"Your grades{course_suffix} have been updated. View them in your private "
-        f"gradebook:\n"
+        f"Your grades for {course_phrase(course_name)} have been updated. View them in "
+        f"your private gradebook:\n"
         f"  {url}\n"
     )
     subject = (
@@ -3542,7 +3543,7 @@ def _course_name(cohort_org: str) -> str:
 def _email_updates(
     cohort_org: str, handles: list[str], dry_run: bool = False
 ) -> tuple[int, list[str]]:
-    """Email each student a 'grades updated' notification to their hertie email address,
+    """Email each student a 'grades updated' notification to their Hertie email address,
     linking to their private gradebook repo (the grade's source of truth).
 
     Returns `(how many FAILED, which handles were told)`. `distribute` exits on the first
