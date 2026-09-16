@@ -43,6 +43,7 @@ from .course import (
     assignment_slug,
     pages_repo,
     session_number,
+    shared_repo,
     submission_repo,
     term_tag,
 )
@@ -1098,14 +1099,29 @@ def _assignment_entry(
     # place to go NOW, so `repo_url` and `submit_url` both wait until there is something at
     # the other end of them; a shape that creates no repo has no name to print at all.
     repo_lines = [f'submit_shape: "{spec.submit_shape}"']
+    # Whose folder, or whose repo: a group assignment fans out per TEAM, and the two words
+    # are the same word wherever the page names one.
+    whose = "<your-team>" if spec.is_group else "<your-handle>"
+    repo_name = ""
     if external:
         if out and spec.submit_url:
             repo_lines.append(f'submit_url: "{q(spec.submit_url)}"')
             repo_lines.append(f'submit_host: "{q(spec.submit_host)}"')
+    elif spec.submit_shared:
+        # The REAL name, and a real URL: there is one drop box for the whole cohort, so
+        # unlike every other shape the page can name the repo exactly rather than describe
+        # its shape - which is also why the theme must not mark this one for `open_in.html`
+        # to rewrite (there is no `<your-handle>` in it to replace, and the reader's own
+        # repo is a folder rather than a repo).
+        repo_name = shared_repo(slug)
+        repo_lines.append(f'submit_path: "{whose}/"')
+        if out:
+            repo_lines.append(
+                f'repo_url: "https://github.com/{cohort_org}/{q(repo_name)}"'
+            )
+        repo_lines.append(f'repo_name: "{q(repo_name)}"')
     else:
-        repo_name = submission_repo(
-            slug, "<your-team>" if spec.is_group else "<your-handle>"
-        )
+        repo_name = submission_repo(slug, whose)
         if out:
             repo_lines.append(
                 f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"'
@@ -1145,12 +1161,15 @@ def _assignment_entry(
         # flag the students hold is a private one - `student_choice` is a rule about who
         # may change it later, not a repo anybody is ever handed.
         born = "private" if spec.visibility_is_students else spec.visibility
-        body = (
-            f"_**{title} is not yet released** - the brief appears here when it is._"
-            if external
-            else f"_**{title} is not yet released** - your "
-            f"{born} `{repo_name}` repo appears when it is._"
-        )
+        if external:
+            coming = "the brief appears here when it is"
+        elif spec.submit_shared:
+            # Not "your repo": there is one, it is the cohort's, and what is the student's
+            # own is a folder in it.
+            coming = f"the `{repo_name}` drop box appears when it is"
+        else:
+            coming = f"your {born} `{repo_name}` repo appears when it is"
+        body = f"_**{title} is not yet released** - {coming}._"
     title = q(title)
     # After the branch above, which is where a released entry learns its name from the
     # README. The due row is the same assignment, so it shows the same two halves -

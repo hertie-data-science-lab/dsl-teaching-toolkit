@@ -15,7 +15,7 @@ not fetch - are vendored, under `base/`.
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
 handed-out assignment, a pending one, one handed in off GitHub, one handed in off GitHub
-that is not out yet, one whose repos are public, a dated exam and a TBC
+that is not out yet, one whose repos are public, one handed into a shared drop box, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
 an All Materials index nested three directories deep, and - within the released session -
 a published file linked to the site's own hosted copy beside an unpublished one linked to
@@ -59,6 +59,11 @@ EXTERNAL_PENDING = "assignment-5-f2026"
 # student is its admin and may publish it once the grading cutoff has passed. Its page has
 # to carry both halves of that, and its due row the one word that says the flag is theirs.
 STUDENT_CHOICE = "assignment-6-f2026"
+# One drop box for the whole cohort (`submit_via: shared`): `repo_name` is a REAL repo
+# rather than a shape, what is the student's own is a folder inside it, and the name must
+# NOT be rewritten to one per reader - which is the one thing open_in.html does to every
+# other assignment page.
+SHARED = "assignment-7-f2026"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
 # by construction rather than by when CI happens to run.
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=BERLIN)
@@ -144,6 +149,8 @@ def _grading_spec(_org: str, repo: str):
         return grades.parse_grading_spec("visibility: public\n")
     if repo == STUDENT_CHOICE:
         return grades.parse_grading_spec("visibility: student_choice\n")
+    if repo == SHARED:
+        return grades.parse_grading_spec("submit_via: shared\n")
     return grades.parse_grading_spec("")
 
 
@@ -275,6 +282,15 @@ def _assignments() -> dict[str, str]:
             datetime(2027, 1, 12, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
             handed_out=frozenset({"assignment-6"}),
+            now=NOW,
+        ),
+        "07-assignment-7.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            SHARED,
+            datetime(2027, 1, 19, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handed_out=frozenset({"assignment-7"}),
             now=NOW,
         ),
     }

@@ -91,6 +91,13 @@ title: page.title
     HERE - a student who reads only "you are an admin" publishes their work on day one and
     finds it closed again an hour later - and it has no Feedback issue either, for the
     reason the public arm does not.
+
+    `shared` is the one shape whose `repo_name` is a REAL repo and not a shape: there is a
+    single private drop box for the whole cohort and what is the student's own is a folder
+    in it (`submit_path`). So it carries no `data-dsl-repo` - there is nothing in the name
+    for open_in.html to substitute a handle into, and rewriting it would point every
+    reader at a repo that does not exist. The `data-dsl-repo-url` link is already the real
+    repo, so it is written here without the marker too.
     {%- endcomment -%}
     {% unless page.handout_pending %}
     {% if page.submit_shape == "external" %}
@@ -99,6 +106,14 @@ title: page.title
       <p><a class="btn" target="_blank" rel="noopener" href="{{ page.submit_url }}">Submit on {{ page.submit_host }}</a></p>
       {% endif %}
       <p>Handed in outside GitHub. See the brief for what to hand in.</p>
+    </div>
+    {% elsif page.submit_shape == "shared" and page.repo_url %}
+    <div class="callout">
+      <p><a class="btn" target="_blank" rel="noopener" href="{{ page.repo_url }}">Open the submission repo on GitHub</a></p>
+      <p>Push your work into the <code>{{ page.submit_path | escape }}</code> folder of
+      <code>{{ page.repo_name | escape }}</code> - that push is your submission. Everyone in the cohort can read
+      the whole repo, so commit nothing you would not show the class. Your grade and feedback arrive in your
+      private gradebook <code>grades-&lt;your-handle&gt;</code>, not here.</p>
     </div>
     {% elsif page.repo_url %}
     <div class="callout">
@@ -159,6 +174,11 @@ title: page.title
   {% if page.submit_shape == "external" and page.submit_url %}
   <p class="post-meta">
     Hand in at <a target="_blank" rel="noopener" href="{{ page.submit_url }}">{{ page.submit_host }}</a>.
+  </p>
+  {% elsif page.submit_shape == "shared" and page.repo_url %}
+  <p class="post-meta">
+    Submit by pushing into <code>{{ page.submit_path | escape }}</code> in
+    <a target="_blank" rel="noopener" href="{{ page.repo_url }}"><code>{{ page.repo_name | escape }}</code></a>.
   </p>
   {% elsif page.submit_shape != "external" and page.repo_url %}
   <p class="post-meta">

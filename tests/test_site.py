@@ -2133,3 +2133,75 @@ def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
     # about at all.
     assert asked == [("Course-Org", "course-materials-f2026", "publish.yml")]
     assert policies["materials"][0].check_file("lectures/01_a/slides.html").include
+
+
+def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
+    monkeypatch,
+):
+    # The ONE shape whose `repo_name` is a real repo: there is a single drop box for the
+    # whole cohort, so the page can name it exactly - and `repo_url` is that repo rather
+    # than the org's filtered list, because there is nothing to filter to.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A3\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("submit_via: shared\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-3"}),
+    )
+    assert out.count('submit_shape: "shared"') == 2
+    assert out.count('repo_name: "assignment-3-submissions"') == 2
+    assert (
+        out.count(
+            'repo_url: "https://github.com/Cohort-f2026/assignment-3-submissions"'
+        )
+        == 2
+    )
+    # What is the reader's own is a FOLDER, which is the half a repo name cannot carry.
+    assert out.count('submit_path: "<your-handle>/"') == 2
+
+
+def test_a_shared_group_assignment_names_the_team_s_folder(monkeypatch):
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A3\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("submit_via: shared\ntype: group\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-3"}),
+    )
+    assert out.count('submit_path: "<your-team>/"') == 2
+    # One drop box either way: the repo is the cohort's, not the team's.
+    assert out.count('repo_name: "assignment-3-submissions"') == 2
+
+
+def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypatch):
+    # "your private <repo> repo appears when it is" would promise every student a repo of
+    # their own, which is the one thing this shape does not hand out.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("submit_via: shared\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert "the `assignment-3-submissions` drop box appears when it is." in out
+    # And no address, because there is nothing at the other end of it yet.
+    assert "repo_url" not in out

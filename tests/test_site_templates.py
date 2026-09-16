@@ -479,12 +479,12 @@ def test_an_external_assignment_is_never_told_to_push(generated):
         _external_arm(
             layout,
             '{% if page.submit_shape == "external" %}',
-            "{% elsif page.repo_url %}",
+            '{% elsif page.submit_shape == "shared" and page.repo_url %}',
         ),
         _external_arm(
             layout,
             '{% if page.submit_shape == "external" and page.submit_url %}',
-            '{% elsif page.submit_shape != "external" and page.repo_url %}',
+            '{% elsif page.submit_shape == "shared" and page.repo_url %}',
         ),
         _external_arm(
             due_row,
@@ -1170,7 +1170,21 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     body = _strip_comments(_open_in())
     assert "[data-dsl-repo]" in body and "[data-dsl-repo-url]" in body
     page = _strip_comments(_templates()["_layouts/assignment.html"])
-    # Every one of them, not a count that drifts: an unmarked span goes on saying
+    # The one shape whose `repo_name` is a REAL repo and not a shape: there is a single
+    # drop box for the whole cohort, so there is nothing in the name to substitute a handle
+    # into and rewriting it would point every reader at a repo that does not exist. Taken
+    # out before the count below, which is the rule for every other shape.
+    shared = [
+        arm
+        for arm in page.split("{% elsif ")
+        if arm.startswith('page.submit_shape == "shared"')
+    ]
+    assert len(shared) == 2, "the shared arms of the callout and the closing line"
+    for arm in shared:
+        assert "{{ page.repo_name | escape }}" in arm
+        assert "data-dsl-repo" not in arm
+        page = page.replace(arm, "")
+    # Every one of the rest, not a count that drifts: an unmarked span goes on saying
     # `<your-handle>` on a page where every other mention of the repo is the real name.
     assert page.count("{{ page.repo_name | escape }}</code>") == page.count(
         "<code data-dsl-repo>"
@@ -1230,3 +1244,38 @@ def test_the_callout_keeps_the_brief_last():
     assert "@extend %quiet-note;" not in cmd
     where = scss.split(".callout .open-in-where {")[1].split("}")[0]
     assert "@extend %quiet-note;" in where
+
+
+def test_a_shared_page_names_the_drop_box_the_folder_and_the_gradebook(generated):
+    page = _front_matter(generated["collections"]["_assignments"]["07-assignment-7.md"])
+    assert page["submit_shape"] == "shared"
+    assert page["due_event"]["submit_shape"] == "shared"
+    # A REAL repo, not a shape - and the folder beside it, which is what is the reader's.
+    assert page["repo_name"] == "assignment-7-submissions"
+    assert page["submit_path"] == "<your-handle>/"
+    assert page["repo_url"].endswith("/assignment-7-submissions")
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    flat = " ".join(layout.split())
+    assert (
+        "Push your work into the <code>{{ page.submit_path | escape }}</code> folder"
+        in flat
+    )
+    assert "Everyone in the cohort can read the whole repo" in flat
+    assert (
+        "your private gradebook <code>grades-&lt;your-handle&gt;</code>, not here."
+        in flat
+    )
+    # And the due row says at a glance that the reader's own work goes in a folder.
+    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
+    assert '"shared" %} ({{ include.event.submit_path | escape }} folder)' in due_row
+
+
+def test_a_shared_page_s_repo_name_is_never_rewritten_per_reader(generated):
+    # Two fences, and both have to hold. The layout marks nothing on this page for
+    # open_in.html to rewrite, and open_in.html would not rewrite it anyway: the shape it
+    # substitutes a handle into has to CONTAIN `<your-handle>`, and a real repo name does
+    # not. Rewriting would point every reader at a repo that does not exist.
+    page = generated["collections"]["_assignments"]["07-assignment-7.md"]
+    assert "data-dsl-repo" not in _strip_comments(page)
+    own = _strip_comments(_open_in()).split("function ownRepo(shape, handle) {")[1]
+    assert 'shape.indexOf("<your-handle>") < 0' in own.split("\n  }")[0]
