@@ -37,6 +37,8 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
+      - `visibility` = who may read each student's repo: `private` (default) or `public`.
+        Read when the repo is created, so editing it afterwards moves nothing
    - Everything else - the team cap, the late window, the penalty - comes from
      `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
      into the assignment's own `grading_config.yml`, where you can revise it per assignment.
@@ -163,6 +165,19 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 | `submit_via` | `github` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
+| `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
+| | `public` | Every student's repo is world-readable from hand-out. |
+
+`visibility: private` (default) or `public`. `public` makes every student's repo
+world-readable from handout; pick it for portfolio work such as a hackathon. A public repo
+gets no Feedback issue: marks and feedback go only to the student's private
+`grades-<handle>` repo. Students who want their own work public on a `private` assignment
+publish a copy under their own account (the gradebook README tells them how); the org's
+copy stays private.
+
+`visibility` is read when each repo is **created**. Editing it after the assignment has
+gone out changes nothing on GitHub, so the cohort's *grading_config.yml* digest reports the
+disagreement until the line and the repos say the same thing again.
 
 The **Feedback issue** - the thread the receipts and the final comment appear in - exists
 only where there is a private repo of the student's own to put it in, so an `external`
@@ -171,7 +186,8 @@ assignment has none. Its marks and its feedback go to the student's private
 onboard.
 
 `submit_url` is not a form box: **New assignment** seeds a commented line for it in
-`grading_config.yml`, and you fill it in there.
+`grading_config.yml`, and you fill it in there. `visibility` is box 10 on that form, which
+is GitHub's cap of ten inputs - every further setting lives in `grading_config.yml` only.
 
 ### Group vs individual assignments
 

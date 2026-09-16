@@ -48,6 +48,21 @@ and a **Submit on \<host\>** button (from `submit_url`) on the cohort site, writ
 grading sheet with every student or team in it, and makes sure each student has their
 private `grades-<handle>` gradebook - which is where their feedback goes.
 
+### An assignment whose repos are public
+
+`visibility: public` in the template's `grading_config.yml` hands out the same repos
+world-readable - portfolio work such as a hackathon. There is then **no Feedback issue**
+(nothing about a student's marking may be written where the internet can read it): marks
+and feedback go to their private `grades-<handle>` gradebook, and the assignment's page on
+the cohort site says the repo is public before they push anything into it.
+
+Each public repo gets **secret scanning and push protection** turned on at creation. If a
+student pushes something that looks like a credential, GitHub refuses the push and prints a
+link; opening it lets them say why they are pushing it, which unblocks that push. Tell them
+to rotate the credential rather than bypass the block. On GitHub Free these features exist
+for public repositories only, so a refusal to enable them is a warning and never fails the
+hand-out.
+
 ## Group or individual?
 
 The shape is the template's own declaration - `type:` in the `grading_config.yml` on its

@@ -111,6 +111,10 @@ requires write to trigger a `workflow_dispatch`.
 Grants are set at repo creation; the nightly **Refresh actions** sweep raises any repo below its
 floor and never demotes.
 
+A `visibility: public` assignment changes who may READ a submission repo and nothing else: the
+floor is computed off the repo's NAME, so `instructors` still hold **read** and never push on a
+student's work, and the student still holds `maintain` on their own.
+
 ## The four `instructors` teams
 
 Four different teams share the word "instructors" - they are not interchangeable. The first names
@@ -139,6 +143,8 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
   re-added. Edit the file.
 - **Students hold `maintain` on their own submission repo** and read on their own
   `grades-<handle>`; nowhere else, so no faculty workflow is visible or runnable for them.
+  `maintain` does not include changing a repo's visibility, so a `public` assignment's repos
+  are public because the assignment said so and stay that way.
 - **New members must accept a one-time org invite** - membership shows `pending` until they do.
 - **Nobody ever holds the bot token.** Every workflow runs server-side under `DSL_BOT_TOKEN`; the
   actor's own permissions are only ever used as the gate.
