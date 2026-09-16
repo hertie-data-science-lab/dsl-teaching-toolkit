@@ -2821,3 +2821,256 @@ def test_a_public_handout_opens_no_feedback_issue(
     assert feedback_issues == []
     assert [k["feedback_body"] for k in seen] == [""]
     assert [k["visibility"] for k in seen] == ["public"]
+
+
+# ---------------------------------------------- an assignment handed into one drop box
+#
+# `submit_via: shared` freezes the cohort template as usual - the brief lives there - and
+# then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
+# no repo per unit, so there is no Feedback issue, no receipt and no model solution; and
+# the drop box's existence is not the record a per-unit repo's is, so the grant loop
+# re-runs every tick and asks who is granted already.
+
+
+@pytest.fixture
+def drop_box(monkeypatch):
+    """Every write the shared arm makes, recorded by name, and the reads it makes to
+    decide which grants are missing."""
+    seen: dict = {
+        "generated": [],
+        "topics": [],
+        "faculty": [],
+        "collaborators": [],
+        "teams": [],
+        "ensured": [],
+        "rulesets": [],
+        "handout": [],
+        "site": [],
+        "granted_already": frozenset(),
+        "teams_already": frozenset(),
+    }
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda org, slug, stamp=None: seen["handout"].append(slug),
+    )
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site", lambda course, cohort: seen["site"].append(cohort)
+    )
+    monkeypatch.setattr(
+        assign,
+        "ensure_cohort_template",
+        lambda course, template, cohort, slug, listing=None: slug,
+    )
+    monkeypatch.setattr(assign, "provision_one", _boom)
+    monkeypatch.setattr(
+        assign,
+        "generate_from_template",
+        lambda **kw: seen["generated"].append(kw) or True,
+    )
+    monkeypatch.setattr(
+        assign,
+        "set_repo_topics",
+        lambda org, repo, topics, person=False: (
+            seen["topics"].append((repo, topics)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "grant_faculty",
+        lambda org, repo, access, **kw: seen["faculty"].append((repo, access)),
+    )
+    monkeypatch.setattr(
+        assign,
+        "who_has_access",
+        lambda org, repo, **kw: seen["granted_already"],
+    )
+    monkeypatch.setattr(assign, "repo_teams", lambda org, repo: seen["teams_already"])
+    monkeypatch.setattr(
+        assign,
+        "add_collaborator",
+        lambda org, repo, handle, permission="push", person=False: (
+            seen["collaborators"].append((repo, handle, permission)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **kw: (
+            seen["teams"].append((repo, team, perm)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign.sync_teams,
+        "ensure_team",
+        lambda org, team, members, prune=True: (
+            seen["ensured"].append((team, members)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "protect_shared_repo",
+        lambda org, repo: seen["rulesets"].append(repo) or True,
+    )
+    return seen
+
+
+def _shared(monkeypatch, tmp_path, *, rows=(), group="", **kwargs):
+    """`provision_all` over a shared assignment. Returns `(exit code, changed)`."""
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec("submit_via: shared\n" + group),
+    )
+    path = _roster_file(
+        tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
+    )
+    return assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, **kwargs
+    )
+
+
+def test_a_shared_handout_makes_one_drop_box_and_grants_every_student_push(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    assert _shared(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+    ) == (0, True)
+    # ONE generate, off the frozen cohort template, private, and named for the assignment
+    # rather than for anybody - which is what lets a public workflow log print it.
+    (made,) = drop_box["generated"]
+    assert made["name"] == "assignment-1-submissions"
+    assert made["template_name"] == "assignment-1" and made["owner"] == "COHORT"
+    assert made["private"] is True
+    # Two students, one repo, push each.
+    assert drop_box["collaborators"] == [
+        ("assignment-1-submissions", "ada-l", "push"),
+        ("assignment-1-submissions", "ben-k", "push"),
+    ]
+    # Read for faculty, like every other repo a cohort receives: the work is marked in
+    # classroom-config, so a commit here would reach no gradebook.
+    assert drop_box["faculty"] == [
+        ("assignment-1-submissions", assign.FACULTY_READ_ACCESS)
+    ]
+    assert drop_box["topics"] == [
+        ("assignment-1-submissions", ["assignment-1", "submission"])
+    ]
+    # And the ruleset, without which one force-push erases the whole cohort's work.
+    assert drop_box["rulesets"] == ["assignment-1-submissions"]
+
+
+def test_a_shared_group_handout_grants_the_teams_and_not_the_students(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(
+        assign.teams,
+        "load",
+        lambda org: {"assignment-1": {"alpha": ["ada-l", "ben-k"]}},
+    )
+    assert _shared(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+        group="type: group\n",
+    ) == (0, True)
+    assert drop_box["teams"] == [
+        ("assignment-1-submissions", "assignment-1-alpha", "push")
+    ]
+    assert drop_box["ensured"] == [("assignment-1-alpha", {"ada-l", "ben-k"})]
+    # Never both: a team project belongs to the team, and a collaborator grant beside it
+    # would outlive a membership change the team grant follows.
+    assert drop_box["collaborators"] == []
+
+
+def test_a_second_tick_grants_only_the_student_who_onboarded_since(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # The drop box already exists, so - unlike a repo per unit - its existence says nothing
+    # about who can push into it. The loop re-runs and the READ decides: everyone already
+    # granted is passed over, and the late onboarder is not.
+    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    drop_box["granted_already"] = frozenset({"ada-l"})
+    assert _shared(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+    ) == (0, True)
+    assert drop_box["generated"] == []
+    assert drop_box["collaborators"] == [("assignment-1-submissions", "ben-k", "push")]
+
+
+def test_a_tick_with_nothing_to_grant_hands_nothing_out_again(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # `due_releases` is cumulative, so this fires four times an hour for the rest of the
+    # term. Everyone is granted, so nothing changed - and the site is not re-rendered.
+    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    drop_box["granted_already"] = frozenset({"ada-l"})
+    assert _shared(monkeypatch, tmp_path) == (0, False)
+    assert drop_box["collaborators"] == [] and gradebooks == []
+    assert drop_box["site"] == []
+
+
+def test_a_grant_read_that_failed_grants_everybody_again(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # None is "we could not look", never "nobody is granted": the PUT is idempotent, and
+    # an over-granted one costs a call where an under-granted one costs a submission.
+    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "who_has_access", lambda org, repo, **kw: None)
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    assert drop_box["collaborators"] == [("assignment-1-submissions", "ada-l", "push")]
+
+
+def test_an_unprotected_drop_box_reds_the_handout(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # Not a warning. Every student has push on that one repo, so until the ruleset is
+    # there one of them can erase the cohort's work and the history the snapshot pins to.
+    monkeypatch.setattr(assign, "protect_shared_repo", lambda org, repo: False)
+    assert _shared(monkeypatch, tmp_path) == (1, True)
+
+
+def test_a_shared_handout_opens_no_feedback_issue_and_pushes_no_solution(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues, capsys
+):
+    # One repo the whole cohort can read is not a place to put a student's marks, nor the
+    # model answer. The fire-once solution marker is deliberately not written, so an
+    # instructor who corrects the shape can still release it.
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
+    assert feedback_issues == []
+    assert "no model solution to push" in capsys.readouterr().out
+
+
+def test_a_shared_dry_run_writes_nothing_at_all(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    assert _shared(monkeypatch, tmp_path, dry_run=True) == (0, False)
+    assert drop_box["generated"] == [] and drop_box["rulesets"] == []
+    assert sheet_writes == [] and gradebooks == []
+
+
+def test_a_shared_handout_writes_the_sheet_and_the_site_like_any_other(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    ((sheet,),) = (sheet_writes,)
+    # Keyed on the UNIT, not on the repo: every unit shares one repo here, so the repo
+    # name cannot tell two rows apart.
+    assert sheet["units"] == [("ada-l", ["ada-l"])]
+    assert drop_box["site"] == ["COHORT"] and gradebooks == ["COHORT"]
+    # And the handout is recorded ungated, like every shape that creates a repo: a first
+    # tick with nobody onboarded is still the moment the assignment went out.
+    assert drop_box["handout"] == ["assignment-1"]
