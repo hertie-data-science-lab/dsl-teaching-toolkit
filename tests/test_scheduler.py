@@ -3737,3 +3737,42 @@ def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
         {r["name"]: r for r in rows},
     )
     assert patched == []
+
+
+def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
+    # The shape decides WHICH repos are frozen and whether each pin is narrowed to a
+    # folder. Off the same memoised read that answers group-vs-individual, and never
+    # guessed downstream: a wrong answer freezes the cohort against repos that do not
+    # exist and cannot be corrected afterwards, because the snapshot is write-once.
+    taken: list[dict] = []
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(
+        scheduler,
+        "snapshot_assignment",
+        lambda org, slug, dl, **kw: (
+            taken.append(kw) or scheduler.SnapshotResult.WRITTEN
+        ),
+    )
+    _stub_autograde(monkeypatch)
+    monkeypatch.setattr(
+        scheduler, "_assignment_template", lambda org, slug, entry: "a-f2026"
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+    )
+    for submit_via, shared in (("shared", True), ("github", False)):
+        taken.clear()
+        monkeypatch.setattr(
+            scheduler,
+            "load_grading_spec",
+            lambda org, template, via=submit_via: GradingSpec(submit_via=via),
+        )
+        assert (
+            scheduler.run(
+                "Course-Org", "Cohort-Org", datetime(2026, 10, 14, tzinfo=timezone.utc)
+            )
+            == 0
+        )
+        assert taken[0]["shared"] is shared
