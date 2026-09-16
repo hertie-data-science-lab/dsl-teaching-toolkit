@@ -227,7 +227,7 @@ solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; 
 `title`, `type`, `team_formation`, `max_team_size`, `submit_via`, `submit_url`,
 `visibility`, `format`, `questions`, `late_window_days`, `late_penalty_per_day`,
 `autograde`, `completion_check`, `grader_pdf`, `tests`. The
-button writes it from its nine inputs plus the course's `assignment_defaults:`; every key
+button writes it from its ten inputs plus the course's `assignment_defaults:`; every key
 is documented inline in the generated file and in
 [Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:
 `autograde: true` runs `tests/` (or `tests/run.sh`, in any language), and `completion_check`

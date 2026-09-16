@@ -1198,8 +1198,9 @@ def _reprivatise_student_repos(
         # handle, and this line is written into a PUBLIC workflow log. The names go to
         # `log_person`, which prints only under DSL_VERBOSE on a local run.
         log_step(
-            f"{slug}: {len(public)} repo(s) published before the cutoff - making them "
-            f"private again until {at.isoformat()}"
+            f"{slug}: {len(public)} repo(s) published before the cutoff - "
+            f"{'would be made' if dry_run else 'making them'} private again until "
+            f"{at.isoformat()}"
         )
         for repo in public:
             if dry_run:
