@@ -125,17 +125,32 @@ def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
 def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(capsys):
     spec = collect.parse_grading_spec("visibility: internal\n")
     assert spec.visibility == "private"
-    assert "is not one of private/public" in capsys.readouterr().err
+    assert "is not one of private/public/student_choice" in capsys.readouterr().err
 
 
-def test_public_is_accepted_vocabulary_and_refused_until_it_is_implemented(capsys):
-    # The word is in the vocabulary, so a file naming it is answered about the SHAPE rather
-    # than about spelling - but the handout creates a private repo whatever it says, so
-    # reading it back as `public` would have the sheet and the site describe a repo that
-    # does not exist.
+def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
+    # The handout creates a world-readable repo for it, so the value stands - and the one
+    # thing that follows from it is derived, never declared: marks and receipts have
+    # nowhere private to go, so the gradebook carries them instead.
     spec = collect.parse_grading_spec("visibility: public\n")
+    assert spec.visibility == "public" and spec.is_public
+    assert not spec.has_feedback_issue
+    assert spec.collects_commits and spec.creates_unit_repos
+    assert capsys.readouterr().err == ""
+
+
+def test_student_choice_is_accepted_vocabulary_and_refused_until_it_is_implemented(
+    capsys,
+):
+    # The word is in the vocabulary, so a file naming it is answered about the SHAPE
+    # rather than about spelling - but the handout creates a private repo the student
+    # cannot publish whatever it says, so reading it back would promise something nothing
+    # delivers.
+    spec = collect.parse_grading_spec("visibility: student_choice\n")
     assert spec.visibility == "private" and spec.has_feedback_issue
-    assert "`visibility: public` is not supported yet" in capsys.readouterr().err
+    assert (
+        "`visibility: student_choice` is not supported yet" in capsys.readouterr().err
+    )
 
 
 def test_a_submit_via_the_engine_cannot_act_on_is_refused_as_a_typo(capsys):

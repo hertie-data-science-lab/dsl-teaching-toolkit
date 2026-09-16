@@ -51,6 +51,7 @@ from .course import (
     GRADEBOOK_PREFIX,
     NO_STARTER,
     NO_TEAMS,
+    OFFERED_VISIBILITIES,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -209,6 +210,15 @@ class _Shape:
         """Handed in off GitHub (Moodle, Kaggle, in class), so no repo is created at all
         and nothing is ever collected."""
         return self.submit_via == "external"
+
+    @property
+    def is_public(self) -> bool:
+        """Whether the handout makes each unit's repo world-readable.
+
+        Both halves, because only one of them is a repo: `visibility:` describes a repo,
+        and a shape that creates none has nothing for it to describe (the parse drops it
+        there, and this asks anyway rather than depending on that)."""
+        return self.creates_unit_repos and self.visibility == "public"
 
     @property
     def has_feedback_issue(self) -> bool:
@@ -1284,17 +1294,19 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 "no repo is created for it - ignored",
             )
         )
-    if values.get("visibility", "private") != "private":
+    if values.get("visibility") == "student_choice":
         # Accepted vocabulary, unimplemented shape: the handout creates a private repo
-        # whatever this says, so reading it back as `public` would have the sheet, the site
-        # and the digest all describing a repo that does not exist.
+        # whatever this says, so reading it back would have the sheet, the site and the
+        # digest all describing a repo nobody created. The word is in the vocabulary
+        # already so that the file which carries it is REPORTED rather than read as a
+        # typo; it leaves this list the moment the handout can act on it.
         values["visibility"] = "private"
         dropped.append(
             Dropped(
                 GRADING_FILE,
                 "visibility",
-                "`visibility: public` is not supported yet - using `private`",
-                ("private",),
+                "`visibility: student_choice` is not supported yet - using `private`",
+                OFFERED_VISIBILITIES,
             )
         )
     if via != "external" and values.get("submit_url"):

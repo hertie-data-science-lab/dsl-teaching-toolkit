@@ -92,10 +92,17 @@ SANDBOX_USER = "dsl-sandbox"
 # offers, and a form offering a word the reader would refuse is a form that lies.
 SUBMIT_VIA = ("github", "external")
 # Who may read a unit's repo. `private` is the default and what every assignment gets until
-# an instructor says otherwise; `public` is portfolio work, and is accepted by the reader
-# but refused back to `private` until the handout can create one. Room for `internal`
-# (visible to an Enterprise, invisible to the world) if the plan ever buys it.
-VISIBILITIES = ("private", "public")
+# an instructor says otherwise; `public` is portfolio work, world-readable from handout.
+# `student_choice` - the repo starts private and the student may publish it themselves - is
+# READ but not yet acted on: the reader refuses it back to `private` with a sentence saying
+# so, exactly as `public` was refused until this shipped. Room for `internal` (visible to
+# an Enterprise, invisible to the world) if the plan ever buys it.
+VISIBILITIES = ("private", "public", "student_choice")
+# The visibilities the handout can actually CREATE, which is what the New assignment
+# dropdown offers and what `scaffold` refuses an answer back to - `STARTER_FORMATS`'
+# relationship to `FORMATS`. A form offering a word the reader would drop is a form that
+# lies, so `student_choice` joins this tuple in the phase that implements it.
+OFFERED_VISIBILITIES = tuple(v for v in VISIBILITIES if v != "student_choice")
 ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
