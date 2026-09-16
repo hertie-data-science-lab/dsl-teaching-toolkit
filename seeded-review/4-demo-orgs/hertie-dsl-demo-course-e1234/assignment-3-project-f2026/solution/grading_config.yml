@@ -1,0 +1,15 @@
+# source: https://github.com/hertie-dsl-demo-course-e1234/assignment-3-project-f2026/blob/solution/grading_config.yml @ 821ddd0
+# INSTRUCTOR-OWNED - defines this assignment for the toolkit. Dates live in the cohort's schedule.yml.
+title: Group project
+type: group                   # individual | group
+team_formation: self_select   # self_select (students use the Join-team form) | assigned (you write teams.csv)
+max_team_size: 3              # group only
+submit_via: github            # github | external
+questions:                    # per-question maxima; the total is their sum
+  Report: 20
+  Code: 20
+  Presentation: 10
+late_window_days: 7
+late_penalty_per_day: 10%
+autograde: true
+tests: tests

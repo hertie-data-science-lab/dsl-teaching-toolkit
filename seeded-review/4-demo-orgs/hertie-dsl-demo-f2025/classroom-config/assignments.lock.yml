@@ -1,0 +1,18 @@
+# source: https://github.com/hertie-dsl-demo-f2025/classroom-config/blob/main/assignments.lock.yml @ e59c746
+# SYSTEM-OWNED - do not edit, edits here are overwritten. Written by the DSL teaching
+# toolkit from each assignment's `grading_config.yml`, one entry per assignment in
+# `schedule.yml`. Faculty change an assignment by editing its own `grading_config.yml` on
+# the course template's `solution` branch; this file catches up next sync.
+#
+# The Join-team form in this cohort's `welcome` repo reads THIS FILE and nothing else.
+#
+#   team_formation: self_select   students form their own teams with the Join-team form
+#                   assigned      the teaching team writes teams.csv; the form refuses
+#                   none          an individual assignment; the form refuses
+#   max_team_size:  the cap the form enforces (group assignments only)
+#
+# An assignment whose course template does not exist yet is locked to `none`:
+# until the template says what it is, nobody can mint a GitHub team for it.
+
+assignments:
+  {}

@@ -1,0 +1,9 @@
+# source: https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/blob/solution/grading_config.yml @ 6152ddf
+# INSTRUCTOR-OWNED - defines this assignment for the toolkit. Dates live in the cohort's schedule.yml.
+title: Linear regression from scratch
+type: individual              # individual | group
+submit_via: github            # github | external
+late_window_days: 7           # late work accepted for 7 days after the due date
+late_penalty_per_day: 10%     # of the earned grade, per day started
+autograde: true               # runs tests/ at the cutoff; the count is shown to graders only
+tests: tests

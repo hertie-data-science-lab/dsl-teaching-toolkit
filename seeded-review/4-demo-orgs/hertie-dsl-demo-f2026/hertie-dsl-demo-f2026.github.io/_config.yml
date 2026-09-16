@@ -1,0 +1,86 @@
+# source: https://github.com/hertie-dsl-demo-f2026/hertie-dsl-demo-f2026.github.io/blob/main/_config.yml @ 6e11f85
+# ============================================================
+# Hertie DSL Course Website — Configuration
+# ============================================================
+# Edit the fields below for your course - EXCEPT the course-identity keys the DSL
+# course sync owns and rewrites on every run: `course_code`, `course_name`, `course_semester`, `github_org`.
+# Change those in the course org's .github/dsl-course.yml instead.
+# Do NOT change anything below the "Do not change" line.
+
+# --- Course identity ---
+course_name: "Deep Learning (Demo)"
+course_description: "A public demonstration course run by the Hertie Data Science Lab - one course org and two cohort orgs showing the teaching toolkit end to end."
+course_semester: "Fall 2026"
+course_code: "E1234"
+github_org: "hertie-dsl-demo-f2026"
+
+# --- Instructor / institution ---
+schoolname: "Hertie School"
+schoolurl: "https://hertie-school.org/en/datasciencelab"
+dsl_org_url: "https://github.com/hertie-data-science-lab"
+address: |
+    Data Science Lab
+    Hertie School
+    Friedrichstraße 180
+    10117 Berlin, Germany
+
+# --- Optional ---
+# twitter_username: hertie_dslab
+# google_analytics: UA-XXXXXXXX-X
+
+# --- Content repo (where course materials live) ---
+# content_repo: "https://github.com/Hertie-School-Deep-Learning-E1394/content-f2025"
+
+### Do not change the following unless you know what you are doing ###
+
+# Shared visual theme — layout, branding and styles come from dsl-jekyll-theme.
+# Restyling happens there and propagates to every DSL site (see that repo).
+# managed by the DSL course sync - rewritten on every run
+remote_theme: "hertie-data-science-lab/dsl-jekyll-theme@e4b8fdc9e87b4729c9dcef142591551a2361d4b5"
+plugins:
+  - jekyll-remote-theme
+  - jekyll-feed
+
+baseurl: ""
+url: "https://hertie-dsl-demo-f2026.github.io"
+
+markdown: kramdown
+permalink: blog/:year/:month/:title
+excerpt_separator: "<!--more-->"
+
+include: ['_images']
+exclude:
+  - develop
+  - hertie-config.yml
+  - vendor
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - .bundle
+  - SETUP-CHECKLIST.md
+
+# managed by the DSL course sync - rewritten on every run
+dateformat: "%d/%m/%Y"
+future: true
+
+# managed by the DSL course sync - rewritten on every run
+collections:
+  events:
+    output: true
+  lectures:
+    output: true
+  assignments:
+    output: true
+  announcements:
+    output: false
+
+# managed by the DSL course sync - rewritten on every run
+defaults:
+  - scope:
+      path: ""
+      type: "assignments"
+    values:
+      layout: "assignment"
+
+# managed by the DSL course sync - rewritten on every run
+title: "Deep Learning (Demo)"

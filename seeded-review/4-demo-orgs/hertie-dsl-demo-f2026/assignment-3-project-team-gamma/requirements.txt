@@ -1,0 +1,7 @@
+# source: https://github.com/hertie-dsl-demo-f2026/assignment-3-project-team-gamma/blob/main/requirements.txt @ 6ea98c3
+# Pin your dependencies. These are the versions the labs were built against - adjust as
+# needed, but keep them PINNED: an unpinned environment is not reproducible.
+numpy==2.1.3
+pandas==2.2.3
+scikit-learn==1.5.2
+matplotlib==3.9.2

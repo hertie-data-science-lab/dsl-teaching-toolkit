@@ -1,0 +1,119 @@
+# source: https://github.com/hertie-dsl-demo-course-e1234/.github/blob/main/.github/workflows/new-assignment.yml @ 0f20914
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is
+# re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).
+name: New assignment
+
+on:
+  workflow_dispatch:
+    inputs:
+      assignment_name:
+        description: "1. The assignment's name, e.g. Neural networks from scratch"
+        required: true
+      assignment_number:
+        description: "2. Assignment number, e.g. 1"
+        required: true
+      semester_tag:
+        description: "3. Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
+        required: true
+      copy_from:
+        description: "4. Copy an existing template forward instead - both branches, whole history. Boxes 5-9 are then ignored"
+        required: false
+        type: choice
+        options:
+          - (fresh starter)
+          - assignment-1-f2026
+          - assignment-2-f2026
+          - assignment-3-project-f2026
+      format:
+        description: "5. Starter file(s) to seed, comma-separated: ipynb, py, rmd, qmd, latex - or none for the README.md only"
+        default: "ipynb"
+      type:
+        description: "6. individual = one repo per student; group = one repo per team (teams.csv)"
+        type: choice
+        default: "individual"
+        options:
+          - individual
+          - group
+      team_formation:
+        description: "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv"
+        type: choice
+        default: "self_select"
+        options:
+          - self_select
+          - assigned
+      submit_via:
+        description: "8. Where students hand in. github = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class), so the repo only carries the brief and nothing is collected"
+        type: choice
+        default: "github"
+        options:
+          - github
+          - external
+      autograde:
+        description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  check-team:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify the user may run actions for THIS repo
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Faculty & instructors have write+ on the course repos; students never do (and triggering a
+          # workflow_dispatch already requires write), so repo permission is the gate.
+          perm=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq '.permission' 2>/tmp/gherr || true)
+          case "$perm" in admin|write|maintain) exit 0 ;; esac
+          echo "::error::@$ACTOR lacks write on $REPO (permission='$perm'). gh api said:"
+          cat /tmp/gherr || true
+          exit 1
+
+  scaffold:
+    needs: check-team
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: hertie-data-science-lab/dsl-teaching-toolkit
+          ref: main
+          # No credential left behind in $GITHUB_WORKSPACE/.git/config. Nothing here ever
+          # pushes to the checkout - the central repo is public and read-only to these
+          # jobs, and every write goes through `gh`/`gh auth setup-git` against ANOTHER
+          # repo - so the persisted header buys nothing, and the grading jobs run the
+          # student's own code with this directory on disk.
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Scaffold assignment
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          NAME: ${{ inputs.assignment_name }}
+          NUMBER: ${{ inputs.assignment_number }}
+          TAG: ${{ inputs.semester_tag }}
+          COPY_FROM: ${{ inputs.copy_from }}
+          FORMAT: ${{ inputs.format }}
+          TYPE: ${{ inputs.type }}
+          TEAM_FORMATION: ${{ inputs.team_formation }}
+          SUBMIT_VIA: ${{ inputs.submit_via }}
+          AUTOGRADE: ${{ inputs.autograde }}
+        run: |
+          gh auth setup-git
+          args=(--org "$ORG" --number "$NUMBER" --tag "$TAG" --name "$NAME" \
+            --format "$FORMAT" --type "$TYPE" --team-formation "$TEAM_FORMATION" \
+            --submit-via "$SUBMIT_VIA" --autograde "$AUTOGRADE")
+          [ "$COPY_FROM" = "(fresh starter)" ] && COPY_FROM=""
+          [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
+          python3 -m dsl_course.scaffold assignment "${args[@]}"
+          python3 -m dsl_course.seed refresh --course-org "$ORG"

@@ -1,0 +1,5 @@
+# source: https://github.com/hertie-dsl-demo-f2026/hertie-dsl-demo-f2026.github.io/blob/main/_data/late_policy.yml @ 6e11f85
+policies:
+  - You have free 8 late days.
+  - You can use late days for assignments. A late day extends the deadline 24 hours.
+  - Once you have used all 8 late days, the penalty is 10% for each additional late day.

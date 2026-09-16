@@ -1,0 +1,121 @@
+# source: https://github.com/hertie-dsl-demo-f2025/classroom-config/blob/main/schedule.yml @ e59c746
+# This cohort's schedule + auto-release plan. Edit here.
+#
+# The DEMO "defaults only" cohort: bootstrapped, given a schedule, and left alone.
+# Every optional key is omitted, so this is the toolkit with no customisation -
+# releases land in the default `materials` repo, at the session's own time, under
+# titles derived from the labels. The sibling cohort hertie-dsl-demo-f2026 exercises
+# every option instead.
+
+semester_start: 2025-09-09
+semester_end: 2025-12-19
+
+# ------------------------------------------------------------------------------ releases
+releases:
+
+  session-01:
+    event_datetime: 2025-09-09T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/01_deep-learning-in-public-policy
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/01_deep-learning-in-public-policy
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/01_deep-learning-in-public-policy
+
+  session-02:
+    event_datetime: 2025-09-16T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/02_deep-neural-networks-1
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/02_deep-neural-networks-1
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/02_deep-neural-networks-1
+
+  session-03:
+    event_datetime: 2025-09-23T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/03_deep-neural-networks-2
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/03_deep-neural-networks-2
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/03_deep-neural-networks-2
+
+  session-04:
+    event_datetime: 2025-09-30T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/04_computer-vision-1-cnns
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/04_computer-vision-1-cnns
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/04_computer-vision-1-cnns
+
+  session-05:
+    event_datetime: 2025-10-07T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/05_computer-vision-2-modern-cnns
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/05_computer-vision-2-modern-cnns
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/05_computer-vision-2-modern-cnns
+
+  session-06:
+    event_datetime: 2025-10-14T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/06_sequence-methods-and-time-series
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/06_sequence-methods-and-time-series
+
+  session-07:
+    event_datetime: 2025-10-21T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/07_natural-language-processing-1
+
+  session-08:
+    event_datetime: 2025-10-28T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: lectures/08_nlp-2-encoder-decoder-and-attention
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/08_nlp-2-encoder-decoder-and-attention
+
+  session-09:
+    event_datetime: 2025-11-04T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/09_further-topics
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/09_further-topics
+
+  session-10:
+    event_datetime: 2025-11-11T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/10_policy-approaches-and-responsible-implementation
+
+  session-11:
+    event_datetime: 2025-11-18T10:00
+    deploy:
+      - course_source_repo: course-materials-f2025
+        course_source_path: labs/11_deep-learning-in-practice
+      - course_source_repo: course-materials-f2025
+        course_source_path: readings/11_deep-learning-in-practice
+
+# No `assignments:` block. Handing one out generates a repo per ONBOARDED student, and
+# nobody has claimed a roster row in this demonstration cohort - so a scheduled handout
+# would fail every hour with "no onboarded enrolled students". The sibling cohort
+# hertie-dsl-demo-f2026 shows the full assignment lifecycle instead.
+
+# ------------------------------------------------------------------------------- archive
+# archive the org (freezes in place): removes all write permissions, retains all read permissions
+archive:
+  date: 2027-09-01            # optional (default: semester_end + 60 days)
+  show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, also sends a notice email 14 days out
+  description: >-             # optional, `{date}` is filled in with the date above
+    This cohort is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.

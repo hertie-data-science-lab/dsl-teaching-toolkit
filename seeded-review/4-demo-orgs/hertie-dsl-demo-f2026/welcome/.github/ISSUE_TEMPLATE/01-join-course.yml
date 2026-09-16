@@ -1,0 +1,20 @@
+# source: https://github.com/hertie-dsl-demo-f2026/welcome/blob/main/.github/ISSUE_TEMPLATE/01-join-course.yml @ 4e22a45
+# SYSTEM-OWNED - do not edit. This form's field ids are a contract with .github/workflows/onboard.yml,
+# which parses them; both are re-pushed by every bootstrap and nightly refresh.
+name: Join course
+description: Enrol in this course with the code the teaching team emailed you
+title: "Join course"
+labels: ["onboarding"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This matches your GitHub handle to the course-registered Hertie email address. You will be automatically assigned as either an enrolled student or auditor, based on assignment by your instructors.
+  - type: input
+    id: enrol_code
+    attributes:
+      label: Enrolment code
+      description: The code emailed to your hertie email address (looks like dsl-xxxxxx).
+      placeholder: "dsl-ab3k9m"
+    validations:
+      required: true

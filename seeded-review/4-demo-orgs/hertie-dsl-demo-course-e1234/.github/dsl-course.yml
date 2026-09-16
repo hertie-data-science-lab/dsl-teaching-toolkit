@@ -1,0 +1,78 @@
+# source: https://github.com/hertie-dsl-demo-course-e1234/.github/blob/main/dsl-course.yml @ 0f20914
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+org: hertie-dsl-demo-course-e1234
+org_name: DSL Demo Course
+course_name: Deep Learning (Demo)
+course_code: E1234
+# Deployment tier this course (and its cohorts) runs the toolkit from. The demo org
+# soaks `staging` before anything is promoted to `release`, which every other org runs.
+central_ref: main
+
+# Defaults the New assignment button writes into a new template's grading_config.yml;
+# each assignment can be edited there afterwards. Changing these changes the NEXT
+# assignment, never one that already exists.
+assignment_defaults:
+  max_team_size: 4            # group assignments only
+  late_window_days: 7         # 0 = nothing after the due date is accepted
+  late_penalty_per_day: 10%   # of the EARNED grade, per day started
+course_description: "A public demonstration course run by the Hertie Data Science Lab - one course org and two cohort orgs showing the teaching toolkit end to end."
+# course_description: One or two sentences, on ONE line - the blurb on every cohort site.
+# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, link ONLY
+#   # these file types. Default (unset): each session's root files, plus one link per
+#   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
+#   # everything you release still ships, and the folder itself is always one click away.
+#   # (The public open-courseware site always lists root files - it hosts what it lists.)
+
+# `course_name`, `course_code` and `course_description` are what reach the cohort
+# websites. Editing them here re-syncs every cohort site already bootstrapped from this
+# course org.
+#
+# This is the persistent COURSE org - it spans many cohorts (years). Cohorts are
+# registered separately in .github/cohort-courses-pages.yml.
+
+# ---------------------------------------------------------------------------
+# People. Two DIFFERENT things live under the `people:` key below - don't
+# confuse them:
+#
+#   course_admins        GRANTS ACCESS. The single source of truth for course-wide
+#                        admin rights - the `course-admin` team here, mirrored into
+#                        every cohort org. A handle added any other way is reverted
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
+#
+#   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
+#                        the OPTIONAL public open-courseware course website (the
+#                        "Publish course website" action). They grant NO GitHub
+#                        access. TAs are NOT declared here - they change every
+#                        cohort, so a cohort's whole teaching team (instructors &
+#                        TAs, their GitHub access AND their cohort-site cards) is
+#                        declared PER COHORT in that cohort's classroom-config/people.yml.
+# ---------------------------------------------------------------------------
+people:
+  course_admins:
+    - github_handle: "henrycgbaker"
+  instructors:
+    - name: "Prof. Lynn Kaack, PhD"
+      title: "Assistant Professor of Computer Science and Public Policy"
+      photo: "https://github.com/LynnKaack.png"
+      url: "https://www.hertie-school.org/de/research/faculty-and-researchers/profile/person/kaack"
+      start: "2026-08-01"
+      end: "2027-07-31"
+  # NB: the public course site renders INSTRUCTOR cards only (include_tas=False in
+  # site.sync_public_site) - TAs are cohort-scoped, so their cards come from each
+  # cohort's own classroom-config/people.yml. These two are therefore inert here.
+  teaching_assistants:
+    - name: "Chiara Fusar Bassini"
+      title: "PhD candidate, Data Science Lab"
+      photo: "https://github.com/chiara-fb.png"
+      url: "https://www.hertie-school.org/en/who-we-are/profile/person/fusar-bassini"
+      start: "2026-08-01"
+      end: "2027-01-31"
+    - github_handle: "henrycgbaker"
+      name: "Henry Baker"
+      title: "Research Engineer & Data Scientist"
+      photo: "/_images/pp/henrycgbaker.jpg"
+      url: "https://www.hertie-school.org/en/who-we-are/profile/person/baker"
+      start: "2026-08-01"
+      end: "2027-01-31"

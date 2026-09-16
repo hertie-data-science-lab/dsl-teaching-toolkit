@@ -1,0 +1,214 @@
+# source: https://github.com/hertie-dsl-demo-f2025/classroom-config/blob/main/.github/workflows/validate-schedule.yml @ e59c746
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
+name: Validate schedule
+
+# Seeded into a cohort's private classroom-config repo as
+# .github/workflows/validate-schedule.yml. Checks schedule.yml the moment it changes, in
+# the repo it lives in - faculty edit here, so the verdict belongs here rather than behind
+# a workflow in the course org.
+#
+# It CANNOT block the commit: workflows run after the push has landed, and branch
+# protection needs a paid plan on a private repo. So it does the two things it can: it
+# FAILS, which puts a red X against the offending commit, and it annotates the lines that
+# could not be read, in the commit's own diff.
+#
+# A red X only works if somebody looks, so the thing that actually notifies is the
+# scheduler's own digest issue for the entries it could not read, plus the email beside it
+# addressed to whoever wrote the line (dsl_course.config_digest). This
+# workflow used to open that issue itself, in a block of shell that searched by title and
+# assigned the pusher; the engine now owns it, and adopts the open issue by the same
+# title. Which means: nothing here writes an issue, and a run that fails to parse still
+# reports itself twice - the red X here, within seconds, and the record + mail from the
+# course org's next tick, within the minute (the dispatcher fires on this push).
+#
+# Validation runs the SAME parser the scheduler uses (dsl_course.schedule), checked
+# out from the public central repo. A second implementation - a JSON schema, a hand-rolled
+# checker - could drift, and its failure mode is the worst one available: passing a file
+# the scheduler will silently drop entries from.
+#
+# A THIRD verdict arrives here and has no channel of its own: an empty course org means
+# the toolkit could not read this cohort's own dsl-course.yml, which is nothing faculty can
+# fix. It reds the run and says so in the annotation, and the annotation asks for the
+# maintainer by name - it cannot email them. A cohort org carries DSL_BOT_TOKEN and nothing
+# else: the GRAPH_* transport and DSL_MAINTAINER_EMAIL are set on COURSE orgs, nothing
+# propagates them down here, and a mail step wired to secrets an org does not have sends to
+# nobody while reading as a channel that works.
+#
+# The red X above is the DROPPED-ENTRY channel here and nothing else. The run also checks
+# whether the plan's sources exist in the course org, but that answer changes week to week
+# (a lecture nobody has written yet is normal in August), so it never touches the exit
+# code. Those have a digest issue of their own, under a separate title, for the same
+# reason: routed through here they would be named "entries the scheduler cannot read" and
+# closed on the next clean parse, staged or not.
+#
+# What a source fault DOES get here is a commit comment, and only when the release is
+# close enough that somebody is meant to hear about it. That is the one moment this
+# workflow can say something the scheduler cannot: the person who just pushed is still at
+# their keyboard, and the alternative is finding out from an email tomorrow. Distant faults
+# get nothing - the digest issue holds them. The comment's TEXT is written by the engine
+# (`--comment-file`), not assembled here: this step used to grep the report back for a rung
+# prefix, which matched some rungs and not others, and counted an entry that had already
+# fired among the ones still to come.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - schedule.yml
+  pull_request:
+    paths:
+      - schedule.yml
+  workflow_dispatch:
+
+# contents: write covers both things this job does to the repo it runs in: checking it
+# out, and leaving a comment on the pushed commit (a commit comment is under the Contents
+# permission, not Issues - the endpoint is repos/.../commits/<sha>/comments). Nothing here
+# writes an ISSUE any more - the engine's digest does - so that scope is gone. The write
+# actually runs on DSL_BOT_TOKEN, so this block is the declared intent rather than the
+# token in use, and it stays at the one scope rather than the default all.
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Pinned to full commit SHAs: these steps share a job with DSL_BOT_TOKEN, and a
+      # mutable tag is whatever the tag currently points at. Comment = the version.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          path: cohort
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: hertie-data-science-lab/dsl-teaching-toolkit
+          ref: main
+          path: central
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r central/requirements.txt
+
+      # The course org this cohort belongs to, read from its own dsl-course.yml (the same
+      # single source of truth dispatch-sync.yml reads - no org name baked in at bootstrap
+      # time). A cohort's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an
+      # empty answer here is an API error or a token that lost its scope - infrastructure,
+      # not anything in the file that was just pushed. It used to be swallowed, which meant
+      # the source check silently stopped running and every push looked clean.
+      #
+      # Through the real loader, not a grep. The dispatchers shell out to
+      # `grep '^course:' | cut -d: -f2- | xargs` because they have neither Python nor the
+      # central checkout; that pipeline reads a quoted value with its quotes on and keeps
+      # a trailing `# comment`, and either spelling resolves to an org that does not
+      # exist. This job has both by now, so it asks `discovery.course_org_for_cohort` -
+      # the same YAML parse every CLI makes.
+      - name: Resolve the course org
+        id: course
+        working-directory: central
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COHORT_ORG: ${{ github.repository_owner }}
+        run: |
+          # Only the ANSWER may reach stdout, because stdout is what is captured into the
+          # step output below: `ghcli.gh` prints its retry notices ("[wait] rate-limited
+          # ...") there before a successful retry, and a second line writes a step-output
+          # line with no `=`. GitHub then rejects the whole file and this step fails -
+          # which skips every step after it, the parse verdict included, and a push that
+          # dropped an entry goes unreported. That is the failure the comment above says
+          # was already fixed once. Same guard, same reason, as `scheduler.main`'s
+          # --list-cohorts: every log line the read makes goes to stderr for the duration.
+          course_org=$(python3 -c '
+          import contextlib, os, sys
+          from dsl_course.discovery import course_org_for_cohort
+          with contextlib.redirect_stdout(sys.stderr):
+              org = course_org_for_cohort(os.environ["COHORT_ORG"])
+          sys.stdout.write(org)
+          ') || true
+          echo "org=$course_org" >> "$GITHUB_OUTPUT"
+
+      - name: Validate schedule.yml
+        id: validate
+        working-directory: central
+        env:
+          # Reading the COURSE org's (private) material repos is beyond the ambient token,
+          # which is scoped to this repo. Absent, --check-sources is simply not passed.
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COURSE_ORG: ${{ steps.course.outputs.org }}
+        run: |
+          set +e
+          # The PARSE runs first and unconditionally. It is the verdict about the file
+          # that was just pushed, it needs nothing but that file, and its channel - the
+          # red X, the issue naming what was dropped, the close on the next clean push -
+          # hangs off the `rc` written below. Failing the step here for an empty course
+          # org skipped all of it: those steps have no status function in their `if:`, so
+          # a failed step above them means they never run, and a push that dropped an
+          # entry went unreported because an unrelated API call came back empty.
+          args=(--file ../cohort/schedule.yml --validate)
+          if [ -n "$COURSE_ORG" ]; then
+            args+=(--check-sources "$COURSE_ORG" --annotate --comment-file comment.txt)
+          fi
+          # stdout is the report; the ::warning:: annotations go to stderr, so they reach
+          # the job log (where Actions renders them against schedule.yml in the commit's
+          # own diff) without landing in the summary as raw workflow-command text.
+          python3 -m dsl_course.schedule "${args[@]}" > report.txt
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+          {
+            echo "## schedule.yml"
+            echo ""
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat report.txt
+          exit 0
+
+      # The push that planned it is the cheapest moment to say so: the person who wrote
+      # the line is still here. `sources_notify` and comment.txt are both written by the
+      # process that knows the rung (dsl_course.schedule --annotate --comment-file), so
+      # this step decides nothing - it posts what it was handed, and adds the one thing
+      # only the workflow knows: where this repo's digest issue actually is.
+      - name: Comment on the push about a release with no materials
+        if: github.event_name == 'push' && steps.validate.outputs.sources_notify == 'true'
+        working-directory: central
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          [ -s comment.txt ] || exit 0
+          # The title comes from the engine that writes the issue. Every lookup of it
+          # matches EXACTLY, so a copy typed here would stop finding the issue the day
+          # the wording changed - and this line would point at a search finding nothing.
+          title=$(python3 -m dsl_course.source_digest --title)
+          # `--search` is a WORD match, so the exact-title filter is client-side. jq reads
+          # the title from the environment rather than from its own program text: it is
+          # engine output, not a string to splice into an expression.
+          url=$(TITLE="$title" gh issue list --repo "$REPO" --state open \
+            --search "$title in:title" --json url,title \
+            --jq 'map(select(.title == env.TITLE))[0].url // empty') || true
+          # Nothing open yet: this push is often what opens it, on the scheduler's next
+          # tick. A search is then the honest answer - it holds the issue within a minute.
+          [ -n "$url" ] || url="https://github.com/$REPO/issues?q=is%3Aissue+is%3Aopen+schedule.yml"
+          body=$(printf '%s\nThe generated GitHub record issue is %s.\n' \
+            "$(cat comment.txt)" "$url")
+          gh api "repos/$REPO/commits/$SHA/comments" -f body="$body" >/dev/null
+
+      - name: Fail the run so the commit carries a red X
+        if: steps.validate.outputs.rc != '0'
+        run: |
+          echo "::error file=schedule.yml::schedule.yml has entries the scheduler cannot read - see the run summary"
+          exit 1
+
+      # LAST, so the dropped-entry channel above has already run. A cohort's dsl-course.yml
+      # is SYSTEM-OWNED and always names `course:`, so an empty answer is an API error or a
+      # token that lost its scope - infrastructure, and nothing in the file just pushed. It
+      # used to be swallowed, which meant the source check silently stopped running and
+      # every push looked clean; it then failed the validate step instead, which skipped
+      # everything after it. The annotation asks for the maintainer by name because this
+      # repo cannot email them - see the header.
+      - name: Fail the run because the course org could not be read
+        if: steps.course.outputs.org == ''
+        run: |
+          echo "::error::could not read this cohort's dsl-course.yml - the source check could not run. This is not a fault in your file - the toolkit could not reach the course org. Tell the maintainer."
+          exit 1

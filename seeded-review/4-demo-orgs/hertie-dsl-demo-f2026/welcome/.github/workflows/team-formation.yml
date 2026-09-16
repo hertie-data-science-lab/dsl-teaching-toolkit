@@ -1,0 +1,361 @@
+# source: https://github.com/hertie-dsl-demo-f2026/welcome/blob/main/.github/workflows/team-formation.yml @ 4e22a45
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
+name: Form team
+
+# Seed this into a cohort's public `welcome` repo as
+# .github/workflows/team-formation.yml. Students open a "Join team" issue here; the issue
+# AUTHOR is the authenticated GitHub handle (unspoofable). We verify they are an onboarded
+# ENROLLED student - auditors are read-only (released materials, no assignment repos) so they
+# are refused - then append a row to the PRIVATE classroom-config/teams.csv - the only writer
+# surface for team membership. A GitHub Team is materialised FROM that CSV later (one-way, by
+# dsl_course.sync_teams), so the Team is a downstream projection that can't drift the way a
+# Classroom-managed team does. Group-assignment provisioning grants that team its shared repo.
+#
+# WHETHER a team may form at all, and how big, is answered by
+# classroom-config/assignments.lock.yml - written by the toolkit from each assignment's
+# grading_config.yml, because that file lives in the course org and this token cannot
+# reach it. An assignment the lock does not carry, or one it marks `assigned` or `none`,
+# is refused here.
+#
+# Runs under secrets.DSL_BOT_TOKEN, which needs, on the cohort org: Contents R/W on
+# classroom-config, Issues R/W on welcome.
+
+on:
+  issues:
+    types: [opened]
+
+# Scoped PER ISSUE, deliberately. A repo-wide group serialises the teams.csv write, but
+# GitHub keeps only ONE pending run per group: when a project deadline sends a burst of
+# Join-team issues, the third arrival CANCELS the second, and a cancelled run posts no
+# comment and adds no label, so those students are dropped in silence. Per-issue groups let
+# the burst run in parallel. The CSV's read-modify-write is made safe by the `sha` it
+# passes instead: a stale sha is a 409, never a lost update, and the script below re-reads,
+# re-checks the team-size cap, and retries on one.
+concurrency:
+  group: team-formation-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+# The ambient GITHUB_TOKEN comments on, labels and closes the issue in THIS repo. It gets
+# nothing else: teams.csv lives in another repo (classroom-config), which only
+# DSL_BOT_TOKEN can reach, so `contents:` here would be scope with no purpose.
+permissions:
+  issues: write
+
+jobs:
+  form-team:
+    # Routed by the FORM's label, not the title: the title is a fixed default the student
+    # never edits (this workflow retitles the issue from the author + form fields).
+    if: contains(github.event.issue.labels.*.name, 'team-formation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify enrolment, append team membership
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
+        with:
+          github-token: ${{ secrets.DSL_BOT_TOKEN || github.token }}
+          script: |
+            const org    = context.repo.owner;            // the cohort org
+            const issue  = context.payload.issue;
+            const handle = issue.user.login;              // authenticated identity
+            const CONFIG = 'classroom-config';
+            const TEAMS  = 'teams.csv', ROSTER = 'students.csv';
+
+            // The half of the two onboarding workflows' github-script bodies that is the same in both.
+            // Not a workflow of its own: dsl_course.welcome splices it in at their `// {shared_script}`
+            // line, so a cohort receives one file per workflow as before. It was written out twice, in
+            // two files, against one file format, with a test comparing the copies byte for byte to
+            // catch the day they stopped agreeing.
+            //
+            // --- CSV, RFC-4180-ish (github-script has no npm deps, so hand-rolled).
+            // Both CSVs are written by Python's csv module, so a field containing a comma (a roster
+            // name like "Doe, Jane") arrives QUOTED. A naive line.split(',') shifts every column right
+            // of it: the wrong enrol_code read, github_handle / github_id written into the wrong cells,
+            // teams.csv rewritten with mangled rows. Quoted fields may contain commas, newlines and
+            // "" -escaped quotes; serialiseCsv re-quotes on the same rule as csv.QUOTE_MINIMAL.
+            const parseCsv = (text) => {
+              const rows = [];
+              let row = [], field = '', quoted = false;
+              for (let i = 0; i < text.length; i++) {
+                const c = text[i];
+                if (quoted) {
+                  if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+                  else if (c === '"') { quoted = false; }
+                  else { field += c; }
+                  continue;
+                }
+                if (c === '"') { quoted = true; }
+                else if (c === ',') { row.push(field); field = ''; }
+                else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+                else if (c !== '\r') { field += c; }
+              }
+              if (field !== '' || row.length) { row.push(field); rows.push(row); }
+              return rows.filter(r => r.some(v => v !== ''));  // drop blank lines
+            };
+            const csvCell = (v) => {
+              const s = (v === undefined || v === null) ? '' : String(v);
+              return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+            };
+            const serialiseCsv = (rows) => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n';
+
+            // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with no comment
+            // and no label, so the student is dropped in silence and nobody triages it. Every terminal
+            // path in both workflows goes through here.
+            const fail = async (msg, label) => {
+              await github.rest.issues.createComment({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, body: msg });
+              await github.rest.issues.addLabels({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: [label] });
+              core.setFailed(msg.replace(/\*\*/g, ''));
+            };
+
+            try {
+              if (!process.env.HAS_BOT) {
+                return fail(
+                  `Thanks @${handle} - team formation is **not yet armed**: the \`DSL_BOT_TOKEN\` secret ` +
+                  `is unset, so I can't read the roster or record your team. A maintainer will action this.`,
+                  'needs-review');
+              }
+
+              // Parse the assignment slug + team name from the issue form.
+              const aMatch = (issue.body || '').match(/Assignment\s*[\r\n]+\s*([A-Za-z0-9][\w.-]*)/i);
+              const tMatch = (issue.body || '').match(/Team\s*[\r\n]+\s*([A-Za-z0-9][\w-]*)/i);
+
+              // What this assignment allows, read from the machine-written mirror the
+              // toolkit keeps at classroom-config/assignments.lock.yml - THIS FILE AND
+              // NOTHING ELSE. The answer lives in the template's grading_config.yml, in
+              // the course org, which this token deliberately cannot reach; the
+              // schedule.yml scrape that stood here before let a slug with no `type:`
+              // mint a real GitHub team for any assignment at all.
+              //
+              // The toolkit writes the file, so its shape is fixed (see
+              // dsl_course.grades.team_lock_text): two-space assignment keys, four-space
+              // scalars under them. `undefined` = no lock file; `null` = a slug it does
+              // not carry.
+              const LOCK = 'assignments.lock.yml';
+              const lockEntry = async (slug) => {
+                let text;
+                try {
+                  const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: LOCK });
+                  text = Buffer.from(got.data.content, 'base64').toString('utf8');
+                } catch (e) {
+                  if (e.status !== 404) throw e;
+                  return undefined;
+                }
+                let inSlug = false, formation = null, cap = null;
+                for (const raw of text.split(/\r?\n/)) {
+                  const line = raw.replace(/#.*$/, '').trimEnd();
+                  const key = line.match(/^ {2}([\w.-]+):$/);
+                  if (key) { inSlug = key[1].toLowerCase() === slug; continue; }
+                  if (!inSlug) continue;
+                  const f = line.match(/^ {4}team_formation:\s*(\w+)$/);
+                  if (f) formation = f[1].toLowerCase();
+                  const c = line.match(/^ {4}max_team_size:\s*(\d+)$/);
+                  if (c) cap = parseInt(c[1], 10);
+                }
+                return formation === null ? null : { formation, cap };
+              };
+
+              if (!aMatch || !tMatch) return fail(
+                `Thanks @${handle} - I couldn't read both an **Assignment** and a **Team** from the form. ` +
+                `Team names use letters, numbers and dashes only. Please open a new issue.`,
+                'needs-review');
+              // Compared and stored lower-case: dsl_course.sync_teams lower-cases the slug it
+              // materialises, so `Team-X` and `team-x` ARE the same team - the size cap and the
+              // one-team-per-assignment rule below must see them that way too.
+              const assignment = aMatch[1].toLowerCase();
+              const team = tMatch[1].toLowerCase();
+              // The GitHub team this row becomes is `<assignment>-<team>` (sync_teams.team_slug).
+              // `course` + `admin` is `course-admin` - the faculty team with admin on every repo
+              // in this org. Never let a form submission name a faculty team.
+              const RESERVED = new Set(['course-admin', 'instructors', 'students', 'auditors']);
+              const slug = `${assignment}-${team}`;
+              // ONE reason-free message for every unavailable name. This issue is public, so a
+              // message that said WHY ("a team can't be named after a GitHub handle") answered,
+              // for any name anyone cared to try, whether that person is in this cohort.
+              const NAME_TAKEN =
+                `Thanks @${handle} - that assignment + team combination isn't available. Pick another team name.`;
+              if (RESERVED.has(slug) || slug.startsWith('instructors-')) return fail(
+                NAME_TAKEN, 'needs-review');
+
+              // Verify the author is an onboarded student (handle recorded in the roster).
+              // Columns (dsl_course.roster.FIELDS) are addressed BY NAME, never by position.
+              const rosterRaw = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: ROSTER });
+              const rosterTable = parseCsv(Buffer.from(rosterRaw.data.content, 'base64').toString('utf8'));
+              const rosterHeader = (rosterTable[0] || []).map(h => h.trim());
+              const iRosterHandle = rosterHeader.indexOf('github_handle');
+              // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
+              // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
+              // required, so an older cohort's students keep forming teams.
+              const iRole = rosterHeader.indexOf('role');
+              if (iRosterHandle < 0) return fail(
+                `Thanks @${handle} - the roster's header is missing a \`github_handle\` column. ` +
+                `A maintainer will action this.`,
+                'needs-review');
+              // ONE message for "not on the roster" and "on it, but not as a project
+              // participant". This issue is public and permanent, and telling the two apart
+              // published the author's enrolment role to anyone who could read the repo.
+              const NOT_A_PARTICIPANT =
+                `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join course** issue first ` +
+                `to onboard, then come back to join a team. If you have already joined, contact the teaching team.`;
+              const myRow = rosterTable.slice(1)
+                .find(r => (r[iRosterHandle] || '').trim().toLowerCase() === handle.toLowerCase());
+              if (!myRow) return fail(NOT_A_PARTICIPANT, 'needs-review');
+              // Auditors are read-only: assignment release is roster-driven (enrolled rows only),
+              // so they never receive an assignment repo - and a group assignment's repo goes to
+              // the whole team. Refuse politely rather than recording a membership that would
+              // hand an auditor a group repo.
+              // Neutral wording: this issue is public, and the roster role is not - so an
+              // auditor gets the SAME message a non-enrolee does. Saying "your enrolment
+              // doesn't include project work" published the author's role in a permanent,
+              // world-readable issue.
+              if (iRole >= 0 && (myRow[iRole] || '').trim().toLowerCase() === 'auditor') return fail(
+                NOT_A_PARTICIPANT, 'needs-review');
+              // A team may not be named after a roster handle: submission repos are
+              // `<slug>-<handle>` and a group repo is `<slug>-<team>`, so a team called after a
+              // classmate would be granted that classmate's repo if the assignment were ever
+              // provisioned as a group.
+              const handles = new Set(rosterTable.slice(1).map(r => (r[iRosterHandle] || '').trim().toLowerCase()).filter(Boolean));
+              if (handles.has(team)) return fail(NAME_TAKEN, 'needs-review');
+
+              // Read teams.csv (create it on first use). Columns: dsl_course.teams.FIELDS.
+              const FIELDS = ['assignment', 'team', 'github_handle'];
+              const readTeams = async () => {
+                let sha = null, header = FIELDS, rows = [];
+                try {
+                  const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: TEAMS });
+                  sha = got.data.sha;
+                  const table = parseCsv(Buffer.from(got.data.content, 'base64').toString('utf8'));
+                  if (table.length) { header = table[0].map(h => h.trim()); rows = table.slice(1); }
+                } catch (e) {
+                  if (e.status !== 404) throw e;
+                }
+                return { sha, header, rows };
+              };
+              const cell = (r, i) => (r[i] || '').trim();
+              // What this assignment allows is per-assignment config, not a property of
+              // teams.csv, so it is read once rather than on every retry below. Four ways
+              // to be refused, and only one of them is the student's to fix.
+              const lock = await lockEntry(assignment);
+              if (lock === undefined) return fail(
+                `Thanks @${handle} - I can't read this cohort's assignment list ` +
+                `(\`classroom-config/${LOCK}\` isn't there). A maintainer will action this.`,
+                'needs-review');
+              if (lock === null) return fail(
+                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort yet. ` +
+                `Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.`,
+                'needs-review');
+              if (lock.formation === 'none') return fail(
+                `Thanks @${handle} - \`${assignment}\` is an individual assignment - no teams.`,
+                'needs-review');
+              // Anything that is not self-selection is the teaching team's to allocate -
+              // `assigned`, and equally a value written by a newer toolkit than this
+              // workflow. Both mean the same thing to a student: wait to be added.
+              if (lock.formation !== 'self_select') return fail(
+                `Thanks @${handle} - teams for \`${assignment}\` are assigned by the instructor. ` +
+                `The teaching team will add you to one; there is nothing for you to do here.`,
+                'needs-review');
+              const cap = lock.cap;
+              if (!(cap > 0)) return fail(
+                `Thanks @${handle} - \`${assignment}\` has no team-size cap recorded. ` +
+                `A maintainer will action this.`,
+                'needs-review');
+
+              // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
+              // once near a project deadline, and each appends to the SAME file; the `sha`
+              // makes a lost update impossible (a stale one is a 409). The WHOLE decision is
+              // re-taken on each attempt, not just the append: the duplicate-membership and
+              // team-size checks are read off the file we are actually writing on top of, so a
+              // team can't go over its cap by two students committing at the same moment.
+              //
+              // 409 = stale sha. 422 = the create-on-first-use race (our request carried no sha
+              // because the file did not exist when we read it, but it does now). A 403 naming
+              // GitHub's SECONDARY rate limit / abuse detection is GitHub asking us to back off -
+              // a deadline-eve burst hits it - and is equally worth another attempt.
+              const retryable = (e) => e.status === 409 || e.status === 422 ||
+                (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
+              const ATTEMPTS = 8;
+              for (let attempt = 1; ; attempt++) {
+                const { sha, header, rows } = await readTeams();
+                const iAssign = header.indexOf('assignment');
+                const iTeam = header.indexOf('team');
+                const iHandle = header.indexOf('github_handle');
+                if (iAssign < 0 || iTeam < 0 || iHandle < 0) return fail(
+                  `Thanks @${handle} - \`teams.csv\` is missing a required column ` +
+                  `(\`assignment\`, \`team\`, \`github_handle\`). A maintainer will action this.`,
+                  'needs-review');
+
+                // One team per student per assignment; respect the size cap; idempotent re-open.
+                const mine = rows.find(r =>
+                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
+                if (mine && cell(mine, iTeam).toLowerCase() === team) {
+                  await github.rest.issues.createComment({
+                    owner: org, repo: context.repo.repo, issue_number: issue.number,
+                    body: `You're already in **${team}** for \`${assignment}\` @${handle} - nothing to do.` });
+                  await github.rest.issues.update({
+                    owner: org, repo: context.repo.repo, issue_number: issue.number, state: 'closed' });
+                  return;
+                }
+                if (mine) return fail(
+                  `You're already in team **${cell(mine, iTeam)}** for \`${assignment}\` @${handle}. ` +
+                  `Contact the teaching team to switch teams.`,
+                  'needs-review');
+                const size = rows.filter(r =>
+                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
+                if (size >= cap) return fail(
+                  `Thanks @${handle} - **${team}** already has ${size} member${size === 1 ? '' : 's'} ` +
+                  `(the cap for \`${assignment}\` is ${cap}). Pick another team name.`,
+                  'needs-review');
+
+                // Append + write back (in the existing header's column order).
+                const fresh = header.map(() => '');
+                fresh[iAssign] = assignment; fresh[iTeam] = team; fresh[iHandle] = handle;
+                rows.push(fresh);
+                const body = serialiseCsv([header, ...rows]);
+                try {
+                  await github.rest.repos.createOrUpdateFileContents({
+                    owner: org, repo: CONFIG, path: TEAMS, ...(sha ? { sha } : {}),
+                    message: `teams: ${handle} -> ${team} (${assignment})`,
+                    content: Buffer.from(body, 'utf8').toString('base64'),
+                  });
+                  break;
+                } catch (e) {
+                  // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
+                  // no comment and no label, so the student is dropped in silence and nobody
+                  // triages it. Every terminal path goes through fail() instead.
+                  if (!retryable(e) || attempt === ATTEMPTS) return fail(
+                    `Thanks @${handle} - I couldn't record your team after ${attempt} attempt(s) ` +
+                    `(\`${e.status}\`). A maintainer will action this.`,
+                    'needs-review');
+                  // Jittered backoff: a burst that retries in lockstep just collides again on
+                  // the same schedule, so each waiter spreads itself across ~400ms of its own.
+                  await new Promise(r => setTimeout(r, 500 * attempt + Math.random() * 400));
+                }
+              }
+
+              // Confirm.
+              await github.rest.issues.createComment({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
+                  `Done **@${handle}** - you're in team **${team}** for \`${assignment}\`.`,
+                  ``,
+                  `- Membership is recorded; your team's repo appears once the teaching team provisions this assignment.`,
+                  `- Need to change teams? Contact the teaching team.`,
+                ].join('\n') });
+              await github.rest.issues.addLabels({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['team-recorded'] });
+              // Title is auto-derived - the form's fixed default plus author + form fields.
+              await github.rest.issues.update({
+                owner: org, repo: context.repo.repo, issue_number: issue.number,
+                title: `Join team: ${handle}`, state: 'closed' });
+            } catch (e) {
+              // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with no
+              // comment and no label, so the student is dropped in silence and nobody triages
+              // it. Every terminal path goes through fail() - this is the one for the paths
+              // that did not expect to fail.
+              await fail(
+                `Thanks @${handle} - something went wrong on my side (\`${e.status || e.name}\`). ` +
+                `A maintainer will action this; there is nothing you need to do.`,
+                'needs-review');
+            }
+        env:
+          HAS_BOT: ${{ secrets.DSL_BOT_TOKEN != '' || '' }}

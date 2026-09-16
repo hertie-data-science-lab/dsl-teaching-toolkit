@@ -1,0 +1,7 @@
+# source: https://github.com/hertie-dsl-demo-course-e1234/hertie-dsl-demo-course-e1234.github.io/blob/main/_publish-config.yml @ 7ffcf65
+# Written by `python3 -m dsl_course.site public-sync` - the settings of the
+# last publish. The daily 'Publish course website' cron re-syncs from them;
+# delete this file to stop the automatic refresh.
+source_repo: course-materials-f2026
+readings_mode: reading-list
+include_lectures: true

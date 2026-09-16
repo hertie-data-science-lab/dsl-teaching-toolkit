@@ -1,0 +1,13 @@
+# source: https://github.com/hertie-dsl-demo-course-e1234/assignment-2-f2026/blob/solution/grading_config.yml @ 9614d2f
+# INSTRUCTOR-OWNED - defines this assignment for the toolkit. Dates live in the cohort's schedule.yml.
+title: Classification and evaluation
+type: individual              # individual | group
+submit_via: github            # github | external
+questions:                    # per-question maxima; the total is their sum
+  Q1: 10
+  Q2: 10
+  Q3: 5
+late_window_days: 7
+late_penalty_per_day: 10%
+autograde: true
+tests: tests

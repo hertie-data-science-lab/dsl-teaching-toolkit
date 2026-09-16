@@ -1,0 +1,15 @@
+# source: https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026/blob/main/publish.yml @ 8d0ceae
+# INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
+# rewritten by the toolkit, so anything you put here stays.
+#
+# What the cohort site hosts PUBLICLY, so a rendered deck opens in a browser instead of
+# showing as source on GitHub. Same syntax as .gitignore, relative to this repo. Anything
+# unmatched stays exactly as it is today: enrolled students open it on GitHub. A deck's
+# <name>_files/ bundle follows its deck. solution/, tests/, grading files and .env are
+# never copied whatever is written here. Applies to every cohort of this course. Edit,
+# then press Sync site (or wait for the next release / daily sync).
+public:
+  - "lectures/**/*.html"
+  - "lectures/**/*.pdf"
+  # - "labs/**/*.pdf"
+  # - "!lectures/09_*/**"      # keep one session private
