@@ -3,6 +3,8 @@ create actually means."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from dsl_course import repos
@@ -273,3 +275,84 @@ def test_a_failed_student_repo_create_still_names_it(monkeypatch, capsys):
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "HTTP 403: forbidden"))
     assert repos.create_repo("Cohort-f2026", "grades-ada-l", person=True) is False
     assert "grades-ada-l" in capsys.readouterr().err
+
+
+def _rulesets(
+    monkeypatch, existing: tuple[int, str], post: tuple[int, str] = (0, "{}")
+):
+    """Answer the rulesets GET with `existing` and the POST with `post`. Returns the
+    calls, each as `(args, stdin)`."""
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_gh(*args, stdin=None, **k):
+        calls.append((args, stdin))
+        return post if "POST" in args else existing
+
+    monkeypatch.setattr(repos, "gh", fake_gh)
+    return calls
+
+
+def test_the_drop_box_ruleset_forbids_force_push_and_deletion_on_the_default_branch(
+    monkeypatch,
+):
+    calls = _rulesets(monkeypatch, (0, ""))
+    assert repos.protect_shared_repo("Cohort", "assignment-3-submissions") is True
+    (read, _), (write, body) = calls
+    assert read[1] == "--paginate"
+    assert "repos/Cohort/assignment-3-submissions/rulesets" in read[2]
+    assert write[:4] == (
+        "api",
+        "--method",
+        "POST",
+        "repos/Cohort/assignment-3-submissions/rulesets",
+    )
+    sent = json.loads(body)
+    assert sent["name"] == repos.DROP_BOX_RULESET
+    assert sent["target"] == "branch" and sent["enforcement"] == "active"
+    # No bypass: a listed actor is one more account that may rewrite the cohort's work.
+    assert sent["bypass_actors"] == []
+    # The branch is named by GitHub's own alias, not by "main" - the drop box inherits its
+    # default branch from the course template, and a ruleset on the wrong branch is none.
+    assert sent["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
+    assert {r["type"] for r in sent["rules"]} == {"deletion", "non_fast_forward"}
+
+
+def test_the_drop_box_ruleset_is_not_posted_twice(monkeypatch):
+    # The handout re-fires on every tick, so a second POST would 422 on the name for the
+    # rest of the term. One listing answers it.
+    calls = _rulesets(monkeypatch, (0, f"some-other-rule\n{repos.DROP_BOX_RULESET}\n"))
+    assert repos.protect_shared_repo("Cohort", "assignment-3-submissions") is True
+    assert len(calls) == 1
+
+
+def test_a_drop_box_that_could_not_be_protected_says_what_it_costs(monkeypatch, capsys):
+    _rulesets(monkeypatch, (1, "gh: HTTP 502"), post=(1, "gh: HTTP 403 - forbidden"))
+    assert repos.protect_shared_repo("Cohort", "assignment-3-submissions") is False
+    err = capsys.readouterr().err
+    assert "erase the whole cohort's work" in err
+
+
+def test_who_has_access_unions_collaborators_and_un_accepted_invitations(monkeypatch):
+    # An invited-but-not-yet-joined student is NOT a collaborator row, so a set built from
+    # the collaborators alone would re-grant them on every tick until they accept.
+    asked: list[str] = []
+
+    def fake_gh(*args, **k):
+        asked.append(args[2])
+        return (0, "Anna\nBot\n" if "collaborators" in args[2] else "Late-Joiner\n")
+
+    monkeypatch.setattr(repos, "gh", fake_gh)
+    assert repos.who_has_access("Cohort", "assignment-3-submissions") == frozenset(
+        {"anna", "bot", "late-joiner"}
+    )
+    assert len(asked) == 2
+
+
+def test_who_has_access_cannot_answer_when_either_listing_fails(monkeypatch, capsys):
+    # None, never the empty set: the caller grants everyone again on None, and would grant
+    # nobody on an empty set it read as "nothing is there".
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    assert repos.who_has_access("Cohort", "assignment-3-submissions") is None
+    assert "could not read Cohort/assignment-3-submissions's collaborators" in (
+        capsys.readouterr().err
+    )

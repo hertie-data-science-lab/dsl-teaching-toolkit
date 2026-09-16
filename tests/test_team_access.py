@@ -638,3 +638,27 @@ def test_an_archived_repo_and_a_course_org_are_left_alone(monkeypatch):
 def test_a_failed_stamp_is_counted(monkeypatch):
     failures, _ = _converge(monkeypatch, _topic_repos(), ok=False)
     assert failures == 2
+
+
+def test_repo_teams_answers_which_teams_already_see_one_repo(monkeypatch):
+    # The shared drop box's grant loop asks this ONCE per tick, where a PUT per team per
+    # tick would run for the rest of the term.
+    asked: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **k):
+        asked.append(args)
+        return 0, "Assignment-3-Alpha\ninstructors\n"
+
+    monkeypatch.setattr(access, "gh", fake_gh)
+    assert access.repo_teams("Cohort", "assignment-3-submissions") == frozenset(
+        {"assignment-3-alpha", "instructors"}
+    )
+    assert "repos/Cohort/assignment-3-submissions/teams" in asked[0][2]
+
+
+def test_repo_teams_cannot_answer_when_the_listing_fails(monkeypatch, capsys):
+    # None, never the empty set: "we could not look" must not read as "nobody is granted",
+    # which is the answer that would leave a team without access and say nothing.
+    monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    assert access.repo_teams("Cohort", "assignment-3-submissions") is None
+    assert "could not read which teams can see" in capsys.readouterr().err

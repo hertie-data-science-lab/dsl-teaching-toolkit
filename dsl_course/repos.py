@@ -228,6 +228,77 @@ def allow_forking(org: str, name: str) -> bool:
     return False
 
 
+# The repository ruleset a shared drop box is handed out with, named so the GET below
+# can recognise our own and leave anything a maintainer added alone. A RULESET and not
+# classic branch protection: rulesets apply to private repositories on the Free plan,
+# where classic protection does not - and the drop box is private by definition.
+DROP_BOX_RULESET = "dsl-drop-box"
+
+
+def protect_shared_repo(org: str, name: str) -> bool:
+    """Stop the default branch of a shared drop box being force-pushed or deleted.
+
+    Every student in the cohort has `push` on that one repo, so without this ONE of them
+    can erase the whole cohort's work and the history it is pinned to - and the deadline
+    snapshot then points at a commit that no longer exists. Folders are a convention
+    inside the repo, not a boundary, and nothing GitHub offers makes them one; what CAN be
+    guaranteed is that whatever was pushed stays reachable, which is what these two rules
+    buy. `git log` keeps the rest.
+
+    `non_fast_forward` + `deletion` and nothing else: a rule requiring pull requests, or a
+    linear history, would stop the ordinary push the assignment is handed out to collect.
+    No bypass actors - an org owner can still edit the ruleset itself, which is the escape
+    hatch, and listing one would only widen who may rewrite the cohort's work.
+
+    Idempotent, and reads before it writes: the handout re-fires on every tick, so a
+    second POST would 422 on the name for the rest of the term. A listing that could not
+    be read falls through to the POST and, if that is refused, counts as a failed handout
+    - the next tick reads the listing again and skips, so it heals itself."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{name}/rulesets?per_page=100",
+        "--jq",
+        ".[].name",
+    )
+    if code == 0 and DROP_BOX_RULESET in {ln.strip() for ln in out.splitlines()}:
+        log_skip(f"{org}/{name} ruleset {DROP_BOX_RULESET}")
+        return True
+    code, out = gh(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{org}/{name}/rulesets",
+        "--input",
+        "-",
+        stdin=json.dumps(
+            {
+                "name": DROP_BOX_RULESET,
+                "target": "branch",
+                "enforcement": "active",
+                "bypass_actors": [],
+                # `~DEFAULT_BRANCH` rather than `main`: the drop box is generated from the
+                # cohort template, so its default branch is whatever the course template's
+                # is, and a ruleset naming the wrong branch protects nothing.
+                "conditions": {
+                    "ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
+                },
+                "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+            }
+        ),
+    )
+    if code == 0:
+        log_ok(f"{org}/{name} cannot be force-pushed or deleted")
+        return True
+    log_err(
+        f"could not protect {org}/{name} against force-push and deletion: {out[:160]}. "
+        f"Every student in the cohort has push on that repo, so until the ruleset is "
+        f"there one of them can erase the whole cohort's work - add it by hand from "
+        f"Settings > Rules, or re-run the release."
+    )
+    return False
+
+
 def set_default_branch(org: str, name: str, branch: str) -> bool:
     """Point the repo's HEAD at `branch`. Idempotent (naming the branch it already opens
     on is accepted).
@@ -676,6 +747,45 @@ def is_collaborator(
         f"could not check whether {login} collaborates on {org}/{repo}: {out[:160]}",
     )
     return None
+
+
+def who_has_access(
+    org: str, repo: str, *, person: bool = False
+) -> frozenset[str] | None:
+    """Every login that already holds a DIRECT grant on `repo`, casefolded - the
+    collaborators plus the people whose invitation is still un-accepted. None when the
+    answer could not be read.
+
+    TWO listings for a whole cohort, where asking `is_collaborator` per student is two
+    calls per student. That is what makes the shared drop box's grant loop affordable: the
+    handout re-fires on every tick (which is how a late onboarder gets their access), and
+    one repo serving fifty units has no per-unit repo whose existence records the grant.
+
+    The invitations half is not an optimisation. A student granted before they accepted
+    their org invite is an INVITATION and not a collaborator row, so a set built from the
+    collaborators alone would re-PUT for every un-onboarded student on every tick, for as
+    long as they never accept.
+
+    None, not the empty set, when either listing fails: the caller's answer to "we could
+    not look" is to grant everyone again - the PUT is idempotent, and an over-granted one
+    costs a call where an under-granted one costs a student their submission."""
+    logins: set[str] = set()
+    for endpoint, jq in (
+        ("collaborators?affiliation=direct&per_page=100", ".[].login"),
+        ("invitations?per_page=100", '.[].invitee.login // ""'),
+    ):
+        code, out = gh(
+            "api", "--paginate", f"repos/{org}/{repo}/{endpoint}", "--jq", jq
+        )
+        if code != 0:
+            _failed_on(
+                person,
+                f"could not read who already has access to a repo in {org}",
+                f"could not read {org}/{repo}'s {endpoint.split('?')[0]}: {out[:160]}",
+            )
+            return None
+        logins |= {ln.strip().casefold() for ln in out.splitlines() if ln.strip()}
+    return frozenset(logins)
 
 
 def remove_collaborator(
