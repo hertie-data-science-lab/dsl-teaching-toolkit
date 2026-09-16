@@ -27,14 +27,14 @@ the plan's); the link only once the assignment has handed out and there is somet
 other end of it. `escape`, because the shape's `<your-handle>` would otherwise read as a
 tag and vanish.
 
-`submit_external` (site.py, off the assignment's own grading_config.yml) is an assignment
-handed in off GitHub - Moodle, Kaggle, in class - for which NO repo is created at all, so
-there is no name to print here. `submit_url` is the address the assignment names, and is
-written only once the brief is out. This row said "Submit via <repo>" for those too, which
-is the one thing there is not.
+`submit_via` (site.py, off the assignment's own grading_config.yml) is the SHAPE:
+`external` is handed in off GitHub - Moodle, Kaggle, in class - and NO repo is created for
+it at all, so there is no name to print here. `submit_url` is the address the assignment
+names, and is written only once the brief is out. This row said "Submit via <repo>" for
+those too, which is the one thing there is not.
 {%- endcomment -%}
 <div class="col col-4 markdown-content" data-label="Details">
-    {%- if include.event.submit_external -%}
+    {%- if include.event.submit_via == "external" -%}
     Handed in outside GitHub
     {%- if include.event.submit_url %} - <a href="{{ include.event.submit_url }}">{{ include.event.submit_host }}</a>
     {%- else %} - see the brief

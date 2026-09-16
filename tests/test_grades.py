@@ -551,12 +551,17 @@ def _distribute(
     dry_run: bool = False,
     roster_rows: str | None = ROSTER_ADA,
     issue: int | None = 7,
+    found_issue: int | None = None,
     put_files_ok: bool = True,
     course_name=lambda org: "",
     assignment: str = "",
     listed: dict[str, dict] | None = None,
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
+
+    `issue` is what `ensure_feedback_issue` answers when it may OPEN one; `found_issue` is
+    what it answers when it may only look (`create=False`), which is every shape with no
+    Feedback issue of its own.
 
     Returns every effect it had: the comments posted, the gradebook commits, the
     classroom-config commit and the mail batches - which between them are the four things
@@ -593,7 +598,9 @@ def _distribute(
     }
     monkeypatch.setattr(grades, "gh", fake_gh)
     monkeypatch.setattr(ghcli, "gh", fake_gh)
-    monkeypatch.setattr(grades, "ensure_gradebooks", lambda org, dry_run=False: 0)
+    monkeypatch.setattr(
+        grades, "ensure_gradebooks", lambda org, dry_run=False, existing=None: 0
+    )
     # The cohort listing distribute takes to check what each repo's visibility REALLY is.
     # None is "could not be read", which is the optimistic default every other reader of
     # this question takes, and what every test that does not care about it gets.
@@ -608,8 +615,8 @@ def _distribute(
     monkeypatch.setattr(
         grades,
         "ensure_feedback_issue",
-        lambda org, repo, body, dry_run=False: (
-            effects["issues"].append((repo, body)) or issue
+        lambda org, repo, body, dry_run=False, create=True: (
+            (effects["issues"].append((repo, body)) or issue) if create else found_issue
         ),
     )
     monkeypatch.setattr(
@@ -1194,8 +1201,7 @@ def test_an_external_assignments_existing_issue_still_gets_the_comment(
 ):
     # Maths a1: handed out before this shipped, so the repos and their Feedback issues are
     # already there and the students were told to read them. Found, never opened.
-    monkeypatch.setattr(grades, "find_feedback_issue", lambda org, repo: (7, "open"))
-    out = _distribute(monkeypatch, tmp_path, grading=_EXTERNAL_GRADING)
+    out = _distribute(monkeypatch, tmp_path, grading=_EXTERNAL_GRADING, found_issue=7)
     assert out["issues"] == []  # nothing was ENSURED
     ((repo, _body, _marker),) = out["comments"]
     assert repo == "assignment-1-ada-l"
@@ -1205,16 +1211,51 @@ def test_no_feedback_issue_is_opened_in_a_repo_the_listing_calls_public(
     tmp_path, monkeypatch
 ):
     # The static "issue iff github AND private" rule is a declaration in a file; this is
-    # the live half of it, against a `visibility:` edited after handout.
-    monkeypatch.setattr(grades, "find_feedback_issue", lambda org, repo: None)
+    # the live half of it, against a `visibility:` edited after handout. The whole thread
+    # is skipped, not just the create: a repo the world can read is not one a mark goes in.
     out = _distribute(
         monkeypatch,
         tmp_path,
+        found_issue=7,
         listed={
             "assignment-1-ada-l": {"name": "assignment-1-ada-l", "visibility": "public"}
         },
     )
     assert out["issues"] == [] and out["comments"] == []
+
+
+def test_a_repo_the_listing_does_not_carry_is_never_asked_about(tmp_path, monkeypatch):
+    # An external assignment creates no repos at all, so probing each one for an issue
+    # would be an API call per student answered 404 every time. The listing already says.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        grading=_EXTERNAL_GRADING,
+        found_issue=7,
+        listed={"grades-ada-l": {"name": "grades-ada-l", "visibility": "private"}},
+    )
+    assert out["issues"] == [] and out["comments"] == []
+    # The mark still reaches the student in their gradebook.
+    assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
+
+
+def test_a_listed_repo_still_gets_its_comment(tmp_path, monkeypatch):
+    # Maths a1 again: the repos ARE listed, so the compat rule still finds their threads.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        grading=_EXTERNAL_GRADING,
+        found_issue=7,
+        listed={
+            "assignment-1-ada-l": {
+                "name": "assignment-1-ada-l",
+                "visibility": "private",
+            }
+        },
+    )
+    assert out["issues"] == []
+    ((repo, _body, _marker),) = out["comments"]
+    assert repo == "assignment-1-ada-l"
 
 
 def test_a_listing_that_could_not_be_read_still_opens_the_issue(tmp_path, monkeypatch):
@@ -1386,6 +1427,12 @@ def test_a_roster_row_with_no_email_is_counted_not_fatal(tmp_path, monkeypatch, 
     assert out["rc"] == 0
     err = capsys.readouterr().err
     assert "no roster row with an email" in err and "ada-l" not in err
+
+
+def test_a_dry_run_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch):
+    # `ensure_gradebooks` skips an unreadable roster (the nightly sync runs it too), so
+    # distribute says so itself - on the dry run as well as on the real one.
+    assert _distribute(monkeypatch, tmp_path, roster_rows=None, dry_run=True)["rc"] == 1
 
 
 def test_distribute_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch, capsys):

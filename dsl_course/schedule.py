@@ -1783,18 +1783,6 @@ _HANDOUT_COMMENT = "   # set automatically by the Release assignment workflow"
 _DUE_TODO = "# TODO: add `due_datetime:` - the date students see (required)"
 
 
-def _source_line(indent: str, source_repo: str) -> str:
-    """`course_source_repo:` for an entry this edit is FABRICATING, or "".
-
-    Required on every assignment entry, and the one field a fabricated one cannot be
-    derived back to: every consumer that starts from a template (the site's brief, the
-    grading sheet, collect) finds its entry by matching this repo name, so an entry without
-    it is a row nothing can tie to the assignment it records. The manual button knows it -
-    it is the box that was filled in - and the handout it just performed is exactly when to
-    write it down."""
-    return f"{indent}course_source_repo: {source_repo}\n" if source_repo else ""
-
-
 class _Declined:
     """What `_insert_handout` returns when the file's shape defeats its line surgery.
 
@@ -1807,9 +1795,7 @@ class _Declined:
 DECLINED = _Declined()
 
 
-def _insert_handout(
-    text: str, slug: str, stamp: str, source_repo: str = ""
-) -> str | _Declined | None:
+def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
     """Pure text surgery for `record_handout` - schedule.yml is USER-owned and
     comment-rich, so we insert lines rather than re-serialising (which would destroy
     every comment).
@@ -1846,7 +1832,6 @@ def _insert_handout(
         return (
             (text if text.endswith("\n") or not text else text + "\n")
             + f"\nassignments:\n  {slug}:\n"
-            + _source_line("    ", source_repo)
             + f"    handout_datetime: {stamp}{_HANDOUT_COMMENT}\n"
             + f"    {_DUE_TODO}\n"
         )
@@ -1908,8 +1893,7 @@ def _insert_handout(
     lines.insert(
         a_start + 1,
         f"{pad}{slug}:\n"
-        + _source_line(child, source_repo)
-        + f"{child}handout_datetime: {stamp}{_HANDOUT_COMMENT}\n"
+        f"{child}handout_datetime: {stamp}{_HANDOUT_COMMENT}\n"
         f"{child}{_DUE_TODO}\n",
     )
     return "".join(lines)
@@ -1951,9 +1935,7 @@ def _put_handout(
     return write(rebuilt, fresh_sha)
 
 
-def record_handout(
-    cohort_org: str, slug: str, stamp: str | None = None, source_repo: str = ""
-) -> None:
+def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None:
     """Record a manual handout back into schedule.yml (`assignments.<slug>.handout_datetime`),
     so the schedule stays the one record of when every assignment went out - whether
     the cron released it or a person ran the workflow. Write-once: an existing
@@ -1981,7 +1963,7 @@ def record_handout(
         stamp = datetime.now(
             _tz(tz_name if isinstance(tz_name, str) else None)
         ).strftime("%Y-%m-%dT%H:%M")
-    new = _insert_handout(text, slug, stamp, source_repo)
+    new = _insert_handout(text, slug, stamp)
     if isinstance(new, _Declined):
         # The handout HAPPENED; the record of it is what we just failed to write. Say so -
         # the alternative (a silent return, indistinguishable from the write-once no-op)

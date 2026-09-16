@@ -91,7 +91,7 @@ def test_an_individual_body_never_names_a_team_even_when_handed_one():
 
 def test_the_issue_body_for_work_handed_in_off_github_promises_no_receipts():
     # There is no push to acknowledge, so the body must not tell a student to expect one.
-    body = grades.feedback_body(spec(submit_external=True))
+    body = grades.feedback_body(spec(submit_via="external"))
     assert body.splitlines() == [
         MARK,
         "**Due:** Sunday 4 October 2026, 23:59 (Europe/Berlin)",
@@ -109,7 +109,7 @@ def test_the_body_always_opens_with_a_mark_the_lookup_can_find():
     # removed by hand. It is a chain, never edited - so the FIRST is what we write.
     for body in (
         grades.feedback_body(spec()),
-        grades.feedback_body(spec(submit_external=True)),
+        grades.feedback_body(spec(submit_via="external")),
     ):
         assert body.startswith(f"{MARK}\n")
 

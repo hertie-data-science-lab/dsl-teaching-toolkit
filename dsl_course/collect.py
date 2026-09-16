@@ -113,6 +113,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from functools import cache
 from pathlib import Path
+from typing import NamedTuple
 
 from . import course, grades, roster, schedule, sync_teams, teams
 from .course import (
@@ -1351,7 +1352,7 @@ def _status_line(
     to know before opening the file: is it worth marking yet, and can it still move?"""
     if phase is not SheetPhase.OPEN:
         return f"FROZEN {spec.cutoff_display}".strip()
-    if spec.submit_external:
+    if not spec.collects_commits:
         return "OPEN - submitted outside GitHub"
     # Named, because "3 of 5" reads differently for teams than for students and a grader
     # scanning this line wants to know which they are looking at without counting rows.
@@ -1392,6 +1393,18 @@ def _sheet_phase(
     return SheetPhase.FREEZING if sealed else SheetPhase.OPEN
 
 
+class SheetWrite(NamedTuple):
+    """What one `sync_sheet` did: whether the sheet is on the repo as this call wanted it,
+    and whether this call is the one that CREATED it.
+
+    `created` is how a handout that makes no repos tells its first tick from its
+    thousandth - there is no new repo to notice - and it costs nothing: the read that
+    answers it is the one the write needs anyway."""
+
+    written: bool
+    created: bool = False
+
+
 def sync_sheet(
     course_org: str,
     cohort_org: str,
@@ -1406,7 +1419,7 @@ def sync_sheet(
     autograde: dict[str, str] | None = None,
     completion: dict[str, str] | None = None,
     dry_run: bool = False,
-) -> bool:
+) -> SheetWrite:
     """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
     there and leaving it exactly as it is when nothing has changed.
 
@@ -1444,13 +1457,13 @@ def sync_sheet(
     if not units:
         # Nobody onboarded, or no teams yet. `submission_targets` has said which.
         log(f"  [skip] {path} - no submission units yet; a later tick creates it")
-        return True
+        return SheetWrite(True)
 
     try:
         found = get_file_with_sha(cohort_org, CONFIG_REPO, path)
     except RuntimeError as exc:
         log_err(f"  ! could not read {path}: {exc}")
-        return False
+        return SheetWrite(False)
     old_text, old_sha = found if found else ("", "")
     phase = _sheet_phase(
         cohort_org, slug, old_text, now, grades.cutoff_at(sched, key, gspec)
@@ -1461,14 +1474,14 @@ def sync_sheet(
         # A grader mid-edit. The file is theirs and it is the record, so the tick reports
         # and stops; the next one picks it up the moment the YAML parses again.
         log_err(f"  ! {path} cannot be read ({exc}) - leaving it exactly as it is")
-        return False
+        return SheetWrite(False)
     previous = on_disk.get(spec.container_key) or {}
     if not isinstance(previous, dict):
         log_err(
             f"  ! {path}: `{spec.container_key}:` is not a mapping of units - "
             f"leaving it exactly as it is"
         )
-        return False
+        return SheetWrite(False)
 
     derive = (
         bool(targets)
@@ -1510,7 +1523,7 @@ def sync_sheet(
         )
         if found is None:
             log_err(f"  ! could not read every submission for {path} - not rewriting")
-            return False
+            return SheetWrite(False)
         pins, notes = found
     if derive:
         info_updates = _sheet_info(
@@ -1601,7 +1614,7 @@ def sync_sheet(
             dry_run,
             changed=changed,
         )
-    return written
+    return SheetWrite(written, created=written and not dry_run and not old_sha)
 
 
 def _pin_commit(
@@ -2815,7 +2828,7 @@ def refresh_assignment_sheet(
         is_group=is_group,
         now=datetime.now(schedule._tz(sched.timezone)),
         dry_run=dry_run,
-    )
+    ).written
     return 0 if ok else 1
 
 
@@ -2946,7 +2959,7 @@ def collect(
             autograde=counts,
             completion=states,
             dry_run=dry_run,
-        )
+        ).written
 
     def sealed(
         counts: dict[str, str] | None = None,

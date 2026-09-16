@@ -49,7 +49,7 @@ from .course import (
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     STARTER_FORMATS,
-    SUBMIT_VIA_OFFERED,
+    SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     TEAM_FORMATIONS,
     UPSTREAM_BRANCH,
@@ -1698,10 +1698,10 @@ def main() -> int:
     pa.add_argument(
         "--submit-via",
         dest="submit_via",
-        choices=list(SUBMIT_VIA_OFFERED),
+        choices=list(SUBMIT_VIA),
         default="github",
-        help="external = handed in off GitHub (Moodle, Kaggle, in class): the repo "
-        "carries the brief and the Feedback issue, and nothing is ever collected",
+        help="external = handed in off GitHub (Moodle, Kaggle, in class): no repo is "
+        "created, and nothing is ever collected",
     )
     pa.add_argument(
         "--autograde",

@@ -1339,7 +1339,7 @@ def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
         scheduler,
         "sync_sheet",
         lambda course, cohort, sched, key, slug, template, **kw: (
-            refreshed.append((key, slug)) or True
+            refreshed.append((key, slug)) or collect_mod.SheetWrite(True)
         ),
     )
     return refreshed

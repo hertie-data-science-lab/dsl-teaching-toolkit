@@ -243,16 +243,9 @@ def _execute_nondeploy(
 
 
 def _collects(course_org: str, entry: schedule.AssignmentEntry) -> bool:
-    """Whether this assignment has commits to freeze and grade at all.
-
-    False for work handed in off GitHub, which creates no repos: the freeze below would
-    find every target absent and the autograde that follows it has nothing to run. Before
-    this gate, a passed deadline on an external assignment meant a 404 per student per tick
-    for the rest of the term - `NOTHING_TO_FREEZE`, silently, four times an hour - and one
-    more line in a public run log on each of them.
-
-    Off the assignment's own `grading_config.yml`, memoised per template per process, and
-    the same read `due_snapshots` above has already paid for."""
+    """Whether this assignment has commits to freeze and grade at all - false for work
+    handed in off GitHub, where the freeze would 404 per student per tick for ever. Off
+    the memoised read `due_snapshots` has already paid for."""
     return load_grading_spec(course_org, entry.course_source_repo).collects_commits
 
 
@@ -891,7 +884,7 @@ def _refresh_sheets(
             template,
             is_group=is_group,
             now=now,
-        ):
+        ).written:
             errors += 1
     return errors
 

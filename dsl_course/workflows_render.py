@@ -37,7 +37,7 @@ from .course import (
     PUBLIC_TYPES,
     SANDBOX_USER,
     STARTER_FORMATS,
-    SUBMIT_VIA_OFFERED,
+    SUBMIT_VIA,
     TEAM_FORMATIONS,
     term_tag,
 )
@@ -1612,7 +1612,7 @@ on:
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
 {_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select", required=False)}
-{_choice_input("submit_via", "8. Where students hand in. github = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site, feedback goes to the student's gradebook", list(SUBMIT_VIA_OFFERED), "github", required=False)}
+{_choice_input("submit_via", "8. Where students hand in. github = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site, feedback goes to the student's gradebook", list(SUBMIT_VIA), "github", required=False)}
       autograde:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean

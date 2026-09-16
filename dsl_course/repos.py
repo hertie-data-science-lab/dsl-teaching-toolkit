@@ -99,6 +99,13 @@ def repo_is_private(org: str, name: str) -> bool:
         return True
 
 
+def listed_is_private(row: dict | None) -> bool:
+    """The same answer as `repo_is_private`, off a row of an org listing rather than a read
+    of its own. Optimistic the same way: an unknown row answers private, so an API blip
+    never leaves a caller treating a private repo as one the world can read."""
+    return ((row or {}).get("visibility") or "private") == "private"
+
+
 def repo_is_archived(org: str, name: str) -> bool:
     """Return True if the repo is archived (assume LIVE if the check fails).
 

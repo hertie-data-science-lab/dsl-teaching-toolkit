@@ -232,7 +232,7 @@ def test_an_external_groups_member_is_shown_the_team_score_in_their_gradebook():
     # and withholding it there leaves a team with a grade and no marks behind it.
     sheet = sentinel_sheet()
     view = student_view(
-        group_spec(submit_external=True),
+        group_spec(submit_via="external"),
         "team-alpha",
         sheet["teams"]["team-alpha"],
         "ben-k",
@@ -363,7 +363,7 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
     ("spec", "expected"),
     [
         # Handed in off GitHub: there was never a commit to time.
-        (individual_spec(submit_external=True), "external"),
+        (individual_spec(submit_via="external"), "external"),
         # A GitHub assignment whose repo nobody pushed to. Calling this one "external"
         # told a student who had missed the deadline that their work was handed in
         # somewhere else - and told their grader the same.
@@ -393,7 +393,7 @@ def test_a_mark_on_a_repo_nothing_was_pushed_to_says_that_in_the_comment():
 
 
 def test_an_assignment_handed_in_off_github_is_never_called_unsubmitted():
-    spec = individual_spec(submit_external=True)
+    spec = individual_spec(submit_via="external")
     sheet = {"submissions": {"ada-l": {"score_individual": 9}}}
     view = build_gradebooks({"assignment-1": (spec, sheet)})["ada-l"]["assignment-1"]
     body = individual_issue_body("Introduce Yourself", view)
@@ -506,7 +506,7 @@ def test_the_team_comment_is_exactly_the_text_the_spec_shows():
 
 
 def test_the_individual_comment_is_exactly_the_text_the_spec_shows():
-    spec = individual_spec(submit_external=True)
+    spec = individual_spec(submit_via="external")
     block = {
         "score_individual": 9,
         "feedback_individual": (

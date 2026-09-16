@@ -78,9 +78,19 @@ def gradebooks(monkeypatch):
     monkeypatch.setattr(
         assign.grades,
         "ensure_gradebooks",
-        lambda org, dry_run=False: calls.append(org) or 0,
+        lambda org, dry_run=False, existing=None: calls.append(org) or 0,
     )
     return calls
+
+
+class _SheetWrites(list):
+    """The `sync_sheet` calls a handout made, and what each of them answered.
+
+    `created` is the half a shape that makes no repos reads to tell its first tick from its
+    thousandth - there is no new repo for it to notice - so a test sets it to False to be
+    the second tick."""
+
+    created = True
 
 
 @pytest.fixture(autouse=True)
@@ -90,13 +100,13 @@ def sheet_writes(monkeypatch):
     Recorded rather than written: what the sheet CONTAINS has its own tests
     (tests/test_collect.py); what matters here is that a handout produces one, keyed on the
     same units the repos were made for."""
-    written: list[dict] = []
+    written = _SheetWrites()
     monkeypatch.setattr(
         assign,
         "sync_sheet",
         lambda course, cohort, sched, key, slug, template, **kw: (
             written.append({"key": key, "slug": slug, "template": template, **kw})
-            or True
+            or collect.SheetWrite(True, created=written.created)
         ),
     )
     return written
@@ -1132,8 +1142,6 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path
     )
     assert captured["key"] == "project"  # the schedule key, not "group-project"
-    # ...and the template, so a fabricated entry can be tied back to the assignment.
-    assert captured["source_repo"] == "assignment-4-project-f2026"
     assert rc == 1  # the site failure was counted, not raised as a traceback
 
 
@@ -2337,9 +2345,13 @@ def _boom(*a, **k):
     raise AssertionError("an external handout writes this")
 
 
-def _external(monkeypatch, tmp_path, *, rows=(), recorded=False, group=""):
+def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwargs):
     """`provision_all` over an external assignment, with every write recorded."""
-    effects: dict = {"handout": [], "marker": [], "site": [], "template": []}
+    from datetime import datetime, timezone
+
+    from dsl_course.schedule import AssignmentEntry
+
+    effects: dict = {"handout": [], "site": []}
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
@@ -2354,27 +2366,28 @@ def _external(monkeypatch, tmp_path, *, rows=(), recorded=False, group=""):
     monkeypatch.setattr(assign, "ensure_cohort_template", boom)
     monkeypatch.setattr(assign, "provision_one", boom)
     monkeypatch.setattr(assign, "generate_from_template", boom)
+    if scheduled:
+        entry = AssignmentEntry(
+            course_source_repo="assignment-1-f2026",
+            due_datetime=datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc),
+        )
+        monkeypatch.setattr(
+            "dsl_course.schedule.load",
+            lambda org: Schedule(assignments={"assignment-1": entry}),
+        )
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda org, slug, stamp=None, source_repo="": effects["handout"].append(
-            (slug, source_repo)
-        ),
+        lambda org, slug, stamp=None: effects["handout"].append(slug),
     )
     monkeypatch.setattr(
         "dsl_course.site.sync_site",
         lambda course, cohort: effects["site"].append(cohort),
     )
-    monkeypatch.setattr(assign, "handout_recorded", lambda org, slug: recorded)
-    monkeypatch.setattr(
-        assign,
-        "record_external_handout",
-        lambda org, slug, units: effects["marker"].append((slug, units)) or True,
-    )
     path = _roster_file(
         tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
     )
     effects["result"] = assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, **kwargs
     )
     return effects
 
@@ -2386,8 +2399,7 @@ def test_an_external_handout_creates_no_repos_and_still_records_itself(
     assert out["result"] == (0, True)
     # The schedule is what the site reads to publish the brief: there is no cohort
     # template repo for `discovery.handed_out_assignments` to find.
-    assert out["handout"] == [("assignment-1", "assignment-1-f2026")]
-    assert out["marker"] == [("assignment-1", 1)]
+    assert out["handout"] == ["assignment-1"]
     assert out["site"] == ["COHORT"]
     assert gradebooks == ["COHORT"]
     ((sheet,),) = (sheet_writes,)
@@ -2398,9 +2410,11 @@ def test_a_second_tick_of_an_external_handout_hands_nothing_out_again(
     tmp_path, monkeypatch, sheet_writes, gradebooks
 ):
     # `due_releases` is cumulative: this fires four times an hour for the rest of the term.
-    out = _external(monkeypatch, tmp_path, recorded=True)
+    # The sheet is already there, which is this shape's "nothing new happened" signal.
+    sheet_writes.created = False
+    out = _external(monkeypatch, tmp_path)
     assert out["result"] == (0, False)
-    assert out["site"] == [] and out["marker"] == [] and gradebooks == []
+    assert out["site"] == [] and out["handout"] == [] and gradebooks == []
     # The sheet is the exception: it is the only pass that knows this assignment's units
     # before its due date, and a late onboarder has no repo to make the tick `changed`.
     assert len(sheet_writes) == 1
@@ -2432,18 +2446,20 @@ def test_an_external_group_handout_forms_teams_and_keys_the_sheet_on_them(
 def test_an_external_dry_run_writes_nothing_at_all(
     tmp_path, monkeypatch, sheet_writes, gradebooks
 ):
-    monkeypatch.setattr(
-        assign,
-        "load_grading_spec",
-        lambda org, template: grades.parse_grading_spec("submit_via: external\n"),
-    )
-    for name in ("ensure_cohort_template", "provision_one", "record_external_handout"):
-        monkeypatch.setattr(assign, name, _boom)
-    monkeypatch.setattr("dsl_course.schedule.record_handout", _boom)
-    monkeypatch.setattr("dsl_course.site.sync_site", _boom)
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
-
-    assert assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, dry_run=True
-    ) == (0, False)
+    out = _external(monkeypatch, tmp_path, dry_run=True)
+    assert out["result"] == (0, False)
+    assert out["handout"] == [] and out["site"] == []
     assert sheet_writes == [] and gradebooks == []
+
+
+def test_an_unscheduled_external_release_is_refused_and_writes_nothing(
+    tmp_path, monkeypatch, sheet_writes, gradebooks, capsys
+):
+    # The manual button on a template the plan does not name. A fabricated entry carries no
+    # `due_datetime`, and for this shape the entry is the only record that it went out at
+    # all - so the operator is sent to schedule.yml rather than left with a half-handout.
+    out = _external(monkeypatch, tmp_path, scheduled=False)
+    assert out["result"] == (1, False)
+    assert out["handout"] == [] and out["site"] == []
+    assert sheet_writes == [] and gradebooks == []
+    assert "due_datetime" in capsys.readouterr().err

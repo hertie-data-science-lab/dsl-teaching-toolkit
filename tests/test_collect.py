@@ -108,16 +108,17 @@ def test_the_group_shape_reads_off_type_and_team_formation():
     )
 
 
-def test_the_shape_of_an_assignment_is_read_off_three_keys(capsys):
+def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
     # `submit_via` + `visibility` are the whole of the shape, and everything that follows
-    # from it - the Feedback issue, the submission arithmetic - is DERIVED, never declared.
+    # from it - the Feedback issue, the submission arithmetic, whether there is a repo per
+    # unit at all - is DERIVED, never declared.
     spec = collect.parse_grading_spec("")
     assert (spec.submit_via, spec.visibility) == ("github", "private")
     assert spec.has_feedback_issue and spec.collects_commits
+    assert spec.creates_unit_repos
     external = collect.parse_grading_spec("submit_via: external\n")
     assert not external.has_feedback_issue and not external.collects_commits
-    public = collect.parse_grading_spec("visibility: public\n")
-    assert not public.has_feedback_issue and public.collects_commits
+    assert not external.creates_unit_repos
     assert capsys.readouterr().err == ""
 
 
@@ -127,15 +128,23 @@ def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(capsys):
     assert "is not one of private/public" in capsys.readouterr().err
 
 
-def test_shared_is_recognised_and_refused_until_it_is_implemented(capsys):
-    # The word is in the vocabulary (`course.SUBMIT_VIA`) so a file naming it is answered
-    # about the SHAPE rather than about spelling - but nothing acts on it yet, so it hands
-    # out exactly as `github` does and says so.
+def test_public_is_accepted_vocabulary_and_refused_until_it_is_implemented(capsys):
+    # The word is in the vocabulary, so a file naming it is answered about the SHAPE rather
+    # than about spelling - but the handout creates a private repo whatever it says, so
+    # reading it back as `public` would have the sheet and the site describe a repo that
+    # does not exist.
+    spec = collect.parse_grading_spec("visibility: public\n")
+    assert spec.visibility == "private" and spec.has_feedback_issue
+    assert "`visibility: public` is not supported yet" in capsys.readouterr().err
+
+
+def test_a_submit_via_the_engine_cannot_act_on_is_refused_as_a_typo(capsys):
+    # The dropdown offers exactly what the reader takes (`course.SUBMIT_VIA`), so a word
+    # the engine cannot act on is not in the vocabulary at all and reads as a misspelling.
     spec = collect.parse_grading_spec("submit_via: shared\n")
-    assert spec.submit_via == "github" and not spec.submit_shared
-    assert "not supported yet" in capsys.readouterr().err
-    # ...and the form never offers a word the reader would refuse.
-    assert "shared" not in course.SUBMIT_VIA_OFFERED
+    assert spec.submit_via == "github"
+    assert "is not one of github/external" in capsys.readouterr().err
+    assert "shared" not in course.SUBMIT_VIA
 
 
 def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(capsys):
@@ -1242,7 +1251,7 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     # The grading sheet has its own tests below; here it is a no-op, so an autograding
     # test does not have to stand up a roster, a snapshot and a classroom-config read.
-    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: True)
+    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
 
 
 def _recorded_sheet_writes(
@@ -1258,7 +1267,7 @@ def _recorded_sheet_writes(
         calls.append({"slug": slug, **kw})
         if order is not None:
             order.append(collect.grades.sheet_path(slug))
-        return ok
+        return collect.SheetWrite(ok)
 
     monkeypatch.setattr(collect, "sync_sheet", fake_sync)
     return calls
@@ -3405,7 +3414,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     # same clone attempt, and the same decision, every hour.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
-    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: True)
+    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -3573,7 +3582,7 @@ def test_the_sheet_carries_the_note_for_a_contradicted_submission(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
@@ -3604,7 +3613,7 @@ def test_the_freeze_reads_the_note_back_off_the_snapshot(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
@@ -3634,7 +3643,7 @@ def test_a_commit_dated_row_says_so_in_the_sheet_at_the_freeze(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.COMMIT_ONLY_NOTE
@@ -3664,7 +3673,7 @@ def test_a_server_timed_row_carries_no_note_at_all(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert "submitted_note" not in info
@@ -3688,7 +3697,7 @@ def test_the_sheet_created_at_handout_has_every_row_and_derives_nothing(monkeypa
         is_group=False,
         now=datetime(2026, 9, 22, tzinfo=BERLIN),
         units=[("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])],
-    )
+    ).written
     ((path, text),) = written
     assert path == "grading_sheets/assignment-1.yml"
     assert "# Status: OPEN - 0 of 2 students have submitted" in text
@@ -3736,7 +3745,7 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, 12, 0, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     ada = sheet["submissions"]["ada-l"]
@@ -3770,7 +3779,7 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
         "assignment-1-f2026",
     )
     kwargs = {"is_group": False, "now": datetime(2026, 10, 6, tzinfo=BERLIN)}
-    assert collect.sync_sheet(*args, **kwargs)
+    assert collect.sync_sheet(*args, **kwargs).written
     ((_path, first),) = written
 
     def boom(*a, **k):
@@ -3782,7 +3791,7 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
         "get_file_with_sha",
         lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
     )
-    assert collect.sync_sheet(*args, **kwargs)
+    assert collect.sync_sheet(*args, **kwargs).written
 
 
 def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
@@ -3813,7 +3822,7 @@ def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),  # past the 11 Oct cutoff
-    )
+    ).written
     ((_path, text),) = written
     assert "submitted: 2026-10-06T09:30+02:00" in text
     assert "days_late: 2" in text
@@ -3855,7 +3864,7 @@ def test_a_comment_the_grader_added_is_not_rewritten_away(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     assert written == []
 
 
@@ -3875,7 +3884,7 @@ def test_a_real_change_is_still_written(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     assert "ben-k" in text
 
@@ -3896,7 +3905,7 @@ def test_a_status_line_that_moved_is_written(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: FROZEN" in text
 
@@ -3920,7 +3929,7 @@ def test_a_duplicate_key_leaves_the_sheet_exactly_as_it_is(monkeypatch, capsys):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 2, tzinfo=BERLIN),
-    )
+    ).written
     assert written == []
     assert "appears twice" in capsys.readouterr().err
 
@@ -3945,7 +3954,7 @@ def test_the_sheet_is_written_against_the_sha_it_was_read_at(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 9, 1, tzinfo=BERLIN),
-    )
+    ).written
     assert seen == {"expected_sha": "OLDSHA"}
 
 
@@ -3980,7 +3989,7 @@ def test_a_sheet_the_grader_broke_mid_edit_is_left_exactly_as_it_is(
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     assert written == []
 
 
@@ -4033,7 +4042,7 @@ def test_a_repo_nobody_has_pushed_to_is_not_read_again(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     assert asked == ["assignment-1-ben-k"]  # never submitted; always worth asking
     # And the fact it was not re-read for still stands, and still counts.
     ((_path, text),) = written
@@ -4060,7 +4069,7 @@ def test_a_repo_pushed_to_since_the_pin_is_re_read(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, 12, 0, tzinfo=BERLIN),
-    )
+    ).written
     assert asked == ["assignment-1-ada-l", "assignment-1-ben-k"]
     ((_path, text),) = written
     assert "submitted: 2026-10-06T09:30+02:00" in text
@@ -4085,7 +4094,7 @@ def test_a_refresh_whose_lookups_failed_leaves_the_sheet_alone(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
 
 
 def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_why(
@@ -4107,7 +4116,7 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 2, tzinfo=BERLIN),  # still open
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: OPEN - submitted outside GitHub" in text
     assert "info" not in grades.parse_sheet(text)["submissions"]["ada-l"]
@@ -4143,7 +4152,7 @@ def test_the_freeze_reads_the_written_snapshot_and_seals_the_sheet(monkeypatch):
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),  # past the 11 Oct cutoff
         autograde={"ada-l": "7/9"},
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: FROZEN Sun 11 Oct 2026 23:59" in text
     ada = grades.parse_sheet(text)["submissions"]["ada-l"]
@@ -4182,7 +4191,7 @@ def test_a_frozen_sheet_is_never_re_derived(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     assert sheet["submissions"]["ada-l"]["info"] == {
@@ -4216,7 +4225,7 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
         "assignment-1-f2026",
         is_group=True,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     assert seen == [SHA]
     ((_path, text),) = written
     team = grades.parse_sheet(text)["teams"]["alpha"]
@@ -4257,7 +4266,7 @@ def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
         "assignment-1-f2026",
         is_group=True,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     assert seen == [frozen]
     ((_path, text),) = written
     assert (
@@ -4329,7 +4338,7 @@ def test_the_sheet_is_not_created_before_there_is_anyone_to_grade(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
 
 
 def test_the_header_facts_come_from_the_two_files_that_own_them(monkeypatch):
@@ -4531,7 +4540,7 @@ def test_a_re_fired_handout_after_the_cutoff_cannot_un_freeze_the_sheet(monkeypa
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
         units=[("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])],  # what a handout passes
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: FROZEN" in text
     assert "OPEN" not in text
@@ -4604,7 +4613,7 @@ def _refresh(monkeypatch, *, now, dry_run=False):
         is_group=False,
         now=now,
         dry_run=dry_run,
-    )
+    ).written
 
 
 def test_the_first_refresh_after_the_due_date_tells_everyone_what_was_recorded(
@@ -4654,7 +4663,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
         "assignment-1-f2026",
         is_group=True,
         now=datetime(2026, 10, 5, tzinfo=BERLIN),
-    )
+    ).written
     assert (
         "**Team:** team-alpha (@ada-l, @ben-k) - fill in CONTRIBUTIONS.md before the "
         "deadline." in opened[0].splitlines()
@@ -4796,7 +4805,7 @@ def test_a_repo_quiet_since_we_last_looked_is_not_re_read(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN),
-    )
+    ).written
 
 
 DUPLICATED_SHEET = (
@@ -4830,7 +4839,7 @@ def test_a_handout_over_a_duplicated_unit_does_not_blank_what_was_derived(monkey
         is_group=False,
         now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN),
         units=[("ada-l", ["ada-l"]), ("ada-l", ["ada-l"])],
-    )
+    ).written
     text = written[-1][1] if written else DUPLICATED_SHEET
     info = grades.parse_sheet(text)["submissions"]["ada-l"][grades.INFO_KEY]
     assert info["submitted"] == "2026-10-03T20:14+02:00"
@@ -4931,7 +4940,7 @@ def test_a_late_push_the_server_timed_reaches_the_final_grade(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     info = sheet["submissions"]["ada-l"]["info"]
@@ -4979,7 +4988,7 @@ def test_a_submission_on_the_deadline_is_not_late_and_loses_nothing(monkeypatch)
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     assert sheet["submissions"]["ada-l"]["info"]["days_late"] == "0"
