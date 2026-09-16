@@ -39,7 +39,7 @@ def _empty_cohort_listing(monkeypatch):
     the tests below hand it none - so what they reach is the fallback, a probe per repo.
     An empty org is the uninteresting answer for them; the ones about the listing itself
     set their own after this fixture and win."""
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: False)
 
 
 @pytest.fixture(autouse=True)
@@ -719,7 +719,7 @@ def test_a_failed_withhold_stops_the_handout_too(monkeypatch, capsys):
 def test_ensure_cohort_template_refuses_when_the_filter_fails(monkeypatch):
     # Wiring: a failed filter must abort ensure_cohort_template rather than fall through to
     # `is_template`, which would hand the unfiltered template to every student.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: False)
     patched = []
@@ -768,7 +768,7 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     # The root of it: provision_one used to log the failure and return "ok" anyway, so
     # provision_all could not tell. Both the group and individual paths must report it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
@@ -921,7 +921,7 @@ def test_the_shape_is_read_off_the_templates_grading_yml(tmp_path, capsys, monke
 def _provisioned(monkeypatch):
     """A repo that creates cleanly, so provision_one exercises the access half. (An
     EXISTING repo with nothing due returns before any access call - see below.)"""
-    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: False)
     monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
 
@@ -1097,7 +1097,7 @@ def test_ensure_cohort_template_repairs_a_half_created_template(monkeypatch):
     # A prior run left the repo existing but never set is_template (a _wait_for_content
     # timeout). The exists-path must still verify content and re-PATCH is_template
     # (idempotent), healing it instead of failing every later handout with "not a template".
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
@@ -1123,7 +1123,7 @@ def test_ensure_cohort_template_stamps_the_topic_the_site_gates_on(monkeypatch):
     # discovery.discover_handed_out_assignments reads this topic back as the record that
     # the assignment went out, and site._assignment_entry withholds the brief until it
     # does - so dropping the stamp silently blanks every brief on every cohort site.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
@@ -1139,7 +1139,7 @@ def test_ensure_cohort_template_stamps_the_topic_the_site_gates_on(monkeypatch):
 def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch):
     # The hand-out itself succeeded, so this must not fail the run - but a silent drop
     # leaves the site withholding a brief the students already hold.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
@@ -1158,7 +1158,7 @@ def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch
 def test_ensure_cohort_template_fails_loudly_when_is_template_patch_fails(monkeypatch):
     # The is_template PATCH result was discarded; now a failed PATCH returns None so the run
     # goes red rather than fanning out from a repo that isn't actually a template.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (1, "403 Forbidden"))
@@ -1260,7 +1260,7 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
     # student's access. The faculty grant is not re-run on either path - the nightly sweep
     # owns that floor. With a solution to push, the push happens either way.
     calls = []
-    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: True)
     for name in (
         "add_collaborator",
         "grant_team_repo_access",
@@ -1523,7 +1523,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
     # reported `failed-no-access` / `failed-no-collaborator` had its missing solution
     # forgotten - and the marker guaranteed no later tick would ever retry it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
@@ -1545,7 +1545,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
 
 def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatch):
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
@@ -1566,7 +1566,7 @@ def test_a_team_of_rejected_handles_gets_no_repo_at_all(monkeypatch, capsys):
     # Every handle in the teams.csv row failed the roster allowlist, so the team is empty
     # and the repo can be granted to nobody. The check ran AFTER creation, so a typo'd team
     # left a private repo behind that no student could open, for the term.
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: False)
 
     def boom(*a, **k):
         raise AssertionError("a team with no vetted members must create nothing")
@@ -1586,7 +1586,7 @@ def test_a_solution_waits_for_the_repo_this_run_created_to_populate(
     # template-generate is async. Pushing into a repo that is still empty clones a repo with
     # no branch, so the solution landed on the runner's own default branch - invisible to
     # the student and to grading, on a green run.
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: False)
     monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
@@ -1646,8 +1646,7 @@ def test_provision_all_answers_every_repo_off_the_callers_listing(
     # (~1,200 an hour for a large cohort) where one paginated listing costs three - and
     # that listing is the tick's, taken once for every cohort pass there is.
     monkeypatch.setattr(
-        assign,
-        "repo_exists",
+        "dsl_course.discovery.repo_exists",
         lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
     )
     created = _listing_run(
@@ -1667,7 +1666,8 @@ def test_no_listing_at_all_falls_back_to_probing_each_repo(tmp_path, monkeypatch
     # from getting their repos.
     probed: list[str] = []
     monkeypatch.setattr(
-        assign, "repo_exists", lambda org, name: probed.append(name) or False
+        "dsl_course.discovery.repo_exists",
+        lambda org, name: probed.append(name) or False,
     )
     created = _listing_run(tmp_path, monkeypatch, None)
     assert created == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
@@ -1682,8 +1682,7 @@ def test_every_repo_a_handout_creates_goes_into_the_listing_it_was_handed(
     # creates them again and counts GitHub's refusals as failures.
     listing: dict[str, dict] = {}
     monkeypatch.setattr(
-        assign,
-        "repo_exists",
+        "dsl_course.discovery.repo_exists",
         lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
     )
     created = _listing_run(tmp_path, monkeypatch, listing)
@@ -2684,7 +2683,7 @@ def test_a_repo_that_already_exists_is_never_re_patched(_public_writes, monkeypa
     # The scheduler re-fires every handed-out assignment four times an hour. A PATCH here
     # would undo, on every one of them, a visibility somebody had deliberately changed -
     # and the cohort's grading_config.yml digest is what reports the disagreement instead.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: True)
     assert _one_public(visibility="public", touch_existing=False) == "skipped"
     assert _public_writes["visibility"] == []
 
@@ -2995,7 +2994,7 @@ def test_a_second_tick_grants_only_the_student_who_onboarded_since(
     # The drop box already exists, so - unlike a repo per unit - its existence says nothing
     # about who can push into it. The loop re-runs and the READ decides: everyone already
     # granted is passed over, and the late onboarder is not.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     drop_box["granted_already"] = frozenset({"ada-l"})
     assert _shared(
         monkeypatch,
@@ -3014,7 +3013,7 @@ def test_a_tick_with_nothing_to_grant_hands_nothing_out_again(
 ):
     # `due_releases` is cumulative, so this fires four times an hour for the rest of the
     # term. Everyone is granted, so nothing changed - and the site is not re-rendered.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     drop_box["granted_already"] = frozenset({"ada-l"})
     assert _shared(monkeypatch, tmp_path) == (0, False)
     assert drop_box["collaborators"] == [] and gradebooks == []
@@ -3026,7 +3025,7 @@ def test_a_grant_read_that_failed_grants_everybody_again(
 ):
     # None is "we could not look", never "nobody is granted": the PUT is idempotent, and
     # an over-granted one costs a call where an under-granted one costs a submission.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "who_has_access", lambda org, repo, **kw: None)
     assert _shared(monkeypatch, tmp_path) == (0, True)
     assert drop_box["collaborators"] == [("assignment-1-submissions", "ada-l", "push")]

@@ -1176,7 +1176,6 @@ def _reprivatise_student_repos(
     that does not say `public` is left alone rather than PATCHed on a guess."""
     if not listing:
         return 0
-    derived = discovery.classify_repos(list(listing.values()))
     errors = 0
     for slug, entry in sorted(sched.assignments.items()):
         if entry.handout_datetime is None:
@@ -1187,16 +1186,18 @@ def _reprivatise_student_repos(
         at = cutoff_at(sched, slug, gspec)
         if at is None or at <= now:
             continue
-        name = schedule.cohort_name(slug, entry)
-        # Archived repos are passed over: they are read-only, so the PATCH would 403 on
-        # every tick for the rest of the term - the same reason every other sweep skips
-        # them.
+        # Sorting the org's repos into the assignments they came out of is not free, and
+        # this pass runs on every tick of every cohort - almost none of which has a
+        # `student_choice` assignment inside its grading window at all. So it happens
+        # here, below every gate above, and not before them. `assignment_rows` leaves
+        # archived repos out: they are read-only, so the PATCH would 403 on every tick for
+        # the rest of the term.
         public = [
             row["name"]
-            for row in listing.values()
-            if derived.get(row["name"]) == name
-            and not row.get("archived")
-            and not listed_is_private(row)
+            for row in discovery.assignment_rows(
+                listing, schedule.cohort_name(slug, entry)
+            )
+            if not listed_is_private(row)
         ]
         if not public:
             continue

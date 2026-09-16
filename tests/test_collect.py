@@ -27,6 +27,7 @@ import yaml
 from conftest import repo_row
 
 from dsl_course import collect, course, gh_contents, ghcli, grades
+from dsl_course.collect import Target
 from dsl_course.faults import Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
@@ -784,8 +785,8 @@ def test_submission_targets_individual_skips_unonboarded(monkeypatch):
     monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     assert collect.submission_targets("Cohort", "assignment-1", False) == [
-        ("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
-        ("assignment-1-ben-baker", "ben-baker", ["ben-baker"]),
+        Target("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-1-ben-baker", "ben-baker", ["ben-baker"]),
     ]
 
 
@@ -799,8 +800,8 @@ def test_submission_targets_individual_ignores_teams_csv(monkeypatch):
     monkeypatch.setattr(collect.teams, "load", lambda org: _TEAMS)
     monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
     assert collect.submission_targets("Cohort", "assignment-4-project", False) == [
-        ("assignment-4-project-anna-adams", "anna-adams", ["anna-adams"]),
-        ("assignment-4-project-ben-baker", "ben-baker", ["ben-baker"]),
+        Target("assignment-4-project-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-4-project-ben-baker", "ben-baker", ["ben-baker"]),
     ]
 
 
@@ -821,7 +822,7 @@ def test_a_handle_on_two_roster_rows_is_one_submission_unit(monkeypatch):
     monkeypatch.setattr(collect.roster, "load", lambda org: twice)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     assert collect.submission_targets("Cohort", "assignment-1", False) == [
-        ("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
     ]
 
 
@@ -841,7 +842,7 @@ def test_a_team_listed_twice_is_one_submission_unit(monkeypatch):
         ],
     )
     assert collect.submission_targets("Cohort", "assignment-4-project", True) == [
-        ("assignment-4-project-team-x", "team-x", ["anna-adams"]),
+        Target("assignment-4-project-team-x", "team-x", ["anna-adams"]),
     ]
 
 
@@ -850,11 +851,11 @@ def test_a_duplicated_unit_is_reported_without_naming_anyone(monkeypatch, capsys
     # through log_person like every other per-person detail.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     kept = collect.one_per_unit(
-        [("r-ada", "ada-l", ["ada-l"]), ("r-ada", "ada-l", ["ada-l"])]
+        [Target("r-ada", "ada-l", ["ada-l"]), Target("r-ada", "ada-l", ["ada-l"])]
     )
     captured = capsys.readouterr()
     said = captured.out + captured.err
-    assert kept == [("r-ada", "ada-l", ["ada-l"])]
+    assert kept == [Target("r-ada", "ada-l", ["ada-l"])]
     assert "1 duplicate submission unit(s)" in said
     assert "ada-l" not in said
 
@@ -1030,7 +1031,7 @@ def _stub_snapshot_write(
         collect,
         "submission_targets",
         lambda org, slug, is_group=False, teams_key=None, **k: [
-            (r, r.split("-")[-1], []) for r in pins
+            Target(r, r.split("-")[-1], []) for r in pins
         ],
     )
     monkeypatch.setattr(
@@ -1396,7 +1397,7 @@ def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
         collect,
         "submission_targets",
         lambda org, slug, is_group=None, teams_key=None, **k: [
-            (f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
+            Target(f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
         ],
     )
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: snapshots)
@@ -1617,7 +1618,8 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
         collect,
         "submission_targets",
         lambda org, slug, is_group=None, teams_key=None, **k: (
-            kinds.append(is_group) or [(f"{slug}-team-x", "team-x", ["anna", "ben"])]
+            kinds.append(is_group)
+            or [Target(f"{slug}-team-x", "team-x", ["anna", "ben"])]
         ),
     )
     sheets = _recorded_sheet_writes(monkeypatch)
@@ -1742,7 +1744,7 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
         collect,
         "submission_targets",
         lambda org, slug, is_group=None, teams_key=None, **k: [
-            (f"{slug}-team-x", "team-x", [])
+            Target(f"{slug}-team-x", "team-x", [])
         ],
     )
     written = _captured_writes(monkeypatch)
@@ -3221,7 +3223,7 @@ def test_submission_targets_individual_excludes_auditors(monkeypatch):
     monkeypatch.setattr(collect.roster, "load", lambda org: students)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     assert collect.submission_targets("Cohort", "assignment-1", False) == [
-        ("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
     ]
 
 
@@ -3448,7 +3450,7 @@ def test_submission_targets_vets_teams_csv_against_the_roster(monkeypatch, capsy
     )
     targets = collect.submission_targets("Cohort", "assignment-4", True)
     # the roster's casing wins; everyone else is dropped
-    assert targets == [("assignment-4-team-1", "team-1", ["ada-l"])]
+    assert targets == [Target("assignment-4-team-1", "team-1", ["ada-l"])]
     err = capsys.readouterr().err
     assert "3 handle(s) in teams.csv" in err
     assert "stranger-x" not in err, "a student's typing must not reach a public log"
@@ -3474,7 +3476,7 @@ def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
         "Cohort", "wk3-regression", True, teams_key="regression"
     )
     assert asked == ["regression"]
-    assert targets == [("wk3-regression-team-1", "team-1", ["ada-l"])]
+    assert targets == [Target("wk3-regression-team-1", "team-1", ["ada-l"])]
 
 
 def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
@@ -3486,7 +3488,7 @@ def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
         lambda rows, slug: {"team-1": ["ada-l"]} if slug == "assignment-4" else {},
     )
     assert collect.submission_targets("Cohort", "assignment-4", True) == [
-        ("assignment-4-team-1", "team-1", ["ada-l"])
+        Target("assignment-4-team-1", "team-1", ["ada-l"])
     ]
 
 
@@ -3529,7 +3531,7 @@ def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
         collect,
         "submission_targets",
         lambda org, slug, is_group=None, teams_key=None, **k: [
-            (f"{slug}-team-x", "team-x", [])
+            Target(f"{slug}-team-x", "team-x", [])
         ],
     )
     _failing_put_file(monkeypatch)
@@ -3589,7 +3591,7 @@ def _sheet_env(
                 pushed_at=(pushed or {}).get(repo, ""),
                 visibility=(visibility or {}).get(repo, "private"),
             )
-            for repo, _unit, _members in targets
+            for repo in {target.repo for target in targets}
         },
     )
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
@@ -3623,8 +3625,8 @@ def _sheet_env(
 
 
 SOLO_TARGETS = [
-    ("assignment-1-ada-l", "ada-l", ["ada-l"]),
-    ("assignment-1-ben-k", "ben-k", ["ben-k"]),
+    Target("assignment-1-ada-l", "ada-l", ["ada-l"]),
+    Target("assignment-1-ben-k", "ben-k", ["ben-k"]),
 ]
 
 
@@ -4323,7 +4325,7 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
 
     written = _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
+        targets=[Target("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
         pins={"assignment-1-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
     )
     monkeypatch.setattr(collect, "get_file_content", contributions)
@@ -4357,7 +4359,7 @@ def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
 
     written = _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
+        targets=[Target("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
         rows={
             "assignment-1-alpha": collect.SnapshotRow(
                 repo="assignment-1-alpha",
@@ -4393,7 +4395,7 @@ def test_an_unwritten_contributions_stub_says_so_rather_than_reading_blank(monke
     # look", so blank is reserved for exactly that.
     written = _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-alpha", "alpha", ["ada-l"])],
+        targets=[Target("assignment-1-alpha", "alpha", ["ada-l"])],
         pins={"assignment-1-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
         contributions=f"{gh_contents.STUB_MARKS[0]}\nWho did what?\n",
     )
@@ -4418,7 +4420,7 @@ def test_a_team_with_nothing_pinned_has_a_blank_contributions_cell(monkeypatch):
     # Nothing was submitted, so there was nothing to have read - which is not the same as
     # a team that submitted and left the file as we seeded it.
     written = _sheet_env(
-        monkeypatch, targets=[("assignment-1-alpha", "alpha", ["ada-l"])]
+        monkeypatch, targets=[Target("assignment-1-alpha", "alpha", ["ada-l"])]
     )
     collect.sync_sheet(
         "Course",
@@ -4701,7 +4703,7 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     monkeypatch.setattr(
         collect.grades,
         "ensure_feedback_issue",
-        lambda org, repo, body, dry_run=False: 7,
+        lambda org, repo, body, dry_run=False, create=True: 7,
     )
     monkeypatch.setattr(
         collect.grades,
@@ -4776,7 +4778,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     # hand, and the CONTRIBUTIONS.md ask is only actionable while the window is still open.
     _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-team-alpha", "team-alpha", ["ada-l", "ben-k"])],
+        targets=[Target("assignment-1-team-alpha", "team-alpha", ["ada-l", "ben-k"])],
         grading=GRADING_YML + "type: group\n",
         pins={"assignment-1-team-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
     )
@@ -4785,7 +4787,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     monkeypatch.setattr(
         collect.grades,
         "ensure_feedback_issue",
-        lambda org, repo, body, dry_run=False: opened.append(body) or 7,
+        lambda org, repo, body, dry_run=False, create=True: opened.append(body) or 7,
     )
     assert collect.sync_sheet(
         "Course",
@@ -4986,7 +4988,7 @@ def test_a_refresh_that_derives_nothing_leaves_a_duplicated_unit_alone(monkeypat
     # derived nothing for it, and the duplicated key rebuilt the block blank. Losing
     # `checked` with it made the next tick re-read and re-fill, so the sheet flipped
     # between "1 of 2 submitted" and "0 of 2" on every tick until the freeze.
-    targets = [("assignment-1-ada-l", "ada-l", ["ada-l"])]
+    targets = [Target("assignment-1-ada-l", "ada-l", ["ada-l"])]
     written = _sheet_env(
         monkeypatch,
         targets=targets + targets,  # what an un-deduplicated roster used to hand over
@@ -5046,7 +5048,10 @@ def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
     monkeypatch.setenv("DSL_VERBOSE", "1")
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     assert [repo for repo, _body, _dry in posted] == ["assignment-1-ben-k"]
-    assert "assignment-1-ada-l - not a known private repo" in capsys.readouterr().out
+    assert (
+        "assignment-1-ada-l - no Feedback thread this run may post in"
+        in capsys.readouterr().out
+    )
 
 
 @pytest.mark.parametrize("listing", [{}, None])
@@ -5250,7 +5255,7 @@ def _checkout(monkeypatch, files: dict[str, str]):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda *a, **k: [("a1-alice", "alice", ["alice"])],
+        lambda *a, **k: [Target("a1-alice", "alice", ["alice"])],
     )
     monkeypatch.setattr(
         collect, "load_snapshots", lambda org, slug: {"a1-alice": "abc"}
@@ -5318,7 +5323,10 @@ def test_an_export_that_never_started_costs_one_copy_not_the_whole_pass(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda *a, **k: [("a1-alice", "alice", ["alice"]), ("a1-ben", "ben", ["ben"])],
+        lambda *a, **k: [
+            Target("a1-alice", "alice", ["alice"]),
+            Target("a1-ben", "ben", ["ben"]),
+        ],
     )
     monkeypatch.setattr(
         collect,
@@ -5541,9 +5549,11 @@ BROKEN_CONFIG = "title: Bayes\ntype: group\nsubmit_via: emial\nmystery: 4\n"
 
 
 def _spec_faults(text=BROKEN_CONFIG, fires=GRADES_AT):
-    return grades.grading_spec_faults(
+    """Just the faults: the spec beside them is what saves the caller a second parse."""
+    faults, _spec = grades.grading_spec_faults(
         "a3", "assignment-3-f2026", "Course-Org", text, fires
     )
+    return faults
 
 
 def test_a_value_that_will_not_grade_as_written_cites_the_line_in_the_template():
@@ -6002,8 +6012,8 @@ def test_shared_targets_all_name_the_one_drop_box(monkeypatch, capsys):
     monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     assert collect.submission_targets("Cohort", "assignment-3", False, shared=True) == [
-        ("assignment-3-submissions", "anna-adams", ["anna-adams"]),
-        ("assignment-3-submissions", "ben-baker", ["ben-baker"]),
+        Target("assignment-3-submissions", "anna-adams", ["anna-adams"], "anna-adams/"),
+        Target("assignment-3-submissions", "ben-baker", ["ben-baker"], "ben-baker/"),
     ]
     # The unit keys still tell the rows apart, which is what `one_per_unit` keys on - so
     # one repo named twice is not a duplicate.
@@ -6018,8 +6028,8 @@ def test_shared_group_targets_name_the_drop_box_once_per_team(monkeypatch):
         lambda org: {"assignment-3": {"alpha": ["anna-adams"], "beta": ["ben-baker"]}},
     )
     assert collect.submission_targets("Cohort", "assignment-3", True, shared=True) == [
-        ("assignment-3-submissions", "alpha", ["anna-adams"]),
-        ("assignment-3-submissions", "beta", ["ben-baker"]),
+        Target("assignment-3-submissions", "alpha", ["anna-adams"], "alpha/"),
+        Target("assignment-3-submissions", "beta", ["ben-baker"], "beta/"),
     ]
 
 
@@ -6136,7 +6146,7 @@ def _shared_snapshot(monkeypatch, pins: dict, pushed=""):
         collect,
         "submission_targets",
         lambda org, slug, is_group=False, teams_key=None, **k: [
-            (drop_box, unit, [unit]) for unit in pins
+            Target(drop_box, unit, [unit], f"{unit}/") for unit in pins
         ],
     )
     monkeypatch.setattr(
@@ -6254,7 +6264,10 @@ def test_a_shared_sheet_keys_its_rows_on_the_folder_not_the_repo(monkeypatch):
     # rows read as the same submission.
     sheet = _shared_sheet(
         monkeypatch,
-        targets=[(_DROP_BOX, "ada-l", ["ada-l"]), (_DROP_BOX, "ben-k", ["ben-k"])],
+        targets=[
+            Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/"),
+            Target(_DROP_BOX, "ben-k", ["ben-k"], "ben-k/"),
+        ],
         rows={
             "ada-l": collect.SnapshotRow(
                 repo=_DROP_BOX,
@@ -6277,7 +6290,7 @@ def test_a_shared_sheet_carries_the_outside_toucher_note_into_info(monkeypatch):
     # GitHub could not time - and a grader is owed both.
     sheet = _shared_sheet(
         monkeypatch,
-        targets=[(_DROP_BOX, "ada-l", ["ada-l"])],
+        targets=[Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/")],
         rows={
             "ada-l": collect.SnapshotRow(
                 repo=_DROP_BOX,
@@ -6296,7 +6309,7 @@ def test_a_shared_sheet_carries_the_outside_toucher_note_into_info(monkeypatch):
 def test_a_shared_assignment_posts_no_receipts(monkeypatch):
     # `has_feedback_issue` is false for it - one repo the whole cohort reads has nowhere
     # private to acknowledge a push - so nothing is ever opened or posted into.
-    targets = [(_DROP_BOX, "ada-l", ["ada-l"])]
+    targets = [Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/")]
     _sheet_env(
         monkeypatch,
         targets=targets,

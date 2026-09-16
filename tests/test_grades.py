@@ -118,7 +118,7 @@ def test_gradebook_provisioning_names_nobody_on_the_happy_path(monkeypatch, caps
     # the CREATE branch, where `repo created: COHORT/grades-ada-l` used to reach the public
     # log. `repos.gh` is stubbed - the process boundary - so the real create_repo runs.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: False)
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
@@ -259,7 +259,7 @@ def test_the_verbose_log_still_says_which_repo_it_was(monkeypatch, capsys):
 def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
     # The old "created-no-collaborator" status doesn't start with "failed", so sync's exit
     # predicate ignored it: a student with no read on their own gradebook, reported green.
-    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: True)
     monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: False)
     assert grades.provision_one("COHORT", "ada-l").startswith("failed")
@@ -276,7 +276,9 @@ def test_a_new_gradebook_grants_faculty_read_and_an_existing_one_is_left_alone(
     # membership cost two PUTs per student a night for nothing.
     faculty = []
     exists = {"grades-ada-l"}
-    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: repo in exists)
+    monkeypatch.setattr(
+        "dsl_course.discovery.repo_exists", lambda org, repo: repo in exists
+    )
     monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: faculty.append(a))
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(grades, "create_repo", lambda *a, **k: True)
@@ -494,8 +496,7 @@ def test_ensure_gradebooks_lists_the_org_once_and_probes_no_gradebook(monkeypatc
     # A repo_exists per student cost a GET per student on every nightly sync, to ask what
     # one paginated listing already answers for the whole cohort.
     monkeypatch.setattr(
-        grades,
-        "repo_exists",
+        "dsl_course.discovery.repo_exists",
         lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
     )
     listed, created = _ensure_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
@@ -508,7 +509,8 @@ def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
     # onboarded today without a gradebook.
     probed: list[str] = []
     monkeypatch.setattr(
-        grades, "repo_exists", lambda org, repo: probed.append(repo) or False
+        "dsl_course.discovery.repo_exists",
+        lambda org, repo: probed.append(repo) or False,
     )
     listed, created = _ensure_run(monkeypatch, None)
     assert listed == ["COHORT"]

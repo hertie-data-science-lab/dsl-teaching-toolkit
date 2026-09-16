@@ -57,6 +57,7 @@ from .course import (
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
+    can_hold_solution,
     collects_commits,
     course_phrase,
     creates_repos,
@@ -70,9 +71,10 @@ from .course import (
     visibility_is_students,
 )
 from .discovery import (
-    classify_repos,
+    assignment_rows,
     course_name_for_cohort,
     course_org_for_cohort,
+    exists_in,
     listing_by_name,
     listing_row,
     org_meta,
@@ -95,7 +97,6 @@ from .repos import (
     create_repo,
     ensure_label,
     listed_is_private,
-    repo_exists,
     repo_is_archived,
     set_repo_topics,
 )
@@ -258,6 +259,12 @@ class _Shape:
     def creates_repos(self) -> bool:
         """Whether the handout creates anything at all for the work to land in."""
         return creates_repos(self.submit_via)
+
+    @property
+    def can_hold_solution(self) -> bool:
+        """`course.can_hold_solution` - whether the model answer may be pushed into this
+        assignment's repos at all."""
+        return can_hold_solution(self.submit_via, self.visibility)
 
     @property
     def visibility_is_students(self) -> bool:
@@ -1335,9 +1342,7 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
             )
         )
     if via == "shared" and values.get("visibility", "private") != "private":
-        # ONE repo holds the whole cohort's work and no student can opt out of being in
-        # it, so the value is corrected rather than obeyed: a `public` drop box would
-        # publish every student's submission on the strength of one instructor's line.
+        # Corrected rather than obeyed - see the `shared` note beside `course.SUBMIT_VIA`.
         values["visibility"] = "private"
         dropped.append(
             Dropped(
@@ -1493,8 +1498,14 @@ def grading_spec_faults(
     fires: datetime | None,
     handed_out: list[dict] | None = None,
     releases_solution: bool = False,
-) -> list[ConfigFault]:
-    """Everything in ONE `grading_config.yml` the parse had to refuse, as faults.
+) -> tuple[list[ConfigFault], GradingSpec | None]:
+    """Everything in ONE `grading_config.yml` the parse had to refuse, as faults - and the
+    spec that parse produced, so the caller does not read and parse the same file again.
+    `None` in its place is a file that is not YAML at all; the faults say so.
+
+    Handing the spec back is not a convenience: `parse_grading_spec` LOGS every line it
+    drops, so a second parse of the same file printed every one of them twice in the same
+    digest run.
 
     The parse's own sentences, in the words it already logs them in: it is the one place
     that knows the vocabulary each key accepts, and a fault that paraphrased it would be a
@@ -1522,7 +1533,7 @@ def grading_spec_faults(
                 lineno=yaml_mark_line(exc),
                 fix="fix the YAML on the line above",
             )
-        ]
+        ], None
     lines = key_lines(text)
     faults = [
         _spec_fault(
@@ -1567,7 +1578,7 @@ def grading_spec_faults(
                 "it - or set `visibility: private` here",
             )
         )
-    return faults
+    return faults, spec
 
 
 def _spec_fix(dropped: Dropped) -> str:
@@ -1617,10 +1628,6 @@ def grading_config_faults(
     # students, which is what makes the org's own two switches worth an API read - see
     # `_org_settings_faults`.
     hands_the_flag_over = False
-    # THE submission-repo rule over the whole listing, computed once for the plan rather
-    # than once per assignment: it sorts every repo in the org, and a cohort carrying six
-    # assignments used to pay for that six times over the same rows.
-    derived = classify_repos(list(listing.values())) if listing else {}
     for slug, entry in sorted(sched.assignments.items()):
         template = entry.course_source_repo
         if not template:
@@ -1635,13 +1642,8 @@ def grading_config_faults(
         # frozen, so nothing it says can be anybody's fault.
         handed_out = None
         if listing is not None and entry.handout_datetime is not None:
-            name = schedule.cohort_name(slug, entry)
-            handed_out = [
-                r
-                for r in listing.values()
-                if derived.get(r["name"]) == name and not r.get("archived")
-            ]
-        faults += grading_spec_faults(
+            handed_out = assignment_rows(listing, schedule.cohort_name(slug, entry))
+        spec_faults, spec = grading_spec_faults(
             slug,
             template,
             course_org,
@@ -1650,10 +1652,8 @@ def grading_config_faults(
             handed_out,
             releases_solution=entry.solution_datetime is not None,
         )
-        if (
-            handed_out
-            and load_grading_spec(course_org, template).visibility_is_students
-        ):
+        faults += spec_faults
+        if handed_out and spec is not None and spec.visibility_is_students:
             hands_the_flag_over = True
     # ONE read of the org, after every template has been parsed and only when something
     # in this cohort actually depends on it: an org with no such assignment is not
@@ -3226,9 +3226,7 @@ def provision_one(
     listing to hand - falls back to probing this one repo, and skips that convergence
     rather than paying a read per student for it."""
     repo = f"{GRADEBOOK_PREFIX}{handle}"
-    existed = (
-        repo in existing if existing is not None else repo_exists(cohort_org, repo)
-    )
+    existed = exists_in(existing, cohort_org, repo)
     if existed:
         log_person(f"  [skip] gradebook {cohort_org}/{repo}")
         # Converge the stamp off the listing row that already answered "is it there?",
@@ -3284,17 +3282,6 @@ def provision_one(
     return "failed-no-collaborator"
 
 
-# How long the NIGHTLY SYNC may spend provisioning gradebooks before it stops and leaves
-# the rest to the next one - the one caller that passes it, because it is the one with no
-# work waiting on the gradebooks it makes. A DEADLINE rather than a count of creations:
-# what has to be bounded is the wall clock of a job (Sync membership has a 30-minute one),
-# and four API calls per new gradebook take as long as the write pacer and the day's rate
-# limit make them - so a count is a guess at that and this is the thing itself. A run that
-# stops here has recorded everything it did; repos already there cost almost nothing, so
-# the next run starts from where this one left off.
-GRADEBOOK_BUDGET_MINUTES = 10
-
-
 def ensure_gradebooks(
     cohort_org: str,
     dry_run: bool = False,
@@ -3318,8 +3305,9 @@ def ensure_gradebooks(
     which is what a caller with work waiting on these repos needs: a handout that stopped
     halfway would publish a brief pointing at gradebooks half the cohort does not have,
     and `distribute` is about to write a mark into every one of them. Only the nightly
-    `sync_membership` passes a budget, because nothing in that run waits on the result
-    (see `GRADEBOOK_BUDGET_MINUTES`).
+    `sync_membership` passes a budget, because nothing in that run waits on the result -
+    and the number of minutes is that caller's own
+    (`sync_membership.GRADEBOOK_BUDGET_MINUTES`).
 
     A roster that is absent or empty is a SKIP, not a failure, for the reason
     `sync_roster.sync` gives: an empty roster is a freshly bootstrapped cohort and a
@@ -3639,24 +3627,48 @@ def feedback_thread_policy(
     return THREAD_FIND
 
 
-def _feedback_thread(
+def feedback_thread(
     spec: SheetSpec,
     cohort_org: str,
     repo: str,
     unit: str,
     members: list[str],
     listed: dict[str, dict] | None,
+    *,
+    known: str = "",
+    only_ours: bool = False,
+    dry_run: bool = False,
 ) -> int | IssueLookupFailed | None:
-    """The Feedback issue this unit's comment goes on: its number, None where there is
-    none, or `LOOKUP_FAILED` where the question could not be answered. The policy above
-    decides which of the three this run is allowed to come back with."""
+    """The Feedback issue this unit's comment or receipt goes on: its number, None where
+    there is none this run may use, or `LOOKUP_FAILED` where the question could not be
+    answered.
+
+    THE entry point, and the only consumer of `feedback_thread_policy`: the grade comment
+    and the submission receipts each used to ask the policy for themselves and act on the
+    answer slightly differently, which is exactly how a receipt came to be posted into a
+    repo a grade would have been withheld from.
+
+    `known` is the thread `distributed.csv` records this unit's last comment landing on.
+    It is used only AFTER the policy has been asked, never instead of it: a repo flipped
+    public since that row was written is a thread the internet can now read, and a
+    correction must not go into it on the strength of the row.
+
+    `only_ours` is the receipts' rule. A receipt is the one thing that would OPEN a thread
+    nobody has asked for yet, so it takes the strongest answer the policy gives and
+    nothing weaker: the repo is in the listing, the listing says it is private, and the
+    shape has a Feedback issue. A repo the listing does not carry, or a listing that could
+    not be read at all, waits for a tick that can say so - the grading sheet is the record
+    and the receipt is a courtesy."""
     policy = feedback_thread_policy(spec, listed, repo)
-    if policy == THREAD_NONE:
+    if policy == THREAD_NONE or (only_ours and policy != THREAD_CREATE):
         return None
+    if known.isdigit():
+        return int(known)
     return ensure_feedback_issue(
         cohort_org,
         repo,
         feedback_body(spec, unit, members),
+        dry_run,
         create=policy == THREAD_CREATE,
     )
 
@@ -3852,20 +3864,13 @@ def distribute(
             if dry_run:
                 counts["comments"] += 1
                 continue
-            # The POLICY first, ahead of the recorded thread: `distributed.csv` says
-            # where this unit's last comment landed, and a repo flipped public since then
-            # is a thread the internet can now read. A correction must not be posted into
-            # it on the strength of a row written while it was still private - so the one
-            # answer that means "not here" is taken before the shortcut, not after it.
-            if feedback_thread_policy(spec, listed, repo) == THREAD_NONE:
-                counts["skipped"] += 1
-                continue
-            # The thread that comment landed on, if there was one: the same issue, and no
-            # lookup to pay for it.
-            issue: int | IssueLookupFailed | None = (
-                int(known)
-                if known.isdigit()
-                else _feedback_thread(spec, cohort_org, repo, target, members, listed)
+            # The thread this unit's last comment landed on, where `distributed.csv`
+            # recorded one - the same issue, and no lookup to pay for it. The POLICY is
+            # asked first either way (inside `feedback_thread`): a repo flipped public
+            # since that row was written is a thread the internet can now read, and a
+            # correction must not be posted into it on the strength of the row.
+            issue: int | IssueLookupFailed | None = feedback_thread(
+                spec, cohort_org, repo, target, members, listed, known=known
             )
             if isinstance(issue, IssueLookupFailed):
                 # The listing could not be READ. Opening one here is how a second Feedback
@@ -3888,9 +3893,7 @@ def distribute(
             if not posted and known:
                 # The recorded thread is gone (deleted, or transferred). Look it up once,
                 # rather than leaving this student unreachable for the rest of the term.
-                issue = _feedback_thread(
-                    spec, cohort_org, repo, target, members, listed
-                )
+                issue = feedback_thread(spec, cohort_org, repo, target, members, listed)
                 posted = isinstance(issue, int) and post_marked_comment(
                     cohort_org, repo, issue, body, GRADE_MARK.format(digest)
                 )

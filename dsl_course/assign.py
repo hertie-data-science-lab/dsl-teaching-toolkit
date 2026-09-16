@@ -84,6 +84,7 @@ from .course import (
 from .discovery import (
     ASSIGNMENT_TEMPLATE_TOPIC,
     classify_repos,
+    exists_in,
     list_org_repos,
     listing_by_name,
     listing_row,
@@ -115,7 +116,6 @@ from .repos import (
     default_branch,
     generate_from_template,
     protect_shared_repo,
-    repo_exists,
     set_repo_topics,
     set_visibility,
     topic_name,
@@ -287,7 +287,7 @@ def ensure_cohort_template(
     `listing` is the cohort's repos keyed by name, off the ONE listing its caller holds
     (`discovery.listing_by_name`); None means there is none, and this probes for itself."""
     entry = listing.get(slug) if listing is not None else None
-    exists = entry is not None if listing is not None else repo_exists(cohort_org, slug)
+    exists = exists_in(listing, cohort_org, slug)
     if exists:
         log_skip(f"cohort template {cohort_org}/{slug}")
         if _template_is_ready(entry, slug):
@@ -583,7 +583,11 @@ def patch_one_repo(
 
 
 def note_the_patch(
-    cohort_org: str, repo: str, paths: list[str], marker: str, on: date
+    cohort_org: str,
+    repo: str,
+    paths: list[str],
+    marker: str,
+    on: date,
 ) -> bool:
     """Tell one student, on the Feedback issue they were pointed at when the repo appeared.
 
@@ -806,9 +810,7 @@ def provision_one(
         # created: a private repo nobody can open is left behind for the term otherwise.
         log_err(f"  ! team {team} has no vetted members - no repo created for it")
         return "failed-no-members"
-    existed = (
-        repo in existing if existing is not None else repo_exists(cohort_org, repo)
-    )
+    existed = exists_in(existing, cohort_org, repo)
     feedback_failed = False
     visibility_failed = False
     if existed:
@@ -1078,7 +1080,7 @@ def ensure_drop_box(
     `listing` is the caller's own rows, mutated with the drop box this run creates, so the
     next pass of the same tick sees the repo rather than creating it again."""
     repo = shared_repo(slug)
-    existed = repo in listing if listing is not None else repo_exists(cohort_org, repo)
+    existed = exists_in(listing, cohort_org, repo)
     if existed:
         log_skip(f"drop box {cohort_org}/{repo}")
         # Converge the stamp off the row that already answered "is it there?", exactly as
@@ -1234,6 +1236,207 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
 # persistent, so withholding the marker for one would re-clone every submission repo every
 # hour for the rest of the term - the exact cost the marker exists to prevent.
 _SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
+
+
+# What one handout arm did, in the four facts `provision_all`'s tail reads off it: the
+# per-unit outcome counts, whether this pass changed anything, the units it made a repo
+# for, and whether a requested model solution could not be fetched. `None` in place of one
+# is a DRY RUN - the arm has said what it would create and created nothing, so there is no
+# tail to run.
+_Released = tuple[dict[str, int], bool, list[tuple[str, list[str], str | None]], bool]
+
+
+def _release_external(
+    cohort_org: str, slug: str, what: str, solution: bool, dry_run: bool
+) -> _Released | None:
+    """The `external` arm: the work is handed in off GitHub (Moodle, Kaggle, in class), so
+    the handout creates nothing at all. Everything this assignment owes its cohort - the
+    schedule entry, the grading sheet, the gradebooks, the site - is the tail every shape
+    shares."""
+    log_step(
+        f"Releasing {slug} to {cohort_org}: handed in off GitHub, so no repos - the "
+        f"schedule, the grading sheet, the gradebooks and the site for {what}"
+    )
+    if solution:
+        # Nowhere to push it: the model answer stays on the template's solution branch,
+        # which is where the teaching team reads it from anyway.
+        log(f"  (no model solution to push - {slug} creates no submission repos)")
+    if dry_run:
+        log(f"    DRY-RUN  no repos; record the handout and the sheet for {what}")
+        return None
+    # There is no new repo here to mark a late onboarder's tick as having done something,
+    # so the sheet in the tail decides it instead.
+    return {}, False, [], False
+
+
+def _release_shared(
+    cohort_template: str,
+    cohort_org: str,
+    slug: str,
+    key: str,
+    sheet_units: list[tuple[str, list[str]]],
+    what: str,
+    *,
+    group: bool,
+    solution: bool,
+    dry_run: bool,
+    listing: dict[str, dict] | None,
+) -> _Released | None:
+    """The `shared` arm: ONE private drop box for the whole cohort, generated from the
+    frozen cohort template, with push for every unit.
+
+    No units are returned: there is no repo per unit here, so nothing downstream that
+    counts them - the solution record above all - has anything to count."""
+    drop_box = shared_repo(slug)
+    log_step(
+        f"Releasing {slug} to {cohort_org}: freeze cohort template, then one private "
+        f"drop box {cohort_org}/{drop_box} with push for {what}"
+    )
+    if solution:
+        # Nowhere private to put it - see the `shared` note beside `course.SUBMIT_VIA`.
+        # The fire-once marker is deliberately not written (`can_hold_solution` gates it),
+        # so an instructor who corrects the shape can still release it.
+        log(
+            f"  (no model solution to push - {slug} has one drop box the whole "
+            f"cohort can read)"
+        )
+    if dry_run:
+        log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
+        log(f"    DRY-RUN  {cohort_org}/{drop_box}  <- push for {what}")
+        return None
+    drop_box_ok, changed = ensure_drop_box(
+        cohort_template,
+        cohort_org,
+        slug,
+        sheet_units,
+        key,
+        group=group,
+        listing=listing,
+    )
+    results: dict[str, int] = {}
+    if not drop_box_ok:
+        # Counted like any other handout failure, through the same `results` the tail
+        # reads: the repos (here, the repo) are what this function is judged on.
+        results["failed-drop-box"] = 1
+    return results, changed, [], False
+
+
+def _release_units(
+    master_org: str,
+    template: str,
+    cohort_template: str,
+    cohort_org: str,
+    slug: str,
+    key: str,
+    spec,
+    gspec,
+    sheet_units: list[tuple[str, list[str]]],
+    what: str,
+    *,
+    group: bool,
+    solution: bool,
+    touch_existing: bool,
+    dry_run: bool,
+    listing: dict[str, dict] | None,
+) -> _Released | None:
+    """The `github` arm: one repo per unit (student, or team), generated from the frozen
+    cohort template, plus the model solution where the shape can hold one."""
+    # NO model solution into repos the toolkit cannot promise are private. `public`
+    # publishes the model answer to the internet and `student_choice` lets any student
+    # publish it, and neither can be taken back - so the stage is skipped whole, and the
+    # FIRE-ONCE marker is deliberately not written for it (`can_hold_solution` gates it in
+    # `provision_all`), which leaves an instructor who corrects the shape able to release
+    # it on a later run. The plan and the definition are edited by different people, so
+    # the digest reports the disagreement as well (`grades.grading_spec_faults`).
+    if solution and not gspec.can_hold_solution:
+        log(
+            f"  (model solution not pushed - {slug}'s repos are public or "
+            f"student-owned, so the answers would be published with them)"
+        )
+        solution = False
+    # A provisioning unit is (repo_name, [member handles], team slug), and each carries
+    # the body its Feedback issue is opened with. Both are names for a repo, so both
+    # belong to the only shape that creates one.
+    #
+    # No body at all where the shape HAS no Feedback issue - a `public` repo is not a
+    # place to write a student's marks - and `provision_one` opens one only for a unit
+    # it was given a body for. The derived rule decides it, so nothing here re-states
+    # which shapes have a thread and which do not.
+    solo_body = (
+        grades.feedback_body(spec) if gspec.has_feedback_issue and not group else ""
+    )
+    units: list[tuple[str, list[str], str | None]] = []
+    feedback_bodies: dict[str, str] = {}
+    for unit, members in sheet_units:
+        repo = submission_repo(slug, unit)
+        units.append((repo, members, teams.team_slug(key, unit) if group else None))
+        feedback_bodies[repo] = (
+            grades.feedback_body(spec, unit, members)
+            if gspec.has_feedback_issue and group
+            else solo_body
+        )
+    # The shape in the one line faculty read in the run log. Only the two that are
+    # NOT the default say anything: `private` is what a reader already assumes, and a
+    # note on every handout is a note nobody reads on the one that matters.
+    shape_note = ""
+    if gspec.visibility == "public":
+        shape_note = " as PUBLIC repos"
+    elif gspec.visibility_is_students:
+        shape_note = " as private repos their students may publish"
+    log_step(
+        f"Releasing {slug} to {cohort_org}: freeze cohort template, then provision "
+        f"{what}{shape_note}{' + solution' if solution else ''}"
+    )
+    if dry_run:
+        log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
+        for repo, handles, team in units:
+            via = f" (team {team})" if team else ""
+            log_person(
+                f"    DRY-RUN  {cohort_org}/{repo}{via}  <- "
+                f"{', '.join('@' + h for h in handles)}"
+            )
+        return None
+
+    results: dict[str, int] = {}
+    solution_unavailable = False
+    with tempfile.TemporaryDirectory() as soldir:
+        # Solution still comes from the COURSE template's solution branch.
+        sol_dir = None
+        if solution:
+            sol_dir = fetch_solution(master_org, template, Path(soldir) / "t")
+            if sol_dir is None:
+                # NOT fatal. The fan-out below is what gets students their repos at all,
+                # and a scheduled handout re-runs every tick - so returning here would
+                # mean a template whose solution branch is missing, renamed, or holding
+                # the model answer outside `solution/` stops provisioning for every
+                # student who onboards from that moment on, with the solution request as
+                # the only cause. Hand out the repos, report the failure, ship no solution.
+                log_err(
+                    "  ! no usable solution to push - provisioning continues without it"
+                )
+                solution_unavailable = True
+
+        # One repo per unit (student, or team), FROM the cohort template.
+        for repo, handles, team in units:
+            log_person(f"-> {repo}")
+            status = provision_one(
+                cohort_org,
+                cohort_template,
+                cohort_org,
+                repo,
+                handles,
+                slug,
+                sol_dir,
+                team=team,
+                touch_existing=touch_existing,
+                existing=listing,
+                feedback_body=feedback_bodies.get(repo, ""),
+                visibility=gspec.visibility,
+            )
+            results[status] = results.get(status, 0) + 1
+
+    log_ok(f"Done - {json.dumps(results)}")
+    return results, any(k != "skipped" for k in results), units, solution_unavailable
 
 
 def provision_all(
@@ -1427,169 +1630,60 @@ def provision_all(
     if auditing:
         log(f"  ({auditing} auditor row(s) skipped - read-only, no assignment repos)")
 
-    # The one place the three shapes part, and the whole of what makes them different.
-    # `external` is handed in off GitHub (Moodle, Kaggle, in class), so everything the
-    # arms below do - the frozen cohort template, the repos, the Feedback issue, the model
-    # solution - has nothing to act on. `shared` freezes the template (the brief lives
-    # there) and then makes ONE drop box for the whole cohort instead of a repo per unit.
-    # What a handout owes the cohort AROUND the work is the tail, which all three share.
-    units: list[tuple[str, list[str], str | None]] = []
-    results: dict[str, int] = {}
-    solution_unavailable = False
-    if gspec.submit_external:
-        log_step(
-            f"Releasing {slug} to {cohort_org}: handed in off GitHub, so no repos - the "
-            f"schedule, the grading sheet, the gradebooks and the site for {what}"
-        )
-        if solution:
-            # Nowhere to push it: the model answer stays on the template's solution
-            # branch, which is where the teaching team reads it from anyway.
-            log(f"  (no model solution to push - {slug} creates no submission repos)")
-        if dry_run:
-            log(f"    DRY-RUN  no repos; record the handout and the sheet for {what}")
-            return 0, False
-        # There is no new repo here to mark a late onboarder's tick as having done
-        # something, so the sheet in the tail decides it instead.
-        changed = False
-    elif gspec.submit_shared:
-        drop_box = shared_repo(slug)
-        log_step(
-            f"Releasing {slug} to {cohort_org}: freeze cohort template, then one private "
-            f"drop box {cohort_org}/{drop_box} with push for {what}"
-        )
-        if solution:
-            # There is nowhere private to put it. One repo holds the whole cohort's work
-            # and everyone in the cohort can read it, so pushing the model answer in would
-            # publish it to the class. The fire-once marker is deliberately not written
-            # (`solution_pushed` below), so correcting the shape still releases it.
-            log(
-                f"  (no model solution to push - {slug} has one drop box the whole "
-                f"cohort can read)"
-            )
-        if dry_run:
-            log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
-            log(f"    DRY-RUN  {cohort_org}/{drop_box}  <- push for {what}")
-            return 0, False
-        cohort_template = ensure_cohort_template(
-            master_org, template, cohort_org, slug, listing
-        )
-        if cohort_template is None:
+    # Stage 1, and the one thing BOTH repo-making shapes need: the cohort's own frozen
+    # copy of the course template. The drop box is generated from it and so is every unit
+    # repo, so it is taken once, here, rather than at the top of two arms that could then
+    # come to freeze different things. A dry run creates nothing and so takes none - each
+    # arm says what it would do and returns before it would be used.
+    cohort_template = ""
+    if gspec.creates_repos and not dry_run:
+        frozen = ensure_cohort_template(master_org, template, cohort_org, slug, listing)
+        if frozen is None:
             log_err("could not create the cohort assignment template.")
             return 1, False
-        drop_box_ok, changed = ensure_drop_box(
+        cohort_template = frozen
+
+    # The one place the three shapes part, and the whole of what makes them different.
+    # `external` is handed in off GitHub (Moodle, Kaggle, in class), so everything the
+    # other two do - the repos, the Feedback issue, the model solution - has nothing to
+    # act on. `shared` makes ONE drop box for the whole cohort instead of a repo per unit.
+    # What a handout owes the cohort AROUND the work is the tail, which all three share.
+    if gspec.submit_external:
+        released = _release_external(cohort_org, slug, what, solution, dry_run)
+    elif gspec.submit_shared:
+        released = _release_shared(
             cohort_template,
             cohort_org,
             slug,
-            sheet_units,
             key,
+            sheet_units,
+            what,
             group=group,
+            solution=solution,
+            dry_run=dry_run,
             listing=listing,
         )
-        if not drop_box_ok:
-            # Counted like any other handout failure, through the same `results` the tail
-            # reads: the repos (here, the repo) are what this function is judged on.
-            results["failed-drop-box"] = 1
     else:
-        # NO model solution into repos the toolkit cannot promise are private. `public`
-        # publishes the model answer to the internet and `student_choice` lets any student
-        # publish it, and neither can be taken back - so the stage is skipped whole, and
-        # the FIRE-ONCE marker is deliberately not written for it (`solution_pushed`
-        # below), which leaves an instructor who corrects the shape able to release it on
-        # a later run. The plan and the definition are edited by different people, so the
-        # digest reports the disagreement as well (`grades.grading_spec_faults`).
-        if solution and gspec.visibility != "private":
-            log(
-                f"  (model solution not pushed - {slug}'s repos are public or "
-                f"student-owned, so the answers would be published with them)"
-            )
-            solution = False
-        # A provisioning unit is (repo_name, [member handles], team slug), and each carries
-        # the body its Feedback issue is opened with. Both are names for a repo, so both
-        # belong to the only shape that creates one.
-        #
-        # No body at all where the shape HAS no Feedback issue - a `public` repo is not a
-        # place to write a student's marks - and `provision_one` opens one only for a unit
-        # it was given a body for. The derived rule decides it, so nothing here re-states
-        # which shapes have a thread and which do not.
-        solo_body = (
-            grades.feedback_body(spec) if gspec.has_feedback_issue and not group else ""
+        released = _release_units(
+            master_org,
+            template,
+            cohort_template,
+            cohort_org,
+            slug,
+            key,
+            spec,
+            gspec,
+            sheet_units,
+            what,
+            group=group,
+            solution=solution,
+            touch_existing=touch_existing,
+            dry_run=dry_run,
+            listing=listing,
         )
-        feedback_bodies: dict[str, str] = {}
-        for unit, members in sheet_units:
-            repo = submission_repo(slug, unit)
-            units.append((repo, members, teams.team_slug(key, unit) if group else None))
-            feedback_bodies[repo] = (
-                grades.feedback_body(spec, unit, members)
-                if gspec.has_feedback_issue and group
-                else solo_body
-            )
-        # The shape in the one line faculty read in the run log. Only the two that are
-        # NOT the default say anything: `private` is what a reader already assumes, and a
-        # note on every handout is a note nobody reads on the one that matters.
-        shape_note = ""
-        if gspec.visibility == "public":
-            shape_note = " as PUBLIC repos"
-        elif gspec.visibility_is_students:
-            shape_note = " as private repos their students may publish"
-        log_step(
-            f"Releasing {slug} to {cohort_org}: freeze cohort template, then provision "
-            f"{what}{shape_note}{' + solution' if solution else ''}"
-        )
-        if dry_run:
-            log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
-            for repo, handles, team in units:
-                via = f" (team {team})" if team else ""
-                log_person(
-                    f"    DRY-RUN  {cohort_org}/{repo}{via}  <- {', '.join('@' + h for h in handles)}"
-                )
-            return 0, False
-
-        # Stage 1: freeze the cohort-level template, off the caller's rows.
-        cohort_template = ensure_cohort_template(
-            master_org, template, cohort_org, slug, listing
-        )
-        if cohort_template is None:
-            log_err("could not create the cohort assignment template.")
-            return 1, False
-
-        with tempfile.TemporaryDirectory() as soldir:
-            # Solution still comes from the COURSE template's solution branch.
-            sol_dir = None
-            if solution:
-                sol_dir = fetch_solution(master_org, template, Path(soldir) / "t")
-                if sol_dir is None:
-                    # NOT fatal. Stage 2 below is what gets students their repos at all, and a
-                    # scheduled handout re-runs every tick - so returning here would mean a
-                    # template whose solution branch is missing, renamed, or holding the model
-                    # answer outside `solution/` stops provisioning for every student who
-                    # onboards from that moment on, with the solution request as the only
-                    # cause. Hand out the repos, report the failure, ship no solution.
-                    log_err(
-                        "  ! no usable solution to push - provisioning continues without it"
-                    )
-                    solution_unavailable = True
-
-            # Stage 2: fan out one repo per unit (student, or team) FROM the cohort template.
-            for repo, handles, team in units:
-                log_person(f"-> {repo}")
-                status = provision_one(
-                    cohort_org,
-                    cohort_template,
-                    cohort_org,
-                    repo,
-                    handles,
-                    slug,
-                    sol_dir,
-                    team=team,
-                    touch_existing=touch_existing,
-                    existing=listing,
-                    feedback_body=feedback_bodies.get(repo, ""),
-                    visibility=gspec.visibility,
-                )
-                results[status] = results.get(status, 0) + 1
-
-        log_ok(f"Done - {json.dumps(results)}")
-        changed = any(k != "skipped" for k in results)
+    if released is None:
+        return 0, False  # a dry run: it has said what it would create, and created none
+    results, changed, units, solution_unavailable = released
 
     # ---------------------------------------- what a handout owes the cohort, either shape
 
@@ -1701,6 +1795,10 @@ def provision_all(
     # the marker used to be written over it and no later tick ever retried.
     solution_pushed = (
         solution
+        # The same predicate the arm above skipped the push on, asked once more because
+        # the arm's own `solution` is its own: a shape that cannot hold the model answer
+        # never pushed one, so its fire-once marker must not be written over the absence.
+        and gspec.can_hold_solution
         and not solution_unavailable
         and bool(units)
         and not any(results.get(s) for s in _SOLUTION_NOT_PUSHED)

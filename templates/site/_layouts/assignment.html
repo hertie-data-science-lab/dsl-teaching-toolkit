@@ -75,10 +75,10 @@ title: page.title
     repos it was given, and this would be telling those students their own repo is not
     there.
 
-    The button and its two data attributes are written ONCE for every shape that has a
-    repo, and the `case` below branches only the SENTENCE: the link is the same link
-    whoever may read the repo, and a shape that copied it carried its own copy of the
-    open_in.html contract to keep in step. A `github-public` assignment is portfolio work -
+    ONE arm for every shape that has a repo: one button, one link, and the `case` below
+    branches only the SENTENCE. A shape that copied the button carried its own copy of the
+    open_in.html contract to keep in step, and the two drifted the first time one of them
+    was reworded. A `github-public` assignment is portfolio work -
     a hackathon, a showcase - and the whole internet can read the repo from the moment it
     is handed out, so the callout a student reads BEFORE their first push is where that has
     to be said; saying it in the brief alone leaves it to whoever wrote the brief. It also
@@ -92,12 +92,12 @@ title: page.title
     finds it closed again an hour later - and it has no Feedback issue either, for the
     reason the public arm does not.
 
-    `shared` is the one shape whose `repo_name` is a REAL repo and not a shape: there is a
-    single private drop box for the whole cohort and what is the student's own is a folder
-    in it (`submit_path`). So it carries no `data-dsl-repo` - there is nothing in the name
-    for open_in.html to substitute a handle into, and rewriting it would point every
-    reader at a repo that does not exist. The `data-dsl-repo-url` link is already the real
-    repo, so it is written here without the marker too.
+    `repo_name_is_shape` (site.py) is what decides whether the two data attributes are
+    written at all. `shared` is the one shape whose `repo_name` is a REAL repo and not a
+    shape: there is a single private drop box for the whole cohort, and what is the
+    student's own is a folder in it (`submit_path`). There is nothing in that name for
+    open_in.html to substitute a handle into, and rewriting it would point every reader at
+    a repo that does not exist - so the flag is false and the markers are left off.
     {%- endcomment -%}
     {% unless page.handout_pending %}
     {% if page.submit_shape == "external" %}
@@ -107,18 +107,15 @@ title: page.title
       {% endif %}
       <p>Handed in outside GitHub. See the brief for what to hand in.</p>
     </div>
-    {% elsif page.submit_shape == "shared" and page.repo_url %}
+    {% elsif page.repo_url %}
     <div class="callout">
-      <p><a class="btn" target="_blank" rel="noopener" href="{{ page.repo_url }}">Open the submission repo on GitHub</a></p>
+      <p><a class="btn" {% if page.repo_name_is_shape %}data-dsl-repo-url {% endif %}target="_blank" rel="noopener" href="{{ page.repo_url }}">Open the submission repo on GitHub</a></p>
+      {% case page.submit_shape %}
+      {% when "shared" %}
       <p>Push your work into the <code>{{ page.submit_path | escape }}</code> folder of
       <code>{{ page.repo_name | escape }}</code> - that push is your submission. Everyone in the cohort can read
       the whole repo, so commit nothing you would not show the class. Your grade and feedback arrive in your
       private gradebook <code>grades-&lt;your-handle&gt;</code>, not here.</p>
-    </div>
-    {% elsif page.repo_url %}
-    <div class="callout">
-      <p><a class="btn" data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}">Open your submission repo on GitHub</a></p>
-      {% case page.submit_shape %}
       {% when "github-public" %}
       <p>Your repo <code data-dsl-repo>{{ page.repo_name | escape }}</code> is <b>public</b>: anyone on the internet can
       read it. Push to <code>main</code> as usual, but commit nothing you would not publish and no data you were told
@@ -175,15 +172,10 @@ title: page.title
   <p class="post-meta">
     Hand in at <a target="_blank" rel="noopener" href="{{ page.submit_url }}">{{ page.submit_host }}</a>.
   </p>
-  {% elsif page.submit_shape == "shared" and page.repo_url %}
+  {% elsif page.repo_url %}
   <p class="post-meta">
-    Submit by pushing into <code>{{ page.submit_path | escape }}</code> in
-    <a target="_blank" rel="noopener" href="{{ page.repo_url }}"><code>{{ page.repo_name | escape }}</code></a>.
-  </p>
-  {% elsif page.submit_shape != "external" and page.repo_url %}
-  <p class="post-meta">
-    Submit by pushing to <code>main</code> in
-    <a data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}"><code data-dsl-repo>{{ page.repo_name | escape }}</code></a>.
+    Submit by pushing {% if page.submit_path %}into <code>{{ page.submit_path | escape }}</code>{% else %}to <code>main</code>{% endif %} in
+    <a {% if page.repo_name_is_shape %}data-dsl-repo-url {% endif %}target="_blank" rel="noopener" href="{{ page.repo_url }}"><code{% if page.repo_name_is_shape %} data-dsl-repo{% endif %}>{{ page.repo_name | escape }}</code></a>.
   </p>
   {% endif %}
 

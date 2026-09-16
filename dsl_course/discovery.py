@@ -35,7 +35,7 @@ from .faults import ConfigFault, Unusable
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log, log_err, log_ok
-from .repos import default_branch, repo_is_archived
+from .repos import default_branch, repo_exists, repo_is_archived
 
 COHORTS_PATH = (
     "cohort-courses-pages.yml"  # standalone registry in the course org's .github repo
@@ -194,6 +194,40 @@ def listing_by_name(org: str) -> dict[str, dict] | None:
     except RuntimeError as exc:
         log_err(f"could not list {org}'s repos: {exc}")
         return None
+
+
+def exists_in(listing: dict[str, dict] | None, org: str, name: str) -> bool:
+    """Whether `org/name` is there: off the caller's listing, or - where there is none -
+    off a probe of its own.
+
+    One spelling of "the listing knows, unless nobody could take one". `None` is "we could
+    not look", never "the org is empty", so it costs a probe rather than a wrong answer;
+    an empty dict IS a listing, and a repo missing from it is missing. Four call sites
+    wrote this out by hand, and a fifth would have had to get the None right again."""
+    if listing is not None:
+        return name in listing
+    return repo_exists(org, name)
+
+
+def assignment_rows(listing: dict[str, dict], name: str) -> list[dict]:
+    """The LIVE rows of `listing` that the cohort assignment `name` handed out: generated
+    from its cohort-side template, and not archived.
+
+    One rule for a question two sweeps ask - the digest's `visibility:` check and the
+    `student_choice` re-privatise pass - which were two spellings of a filter whose whole
+    subtlety is in `classify_repos` (a template is not one of its own submissions, and
+    `assignment-4` does not own `assignment-4-project-ada-l`).
+
+    Archived rows are left out on both sides: one is read-only, so a write against it 403s
+    on every tick for the rest of the term, and a finished cohort is meant to stay frozen.
+    Pure CPU over rows already in memory, so it is asked per assignment rather than
+    computed once and threaded."""
+    derived = classify_repos(list(listing.values()))
+    return [
+        row
+        for row in listing.values()
+        if derived.get(row["name"]) == name and not row.get("archived")
+    ]
 
 
 def listing_row(org: str, name: str, visibility: str = "private") -> dict:

@@ -53,7 +53,7 @@ from .discovery import (
 from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login
-from .grades import GRADEBOOK_BUDGET_MINUTES, ensure_gradebooks, write_team_lock
+from .grades import ensure_gradebooks, write_team_lock
 from .log import log_err, log_ok
 
 # What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -62,6 +62,16 @@ from .log import log_err, log_ok
 # nothing this run may reconcile from, and reconciling from what it does say would prune
 # a cohort's teams down to whatever survived the parse.
 _CONTENT_FAULT = (Unusable, yaml.YAMLError)
+
+# How long the NIGHTLY SYNC may spend provisioning gradebooks before it stops and leaves
+# the rest to the next one - the one caller that passes it, because it is the one with no
+# work waiting on the gradebooks it makes. A DEADLINE rather than a count of creations:
+# what has to be bounded is the wall clock of a job (Sync membership has a 30-minute one),
+# and four API calls per new gradebook take as long as the write pacer and the day's rate
+# limit make them - so a count is a guess at that and this is the thing itself. A run that
+# stops here has recorded everything it did; repos already there cost almost nothing, so
+# the next run starts from where this one left off.
+GRADEBOOK_BUDGET_MINUTES = 10
 
 
 def _unreadable_course_config(course_org: str, exc: Exception) -> int:

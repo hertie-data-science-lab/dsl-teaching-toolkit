@@ -715,6 +715,22 @@ def add_collaborator(
     return False
 
 
+def _direct_logins(
+    org: str, repo: str, endpoint: str, jq: str
+) -> tuple[list[str] | None, str]:
+    """The non-blank lines `jq` selected from one paginated listing of `org/repo`, or
+    `(None, the error text)` when the call itself failed.
+
+    The three readers below ask GitHub in exactly the same way and differ only in WHICH
+    listing they read and what a failure MEANS to them - a 404 is "no such repo, so there
+    is nothing to revoke on it" to two of them and a read it may not guess at to the
+    third. That answer stays with each caller; the call does not."""
+    code, out = gh("api", "--paginate", f"repos/{org}/{repo}/{endpoint}", "--jq", jq)
+    if code != 0:
+        return None, out
+    return [line.strip() for line in out.splitlines() if line.strip()], out
+
+
 def is_collaborator(
     org: str, repo: str, login: str, *, person: bool = False
 ) -> bool | None:
@@ -730,15 +746,11 @@ def is_collaborator(
     None means the answer could not be read. Kept distinct from False on purpose: the
     caller is about to REVOKE access, and a rate limit or a network drop must never read
     as "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"repos/{org}/{repo}/collaborators?affiliation=direct&per_page=100",
-        "--jq",
-        ".[].login",
+    logins, out = _direct_logins(
+        org, repo, "collaborators?affiliation=direct&per_page=100", ".[].login"
     )
-    if code == 0:
-        return login.casefold() in {ln.strip().casefold() for ln in out.splitlines()}
+    if logins is not None:
+        return login.casefold() in {ln.casefold() for ln in logins}
     if is_missing_resource(out):
         return False  # no such repo - nothing to revoke on it
     _failed_on(
@@ -774,17 +786,15 @@ def who_has_access(
         ("collaborators?affiliation=direct&per_page=100", ".[].login"),
         ("invitations?per_page=100", '.[].invitee.login // ""'),
     ):
-        code, out = gh(
-            "api", "--paginate", f"repos/{org}/{repo}/{endpoint}", "--jq", jq
-        )
-        if code != 0:
+        found, out = _direct_logins(org, repo, endpoint, jq)
+        if found is None:
             _failed_on(
                 person,
                 f"could not read who already has access to a repo in {org}",
                 f"could not read {org}/{repo}'s {endpoint.split('?')[0]}: {out[:160]}",
             )
             return None
-        logins |= {ln.strip().casefold() for ln in out.splitlines() if ln.strip()}
+        logins |= {login.casefold() for login in found}
     return frozenset(logins)
 
 
@@ -817,14 +827,10 @@ def pending_invitations(
 
     None is kept distinct from `[]` for the same reason as `is_collaborator`: the caller is
     about to revoke, and an unreadable listing must never read as "nothing to cancel"."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"repos/{org}/{repo}/invitations?per_page=100",
-        "--jq",
-        ".[] | [.id, .invitee.login] | @tsv",
+    rows, out = _direct_logins(
+        org, repo, "invitations?per_page=100", ".[] | [.id, .invitee.login] | @tsv"
     )
-    if code != 0:
+    if rows is None:
         if is_missing_resource(out):
             return []  # no such repo - nothing to cancel on it
         _failed_on(
@@ -835,8 +841,8 @@ def pending_invitations(
         return None
     fold = login.casefold()
     ids = []
-    for line in out.splitlines():
-        invitation_id, _, invitee = line.partition("\t")
+    for row in rows:
+        invitation_id, _, invitee = row.partition("\t")
         if invitee.strip().casefold() == fold:
             ids.append(invitation_id.strip())
     return ids

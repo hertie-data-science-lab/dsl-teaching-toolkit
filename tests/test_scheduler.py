@@ -32,6 +32,7 @@ from dsl_course import (
 from dsl_course import collect as collect_mod
 from dsl_course import faults as faults_mod
 from dsl_course import issues as issues_mod
+from dsl_course.collect import Target
 from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
@@ -2791,7 +2792,7 @@ def test_a_snapshot_whose_repos_are_all_absent_does_not_licence_autograding(
 ):
     # Same, one step later: the repos are declared but not generated yet (every target 404s).
     assert _real_snapshot_then_autograde(
-        monkeypatch, targets=[("assignment-1-anna", "anna", ["anna"])]
+        monkeypatch, targets=[Target("assignment-1-anna", "anna", ["anna"])]
     ) == (0, [])
 
 

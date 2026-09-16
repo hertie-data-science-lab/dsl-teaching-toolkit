@@ -285,7 +285,10 @@ day that sentence is reworded.
 
   /* The student's own repo for an assignment, out of the SHAPE the page carries. A GROUP
      assignment is named for the team (`<slug>-<your-team>`), which no browser can know, so
-     it gets nothing back and the page keeps what it rendered. */
+     it gets nothing back and the page keeps what it rendered. The same bail is what keeps
+     a SHARED drop box safe - `<slug>-submissions` is a real repo name with no
+     `<your-handle>` in it, so nothing is substituted even if a marker ever reached the
+     page (the layout writes none: see `repo_name_is_shape`). */
   function ownRepo(shape, handle) {
     if (!handle || !shape || shape.indexOf("<your-handle>") < 0) { return ""; }
     return shape.replace("<your-handle>", handle);

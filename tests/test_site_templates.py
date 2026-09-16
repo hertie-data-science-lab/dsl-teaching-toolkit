@@ -479,12 +479,12 @@ def test_an_external_assignment_is_never_told_to_push(generated):
         _external_arm(
             layout,
             '{% if page.submit_shape == "external" %}',
-            '{% elsif page.submit_shape == "shared" and page.repo_url %}',
+            "{% elsif page.repo_url %}",
         ),
         _external_arm(
             layout,
             '{% if page.submit_shape == "external" and page.submit_url %}',
-            '{% elsif page.submit_shape == "shared" and page.repo_url %}',
+            "{% elsif page.repo_url %}",
         ),
         _external_arm(
             due_row,
@@ -509,7 +509,7 @@ def test_a_pending_assignment_gets_no_callout_at_all(generated):
         "{% endunless %}", 1
     )[0]
     assert "Handed in outside GitHub" in gated
-    assert "Open your submission repo" in gated
+    assert "Open the submission repo" in gated
     pending = _front_matter(
         generated["collections"]["_assignments"]["05-assignment-5.md"]
     )
@@ -525,6 +525,7 @@ def test_a_public_assignments_page_warns_before_the_first_push(generated):
     assert page["submit_shape"] == "github-public"
     assert page["due_event"]["submit_shape"] == "github-public"
     assert page["repo_name"] == "assignment-4-<your-handle>"
+    assert page["repo_name_is_shape"] is True
     layout = _liquid_templates()["_layouts/assignment.html"]
     assert '{% when "github-public" %}' in layout
     flat = " ".join(layout.split())
@@ -537,8 +538,8 @@ def test_a_public_assignments_page_warns_before_the_first_push(generated):
     # sentence - so the `data-dsl-repo-url` contract is written once and cannot drift.
     repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
     assert repo_arm.count("data-dsl-repo-url") == 1
-    # public and student_choice; plain private is the `else`.
-    assert repo_arm.count("{% when ") == 2
+    # shared, public and student_choice; plain private is the `else`.
+    assert repo_arm.count("{% when ") == 3
     assert "Your work goes in your private repo" in flat
 
 
@@ -1170,26 +1171,24 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     body = _strip_comments(_open_in())
     assert "[data-dsl-repo]" in body and "[data-dsl-repo-url]" in body
     page = _strip_comments(_templates()["_layouts/assignment.html"])
-    # The one shape whose `repo_name` is a REAL repo and not a shape: there is a single
-    # drop box for the whole cohort, so there is nothing in the name to substitute a handle
-    # into and rewriting it would point every reader at a repo that does not exist. Taken
-    # out before the count below, which is the rule for every other shape.
-    shared = [
-        arm
-        for arm in page.split("{% elsif ")
-        if arm.startswith('page.submit_shape == "shared"')
-    ]
-    assert len(shared) == 2, "the shared arms of the callout and the closing line"
-    for arm in shared:
-        assert "{{ page.repo_name | escape }}" in arm
-        assert "data-dsl-repo" not in arm
-        page = page.replace(arm, "")
-    # Every one of the rest, not a count that drifts: an unmarked span goes on saying
-    # `<your-handle>` on a page where every other mention of the repo is the real name.
-    assert page.count("{{ page.repo_name | escape }}</code>") == page.count(
-        "<code data-dsl-repo>"
-    )
-    assert page.count('href="{{ page.repo_url }}"') == page.count("data-dsl-repo-url")
+    # The `shared` sentence names a REAL repo and not a shape: there is a single drop box
+    # for the whole cohort, so there is nothing in that name to substitute a handle into
+    # and rewriting it would point every reader at a repo that does not exist. It carries
+    # no marker of its own; the two the arm SHARES with every other shape - the button and
+    # the closing line - are written under `repo_name_is_shape`, which site.py writes for
+    # a per-unit repo and for nothing else.
+    shared = page.split('{% when "shared" %}')[1].split("{% when ")[0]
+    assert "{{ page.repo_name | escape }}" in shared
+    assert "data-dsl-repo" not in shared
+    page = page.replace(shared, "")
+    assert 'href="{{ page.repo_url }}"' in page
+    # Every one of the rest, marked or gated on the flag - not a count that drifts: an
+    # unmarked span goes on saying `<your-handle>` on a page where every other mention of
+    # the repo is the real name.
+    named = re.findall(r"<code([^>]*)>\{\{ page\.repo_name \| escape \}\}", page)
+    assert named and all("data-dsl-repo" in attrs for attrs in named), named
+    linked = re.findall(r'<a([^>]*)href="\{\{ page\.repo_url \}\}"', page)
+    assert linked and all("data-dsl-repo-url" in attrs for attrs in linked), linked
     # A GROUP assignment is named for the team, which no browser can know, so it is left
     # exactly as rendered.
     own = body.split("function ownRepo(shape, handle) {")[1].split("\n  }")[0]
@@ -1252,6 +1251,9 @@ def test_a_shared_page_names_the_drop_box_the_folder_and_the_gradebook(generated
     assert page["due_event"]["submit_shape"] == "shared"
     # A REAL repo, not a shape - and the folder beside it, which is what is the reader's.
     assert page["repo_name"] == "assignment-7-submissions"
+    # And NOT a shape: nothing on this page is rewritten to the reader's own repo.
+    assert "repo_name_is_shape" not in page
+    assert "repo_name_is_shape" not in page["due_event"]
     assert page["submit_path"] == "<your-handle>/"
     assert page["repo_url"].endswith("/assignment-7-submissions")
     layout = _liquid_templates()["_layouts/assignment.html"]

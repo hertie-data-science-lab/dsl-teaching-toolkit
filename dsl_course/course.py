@@ -92,6 +92,15 @@ SANDBOX_USER = "dsl-sandbox"
 # engine can ACT on it, because this same tuple is what the New assignment dropdown
 # offers, and a form offering a word the reader would refuse is a form that lies.
 SUBMIT_VIA = ("github", "external", "shared")
+# THE `shared` rationale, written down once so the five places that act on it can point
+# here instead of arguing it out again and drifting: a drop box is ONE repo that the whole
+# cohort reads, and no student can opt out of being in it. Everything that would otherwise
+# be written per unit therefore has nowhere private to go - no Feedback issue and so no
+# receipt (`has_feedback_issue`), no model solution (`can_hold_solution`), and no
+# `visibility:` to choose (v1 keeps it private, because `public` would publish every
+# student's submission on the strength of one instructor's line). It is hand-marked for a
+# different reason: the autograder and the grader's reading copy run per UNIT against the
+# unit's own repo, and here fifty units share one.
 # Who may read a unit's repo. `private` is the default and what every assignment gets until
 # an instructor says otherwise; `public` is portfolio work, world-readable from handout;
 # `student_choice` starts private and hands the flag to the student, who may publish their
@@ -154,7 +163,11 @@ def collects_commits(submit_via: str) -> bool:
     The gate on every piece of submission arithmetic - the snapshot, the late days, the
     receipts, the `info:` block - named for what it ASKS, which is why `shared` widened it
     here and re-opened none of those call sites: work pushed into a folder of the drop box
-    is timed, and is late, exactly as work pushed to a repo of one's own."""
+    is timed, and is late, exactly as work pushed to a repo of one's own.
+
+    Extensionally the same set as `creates_repos` today, and by COINCIDENCE: both are
+    false for `external` alone. They are different questions, so widening either one means
+    looking at the other."""
     return submit_via in ("github", "shared")
 
 
@@ -167,6 +180,21 @@ def creates_unit_repos(submit_via: str) -> bool:
     return submit_via == "github"
 
 
+def can_hold_solution(submit_via: str, visibility: str) -> bool:
+    """Whether the model answer can be pushed into the repos this assignment hands out.
+
+    ONE predicate for a question two files ask independently: `assign.provision_all` skips
+    the push, and the digest faults a `schedule.yml` `solution_datetime:` that would
+    therefore pass and release nothing. Asked apart, the two came to disagree - a `shared`
+    assignment was scheduled a release the handout silently declined.
+
+    It takes a repo of the unit's OWN (`external` has none, and a shared drop box is one
+    repo the whole cohort reads) AND a repo the toolkit can promise is private (`public`
+    publishes the answers to the internet, `student_choice` lets any student publish
+    them). Neither can be taken back, which is why this is a refusal and not a warning."""
+    return creates_unit_repos(submit_via) and visibility == "private"
+
+
 def creates_repos(submit_via: str) -> bool:
     """Whether the handout creates ANYTHING for the work to land in - a repo per unit, or
     the one drop box the whole cohort pushes into.
@@ -174,7 +202,8 @@ def creates_repos(submit_via: str) -> bool:
     The third question, and the one the two above cannot answer between them: a shared
     assignment makes no repo per unit and still makes a repo, so everything that asks "is
     there something here whose visibility, topics and faculty floor are ours?" asks this.
-    False for `external` alone, which creates nothing at all."""
+    False for `external` alone, which creates nothing at all - which makes it, today and
+    by coincidence, the same set as `collects_commits`. See the note there."""
     return submit_via != "external"
 
 

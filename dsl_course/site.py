@@ -1110,9 +1110,7 @@ def _assignment_entry(
     elif spec.submit_shared:
         # The REAL name, and a real URL: there is one drop box for the whole cohort, so
         # unlike every other shape the page can name the repo exactly rather than describe
-        # its shape - which is also why the theme must not mark this one for `open_in.html`
-        # to rewrite (there is no `<your-handle>` in it to replace, and the reader's own
-        # repo is a folder rather than a repo).
+        # its shape. No `repo_name_is_shape` with it - see below.
         repo_name = shared_repo(slug)
         repo_lines.append(f'submit_path: "{whose}/"')
         if out:
@@ -1127,6 +1125,13 @@ def _assignment_entry(
                 f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"'
             )
         repo_lines.append(f'repo_name: "{q(repo_name)}"')
+        # Whether `repo_name` is a SHAPE to substitute a handle into, or a real repo
+        # name. The theme marks the button and the link for `open_in.html` on this and on
+        # nothing else: a shared drop box is named exactly, has no `<your-handle>` to
+        # replace, and a rewrite of it would point every reader at a repo that does not
+        # exist. One flag rather than a second `case` in the theme, so a shape added later
+        # says which it is rather than being matched by name.
+        repo_lines.append("repo_name_is_shape: true")
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
