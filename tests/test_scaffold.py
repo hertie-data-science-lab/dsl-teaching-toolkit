@@ -682,6 +682,33 @@ def test_the_submit_url_line_is_live_only_where_it_means_something(fake, monkeyp
     assert spec.submit_url == "" and spec.dropped == ()
 
 
+def test_the_visibility_box_lands_in_the_file_the_handout_reads(fake, monkeypatch):
+    # Box 10, and the last one the form can ever have. It is read when each student's repo
+    # is CREATED, so the answer given here is the only chance to give it - and the seeded
+    # line is live, because `private` is a real answer and not an absence.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment("Org", "1", "f2026", [], visibility="public") == 0
+    )
+    public = written["grading_config.yml"]
+    assert "\nvisibility: public" in public
+    spec = grades.parse_grading_spec(public)
+    assert spec.visibility == "public" and spec.dropped == ()
+    assert not spec.has_feedback_issue  # derived, never declared
+
+
+def test_the_visibility_line_is_commented_where_no_repo_is_created(fake, monkeypatch):
+    # `visibility:` describes a repo and `external` creates none - the parse drops it
+    # there - so a live line would be a setting that reads as if it did something.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
+        == 0
+    )
+    assert "\n# visibility: private" in written["grading_config.yml"]
+    assert grades.parse_grading_spec(written["grading_config.yml"]).dropped == ()
+
+
 def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     # `derive` writes `solution/X` onto `main` as `X`. A model answer seeded as
     # `solution/solution.ipynb` therefore derived a SECOND notebook beside the untouched
@@ -1332,8 +1359,15 @@ def test_a_copied_assignment_says_which_boxes_it_ignored(origins, monkeypatch, c
     )
     assert made["assignment-1-f2026"] == "Assignment 1: Neural networks from scratch"
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "were ignored" in l]
-    assert "boxes 5-9" in line
-    for field in ("format", "type", "team_formation", "submit_via", "autograde"):
+    assert "boxes 5-10" in line
+    for field in (
+        "format",
+        "type",
+        "team_formation",
+        "submit_via",
+        "autograde",
+        "visibility",
+    ):
         assert field in line
     assert (
         "https://github.com/Org/assignment-1-f2026/blob/solution/grading_config.yml"

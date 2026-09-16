@@ -32,6 +32,7 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
     NOTHING_PUBLIC,
+    OFFERED_VISIBILITIES,
     PUBLIC_DIRS,
     PUBLIC_HTML_PDF,
     PUBLIC_TYPES,
@@ -1578,7 +1579,7 @@ _STARTER_FORMATS_INPUT = f"""\
 def render_new_assignment(assignments: list[str] | None = None) -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
-    NINE boxes, and between them they are the whole assignment: everything but `format`
+    TEN boxes, and between them they are the whole assignment: everything but `format`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
     grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
     - the team cap, the late window, the penalty, the question maxima - comes from the
@@ -1586,14 +1587,17 @@ def render_new_assignment(assignments: list[str] | None = None) -> str:
     file so it can be revised there per assignment afterwards.
 
     `copy_from` is the box that asks for none of it: last year's template arrives whole,
-    and the `grading_config.yml` that comes with it is the definition, so boxes 5-9 are
+    and the `grading_config.yml` that comes with it is the definition, so boxes 5-10 are
     ignored. It is box 4 for that reason - GitHub renders these top to bottom and the
-    answer that voids the rest belongs above them, not after the five boxes it voids. The
+    answer that voids the rest belongs above them, not after the six boxes it voids. The
     name and the number are asked for either way: they name the repo and describe it.
 
-    GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no tenth: an
-    assignment's remaining settings belong in a file the instructor can revise, not in a
-    form filled in once, before the brief has even been written."""
+    GitHub caps a workflow_dispatch at 10 inputs and `visibility` is the tenth, so this
+    form is now FULL: nothing may be added to it again. Every further setting belongs in
+    the `grading_config.yml` the scaffold writes - a file the instructor can revise once
+    the brief exists - and not in a form filled in before it has even been written.
+    `visibility` earned the last box because it cannot be revised afterwards: it is read
+    when each student's repo is CREATED, and editing it later moves nothing."""
     return f"""name: New assignment
 
 on:
@@ -1608,7 +1612,7 @@ on:
       semester_tag:
         description: "3. Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
         required: true
-{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-9 are then ignored", assignments or [])}
+{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-10 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
 {_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select", required=False)}
@@ -1617,6 +1621,7 @@ on:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
+{_choice_input("visibility", "10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon - there is then no Feedback issue, and marks go only to the student's private gradebook. Read when the repo is created: editing it later changes nothing", list(OFFERED_VISIBILITIES), "private", required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1633,12 +1638,14 @@ on:
           TYPE: ${{{{ inputs.type }}}}
           TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
+          VISIBILITY: ${{{{ inputs.visibility }}}}
           AUTOGRADE: ${{{{ inputs.autograde }}}}
         run: |
           gh auth setup-git
           args=(--org "$ORG" --number "$NUMBER" --tag "$TAG" --name "$NAME" \\
             --format "$FORMAT" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
-            --submit-via "$SUBMIT_VIA" --autograde "$AUTOGRADE")
+            --submit-via "$SUBMIT_VIA" --visibility "$VISIBILITY" \\
+            --autograde "$AUTOGRADE")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
           python3 -m dsl_course.scaffold assignment "${{args[@]}}"

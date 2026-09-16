@@ -897,9 +897,9 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
 
 
 # The whole assignment, in the order the nine boxes are numbered. Pinned as a LIST: the
-# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - a tenth
-# box means one of these earned its place over an edit to a file, so it is a decision, not
-# a diff nobody noticed.
+# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - which
+# `visibility` now reaches, so the form is FULL: an eleventh box is impossible and a
+# replacement for one of these is a decision, not a diff nobody noticed.
 NEW_ASSIGNMENT_INPUTS = [
     "assignment_name",
     "assignment_number",
@@ -910,14 +910,15 @@ NEW_ASSIGNMENT_INPUTS = [
     "team_formation",
     "submit_via",
     "autograde",
+    "visibility",
 ]
 
 
 def test_the_boxes_a_copy_ignores_are_not_marked_required():
-    # GitHub renders an asterisk beside every `required: true` label, so boxes 5-9 were
+    # GitHub renders an asterisk beside every `required: true` label, so boxes 5-10 were
     # demanding an answer on the same form where box 4 says it ignores them. They all
     # carry a `default:`, and a choice/string with a default and a boolean are submitted
-    # whether or not anyone touches the form - so the run step still gets all nine.
+    # whether or not anyone touches the form - so the run step still gets all six.
     inputs = workflow_inputs(
         workflows_render.render_new_assignment(["assignment-1-f2025"])
     )
@@ -940,10 +941,10 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert len(inputs) <= GITHUB_MAX_DISPATCH_INPUTS
     # GitHub renders the boxes in this order and numbers nothing itself, so the numbering
     # in the descriptions is the only thing that can be wrong about it. `copy_from` is
-    # box 4 and says so: it voids boxes 5-9, and a form is filled in top to bottom.
+    # box 4 and says so: it voids boxes 5-10, and a form is filled in top to bottom.
     for n, name in enumerate(NEW_ASSIGNMENT_INPUTS, start=1):
         assert inputs[name]["description"].startswith(f"{n}. ")
-    assert "Boxes 5-9 are then ignored" in inputs["copy_from"]["description"]
+    assert "Boxes 5-10 are then ignored" in inputs["copy_from"]["description"]
     # Box 5 takes a LIST, so it is free text rather than a dropdown - and every format the
     # scaffold accepts has to be named in the description, because that is the only place
     # a faculty member can read the vocabulary off. Asserted as the WHOLE joined list
@@ -955,6 +956,10 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
     assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
+    # Only what the handout can CREATE: `student_choice` is vocabulary the reader accepts
+    # and refuses back to `private`, and a dropdown offering it would be a form that lies.
+    assert inputs["visibility"]["options"] == list(course.OFFERED_VISIBILITIES)
+    assert inputs["visibility"]["default"] == "private"
     # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
     assert inputs["autograde"]["type"] == "boolean"
     assert inputs["autograde"]["default"] is False
@@ -969,6 +974,7 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
         ("TYPE", "type"),
         ("TEAM_FORMATION", "team_formation"),
         ("SUBMIT_VIA", "submit_via"),
+        ("VISIBILITY", "visibility"),
         ("AUTOGRADE", "autograde"),
     ):
         assert step["env"][env_name] == f"${{{{ inputs.{field} }}}}"

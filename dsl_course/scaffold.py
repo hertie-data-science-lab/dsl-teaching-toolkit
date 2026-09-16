@@ -37,6 +37,7 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
     NOTHING_PUBLIC,
+    OFFERED_VISIBILITIES,
     PROPOSAL_BRANCH_PREFIX,
     PUBLIC_ALL_FILES,
     PUBLIC_DIRS,
@@ -242,6 +243,7 @@ def _grading_config(
     kind: str,
     team_formation: str,
     submit_via: str,
+    visibility: str,
     formats: list[str],
     autograde: bool,
     defaults: dict,
@@ -283,6 +285,18 @@ def _grading_config(
             "https://moodle.hertie-school.org/mod/assign/view.php?id=CHANGE-ME",
             "external only: the `Submit on ...` button on the site (https only)",
             live=submit_via == "external",
+        ),
+        # Live only where there IS a repo for it to describe, for the same reason
+        # `submit_url` is live only where there is not: an `external` assignment creates
+        # none, and the parse drops the key there. Read when each repo is CREATED, so the
+        # comment says what editing it afterwards does - which is nothing to the repos,
+        # and a digest fault until the line matches them again.
+        _setting(
+            "visibility",
+            visibility,
+            "private (the student and the teaching team) | public (the whole internet: "
+            "portfolio work, no Feedback issue) - read at hand-out only",
+            live=submit_via != "external",
         ),
         # ONE format, because `grades` reads one: the key is the vocabulary this file
         # teaches, and the only thing it drives - the `completion_check` default - is
@@ -1250,6 +1264,7 @@ def scaffold_assignment(
     name: str = "",
     team_formation: str = "self_select",
     submit_via: str = "github",
+    visibility: str = "private",
     autograde: bool = False,
     copy_from: str = "",
 ) -> int:
@@ -1315,7 +1330,8 @@ def scaffold_assignment(
         if not _copy_branches(org, copy_from, repo, needs=SOLUTION_BRANCH, head=head):
             return 1
         log(
-            "  (boxes 5-9 - format, type, team_formation, submit_via and autograde - "
+            "  (boxes 5-10 - format, type, team_formation, submit_via, autograde and "
+            "visibility - "
             "were ignored: the number and the tag name the repo, the name describes it, "
             "and the copied definition governs the rest: "
             f"https://github.com/{org}/{repo}/blob/"
@@ -1419,6 +1435,7 @@ def scaffold_assignment(
                 kind=kind,
                 team_formation=team_formation,
                 submit_via=submit_via,
+                visibility=visibility,
                 formats=formats,
                 autograde=autograde,
                 defaults=defaults,
@@ -1704,6 +1721,14 @@ def main() -> int:
         "created, and nothing is ever collected",
     )
     pa.add_argument(
+        "--visibility",
+        choices=list(OFFERED_VISIBILITIES),
+        default="private",
+        help="public = every student's repo is world-readable from hand-out (portfolio "
+        "work); there is then no Feedback issue and feedback goes to the gradebook. Read "
+        "when the repo is created - editing it later changes nothing",
+    )
+    pa.add_argument(
         "--autograde",
         choices=["false", "true"],
         default="false",
@@ -1760,6 +1785,7 @@ def main() -> int:
             name=args.name,
             team_formation=args.team_formation,
             submit_via=args.submit_via,
+            visibility=args.visibility,
             autograde=args.autograde == "true",
             copy_from=args.copy_from,
         )
