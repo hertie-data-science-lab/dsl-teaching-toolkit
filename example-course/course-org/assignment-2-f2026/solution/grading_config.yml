@@ -4,7 +4,7 @@ type: individual              # individual | group
 # team_formation: self_select # group only: self_select (Join-team form) | assigned (teams.csv)
 # max_team_size: 5            # group only
 submit_via: github            # github (they push to their repo) | external (handed in elsewhere)
-visibility: private           # private | public - who may read the student's repo
+visibility: private           # private | public | student_choice - who may read it
 format: ipynb                 # ipynb | py | rmd | qmd | latex | none - the starter stub only
 
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
