@@ -148,7 +148,7 @@ from .grades import (
     sheet_spec,
 )
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
-from .repos import default_branch, repo_missing
+from .repos import default_branch, listed_is_private, repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
@@ -993,7 +993,7 @@ def snapshot_assignment(
     # server's word on when each repo last received anything, and the pin is chosen on a
     # date the student wrote. Best-effort - without it the rows simply carry `commit`, as
     # they always did.
-    pushed = _pushed_at(cohort_org)
+    listing = _cohort_listing(cohort_org)
     moment = local_deadline(deadline, tz)
     rows: list[tuple[str, str, str, str, str]] = []
     any_present = False
@@ -1009,7 +1009,9 @@ def snapshot_assignment(
             # server's push record if GitHub has one, else the committer date, which the
             # student supplied and can backdate. The snapshot is write-once, so it is
             # recorded now or never.
-            submitted = _submitted(cohort_org, repo, pin, pushed.get(repo, ""), moment)
+            submitted = _submitted(
+                cohort_org, repo, pin, _pushed_at(listing, repo), moment
+            )
             if submitted is None:
                 log_err(
                     f"  ! could not read {target_ref(repo)}'s push records - abandoning "
@@ -1200,24 +1202,32 @@ def _quiet_since(pushed_at: str, recorded: object, checked: object = None) -> bo
     return looked is not None and pushed < looked.replace(**to_minute)
 
 
-def _pushed_at(cohort_org: str) -> dict[str, str]:
-    """`{repo: pushed_at}` for the whole cohort, from ONE listing.
+def _cohort_listing(cohort_org: str) -> dict[str, dict]:
+    """`{repo: its listing row}` for the whole cohort, from ONE listing.
 
-    The server's word on when each repo last received anything - which is what the pin, a
-    date the student wrote, is checked against. Best-effort: without it every repo is
-    simply read (see `_provisional_pins`) and nothing is accused."""
+    Two of this module's questions are answered off the same rows, so they are read once
+    and handed down rather than each taking a listing of its own: `pushed_at` is the
+    server's word on when a repo last received anything, which is what a pin - a date the
+    student wrote - is checked against, and `visibility` is what says whether a repo is
+    still a private place to post a receipt into.
+
+    Best-effort: an unreadable listing is an empty one, and both readers have a safe answer
+    for a repo it does not mention (read that repo after all; assume it is private)."""
     try:
-        return {
-            row["name"]: row.get("pushed_at") or ""
-            for row in list_org_repos(cohort_org)
-        }
+        return {row["name"]: row for row in list_org_repos(cohort_org)}
     except RuntimeError as exc:
         log(f"  (no repo listing this tick - re-reading each submission: {exc})")
         return {}
 
 
+def _pushed_at(listing: dict[str, dict], repo: str) -> str:
+    """When GitHub last saw a push to `repo`, off the listing; "" if it is not in it."""
+    return (listing.get(repo) or {}).get("pushed_at") or ""
+
+
 def _provisional_pins(
     cohort_org: str,
+    listing: dict[str, dict],
     targets: list[tuple[str, str, list[str]]],
     deadline: str,
     previous: dict,
@@ -1228,9 +1238,9 @@ def _provisional_pins(
     The snapshot file stays write-once and stays the cutoff's job: these pins move with
     every push through the late window, which is the whole point of refreshing the sheet.
 
-    Only the repos that can have MOVED are read. One org listing carries `pushed_at` for
-    the whole cohort, and a repo quiet since the commit the sheet already records cannot
-    have gained a later one - so it is not asked, and the fact on the sheet stands (a unit
+    Only the repos that can have MOVED are read. The cohort listing handed in carries
+    `pushed_at` for every repo, and one quiet since the commit the sheet already records
+    cannot have gained a later one - so it is not asked, and the fact on the sheet stands (a unit
     absent from these pins is one `grades._merged_block` leaves alone). The refresh runs
     four times an hour for the length of the late window, where it used to cost one commits
     call per submission repo on every one of those ticks.
@@ -1242,18 +1252,18 @@ def _provisional_pins(
     per submission repo and this runs four times an hour for the length of the late
     window. The freeze pays for it once (`_submitted`), which is where the answer is
     written down for good."""
-    pushed = _pushed_at(cohort_org)
     pins: dict[str, tuple[str, str]] = {}
     notes: dict[str, str] = {}
     for repo, unit, _members in targets:
         was = (previous.get(unit) or {}).get(grades.INFO_KEY) or {}
-        if _quiet_since(pushed.get(repo, ""), was.get("submitted"), was.get("checked")):
+        pushed_at = _pushed_at(listing, repo)
+        if _quiet_since(pushed_at, was.get("submitted"), was.get("checked")):
             continue
         pin = _snapshot_sha(cohort_org, repo, deadline)
         if pin is None:
             return None
         pins[repo] = (pin.sha, pin.committed)
-        if delivery_is_suspect(pin.committed, pushed.get(repo, ""), due):
+        if delivery_is_suspect(pin.committed, pushed_at, due):
             notes[repo] = SUSPECT_NOTE
     return pins, notes
 
@@ -1284,6 +1294,7 @@ def _receipt_event(
 def _post_receipts(
     cohort_org: str,
     spec: grades.SheetSpec,
+    listing: dict[str, dict],
     targets: list[tuple[str, str, list[str]]],
     pins: dict[str, tuple[str, str]],
     previous: dict,
@@ -1299,7 +1310,14 @@ def _post_receipts(
     stop the sheet - which is the record - from being written. Nothing at all where the
     assignment has no Feedback issue to post into: work handed in off GitHub has no push to
     acknowledge, and a shape whose repo is not the student's own has nowhere private to say
-    it. The gradebook carries the feedback for all of them."""
+    it. The gradebook carries the feedback for all of them.
+
+    That gate is the FILE's answer and there is a LIVE one in the loop as well, because
+    the two can disagree: `visibility:` edited back to `private` after hand-out leaves the
+    file saying there is a private thread here and the cohort's repos world-readable, and
+    this would open one in each of them and post a student's submission times where the
+    internet can read them. The repo wins. (The digest reports the disagreement itself -
+    `grades._visibility_faults`; this is what keeps it from costing anything meanwhile.)"""
     if not spec.has_feedback_issue:
         return
     posted = 0
@@ -1315,6 +1333,12 @@ def _post_receipts(
         was = before.get("submitted")
         event = _receipt_event(phase, sha, was, shown, before.get("checked"))
         if event is None or (not changed and event == course.RECEIPT_UPDATED):
+            continue
+        if not listed_is_private(listing.get(repo)):
+            # Off the listing this pass already took, so the guard costs no call at all;
+            # a repo the listing does not mention reads as private, which is how every
+            # reader of `visibility` in this toolkit fails (see `repos.listed_is_private`).
+            log_person(f"    [skip] receipt on {cohort_org}/{repo} - it is not private")
             continue
         body = grades.receipt(
             spec,
@@ -1494,6 +1518,11 @@ def sync_sheet(
     info_updates: dict[str, dict] = {}
     pins: dict[str, tuple[str, str]] = {}
     notes: dict[str, str] = {}
+    # ONE listing for the whole cohort, taken here rather than inside the pin pass because
+    # the receipts read it too - which of these repos has moved, and which of them is still
+    # private enough to post into. The freeze pays for it as well, where it used to take
+    # none: one paginated listing against a GET per submission repo it would otherwise need.
+    listing = _cohort_listing(cohort_org) if derive else {}
     if derive and phase is SheetPhase.FREEZING:
         rows = load_snapshot_rows(cohort_org, slug)
         if rows is None:
@@ -1516,6 +1545,7 @@ def sync_sheet(
     elif derive:
         found = _provisional_pins(
             cohort_org,
+            listing,
             targets,
             (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
             previous,
@@ -1605,6 +1635,7 @@ def sync_sheet(
         _post_receipts(
             cohort_org,
             spec,
+            listing,
             targets,
             pins,
             previous,

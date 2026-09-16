@@ -2660,7 +2660,7 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
         "_snapshot_sha",
         lambda org, repo, deadline, at="": collect_mod.Pin(absent=True),
     )
-    monkeypatch.setattr(collect_mod, "_pushed_at", lambda org: {})
+    monkeypatch.setattr(collect_mod, "_cohort_listing", lambda org: {})
 
     def no_write(*a, **k):
         raise AssertionError("nothing may be written when there is nothing to freeze")

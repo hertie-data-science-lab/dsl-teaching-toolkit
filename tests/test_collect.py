@@ -936,7 +936,11 @@ def _stub_snapshot_write(
     ladder existed expect. Stubbed, never called: nothing here reaches GitHub."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
-    monkeypatch.setattr(collect, "_pushed_at", lambda org: pushed or {})
+    monkeypatch.setattr(
+        collect,
+        "_cohort_listing",
+        lambda org: {r: {"name": r, "pushed_at": p} for r, p in (pushed or {}).items()},
+    )
     monkeypatch.setattr(
         collect, "_push_activity", lambda org, repo: (activity or {}).get(repo, [])
     )
@@ -3481,6 +3485,7 @@ def _sheet_env(
     rows=None,
     contributions=None,
     pushed=None,
+    visibility=None,
     write_ok=True,
 ):
     """Stand `sync_sheet` up on stubs and return the (path, text) writes it makes.
@@ -3488,13 +3493,20 @@ def _sheet_env(
     `pushed` is `{repo: pushed_at}` out of the org listing the refresh takes to find which
     repos can have moved. Unset means none of them carries one, so every repo is read -
     which is what every test written before that short-circuit existed expects.
+    `visibility` is `{repo: "public"}` for a repo the same listing says the world can
+    read; unset means every one of them is listed private, which is what a `github` +
+    `private` assignment - every test here but one - looks like.
     `write_ok=False` refuses the sheet write, which is what a lost compare-and-swap is."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(
         collect,
         "list_org_repos",
         lambda org: [
-            {"name": repo, "pushed_at": (pushed or {}).get(repo, "")}
+            {
+                "name": repo,
+                "pushed_at": (pushed or {}).get(repo, ""),
+                "visibility": (visibility or {}).get(repo, "private"),
+            }
             for repo, _unit, _members in targets
         ],
     )
@@ -4906,6 +4918,41 @@ def test_a_receipt_is_not_posted_when_the_sheet_write_was_refused(monkeypatch):
     posted = _receipt_env(monkeypatch)
     assert not _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     assert posted == []
+
+
+def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
+    # `visibility:` edited back to `private` after hand-out leaves the FILE saying there is
+    # a private Feedback thread in each repo and the repos themselves world-readable. A
+    # receipt says when a student submitted; posting it there publishes it. The repo wins,
+    # per repo - the student whose repo really is private is still told.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        pins={
+            "assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z"),
+            "assignment-1-ben-k": collect.Pin(SHA, "2026-10-03T21:00:00Z"),
+        },
+        visibility={"assignment-1-ada-l": "public"},
+    )
+    posted = _receipt_env(monkeypatch)
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    assert [repo for repo, _body, _dry in posted] == ["assignment-1-ben-k"]
+    assert "assignment-1-ada-l - it is not private" in capsys.readouterr().out
+
+
+def test_a_repo_missing_from_the_listing_is_treated_as_private(monkeypatch):
+    # The listing is best-effort: a tick that could not take one, or a repo created since
+    # it was taken, must not silently stop every receipt the assignment owes.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+    )
+    monkeypatch.setattr(collect, "list_org_repos", lambda org: [])
+    posted = _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    assert [repo for repo, _body, _dry in posted] == ["assignment-1-ada-l"]
 
 
 def test_the_public_log_counts_receipts_and_names_no_submission_repo(
