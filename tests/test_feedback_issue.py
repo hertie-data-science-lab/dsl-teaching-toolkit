@@ -264,6 +264,22 @@ def test_a_lookup_that_failed_opens_nothing(monkeypatch, capsys):
     assert "posting none" in capsys.readouterr().err
 
 
+def test_a_repo_that_is_not_there_has_no_issue_rather_than_no_answer(monkeypatch):
+    # A 404 IS an answer: no repo, no Feedback issue. Every shape reaches one - a student
+    # who never onboarded, a team formed after the handout, an assignment handed in off
+    # GitHub whose repos were never created - and reading it as "could not look" made a
+    # cohort of absent repos a red run with a `[wait]` line per student. Nothing is OPENED
+    # on the strength of it: `feedback_thread_policy` decides that, off the listing.
+    monkeypatch.setattr(grades, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") is None
+    assert (
+        grades.ensure_feedback_issue(
+            "Cohort", "assignment-1-ada-l", "body", create=False
+        )
+        is None
+    )
+
+
 def test_the_oldest_labelled_issue_is_asked_for_first(monkeypatch):
     # GitHub lists newest first by default, and a student holds `maintain` on their own
     # submission repo: theirs would have won.

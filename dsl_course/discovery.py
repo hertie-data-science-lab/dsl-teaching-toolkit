@@ -18,6 +18,7 @@ filesystem transport of the same rule.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import yaml
 
@@ -193,6 +194,32 @@ def listing_by_name(org: str) -> dict[str, dict] | None:
     except RuntimeError as exc:
         log_err(f"could not list {org}'s repos: {exc}")
         return None
+
+
+def listing_row(org: str, name: str, visibility: str = "private") -> dict:
+    """One row for a repo THIS run has just created, in the shape `list_org_repos` gives
+    every other row.
+
+    A listing is taken once and handed to every pass of a tick, so the pass that CREATES
+    a repo is the one thing that can make it stale - and the next pass then creates the
+    same repo again and counts GitHub's refusal as a failure. Inserting the row is what
+    keeps one listing true for a whole tick.
+
+    Every field a reader of a listing asks for, answered as the repo really is a moment
+    after its create: nothing is a template or archived when it is made, it carries no
+    topics until `_tag_submission` stamps them, and `pushed_at` is now - the generate IS
+    a push, and a row without it reads as "never pushed to", which is the one answer that
+    would have the sheet refresh skip a repo rather than look at it."""
+    return {
+        "name": name,
+        "description": "",
+        "visibility": visibility,
+        "url": f"https://github.com/{org}/{name}",
+        "isTemplate": False,
+        "archived": False,
+        "pushed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "topics": [],
+    }
 
 
 def _registry_fault(what: str) -> ConfigFault:

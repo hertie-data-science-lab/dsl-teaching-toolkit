@@ -148,7 +148,7 @@ from .grades import (
     sheet_spec,
 )
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
-from .repos import default_branch, listed_is_private, repo_missing
+from .repos import default_branch, repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
@@ -977,10 +977,10 @@ def snapshot_assignment(
     `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
     already holds (`discovery.listing_by_name`). It is read for `pushed_at` alone - the
     server's word on when each repo last received anything, which is what a pin chosen on a
-    date the student wrote is checked against - so an empty one costs only the note beside
-    each row. None means no caller handed one down and this takes its own; `{}` is a
-    listing that was taken and could not be read, and the rows simply carry `commit`, as
-    they always did."""
+    date the student wrote is checked against - so a row it does not carry costs only the
+    note beside that row. None means nobody handed one down, or the tick's own could not be
+    read, and this takes one of its own; if that fails too the rows simply carry `commit`,
+    as they always did."""
     if load_snapshots(cohort_org, slug) is not None:
         log_skip(f"snapshot {snapshot_path(slug)}")
         return SnapshotResult.PRESENT
@@ -1282,7 +1282,7 @@ def _receipt_event(
 def _post_receipts(
     cohort_org: str,
     spec: grades.SheetSpec,
-    listing: dict[str, dict],
+    listing: dict[str, dict] | None,
     targets: list[tuple[str, str, list[str]]],
     pins: dict[str, tuple[str, str]],
     previous: dict,
@@ -1300,8 +1300,9 @@ def _post_receipts(
     acknowledge, and a shape whose repo is not the student's own has nowhere private to say
     it. The gradebook carries the feedback for all of them.
 
-    That gate is the FILE's answer and there is a LIVE one in the loop as well, because
-    the two can disagree: `visibility:` edited back to `private` after hand-out leaves the
+    That gate is the FILE's answer, and the loop below asks the LIVE one -
+    `grades.feedback_thread_policy`, the same chokepoint the grade comment goes through.
+    The two can disagree: `visibility:` edited back to `private` after hand-out leaves the
     file saying there is a private thread here and the cohort's repos world-readable, and
     this would open one in each of them and post a student's submission times where the
     internet can read them. The repo wins. (The digest reports the disagreement itself -
@@ -1322,11 +1323,16 @@ def _post_receipts(
         event = _receipt_event(phase, sha, was, shown, before.get("checked"))
         if event is None or (not changed and event == course.RECEIPT_UPDATED):
             continue
-        if not listed_is_private(listing.get(repo)):
-            # Off the listing this pass already took, so the guard costs no call at all;
-            # a repo the listing does not mention reads as private, which is how every
-            # reader of `visibility` in this toolkit fails (see `repos.listed_is_private`).
-            log_person(f"    [skip] receipt on {cohort_org}/{repo} - it is not private")
+        if grades.feedback_thread_policy(spec, listing, repo) != grades.THREAD_CREATE:
+            # A receipt is the one thing that would OPEN a thread nobody has asked for
+            # yet, so it takes the strongest answer the policy gives and nothing weaker:
+            # this repo is in the listing and the listing says it is private. A repo the
+            # listing does not carry, or a listing that could not be read at all, waits
+            # for a tick that can say so - the sheet is the record, and the receipt is a
+            # courtesy. Off the rows this pass already holds, so the guard costs no call.
+            log_person(
+                f"    [skip] receipt on {cohort_org}/{repo} - not a known private repo"
+            )
             continue
         body = grades.receipt(
             spec,
@@ -1449,9 +1455,9 @@ def sync_sheet(
 
     `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
     already holds (`discovery.listing_by_name`): which of them has moved, and which of them
-    is still private enough to post a receipt into. None means no caller handed one down -
-    a button press, an autograde run - and this takes its own, and only if it is going to
-    derive anything at all."""
+    is still private enough to post a receipt into. None means nobody handed one down - a
+    button press, an autograde run - or the tick's own could not be read, and this takes
+    its own, and only if it is going to derive anything at all."""
     gspec = load_grading_spec(course_org, template)
     spec = sheet_spec(sched, key, slug, gspec, is_group)
     path = grades.sheet_path(slug)
@@ -1514,11 +1520,11 @@ def sync_sheet(
     pins: dict[str, tuple[str, str]] = {}
     notes: dict[str, str] = {}
     # The caller's listing, or one of our own where there is no caller to have taken it -
-    # and only where something is going to be derived off it.
-    if not derive:
-        listing = {}
-    elif listing is None:
-        listing = listing_by_name(cohort_org) or {}
+    # and only where something is going to be derived off it. A listing that could not be
+    # read stays None the whole way down: "we could not look" is not "the org is empty",
+    # and the receipts below are exactly the reader that must not confuse the two.
+    if derive and listing is None:
+        listing = listing_by_name(cohort_org)
     if derive and phase is SheetPhase.FREEZING:
         rows = load_snapshot_rows(cohort_org, slug)
         if rows is None:
@@ -1541,7 +1547,7 @@ def sync_sheet(
     elif derive:
         found = _provisional_pins(
             cohort_org,
-            listing,
+            listing or {},
             targets,
             (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
             previous,

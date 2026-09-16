@@ -15,7 +15,7 @@ import yaml
 
 from dsl_course import assign, collect, grades, workflows_place
 from dsl_course.schedule import Schedule
-from tests.conftest import ROSTER_HEADER
+from tests.conftest import ROSTER_HEADER, repo_row
 
 HEADER = ROSTER_HEADER
 
@@ -35,10 +35,11 @@ def _no_cohort_schedule(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _empty_cohort_listing(monkeypatch):
-    """provision_all takes ONE repo listing of the cohort and answers "does this repo
-    exist?" out of it. An empty org is the uninteresting answer for the tests below; the
-    ones about the listing itself set their own after this fixture and win."""
-    monkeypatch.setattr(assign, "list_org_repos", lambda org: [])
+    """provision_all answers "does this repo exist?" off the listing its CALLER holds, and
+    the tests below hand it none - so what they reach is the fallback, a probe per repo.
+    An empty org is the uninteresting answer for them; the ones about the listing itself
+    set their own after this fixture and win."""
+    monkeypatch.setattr(assign, "repo_exists", lambda org, name: False)
 
 
 @pytest.fixture(autouse=True)
@@ -141,17 +142,19 @@ def test_the_grading_sheet_is_created_at_handout_with_one_row_per_student(
     assert sheet["units"] == [("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])]
 
 
-def test_the_repo_shape_re_lists_for_itself_rather_than_read_the_ticks_rows(
+def test_the_repo_shape_runs_on_the_ticks_rows_and_lists_nothing_itself(
     tmp_path, monkeypatch, sheet_writes
 ):
-    # A tick fires every handed-out release, so the repos and gradebooks an EARLIER
-    # assignment in the same tick has just created have to be in the rows this one reads -
-    # off a listing taken before any of that, it would create them again and count the
-    # refusals as failures. So the arm that creates repos lists for itself, a moment
-    # before it creates them, whatever the tick hands down.
+    # ONE listing per tick, for every pass and both arms of every handout. A second
+    # listing here cost one paginated read per handed-out assignment per quarter of an
+    # hour, and the rows it would have brought back are the ones this run writes itself.
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
-    listed: list[str] = []
-    monkeypatch.setattr(assign, "list_org_repos", lambda org: listed.append(org) or [])
+    monkeypatch.setattr(
+        assign,
+        "list_org_repos",
+        lambda org: pytest.fail("a handout listed the org for itself"),
+    )
+    rows = {"assignment-1-ada-l": repo_row("assignment-1-ada-l")}
     monkeypatch.setattr(
         assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
     )
@@ -164,12 +167,11 @@ def test_the_repo_shape_re_lists_for_itself_rather_than_read_the_ticks_rows(
         "assignment-1-f2026",
         "COHORT",
         roster_path=path,
-        listing={"assignment-1-ada-l": {"name": "assignment-1-ada-l"}},
+        listing=rows,
     )
 
-    assert listed == ["COHORT"]
     ((sheet,),) = (sheet_writes,)
-    assert sheet["listing"] == {}, "the tick's stale rows were used after all"
+    assert sheet["listing"] is rows, "the sheet read rows this run did not share"
 
 
 def test_a_handout_that_provisioned_nothing_does_not_rewrite_the_sheet(
@@ -344,6 +346,53 @@ def _marker_run(
         solution=True,
     )
     return rc, recorded
+
+
+@pytest.mark.parametrize("visibility", ["public", "student_choice"])
+def test_no_model_solution_is_pushed_into_repos_that_are_not_private(
+    tmp_path, monkeypatch, capsys, visibility
+):
+    # `public` publishes the model answer to the internet and `student_choice` hands the
+    # flag to the student, and neither can be taken back. The stage is skipped whole -
+    # and the fire-once marker is deliberately NOT written, so an instructor who corrects
+    # the shape can still release the solution on a later run.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(visibility=visibility),
+    )
+    monkeypatch.setattr(
+        assign,
+        "fetch_solution",
+        lambda *a, **k: pytest.fail("the model answer was fetched"),
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    sol_dirs: list = []
+    monkeypatch.setattr(
+        assign, "provision_one", lambda *a, **k: sol_dirs.append(a[6]) or "ok"
+    )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    recorded: list = []
+    monkeypatch.setattr(
+        assign, "record_solution_released", lambda *a, **k: recorded.append(a) or True
+    )
+
+    rc, _changed = assign.provision_all(
+        "COURSE",
+        "assignment-1-f2026",
+        "COHORT",
+        roster_path=path,
+        solution=True,
+    )
+
+    assert rc == 0, "a shape that withholds the solution is not a failed handout"
+    assert sol_dirs == [None], "the model answer reached a repo that is not private"
+    assert recorded == [], "the fire-once marker was written for a solution never sent"
+    assert "model solution not pushed" in capsys.readouterr().out
 
 
 def test_the_marker_is_not_written_when_a_solution_push_failed(tmp_path, monkeypatch):
@@ -1561,27 +1610,18 @@ def test_a_solution_waits_for_the_repo_this_run_created_to_populate(
 
 
 def _ready_template(name="assignment-1"):
-    return {"name": name, "isTemplate": True, "topics": [name, "assignment-template"]}
+    return repo_row(name, isTemplate=True, topics=[name, "assignment-template"])
 
 
-def _listing_run(tmp_path, monkeypatch, listing):
-    """provision_all over two students, with `listing` standing in for the org listing.
-    Returns (the orgs listed, the repos generate_from_template was asked to create)."""
+def _listing_run(tmp_path, monkeypatch, listing, template="assignment-1-f2026"):
+    """provision_all over two students on the CALLER's `listing` (None = none to hand).
+    Returns the repos generate_from_template was asked to create."""
     path = _roster_file(
         tmp_path,
         "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
         "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def",
     )
-    listed: list[str] = []
-
-    def fake_listing(org):
-        listed.append(org)
-        if isinstance(listing, Exception):
-            raise listing
-        return listing
-
     created: list[str] = []
-    monkeypatch.setattr(assign, "list_org_repos", fake_listing)
     monkeypatch.setattr(
         assign, "generate_from_template", lambda **k: created.append(k["name"]) or True
     )
@@ -1593,40 +1633,75 @@ def _listing_run(tmp_path, monkeypatch, listing):
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
-    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
-    return listed, created
+    assign.provision_all(
+        "COURSE", template, "COHORT", roster_path=path, listing=listing
+    )
+    return created
 
 
-def test_provision_all_lists_the_org_once_and_probes_no_repo(tmp_path, monkeypatch):
+def test_provision_all_answers_every_repo_off_the_callers_listing(
+    tmp_path, monkeypatch
+):
     # A `repo_exists` per unit cost a GET per student per assignment on EVERY hourly tick
-    # (~1,200 an hour for a large cohort) where one paginated listing costs three.
+    # (~1,200 an hour for a large cohort) where one paginated listing costs three - and
+    # that listing is the tick's, taken once for every cohort pass there is.
     monkeypatch.setattr(
         assign,
         "repo_exists",
         lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
     )
-    listed, created = _listing_run(
+    created = _listing_run(
         tmp_path,
         monkeypatch,
-        [_ready_template(), {"name": "assignment-1-ada-l", "topics": []}],
+        {
+            "assignment-1": _ready_template(),
+            "assignment-1-ada-l": repo_row("assignment-1-ada-l"),
+        },
     )
-    assert listed == ["COHORT"], "one listing per run, not one per repo"
     assert created == ["assignment-1-bob-b"], "a listed repo was regenerated"
 
 
-def test_a_failed_listing_falls_back_to_probing_each_repo(tmp_path, monkeypatch):
-    # The listing is an optimisation. A rate limit on it must not stop the students who
-    # onboarded this hour from getting their repos.
+def test_no_listing_at_all_falls_back_to_probing_each_repo(tmp_path, monkeypatch):
+    # The listing is an optimisation, and None is what a caller that could not read one
+    # hands down. A rate limit there must not stop the students who onboarded this hour
+    # from getting their repos.
     probed: list[str] = []
     monkeypatch.setattr(
         assign, "repo_exists", lambda org, name: probed.append(name) or False
     )
-    listed, created = _listing_run(
-        tmp_path, monkeypatch, RuntimeError("could not list repos in COHORT: 502")
-    )
-    assert listed == ["COHORT"]
+    created = _listing_run(tmp_path, monkeypatch, None)
     assert created == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
     assert probed == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+
+
+def test_every_repo_a_handout_creates_goes_into_the_listing_it_was_handed(
+    tmp_path, monkeypatch
+):
+    # A tick fires every handed-out release off ONE listing, so the repos an earlier
+    # assignment in it has just created have to be in the rows the next one reads - or it
+    # creates them again and counts GitHub's refusals as failures.
+    listing: dict[str, dict] = {}
+    monkeypatch.setattr(
+        assign,
+        "repo_exists",
+        lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
+    )
+    created = _listing_run(tmp_path, monkeypatch, listing)
+    assert created == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+    row = listing["assignment-1-ada-l"]
+    # Every field a reader of a listing asks of it: `classify_repos` and the faculty floor
+    # (`isTemplate`, `topics`), the sweeps that skip a frozen repo (`archived`), the
+    # student_choice re-privatise and the receipts (`visibility`), the sheet refresh's
+    # "has anything reached this repo?" (`pushed_at`).
+    assert (row["name"], row["visibility"]) == ("assignment-1-ada-l", "private")
+    assert (row["isTemplate"], row["archived"], row["topics"]) == (False, False, [])
+    assert row["pushed_at"]
+    # The cohort template goes in as the repair leaves it, so nothing freezes it twice.
+    assert listing["assignment-1"]["isTemplate"] is True
+
+    # The next pass over the same rows makes nothing at all.
+    again = _listing_run(tmp_path, monkeypatch, listing)
+    assert again == []
 
 
 def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
@@ -1653,7 +1728,7 @@ def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
             "assignment-1-f2026",
             "COHORT",
             "assignment-1",
-            [_ready_template()],
+            {"assignment-1": _ready_template()},
         )
         == "assignment-1"
     )
@@ -1662,8 +1737,8 @@ def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
 @pytest.mark.parametrize(
     "entry",
     [
-        {"name": "assignment-1", "isTemplate": False, "topics": ["assignment-1"]},
-        {"name": "assignment-1", "isTemplate": True, "topics": []},
+        repo_row("assignment-1", topics=["assignment-1"]),
+        repo_row("assignment-1", isTemplate=True),
     ],
 )
 def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
@@ -1680,7 +1755,11 @@ def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
     assert (
         assign.ensure_cohort_template(
-            "COURSE", "assignment-1-f2026", "COHORT", "assignment-1", [entry]
+            "COURSE",
+            "assignment-1-f2026",
+            "COHORT",
+            "assignment-1",
+            {"assignment-1": entry},
         )
         == "assignment-1"
     )
@@ -2229,6 +2308,7 @@ def _cli(monkeypatch, *argv: str) -> dict:
     """Run `assign.main()` on `argv`, with both modes stubbed. Returns the keywords the
     mode that ran was called with."""
     seen: dict = {}
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: {"listed": org})
     monkeypatch.setattr(
         assign,
         "provision_all",
@@ -2263,6 +2343,12 @@ def test_each_mode_keeps_its_own_default_when_the_flag_is_not_given(monkeypatch)
     # success. Patching writes into repos students already hold, so it previews.
     assert _cli(monkeypatch)["dry_run"] is False
     assert _cli(monkeypatch, "--patch-path", "starter.py")["dry_run"] is True
+
+
+def test_the_release_button_lists_the_cohort_once_for_itself(monkeypatch):
+    # There is no tick above a button press to have taken the listing, and every repo
+    # question the handout asks is answered off one - so this press takes it, once.
+    assert _cli(monkeypatch)["listing"] == {"listed": "COHORT"}
 
 
 @pytest.mark.parametrize("flag, want", [("--dry-run", True), ("--no-dry-run", False)])
@@ -2442,7 +2528,7 @@ def test_an_external_handout_runs_on_the_ticks_listing_and_takes_none(
 ):
     # Nothing is created, so there is nothing fresher to see: the sheet and the gradebooks
     # read the rows the tick already holds, and this shape lists the org not at all.
-    rows = {"grades-ada-l": {"name": "grades-ada-l", "topics": ["gradebook"]}}
+    rows = {"grades-ada-l": repo_row("grades-ada-l", topics=["gradebook"])}
     monkeypatch.setattr(
         assign,
         "list_org_repos",

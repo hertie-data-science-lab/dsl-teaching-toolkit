@@ -73,6 +73,7 @@ from .discovery import (
     course_name_for_cohort,
     course_org_for_cohort,
     listing_by_name,
+    listing_row,
     org_meta,
 )
 from .faults import ConfigFault
@@ -86,7 +87,7 @@ from .gh_contents import (
     yaml_mark_line,
     yaml_problem,
 )
-from .ghcli import bot_login, clone, gh
+from .ghcli import bot_login, clone, gh, is_missing_resource
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
@@ -269,6 +270,11 @@ class SheetSpec(_Shape):
     # assignment that says nothing gets: one private repo per unit.
     submit_via: str = "github"
     visibility: str = "private"
+    # Whether the two above were READ from an assignment's definition at all. False for a
+    # sheet whose assignment the schedule no longer declares (`_spec_from_sheet`): the
+    # defaults are a guess then, and the one thing a guess may never do is open a Feedback
+    # issue in a student's repo (`feedback_thread_policy`).
+    shape_known: bool = True
     questions: dict[str, str] | None = None
     late_window_days: int | None = None
     late_penalty_per_day: str | None = None
@@ -1461,6 +1467,7 @@ def grading_spec_faults(
     text: str,
     fires: datetime | None,
     handed_out: list[dict] | None = None,
+    releases_solution: bool = False,
 ) -> list[ConfigFault]:
     """Everything in ONE `grading_config.yml` the parse had to refuse, as faults.
 
@@ -1471,7 +1478,11 @@ def grading_spec_faults(
     `handed_out` is the repos this assignment actually created, off the caller's listing:
     one more fault, off the SAME parse, because parsing a second time here would log every
     refused line in this file twice. None means there is nothing to compare the file
-    against - the assignment has not gone out, or the listing could not be read."""
+    against - the assignment has not gone out, or the listing could not be read.
+
+    `releases_solution` is whether this assignment's `schedule.yml` entry carries a
+    `solution_datetime:` - the one fact about it that the definition here can contradict
+    (see below), and the only thing read from outside this file."""
     try:
         spec = parse_grading_spec(text)
     except yaml.YAMLError as exc:
@@ -1505,6 +1516,31 @@ def grading_spec_faults(
     if handed_out:
         faults += _visibility_faults(
             spec, slug, template, course_org, lines, fires, handed_out
+        )
+    if releases_solution and spec.visibility != "private":
+        # A moment that will pass and do nothing. `provision_all` refuses to push the
+        # model answer into repos the toolkit cannot promise are private - `public`
+        # publishes it to the internet and `student_choice` lets the student do so - and
+        # the two files are written by different people, so nothing else would notice
+        # that the plan schedules a release the definition forbids.
+        faults.append(
+            _spec_fault(
+                slug,
+                template,
+                course_org,
+                fires,
+                f"this assignment's entry in `schedule.yml` carries a "
+                f"`solution_datetime:`, but `visibility: {spec.visibility}` means its "
+                f"repos are not private - the model solution is never pushed into repos "
+                f"the world can read, or the students can publish, so that moment "
+                f"passes and nothing is released",
+                field="visibility",
+                lineno=lines.get(("visibility",)),
+                fix="remove `solution_datetime:` from this assignment's entry in "
+                "classroom-config/schedule.yml - the model answer stays on this "
+                "template's `solution` branch, which is where the teaching team reads "
+                "it - or set `visibility: private` here",
+            )
         )
     return faults
 
@@ -1581,7 +1617,13 @@ def grading_config_faults(
                 if derived.get(r["name"]) == name and not r.get("archived")
             ]
         faults += grading_spec_faults(
-            slug, template, course_org, text, fires, handed_out
+            slug,
+            template,
+            course_org,
+            text,
+            fires,
+            handed_out,
+            releases_solution=entry.solution_datetime is not None,
         )
         if (
             handed_out
@@ -2046,13 +2088,19 @@ def _feedback_issues(
 ) -> list[str] | None:
     """The issues this query matches, or None when the question could not be ANSWERED.
 
-    ANY failure is "could not answer", a 404 included: a repo that reads as absent because
-    the token lost its grant is not a repo with no issues, and the caller acts on the
-    difference by opening one. The shape that has no repo at all never reaches here -
-    `_feedback_thread` answers it off the listing before any call is made."""
+    A 404 IS an answer: there is no such repo, so it has no Feedback issue. Every shape
+    can reach one - a student who never onboarded, a team formed after the handout, an
+    assignment handed in off GitHub whose repos were never created - and answering "could
+    not read it" for them turned a cohort of absent repos into a red run and a `[wait]`
+    line per student. What stops the 404 being read as "so open one" is the policy
+    (`feedback_thread_policy`), which never creates where the listing did not show a
+    private repo.
+
+    Anything else is genuinely "could not answer" - a token that lost its grant is not a
+    repo with no issues - and the caller must not act on the difference."""
     code, out = gh("api", f"repos/{cohort_org}/{repo}/issues?{query}", "--jq", jq)
     if code != 0:
-        return None
+        return [] if is_missing_resource(out) else None
     return [line for line in out.splitlines() if line.strip()]
 
 
@@ -3173,6 +3221,10 @@ def provision_one(
             person=True,
         ):
             return "failed-create"
+        if existing is not None:
+            # The caller's listing is now one repo out of date, and in a scheduler tick
+            # the passes after this one read it (`discovery.listing_row`).
+            existing[repo] = listing_row(cohort_org, repo)
         put_file(
             cohort_org,
             repo,
@@ -3206,13 +3258,14 @@ def provision_one(
     return "failed-no-collaborator"
 
 
-# How long one run may spend provisioning gradebooks before it stops and leaves the rest
-# to the next one. A DEADLINE rather than a count of creations: what has to be bounded is
-# the wall clock of a job (the nightly Sync membership has a 30-minute one), and four API
-# calls per new gradebook take as long as the write pacer and the day's rate limit make
-# them - so a count is a guess at that and this is the thing itself. A run that stops here
-# has recorded everything it did; repos already there cost almost nothing, so the next run
-# starts from where this one left off.
+# How long the NIGHTLY SYNC may spend provisioning gradebooks before it stops and leaves
+# the rest to the next one - the one caller that passes it, because it is the one with no
+# work waiting on the gradebooks it makes. A DEADLINE rather than a count of creations:
+# what has to be bounded is the wall clock of a job (Sync membership has a 30-minute one),
+# and four API calls per new gradebook take as long as the write pacer and the day's rate
+# limit make them - so a count is a guess at that and this is the thing itself. A run that
+# stops here has recorded everything it did; repos already there cost almost nothing, so
+# the next run starts from where this one left off.
 GRADEBOOK_BUDGET_MINUTES = 10
 
 
@@ -3220,7 +3273,7 @@ def ensure_gradebooks(
     cohort_org: str,
     dry_run: bool = False,
     existing: dict[str, dict] | None = None,
-    budget_minutes: float = GRADEBOOK_BUDGET_MINUTES,
+    budget_minutes: float | None = None,
 ) -> int:
     """Provision one private gradebook repo per onboarded enrolled student. Idempotent.
 
@@ -3235,10 +3288,12 @@ def ensure_gradebooks(
     its own reasons, and a second listing per release run answers the same question twice.
 
     `budget_minutes` bounds the WALL CLOCK: once it is spent this stops and says how many
-    students are left, and they wait for the next run - one nightly sync away. It applies
-    whether or not there was a listing to say which students still need one, which is the
-    point: a run that could not list the org probes per student, and that is exactly the
-    run most likely to overrun the job it sits in.
+    students are left, and they wait for the next run. None - the default - is unbounded,
+    which is what a caller with work waiting on these repos needs: a handout that stopped
+    halfway would publish a brief pointing at gradebooks half the cohort does not have,
+    and `distribute` is about to write a mark into every one of them. Only the nightly
+    `sync_membership` passes a budget, because nothing in that run waits on the result
+    (see `GRADEBOOK_BUDGET_MINUTES`).
 
     A roster that is absent or empty is a SKIP, not a failure, for the reason
     `sync_roster.sync` gives: an empty roster is a freshly bootstrapped cohort and a
@@ -3270,13 +3325,17 @@ def ensure_gradebooks(
     results: dict[str, int] = {}
     deferred = 0
     started = time.monotonic()
-    for s in onboarded:
+    for done, s in enumerate(onboarded):
         if dry_run:
             log_person(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
             continue
-        if time.monotonic() - started > budget_minutes * 60:
-            deferred += 1
-            continue
+        if budget_minutes is not None and (
+            time.monotonic() - started > budget_minutes * 60
+        ):
+            # STOP rather than step through what is left: the budget is spent, so every
+            # student after this one is deferred by the same clock.
+            deferred = len(onboarded) - done
+            break
         status = provision_one(cohort_org, s.github_handle, existing)
         results[status] = results.get(status, 0) + 1
     if dry_run:
@@ -3404,8 +3463,17 @@ def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
     """A minimal spec for a sheet whose assignment the schedule no longer declares - a
     term whose entry has been deleted, or a hand-written sheet. Its shape is read off the
     file itself so the marks still reach their students; the maxima and the late policy
-    are simply unknown, and nothing is derived from them."""
-    return SheetSpec(slug=slug, title=slug, is_group="teams" in (sheet or {}))
+    are simply unknown, and nothing is derived from them.
+
+    `shape_known=False` says the rest is a guess: there is no definition to read
+    `submit_via` or `visibility` from, so this spec may use a Feedback issue it finds and
+    may never open one (`feedback_thread_policy`)."""
+    return SheetSpec(
+        slug=slug,
+        title=slug,
+        is_group="teams" in (sheet or {}),
+        shape_known=False,
+    )
 
 
 def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
@@ -3497,6 +3565,54 @@ def _issue_targets(
     return out
 
 
+# What a run may do about one unit's Feedback issue. THREE answers and one function that
+# gives them (`feedback_thread_policy`), because the question is asked by the feedback
+# comment, by the receipts and by nothing else - and two spellings of it meant a receipt
+# posted into a repo a grade would have been withheld from.
+THREAD_CREATE = "create"  # open one if this repo has none
+THREAD_FIND = "find"  # use the thread it has; never open one
+THREAD_NONE = "none"  # do not look, do not post
+
+
+def feedback_thread_policy(
+    spec: SheetSpec, listed: dict[str, dict] | None, repo: str
+) -> str:
+    """May this run touch `repo`'s Feedback issue, and may it OPEN one?
+
+    Everything the toolkit knows about that, in one place: the assignment's SHAPE (does it
+    have a Feedback issue at all?) and the org LISTING's word on the repo (is it there,
+    and is it still private?). Both are needed - the file says what was handed out and the
+    listing says what is there now - and each answer here is deliberately narrow in the
+    direction that cannot hurt a student: a listing is a snapshot, and answering "no
+    thread" off it wrongly withholds a mark.
+
+    - `listed is None` - we could not look at all: FIND. The thread a student was told to
+      read is still the right place for their feedback; opening one on an org nobody could
+      list is how a second Feedback issue appears over it.
+    - the repo is NOT in the listing: FIND where the shape creates a repo per unit (it may
+      have been created since the listing was taken, and that is exactly the student whose
+      feedback must not be dropped), NONE where it does not - an external assignment has
+      no repos, and probing each would be an issues call per student for an answer already
+      known.
+    - the listing says the repo is not private: NONE. Nothing about a student's marking
+      goes where the world can read it, not even into a thread `distributed.csv` says we
+      used before - which is what a `visibility:` edited after handout leaves behind.
+    - otherwise: CREATE for an assignment whose shape HAS a Feedback issue and whose shape
+      was read from a real definition; FIND for every other one, which is what keeps a
+      cohort handed out before these shapes existed (Maths a1) receiving its feedback
+      where it was told to read it."""
+    if listed is None:
+        return THREAD_FIND
+    row = listed.get(repo)
+    if row is None:
+        return THREAD_FIND if spec.creates_unit_repos else THREAD_NONE
+    if not listed_is_private(row):
+        return THREAD_NONE
+    if spec.shape_known and spec.has_feedback_issue:
+        return THREAD_CREATE
+    return THREAD_FIND
+
+
 def _feedback_thread(
     spec: SheetSpec,
     cohort_org: str,
@@ -3506,32 +3622,16 @@ def _feedback_thread(
     listed: dict[str, dict] | None,
 ) -> int | IssueLookupFailed | None:
     """The Feedback issue this unit's comment goes on: its number, None where there is
-    none, or `LOOKUP_FAILED` where the question could not be answered.
-
-    Two gates, both off the ONE listing the caller took, and both DELIBERATELY narrow - a
-    listing is a snapshot, and answering "no thread" off it wrongly withholds a mark.
-
-    A repo the listing says is NOT private has no thread, whatever the file still says: a
-    `visibility:` edited after handout must not leave marks in a repo the world can read.
-    A repo the listing does not carry is skipped only where the shape creates no repos to
-    begin with - an external assignment has none, and probing each would be an issues call
-    per student for a certain answer. A `github` repo missing from the listing falls
-    THROUGH and is asked about: it may be a repo created since the listing was taken, and
-    that is exactly the student whose feedback must not be dropped.
-
-    Opening one is then the exception rather than the rule. Only an assignment that HAS a
-    Feedback issue may have one opened; every other shape uses the thread it finds and
-    creates nothing, which is what keeps a cohort handed out before this shipped receiving
-    its feedback where it was told to read it."""
-    if listed is not None and not listed_is_private(listed.get(repo)):
-        return None
-    if listed is not None and repo not in listed and not spec.creates_unit_repos:
+    none, or `LOOKUP_FAILED` where the question could not be answered. The policy above
+    decides which of the three this run is allowed to come back with."""
+    policy = feedback_thread_policy(spec, listed, repo)
+    if policy == THREAD_NONE:
         return None
     return ensure_feedback_issue(
         cohort_org,
         repo,
         feedback_body(spec, unit, members),
-        create=spec.has_feedback_issue,
+        create=policy == THREAD_CREATE,
     )
 
 
@@ -3726,21 +3826,21 @@ def distribute(
             if dry_run:
                 counts["comments"] += 1
                 continue
-            # The LIVE gate first, ahead of the recorded thread: `distributed.csv` says
+            # The POLICY first, ahead of the recorded thread: `distributed.csv` says
             # where this unit's last comment landed, and a repo flipped public since then
             # is a thread the internet can now read. A correction must not be posted into
-            # it on the strength of a row written while it was still private.
-            issue: int | IssueLookupFailed | None = None
-            if listed is None or listed_is_private(listed.get(repo)):
-                # The thread that comment landed on, if there was one: the same issue,
-                # without a listing to get wrong.
-                issue = (
-                    int(known)
-                    if known.isdigit()
-                    else _feedback_thread(
-                        spec, cohort_org, repo, target, members, listed
-                    )
-                )
+            # it on the strength of a row written while it was still private - so the one
+            # answer that means "not here" is taken before the shortcut, not after it.
+            if feedback_thread_policy(spec, listed, repo) == THREAD_NONE:
+                counts["skipped"] += 1
+                continue
+            # The thread that comment landed on, if there was one: the same issue, and no
+            # lookup to pay for it.
+            issue: int | IssueLookupFailed | None = (
+                int(known)
+                if known.isdigit()
+                else _feedback_thread(spec, cohort_org, repo, target, members, listed)
+            )
             if isinstance(issue, IssueLookupFailed):
                 # The listing could not be READ. Opening one here is how a second Feedback
                 # issue appears over the thread the student was told to read, so this unit
@@ -3749,11 +3849,11 @@ def distribute(
                 log_person(f"  [wait] Feedback issue unreadable on {cohort_org}/{repo}")
                 continue
             if issue is None:
-                # No thread to post on: a submission repo that is not there (a student who
-                # never onboarded, a team formed after the handout, an assignment handed in
-                # off GitHub that creates none at all), or one whose shape says it has no
-                # Feedback issue. The mark is in the gradebook either way. Counted, never
-                # named.
+                # Looked, and there is no thread: a submission repo that is not there (a
+                # student who never onboarded, a team formed after the handout, an
+                # assignment handed in off GitHub), or a shape that may use a thread but
+                # never open one. The mark is in the gradebook either way. Counted, never
+                # named - one number in the `Done` line, not a red run.
                 counts["skipped"] += 1
                 continue
             posted = post_marked_comment(
@@ -3821,8 +3921,9 @@ def distribute(
         # `ensure_gradebooks` passes over either rather than redden the nightly sync it now
         # also runs on, so saying so is this run's own job. Distribute is about to write a
         # mark per student, and a header-only students.csv is not a cohort nobody enrolled
-        # in by the time marks exist. Nothing is withheld for it - see `_on_the_roster` -
-        # but the run goes red until somebody fixes the file.
+        # in by the time marks exist: `_on_the_roster` keeps only the books belonging to
+        # somebody the roster knows, so an empty roster drops EVERY mark in the run as
+        # `unknown`. This exit is the only signal that happened.
         return 1 if provisioning_failed or not students else 0
 
     failed_mail, told = (

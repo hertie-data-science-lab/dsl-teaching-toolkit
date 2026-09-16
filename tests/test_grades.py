@@ -584,6 +584,21 @@ def _schedule_with(*slugs: str) -> Schedule:
     )
 
 
+class _ListedPrivate(dict):
+    """A cohort listing that answers "private" for every repo asked of it.
+
+    What `distribute` really sees on a `github` + `private` cohort - the shape every test
+    here but a handful is about - without each of them having to spell a row per unit. The
+    ones that ARE about the listing pass their own, and `listed=None` is the listing that
+    could not be read at all."""
+
+    def get(self, name, default=None):
+        return super().get(name) or repo_row(name)
+
+
+_ANY_PRIVATE = _ListedPrivate()
+
+
 def _distribute(
     monkeypatch,
     tmp_path,
@@ -603,7 +618,7 @@ def _distribute(
     put_files_ok: bool = True,
     course_name=lambda org: "",
     assignment: str = "",
-    listed: dict[str, dict] | None = None,
+    listed: dict[str, dict] | None = _ANY_PRIVATE,
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
@@ -643,15 +658,20 @@ def _distribute(
         "config": [],
         "outbox": [],
         "issues": [],
+        "gradebook_calls": [],
     }
     monkeypatch.setattr(grades, "gh", fake_gh)
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(
-        grades, "ensure_gradebooks", lambda org, dry_run=False, existing=None: 0
+        grades,
+        "ensure_gradebooks",
+        lambda org, dry_run=False, existing=None, **kw: (
+            effects["gradebook_calls"].append(kw) or 0
+        ),
     )
-    # The cohort listing distribute takes to check what each repo's visibility REALLY is.
-    # None is "could not be read", which is the optimistic default every other reader of
-    # this question takes, and what every test that does not care about it gets.
+    # The cohort listing distribute takes to check what each repo is: there, and private.
+    # None is "could not be read", which is a listing nothing may be CREATED on the
+    # strength of (`grades.feedback_thread_policy`).
     monkeypatch.setattr(grades, "listing_by_name", lambda org: listed)
     monkeypatch.setattr(grades, "course_org_for_cohort", lambda org: "COURSE")
     monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: grading)
@@ -1306,10 +1326,155 @@ def test_a_listed_repo_still_gets_its_comment(tmp_path, monkeypatch):
     assert repo == "assignment-1-ada-l"
 
 
-def test_a_listing_that_could_not_be_read_still_opens_the_issue(tmp_path, monkeypatch):
-    # The optimistic default every other reader of this question takes: an API blip must
-    # not hold a whole cohort's feedback back.
-    assert _distribute(monkeypatch, tmp_path, listed=None)["issues"]
+@pytest.mark.parametrize(
+    "shape, listed, want",
+    [
+        # We could not look at all: find the thread the student was told to read, open
+        # nothing on an org nobody could list.
+        ({}, None, grades.THREAD_FIND),
+        # There, and private: the one case a Feedback issue may be OPENED in.
+        ({}, {"assignment-1-ada": "private"}, grades.THREAD_CREATE),
+        # There, and not private. Nothing about a student's marking goes where the world
+        # can read it - not even into a thread we used while it was still private.
+        ({}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
+        ({"visibility": "public"}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
+        # There and private, but a shape with no Feedback issue of its own: the thread a
+        # cohort handed out before these shapes existed still gets its comment.
+        ({"visibility": "public"}, {"assignment-1-ada": "private"}, grades.THREAD_FIND),
+        (
+            {"visibility": "student_choice"},
+            {"assignment-1-ada": "private"},
+            grades.THREAD_FIND,
+        ),
+        (
+            {"submit_via": "external"},
+            {"assignment-1-ada": "private"},
+            grades.THREAD_FIND,
+        ),
+        # Not in the listing. A `github` repo may have been created since it was taken -
+        # that is exactly the student whose feedback must not be dropped - where a shape
+        # that creates no repos has none to find, and probing each would be an issues call
+        # per student for an answer already known.
+        ({}, {"grades-ada": "private"}, grades.THREAD_FIND),
+        ({"submit_via": "external"}, {"grades-ada": "private"}, grades.THREAD_NONE),
+    ],
+)
+def test_the_feedback_thread_policy_answers_every_shape(shape, listed, want):
+    # ONE question - may this run touch a Feedback issue here, and may it open one? - and
+    # one place that answers it, because the grade comment and the receipts both ask.
+    spec = grades.SheetSpec(slug="assignment-1", title="A1", is_group=False, **shape)
+    rows = (
+        None
+        if listed is None
+        else {name: repo_row(name, visibility=v) for name, v in listed.items()}
+    )
+    assert grades.feedback_thread_policy(spec, rows, "assignment-1-ada") == want
+
+
+def test_a_spec_read_off_the_sheet_alone_never_opens_an_issue():
+    # No schedule entry, so no definition: `submit_via` and `visibility` are this spec's
+    # defaults rather than anybody's decision, and the one thing a guess may not do is
+    # open a Feedback issue in a student's repo. Its marks still reach the thread it finds.
+    spec = grades._spec_from_sheet("assignment-1", {"submissions": {}})
+    rows = {"assignment-1-ada": repo_row("assignment-1-ada")}
+    assert (
+        grades.feedback_thread_policy(spec, rows, "assignment-1-ada")
+        is grades.THREAD_FIND
+    )
+
+
+def test_distribute_provisions_the_gradebooks_with_no_time_budget(
+    tmp_path, monkeypatch
+):
+    # The nightly sync is the ONE caller that bounds `ensure_gradebooks`. This run is
+    # about to write a mark into every one of these repos, so one it stopped short of
+    # would be a 404 per student in a public log, not a batch for tomorrow.
+    assert _distribute(monkeypatch, tmp_path)["gradebook_calls"] == [{}]
+
+
+def test_a_repo_flipped_public_gets_no_comment_on_the_recorded_thread_either(
+    tmp_path, monkeypatch
+):
+    # `distributed.csv` says where this unit's last comment landed, and a repo flipped
+    # public since then is a thread the internet can now read. The live answer is taken
+    # BEFORE the shortcut, or a correction lands in it on the strength of a row written
+    # while the repo was still private.
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, cfg_files, _d),) = first["config"]
+    corrected = _SHEET.replace("score_individual: 43", "score_individual: 45")
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": corrected},
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        listed={
+            "assignment-1-ada-l": repo_row("assignment-1-ada-l", visibility="public")
+        },
+        found_issue=9,
+    )
+    assert again["comments"] == [] and again["issues"] == []
+    assert again["rc"] == 0  # the mark is in the gradebook; this is not a failure
+
+
+def test_an_external_unit_with_no_repo_is_counted_and_leaves_the_run_green(
+    tmp_path, monkeypatch, capsys
+):
+    # Maths a1's shape on a tick whose listing failed: the lookup is made (it is the only
+    # way to reach an issue a cohort already has), the repo is not there, and a 404 is an
+    # answer rather than a failure - one count in the `Done` line, no red X.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        grading=_GRADING_YML + "submit_via: external\n",
+        listed=None,
+    )
+    assert out["comments"] == [] and out["issues"] == [] and out["rc"] == 0
+    assert '"skipped": 1' in capsys.readouterr().out
+
+
+def test_a_gradebook_this_run_creates_goes_into_the_listing_it_was_handed(monkeypatch):
+    # The handout provisions the gradebooks off the tick's rows, so a gradebook made here
+    # has to be in them: the next release of the same tick reads those rows, and would
+    # otherwise create it again and count GitHub's refusal as a failure.
+    monkeypatch.setattr(grades, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    existing: dict[str, dict] = {}
+    assert grades.provision_one("COHORT", "ada-l", existing) == "ok"
+    row = existing["grades-ada-l"]
+    assert (row["name"], row["visibility"]) == ("grades-ada-l", "private")
+    assert (row["isTemplate"], row["archived"], row["topics"]) == (False, False, [])
+    assert row["pushed_at"]
+    # And the second pass over those rows makes nothing.
+    monkeypatch.setattr(
+        grades, "create_repo", lambda *a, **k: pytest.fail("made twice")
+    )
+    assert grades.provision_one("COHORT", "ada-l", existing) == "skipped"
+
+
+def test_a_listing_that_could_not_be_read_uses_a_thread_but_opens_none(
+    tmp_path, monkeypatch
+):
+    # An API blip must not hold a whole cohort's feedback back - the thread each student
+    # was told to read is still theirs, and the comment goes on it. But nothing is OPENED
+    # on an org nobody could list: the one repo whose visibility we cannot check is
+    # exactly the one a Feedback issue must not appear in, and a second issue over a
+    # thread they are already reading is not recoverable.
+    out = _distribute(monkeypatch, tmp_path, listed=None, found_issue=7)
+    assert [repo for repo, _body, _marker in out["comments"]] == ["assignment-1-ada-l"]
+    assert out["issues"] == []
+
+
+def test_a_listing_that_could_not_be_read_opens_nothing_and_skips(
+    tmp_path, monkeypatch, capsys
+):
+    # And where there is no thread to find either, the mark is simply not posted: it is in
+    # the gradebook, the count says how many, and the run stays green.
+    out = _distribute(monkeypatch, tmp_path, listed=None)
+    assert out["comments"] == [] and out["issues"] == [] and out["rc"] == 0
+    assert '"skipped": 1' in capsys.readouterr().out
 
 
 # A handle no roster row claims. A sheet is hand-typed, and the demo org carried six of
@@ -1544,12 +1709,16 @@ def test_a_github_repo_missing_from_the_listing_is_still_asked_about(
     # A listing is a SNAPSHOT: a repo created since it was taken is absent from it, and
     # that is exactly the student whose feedback must not be silently dropped. Only a
     # shape that creates no repos at all is answered off the listing's silence.
+    # `found_issue` is what a LOOKUP answers; `issues` is what was OPENED, and a repo the
+    # listing cannot vouch for is one nothing may be opened in.
     out = _distribute(
         monkeypatch,
         tmp_path,
         listed={"grades-ada-l": repo_row("grades-ada-l")},
+        found_issue=7,
     )
     assert [repo for repo, _body, _marker in out["comments"]] == ["assignment-1-ada-l"]
+    assert out["issues"] == []
 
 
 def test_an_external_assignment_never_probes_a_repo_nobody_created(

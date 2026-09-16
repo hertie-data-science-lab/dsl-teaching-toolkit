@@ -4992,21 +4992,28 @@ def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
     monkeypatch.setenv("DSL_VERBOSE", "1")
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     assert [repo for repo, _body, _dry in posted] == ["assignment-1-ben-k"]
-    assert "assignment-1-ada-l - it is not private" in capsys.readouterr().out
+    assert "assignment-1-ada-l - not a known private repo" in capsys.readouterr().out
 
 
-def test_a_repo_missing_from_the_listing_is_treated_as_private(monkeypatch):
-    # The listing is best-effort: a tick that could not take one, or a repo created since
-    # it was taken, must not silently stop every receipt the assignment owes.
+@pytest.mark.parametrize("listing", [{}, None])
+def test_a_repo_the_listing_cannot_vouch_for_waits_for_its_receipt(
+    monkeypatch, listing
+):
+    # A receipt is the one thing that would OPEN a thread nobody has asked for, so it
+    # takes the strongest answer the policy gives: this repo is in the listing and the
+    # listing says it is private. A repo the listing does not carry, and a listing that
+    # could not be read at all, are both "we could not look" - and a receipt posted on
+    # that guess is a submission time in a repo that may since have gone public. The sheet
+    # is the record either way, and the gradebook carries the feedback.
     _sheet_env(
         monkeypatch,
         targets=SOLO_TARGETS[:1],
         pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
     )
-    monkeypatch.setattr(collect, "listing_by_name", lambda org: {})
+    monkeypatch.setattr(collect, "listing_by_name", lambda org: listing)
     posted = _receipt_env(monkeypatch)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
-    assert [repo for repo, _body, _dry in posted] == ["assignment-1-ada-l"]
+    assert posted == []
 
 
 def test_the_public_log_counts_receipts_and_names_no_submission_repo(
@@ -5682,6 +5689,53 @@ def test_a_listing_that_could_not_be_read_reports_nothing_and_keeps_the_rest(
     # file's digest for either, since every other fault in it was read from the template.
     found = _visibility_run(monkeypatch, "visibility: public\nmystery: 4\n", None)
     assert [f.field for f in found] == ["mystery"]
+
+
+def test_a_scheduled_solution_for_repos_that_are_not_private_is_a_fault(monkeypatch):
+    # The handout refuses to push the model answer into repos it cannot promise are
+    # private, so a `solution_datetime:` on such an assignment is a moment that passes and
+    # releases nothing. The plan and the definition are two files edited by two people, so
+    # nothing else would ever notice they disagree.
+    from dsl_course.schedule import AssignmentEntry
+
+    monkeypatch.setattr(
+        grades, "_grading_text", lambda course, template: "visibility: public\n"
+    )
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=DUE_AT,
+                solution_datetime=DUE_AT,
+            )
+        }
+    )
+    found: list = []
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, None)
+    (fault,) = found
+    assert fault.field == "visibility"
+    assert "solution_datetime" in fault.what and "public" in fault.what
+    assert "schedule.yml" in fault.fix_text
+
+
+def test_a_private_assignment_may_schedule_its_solution(monkeypatch):
+    monkeypatch.setattr(grades, "_grading_text", lambda course, template: "")
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    from dsl_course.schedule import AssignmentEntry
+
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=DUE_AT,
+                solution_datetime=DUE_AT,
+            )
+        }
+    )
+    found: list = []
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, None)
+    assert found == []
 
 
 def test_the_listings_own_word_is_what_is_compared(monkeypatch):

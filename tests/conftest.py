@@ -55,6 +55,7 @@ def repo_row(name: str, **extra) -> dict:
         "url": f"https://github.com/org/{name}",
         "isTemplate": False,
         "archived": False,
+        "pushed_at": "",
         "topics": [],
         **extra,
     }

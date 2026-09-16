@@ -56,6 +56,10 @@ world-readable - portfolio work such as a hackathon. There is then **no Feedback
 and feedback go to their private `grades-<handle>` gradebook, and the assignment's page on
 the cohort site says the repo is public before they push anything into it.
 
+No **model solution** is pushed into these repos, whatever `include_solution` or
+`solution_datetime:` says - publishing the answers is not something a later run could take
+back - so it stays on the template's `solution` branch for the teaching team.
+
 GitHub turns **secret scanning and push protection** on for a public repository itself, so
 every one of these repos has both from the moment it is created. If a student pushes
 something that looks like a credential, GitHub refuses the push and prints a link; opening
@@ -69,6 +73,9 @@ credential rather than bypass the block.
 own, which is the only permission that carries GitHub's visibility switch. There is no
 Feedback issue (the repo may be public tomorrow): marks and feedback go to their private
 `grades-<handle>` gradebook.
+
+No model solution is pushed into these repos either, for the same reason: the student may
+publish the repo the day after the cutoff, and the answers would go with it.
 
 Until the assignment's **grading cutoff** the scheduler puts any of these repos back to
 private on its next tick, and the assignment's page on the cohort site says so. After the

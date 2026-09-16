@@ -240,8 +240,9 @@ def _execute_nondeploy(
             # template, and the tick knows which it is firing - so it says, rather than
             # letting the far end pick the first and hand out the other one's repos.
             slug=release.assignment_slug,
-            # The tick's listing, for the shape that creates no repos: its sheet and its
-            # gradebooks are all it has. The arm that creates repos re-lists for itself.
+            # The tick's ONE listing of the cohort, which this handout both reads
+            # and adds every repo it creates to - so the next release in this same tick
+            # sees them (see `assign.provision_all`).
             listing=listing,
         )
         if failed != 0:
@@ -262,7 +263,7 @@ def _snapshot_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None = None,
+    listing: dict[str, dict] | None,
 ) -> int:
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
@@ -271,9 +272,9 @@ def _snapshot_passed_deadlines(
     What was frozen is NOT returned: the snapshot file itself is the handoff to the
     autograde phase, which runs in another job (and so another process) entirely.
 
-    `listing` is the tick's own (see `run`), read for `pushed_at`. `{}` is the degraded
-    answer a listing that could not be read leaves behind, and the freeze goes on without
-    it - which is why every assignment frozen in one tick shares one listing or none."""
+    `listing` is the tick's own (see `run`), read for `pushed_at`. None is "it could not
+    be read", handed down as None rather than as an empty org: every reader has its own
+    answer to not knowing, and the freeze's is to take a listing of its own."""
     errors = 0
     for slug, deadline in due_snapshots(course_org, sched, now):
         entry = sched.assignments[slug]
@@ -305,7 +306,7 @@ def _snapshot_passed_deadlines(
             is_group=is_group,
             teams_key=slug,
             tz=sched.timezone,
-            listing=listing or {},
+            listing=listing,
         )
         if result is SnapshotResult.FAILED:
             errors += 1
@@ -399,7 +400,7 @@ def _run_releases(
     cohort_org: str,
     due: list[Release],
     now: datetime,
-    listing: dict[str, dict] | None = None,
+    listing: dict[str, dict] | None,
 ) -> int:
     """Fire every due release's due actions, then sync the site once. Returns the error
     count. `now` gates each action individually: a deploy with its own deploy_datetime
@@ -630,7 +631,7 @@ def _config_faults(
     course_org: str,
     cohort_org: str,
     sched: schedule.Schedule,
-    listing: dict[str, dict] | None = None,
+    listing: dict[str, dict] | None,
 ) -> dict:
     """Every hand-edited file in this cohort's classroom-config EXCEPT schedule.yml, and
     what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
@@ -770,7 +771,7 @@ def _preflight_configs(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None = None,
+    listing: dict[str, dict] | None,
 ) -> int:
     """Check every hand-edited file in this cohort's classroom-config and keep one digest
     issue per file in step. Always returns 0.
@@ -868,7 +869,7 @@ def _refresh_sheets(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None = None,
+    listing: dict[str, dict] | None,
 ) -> int:
     """Keep every open assignment's grading sheet current: one pass, after the freeze.
 
@@ -913,7 +914,7 @@ def _refresh_sheets(
             template,
             is_group=is_group,
             now=now,
-            listing=listing or {},
+            listing=listing,
         ).written:
             errors += 1
     return errors
@@ -1149,7 +1150,7 @@ def _reprivatise_student_repos(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None = None,
+    listing: dict[str, dict] | None,
 ) -> int:
     """Put every `visibility: student_choice` repo back to private that has been published
     BEFORE its grading cutoff. Returns the error count.
@@ -1219,8 +1220,8 @@ def _release_phase(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    verdict: cadence.Verdict | None = None,
-    listing: dict[str, dict] | None = None,
+    verdict: cadence.Verdict | None,
+    listing: dict[str, dict] | None,
 ) -> int:
     """Snapshot every passed deadline, refresh every open grading sheet, pre-flight the
     plan's sources, and fire everything now due. Returns the error count. No grading: see
@@ -1344,14 +1345,19 @@ def run(
         # ONE listing of the cohort for the whole tick, taken here at the start of it and
         # handed to every pass that asks a question of the org: the freeze's `pushed_at`,
         # the sheet refresh's receipts, the grading-config digest's "what did this
-        # assignment actually hand out?", and the shape of handout that creates no repos.
-        # Each used to take one of its own, so the cost grew with the number of ASSIGNMENTS
-        # a cohort carries rather than with the number of cohorts. The one arm that still
-        # lists for itself is the repo-creating handout, which needs rows newer than this
-        # (see `assign.provision_all`).
+        # assignment actually hand out?", the student_choice re-privatise, and both arms of
+        # every handout. Each used to take one of its own, so the cost grew with the number
+        # of ASSIGNMENTS a cohort carries rather than with the number of cohorts.
         #
-        # None is "we could not look", and it is the answer each pass reads in its own way:
-        # the digest reports nothing, the freeze and the sheets go on without `pushed_at`.
+        # It is MUTABLE, and the handouts write back into it every repo and gradebook they
+        # create (`discovery.listing_row`): a tick fires every handed-out release, so the
+        # second one has to see what the first just made or it makes it again and counts
+        # GitHub's refusals as failures. That is what keeps this at one listing per tick.
+        #
+        # None is "we could not look", and it is handed down AS None - never as an empty
+        # org - because each pass reads it in its own way: the digest reports nothing, the
+        # freeze and the sheets take a listing of their own, the re-privatise flips
+        # nothing, and no receipt is posted on a repo nobody could confirm is private.
         # Not taken for the autograde phase, which asks the org nothing.
         listing = discovery.listing_by_name(cohort_org)
         errors += _release_phase(

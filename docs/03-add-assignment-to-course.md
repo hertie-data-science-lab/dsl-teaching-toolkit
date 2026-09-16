@@ -172,7 +172,10 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 | | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |
 
 A `public` or `student_choice` repo gets **no Feedback issue**: marks and feedback go only
-to the student's private `grades-<handle>` repo. Students who want their own work public on
+to the student's private `grades-<handle>` repo, and no **model solution** is ever pushed
+into one - the answers would be published with the repo, so an assignment that is not
+`private` keeps its model answer on the template's `solution` branch (the digest says so if
+its `schedule.yml` entry asks for a solution release anyway). Students who want their own work public on
 a `private` assignment publish a copy under their own account (the gradebook README tells
 them how); the org's copy stays private.
 

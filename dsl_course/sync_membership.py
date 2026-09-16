@@ -48,12 +48,12 @@ from .discovery import (
     discover_assignments,
     discover_cohorts,
     discover_content_repos,
-    list_org_repos,
+    listing_by_name,
 )
 from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login
-from .grades import ensure_gradebooks, write_team_lock
+from .grades import GRADEBOOK_BUDGET_MINUTES, ensure_gradebooks, write_team_lock
 from .log import log_err, log_ok
 
 # What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -150,7 +150,13 @@ def sync(
             # question of it - which submission repos an off-boarded student still holds a
             # grant on, and which students have no gradebook yet - and each used to take a
             # paginated listing of its own, nightly, per cohort.
-            existing = list_org_repos(org)
+            #
+            # `listing_by_name` and not `list_org_repos`: this is taken before the roster
+            # reconcile rather than inside it, and a listing that RAISED here would have
+            # skipped the whole cohort - enrolment included - over rows only the prune and
+            # the gradebooks need. None is "we could not look", and each of them answers
+            # it for itself.
+            existing = listing_by_name(org)
             errors += sync_roster.sync(
                 org, prune=True, dry_run=dry_run, existing=existing
             )
@@ -167,8 +173,14 @@ def sync(
             # rather than from the first distribute: it is where feedback goes for every
             # shape that has no Feedback issue, and the assignment brief points at it from
             # the day it is published. Idempotent, one cohort listing.
+            # The ONE caller that bounds it: this run has 30 minutes for every cohort
+            # at once and nothing waiting on the repos it makes, so a cohort that would
+            # overrun stops and the next night takes the next batch.
             errors += ensure_gradebooks(
-                org, dry_run=dry_run, existing={r["name"]: r for r in existing}
+                org,
+                dry_run=dry_run,
+                existing=existing,
+                budget_minutes=GRADEBOOK_BUDGET_MINUTES,
             )
         except _CONTENT_FAULT as exc:
             # A file faculty have to fix, not a run that broke. This cohort is skipped -

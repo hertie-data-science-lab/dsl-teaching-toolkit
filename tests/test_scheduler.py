@@ -1102,6 +1102,7 @@ def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
         sched,
         datetime(2026, 10, 17, tzinfo=timezone.utc),
         False,
+        None,
     )
     assert refreshed == [("assignment-1", "assignment-1")]
 
@@ -1409,13 +1410,23 @@ def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
     assert refreshed == [("assignment-1", "assignment-1")]
 
 
-def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch):
+@pytest.mark.parametrize(
+    "rows",
+    [
+        {"a-ada": {"name": "a-ada", "visibility": "private"}},
+        # A listing that could not be READ reaches every one of them as None, never as an
+        # empty org: `{}` says this cohort holds no repos, and a pass that read a failure
+        # as that answer would post no receipt into a repo it could have, flip nothing
+        # back to private, and report a handed-out assignment as never handed out.
+        None,
+    ],
+)
+def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch, rows):
     # The freeze's `pushed_at`, the sheet refresh's receipts, the grading-config digest's
-    # "what did this assignment actually hand out?" and the shape of handout that creates
-    # no repos all ask the same org the same question. Each used to take a listing of its
-    # own, so the cost grew with the number of ASSIGNMENTS a cohort carries; it is now one
-    # per cohort per tick, and it is the SAME rows every pass reads.
-    rows = {"a-ada": {"name": "a-ada", "visibility": "private"}}
+    # "what did this assignment actually hand out?" and both arms of every handout all ask
+    # the same org the same question. Each used to take a listing of its own, so the cost
+    # grew with the number of ASSIGNMENTS a cohort carries; it is now one per cohort per
+    # tick, and it is the SAME rows every pass reads.
     taken: list[str] = []
     monkeypatch.setattr(
         scheduler.discovery,
@@ -1920,7 +1931,7 @@ def test_run_releases_counts_a_raised_site_sync(monkeypatch):
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
     due = [_r("wk1", WHEN, deploy=[Deploy("cm", "lectures/01", "materials", None)])]
-    assert scheduler._run_releases("Course-Org", "Cohort-Org", due, WHEN) == 1
+    assert scheduler._run_releases("Course-Org", "Cohort-Org", due, WHEN, None) == 1
 
 
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
@@ -2704,7 +2715,7 @@ def test_the_snapshot_pass_reads_each_passed_deadline_once(monkeypatch):
         **{"assignment-1": _due(13), "assignment-2": _due(14)},
     )
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False) == 1
+    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False, None) == 1
     assert reads == ["assignment-1", "assignment-2"], "one read per passed deadline"
 
 
@@ -2727,7 +2738,7 @@ def test_neither_deadline_pass_touches_an_assignment_with_nothing_to_collect(
     monkeypatch.setattr(scheduler, "has_autograde_results", boom)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False) == 0
+    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False, None) == 0
     assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     # The cutoff itself has still passed - that is what the sheet refresh reads this for.
     assert scheduler.due_snapshots("C", sched, now) != []
@@ -2763,7 +2774,7 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    errors = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
+    errors = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False, None)
     errors += scheduler._autograde_passed_deadlines("C", "K", sched, now, False)
     return errors, graded
 
@@ -2960,7 +2971,7 @@ def _config_preflight(
         lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
     )
     rc = scheduler._preflight_configs(
-        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False, None
     )
     return rc, synced, mailed
 
@@ -3051,7 +3062,7 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
     )
     monkeypatch.setattr(scheduler.config_digest, "sync", boom)
     rc = scheduler._preflight_configs(
-        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False, None
     )
     assert rc == 0
 

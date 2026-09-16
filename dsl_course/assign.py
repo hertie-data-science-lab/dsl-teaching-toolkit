@@ -68,7 +68,13 @@ from .course import (
     submission_repo,
     visibility_is_students,
 )
-from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, classify_repos, list_org_repos
+from .discovery import (
+    ASSIGNMENT_TEMPLATE_TOPIC,
+    classify_repos,
+    list_org_repos,
+    listing_by_name,
+    listing_row,
+)
 from .fs import copy_tree
 from .gh_contents import (
     blob_sha,
@@ -132,33 +138,12 @@ def _wait_for_content(
     return False
 
 
-def _org_listing(cohort_org: str) -> list[dict] | None:
-    """One paginated listing of the cohort org, or None when it could not be read.
-
-    Both stages below ask the same question of it - "is this repo already there, and is it
-    already in the state we would otherwise write?" - and asking GitHub repo by repo cost a
-    GET per student per assignment on every hourly tick (a 400-student cohort carrying
-    three assignments: ~1,200 reads an hour, where one listing costs three).
-
-    None means the listing itself failed, and each caller falls back to its own per-repo
-    probe. The listing is an optimisation, not a new way for a handout to fail: a rate
-    limit here must not stop the students who onboarded this hour from getting their repos.
-    """
-    try:
-        return list_org_repos(cohort_org)
-    except RuntimeError as exc:
-        log_err(
-            f"could not list {cohort_org}'s repos - falling back to a probe per repo: {exc}"
-        )
-        return None
-
-
 def _template_is_ready(entry: dict | None, slug: str) -> bool:
     """Whether an existing cohort template already carries everything the repair in
     `ensure_cohort_template` would write.
 
-    `entry` is that repo's row in `_org_listing`'s listing (None when there is no listing,
-    or no such repo). The topics are the LAST thing the repair writes and the flag the
+    `entry` is that repo's row in the caller's listing (None when there is no listing, or
+    no such repo). The topics are the LAST thing the repair writes and the flag the
     second, so a repo carrying both has been through a complete repair - which is also why
     this needs no content check of its own: `_wait_for_content` gates both writes."""
     if entry is None:
@@ -277,17 +262,16 @@ def ensure_cohort_template(
     template: str,
     cohort_org: str,
     slug: str,
-    listing: list[dict] | None = None,
+    listing: dict[str, dict] | None = None,
 ) -> str | None:
     """Stage 1: freeze a cohort-level template repo (named `<slug>`) from the course
     template, so the cohort has its own copy and per-student repos generate from it
     (the role Classroom 50's classroom template used to play). Returns the cohort
-    template name, or None on failure. Idempotent."""
-    entry = (
-        next((r for r in listing if r["name"] == slug), None)
-        if listing is not None
-        else None
-    )
+    template name, or None on failure. Idempotent.
+
+    `listing` is the cohort's repos keyed by name, off the ONE listing its caller holds
+    (`discovery.listing_by_name`); None means there is none, and this probes for itself."""
+    entry = listing.get(slug) if listing is not None else None
     exists = entry is not None if listing is not None else repo_exists(cohort_org, slug)
     if exists:
         log_skip(f"cohort template {cohort_org}/{slug}")
@@ -343,13 +327,23 @@ def ensure_cohort_template(
     # as the record that this assignment went out, and the site withholds the brief until
     # it does. So a failure here is said out loud with its consequence attached rather than
     # dropped - the hand-out itself succeeded, and failing it now would be worse.
-    if not set_repo_topics(cohort_org, slug, [slug, ASSIGNMENT_TEMPLATE_TOPIC]):
+    stamped = set_repo_topics(cohort_org, slug, [slug, ASSIGNMENT_TEMPLATE_TOPIC])
+    if not stamped:
         log_err(
             f"  ! {cohort_org}/{slug} carries no `{ASSIGNMENT_TEMPLATE_TOPIC}` topic. That "
             f"topic is what the cohort site reads as the record that {slug} was handed "
             f"out, so its brief stays withheld there until the topic is set by hand (or "
             f"its `handout_datetime` passes)."
         )
+    if listing is not None and slug not in listing:
+        # Written back into the caller's rows, as the repair above leaves it: whatever
+        # reads them after this - the units below, the next release of the same tick -
+        # finds the template this run froze rather than freezing it a second time
+        # (`discovery.listing_row`).
+        listing[slug] = listing_row(cohort_org, slug) | {
+            "isTemplate": True,
+            "topics": [slug, ASSIGNMENT_TEMPLATE_TOPIC] if stamped else [],
+        }
     return slug
 
 
@@ -757,11 +751,15 @@ def provision_one(
     - on the collaborator and on the team alike, because a team project belongs to all of
     its members and a repo only one of them could publish is not theirs.
 
-    `existing` is the cohort's repos off ONE listing (`_org_listing`), keyed by name;
-    membership in it answers "does this repo already exist?" without a GET per student,
-    and each row carries the `topics` that `_tag_submission` converges off. None - no
-    listing to hand - falls back to probing this one repo, and skips that convergence
+    `existing` is the cohort's repos off ONE listing (`discovery.listing_by_name`), keyed
+    by name; membership in it answers "does this repo already exist?" without a GET per
+    student, and each row carries the `topics` that `_tag_submission` converges off. None -
+    no listing to hand - falls back to probing this one repo, and skips that convergence
     rather than paying a read per student for it.
+
+    A repo this call CREATES is written back into it (`discovery.listing_row`), so the
+    listing stays true for everything that reads it after this: the caller's own gradebook
+    pass, and the next assignment of the same tick.
 
     `touch_existing=False` (the hourly scheduler): a repo that already exists, with no
     solution due, is left exactly as it is - no access re-grant, no team reconcile. The
@@ -831,6 +829,8 @@ def provision_one(
             cohort_org, repo, "public", person=True
         ):
             visibility_failed = True
+        if existing is not None:
+            existing[repo] = listing_row(cohort_org, repo, visibility)
         _tag_submission(cohort_org, repo, slug, set())
         # The Feedback issue, on the CREATE path only. It is where every receipt and,
         # eventually, the grade is posted, so the student is told at handout where to
@@ -917,46 +917,43 @@ def provision_one(
                 f"  ! team {team} is missing member(s) - they cannot see "
                 f"{cohort_org}/{repo}",
             )
-        # A failed solution push WINS over every other fault here. provision_all writes the
-        # FIRE-ONCE solution marker off these statuses, so a repo that reported any other
-        # failure had its missing solution forgotten - and the marker guaranteed no later
-        # tick would retry. Every other fault below is persistent and unrelated to the
-        # push; only this one must reach `failed-solution`.
-        if solution_failed:
-            return "failed-solution"
-        if not access_ok:
-            return "failed-no-access"
-        if not team_ok:
-            return "failed-team-members"
-        if visibility_failed:
-            return "failed-visibility"
-        if feedback_failed:
-            return "failed-no-feedback-issue"
-        return "skipped" if existed else "ok"
-
-    # Ordering hazard (individual path): granting a repo collaborator BEFORE the student has
-    # accepted their org invite records them as an OUTSIDE collaborator, which can make a
-    # later team-based add 422 forever. The individual flow is collaborator-based by design
-    # (see the module docstring - groups are the team-based path), and onboarding normally
-    # accepts the org invite first, so this stays a direct grant; the group path already
-    # routes access through the team to avoid the wedge.
-    added = 0
-    for handle in handles:
-        if add_collaborator(
-            cohort_org, repo, handle, permission=permission, person=True
-        ):
-            log_person(f"  [ok]   + @{handle} ({permission})")
-            added += 1
-        else:
-            log_err(f"  ! could not add @{handle} (not a real account?)")
-    # Same precedence as the group arm above: a failed solution push wins, because it is
-    # the only fault the fire-once marker must not be written over.
-    if solution_failed:
-        return "failed-solution"
-    if added == 0:
+        access_failure = (
+            "failed-no-access"
+            if not access_ok
+            else "failed-team-members"
+            if not team_ok
+            else ""
+        )
+    else:
+        # Ordering hazard (individual path): granting a repo collaborator BEFORE the
+        # student has accepted their org invite records them as an OUTSIDE collaborator,
+        # which can make a later team-based add 422 forever. The individual flow is
+        # collaborator-based by design (see the module docstring - groups are the
+        # team-based path), and onboarding normally accepts the org invite first, so this
+        # stays a direct grant; the group path already routes access through the team to
+        # avoid the wedge.
+        added = 0
+        for handle in handles:
+            if add_collaborator(
+                cohort_org, repo, handle, permission=permission, person=True
+            ):
+                log_person(f"  [ok]   + @{handle} ({permission})")
+                added += 1
+            else:
+                log_err(f"  ! could not add @{handle} (not a real account?)")
         # A repo nobody can open is a failed handout - "failed" is what the exit code
         # keys on (see provision_all), so the run goes red rather than quietly ok.
-        return "failed-no-collaborator"
+        access_failure = "failed-no-collaborator" if added == 0 else ""
+
+    # ONE status tail for both arms, in one precedence. A failed solution push WINS over
+    # every other fault: provision_all writes the FIRE-ONCE solution marker off these
+    # statuses, so a repo that reported any other failure had its missing solution
+    # forgotten - and the marker guaranteed no later tick would retry. Every other fault
+    # here is persistent and unrelated to the push.
+    if solution_failed:
+        return "failed-solution"
+    if access_failure:
+        return access_failure
     if visibility_failed:
         return "failed-visibility"
     if feedback_failed:
@@ -1036,6 +1033,10 @@ def main() -> int:
             solution=args.solution,
             dry_run=bool(args.dry_run),
             slug=args.slug,
+            # ONE listing of the cohort for this press, taken here because there is no
+            # tick above to have taken it: every repo question below is answered off it,
+            # and None (it could not be read) falls back to a probe per repo.
+            listing=listing_by_name(args.cohort_org),
         )
         return rc
     except RuntimeError as exc:
@@ -1121,12 +1122,15 @@ def provision_all(
     different students and keep separate grades, and guessing is a whole cohort's work in
     the wrong place.
 
-    `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
-    already holds (`discovery.listing_by_name`), and it is what the shape that creates NO
-    repos runs on - its sheet and its gradebooks. The arm that DOES create repos takes its
-    own a moment before it creates them (`_org_listing`) and uses that instead: the repos
-    and gradebooks this very tick has already made for an earlier assignment are in it, and
-    a listing taken before any of that would have this one try to create them again."""
+    `listing` is the cohort's repos keyed by name, off the ONE listing its caller already
+    holds - the tick's (`scheduler.run`) or the one the button takes for itself - and BOTH
+    arms run on it: "is this repo already there?" for the cohort template and every unit,
+    and "does this student already have a gradebook?" in the tail. It is also MUTATED,
+    which is what makes one listing enough: every repo this run creates is written back
+    into it (`discovery.listing_row`), so the next assignment of the same tick sees the
+    repos and gradebooks this one just made instead of creating them again and counting
+    GitHub's refusals as failures. None is "we could not look", and each step below falls
+    back to a probe of its own."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
@@ -1278,8 +1282,6 @@ def provision_all(
     # act on. What a handout owes the cohort AROUND the work is the tail, which both share.
     units: list[tuple[str, list[str], str | None]] = []
     results: dict[str, int] = {}
-    # The caller's listing until the repo-creating arm takes its own fresher one below.
-    existing: dict[str, dict] | None = listing
     solution_unavailable = False
     if not gspec.creates_unit_repos:
         log_step(
@@ -1297,6 +1299,19 @@ def provision_all(
         # something, so the sheet in the tail decides it instead.
         changed = False
     else:
+        # NO model solution into repos the toolkit cannot promise are private. `public`
+        # publishes the model answer to the internet and `student_choice` lets any student
+        # publish it, and neither can be taken back - so the stage is skipped whole, and
+        # the FIRE-ONCE marker is deliberately not written for it (`solution_pushed`
+        # below), which leaves an instructor who corrects the shape able to release it on
+        # a later run. The plan and the definition are edited by different people, so the
+        # digest reports the disagreement as well (`grades.grading_spec_faults`).
+        if solution and gspec.visibility != "private":
+            log(
+                f"  (model solution not pushed - {slug}'s repos are public or "
+                f"student-owned, so the answers would be published with them)"
+            )
+            solution = False
         # A provisioning unit is (repo_name, [member handles], team slug), and each carries
         # the body its Feedback issue is opened with. Both are names for a repo, so both
         # belong to the only shape that creates one.
@@ -1338,18 +1353,9 @@ def provision_all(
                 )
             return 0, False
 
-        # ONE listing of the cohort, taken before anything is created, answers "is it
-        # already there?" for the template below, for every unit in stage 2, and for the
-        # gradebooks in the tail. Taken HERE and not handed down from the tick: a tick
-        # fires every handed-out release, so the repos and gradebooks an earlier assignment
-        # in this same tick has just created have to be in it, or this one creates them
-        # again and counts the 422s as failures.
-        own = _org_listing(cohort_org)
-        existing = {r["name"]: r for r in own} if own is not None else None
-
-        # Stage 1: freeze the cohort-level template.
+        # Stage 1: freeze the cohort-level template, off the caller's rows.
         cohort_template = ensure_cohort_template(
-            master_org, template, cohort_org, slug, own
+            master_org, template, cohort_org, slug, listing
         )
         if cohort_template is None:
             log_err("could not create the cohort assignment template.")
@@ -1385,7 +1391,7 @@ def provision_all(
                     sol_dir,
                     team=team,
                     touch_existing=touch_existing,
-                    existing=existing,
+                    existing=listing,
                     feedback_body=feedback_bodies.get(repo, ""),
                     visibility=gspec.visibility,
                 )
@@ -1426,7 +1432,7 @@ def provision_all(
             is_group=group,
             now=datetime.now(timezone.utc),
             units=sheet_units,
-            listing=existing,
+            listing=listing,
         )
         sheet_written = sheet.written
         if not sheet.written:
@@ -1470,7 +1476,7 @@ def provision_all(
         # distribute: the brief points at "your gradebook" from the day it is published,
         # and a student who onboarded this hour has just been given their repo. Idempotent,
         # and off the listing this run already took rather than a second one.
-        grades.ensure_gradebooks(cohort_org, existing=existing)
+        grades.ensure_gradebooks(cohort_org, existing=listing)
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
     # file that doesn't parse raises yaml.YAMLError - which is NOT a RuntimeError. The repos
