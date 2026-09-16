@@ -47,8 +47,11 @@ is the one thing there is not.
     {%- comment -%}
     The shape rides on the sub-hash for the same reason the repo name does. One word,
     because the row is a glance: the assignment's own page carries the sentence about what
-    a public repo means for what a student may commit into it.
+    a public repo means for what a student may commit into it, and about when a repo whose
+    flag the student holds may be published.
     {%- endcomment -%}
-    {%- if include.event.submit_shape == "github-public" %} (public){%- endif -%}
+    {%- if include.event.submit_shape == "github-public" %} (public)
+    {%- elsif include.event.submit_shape == "github-student-choice" %} (yours to publish)
+    {%- endif -%}
     {%- endif -%}
 </div>

@@ -608,6 +608,49 @@ def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
     assert "your public `assignment-1-<your-handle>` repo appears when it is." in out
 
 
+def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
+    # The shape word is what the theme `case`s on, and the due row is a sub-hash that
+    # cannot see its parent's fields - so both levels carry it, kebab-cased like every
+    # other shape however the config spells the value.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A1\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("visibility: student_choice\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count('submit_shape: "github-student-choice"') == 2
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
+
+
+def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch):
+    # The handout creates a PRIVATE repo; `student_choice` is a rule about who may change
+    # that afterwards. The placeholder line would otherwise promise a cohort their
+    # "student_choice repo".
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("visibility: student_choice\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert out.count('submit_shape: "github-student-choice"') == 2
+    assert "your private `assignment-1-<your-handle>` repo appears when it is." in out
+
+
 def test_an_external_assignments_shape_names_no_visibility(monkeypatch):
     # A visibility describes a repo and this shape creates none, so its shape is the bare
     # word: a page that carried a visibility would describe something nobody made.

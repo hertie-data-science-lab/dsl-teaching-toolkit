@@ -55,6 +55,10 @@ PUBLIC = "assignment-4-f2026"
 # External AND still pending, which is the pair of states that reaches no reader: the
 # brief is embargoed until hand-out, so the page may not yet say where the work goes.
 EXTERNAL_PENDING = "assignment-5-f2026"
+# The student's own call (`visibility: student_choice`): the same private repo, but the
+# student is its admin and may publish it once the grading cutoff has passed. Its page has
+# to carry both halves of that, and its due row the one word that says the flag is theirs.
+STUDENT_CHOICE = "assignment-6-f2026"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
 # by construction rather than by when CI happens to run.
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=BERLIN)
@@ -136,7 +140,11 @@ def _grading_spec(_org: str, repo: str):
         return grades.parse_grading_spec(
             f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
         )
-    return grades.parse_grading_spec("visibility: public\n" if repo == PUBLIC else "")
+    if repo == PUBLIC:
+        return grades.parse_grading_spec("visibility: public\n")
+    if repo == STUDENT_CHOICE:
+        return grades.parse_grading_spec("visibility: student_choice\n")
+    return grades.parse_grading_spec("")
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
@@ -211,7 +219,8 @@ def _lectures(hosted: dict) -> dict[str, str]:
 def _assignments() -> dict[str, str]:
     """Every way an assignment says where the work goes: one handed out (repo link, brief,
     README-derived name), one still pending, one handed in off GitHub, one handed in off
-    GitHub but not out yet, and one whose repos are public.
+    GitHub but not out yet, one whose repos are public, and one whose repos the students
+    may publish themselves.
 
     The external ones are handed out by their PIN rather than by a frozen cohort template:
     that handout creates no repos at all, so `handed_out` never carries their name and
@@ -257,6 +266,15 @@ def _assignments() -> dict[str, str]:
             EXTERNAL_PENDING,
             datetime(2026, 12, 22, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 11, 10, 9, 0, tzinfo=BERLIN),
+            now=NOW,
+        ),
+        "06-assignment-6.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            STUDENT_CHOICE,
+            datetime(2027, 1, 12, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handed_out=frozenset({"assignment-6"}),
             now=NOW,
         ),
     }

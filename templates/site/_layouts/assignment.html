@@ -50,7 +50,8 @@ title: page.title
     {%- comment -%}
     `submit_shape` (site.py, off `course.submit_shape` and so off the assignment's own
     grading_config.yml) is the SHAPE in one word - `external`, `github-private`,
-    `github-public`. `external` is handed in off GitHub - Moodle, Kaggle, in class - and NO
+    `github-public`, `github-student-choice`. `external` is handed in off GitHub - Moodle,
+    Kaggle, in class - and NO
     repo is created for it at all. So there is nothing to open and nothing to name: the
     brief below says where the work goes, and `submit_url` puts a button on it when the
     assignment names an address. This block used to print off `repo_url` alone, so a Moodle
@@ -83,6 +84,13 @@ title: page.title
     to be said; saying it in the brief alone leaves it to whoever wrote the brief. It also
     has no Feedback issue (`course.has_feedback_issue`: a thread in a public repo is a
     published mark), which is why that arm is the one that names the gradebook.
+
+    `github-student-choice` is the same repo with the flag handed over: it starts private,
+    the student is its admin, and the toolkit puts it back to private until the grading
+    cutoff has passed (`scheduler._reprivatise_student_repos`). Both halves of that belong
+    HERE - a student who reads only "you are an admin" publishes their work on day one and
+    finds it closed again an hour later - and it has no Feedback issue either, for the
+    reason the public arm does not.
     {%- endcomment -%}
     {% unless page.handout_pending %}
     {% if page.submit_shape == "external" %}
@@ -101,6 +109,10 @@ title: page.title
       read it. Push to <code>main</code> as usual, but commit nothing you would not publish and no data you were told
       to keep private. Your grade and feedback arrive in your private gradebook <code>grades-&lt;your-handle&gt;</code>,
       not here.</p>
+      {% when "github-student-choice" %}
+      <p>Your repo starts private. You are its admin: after the grading cutoff you may make it public from
+      Settings &gt; Danger zone if you want it in your portfolio. Before then the toolkit turns it private again.
+      Your grade and feedback arrive in your private gradebook, not here.</p>
       {% else %}
       <p>Your work goes in your private repo <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit
       as you go, and push to <code>main</code> - that push is your submission.</p>

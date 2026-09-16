@@ -1141,11 +1141,15 @@ def _assignment_entry(
         # "**<what> is not yet released** - <where it will be> when <it is>", bold lead
         # inside italics. They render in the same table column and on adjacent tabs, so
         # they read as one status vocabulary or as two.
+        # The word describes the repo the handout will CREATE, which for the shape whose
+        # flag the students hold is a private one - `student_choice` is a rule about who
+        # may change it later, not a repo anybody is ever handed.
+        born = "private" if spec.visibility_is_students else spec.visibility
         body = (
             f"_**{title} is not yet released** - the brief appears here when it is._"
             if external
             else f"_**{title} is not yet released** - your "
-            f"{spec.visibility} `{repo_name}` repo appears when it is._"
+            f"{born} `{repo_name}` repo appears when it is._"
         )
     title = q(title)
     # After the branch above, which is where a released entry learns its name from the

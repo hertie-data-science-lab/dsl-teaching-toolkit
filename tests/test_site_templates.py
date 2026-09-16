@@ -537,8 +537,33 @@ def test_a_public_assignments_page_warns_before_the_first_push(generated):
     # sentence - so the `data-dsl-repo-url` contract is written once and cannot drift.
     repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
     assert repo_arm.count("data-dsl-repo-url") == 1
-    assert repo_arm.count("{% when ") == 1  # public; private is the `else`
+    # public and student_choice; plain private is the `else`.
+    assert repo_arm.count("{% when ") == 2
     assert "Your work goes in your private repo" in flat
+
+
+def test_a_student_choice_page_says_when_the_repo_may_be_published(generated):
+    # The student is an admin of this repo, so the page has to carry BOTH halves of that:
+    # what they may do, and that the toolkit undoes it until the grading cutoff. A page
+    # that said only the first has a student publishing on day one and finding it closed
+    # again an hour later.
+    page = _front_matter(generated["collections"]["_assignments"]["06-assignment-6.md"])
+    assert page["submit_shape"] == "github-student-choice"
+    assert page["due_event"]["submit_shape"] == "github-student-choice"
+    assert page["repo_name"] == "assignment-6-<your-handle>"
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    assert '{% when "github-student-choice" %}' in layout
+    flat = " ".join(layout.split())
+    assert "Your repo starts private. You are its admin:" in flat
+    assert (
+        "after the grading cutoff you may make it public from Settings &gt; Danger zone"
+        in flat
+    )
+    assert "Before then the toolkit turns it private again." in flat
+    assert "Your grade and feedback arrive in your private gradebook, not here." in flat
+    # And the due row says at a glance that the flag is the student's.
+    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
+    assert '"github-student-choice" %} (yours to publish)' in due_row
 
 
 def test_a_pending_external_assignments_page_offers_nowhere_to_go(generated):
