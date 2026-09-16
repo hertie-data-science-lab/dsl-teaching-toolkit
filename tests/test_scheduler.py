@@ -1445,6 +1445,13 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch)
         "grading_config_faults",
         lambda course, sched, found, listing: seen.update(digest=listing),
     )
+    monkeypatch.setattr(
+        scheduler,
+        "_reprivatise_student_repos",
+        lambda course, cohort, sched, now, dry_run, listing: (
+            seen.update(reprivatise=listing) or 0
+        ),
+    )
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: True)
     handed = AssignmentEntry(
@@ -1467,7 +1474,7 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch)
         "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
     )
     assert taken == ["Cohort-f2026"], "one listing per cohort, not one per assignment"
-    assert set(seen) == {"snapshot", "sheet", "digest", "handout"}
+    assert set(seen) == {"snapshot", "sheet", "digest", "handout", "reprivatise"}
     assert all(v is rows for v in seen.values())
 
 
@@ -3529,3 +3536,193 @@ def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
         "Cohort archives on 2027-02-16"
     ]
     assert seen["issues"] == []
+
+
+# ------------------- the repos whose visibility the toolkit gave away, taken back
+#
+# `visibility: student_choice` makes the student `admin` of their own repo so that they
+# can put their work in a portfolio once it has been marked. Until the grading cutoff a
+# published repo is one the rest of the cohort can copy from - so the tick closes it
+# again, off the listing it already holds, and after the cutoff never touches it again.
+
+CUTOFF = datetime(2026, 10, 30, 23, 59, 59, tzinfo=BERLIN)
+
+
+def _choice_rows(*names_and_visibility: tuple[str, str], **extra) -> list[dict]:
+    from conftest import repo_row
+
+    return [repo_row("assignment-1", isTemplate=True)] + [
+        repo_row(name, visibility=vis, **extra) for name, vis in names_and_visibility
+    ]
+
+
+def _reprivatise(
+    monkeypatch,
+    rows,
+    *,
+    now=datetime(2026, 10, 14, tzinfo=BERLIN),
+    visibility="student_choice",
+    dry_run=False,
+):
+    """The pass over one handed-out assignment, with every PATCH it makes recorded."""
+    patched: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(visibility=visibility),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "set_visibility",
+        lambda org, repo, vis, person=False: patched.append((repo, vis)) or True,
+    )
+    sched = _assignments(
+        **{
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                handout_datetime=datetime(2026, 10, 1, 9, 0, tzinfo=BERLIN),
+                due_datetime=CUTOFF,
+            )
+        }
+    )
+    listing = None if rows is None else {r["name"]: r for r in rows}
+    rc = scheduler._reprivatise_student_repos(
+        "Course-Org", "Cohort-f2026", sched, now, dry_run, listing
+    )
+    return rc, patched
+
+
+def test_a_repo_published_before_the_cutoff_is_made_private_again(monkeypatch):
+    rc, patched = _reprivatise(
+        monkeypatch,
+        _choice_rows(
+            ("assignment-1-ada-l", "public"), ("assignment-1-ben-k", "private")
+        ),
+    )
+    assert rc == 0
+    # One PATCH, for the one repo whose row says public. Nothing is read of its own: the
+    # tick's listing already carries every row's visibility.
+    assert patched == [("assignment-1-ada-l", "private")]
+
+
+def test_the_public_log_counts_the_repos_and_never_names_one(monkeypatch, capsys):
+    # `<slug>-<handle>` is a student's handle and this line goes into a PUBLIC workflow
+    # log, so the count is what is printed and the names go to `log_person`.
+    _reprivatise(monkeypatch, _choice_rows(("assignment-1-ada-l", "public")))
+    out = capsys.readouterr().out
+    assert "1 repo(s) published before the cutoff" in out
+    assert "ada-l" not in out
+
+
+def test_after_the_cutoff_the_students_own_flag_stands(monkeypatch):
+    # The whole point of the shape: the assignment page promises a student their repo is
+    # theirs to publish once it has been marked, and a pass that kept flipping it back
+    # would make that promise false.
+    _rc, patched = _reprivatise(
+        monkeypatch,
+        _choice_rows(("assignment-1-ada-l", "public")),
+        now=CUTOFF + timedelta(minutes=1),
+    )
+    assert patched == []
+
+
+def test_a_repo_that_is_already_private_is_never_patched(monkeypatch):
+    _rc, patched = _reprivatise(
+        monkeypatch, _choice_rows(("assignment-1-ada-l", "private"))
+    )
+    assert patched == []
+
+
+def test_an_archived_repo_is_left_alone(monkeypatch):
+    # Read-only, so the PATCH would 403 on every tick for the rest of the term.
+    _rc, patched = _reprivatise(
+        monkeypatch, _choice_rows(("assignment-1-ada-l", "public"), archived=True)
+    )
+    assert patched == []
+
+
+@pytest.mark.parametrize("visibility", ["private", "public"])
+def test_no_other_shape_has_its_visibility_touched(monkeypatch, visibility):
+    # A `public` assignment's repos are public because the assignment said so; a `private`
+    # one's disagreement is a digest fault, not something this pass corrects behind
+    # somebody's back.
+    _rc, patched = _reprivatise(
+        monkeypatch,
+        _choice_rows(("assignment-1-ada-l", "public")),
+        visibility=visibility,
+    )
+    assert patched == []
+
+
+def test_a_listing_that_could_not_be_read_flips_nothing(monkeypatch):
+    # "We could not look" is not "nothing is public": guessing either way costs a PATCH
+    # per student per tick, or a cohort's work left open.
+    assert _reprivatise(monkeypatch, None) == (0, [])
+
+
+def test_a_dry_run_flips_nothing(monkeypatch):
+    _rc, patched = _reprivatise(
+        monkeypatch, _choice_rows(("assignment-1-ada-l", "public")), dry_run=True
+    )
+    assert patched == []
+
+
+def test_a_failed_patch_is_counted(monkeypatch):
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(visibility="student_choice"),
+    )
+    monkeypatch.setattr(scheduler, "set_visibility", lambda *a, **k: False)
+    sched = _assignments(
+        **{
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                handout_datetime=datetime(2026, 10, 1, 9, 0, tzinfo=BERLIN),
+                due_datetime=CUTOFF,
+            )
+        }
+    )
+    rows = _choice_rows(("assignment-1-ada-l", "public"))
+    assert (
+        scheduler._reprivatise_student_repos(
+            "Course-Org",
+            "Cohort-f2026",
+            sched,
+            datetime(2026, 10, 14, tzinfo=BERLIN),
+            False,
+            {r["name"]: r for r in rows},
+        )
+        == 1
+    )
+
+
+def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(visibility="student_choice"),
+    )
+    patched: list = []
+    monkeypatch.setattr(
+        scheduler,
+        "set_visibility",
+        lambda *a, **k: patched.append(a) or True,
+    )
+    sched = _assignments(
+        **{
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026", due_datetime=CUTOFF
+            )
+        }
+    )
+    rows = _choice_rows(("assignment-1-ada-l", "public"))
+    scheduler._reprivatise_student_repos(
+        "Course-Org",
+        "Cohort-f2026",
+        sched,
+        datetime(2026, 10, 14, tzinfo=BERLIN),
+        False,
+        {r["name"]: r for r in rows},
+    )
+    assert patched == []

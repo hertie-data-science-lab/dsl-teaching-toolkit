@@ -113,7 +113,8 @@ from .grades import (
     load_grading_spec,
     sheet_path,
 )
-from .log import log, log_err, log_ok, log_step
+from .log import log, log_err, log_ok, log_person, log_step
+from .repos import listed_is_private, set_visibility
 from .schedule import Release
 from .schedule_plan import deploy_dest
 
@@ -1140,6 +1141,75 @@ def _archive_phase(
     )
 
 
+def _reprivatise_student_repos(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+    listing: dict[str, dict] | None = None,
+) -> int:
+    """Put every `visibility: student_choice` repo back to private that has been published
+    BEFORE its grading cutoff. Returns the error count.
+
+    The one thing the toolkit still owes a shape whose flag it has given away. The student
+    is `admin` of their own repo so that they can put their work in a portfolio once it
+    has been marked; until the cutoff, a repo the world can read is a repo the rest of the
+    cohort can copy from, and no amount of wording in the brief stops that. So it is
+    closed again, every quarter of an hour, until the door shuts - and after the cutoff
+    this pass never touches a visibility again, which is what makes the promise on the
+    assignment page true.
+
+    Off the tick's OWN listing (`run`), which already carries each row's `visibility`: one
+    PATCH per offending repo and no read of its own. A listing that could not be taken is
+    "we could not look", and nothing is flipped on the strength of that.
+
+    `repos.listed_is_private` is optimistic - an unknown row answers private - so a row
+    that does not say `public` is left alone rather than PATCHed on a guess."""
+    if not listing:
+        return 0
+    derived = discovery.classify_repos(list(listing.values()))
+    errors = 0
+    for slug, entry in sorted(sched.assignments.items()):
+        if entry.handout_datetime is None:
+            continue
+        gspec = load_grading_spec(course_org, entry.course_source_repo)
+        if not gspec.visibility_is_students:
+            continue
+        at = cutoff_at(sched, slug, gspec)
+        if at is None or at <= now:
+            continue
+        name = schedule.cohort_name(slug, entry)
+        # Archived repos are passed over: they are read-only, so the PATCH would 403 on
+        # every tick for the rest of the term - the same reason every other sweep skips
+        # them.
+        public = [
+            row["name"]
+            for row in listing.values()
+            if derived.get(row["name"]) == name
+            and not row.get("archived")
+            and not listed_is_private(row)
+        ]
+        if not public:
+            continue
+        # A COUNT in the run log and never a name: `<slug>-<handle>` is a student's
+        # handle, and this line is written into a PUBLIC workflow log. The names go to
+        # `log_person`, which prints only under DSL_VERBOSE on a local run.
+        log_step(
+            f"{slug}: {len(public)} repo(s) published before the cutoff - making them "
+            f"private again until {at.isoformat()}"
+        )
+        for repo in public:
+            if dry_run:
+                log_person(f"    DRY-RUN  {cohort_org}/{repo} -> private")
+                continue
+            if set_visibility(cohort_org, repo, "private", person=True):
+                log_person(f"  [ok] {cohort_org}/{repo} is private again")
+            else:
+                errors += 1
+    return errors
+
+
 def _release_phase(
     course_org: str,
     cohort_org: str,
@@ -1203,6 +1273,13 @@ def _release_phase(
     # every assignment past its cutoff, and everything else that is past its DUE date
     # gets its `info:` refreshed here.
     errors += _refresh_sheets(course_org, cohort_org, sched, now, dry_run, listing)
+    # And then the one shape whose visibility the toolkit does not own: a `student_choice`
+    # repo published before its cutoff is closed again here. After the freeze above, so a
+    # repo made public on the morning of the deadline is still snapshotted from the work
+    # in it; before the releases below, because nothing a handout does depends on it.
+    errors += _reprivatise_student_repos(
+        course_org, cohort_org, sched, now, dry_run, listing
+    )
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits

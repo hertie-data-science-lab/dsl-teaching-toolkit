@@ -157,8 +157,13 @@ def set_visibility(
     A PATCH of its own because `POST /repos/{o}/{r}/generate` takes `private` and nothing
     else: a repo generated from a template is born private, and an assignment whose
     `visibility:` says `public` is that repo flipped immediately afterwards. So the flip
-    belongs to the CREATE path alone - re-PATCHing a repo that already exists would undo,
-    on every quarter-hourly tick, whatever a person had deliberately changed.
+    belongs to the CREATE path - re-PATCHing a repo that already exists would undo, on
+    every quarter-hourly tick, whatever a person had deliberately changed.
+
+    The ONE exception is the shape where a person changing it is the thing being
+    corrected: a `student_choice` repo published before its grading cutoff is put back
+    here by `scheduler._reprivatise_student_repos`, which is the promise the assignment's
+    own page makes to the rest of the cohort. After the cutoff nothing flips it again.
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
     verbose log (see `log.log_err_person`)."""
