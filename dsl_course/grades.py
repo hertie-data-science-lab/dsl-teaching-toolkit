@@ -222,6 +222,11 @@ class _Shape:
 
     submit_via: str
     visibility: str
+    # Whether the two above were READ from an assignment's definition at all. A spec that
+    # carries no such field was built from one, which is the ordinary case; `SheetSpec`
+    # redeclares it as a field because a sheet whose assignment the schedule no longer
+    # declares has to say so (`_spec_from_sheet`).
+    shape_known: bool = True
 
     @property
     def submit_external(self) -> bool:
@@ -244,6 +249,17 @@ class _Shape:
     def has_feedback_issue(self) -> bool:
         """Whether this assignment's units have a Feedback issue to post into."""
         return has_feedback_issue(self.submit_via, self.visibility)
+
+    @property
+    def may_open_feedback_issue(self) -> bool:
+        """Whether this run may OPEN a Feedback issue in a unit's repo.
+
+        Two conditions, and the second is the one easily lost: the shape must HAVE a
+        Feedback issue, and the shape must have been read from a real definition. A sheet
+        whose assignment the schedule no longer declares falls back to the defaults -
+        `github` + `private` - and a guess may keep writing in the thread a student was
+        told to read, but must never open a second one over it."""
+        return self.shape_known and self.has_feedback_issue
 
     @property
     def collects_commits(self) -> bool:
@@ -289,10 +305,9 @@ class SheetSpec(_Shape):
     # assignment that says nothing gets: one private repo per unit.
     submit_via: str = "github"
     visibility: str = "private"
-    # Whether the two above were READ from an assignment's definition at all. False for a
-    # sheet whose assignment the schedule no longer declares (`_spec_from_sheet`): the
-    # defaults are a guess then, and the one thing a guess may never do is open a Feedback
-    # issue in a student's repo (`feedback_thread_policy`).
+    # False for a sheet whose assignment the schedule no longer declares
+    # (`_spec_from_sheet`): the shape above is then a guess, and the one thing a guess may
+    # never do is open a Feedback issue in a student's repo (`may_open_feedback_issue`).
     shape_known: bool = True
     questions: dict[str, str] | None = None
     late_window_days: int | None = None
@@ -1352,6 +1367,21 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 "whole cohort's work, so v1 keeps it private - ignored",
             )
         )
+    for key in ("autograde", "grader_pdf"):
+        if via == "shared" and values.get(key):
+            # Both stages run PER UNIT against the unit's own repo, and a drop box is one
+            # repo for the whole cohort: each of fifty students would have the whole
+            # cohort's work cloned, run and archived under their own key, and every one of
+            # them would get the same score. Same note beside `course.SUBMIT_VIA`.
+            values[key] = False
+            dropped.append(
+                Dropped(
+                    GRADING_FILE,
+                    key,
+                    f"`{key}:` is not read for a shared drop box - one repo holds the "
+                    f"whole cohort's work, so it is hand-marked - ignored",
+                )
+            )
     if via != "external" and values.get("submit_url"):
         values["submit_url"] = ""
         dropped.append(
@@ -1553,12 +1583,13 @@ def grading_spec_faults(
         faults += _visibility_faults(
             spec, slug, template, course_org, lines, fires, handed_out
         )
-    if releases_solution and spec.visibility != "private":
+    if releases_solution and not spec.can_hold_solution:
         # A moment that will pass and do nothing. `provision_all` refuses to push the
-        # model answer into repos the toolkit cannot promise are private - `public`
-        # publishes it to the internet and `student_choice` lets the student do so - and
-        # the two files are written by different people, so nothing else would notice
-        # that the plan schedules a release the definition forbids.
+        # model answer where there is no repo of the unit's own to put it in, or none the
+        # toolkit can promise is private - and the two files are written by different
+        # people, so nothing else would notice that the plan schedules a release the
+        # definition forbids. ONE predicate, asked in both places
+        # (`course.can_hold_solution`).
         faults.append(
             _spec_fault(
                 slug,
@@ -1566,16 +1597,18 @@ def grading_spec_faults(
                 course_org,
                 fires,
                 f"this assignment's entry in `schedule.yml` carries a "
-                f"`solution_datetime:`, but `visibility: {spec.visibility}` means its "
-                f"repos are not private - the model solution is never pushed into repos "
-                f"the world can read, or the students can publish, so that moment "
-                f"passes and nothing is released",
+                f"`solution_datetime:`, but `submit_via: {spec.submit_via}` with "
+                f"`visibility: {spec.visibility}` gives it no private repo of its own to "
+                f"push the model solution into - it is never pushed where the world can "
+                f"read it, where the students can publish it, or where the whole cohort "
+                f"shares one repo, so that moment passes and nothing is released",
                 field="visibility",
                 lineno=lines.get(("visibility",)),
                 fix="remove `solution_datetime:` from this assignment's entry in "
                 "classroom-config/schedule.yml - the model answer stays on this "
                 "template's `solution` branch, which is where the teaching team reads "
-                "it - or set `visibility: private` here",
+                "it - or give this assignment a private repo per unit here "
+                "(`submit_via: github`, `visibility: private`)",
             )
         )
     return faults, spec
@@ -3481,7 +3514,7 @@ def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
 
     `shape_known=False` says the rest is a guess: there is no definition to read
     `submit_via` or `visibility` from, so this spec may use a Feedback issue it finds and
-    may never open one (`feedback_thread_policy`)."""
+    may never open one (`may_open_feedback_issue`)."""
     return SheetSpec(
         slug=slug,
         title=slug,
@@ -3622,7 +3655,7 @@ def feedback_thread_policy(
         return THREAD_FIND if spec.creates_unit_repos else THREAD_NONE
     if not listed_is_private(row):
         return THREAD_NONE
-    if spec.shape_known and spec.has_feedback_issue:
+    if spec.may_open_feedback_issue:
         return THREAD_CREATE
     return THREAD_FIND
 

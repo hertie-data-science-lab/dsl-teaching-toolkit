@@ -77,6 +77,7 @@ from .course import (
     CONFIG_REPO,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
+    github_visibility,
     shared_repo,
     submission_repo,
     visibility_is_students,
@@ -100,7 +101,7 @@ from .gh_contents import (
     repo_blob_shas,
     repo_tree,
 )
-from .ghcli import GIT_ENV, clone, gh, git
+from .ghcli import GIT_ENV, bot_login, clone, gh, git
 from .log import (
     log,
     log_err,
@@ -114,12 +115,14 @@ from .releaseignore import RELEASEIGNORE, deny_for, excluded_in_tree
 from .repos import (
     add_collaborator,
     default_branch,
+    direct_collaborators,
     generate_from_template,
+    listed_is_private,
     protect_shared_repo,
+    remove_collaborator,
     set_repo_topics,
     set_visibility,
     topic_name,
-    who_has_access,
 )
 from .workflows_place import NEVER_IN_STUDENT_REPOS
 
@@ -588,13 +591,27 @@ def note_the_patch(
     paths: list[str],
     marker: str,
     on: date,
+    row: dict | None,
 ) -> bool:
     """Tell one student, on the Feedback issue they were pointed at when the repo appeared.
 
     Only where that issue already EXISTS: `assign` opens it at hand-out with the assignment's
     due date and brief in the body, and a patch has neither to hand - opening one here would
     put a thread with the wrong body over the one the student is reading. A repo whose issue
-    is missing is counted and named through `log_person`, not silently passed over."""
+    is missing is counted and named through `log_person`, not silently passed over.
+
+    And only where the LISTING says the repo is still private. `row` is this repo's row of
+    the listing `patch_released` already holds, and the same guard every other write into
+    a Feedback thread takes (`grades.feedback_thread_policy`): a thread in a public repo
+    is a thread the internet reads, and this one names the files a student was handed
+    wrong. Optimistic like `repos.listed_is_private` - a row nobody could read answers
+    private - because the cost of being wrong the other way is a note nobody gets."""
+    if not listed_is_private(row):
+        log_person(
+            f"    {cohort_org}/{repo}: the listing says it is not private - the file is "
+            f"patched, the note is not posted"
+        )
+        return False
     found = grades.find_feedback_issue(cohort_org, repo)
     if isinstance(found, grades.IssueLookupFailed) or found is None:
         log_person(
@@ -692,6 +709,10 @@ def patch_released(
         return 1
     listing = list_org_repos(cohort_org)
     targets = patch_targets(listing, cohort_slug)
+    # Kept beside the targets, which came out of the same listing: the patch NOTE goes
+    # into a Feedback issue, and whether that issue is one the world can read is the
+    # listing's answer (`note_the_patch`).
+    rows = {row["name"]: row for row in listing}
     if load_grading_spec(master_org, template).submit_shared:
         # One repo for the whole cohort, and `patch_targets` finds it by the same
         # template-prefix rule that finds a repo per unit - so the loop below needs no arm
@@ -722,7 +743,9 @@ def patch_released(
             cohort_org, repo, corrected, digests, handout, overwrite
         )
         tally[verdict] = tally.get(verdict, 0) + 1
-        if verdict == PATCHED and note_the_patch(cohort_org, repo, written, marker, on):
+        if verdict == PATCHED and note_the_patch(
+            cohort_org, repo, written, marker, on, rows.get(repo)
+        ):
             notes += 1
     # The cohort-side template LAST, and only once every submission repo is done: it is
     # what late onboarders generate from, but it is also the baseline that tells a
@@ -853,12 +876,21 @@ def provision_one(
         # Secret scanning and its push protection are NOT asked for here: GitHub turns
         # both on for a public repository by default, so a PATCH would only ever repeat
         # what is already true.
+        # The row written back into the caller's listing carries GITHUB's vocabulary and
+        # nothing else, and two things make the config's word the wrong one for it.
+        # `student_choice` is a rule about who may flip the repo later, not a value GitHub
+        # has ever heard of (`course.github_visibility`); and a `public` flip that FAILED
+        # leaves the repo exactly as `/generate` made it. Writing the INTENTION there hid
+        # the failure from the one reader that exists to catch it - the digest's
+        # `grades._visibility_faults` compares these rows against the file.
+        listed_as = github_visibility(visibility)
         if visibility == "public" and not set_visibility(
             cohort_org, repo, "public", person=True
         ):
             visibility_failed = True
+            listed_as = "private"
         if existing is not None:
-            existing[repo] = listing_row(cohort_org, repo, visibility)
+            existing[repo] = listing_row(cohort_org, repo, listed_as)
         _tag_submission(cohort_org, repo, slug, set())
         # The Feedback issue, on the CREATE path only. It is where every receipt and,
         # eventually, the grade is posted, so the student is told at handout where to
@@ -997,14 +1029,24 @@ def _grant_drop_box(
     *,
     group: bool,
 ) -> tuple[int, bool]:
-    """Give every unit `push` on the ONE drop box. Returns `(grants made, nothing failed)`.
+    """CONVERGE who may push to the ONE drop box on the units that should: grant everyone
+    who is missing, and - for an individual assignment - revoke every direct grant that
+    belongs to nobody on the current list. Returns `(changes made, nothing failed)`.
 
-    The grants made are what tells a tick that did something from the thousand that did
+    The changes made are what tells a tick that did something from the thousand that did
     not: a drop box that already exists is not the record its per-unit twin is, because a
     student who onboards in week three needs their grant on a repo that has been there
     since week one. So the loop re-runs every tick and this asks, ONCE, who is granted
-    already (`repos.who_has_access` / `access.repo_teams`) rather than paying an
+    already (`repos.direct_collaborators` / `access.repo_teams`) rather than paying an
     idempotent PUT per unit per tick for the rest of the term.
+
+    GRANTING alone is not enough here, and this is the one repo where that matters: a
+    per-unit repo holds one student's own work, but the drop box holds the WHOLE cohort's,
+    so a student who withdraws keeps push on everybody else's until something takes it
+    away. `units` is built from the enrolled, onboarded roster upstream, so it is the
+    answer - and `direct_collaborators` is the only set revoked against, which is what
+    keeps faculty and the bot (who reach the repo through a team, or by owning the org)
+    out of it.
 
     Not a cohort-wide team, which would be one grant for everybody: `sync_teams` would
     then have to own and prune it, and a student who left the course would keep push on
@@ -1040,18 +1082,32 @@ def _grant_drop_box(
             else:
                 failed += 1
         return made, failed == 0
-    granted = who_has_access(cohort_org, repo)
-    for _unit, members in units:
-        for handle in members:
-            if granted is not None and handle.casefold() in granted:
-                continue
-            if add_collaborator(
-                cohort_org, repo, handle, permission="push", person=True
-            ):
-                made += 1
-                log_person(f"  [ok]   + @{handle} (push)")
-            else:
-                failed += 1
+    granted = direct_collaborators(cohort_org, repo)
+    # The unique handles, not the units: an individual assignment has one member per unit,
+    # and a student on two rows of the roster is one person with one grant to make.
+    wanted = {handle for _unit, members in units for handle in members}
+    for handle in sorted(wanted):
+        if granted is not None and handle.casefold() in granted:
+            continue
+        if add_collaborator(cohort_org, repo, handle, permission="push", person=True):
+            made += 1
+            log_person(f"  [ok]   + @{handle} (push)")
+        else:
+            failed += 1
+    # ...and the other direction. A listing that could not be read revokes NOTHING: the
+    # cost of granting again on a bad read is one idempotent call, and the cost of
+    # revoking on one is a student locked out of their own submission. The bot is spared
+    # by name because a run that removed its own grant could not repair anything
+    # afterwards; everyone else in this set was put there by this loop.
+    stale = sorted((granted or frozenset()) - {h.casefold() for h in wanted})
+    for login in stale:
+        if login == bot_login().casefold():
+            continue
+        if remove_collaborator(cohort_org, repo, login, person=True):
+            made += 1
+            log_person(f"  [ok]   - @{login} (no longer on the roster)")
+        else:
+            failed += 1
     return made, failed == 0
 
 

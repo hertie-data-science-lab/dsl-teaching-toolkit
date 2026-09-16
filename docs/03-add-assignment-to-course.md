@@ -214,8 +214,10 @@ What to know before you pick it:
 - **No Feedback issue, no receipt, no model solution.** All three would be written where
   the whole cohort can read them. Marks and feedback go to the private `grades-<handle>`
   gradebook.
-- **Leave `autograde: false`.** The hidden tests would run against the whole drop box
-  rather than against one folder.
+- **Hand-marked.** `autograde:` and `grader_pdf:` are dropped at the parse if you set
+  them: both run per unit against the unit's own repo, so each student would have the whole
+  drop box cloned and scored under their own name, and every one of them would get the same
+  result.
 
 The **Feedback issue** - the thread the receipts and the final comment appear in - exists
 only where there is a private repo of the student's own to put it in, so an `external` or

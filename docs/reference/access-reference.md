@@ -123,6 +123,14 @@ recognises `<slug>-<handle>` recognises this, and `instructors` hold **read**. T
 carries a ruleset forbidding force-pushes and deletion, so push cannot be used to erase
 anybody's history.
 
+Push on that one repo CONVERGES on the roster, which no other submission repo needs to: the
+drop box holds the whole cohort's work, so a grant left behind is somebody who has left the
+course able to overwrite everybody else's. Every tick grants whoever is missing and revokes
+every direct grant belonging to nobody on the enrolled, onboarded roster - including one added
+by hand. Team grants, the faculty teams and the bot are never touched: they reach the repo
+through a team or by owning the org, and the sweep only ever reads and revokes DIRECT
+collaborators. A listing that could not be read revokes nothing.
+
 A `visibility: student_choice` assignment changes the STUDENT's grant and nothing else: they
 hold **admin** on their own repo (or their team does, on a group one) so that they can publish
 it after the grading cutoff. The faculty floor is unchanged - still read, never push, on a

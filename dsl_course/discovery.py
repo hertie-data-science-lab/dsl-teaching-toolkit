@@ -234,6 +234,12 @@ def listing_row(org: str, name: str, visibility: str = "private") -> dict:
     """One row for a repo THIS run has just created, in the shape `list_org_repos` gives
     every other row.
 
+    `visibility` is GITHUB's word for the repo as it stands NOW - `private` unless this
+    run has already flipped it and been told the flip landed. Never the config's
+    `visibility:`: that file says what was ASKED for, this row says what is there, and a
+    reader that compares the two (`grades._visibility_faults`) can only notice a
+    difference if the row was not written from the same wish.
+
     A listing is taken once and handed to every pass of a tick, so the pass that CREATES
     a repo is the one thing that can make it stale - and the next pass then creates the
     same repo again and counts GitHub's refusal as a failure. Inserting the row is what

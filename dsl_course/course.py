@@ -148,6 +148,17 @@ def visibility_is_students(visibility: str) -> bool:
     return visibility == "student_choice"
 
 
+def github_visibility(visibility: str) -> str:
+    """What GITHUB will call a repo the toolkit handed out under this `visibility:`.
+
+    The config's vocabulary and GitHub's are not the same, in one place: `student_choice`
+    is a rule about who may flip the flag AFTER the handout, and the repo GitHub is asked
+    to make is private like any other. So a listing row - which carries GitHub's word and
+    only GitHub's - never says `student_choice`, and nothing that compares a row against
+    the file has to know that on its own account."""
+    return "public" if visibility == "public" else "private"
+
+
 def has_feedback_issue(submit_via: str, visibility: str) -> bool:
     """Whether the receipts and the final comment have a Feedback issue to go on.
 

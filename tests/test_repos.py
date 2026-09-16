@@ -332,7 +332,9 @@ def test_a_drop_box_that_could_not_be_protected_says_what_it_costs(monkeypatch, 
     assert "erase the whole cohort's work" in err
 
 
-def test_who_has_access_unions_collaborators_and_un_accepted_invitations(monkeypatch):
+def test_direct_collaborators_unions_collaborators_and_un_accepted_invitations(
+    monkeypatch,
+):
     # An invited-but-not-yet-joined student is NOT a collaborator row, so a set built from
     # the collaborators alone would re-grant them on every tick until they accept.
     asked: list[str] = []
@@ -342,17 +344,19 @@ def test_who_has_access_unions_collaborators_and_un_accepted_invitations(monkeyp
         return (0, "Anna\nBot\n" if "collaborators" in args[2] else "Late-Joiner\n")
 
     monkeypatch.setattr(repos, "gh", fake_gh)
-    assert repos.who_has_access("Cohort", "assignment-3-submissions") == frozenset(
-        {"anna", "bot", "late-joiner"}
-    )
+    assert repos.direct_collaborators(
+        "Cohort", "assignment-3-submissions"
+    ) == frozenset({"anna", "bot", "late-joiner"})
     assert len(asked) == 2
 
 
-def test_who_has_access_cannot_answer_when_either_listing_fails(monkeypatch, capsys):
+def test_direct_collaborators_cannot_answer_when_either_listing_fails(
+    monkeypatch, capsys
+):
     # None, never the empty set: the caller grants everyone again on None, and would grant
     # nobody on an empty set it read as "nothing is there".
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
-    assert repos.who_has_access("Cohort", "assignment-3-submissions") is None
+    assert repos.direct_collaborators("Cohort", "assignment-3-submissions") is None
     assert "could not read Cohort/assignment-3-submissions's collaborators" in (
         capsys.readouterr().err
     )

@@ -202,6 +202,20 @@ def test_a_shared_drop_box_is_private_whatever_the_file_says(capsys):
     assert "one repo holds the whole cohort's work" in capsys.readouterr().err
 
 
+def test_a_shared_assignment_is_hand_marked_whatever_the_file_says(capsys):
+    # Both stages run per UNIT against the unit's own repo, and here there is one repo for
+    # everybody: fifty students would each have the whole cohort's work cloned, run and
+    # archived under their own key, and every one of them would get the same score.
+    # Corrected at the parse, exactly as the visibility is.
+    spec = collect.parse_grading_spec(
+        "submit_via: shared\nautograde: true\ngrader_pdf: true\n"
+    )
+    assert spec.autograde is False and spec.grader_pdf is False
+    said = capsys.readouterr().err
+    assert "`autograde:` is not read for a shared drop box" in said
+    assert "`grader_pdf:` is not read for a shared drop box" in said
+
+
 def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(capsys):
     # `submit_url` is the address of the place work is handed in INSTEAD of GitHub, so a
     # shape that collects commits has no use for it - the same drop `github` gets.
@@ -5785,6 +5799,32 @@ def test_a_scheduled_solution_for_repos_that_are_not_private_is_a_fault(monkeypa
     assert "schedule.yml" in fault.fix_text
 
 
+def test_a_scheduled_solution_for_a_shared_drop_box_is_a_fault(monkeypatch):
+    # The same predicate, and the reason `course.can_hold_solution` is one and not two:
+    # a drop box is private, so a rule written as "is it private?" let this one through -
+    # and the model answer would have been published to the whole cohort if it had not.
+    from dsl_course.schedule import AssignmentEntry
+
+    monkeypatch.setattr(
+        grades, "_grading_text", lambda course, template: "submit_via: shared\n"
+    )
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=DUE_AT,
+                solution_datetime=DUE_AT,
+            )
+        }
+    )
+    found: list = []
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, None)
+    (fault,) = found
+    assert fault.field == "visibility"
+    assert "solution_datetime" in fault.what and "shared" in fault.what
+
+
 def test_a_private_assignment_may_schedule_its_solution(monkeypatch):
     monkeypatch.setattr(grades, "_grading_text", lambda course, template: "")
     monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
@@ -6086,6 +6126,31 @@ def test_a_folder_a_classmate_touched_last_pins_the_member_and_says_so(monkeypat
     assert pin == collect.Pin(
         "mine", "2026-10-12T09:00:00Z", note=collect.OUTSIDE_TOUCH_NOTE
     )
+
+
+def test_a_walk_that_ran_out_of_page_says_so_rather_than_reading_as_no_submission(
+    monkeypatch,
+):
+    # A blank pin means "nothing was submitted", and after a full page of somebody else's
+    # commits it means "we stopped looking" instead. The two are not the same thing to a
+    # grader, and only one of them is a fact about the student.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(sha=f"c{n:038d}", author="ben-k")
+                for n in range(collect._COMMIT_PAGE)
+            ]
+        },
+    )
+    pin = collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    )
+    assert pin == collect.Pin(note=collect.PAGE_EXHAUSTED_NOTE)
 
 
 def test_a_folder_with_no_commit_by_a_member_is_no_submission(monkeypatch):

@@ -724,7 +724,15 @@ OUTSIDE_TOUCH_NOTE = (
 # How many commits deep the walk for a member's own commit goes. One page: a folder with a
 # hundred commits above the unit's own by people outside it is not a timing question any
 # more, and the note above is what a grader acts on either way.
-_COMMIT_PAGE = "100"
+_COMMIT_PAGE = 100
+# What the walk says when it reaches the bottom of that page having found nothing the unit
+# itself committed. The pin is blank either way, and a blank pin on its own reads as
+# "nothing was submitted" - which is a different thing from "we stopped looking", and only
+# one of the two is a fact about the student.
+PAGE_EXHAUSTED_NOTE = (
+    f"no commit by this unit in the {_COMMIT_PAGE} newest commits touching its "
+    f"folder - check"
+)
 
 
 def _snapshot_sha(
@@ -755,7 +763,10 @@ def _snapshot_sha(
 
     Returns a bare `Pin()` when there is nothing to grade - no commit that early, none by a
     member, or an empty repo - and `Pin(absent=True)` when there is no such repo at all (an
-    on-time submission cannot live in a repo that does not exist).
+    on-time submission cannot live in a repo that does not exist). A walk that ran out of
+    page before it found the unit's own commit comes back blank too, but with
+    `PAGE_EXHAUSTED_NOTE` on it: the pin is empty because WE stopped looking, not because
+    the student pushed nothing.
     Returns None when the API call itself failed - the caller then abandons the whole
     snapshot so the next cron tick retries, rather than baking a transient error into a
     record that is never rewritten."""
@@ -767,7 +778,7 @@ def _snapshot_sha(
         "-f",
         f"until={_until_param(deadline)}",
         "-f",
-        f"per_page={_COMMIT_PAGE if members else '1'}",
+        f"per_page={_COMMIT_PAGE if members else 1}",
         *(("-f", f"path={path}") if path else ()),
         "--jq",
         _COMMIT_FIELDS,
@@ -803,6 +814,11 @@ def _snapshot_sha(
                     f"client-supplied, so check for a skewed clock before marking"
                 )
             return Pin(sha, committed, note=OUTSIDE_TOUCH_NOTE if outsider else "")
+        if wanted is not None and len(lines) >= _COMMIT_PAGE:
+            # A whole page of commits in this folder and not one of them the unit's. The
+            # pin is still blank - there is nothing of theirs we can point at - but the
+            # blank is ours and not theirs, and a grader has to be told which.
+            return Pin(note=PAGE_EXHAUSTED_NOTE)
         return Pin()
     # A 409 is an EMPTY repo: it exists but has no commits, so "" is a real recorded
     # non-submission (we freeze it, closing the backdating window for it).

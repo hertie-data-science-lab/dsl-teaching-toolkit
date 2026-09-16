@@ -2250,6 +2250,46 @@ def test_each_patched_repo_gets_one_note_on_its_feedback_issue(monkeypatch):
     assert marker.startswith("<!-- dsl-patch:")
 
 
+def test_a_repo_the_listing_says_is_public_is_patched_but_not_told(monkeypatch):
+    # The note names the files a student was handed wrong, and it goes into an issue that
+    # lives IN the repo. So it takes the same guard every other write into a Feedback
+    # thread takes: a `visibility: public` assignment - or one whose student has published
+    # theirs - is patched like any other, and told nothing where the internet would read
+    # it. The listing the run already holds is the answer.
+    commits = _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ben": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    monkeypatch.setattr(
+        assign,
+        "list_org_repos",
+        lambda org: [
+            {"name": "assignment-1", "isTemplate": True, "archived": False},
+            {"name": "assignment-1-ada", "isTemplate": False, "archived": False},
+            {
+                "name": "assignment-1-ben",
+                "isTemplate": False,
+                "archived": False,
+                "visibility": "public",
+            },
+        ],
+    )
+    assert _run(dry_run=False) == 0
+    # Both repos got the file; only the private one got the note.
+    assert sorted(repo for repo, _files in commits) == [
+        "assignment-1",
+        "assignment-1-ada",
+        "assignment-1-ben",
+    ]
+    assert [repo for _org, repo, _issue, _body, _marker in notes] == [
+        "assignment-1-ada"
+    ]
+
+
 def test_a_dry_run_writes_nothing_and_says_nothing(monkeypatch):
     commits = _cohort(
         monkeypatch,
@@ -2708,6 +2748,28 @@ def test_a_failed_visibility_patch_is_counted_and_withholds_nothing(
     assert "assignment-1-ada-l" not in capsys.readouterr().out
 
 
+def test_the_listing_row_a_create_writes_back_carries_githubs_own_word(
+    _public_writes, monkeypatch
+):
+    # The row a pass writes back is what the NEXT pass of the same tick reads, and what
+    # the digest compares against the file. So it says what GitHub will report, never what
+    # the file asked for: a flip that failed leaves the repo private (and the fault the
+    # digest exists to raise depends on the row saying so), and `student_choice` is a rule
+    # about who may flip it later - not a word GitHub has ever heard of.
+    listing: dict[str, dict] = {}
+    assert _one_public(visibility="public", existing=listing) == "ok"
+    assert listing["assignment-1-ada-l"]["visibility"] == "public"
+
+    monkeypatch.setattr(assign, "set_visibility", lambda *a, **k: False)
+    failed: dict[str, dict] = {}
+    assert _one_public(visibility="public", existing=failed) == "failed-visibility"
+    assert failed["assignment-1-ada-l"]["visibility"] == "private"
+
+    chosen: dict[str, dict] = {}
+    assert _one_public(visibility="student_choice", existing=chosen) == "ok"
+    assert chosen["assignment-1-ada-l"]["visibility"] == "private"
+
+
 # ------------------------------- an assignment whose repos the students may publish
 #
 # `visibility: student_choice` creates the same PRIVATE repos and hands the flag over: the
@@ -2840,6 +2902,7 @@ def drop_box(monkeypatch):
         "topics": [],
         "faculty": [],
         "collaborators": [],
+        "revoked": [],
         "teams": [],
         "ensured": [],
         "rulesets": [],
@@ -2880,7 +2943,7 @@ def drop_box(monkeypatch):
     )
     monkeypatch.setattr(
         assign,
-        "who_has_access",
+        "direct_collaborators",
         lambda org, repo, **kw: seen["granted_already"],
     )
     monkeypatch.setattr(assign, "repo_teams", lambda org, repo: seen["teams_already"])
@@ -2891,6 +2954,14 @@ def drop_box(monkeypatch):
             seen["collaborators"].append((repo, handle, permission)) or True
         ),
     )
+    monkeypatch.setattr(
+        assign,
+        "remove_collaborator",
+        lambda org, repo, login, person=False: (
+            seen["revoked"].append((repo, login)) or True
+        ),
+    )
+    monkeypatch.setattr(assign, "bot_login", lambda: "dsl-bot")
     monkeypatch.setattr(
         assign,
         "grant_team_repo_access",
@@ -3020,13 +3091,40 @@ def test_a_tick_with_nothing_to_grant_hands_nothing_out_again(
     assert drop_box["site"] == []
 
 
+def test_a_student_off_the_roster_loses_push_on_the_drop_box(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # The drop box holds the WHOLE cohort's work, so a grant left behind is not one
+    # student keeping their own repo: it is somebody who has left the course able to read
+    # and overwrite everyone else's. The grant loop re-runs every tick, so the tick after
+    # the roster changed is where the access follows it.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    drop_box["granted_already"] = frozenset({"ada-l", "gone-g", "dsl-bot"})
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    # Nobody new to grant; one grant to take away - and never the bot's, which is how the
+    # next tick repairs anything at all.
+    assert drop_box["collaborators"] == []
+    assert drop_box["revoked"] == [("assignment-1-submissions", "gone-g")]
+
+
+def test_a_grant_read_that_failed_revokes_nobody(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # None is "we could not look", never "nobody is granted". Granting again on a bad read
+    # costs one idempotent call; revoking on one costs a student their submission.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "direct_collaborators", lambda org, repo, **kw: None)
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    assert drop_box["revoked"] == []
+
+
 def test_a_grant_read_that_failed_grants_everybody_again(
     tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
 ):
     # None is "we could not look", never "nobody is granted": the PUT is idempotent, and
     # an over-granted one costs a call where an under-granted one costs a submission.
     monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
-    monkeypatch.setattr(assign, "who_has_access", lambda org, repo, **kw: None)
+    monkeypatch.setattr(assign, "direct_collaborators", lambda org, repo, **kw: None)
     assert _shared(monkeypatch, tmp_path) == (0, True)
     assert drop_box["collaborators"] == [("assignment-1-submissions", "ada-l", "push")]
 

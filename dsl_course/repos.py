@@ -761,12 +761,16 @@ def is_collaborator(
     return None
 
 
-def who_has_access(
+def direct_collaborators(
     org: str, repo: str, *, person: bool = False
 ) -> frozenset[str] | None:
     """Every login that already holds a DIRECT grant on `repo`, casefolded - the
     collaborators plus the people whose invitation is still un-accepted. None when the
     answer could not be read.
+
+    DIRECT, and the name says so: a team grant and an org owner reach the repo without
+    appearing here, which is what makes this set safe to converge AGAINST - the caller
+    revokes off it, and faculty and the bot must never be in what it revokes.
 
     TWO listings for a whole cohort, where asking `is_collaborator` per student is two
     calls per student. That is what makes the shared drop box's grant loop affordable: the

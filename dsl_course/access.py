@@ -204,7 +204,7 @@ def repo_teams(org: str, repo: str) -> frozenset[str] | None:
     """The slugs of every team that holds any access on ONE repo, casefolded. None when
     the listing could not be read.
 
-    The team half of `repos.who_has_access`, and there for the same caller: a shared drop
+    The team half of `repos.direct_collaborators`, and there for the same caller: a shared drop
     box is handed out to one repo per assignment, so "which of this assignment's teams
     have been granted already?" is one listing per tick rather than a PUT per team per
     tick for the rest of the term.
