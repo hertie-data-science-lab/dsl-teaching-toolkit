@@ -161,7 +161,11 @@ def due_snapshots(
     Not pure, therefore: it reads each template's `grading_config.yml`. That read is
     memoised per process (`grades._grading_text`), and both passes below share this answer.
     Whether each assignment has already been snapshotted or graded is still a separate
-    question (see `_snapshot_passed_deadlines` / `_autograde_passed_deadlines`)."""
+    question (see `_snapshot_passed_deadlines` / `_autograde_passed_deadlines`), and so is
+    whether there is anything to collect from it at all: this answers "the cutoff has
+    passed", which is also what `_refresh_open_sheets` reads it for, and an assignment
+    handed in off GitHub has a cutoff like any other. The COLLECTION gate belongs to the
+    two passes that collect, and is applied there."""
     passed = []
     for slug, entry in sched.assignments.items():
         gspec = load_grading_spec(course_org, entry.course_source_repo)
@@ -238,6 +242,20 @@ def _execute_nondeploy(
     return errors, changed
 
 
+def _collects(course_org: str, entry: schedule.AssignmentEntry) -> bool:
+    """Whether this assignment has commits to freeze and grade at all.
+
+    False for work handed in off GitHub, which creates no repos: the freeze below would
+    find every target absent and the autograde that follows it has nothing to run. Before
+    this gate, a passed deadline on an external assignment meant a 404 per student per tick
+    for the rest of the term - `NOTHING_TO_FREEZE`, silently, four times an hour - and one
+    more line in a public run log on each of them.
+
+    Off the assignment's own `grading_config.yml`, memoised per template per process, and
+    the same read `due_snapshots` above has already paid for."""
+    return load_grading_spec(course_org, entry.course_source_repo).collects_commits
+
+
 def _snapshot_passed_deadlines(
     course_org: str,
     cohort_org: str,
@@ -254,6 +272,8 @@ def _snapshot_passed_deadlines(
     errors = 0
     for slug, deadline in due_snapshots(course_org, sched, now):
         entry = sched.assignments[slug]
+        if not _collects(course_org, entry):
+            continue
         # every cohort-side artefact keys on the assignment's cohort NAME, not its slug
         name = schedule.cohort_name(slug, entry)
         if load_snapshots(cohort_org, name) is not None:
@@ -332,6 +352,8 @@ def _autograde_passed_deadlines(
     is not guessed here - `collect` resolves it from the cohort schedule / grading_config.yml."""
     errors = 0
     for slug, deadline in due_snapshots(course_org, sched, now):
+        if not _collects(course_org, sched.assignments[slug]):
+            continue
         # the fire-once marker is keyed on the cohort NAME - it must agree with what
         # collect writes, or a passed deadline re-grades every tick
         name = schedule.cohort_name(slug, sched.assignments[slug])

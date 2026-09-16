@@ -2616,6 +2616,31 @@ def test_the_snapshot_pass_reads_each_passed_deadline_once(monkeypatch):
     assert reads == ["assignment-1", "assignment-2"], "one read per passed deadline"
 
 
+def test_neither_deadline_pass_touches_an_assignment_with_nothing_to_collect(
+    monkeypatch,
+):
+    # Handed in off GitHub: there are no repos, so the freeze would find every target
+    # absent and the autograde behind it has nothing to run. Before this gate that was a
+    # 404 per student per tick for the rest of the term, on a green run.
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(submit_via="external"),
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("nothing is collected from an external assignment")
+
+    monkeypatch.setattr(scheduler, "load_snapshots", boom)
+    monkeypatch.setattr(scheduler, "has_autograde_results", boom)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False) == 0
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    # The cutoff itself has still passed - that is what the sheet refresh reads this for.
+    assert scheduler.due_snapshots("C", sched, now) != []
+
+
 def _real_snapshot_then_autograde(monkeypatch, targets):
     """Both deadline phases over the REAL snapshot_assignment, with `targets` as the
     assignment's submission units. Returns the (course_org, template, ...) collect got.
