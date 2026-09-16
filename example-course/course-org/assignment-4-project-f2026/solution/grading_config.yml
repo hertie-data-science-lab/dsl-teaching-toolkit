@@ -4,6 +4,8 @@ type: group                   # individual | group
 team_formation: self_select   # self_select (students use the Join-team form) | assigned
 max_team_size: 4              # group only
 submit_via: github            # github (they push to their repo) | external (handed in elsewhere)
+# submit_via: shared          # one private <slug>-submissions repo for the whole cohort,
+                              # a folder per team inside it, everyone able to read everyone
 visibility: private           # private | public | student_choice - who may read it
 format: py                    # ipynb | py | rmd | qmd | latex | none - the starter stub only
 

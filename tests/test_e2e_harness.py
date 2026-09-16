@@ -855,3 +855,12 @@ def test_a_fine_grained_token_is_probed_instead(monkeypatch, capsys):
     monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: next(denied))
     with pytest.raises(AssertionError, match="cannot delete repos"):
         module._assert_can_delete_repos()
+
+
+def test_the_shared_drop_box_is_inside_this_run_s_namespace():
+    # Cleanup deletes only what matches the run's own slug. `<slug>-submissions` is inside
+    # that rule already - it is a `-<suffix>` of the slug like every submission repo - so
+    # a shared assignment's drop box is removed rather than reported as somebody's drift.
+    run = "e2eabc123"
+    assert cleanup.is_run_repo(f"{cleanup.slug(run)}-submissions", run)
+    assert not cleanup.is_drift(f"{cleanup.slug(run)}-submissions", run)

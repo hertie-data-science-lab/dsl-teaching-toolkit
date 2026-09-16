@@ -103,12 +103,22 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 no repo is created for it, so there is no commit to time.
 
+For `submit_via: shared` the timing is per FOLDER of the one drop box: `submitted` is the
+last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **and was made
+by one of that unit's own members**, so a classmate's edit is never marked as their work. A
+folder nobody in the unit ever pushed to has no submission. Two things differ from the
+shapes with a repo each: `suspect` never appears (GitHub's last-push record is the whole
+repo's, so it would accuse the entire cohort of one student's late push), and when the most
+recent hand on a folder was not the unit's, `submitted_note` says
+`last change to this folder was by someone outside the team - check`.
+
 ## Marking, step by step
 
 1. **Handout.** The sheet appears with one row per student or team, every student has a
    private `grades-<handle>` gradebook, and every submission repo gets a **Feedback**
-   issue. An `external` assignment has no repos, so it gets no issues: its marks and
-   feedback reach students through the gradebook alone, and a group's team score and team
+   issue. An `external` assignment has no repos and a `shared` one has a repo the whole
+   cohort reads, so neither gets an issue: their marks and feedback reach students through
+   the gradebook alone, and for an `external` group assignment the team score and team
    feedback go into each member's.
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
    issue. Late pushes refresh both, quarter-hourly, until the cutoff.

@@ -48,6 +48,19 @@ and a **Submit on \<host\>** button (from `submit_url`) on the cohort site, writ
 grading sheet with every student or team in it, and makes sure each student has their
 private `grades-<handle>` gradebook - which is where their feedback goes.
 
+### An assignment handed into one shared drop box
+
+`submit_via: shared` freezes the cohort template as usual - the brief lives there - and
+then creates exactly **one** repo, `<slug>-submissions`: private, with every onboarded
+student (or every vetted team) on `push`, and protected against force-pushes and deletion
+so nobody can erase the cohort's work. Each unit pushes into its own `<handle>/` or
+`<team>/` folder and can read everyone else's.
+
+There is no Feedback issue, no receipt and no model solution push - one repo the whole
+cohort reads is not a place for any of them; marks and feedback go to each student's
+private `grades-<handle>` gradebook. The handout re-fires every quarter of an hour like
+any other, and a student who onboards later is granted push on the next tick.
+
 ### An assignment whose repos are public
 
 `visibility: public` in the template's `grading_config.yml` hands out the same repos

@@ -33,7 +33,9 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `submit_via` = where students hand in. `github` = they push to their repo, and the
         cutoff, the receipts and the late window apply; `external` = handed in elsewhere
         (Moodle, Kaggle, in class), so **no repo is created**: the brief and a submit link
-        appear on the site and feedback goes to the student's gradebook
+        appear on the site and feedback goes to the student's gradebook; `shared` = one
+        private repo for the whole cohort, each student pushing into their own folder and
+        able to read everyone else's
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
@@ -166,6 +168,7 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 |---|---|---|
 | `submit_via` | `github` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
+| | `shared` | **One private repo for the whole cohort**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Feedback issue and no receipt. |
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
 | `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
@@ -189,9 +192,34 @@ privileges, set by hand once - see the
 [deployment checklist](DEPLOYMENT-CHECKLIST.md#cohort-setup-per-year)). The same digest
 faults while either is wrong.
 
+#### A shared drop box
+
+`submit_via: shared` hands out ONE private repo for the assignment, `<slug>-submissions`,
+and gives every onboarded student (or every team) `push` on it. Each unit works in its own
+`<handle>/` or `<team>/` folder; the whole cohort can read the whole repo, which is the
+point - peer-visible presentations, referee reports, a gallery of submissions.
+
+What to know before you pick it:
+
+- **The folders are a convention, not a boundary.** Anyone with push can write into anyone
+  else's folder. A submission is pinned to the last commit in a folder that one of *its own*
+  members made, so a classmate's edit cannot be marked as a student's work - and when the
+  most recent hand on a folder was not the unit's, the grading sheet says so
+  (`submitted_note`). Nothing is lost either way: `git log` keeps every version, and the
+  repo is protected against force-pushes and deletion, so the history cannot be rewritten.
+- **One drop box per assignment.** Two schedule entries resolving to one cohort-side name
+  are refused, as they are for every other shape.
+- **Private only.** One repo holds the whole cohort's work and no student can opt out of
+  being in it, so a `visibility:` line on a shared assignment is dropped at the parse.
+- **No Feedback issue, no receipt, no model solution.** All three would be written where
+  the whole cohort can read them. Marks and feedback go to the private `grades-<handle>`
+  gradebook.
+- **Leave `autograde: false`.** The hidden tests would run against the whole drop box
+  rather than against one folder.
+
 The **Feedback issue** - the thread the receipts and the final comment appear in - exists
-only where there is a private repo of the student's own to put it in, so an `external`
-assignment has none. Its marks and its feedback go to the student's private
+only where there is a private repo of the student's own to put it in, so an `external` or
+`shared` assignment has none. Its marks and its feedback go to the student's private
 `grades-<handle>` gradebook, which every shape writes to and which exists from the day they
 onboard.
 

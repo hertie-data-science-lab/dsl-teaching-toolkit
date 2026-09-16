@@ -3,7 +3,7 @@
     python -m tests.e2e.cleanup --run-id e2eab12cd [--dry-run]
 
 Re-runnable and narrow by construction. It deletes ONLY repos whose names match this run's
-own namespace (`assignment-90-<run>`, plus the `-<handle>` and `-template` repos GitHub
+own namespace (`assignment-90-<run>`, plus the `-<handle>`, `-submissions` and `-template` repos GitHub
 Classroom-style provisioning hangs off it), removes only the fenced schedule block this run
 inserted, and only the snapshot / autograde / grading-sheet artefacts named after this
 run's slug. Anything else that looks like e2e leavings is REPORTED and left alone: a
@@ -77,8 +77,9 @@ def slug(run_id: str) -> str:
 
 
 def is_run_repo(name: str, run_id: str) -> bool:
-    """Whether `name` is a repo THIS run created: the template, the assignment itself, or
-    one of its `-<handle>` submission repos - and nothing else."""
+    """Whether `name` is a repo THIS run created: the template, the assignment itself,
+    one of its `-<handle>` submission repos, or the `-submissions` drop box a shared
+    assignment hands out - and nothing else."""
     return re.fullmatch(rf"{re.escape(slug(run_id))}(-.+)?", name) is not None
 
 
