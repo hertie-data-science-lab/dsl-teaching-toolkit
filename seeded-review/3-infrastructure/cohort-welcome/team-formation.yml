@@ -195,7 +195,7 @@ jobs:
               // participant". This issue is public and permanent, and telling the two apart
               // published the author's enrolment role to anyone who could read the repo.
               const NOT_A_PARTICIPANT =
-                `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join course** issue first ` +
+                `Thanks @${handle} - I can't find you on the course enrolment roster yet. Please open a **Join course** issue first ` +
                 `to onboard, then come back to join a team. If you have already joined, contact the teaching team.`;
               const myRow = rosterTable.slice(1)
                 .find(r => (r[iRosterHandle] || '').trim().toLowerCase() === handle.toLowerCase());
@@ -242,7 +242,7 @@ jobs:
                 'needs-review');
               if (lock === null) return fail(
                 `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort yet. ` +
-                `Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.`,
+                `Check the slug with the teaching team.`,
                 'needs-review');
               if (lock.formation === 'none') return fail(
                 `Thanks @${handle} - \`${assignment}\` is an individual assignment - no teams.`,

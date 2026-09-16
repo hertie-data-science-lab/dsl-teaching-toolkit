@@ -14,8 +14,9 @@ name: Scheduled release
 # by `repository_dispatch` from an external dispatcher (every 15 minutes, off-box), and each
 # driver covers the other's outage. Both arrive here as an ordinary run; nothing downstream
 # cares which, because every action is dated and fire-once. The off-peak minutes stay as they
-# are - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
-# 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is negligible.
+# are - GitHub drops scheduled runs at the top of the hour, so `0 * * * *` was delivered 6
+# times a day, not 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is
+# negligible.
 #
 # THREE JOBS. `release` walks every cohort (fast: dated copies and repo provisioning) and is
 # separate because a grading pass can run for two hours and must not hold up a release due
