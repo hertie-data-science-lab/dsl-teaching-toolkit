@@ -344,6 +344,9 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
         "This gradebook is private to you. It is regenerated each time grades are "
         "distributed; do not edit it.\n"
         "\n"
+        "Feedback for assignments handed in outside GitHub, in a shared repo or in a "
+        "public repo appears here and nowhere else.\n"
+        "\n"
         "| Assignment | Final grade | Submitted | Late | Team |\n"
         "|---|---|---|---|---|\n"
         "| Neural networks from scratch | 40 / 50 | 3 Oct 22:14 | on time | team-alpha |\n"
@@ -356,7 +359,30 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
         "> **Team feedback (shared with team-alpha):** Clean derivation in Q1-Q3. Q4 "
         "confuses the\n"
         "> marginal with the conditional. Plots are excellent.\n"
+        "\n"
+        "## Keeping your work\n"
+        "\n"
+        "Your assignment repos are private to you and the teaching team and stay readable "
+        "after the course ends. To show one publicly, publish a copy under your own "
+        "account; the original stays private.\n"
+        "\n"
+        "```\n"
+        "git clone https://github.com/<cohort-org>/<slug>-<your-handle>\n"
+        "cd <slug>-<your-handle>\n"
+        "git remote set-url origin https://github.com/<you>/<new-public-repo>\n"
+        "git push -u origin main\n"
+        "```\n"
     )
+
+
+def test_the_two_standing_answers_survive_the_first_distribute():
+    # `render_readme` REPLACES the starter page, and both of these were written only into
+    # that starter - so the week a student was first marked they lost the line saying
+    # where feedback for the other shapes lands, and the recipe for keeping their work.
+    starter = grades._STARTER_README
+    rendered = render_readme("ben-k", spec_example_book()["ben-k"], TITLES)
+    for standing in (grades._CHANNEL_NOTE, grades._KEEPING_YOUR_WORK):
+        assert standing in starter and standing in rendered
 
 
 @pytest.mark.parametrize(
@@ -374,7 +400,7 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
 def test_the_submitted_column_tells_the_two_kinds_of_blank_apart(spec, expected):
     sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 9}}}
     books = build_gradebooks({"assignment-1": (spec, sheet)})
-    row = render_readme("ada-l", books["ada-l"], {}).splitlines()[4]
+    row = render_readme("ada-l", books["ada-l"], {}).splitlines()[6]
     assert row == f"| assignment-1 | 9 | {expected} |  |  |"
 
 

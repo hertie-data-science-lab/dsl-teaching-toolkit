@@ -33,15 +33,25 @@ def _team_lock_is_current(monkeypatch):
 @pytest.fixture(autouse=True)
 def gradebooks(monkeypatch):
     """A private gradebook per onboarded student, provisioned at the end of every cohort's
-    sync. It reads the roster and lists the org, so it is stubbed here for the tests about
-    the sync's own orchestration; the one about it sets its own."""
-    calls: list[str] = []
+    sync. It reads the roster and takes the cohort listing this pass already holds, so it
+    is stubbed here for the tests about the sync's own orchestration; the one about it sets
+    its own. Records `(org, the listing it was handed)`."""
+    calls: list[tuple[str, object]] = []
     monkeypatch.setattr(
         sync_membership,
         "ensure_gradebooks",
-        lambda org, dry_run=False: calls.append(org) or 0,
+        lambda org, dry_run=False, existing=None: calls.append((org, existing)) or 0,
     )
     return calls
+
+
+@pytest.fixture(autouse=True)
+def listed(monkeypatch):
+    """The ONE cohort listing a per-cohort pass takes, which the off-boarding prune and the
+    gradebooks then share. Live here, so a test that forgets it reaches GitHub."""
+    monkeypatch.setattr(
+        sync_membership, "list_org_repos", lambda org: [{"name": f"{org}-welcome"}]
+    )
 
 
 def test_every_live_cohorts_sync_provisions_its_gradebooks(monkeypatch, gradebooks):
@@ -60,7 +70,11 @@ def test_every_live_cohorts_sync_provisions_its_gradebooks(monkeypatch, gradeboo
     monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
 
     assert sync_membership.sync("Course", all_cohorts=True) == 0
-    assert gradebooks == ["Cohort-A"]
+    # And off the listing this pass already took, keyed by name: the off-boarding prune
+    # asks the same rows, and each used to take a paginated listing of its own.
+    assert gradebooks == [
+        ("Cohort-A", {"Cohort-A-welcome": {"name": "Cohort-A-welcome"}})
+    ]
 
 
 def test_empty_registry_is_visible_but_not_fatal(monkeypatch, capsys):

@@ -457,6 +457,66 @@ def test_an_external_assignments_page_has_no_repo_for_a_profile_to_rewrite(gener
     assert "repo_name" not in page["due_event"]
 
 
+def _external_arm(text: str, opens: str, closes: str) -> str:
+    """The branch a template takes for an assignment handed in off GitHub.
+
+    Textual, because the offline suite has no Liquid engine: the arm is what sits between
+    the `if` that selects it and the next branch, and what may never be in it is a word."""
+    after = text.split(opens, 1)
+    assert len(after) == 2, f"the external branch `{opens}` is gone"
+    arm = after[1].split(closes, 1)
+    assert len(arm) == 2, f"the branch after `{opens}` is gone"
+    return arm[0]
+
+
+def test_an_external_assignment_is_never_told_to_push(generated):
+    # The page and the due row both printed "Submit by pushing to `main` in <repo>" off
+    # `repo_url` alone, so a Moodle cohort was told to push to a repo that does not exist.
+    # Nor may either arm claim no repository was created: a cohort handed out before this
+    # shipped has the repos it was given, and the page would deny them.
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
+    arms = [
+        _external_arm(
+            layout,
+            '{% if page.submit_via == "external" %}',
+            '{% elsif page.visibility == "public" %}',
+        ),
+        _external_arm(
+            layout,
+            '{% if page.submit_via == "external" and page.submit_url %}',
+            '{% elsif page.submit_via != "external" and page.repo_url %}',
+        ),
+        _external_arm(
+            due_row,
+            '{%- if include.event.submit_via == "external" -%}',
+            "{%- elsif include.event.repo_name -%}",
+        ),
+    ]
+    for arm in arms:
+        assert "push" not in arm.lower(), arm
+        assert "no repository" not in arm.lower(), arm
+    # And the front matter carries nothing for a profile to rewrite into a repo name.
+    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
+    assert "repo_name" not in page and "repo_url" not in page
+
+
+def test_a_pending_assignment_gets_no_callout_at_all(generated):
+    # The callout answers "where does the work go, now?", and for an assignment still to
+    # come there is no brief to read and no address to go to. The layout gates the whole
+    # block rather than each arm, so this holds for every shape.
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    gated = layout.split("{% unless page.handout_pending %}", 1)[1].split(
+        "{% endunless %}", 1
+    )[0]
+    assert "Handed in outside GitHub" in gated
+    assert "Open your private submission repo" in gated
+    pending = _front_matter(
+        generated["collections"]["_assignments"]["05-assignment-5.md"]
+    )
+    assert pending["handout_pending"] is True
+
+
 def test_a_public_assignments_page_warns_before_the_first_push(generated):
     # The one callout that has to be read BEFORE a student pushes: the repo is
     # world-readable from hand-out, so "commit nothing you would not publish" belongs on

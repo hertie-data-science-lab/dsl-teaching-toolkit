@@ -264,16 +264,6 @@ def test_a_lookup_that_failed_opens_nothing(monkeypatch, capsys):
     assert "posting none" in capsys.readouterr().err
 
 
-def test_a_repo_that_is_not_there_has_no_feedback_issue_rather_than_a_failed_lookup(
-    monkeypatch,
-):
-    # An assignment handed in off GitHub creates no repos at all, so every unit's lookup
-    # 404s. Read as "the lookup failed", that made distribute red for the whole cohort and
-    # held back every mark; a repo that does not exist simply has no Feedback issue in it.
-    monkeypatch.setattr(grades, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") is None
-
-
 def test_the_oldest_labelled_issue_is_asked_for_first(monkeypatch):
     # GitHub lists newest first by default, and a student holds `maintain` on their own
     # submission repo: theirs would have won.

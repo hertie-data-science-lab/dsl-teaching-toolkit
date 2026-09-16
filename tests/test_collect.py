@@ -192,10 +192,18 @@ def test_submit_url_is_read_for_external_only_and_https_only(capsys):
     assert capsys.readouterr().err == ""
     # The site's button is the one link that sends a whole cohort somewhere off the
     # strength of one hand-typed line: https, or no button at all.
-    for bad in ("http://moodle.example.edu/x", "javascript:alert(1)", "moodle.edu"):
+    # And the seeded line uncommented but not answered is the same refusal: a button
+    # pointing a whole cohort at a Moodle page nobody created.
+    placeholder = f"https://moodle.example.edu/x?id={course.SETTING_PLACEHOLDER}"
+    for bad in (
+        "http://moodle.example.edu/x",
+        "javascript:alert(1)",
+        "moodle.edu",
+        placeholder,
+    ):
         spec = collect.parse_grading_spec(f"submit_via: external\nsubmit_url: {bad}\n")
         assert spec.submit_url == "" and spec.submit_host == ""
-        assert "is not an `https://` address" in capsys.readouterr().err
+        assert "is not a filled-in `https://` address" in capsys.readouterr().err
     # And it describes a handover the toolkit does not see, so on any other shape it is a
     # line pointing students away from the repo they are supposed to push to.
     spec = collect.parse_grading_spec(f"submit_url: {url}\n")

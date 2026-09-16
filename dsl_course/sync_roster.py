@@ -130,7 +130,10 @@ def revoke_repo_grants(
 
 
 def revoke_offboarded_access(
-    cohort_org: str, on_roster: set[str], dry_run: bool = False
+    cohort_org: str,
+    on_roster: set[str],
+    dry_run: bool = False,
+    existing: list[dict] | None = None,
 ) -> int:
     """Revoke the collaborator grant an off-boarded student still holds on the submission
     repos named after them. Returns the error count.
@@ -161,9 +164,10 @@ def revoke_offboarded_access(
         for key, per_team in teams.load(cohort_org).items()
         for team in per_team
     }
+    rows = list_org_repos(cohort_org) if existing is None else existing
     stale = [
         (repo, suffix)
-        for repo, suffix in submission_repo_suffixes(list_org_repos(cohort_org))
+        for repo, suffix in submission_repo_suffixes(rows)
         if suffix.casefold() not in on_roster
         and repo.casefold() not in declared_team_repos
     ]
@@ -186,7 +190,17 @@ def revoke_offboarded_access(
     return errors
 
 
-def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
+def sync(
+    cohort_org: str,
+    prune: bool = False,
+    dry_run: bool = False,
+    existing: list[dict] | None = None,
+) -> int:
+    """Reconcile the cohort's role teams and, with `prune`, its off-boarded access.
+
+    `existing` is the cohort's repo listing when the CALLER already holds one (the nightly
+    Sync membership takes one for this and the gradebooks alike); None means take one here,
+    and only the prune half needs it at all."""
     students = roster.load(cohort_org)
     if students is None:
         # An ABSENT students.csv, which `load` has already logged. A file faculty have to
@@ -237,6 +251,7 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
             cohort_org,
             {s.github_handle.casefold() for rows in wanted.values() for s in rows},
             dry_run=dry_run,
+            existing=existing,
         )
     return errors
 

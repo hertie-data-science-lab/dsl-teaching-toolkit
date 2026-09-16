@@ -16,7 +16,7 @@ import yaml
 
 from dsl_course import gh_contents, ghcli, grades, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER
+from tests.conftest import ROSTER_HEADER, repo_row
 
 # ------------------------------------------------------ provisioning the gradebooks
 
@@ -49,6 +49,36 @@ def test_a_cohort_with_no_roster_rows_yet_is_a_skip_not_a_failure(monkeypatch, c
     monkeypatch.setattr(grades.roster, "load", lambda org: None)
     assert grades.ensure_gradebooks("COHORT") == 0
     assert capsys.readouterr().err == ""
+
+
+def test_one_run_creates_at_most_the_cap_and_says_how_many_are_left(
+    monkeypatch, capsys
+):
+    # Four API calls per new gradebook, on a nightly job with a 30-minute bound: a large
+    # cohort's FIRST night would spend all of it here, and a job that times out has
+    # recorded nothing about where it got to. Nothing is lost - the next run starts from
+    # the rest - so the run stays green and says the count.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    rows = "".join(
+        f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}"
+        for n in range(grades.MAX_NEW_GRADEBOOKS + 5)
+    )
+    monkeypatch.setattr(
+        grades.roster, "load", lambda org: roster.parse(ROSTER_HEADER + rows + "\n")
+    )
+    made: list[str] = []
+    monkeypatch.setattr(
+        grades,
+        "provision_one",
+        lambda org, handle, existing=None: made.append(handle) or "ok",
+    )
+    # An existing gradebook costs nothing, so the cap counts CREATIONS: the listing is
+    # what says which those are.
+    assert grades.ensure_gradebooks("COHORT", existing={"grades-s0": {}}) == 0
+    assert made[0] == "s0" and len(made) == grades.MAX_NEW_GRADEBOOKS + 1
+    out = capsys.readouterr().out
+    assert "4 more gradebook(s) on the next run" in out
+    assert "s61" not in out  # a count, never a handle
 
 
 def test_ensure_gradebooks_names_no_student_in_a_public_log(monkeypatch, capsys):
@@ -1445,6 +1475,80 @@ def test_distribute_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch, c
     ((_repo, files, _delete),) = out["config"]
     assert grades.COHORT_CSV_NAME not in files
     assert grades.DISTRIBUTED_PATH in files
+
+
+def test_distribute_reds_on_a_header_only_roster_and_leaves_the_export(
+    tmp_path, monkeypatch, capsys
+):
+    # `ensure_gradebooks` passes over an EMPTY roster as well as an unreadable one (a
+    # freshly bootstrapped cohort is not a failure), so by the time marks exist distribute
+    # has to say so itself - and the export is one row per enrolled student, so rebuilding
+    # it from no rows would commit a header line over the file a registrar transcribes
+    # grades from.
+    out = _distribute(monkeypatch, tmp_path, roster_rows="")
+    assert out["rc"] == 1
+    ((_repo, files, _delete),) = out["config"]
+    assert grades.COHORT_CSV_NAME not in files
+    assert grades.DISTRIBUTED_PATH in files
+
+
+def test_a_dry_run_reds_on_a_header_only_roster_too(tmp_path, monkeypatch):
+    assert _distribute(monkeypatch, tmp_path, roster_rows="", dry_run=True)["rc"] == 1
+
+
+def test_a_repo_flipped_public_gets_no_comment_even_on_a_recorded_thread(
+    tmp_path, monkeypatch
+):
+    # `distributed.csv` says where this unit's last comment landed, and it was written
+    # while the repo was still private. A correction posted on the strength of that row
+    # publishes a mark; the live listing is asked FIRST, ahead of the record.
+    recorded = (
+        "target,assignment,channel,content_hash,distributed_at,issue\n"
+        "ada-l,assignment-1,issue,stale,2026-10-05T00:00:00,7\n"
+    )
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        distributed=recorded,
+        listed={
+            "assignment-1-ada-l": repo_row("assignment-1-ada-l", visibility="public")
+        },
+    )
+    assert out["comments"] == [] and out["issues"] == []
+    # The mark still reaches them: the gradebook is the channel every shape writes to.
+    ((gb_repo, _files, _d),) = out["gradebooks"]
+    assert gb_repo == "grades-ada-l"
+
+
+def test_a_github_repo_missing_from_the_listing_is_still_asked_about(
+    tmp_path, monkeypatch
+):
+    # A listing is a SNAPSHOT: a repo created since it was taken is absent from it, and
+    # that is exactly the student whose feedback must not be silently dropped. Only a
+    # shape that creates no repos at all is answered off the listing's silence.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        listed={"grades-ada-l": repo_row("grades-ada-l")},
+    )
+    assert [repo for repo, _body, _marker in out["comments"]] == ["assignment-1-ada-l"]
+
+
+def test_an_external_assignment_never_probes_a_repo_nobody_created(
+    tmp_path, monkeypatch
+):
+    # The other half of the same rule: `submit_via: external` creates none, so every
+    # unit's lookup would be an issues call for a certain answer.
+    # `found_issue` is what a LOOKUP would answer, so a run that probed anyway would post.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        grading=_GRADING_YML + "submit_via: external\n",
+        listed={"grades-ada-l": repo_row("grades-ada-l")},
+        found_issue=9,
+    )
+    assert out["comments"] == [] and out["issues"] == []
+    assert out["rc"] == 0
 
 
 # ------------------------------------------------- the team-formation lock file

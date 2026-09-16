@@ -53,6 +53,7 @@ from .course import (
     NO_STARTER,
     NO_TEAMS,
     OFFERED_VISIBILITIES,
+    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -84,7 +85,7 @@ from .gh_contents import (
     yaml_mark_line,
     yaml_problem,
 )
-from .ghcli import bot_login, clone, gh, is_missing_resource
+from .ghcli import bot_login, clone, gh
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
@@ -105,21 +106,46 @@ GRADEBOOK_DIR = (
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
+# The two things a gradebook has to say whatever else is on it. CONSTANTS, because
+# `render_readme` replaces the whole file on the first distribute: written into the starter
+# alone, both would vanish the moment a student was first marked - which is the moment the
+# first of them starts mattering.
+#
+# Not every assignment has a Feedback issue to read: an assignment handed in off GitHub
+# creates no repo at all, and a shared or public one is not private to the student. This
+# page is the channel every shape writes to, so it says so under the line that says the
+# repo is theirs.
+_CHANNEL_NOTE = (
+    "Feedback for assignments handed in outside GitHub, in a shared repo or in a public "
+    "repo appears here and nowhere else."
+)
+# `student_choice` was dropped as a setting (a repo admin can delete or transfer the repo,
+# and the org switches that would forbid it are web-only), so the answer to "can I show
+# this to an employer?" is a recipe rather than a knob - and it belongs where the student
+# is already looking.
+_KEEPING_YOUR_WORK = (
+    "## Keeping your work\n\n"
+    "Your assignment repos are private to you and the teaching team and stay readable "
+    "after the course ends. To show one publicly, publish a copy under your own account; "
+    "the original stays private.\n\n"
+    "```\n"
+    "git clone https://github.com/<cohort-org>/<slug>-<your-handle>\n"
+    "cd <slug>-<your-handle>\n"
+    "git remote set-url origin https://github.com/<you>/<new-public-repo>\n"
+    "git push -u origin main\n"
+    "```"
+)
 # What a gradebook says before its student has been marked in anything. The legend names
 # the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
 # and promising them a team score or their own adjustment - neither of which a gradebook
 # ever shows - contradicts the one thing the page is for. Replaced wholesale by
-# `render_readme` on the first distribute.
+# `render_readme` on the first distribute, which carries the two constants above forward.
 _STARTER_README = (
     "# Your gradebook\n\n"
     "This private repository is viewable only by you. Grades and feedback for each "
     "piece of assessment appear in `grades.yml` as the course progresses.\n\n"
-    # Not every assignment has a Feedback issue to read: an assignment handed in off
-    # GitHub creates no repo at all, and a shared or public one is not private to the
-    # student. This page is the channel every shape writes to, so it says so on the line
-    # under the one that says the repo is theirs.
-    "Feedback for assignments handed in outside GitHub, in a shared repo or in a public "
-    "repo appears here and nowhere else.\n\n"
+    + _CHANNEL_NOTE
+    + "\n\n"
     "## What each field means\n\n"
     "| Field | Meaning |\n"
     "| --- | --- |\n"
@@ -130,20 +156,7 @@ _STARTER_README = (
     "late days cost. |\n"
     "| `team` | Group assignments only: the team you submitted with. |\n"
     "| `team_feedback` | Group assignments only: feedback shared with the whole team. |\n"
-    # `student_choice` was dropped as a setting (a repo admin can delete or transfer the
-    # repo, and the org switches that would forbid it are web-only), so the answer to "can
-    # I show this to an employer?" is a recipe rather than a knob - and it belongs where
-    # the student is already looking.
-    "\n## Keeping your work\n\n"
-    "Your assignment repos are private to you and the teaching team and stay readable "
-    "after the course ends. To show one publicly, publish a copy under your own account; "
-    "the original stays private.\n\n"
-    "```\n"
-    "git clone https://github.com/<cohort-org>/<slug>-<your-handle>\n"
-    "cd <slug>-<your-handle>\n"
-    "git remote set-url origin https://github.com/<you>/<new-public-repo>\n"
-    "git push -u origin main\n"
-    "```\n"
+    "\n" + _KEEPING_YOUR_WORK + "\n"
 )
 
 
@@ -1103,20 +1116,26 @@ def _submit_url(value: object, where: str, dropped: list[str]) -> str:
     """Where an EXTERNAL assignment is handed in - the address behind the site's
     `Submit on <host>` button.
 
-    `https://` only: this is the one link on a public course site that sends a whole cohort
-    somewhere on the strength of one hand-typed line. Refused rather than raised, so the
-    site shows the brief with no button."""
+    `https://` only, and FILLED IN: this is the one link on a public course site that sends
+    a whole cohort somewhere on the strength of one hand-typed line, and `CHANGE-ME` is the
+    placeholder the scaffold seeds - a file still carrying it has had the line uncommented
+    and not answered. Refused rather than raised, so the site shows the brief with no
+    button."""
     text = str(value or "").strip()
     if not text:
         return ""
-    if text.lower().startswith("https://") and urlsplit(text).hostname:
+    if (
+        text.lower().startswith("https://")
+        and urlsplit(text).hostname
+        and SETTING_PLACEHOLDER not in text
+    ):
         return text
     dropped.append(
         Dropped(
             where,
             "submit_url",
-            f"`submit_url: {value}` is not an `https://` address - the site shows the "
-            f"brief with no submit button",
+            f"`submit_url: {value}` is not a filled-in `https://` address - the site "
+            f"shows the brief with no submit button",
         )
     )
     return ""
@@ -1990,13 +2009,13 @@ def _feedback_issues(
 ) -> list[str] | None:
     """The issues this query matches, or None when the question could not be ANSWERED.
 
-    A repo that is not there answers it: there are no issues in a repo that does not
-    exist. That is an ordinary state on every shape that creates no repo - an external
-    assignment has none at all - and reading it as "the lookup failed" reddened the run
-    for every student in the cohort and held their feedback back with it."""
+    ANY failure is "could not answer", a 404 included: a repo that reads as absent because
+    the token lost its grant is not a repo with no issues, and the caller acts on the
+    difference by opening one. The shape that has no repo at all never reaches here -
+    `_feedback_thread` answers it off the listing before any call is made."""
     code, out = gh("api", f"repos/{cohort_org}/{repo}/issues?{query}", "--jq", jq)
     if code != 0:
-        return [] if is_missing_resource(out) else None
+        return None
     return [line for line in out.splitlines() if line.strip()]
 
 
@@ -2855,7 +2874,21 @@ def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) ->
         *(_readme_row(titles.get(slug, slug), book[slug]) for slug in slugs),
     ]
     sections = [_readme_section(titles.get(slug, slug), book[slug]) for slug in slugs]
-    return "\n\n".join([_PRIVACY_HEADER, "\n".join(table), *sections]) + "\n"
+    # The same two constants the starter page opens and closes with: this REPLACES that
+    # page, and a student first marked in week three must not lose the two things it told
+    # them - where feedback for the other shapes lands, and how to keep their work.
+    return (
+        "\n\n".join(
+            [
+                _PRIVACY_HEADER,
+                _CHANNEL_NOTE,
+                "\n".join(table),
+                *sections,
+                _KEEPING_YOUR_WORK,
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_registrar_csv(
@@ -3155,6 +3188,14 @@ def provision_one(
     return "failed-no-collaborator"
 
 
+# How many gradebooks one run may CREATE. Four API calls each (create, README, topics,
+# faculty grant), and this now runs on the nightly Sync membership, whose job has a
+# 30-minute bound: a 300-student cohort's first night would spend the whole of it here and
+# a job that times out has recorded nothing about where it got to. Repos already there cost
+# nothing, so every later run starts from where this one stopped.
+MAX_NEW_GRADEBOOKS = 60
+
+
 def ensure_gradebooks(
     cohort_org: str, dry_run: bool = False, existing: dict[str, dict] | None = None
 ) -> int:
@@ -3169,6 +3210,11 @@ def ensure_gradebooks(
     `existing` is the cohort's repos off a listing the CALLER already holds, keyed by name;
     None means take one here. Every caller but the nightly sync has just listed the org for
     its own reasons, and a second listing per release run answers the same question twice.
+
+    At most `MAX_NEW_GRADEBOOKS` are CREATED per run, and only where the listing says which
+    those are - a run that could not list the org falls back to a probe per student and
+    cannot tell a creation from a skip until it has paid for it. The rest wait for the next
+    run, which is one nightly sync away.
 
     A roster that is absent or empty is a SKIP, not a failure, for the reason
     `sync_roster.sync` gives: an empty roster is a freshly bootstrapped cohort and a
@@ -3198,14 +3244,31 @@ def ensure_gradebooks(
     if existing is None and not dry_run:
         existing = _existing_repos(cohort_org)
     results: dict[str, int] = {}
+    creating = 0
+    deferred = 0
     for s in onboarded:
         if dry_run:
             log_person(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
             continue
+        if (
+            existing is not None
+            and f"{GRADEBOOK_PREFIX}{s.github_handle}" not in existing
+        ):
+            if creating >= MAX_NEW_GRADEBOOKS:
+                deferred += 1
+                continue
+            creating += 1
         status = provision_one(cohort_org, s.github_handle, existing)
         results[status] = results.get(status, 0) + 1
     if dry_run:
         return 0
+    if deferred:
+        # A COUNT, and green: nothing is lost, and the students who do have one were all
+        # reconciled. The next run creates the next batch.
+        log(
+            f"  ({deferred} more gradebook(s) on the next run - one run creates at most "
+            f"{MAX_NEW_GRADEBOOKS})"
+        )
     log_ok(f"Done - {json.dumps(results)}")
     return 1 if any(k.startswith("failed") for k in results) else 0
 
@@ -3425,11 +3488,16 @@ def _feedback_thread(
     """The Feedback issue this unit's comment goes on: its number, None where there is
     none, or `LOOKUP_FAILED` where the question could not be answered.
 
-    Two gates, both off the ONE listing the caller took. A repo the listing does not carry
-    has no thread and is not asked about - an external assignment creates none at all, and
-    probing each would be an issues call per student. A repo the listing says is NOT
-    private has no thread either, whatever the file still says: a `visibility:` edited
-    after handout must not leave marks in a repo the world can read.
+    Two gates, both off the ONE listing the caller took, and both DELIBERATELY narrow - a
+    listing is a snapshot, and answering "no thread" off it wrongly withholds a mark.
+
+    A repo the listing says is NOT private has no thread, whatever the file still says: a
+    `visibility:` edited after handout must not leave marks in a repo the world can read.
+    A repo the listing does not carry is skipped only where the shape creates no repos to
+    begin with - an external assignment has none, and probing each would be an issues call
+    per student for a certain answer. A `github` repo missing from the listing falls
+    THROUGH and is asked about: it may be a repo created since the listing was taken, and
+    that is exactly the student whose feedback must not be dropped.
 
     Opening one is then the exception rather than the rule. Only an assignment that HAS a
     Feedback issue may have one opened; every other shape uses the thread it finds and
@@ -3437,7 +3505,7 @@ def _feedback_thread(
     its feedback where it was told to read it."""
     if listed is not None and not listed_is_private(listed.get(repo)):
         return None
-    if listed is not None and repo not in listed:
+    if listed is not None and repo not in listed and not spec.creates_unit_repos:
         return None
     return ensure_feedback_issue(
         cohort_org,
@@ -3638,14 +3706,20 @@ def distribute(
             if dry_run:
                 counts["comments"] += 1
                 continue
-            # The thread this unit's last comment landed on, if there was one: the same
-            # issue, without a listing to get wrong.
-            issue: int | IssueLookupFailed | None = (
-                int(known) if known.isdigit() else None
-            )
-            if issue is None:
-                issue = _feedback_thread(
-                    spec, cohort_org, repo, target, members, listed
+            # The LIVE gate first, ahead of the recorded thread: `distributed.csv` says
+            # where this unit's last comment landed, and a repo flipped public since then
+            # is a thread the internet can now read. A correction must not be posted into
+            # it on the strength of a row written while it was still private.
+            issue: int | IssueLookupFailed | None = None
+            if listed is None or listed_is_private(listed.get(repo)):
+                # The thread that comment landed on, if there was one: the same issue,
+                # without a listing to get wrong.
+                issue = (
+                    int(known)
+                    if known.isdigit()
+                    else _feedback_thread(
+                        spec, cohort_org, repo, target, members, listed
+                    )
                 )
             if isinstance(issue, IssueLookupFailed):
                 # The listing could not be READ. Opening one here is how a second Feedback
@@ -3723,11 +3797,13 @@ def distribute(
 
     if dry_run:
         _preview(cohort_org, sheets, specs, books, counts, pending, notify, held)
-        # `students is None` on both exits, for the same reason: `ensure_gradebooks` skips
-        # a roster it could not read rather than redden the nightly sync it now also runs
-        # on, so saying so is this run's own job. Nothing is withheld for it - see
-        # `_on_the_roster` - but the run goes red until somebody fixes the file.
-        return 1 if provisioning_failed or students is None else 0
+        # `not students` on both exits - no rows AND no file, for the same reason:
+        # `ensure_gradebooks` passes over either rather than redden the nightly sync it now
+        # also runs on, so saying so is this run's own job. Distribute is about to write a
+        # mark per student, and a header-only students.csv is not a cohort nobody enrolled
+        # in by the time marks exist. Nothing is withheld for it - see `_on_the_roster` -
+        # but the run goes red until somebody fixes the file.
+        return 1 if provisioning_failed or not students else 0
 
     failed_mail, told = (
         _email_updates(cohort_org, pending, dry_run=False)
@@ -3742,13 +3818,15 @@ def distribute(
     #    with the retired files this cohort is migrating off, so the old and the new can
     #    never both be present for a reader to choose between.
     writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
-    if students is None:
-        # `roster.load` answers None for a roster it could not READ, and the export is one
-        # row per ENROLLED student - so regenerating it from no rows would commit a header
-        # line over the file a registrar transcribes grades from. Leaving it is the only
-        # safe answer; the run goes red and the next one rebuilds it.
+    if not students:
+        # `roster.load` answers None for a roster it could not READ and [] for one with no
+        # rows, and the export is one row per ENROLLED student - so regenerating it from
+        # either would commit a header line over the file a registrar transcribes grades
+        # from. Leaving it is the only safe answer; the run goes red and the next one
+        # rebuilds it.
         log_err(
-            f"roster in {cohort_org} could not be read - {COHORT_CSV_NAME} left as it is"
+            f"roster in {cohort_org} is empty or could not be read - "
+            f"{COHORT_CSV_NAME} left as it is"
         )
     else:
         writes[COHORT_CSV_NAME] = render_registrar_csv(students, books).encode()
@@ -3773,7 +3851,7 @@ def distribute(
         or counts["failed"]
         or failed_mail
         or not recorded
-        or students is None
+        or not students
         else 0
     )
 

@@ -2414,10 +2414,15 @@ def test_a_second_tick_of_an_external_handout_hands_nothing_out_again(
     sheet_writes.created = False
     out = _external(monkeypatch, tmp_path)
     assert out["result"] == (0, False)
-    assert out["site"] == [] and out["handout"] == [] and gradebooks == []
+    assert out["site"] == [] and gradebooks == []
     # The sheet is the exception: it is the only pass that knows this assignment's units
     # before its due date, and a late onboarder has no repo to make the tick `changed`.
     assert len(sheet_writes) == 1
+    # And the handout goes with it, on ANY tick whose sheet landed rather than only on the
+    # one that created it: `record_handout` is write-once, so repeating it costs a read and
+    # changes nothing - where gating it on creation left a manual release whose sheet
+    # already existed with no record at all, and the brief is published off that record.
+    assert out["handout"] == ["assignment-1"]
 
 
 def test_an_external_group_handout_forms_teams_and_keys_the_sheet_on_them(

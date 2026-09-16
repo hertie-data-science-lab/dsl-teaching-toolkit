@@ -1381,6 +1381,7 @@ def provision_all(
     #
     # Not fatal, and deliberately not counted: the repos are handed out by this point, and
     # the refresh pass creates a sheet it finds missing on the next tick.
+    sheet_written = False
     if changed or not gspec.creates_unit_repos:
         sheet = sync_sheet(
             master_org,
@@ -1393,6 +1394,7 @@ def provision_all(
             now=datetime.now(timezone.utc),
             units=sheet_units,
         )
+        sheet_written = sheet.written
         if not sheet.written:
             log_err(
                 f"  ! could not write the grading sheet for {slug} - the hourly refresh "
@@ -1409,10 +1411,13 @@ def provision_all(
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
     #
     # Ungated where there are repos: a first tick with nobody onboarded yet is still the
-    # moment the assignment went out. A shape that creates none is refused above unless the
-    # schedule already names it, so there the entry is certain to be there and the read is
-    # only worth paying on the tick that handed something out.
-    if changed or gspec.creates_unit_repos:
+    # moment the assignment went out. A shape that creates none has no such signal, so it
+    # records on any tick whose SHEET landed - not only the one that created it. Gating on
+    # creation instead meant a manual release whose sheet already existed, or one fired
+    # before anybody had onboarded, never recorded the handout at all - and the brief is
+    # published off that record, so it never appeared. `record_handout` is write-once, so
+    # repeating it on every later tick costs one read and changes nothing.
+    if gspec.creates_unit_repos or sheet_written:
         schedule.record_handout(cohort_org, key)
 
     # ...and refresh the Join-team form's mirror while this run holds the schedule and the

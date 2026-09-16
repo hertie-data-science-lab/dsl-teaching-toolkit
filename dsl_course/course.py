@@ -121,6 +121,11 @@ DEFAULT_MAX_TEAM_SIZE = 5
 # why it is named here, beside the vocabulary it belongs to, rather than spelt again in
 # each of the three layers that has to recognise it.
 NO_STARTER = "none"
+# The stand-in the scaffold seeds where a setting has no sensible default but a shape worth
+# showing (`submit_url`). Here because two layers have to agree on it: `scaffold` writes it
+# into the file and `grades` refuses to act on a line still carrying it, which is what a
+# commented example turning into a live one otherwise costs a cohort.
+SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
 # The starters an instructor may actually name, `none` being the answer that means none of
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.

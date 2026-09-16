@@ -48,6 +48,7 @@ from .discovery import (
     discover_assignments,
     discover_cohorts,
     discover_content_repos,
+    list_org_repos,
 )
 from .faults import Unusable
 from .gh_contents import read_error
@@ -145,7 +146,14 @@ def sync(
         # transient failure must not abort the whole batch (the lesson seed.refresh
         # applied). Log it, count it, and carry on to the next cohort.
         try:
-            errors += sync_roster.sync(org, prune=True, dry_run=dry_run)
+            # ONE listing of the cohort for this pass. Two of the steps below ask the same
+            # question of it - which submission repos an off-boarded student still holds a
+            # grant on, and which students have no gradebook yet - and each used to take a
+            # paginated listing of its own, nightly, per cohort.
+            existing = list_org_repos(org)
+            errors += sync_roster.sync(
+                org, prune=True, dry_run=dry_run, existing=existing
+            )
             errors += sync_teams.sync(org, prune=True, dry_run=dry_run)
             errors += sync_faculty.sync_cohort_instructors(
                 course_org, org, content_repos, assignments, dry_run=dry_run
@@ -159,7 +167,9 @@ def sync(
             # rather than from the first distribute: it is where feedback goes for every
             # shape that has no Feedback issue, and the assignment brief points at it from
             # the day it is published. Idempotent, one cohort listing.
-            errors += ensure_gradebooks(org, dry_run=dry_run)
+            errors += ensure_gradebooks(
+                org, dry_run=dry_run, existing={r["name"]: r for r in existing}
+            )
         except _CONTENT_FAULT as exc:
             # A file faculty have to fix, not a run that broke. This cohort is skipped -
             # a roster nobody can read is not an empty roster, and acting on it would

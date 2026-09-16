@@ -47,6 +47,7 @@ from .course import (
     PUBLIC_LECTURES,
     PUBLIC_TYPES,
     PUBLISH_FILE,
+    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     STARTER_FORMATS,
@@ -277,20 +278,21 @@ def _grading_config(
             "github (they push to their repo) | external (handed in elsewhere: Moodle, "
             "Kaggle, in class - no repo is created)",
         ),
-        # Live only where it means something. `submit_url` is the one thing the toolkit is
-        # ever told about a handover it does not see, and on a github assignment it would
-        # be a line pointing students away from the repo they are supposed to push to.
+        # COMMENTED on every shape, `external` included. The value here is a placeholder
+        # with the right shape and no meaning, and a live line carrying it would put a
+        # `Submit on moodle.hertie-school.org` button in front of a whole cohort pointing
+        # at a page that does not exist. An instructor uncomments it once they have the
+        # real address; `grades._submit_url` refuses one still carrying the placeholder.
         _setting(
             "submit_url",
-            "https://moodle.hertie-school.org/mod/assign/view.php?id=CHANGE-ME",
+            f"https://moodle.hertie-school.org/mod/assign/view.php?id={SETTING_PLACEHOLDER}",
             "external only: the `Submit on ...` button on the site (https only)",
-            live=submit_via == "external",
+            live=False,
         ),
-        # Live only where there IS a repo for it to describe, for the same reason
-        # `submit_url` is live only where there is not: an `external` assignment creates
-        # none, and the parse drops the key there. Read when each repo is CREATED, so the
-        # comment says what editing it afterwards does - which is nothing to the repos,
-        # and a digest fault until the line matches them again.
+        # Live only where there IS a repo for it to describe: an `external` assignment
+        # creates none, and the parse drops the key there. Read when each repo is CREATED,
+        # so the comment says what editing it afterwards does - which is nothing to the
+        # repos, and a digest fault until the line matches them again.
         _setting(
             "visibility",
             visibility,
