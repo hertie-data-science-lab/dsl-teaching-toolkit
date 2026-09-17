@@ -147,19 +147,20 @@ date on a `dateless:` row and `(TBC)` follows it on a `tbc:` one.
 
 **New this round: five shapes, not two.** `page.submit_shape` (`site.py`, off
 `course.submit_shape(submit_via, visibility)`) is the one word the layout branches on:
-`github-private`, `github-public`, `github-student-choice`, `shared`, `external`. Only
-`github-private` has a Feedback issue (`course.has_feedback_issue`) - every callout below
-for the other four shapes ends by naming the private gradebook as where marks actually
-land, because a thread in a public repo, a shared repo, or one the student may publish
-would be a published mark.
+`assignment-repo-private`, `assignment-repo-public`, `assignment-repo-student-choice`,
+`shared-dropbox-repo`, `external`. Only `assignment-repo-private` has a Feedback issue
+(`course.has_feedback_issue`) - every callout below for the other four shapes ends by
+naming the private gradebook as where marks actually land, because a thread in a public
+repo, a shared repo, or one the student may publish would be a published mark.
 
 Not yet handed out - the brief is withheld, the row and its dates stay, `handout_pending:
 true`. The line is now shape-specific (`site._assignment_entry`):
 ```
 Assignment 1                      # title from the SLUG, title-cased, never the README
-_**Assignment 1 is not yet released** - your private `assignment-1-<your-handle>` repo appears when it is._            # github-private / github-public
-_**Assignment 1 is not yet released** - your private `assignment-1-<your-handle>` repo appears when it is._            # github-student-choice too - "born" private: the flag is a rule about who may change visibility LATER, not a repo anybody is ever handed public
-_**Assignment 1 is not yet released** - the `assignment-1-submissions` drop box appears when it is._                   # shared - names the one shared repo, not a shape
+_**Assignment 1 is not yet released** - your private `assignment-1-<your-handle>` repo appears when it is._            # assignment-repo-private
+_**Assignment 1 is not yet released** - your public `assignment-1-<your-handle>` repo appears when it is._             # assignment-repo-public - the placeholder names the repo's real visibility
+_**Assignment 1 is not yet released** - your private `assignment-1-<your-handle>` repo appears when it is._            # assignment-repo-student-choice too - "born" private: the flag is a rule about who may change visibility LATER, not a repo anybody is ever handed public
+_**Assignment 1 is not yet released** - the `assignment-1-submissions` drop box appears when it is._                   # shared-dropbox-repo - names the one shared repo, not a shape
 _**Assignment 1 is not yet released** - the brief appears here when it is._                                            # external - there is no repo to describe at all
 ```
 (Group assignments say `assignment-4-project-<your-team>`.) Deliberately word for word the
@@ -180,25 +181,25 @@ The "open in your local copy" strip (`open_in.html`) is skipped for `external` -
 no repo shape to open a local copy of. The submission callout is now ONE `case` on
 `submit_shape`, one button, five sentences:
 ```
-                                                                              # github-private (the default `else` arm)
+                                                                              # assignment-repo-private (the default `else` arm)
 Open the submission repo on GitHub                                          # button
 Your work goes in your private repo `assignment-1-<your-handle>`. Clone it, commit
 as you go, and push to `main` - that push is your submission.
 
-                                                                              # github-public
+                                                                              # assignment-repo-public
 Open the submission repo on GitHub                                          # button
 Your repo `assignment-1-<your-handle>` is **public**: anyone on the internet can
 read it. Push to `main` as usual, but commit nothing you would not publish and no data you were told
 to keep private. Your grade and feedback arrive in your private gradebook `grades-<your-handle>`,
 not here.
 
-                                                                              # github-student-choice
+                                                                              # assignment-repo-student-choice
 Open the submission repo on GitHub                                          # button
 Your repo starts private. You are its admin: after the grading cutoff you may make it public from
 Settings > Danger zone if you want it in your portfolio. Before then the toolkit turns it private again.
 Your grade and feedback arrive in your private gradebook, not here.
 
-                                                                              # shared
+                                                                              # shared-dropbox-repo
 Open the submission repo on GitHub                                          # button, links the ONE drop-box repo
 Push your work into the `<your-handle>/` folder of
 `assignment-1-submissions` - that push is your submission. Everyone in the cohort can read
@@ -215,11 +216,12 @@ Handed in outside GitHub. See the brief for what to hand in. Your grade and feed
 private gradebook `grades-<your-handle>`.
 ```
 `repo_url` is the cohort org's repo list filtered to this assignment for every shape but
-`shared` (whose `repo_url` is the ONE drop-box repo's own address) - not one student's
-address: the page is public and identical for everyone, and GitHub shows a signed-in
-student only the repos they can see, so the filter lands on their own (or their team's).
-`repo_name_is_shape` (site.py) is false only for `shared`: its `repo_name` is a real repo,
-`assignment-1-submissions`, not a `<your-handle>` shape for `open_in.html` to substitute
+`shared_dropbox_repo` (whose `repo_url` is the ONE drop-box repo's own address) - not one
+student's address: the page is public and identical for everyone, and GitHub shows a
+signed-in student only the repos they can see, so the filter lands on their own (or their
+team's). `repo_name_is_shape` (site.py) is false only for `shared_dropbox_repo`: its
+`repo_name` is a real repo, `assignment-1-submissions`, not a `<your-handle>` shape for
+`open_in.html` to substitute
 into - substituting a handle into a name that already exists would point every reader at a
 repo that is not theirs.
 
@@ -229,8 +231,8 @@ does not collect, so there is no deadline here to quote a penalty against
 
 Quietly repeated under the brief, at the point a student has just finished reading it:
 ```
-Submit by pushing to `main` in `assignment-1-<your-handle>`.                       # github-*, no submit_path
-Submit by pushing into `<your-handle>/` in `assignment-1-submissions`.             # shared
+Submit by pushing to `main` in `assignment-1-<your-handle>`.                       # assignment-repo-*, no submit_path
+Submit by pushing into `<your-handle>/` in `assignment-1-submissions`.             # shared-dropbox-repo
 Hand in at moodle.hertie-school.org.                                              # external, with a submit_url
                                                                                     # external, no submit_url - nothing is repeated here at all
 ```
@@ -238,10 +240,10 @@ Hand in at moodle.hertie-school.org.                                            
 The due row's Details column (`schedule_row_due.html`) says where to submit, one word
 narrower than the page's own callout - no gradebook reminder, this is a schedule table:
 ```
-Submit via `assignment-1-<your-handle>`                        # github-private
-Submit via `assignment-1-<your-handle>` (public)                # github-public
-Submit via `assignment-1-<your-handle>` (yours to publish)      # github-student-choice
-Submit via `assignment-1-submissions` (<your-handle>/ folder)  # shared
+Submit via `assignment-1-<your-handle>`                        # assignment-repo-private
+Submit via `assignment-1-<your-handle>` (public)                # assignment-repo-public
+Submit via `assignment-1-<your-handle>` (yours to publish)      # assignment-repo-student-choice
+Submit via `assignment-1-submissions` (<your-handle>/ folder)  # shared-dropbox-repo
 Handed in outside GitHub - see the brief                        # external, no submit_url
 Handed in outside GitHub - moodle.hertie-school.org             # external, with a submit_url (linked)
 ```

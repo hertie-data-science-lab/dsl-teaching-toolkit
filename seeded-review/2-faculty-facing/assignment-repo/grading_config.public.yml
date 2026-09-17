@@ -3,7 +3,7 @@ title: Portfolio piece        # the assignment's name, shown to graders and on t
 type: individual              # individual | group
 # team_formation: self_select # self_select (students use the Join-team form) | assigned (you write teams.csv)
 # max_team_size: 5            # group only
-submit_via: github            # github (they push to their repo) | external (handed in elsewhere: Moodle, Kaggle, in class - no repo is created) | shared (one private repo for the whole cohort, each student pushes into their own folder, peers can read it)
+submit_via: assignment_repo   # assignment_repo (they push to their repo) | external (handed in elsewhere: Moodle, Kaggle, in class - no repo is created) | shared_dropbox_repo (one private repo for the whole cohort, each student pushes into their own folder, peers can read it)
 # submit_url: https://moodle.hertie-school.org/mod/assign/view.php?id=CHANGE-ME # external only: the `Submit on ...` button on the site (https only)
 visibility: public            # private (the student and the teaching team) | public (the whole internet: portfolio work, no Feedback issue) | student_choice (private, and the student is its admin: theirs to publish after the grading cutoff, and no Feedback issue) - read at hand-out only
 format: py                    # ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; grading reads whatever is in the repo

@@ -6,9 +6,9 @@ repo, `TeamResult` - carries no member field at all, so no member's adjustment, 
 final grade can leak into a comment the whole team reads). Every send carries a content
 hash so a re-run after one correction updates nothing that already went out unchanged.
 
-**Same gate as the receipts beside this file**: posted only for `github`/`private`. For
-`github`/`public`, `github`/`student_choice`, `shared` and `external`, this comment is
-never posted anywhere - the mark and the words reach the student only through
+**Same gate as the receipts beside this file**: posted only for `assignment_repo`/`private`.
+For `assignment_repo`/`public`, `assignment_repo`/`student_choice`, `shared_dropbox_repo`
+and `external`, this comment is never posted anywhere - the mark and the words reach the student only through
 `gradebook-repo/README.md`'s per-assignment section (`grades.render_readme`).
 
 ### Individual - anna-adams, assignment-2 (plain grade)

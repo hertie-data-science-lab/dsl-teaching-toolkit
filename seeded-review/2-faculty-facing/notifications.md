@@ -466,7 +466,7 @@ The CURRENT wording of every repo the pipeline seeds:
 | `<org>.github.io` (both tiers) | `[do not touch]: Course website (auto-deployed)` | `scaffold.py:679` | both |
 | cohort `materials` | `Released lectures, labs, readings, & other materials` | `deploy.py:218` | student |
 | cohort `<slug>-<handle>` | `{slug} - submission repo` | `assign.py:876` | student |
-| cohort `<slug>-submissions` (new: `submit_via: shared`) | `{slug} - shared submission drop box` | `assign.py:1165` | student (the whole cohort reads it) |
+| cohort `<slug>-submissions` (new: `submit_via: shared_dropbox_repo`) | `{slug} - shared submission drop box` | `assign.py:1165` | student (the whole cohort reads it) |
 | cohort `grades-<handle>` | `Private gradebook for @{handle}` | `grades.py:2158` | student (own repo only) |
 | cohort assignment template | `{slug} - cohort assignment template` | `assign.py:238` | faculty |
 
@@ -520,7 +520,7 @@ date); the third is immediate.
 handed out no longer match its own `visibility:` line. Read once, at repo CREATION
 (`repos.set_visibility`); editing the file afterwards is a silent no-op, so this is what
 notices. Exempted where `visibility: student_choice` (the student, not the file, decides -
-see fault 2) and for any shape that creates no repo of its own (`external`, `shared`).
+see fault 2) and for any shape that creates no repo of its own (`external`, `shared_dropbox_repo`).
 
 ```
 `visibility: public` does not describe the repos this assignment handed out - 3 of 20 are not public. The value is read when each repo is CREATED, so editing it afterwards moves nothing on its own
@@ -545,18 +545,19 @@ an assignment in this cohort is handed out with `visibility: student_choice`, wh
 **3. Shared-shape advisory (`Dropped` warnings, `grades._cross_check`)** - not a
 `ConfigFault` of its own, but the same `Dropped` line every other refused
 `grading_config.yml` setting produces (section 6's sibling parse), surfaced through
-`grading_spec_faults` into this same digest. For `submit_via: shared`, every one of
-`autograde:`, `completion_check:` and `grader_pdf:` that is set true is force-corrected to
-`false` and reported once each:
+`grading_spec_faults` into this same digest. For `submit_via: shared_dropbox_repo`, every
+one of `autograde:`, `completion_check:` and `grader_pdf:` that is set true is
+force-corrected to `false` and reported once each:
 
 ```
 `autograde:` is not read for a shared drop box - one repo holds the whole cohort's work, so it is hand-marked - ignored
 `completion_check:` is not read for a shared drop box - one repo holds the whole cohort's work, so it is hand-marked - ignored
 `grader_pdf:` is not read for a shared drop box - one repo holds the whole cohort's work, so it is hand-marked - ignored
 ```
-`visibility:` is corrected the same way for both `shared` and `external` (`visibility:` is
-not read for a shared drop box.../says nothing about an assignment handed in off GitHub...
-- ignored), and `submit_url:` is corrected to blank for anything but `external` (`` `submit_url:`
+`visibility:` is corrected the same way for both `shared_dropbox_repo` and `external`
+(`visibility:` is not read for a shared drop box.../says nothing about an assignment
+handed in off GitHub... - ignored), and `submit_url:` is corrected to blank for anything
+but `external` (`` `submit_url:`
 is only read for `submit_via: external` - ignored ``) - see the scaffolded
 `grading_config.yml` variants in `2-faculty-facing/assignment-repo/` for where each of
 these lines is seeded already commented out, so an instructor is unlikely to trip them by

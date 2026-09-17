@@ -37,7 +37,7 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `emails/grades-updated.txt` | Grade-release notification - rendered named AND degraded | `grades.update_message` |
 | `gradebook-repo/README.md` | Landing page in their private `grades-<handle>` repo, before and after the first Distribute grades | `grades._STARTER_README`, `grades.render_readme` |
 | `gradebook-repo/grades.yml` | The grades file they open (shape + field names) | `grades.render_yaml`, `grades.student_view` |
-| `assignment-repo/README.github.md`, `README.external.md` | What a student sees in their own assignment repo. **One text for `github`/`shared` (the visibility - private, public, student_choice - never changes the brief), a second for `external`**; `type: group` adds `CONTRIBUTIONS.md` beside it, unaffected by shape | `scaffold._brief_stub` |
+| `assignment-repo/README.assignment_repo.md`, `README.external.md` | What a student sees in their own assignment repo. **One text for `github`/`shared` (the visibility - private, public, student_choice - never changes the brief), a second for `external`**; `type: group` adds `CONTRIBUTIONS.md` beside it, unaffected by shape | `scaffold._brief_stub` |
 | `assignment-repo/CONTRIBUTIONS.md` | Group-only companion to the README, shape-independent | `scaffold._CONTRIBUTIONS_STUB` |
 | `assignment-repo/starter.*` | The starter they complete | `dsl_course/scaffold.py` |
 | `assignment-repo/solution-README.md` | Model-solution page, post-deadline | `dsl_course/scaffold.py` |

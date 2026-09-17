@@ -4,15 +4,15 @@ One comment per event, additive - a comment edited in place would leave no trace
 the work actually arrived. `grades.receipt` (`course.receipt_body` underneath) composes the
 text; `grades.post_receipt` posts it once per `(commit, event)` pair (the hidden
 `<!-- dsl-receipt:<sha>:<event> -->` marker is what makes a re-run idempotent - never shown
-to a student). All four below render from assignment-2's spec (individual, `github`/
-`private`, a 7-day late window at 10%/day).
+to a student). All four below render from assignment-2's spec (individual,
+`assignment_repo`/`private`, a 7-day late window at 10%/day).
 
-**Posted only where `spec.has_feedback_issue` is true - i.e. `github`/`private` alone.**
-`collect._post_receipts` returns immediately `if not spec.has_feedback_issue:` for every
-other shape (`github`/`public`, `github`/`student_choice`, `shared`, `external`): there is
-no Feedback issue to post into for any of them, not merely (for `external`) no commit to
-time. Their Feedback issue only ever carries nothing at all - the gradebook is the one
-channel that reaches all five shapes.
+**Posted only where `spec.has_feedback_issue` is true - i.e. `assignment_repo`/`private`
+alone.** `collect._post_receipts` returns immediately `if not spec.has_feedback_issue:` for
+every other shape (`assignment_repo`/`public`, `assignment_repo`/`student_choice`,
+`shared_dropbox_repo`, `external`): there is no Feedback issue to post into for any of
+them, not merely (for `external`) no commit to time. Their Feedback issue only ever
+carries nothing at all - the gradebook is the one channel that reaches all five shapes.
 
 ### At the due date - submitted on time
 
