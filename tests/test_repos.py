@@ -400,3 +400,39 @@ def test_a_plan_refusal_of_the_drop_box_ruleset_warns_but_does_not_fail(
 def test_any_other_ruleset_failure_is_still_counted(monkeypatch, capsys):
     monkeypatch.setattr(repos, "gh", lambda *a, stdin=None: (1, "HTTP 502 bad gateway"))
     assert repos.protect_shared_repo("org", "a1-submissions") is False
+
+
+def test_a_visibility_patch_waits_out_a_repo_still_being_created(monkeypatch):
+    """Right after `generate` GitHub refuses the PATCH with 422 "still in progress"; the
+    flip retries on that answer alone and succeeds once the repo has settled."""
+    answers = iter(
+        [
+            (
+                1,
+                "Failed to update visibility. A previous repository operation is still in progress. (HTTP 422)",
+            ),
+            (
+                1,
+                "Failed to update visibility. A previous repository operation is still in progress. (HTTP 422)",
+            ),
+            (0, "public"),
+        ]
+    )
+    slept = []
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
+    monkeypatch.setattr(repos.time, "sleep", slept.append)
+    assert repos.set_visibility("org", "a1-ada", "public") is True
+    assert slept == [repos._SETTLE_DELAY, repos._SETTLE_DELAY]
+
+
+def test_any_other_visibility_refusal_is_not_retried(monkeypatch, capsys):
+    calls = []
+
+    def fake(*a, **k):
+        calls.append(a)
+        return 1, "HTTP 403 Forbidden"
+
+    monkeypatch.setattr(repos, "gh", fake)
+    monkeypatch.setattr(repos.time, "sleep", lambda s: None)
+    assert repos.set_visibility("org", "a1-ada", "public") is False
+    assert len(calls) == 1

@@ -5,6 +5,7 @@ topic and describe it, add a collaborator - and what a published page may never 
 from __future__ import annotations
 
 import json
+import time
 from fnmatch import fnmatch
 from functools import cache
 from typing import NamedTuple
@@ -158,6 +159,12 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     return False
 
 
+# GitHub's answer while a just-created repo is still being populated.
+_SETTLING = "operation is still in progress"
+_SETTLE_ATTEMPTS = 6
+_SETTLE_DELAY = 5.0
+
+
 def set_visibility(
     org: str, name: str, visibility: str, *, person: bool = False
 ) -> bool:
@@ -177,16 +184,24 @@ def set_visibility(
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
     verbose log (see `log.log_err_person`)."""
-    code, out = gh(
-        "api",
-        "--method",
-        "PATCH",
-        f"repos/{org}/{name}",
-        "--field",
-        f"visibility={visibility}",
-    )
-    if code == 0:
-        return True
+    # A repo generated from a template is still being populated for a few seconds; a PATCH
+    # in that window is refused with 422 "A previous repository operation is still in
+    # progress" (seen live 2026-09-17: refused at once, accepted 8 s later). Retry on
+    # exactly that answer and nothing else.
+    for attempt in range(_SETTLE_ATTEMPTS):
+        code, out = gh(
+            "api",
+            "--method",
+            "PATCH",
+            f"repos/{org}/{name}",
+            "--field",
+            f"visibility={visibility}",
+        )
+        if code == 0:
+            return True
+        if _SETTLING not in out.lower() or attempt == _SETTLE_ATTEMPTS - 1:
+            break
+        time.sleep(_SETTLE_DELAY)
     _failed_on(
         person,
         f"could not set a repo's visibility in {org}",
