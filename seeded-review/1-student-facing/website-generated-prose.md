@@ -261,6 +261,29 @@ The same four sentences the repo's own About line carries at creation (`assign._
 twice is a note with two answers. Only once the brief is out: a warning about a repo that
 does not exist yet would sit above the line saying the assignment has not been handed out.
 
+**A drop-box page now offers real Edit buttons, not none.** The callout carries two data
+attributes only when `page.submit_path` is set - `shared_dropbox_repo` and no other shape
+(`templates/site/_layouts/assignment.html`):
+```html
+<div class="callout"{% if page.submit_path %} data-dsl-dropbox="{{ page.repo_name | escape }}" data-dsl-dropbox-path="{{ page.submit_path | escape }}"{% endif %}>
+```
+`open_in.html`'s `decorateAssignment` reads them when there is no `data-repo-name` shape to
+resolve: it takes the drop box's name exactly as printed (never substituted - a real repo,
+not a shape) and substitutes the reader's handle into the FOLDER alone, via `ownShape`
+(renamed from `ownRepo`, which now does this same substitution for both cases):
+```js
+function ownShape(shape, handle) {
+  if (!handle || !shape || shape.indexOf("<your-handle>") < 0) { return ""; }
+  return shape.replace("<your-handle>", handle);
+}
+```
+So `Edit online` and `Edit locally` appear on a drop-box page exactly as they do on every
+other shape, pointed at the reader's own folder rather than nothing: for
+`assignment-1-submissions` and handle `jane`, `Edit online` opens
+`https://github.dev/hertie-dsl-demo-f2026/assignment-1-submissions/tree/main/jane` and
+`Edit locally` opens `vscode://file/<assignments-root>/assignment-1-submissions/jane` -
+never the whole shared repo.
+
 The due row's Details column (`schedule_row_due.html`) says where to submit, one word
 narrower than the page's own callout - no gradebook reminder, this is a schedule table:
 ```

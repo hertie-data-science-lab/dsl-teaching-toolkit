@@ -8,14 +8,27 @@ course_code: E1234
 #   # commit of the central toolkit - the way to hold a course still, or back, while
 #   # something is fixed. Unset means `release`, which is where every real course belongs.
 #   # (`main` is the trunk and is also accepted, but only the demo course runs it: an org
-#   # on `main` takes every merge the moment it lands.) Cohorts inherit this; setting it
-#   # in a cohort's own file does nothing.
+#   # on `main` takes every merge the moment it lands. `preview` is a PR tip the maintainer
+#   # force-pushes, for looking at a feature before it merges - the demo course and nothing
+#   # else.) Cohorts inherit this; setting it in a cohort's own file does nothing.
 # course_description: One or two sentences, on ONE line - the blurb on every cohort site.
 # site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, link ONLY
 #   # these file types. Default (unset): each session's root files, plus one link per
 #   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
 #   # everything you release still ships, and the folder itself is always one click away.
 #   # (The public open-courseware site always lists root files - it hosts what it lists.)
+#   # WHICH of those files the cohort site hosts publicly, so an HTML deck opens rendered
+#   # instead of showing as source, is `publish.yml` in the materials repo - not here.
+
+# What every assignment under this course starts from. **New assignment** stamps these
+# values into the `grading_config.yml` it generates, so each assignment's own file says
+# what it does and can be edited there afterwards; changing them here changes the NEXT
+# assignment, never one that already exists. The two late-work lines are the toolkit's
+# own default, applied when they are absent here and from the assignment too.
+assignment_defaults:
+  max_team_size: 5            # group assignments only
+  late_window_days: 10        # 0 = nothing after the due date is accepted
+  late_penalty_per_day: 10%   # of the EARNED grade, per day started
 
 # `course_name`, `course_code` and `course_description` are what reach the cohort
 # websites. Editing them here re-syncs every cohort site already bootstrapped from this
@@ -44,7 +57,9 @@ course_code: E1234
 # ---------------------------------------------------------------------------
 
 # Uncomment and fill in at least one course admin (if you passed --admins at
-# bootstrap, this is already filled in for you):
+# bootstrap, this is already filled in for you). No `email:` here: this file is
+# public, so the admins' addresses live in the org secret DSL_COURSE_ADMIN_EMAILS
+# instead - that is where a fault in this file is emailed.
 # people:
 #   course_admins:
 #     - github_handle: "adminhandle"    # required - grants the `course-admin` team

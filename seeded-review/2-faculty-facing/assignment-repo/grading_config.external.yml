@@ -12,8 +12,8 @@ format: py                    # ipynb | py | rmd | qmd | latex | none - chooses 
 #   Q1: 15                    # each blank in the grading sheet. The total is their sum;
 #   Q2: 10                    # there is no `points:` field anywhere.
 
-# late_window_days: 7         # 0 or absent = nothing after the due date is accepted
-# late_penalty_per_day: 10%   # of the EARNED grade, per day started
+late_window_days: 10          # 0 = nothing after the due date is accepted
+late_penalty_per_day: 10%     # of the EARNED grade, per day started
 
 autograde: false              # true: run tests/ at the cutoff and show the count to graders
 completion_check: false       # true: execute the notebook at the cutoff, record whether it runs clean
