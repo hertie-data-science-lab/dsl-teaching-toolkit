@@ -967,6 +967,72 @@ def test_the_clone_button_waits_for_the_fork():
     assert 'el("dsl-forked").addEventListener' in body
 
 
+def test_step_three_names_the_folder_the_clone_dialog_should_be_pointed_at():
+    # No clone URL can carry a destination - `vscode://vscode.git/clone` takes a url and a
+    # ref, and the git extension hands the dialog no parent path - so the page names the
+    # folder instead. Without it a student takes whatever folder the dialog opens at, and
+    # step 4 and every `local` button then point at a clone that is not there.
+    body = _strip_comments(_profile())
+    assert 'id="dsl-clone-parent"' in body
+    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
+    assert "api.cloneParent(me.materials, repo)" in refresh
+    # Only once there is a folder to name and a clone about to be made.
+    assert 'show("dsl-clone-where", !!parent && !!me.handle && !!forked);' in refresh
+    # The rule lives beside the one it inverts: a saved folder that already names the repo
+    # is where the clone GOES, so the dialog wants the folder above it - and a folder that
+    # does not is the dialog's answer as it stands.
+    helper = _strip_comments(_open_in()).split("function cloneParent(folder, repo) {")[
+        1
+    ]
+    helper = helper.split("\n  }")[0]
+    assert "trimmed.slice(cut + 1) !== repo" in helper
+    assert "cloneParent: cloneParent," in _strip_comments(_open_in())
+
+
+def test_step_three_also_prints_the_command_that_needs_no_dialog():
+    # The page cannot RUN anything - no browser API executes a shell command - but the line
+    # it prints clones into the exact folder, which no dialog and no URL can be told. It is
+    # also the only clone a student whose editor is not VS Code is offered at all.
+    body = _strip_comments(_profile())
+    assert 'id="dsl-clone-cmd"' in body
+    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
+    assert "api.cloneCommand(me.handle, repo, me.materials)" in refresh
+    assert 'show("dsl-clone-cmd", !!parent && !!me.handle && !!forked);' in refresh
+    # Built once, not per keystroke: `refresh` runs on every one, and a block rebuilt each
+    # time would hang a fresh Copy listener on every one.
+    assert 'var cmd = api.commandBlock().querySelector("code");' in body
+    assert "api.commandBlock()" not in refresh
+
+
+def test_the_clone_command_targets_the_repo_folder_itself():
+    # One segment further down than the dialog hint: the dialog is given the folder the
+    # clone goes INTO, `git clone` the folder it becomes. Both off the same saved path.
+    body = _strip_comments(_open_in())
+    path = body.split("function localPath(folder, repo) {")[1].split("\n  }")[0]
+    assert "cloneParent(folder, repo)" in path
+    cmd = body.split("function cloneCommand(owner, repo, folder) {")[1].split("\n  }")[
+        0
+    ]
+    assert "localPath(folder, repo)" in cmd
+    # Quoted, because nothing stops a space in a home folder - and double quotes are what
+    # bash, zsh, PowerShell and cmd all honour.
+    assert cmd.count("'\"'") == 1 and '.git "' in cmd
+
+
+def test_copy_falls_back_to_a_selection_and_never_leaves_a_dead_button():
+    # `navigator.clipboard` is the whole of it on an https Pages site; the selection trick
+    # covers the rest. Either way the command stays on the page to select by hand, and the
+    # button says which happened rather than silently doing nothing.
+    body = _strip_comments(_open_in())
+    copy = body.split("function copy(text, btn) {")[1].split("\n  }")[0]
+    assert "navigator.clipboard.writeText" in copy
+    assert "selectCopy(text)" in copy
+    assert '"Copied"' in copy and '"Copy failed"' in copy
+    # Copy reads the block's own <code>, so a refilled block cannot copy the old command.
+    block = body.split("function commandBlock() {")[1].split("\n  }")[0]
+    assert "copy(code.textContent, btn)" in block
+
+
 def test_a_custom_scheme_link_never_opens_a_new_tab():
     # `target=_blank` on a `vscode://` link hands the URL to the handler and leaves an
     # empty tab behind for the reader to close. One helper decides, so every button that
@@ -1018,3 +1084,11 @@ def test_the_assignment_page_offers_a_clone():
     block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
     assert "vscode://vscode.git/clone?url=" in block
     assert '"Clone"' in block
+    # And names the folder to point the dialog at, the way /profile/ step 3 does - the
+    # assignment folder, because that is where this repo belongs, not `materials`.
+    assert "cloneParent(me.assignments, repo)" in block
+    assert "if (offers[0][0] && me.assignments) {" in block
+    # And the exact command under it, which needs neither the dialog nor VS Code - the
+    # clone button is offered for VS Code alone, so for everyone else this is the only one.
+    assert "cloneCommand(org, repo, me.assignments)" in block
+    assert "if (me.assignments) {" in block

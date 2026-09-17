@@ -287,6 +287,47 @@
     margin-left: 8px;
 }
 
+/* A command the reader runs themselves, and the button that takes it: the only way to
+   clone into an EXACT folder, since no clone URL can carry one and no page can run
+   anything. It wraps rather than scrolls - a path with a cohort org in it is long, and a
+   clipped command reads as a broken one. */
+.cmd {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0.3em 0 0 0;
+
+    code {
+        flex: 1;
+        min-width: 0;
+        padding: 0.4em 0.5em;
+        border: 1px solid #d8d8d8;
+        border-radius: 3px;
+        font-size: 0.85em;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    /* The same button as a field's Save on /profile/, and sized here rather than there
+       because this block appears on an assignment page too. */
+    .cmd-copy {
+        flex: none;
+        padding: 3px 14px;
+        font-size: 0.8em;
+        cursor: pointer;
+    }
+}
+
+/* Under the button row, not beside it: the folder the clone dialog has to be pointed at by
+   hand, because no `vscode://vscode.git/clone` URL can carry one. */
+.callout .open-in-where {
+    @extend %quiet-note;
+    margin: 0.4em 0 0 0;
+
+    code {
+        word-break: break-all;
+    }
+}
+
 /* The one line a student sees before they have a profile: what the buttons would do, and
    where to switch them on. An offer, not an instruction, above pages whose subject is the
    material rather than this. */

@@ -105,7 +105,8 @@ day that sentence is reworded.
        local    vscode://file/Users/jane/hertie/materials/labs/01/lab.ipynb
 
        folder "/Users/jane/hertie/materials"  same local URL - a folder already naming
-                                              the repo does not get it twice
+                                              the repo does not get it twice, and the
+                                              clone dialog wants /Users/jane/hertie
        folder "C:\Users\jane\hertie"          vscode://file/C:/Users/jane/hertie/...
        source .../tree/main/labs/01           both segments open the FOLDER
        assignment repo "assignment-1-jane"    https://github.dev/hertie-x/assignment-1-jane
@@ -144,6 +145,37 @@ day that sentence is reworded.
     return editor.replace("{path}", out.join("/"));
   }
 
+  /* The folder an editor's clone dialog should be pointed at, which /profile/ prints
+     because no clone URL can carry one: `vscode://vscode.git/clone` takes a url and a ref,
+     and the git extension hands the dialog no parent path. The rule above, read the other
+     way round - a saved folder that already names the repo is where the clone GOES, so the
+     dialog wants the folder above it. Given back in the reader's own spelling, separators
+     and all, because a file picker is where they have to recognise it. */
+  function cloneParent(folder, repo) {
+    if (!folder) { return ""; }
+    var trimmed = folder.replace(/[\/\\]+$/, "");
+    var cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    if (!repo || cut < 0 || trimmed.slice(cut + 1) !== repo) { return trimmed; }
+    return trimmed.slice(0, cut) || trimmed;
+  }
+
+  /* Where a clone of `repo` belongs, as a PATH in the reader's own spelling: what
+     `localUrl` builds, given back unencoded, because a `git clone` target is typed into a
+     shell rather than handed to a URL handler. */
+  function localPath(folder, repo) {
+    var parent = cloneParent(folder, repo);
+    if (!parent || !repo) { return parent; }
+    return parent + (parent.indexOf("\\") >= 0 ? "\\" : "/") + repo;
+  }
+
+  /* The command that clones into it. The page cannot run anything - no browser API
+     executes a shell command and no `vscode://` handler takes one - so the reader runs it,
+     and in exchange it needs no dialog and no VS Code. */
+  function cloneCommand(owner, repo, folder) {
+    return 'git clone https://github.com/' + owner + '/' + repo + '.git "'
+      + localPath(folder, repo) + '"';
+  }
+
   function onlineUrl(owner, repo, tail) {
     /* github.dev is VS Code in the browser, on whatever repo the path names - so the
        owner is the student (their fork) or the cohort org (their submission repo). */
@@ -160,6 +192,58 @@ day that sentence is reworded.
     newTab(a, href);
     a.appendChild(document.createTextNode(label));
     return a;
+  }
+
+  /* A command and the button that takes it. The caller writes the command into the
+     `<code>`, which is also what Copy reads - one copy of the text, so a block whose
+     command is rebuilt cannot go on copying the old one. */
+  function commandBlock() {
+    var p = document.createElement("p");
+    p.className = "cmd";
+    var code = document.createElement("code");
+    p.appendChild(code);
+    var btn = document.createElement("button");
+    btn.setAttribute("type", "button");
+    btn.className = "btn cmd-copy";
+    btn.appendChild(document.createTextNode("Copy"));
+    btn.addEventListener("click", function () { copy(code.textContent, btn); });
+    p.appendChild(btn);
+    return p;
+  }
+
+  /* `navigator.clipboard` is the whole of it on a modern https page, which a Pages site
+     is; the old selection trick is the fallback for everything else. If both fail the
+     command is still on the page to select by hand, which is what the button saved. */
+  function copy(text, btn) {
+    function done(ok) {
+      btn.textContent = ok ? "Copied" : "Copy failed";
+      window.setTimeout(function () { btn.textContent = "Copy"; }, 2000);
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function () { done(true); },
+          function () { done(selectCopy(text)); }
+        );
+        return;
+      }
+    } catch (e) { /* Falls through to the selection path. */ }
+    done(selectCopy(text));
+  }
+
+  function selectCopy(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
   }
 
   function decorateFiles(root, me) {
@@ -256,6 +340,26 @@ day that sentence is reworded.
       btn.parentNode.insertBefore(el, at.nextSibling);
       at = el;
     }
+    /* Nothing can point the clone dialog at a folder (see cloneParent), so the callout
+       names the one to choose - the answer /profile/ step 3 gives for `materials`, given
+       here for the assignment folder, which is where this repo belongs. */
+    if (offers[0][0] && me.assignments) {
+      var where = document.createElement("p");
+      where.className = "open-in-where";
+      where.appendChild(document.createTextNode("Clone asks where to put it: choose "));
+      var code = document.createElement("code");
+      code.appendChild(document.createTextNode(cloneParent(me.assignments, repo)));
+      where.appendChild(code);
+      where.appendChild(document.createTextNode("."));
+      btn.parentNode.parentNode.insertBefore(where, btn.parentNode.nextSibling);
+    }
+    /* And the exact one, for the reader who would rather not navigate a dialog - or who
+       is not on VS Code, and has had no clone offered them at all until here. */
+    if (me.assignments) {
+      var cmd = commandBlock();
+      cmd.querySelector("code").textContent = cloneCommand(org, repo, me.assignments);
+      btn.parentNode.parentNode.appendChild(cmd);
+    }
   }
 
   function ready(fn) {
@@ -278,6 +382,9 @@ day that sentence is reworded.
     stored: read,
     save: save,
     localUrl: localUrl,
+    cloneParent: cloneParent,
+    cloneCommand: cloneCommand,
+    commandBlock: commandBlock,
     newTab: newTab,
     VSCODE: VSCODE,
     ready: ready
