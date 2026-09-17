@@ -2442,9 +2442,15 @@ def _verbatim(score: object) -> str:
     return "" if isinstance(score, dict) or _blank(score) else str(score).strip()
 
 
-def _max_points(spec: SheetSpec) -> str:
+def total_points(spec: SheetSpec | GradingSpec) -> str:
     """The assignment's total, or "" when the maxima are not all numbers - `questions`
-    holds them as written, and a course may declare `Q1: see rubric`."""
+    holds them as written, and a course may declare `Q1: see rubric`.
+
+    Public, and takes either spec, because the cohort site prints the same total on the
+    assignment's page (`site._assignment_entry`) that the gradebook prints beside a score.
+    One implementation: a second sum of the same maxima is a second answer to "what is
+    this assignment out of", and the two would part company the first time one was
+    changed."""
     maxima = [_decimal(maximum) for maximum in (spec.questions or {}).values()]
     if not maxima or None in maxima:
         return ""
@@ -2540,7 +2546,7 @@ def student_view(
                 if (spec.is_group and spec.creates_unit_repos)
                 else (_marked(score) or score)
             ),
-            "max_points": _max_points(spec),
+            "max_points": total_points(spec),
             "feedback": person.get("feedback_individual"),
             "submitted": _submitted_display(
                 info.get("submitted"), not spec.collects_commits
@@ -3091,7 +3097,7 @@ def team_result(spec: SheetSpec, team: str, block: dict | None) -> TeamResult:
     return TeamResult(
         team=team,
         team_score=block.get(spec.score_key),
-        max_points=_max_points(spec),
+        max_points=total_points(spec),
         submitted_display=_submitted_display(
             info.get("submitted"), not spec.collects_commits
         ),

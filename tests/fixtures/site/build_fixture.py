@@ -145,7 +145,10 @@ def _grading_spec(_org: str, repo: str):
 
     The default carries a late WINDOW and a penalty and the named shapes do not, so the
     generated pages hold both halves of `course.late_rule` - the rule quoted and the
-    deadline standing alone - and `external` holds neither."""
+    deadline standing alone - and `external` holds neither. It declares `questions:` for
+    the same reason: the total off those maxima is what the page prints as `max_points`,
+    and the named shapes declare none, so the fixture holds a page with the line and pages
+    without it."""
     if repo in (EXTERNAL, EXTERNAL_PENDING):
         return grades.parse_grading_spec(
             f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
@@ -156,7 +159,9 @@ def _grading_spec(_org: str, repo: str):
         return grades.parse_grading_spec("visibility: student_choice\n")
     if repo == SHARED:
         return grades.parse_grading_spec("submit_via: shared_dropbox_repo\n")
-    return grades.parse_grading_spec("late_window_days: 7\nlate_penalty_per_day: 10%\n")
+    return grades.parse_grading_spec(
+        "late_window_days: 7\nlate_penalty_per_day: 10%\nquestions:\n  Q1: 15\n  Q2: 10\n"
+    )
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:

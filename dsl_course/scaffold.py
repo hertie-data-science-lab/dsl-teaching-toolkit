@@ -609,11 +609,14 @@ def _brief_stub(
     write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
     unedited.
 
-    Points and nothing else on the facts line. The deadline and the late rule are the
-    assignment's page on the cohort site, which prints both off the plan and off this
-    assignment's own `grading_config.yml`; spelling either here as well is how a cohort
-    comes to read two answers to one question - and the copy that is hand-edited prose is
-    the one that goes stale.
+    NO facts line at all - two headings and what goes under them. The deadline, the late
+    rule and what the assignment is out of are the assignment's page on the cohort site,
+    which prints all three off the plan and off this assignment's own
+    `grading_config.yml` (the total being the sum of its `questions:` maxima); spelling
+    any of them here as well is how a cohort comes to read two answers to one question -
+    and the copy that is hand-edited prose is the one that goes stale. The `**Points:**
+    __` line this opened with was exactly that: a blank for an author to fill in beside a
+    number the assignment already declares.
 
     `formats` add the one line the stub is NOT free to leave to its author: what counts
     as handing each of them in (`_ARTEFACT_NOTE`), one per format. A brief that never says
@@ -632,7 +635,6 @@ def _brief_stub(
     )
     return (
         f"# {title}\n\n"
-        "**Points:** __\n\n"
         "## Task\n\n"
         "_Write the assignment here (dsl-stub: replace this whole file)._\n\n"
         "## What to submit\n\n"

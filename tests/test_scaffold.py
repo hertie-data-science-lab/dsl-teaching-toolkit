@@ -548,7 +548,6 @@ def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
 
     brief = fake.files[("assignment-1-f2026", "README.md")]
     assert "Commit the notebook" not in brief
-    assert "**Points:** __\n" in brief
     assert "`submit_url:`" in brief  # and it says where the address goes instead
 
 
@@ -563,13 +562,14 @@ def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
         == 0
     )
     brief = fake.files[("assignment-1-f2026", "README.md")]
-    assert brief.startswith("# Neural networks from scratch\n")
+    assert brief.startswith("# Neural networks from scratch\n\n## Task\n")
     assert "## Task" in brief and "## What to submit" in brief
-    # Points and nothing else on the facts line. The deadline and the late rule are the
-    # assignment's page on the cohort site, which prints both off the plan and off this
-    # assignment's own grading_config.yml - spelt here as well, the hand-edited copy is
-    # the one that goes stale and a cohort reads two answers to one question.
-    assert "**Points:** __\n" in brief
+    # No facts line at all. The deadline, the late rule and what the assignment is worth
+    # are the assignment's page on the cohort site, which prints all three off the plan
+    # and off this assignment's own grading_config.yml (the total being the sum of its
+    # `questions:` maxima) - spelt here as well, the hand-edited copy is the one that goes
+    # stale and a cohort reads two answers to one question.
+    assert "Points" not in brief
     assert "Due" not in brief and "Late work" not in brief
 
 

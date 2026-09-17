@@ -41,6 +41,18 @@ title: page.title
     {% if page.due_event %}
     <p class="post-meta post-due"><strong>Due {{ page.due_event.date | date: "%A" }} {{ page.due_event.date | date: site.dateformat }} {{ page.due_event.date | date: "%H:%M" }}</strong></p>
     {% endif %}
+    {%- comment -%}
+    What the assignment is out of, under the deadline and off `max_points` (site.py, the
+    sum of the `questions:` maxima in the assignment's own grading_config.yml - the same
+    total the gradebook prints beside a score). Written only when the assignment declares
+    numeric maxima, so an assignment with no `questions:` block prints no line at all
+    rather than a total of nothing. The brief no longer opens with a `**Points:** __` line
+    for its author to fill in: a fact that is already in the assignment's definition is
+    read from there, and the hand-edited copy is the one that goes stale.
+    {%- endcomment -%}
+    {% if page.max_points %}
+    <p class="post-meta">Worth {{ page.max_points }} points</p>
+    {% endif %}
   </header>
 
   <div>

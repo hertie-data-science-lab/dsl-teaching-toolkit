@@ -63,7 +63,7 @@ from .discovery import (
 )
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
-from .grades import load_grading_spec
+from .grades import load_grading_spec, total_points
 from .log import log, log_err, log_step, log_withheld
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -1116,6 +1116,15 @@ def _assignment_entry(
         if spec.collects_commits
         else ""
     )
+    # What the assignment is out of, off the `questions:` maxima it declares - the same
+    # sum the gradebook prints beside a score (`grades.total_points`), so the two cannot
+    # disagree. Written only when there IS one: `questions:` is optional, and a course may
+    # write `Q1: see rubric`, where there is no total to print at all. The brief asks
+    # nobody to type it (`scaffold._brief_stub`): a fact the assignment already declares
+    # is read from the declaration. The page alone, like `late_rule` - the due row is a
+    # glance at WHEN and WHERE.
+    points = total_points(spec)
+    points_fm = f'max_points: "{points}"\n' if points else ""
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1174,6 +1183,7 @@ def _assignment_entry(
         f"{flags}"
         f"{repo_fm}"
         f"{late_fm}"
+        f"{points_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"

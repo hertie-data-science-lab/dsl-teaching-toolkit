@@ -709,6 +709,40 @@ def test_the_late_rule_is_the_pages_alone_and_not_the_due_rows(monkeypatch):
     assert "late_rule" not in out.split("due_event:")[1]
 
 
+def test_the_page_carries_the_total_the_questions_add_up_to(monkeypatch):
+    # What the assignment is out of is the assignment's own (`questions:` in
+    # grading_config.yml), summed by the one helper the gradebook sums it with
+    # (`grades.total_points`) - so the page and a student's gradebook cannot print two
+    # different totals. The page alone, like the late rule: the due row is a glance at
+    # WHEN and WHERE.
+    out = _entry_for(
+        monkeypatch,
+        "questions:\n  Q1: 15\n  Q2: 10\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert 'max_points: "25"' in out
+    assert out.count("max_points:") == 1
+    assert "max_points" not in out.split("due_event:")[1]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # No `questions:` at all: the assignment declares no maxima, so there is no total.
+        "",
+        # Declared, but not as numbers - a course may mark `Q1` against a rubric. Nothing
+        # adds up, and a page that printed "Worth points" would be worse than no line.
+        "questions:\n  Q1: see rubric\n  Q2: 10\n",
+    ],
+)
+def test_an_assignment_that_declares_no_total_carries_no_points_line(
+    monkeypatch, config
+):
+    # The key's presence is the theme's gate, so an absent key is an absent line.
+    out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
+    assert "max_points" not in out
+
+
 def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
     # The default, and the wording the theme has always printed: the repo IS the
     # submission, so nothing about the page changes.

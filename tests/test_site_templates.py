@@ -430,6 +430,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "submit_host",
         "due_event",
         "late_rule",
+        "max_points",
     ],
 )
 def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
@@ -557,6 +558,28 @@ def test_the_deadline_is_bold_under_the_release_date_and_printed_once():
     )
     assert "Due Date:" not in flat
     assert flat.count("page.due_event.date") == 3  # weekday, date, time - one line
+
+
+def test_what_the_assignment_is_worth_sits_under_the_deadline(generated):
+    # One fact, one place: the total is the sum of the `questions:` maxima in the
+    # assignment's own grading_config.yml (`grades.total_points`, the same total the
+    # gradebook prints beside a score), so nobody types it into the brief. It reads under
+    # the deadline, which is where the other two meta lines are.
+    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
+    flat = " ".join(layout.split())
+    line = '{% if page.max_points %} <p class="post-meta">Worth {{ page.max_points }} points</p> {% endif %}'
+    assert flat.count(line) == 1
+    assert flat.index("post-due") < flat.index("page.max_points")
+    assert flat.index("page.max_points") < flat.index("</header>")
+    # An assignment that declares numeric maxima carries the total; one that declares
+    # none carries no key, so the line never prints.
+    page = _front_matter(generated["collections"]["_assignments"]["01-assignment-1.md"])
+    assert page["max_points"] == "25"
+    assert "max_points" not in page["due_event"]
+    off_github = _front_matter(
+        generated["collections"]["_assignments"]["03-assignment-3.md"]
+    )
+    assert "max_points" not in off_github
 
 
 def test_the_page_says_where_the_work_goes_exactly_once():
