@@ -115,7 +115,7 @@ A `visibility: public` assignment changes who may READ a submission repo and not
 floor is computed off the repo's NAME, so `instructors` still hold **read** and never push on a
 student's work, and the student still holds `maintain` on their own.
 
-A `submit_via: shared` assignment hands out ONE repo, `<slug>-submissions`, and every
+A `submit_via: shared_dropbox_repo` assignment hands out ONE repo, `<slug>-submissions`, and every
 onboarded student (or every vetted team) holds **push** on it - the whole cohort's work in
 one place, readable by all of them, which is what the shape is for. The faculty floor is
 unchanged: the name derives from the assignment's cohort template, so the same rule that

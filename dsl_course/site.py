@@ -1090,7 +1090,8 @@ def _assignment_entry(
     subtitle = found[1].title if found else ""
     external = spec.submit_external
     # Where the work goes. `submit_shape` is the SHAPE in one word (`course.submit_shape`:
-    # `github-private`, `github-public`, `external`), written whatever the handout state
+    # `assignment-repo-private`, `assignment-repo-public`, `external`), written whatever
+    # the handout state
     # because it is the plan's and is known before anything ships - the theme `case`s on
     # it, and without it both the page and the due row told a Moodle cohort to submit by
     # pushing to `main`. ONE key and not the `submit_via`/`visibility` pair it is derived

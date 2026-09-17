@@ -2962,7 +2962,7 @@ def test_a_public_handout_opens_no_feedback_issue(
 
 # ---------------------------------------------- an assignment handed into one drop box
 #
-# `submit_via: shared` freezes the cohort template as usual - the brief lives there - and
+# `submit_via: shared_dropbox_repo` freezes the cohort template as usual - the brief lives there - and
 # then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
 # no repo per unit, so there is no Feedback issue, no receipt and no model solution; and
 # the drop box's existence is not the record a per-unit repo's is, so the grant loop
@@ -3065,7 +3065,9 @@ def _shared(monkeypatch, tmp_path, *, rows=(), group="", **kwargs):
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template: grades.parse_grading_spec("submit_via: shared\n" + group),
+        lambda org, template: grades.parse_grading_spec(
+            "submit_via: shared_dropbox_repo\n" + group
+        ),
     )
     path = _roster_file(
         tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
@@ -3265,7 +3267,7 @@ def test_patching_a_drop_box_names_the_drop_box_and_nobody_else(monkeypatch, cap
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, tmpl: assign.grades.GradingSpec(submit_via="shared"),
+        lambda org, tmpl: assign.grades.GradingSpec(submit_via="shared_dropbox_repo"),
     )
     assert _run(dry_run=False) == 0
     said = capsys.readouterr()

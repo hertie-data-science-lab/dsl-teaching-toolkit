@@ -24,8 +24,8 @@ NOTHING: no cohort template, no repo, no Feedback issue, no solution push. It st
 the handout and writes the grading sheet, the gradebooks and the site, which is everything
 a handout owes the cohort around the work itself.
 
-For `submit_via: shared` it freezes the cohort template as usual - the brief lives
-there - and then creates ONE private repo, `<slug>-submissions`, with every onboarded
+For `submit_via: shared_dropbox_repo` it freezes the cohort template as usual - the
+brief lives there - and then creates ONE private repo, `<slug>-submissions`, with every onboarded
 student (or every vetted team) on `push`. Each unit works in its own `<unit>/` folder and
 can read everyone else's; a ruleset asks to stop the one repo being force-pushed or deleted,
 though GitHub Free (every Hertie org, until the Education upgrade) refuses rulesets on a
@@ -1134,9 +1134,9 @@ def ensure_drop_box(
     group: bool,
     listing: dict[str, dict] | None = None,
 ) -> tuple[bool, bool]:
-    """The whole of what `submit_via: shared` hands out: ONE private `<slug>-submissions`
-    off the frozen cohort template, push for every unit, and a ruleset that stops it being
-    rewritten. Returns `(nothing failed, anything changed)`.
+    """The whole of what `submit_via: shared_dropbox_repo` hands out: ONE private
+    `<slug>-submissions` off the frozen cohort template, push for every unit, and a
+    ruleset that stops it being rewritten. Returns `(nothing failed, anything changed)`.
 
     The name carries no handle, so unlike every other submission repo it may be printed in
     a public workflow log in full (`course.shared_repo`).
@@ -1358,8 +1358,8 @@ def _release_shared(
     dry_run: bool,
     listing: dict[str, dict] | None,
 ) -> _Released | None:
-    """The `shared` arm: ONE private drop box for the whole cohort, generated from the
-    frozen cohort template, with push for every unit.
+    """The `shared_dropbox_repo` arm: ONE private drop box for the whole cohort,
+    generated from the frozen cohort template, with push for every unit.
 
     No units are returned: there is no repo per unit here, so nothing downstream that
     counts them - the solution record above all - has anything to count."""
@@ -1369,7 +1369,8 @@ def _release_shared(
         f"drop box {cohort_org}/{drop_box} with push for {what}"
     )
     if solution:
-        # Nowhere private to put it - see the `shared` note beside `course.SUBMIT_VIA`.
+        # Nowhere private to put it - see the `shared_dropbox_repo` note beside
+        # `course.SUBMIT_VIA`.
         # The fire-once marker is deliberately not written (`can_hold_solution` gates it),
         # so an instructor who corrects the shape can still release it.
         log(
@@ -1415,8 +1416,8 @@ def _release_units(
     dry_run: bool,
     listing: dict[str, dict] | None,
 ) -> _Released | None:
-    """The `github` arm: one repo per unit (student, or team), generated from the frozen
-    cohort template, plus the model solution where the shape can hold one."""
+    """The `assignment_repo` arm: one repo per unit (student, or team), generated from
+    the frozen cohort template, plus the model solution where the shape can hold one."""
     # NO model solution into repos the toolkit cannot promise are private. `public`
     # publishes the model answer to the internet and `student_choice` lets any student
     # publish it, and neither can be taken back - so the stage is skipped whole, and the
@@ -1722,7 +1723,8 @@ def provision_all(
     # The one place the three shapes part, and the whole of what makes them different.
     # `external` is handed in off GitHub (Moodle, Kaggle, in class), so everything the
     # other two do - the repos, the Feedback issue, the model solution - has nothing to
-    # act on. `shared` makes ONE drop box for the whole cohort instead of a repo per unit.
+    # act on. `shared_dropbox_repo` makes ONE drop box for the whole cohort instead of
+    # a repo per unit.
     # What a handout owes the cohort AROUND the work is the tail, which all three share.
     if gspec.submit_external:
         released = _release_external(cohort_org, slug, what, solution, dry_run)

@@ -3,8 +3,8 @@ title: Group project          # the assignment's name, shown to graders and on t
 type: group                   # individual | group
 team_formation: self_select   # self_select (students use the Join-team form) | assigned
 max_team_size: 4              # group only
-submit_via: github            # github (push to their repo) | external (handed in elsewhere) | shared, below
-# submit_via: shared          # one private <slug>-submissions repo for the whole cohort,
+submit_via: assignment_repo   # assignment_repo (push to their repo) | external (handed in elsewhere) | shared_dropbox_repo, below
+# submit_via: shared_dropbox_repo # one private <slug>-submissions repo for the whole cohort,
                               # a folder per team inside it, everyone able to read everyone
 visibility: private           # private | public | student_choice - who may read it
 format: py                    # ipynb | py | rmd | qmd | latex | none - the starter stub only

@@ -103,7 +103,7 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 no repo is created for it, so there is no commit to time.
 
-For `submit_via: shared` the timing is per FOLDER of the one drop box: `submitted` is the
+For `submit_via: shared_dropbox_repo` the timing is per FOLDER of the one drop box: `submitted` is the
 last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **and was made
 by one of that unit's own members**, so a classmate's edit is never marked as their work. A
 folder nobody in the unit ever pushed to has no submission. Two things differ from the
@@ -120,9 +120,9 @@ repo's, so it would accuse the entire cohort of one student's late push), and
 ## Marking, step by step
 
 1. **Handout.** The sheet appears with one row per student or team, every student has a
-   private `grades-<handle>` gradebook, and a `submit_via: github`, `visibility: private`
+   private `grades-<handle>` gradebook, and a `submit_via: assignment_repo`, `visibility: private`
    submission repo gets a **Feedback** issue. An `external` assignment has no repos, a
-   `shared` one has a repo the whole cohort reads, and a `public` or `student_choice` repo
+   `shared_dropbox_repo` one has a repo the whole cohort reads, and a `public` or `student_choice` repo
    is not private - none of the three gets an issue: their marks and feedback reach students
    through the gradebook alone, and for an `external` group assignment the team score and
    team feedback go into each member's.

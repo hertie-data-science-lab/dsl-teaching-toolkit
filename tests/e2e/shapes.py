@@ -77,7 +77,7 @@ class Shape:
     @property
     def submit_shared(self) -> bool:
         """Whether the whole cohort hands in to ONE repo."""
-        return self.submit_via == "shared"
+        return self.submit_via == "shared_dropbox_repo"
 
     def repo(self, run_id: str, handle: str) -> str:
         """The repo this handle's work lands in - `''` where the shape creates none.
@@ -102,11 +102,11 @@ class Shape:
 # autograding, because it is the shape every assertion this harness made before the others
 # existed was written against: the run must still prove that one end to end.
 SHAPES = (
-    Shape("private", "github", "private", autograde=True),
-    Shape("public", "github", "public"),
-    Shape("student-choice", "github", "student_choice"),
+    Shape("private", "assignment_repo", "private", autograde=True),
+    Shape("public", "assignment_repo", "public"),
+    Shape("student-choice", "assignment_repo", "student_choice"),
     Shape("external", "external", submit_url=SUBMIT_URL),
-    Shape("shared", "shared"),
+    Shape("shared", "shared_dropbox_repo"),
 )
 
 BY_NAME = {shape.name: shape for shape in SHAPES}

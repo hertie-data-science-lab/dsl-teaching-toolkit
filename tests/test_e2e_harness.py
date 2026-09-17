@@ -908,11 +908,11 @@ def test_the_shape_words_are_the_ones_the_page_carries():
     # on them. Pinned here so a rename in `course.submit_shape` breaks in CI rather than
     # an hour into a live run.
     assert [s.key for s in shapes.SHAPES] == [
-        "github-private",
-        "github-public",
-        "github-student-choice",
+        "assignment-repo-private",
+        "assignment-repo-public",
+        "assignment-repo-student-choice",
         "external",
-        "shared",
+        "shared-dropbox-repo",
     ]
 
 
@@ -994,7 +994,7 @@ def test_the_scaffolds_placeholder_never_reaches_a_live_setting():
 
 def test_a_setting_the_scaffold_never_writes_is_refused():
     with pytest.raises(ValueError, match="appears 0 time"):
-        shapes.set_setting("title: x\n", "submit_shape", "github-public")
+        shapes.set_setting("title: x\n", "submit_shape", "assignment-repo-public")
 
 
 def test_a_setting_that_appears_twice_is_refused():
@@ -1258,7 +1258,7 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
         if path.startswith(f"{grades.SHEETS_DIR}/"):
             return SHEET_TEXT
         if path.startswith("_assignments/"):
-            return '---\nsubmit_shape: "github-private"\n---\n'
+            return '---\nsubmit_shape: "assignment-repo-private"\n---\n'
         return ""
 
     monkeypatch.setattr(module.gh_contents, "get_file_content", content)
@@ -1291,7 +1291,7 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
         title="E2E",
         kind="individual",
         team_formation="self_select",
-        submit_via="github",
+        submit_via="assignment_repo",
         visibility="private",
         formats=["py"],
         autograde=True,

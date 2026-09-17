@@ -577,12 +577,12 @@ def test_a_public_assignments_page_warns_before_the_first_push(generated):
     # the page and not in the brief. It is also the one with no Feedback issue, which is
     # why it - alone - names the gradebook.
     page = _front_matter(generated["collections"]["_assignments"]["04-assignment-4.md"])
-    assert page["submit_shape"] == "github-public"
-    assert page["due_event"]["submit_shape"] == "github-public"
+    assert page["submit_shape"] == "assignment-repo-public"
+    assert page["due_event"]["submit_shape"] == "assignment-repo-public"
     assert page["repo_name"] == "assignment-4-<your-handle>"
     assert page["repo_name_is_shape"] is True
     layout = _liquid_templates()["_layouts/assignment.html"]
-    assert '{% when "github-public" %}' in layout
+    assert '{% when "assignment-repo-public" %}' in layout
     flat = " ".join(layout.split())
     assert "is <b>public</b>: anyone on the internet can read it." in flat
     assert (
@@ -604,11 +604,11 @@ def test_a_student_choice_page_says_when_the_repo_may_be_published(generated):
     # that said only the first has a student publishing on day one and finding it closed
     # again an hour later.
     page = _front_matter(generated["collections"]["_assignments"]["06-assignment-6.md"])
-    assert page["submit_shape"] == "github-student-choice"
-    assert page["due_event"]["submit_shape"] == "github-student-choice"
+    assert page["submit_shape"] == "assignment-repo-student-choice"
+    assert page["due_event"]["submit_shape"] == "assignment-repo-student-choice"
     assert page["repo_name"] == "assignment-6-<your-handle>"
     layout = _liquid_templates()["_layouts/assignment.html"]
-    assert '{% when "github-student-choice" %}' in layout
+    assert '{% when "assignment-repo-student-choice" %}' in layout
     flat = " ".join(layout.split())
     assert "Your repo starts private. You are its admin:" in flat
     assert (
@@ -619,7 +619,7 @@ def test_a_student_choice_page_says_when_the_repo_may_be_published(generated):
     assert "Your grade and feedback arrive in your private gradebook, not here." in flat
     # And the due row says at a glance that the flag is the student's.
     due_row = _liquid_templates()["_includes/schedule_row_due.html"]
-    assert '"github-student-choice" %} (yours to publish)' in due_row
+    assert '"assignment-repo-student-choice" %} (yours to publish)' in due_row
 
 
 def test_a_pending_external_assignments_page_offers_nowhere_to_go(generated):
@@ -1232,7 +1232,7 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     # no marker of its own; the two the arm SHARES with every other shape - the button and
     # the closing line - are written under `repo_name_is_shape`, which site.py writes for
     # a per-unit repo and for nothing else.
-    shared = page.split('{% when "shared" %}')[1].split("{% when ")[0]
+    shared = page.split('{% when "shared-dropbox-repo" %}')[1].split("{% when ")[0]
     assert "{{ page.repo_name | escape }}" in shared
     assert "data-dsl-repo" not in shared
     page = page.replace(shared, "")
@@ -1302,8 +1302,8 @@ def test_the_callout_keeps_the_brief_last():
 
 def test_a_shared_page_names_the_drop_box_the_folder_and_the_gradebook(generated):
     page = _front_matter(generated["collections"]["_assignments"]["07-assignment-7.md"])
-    assert page["submit_shape"] == "shared"
-    assert page["due_event"]["submit_shape"] == "shared"
+    assert page["submit_shape"] == "shared-dropbox-repo"
+    assert page["due_event"]["submit_shape"] == "shared-dropbox-repo"
     # A REAL repo, not a shape - and the folder beside it, which is what is the reader's.
     assert page["repo_name"] == "assignment-7-submissions"
     # And NOT a shape: nothing on this page is rewritten to the reader's own repo.
@@ -1324,7 +1324,10 @@ def test_a_shared_page_names_the_drop_box_the_folder_and_the_gradebook(generated
     )
     # And the due row says at a glance that the reader's own work goes in a folder.
     due_row = _liquid_templates()["_includes/schedule_row_due.html"]
-    assert '"shared" %} ({{ include.event.submit_path | escape }} folder)' in due_row
+    assert (
+        '"shared-dropbox-repo" %} ({{ include.event.submit_path | escape }} folder)'
+        in due_row
+    )
 
 
 def test_a_shared_page_s_repo_name_is_never_rewritten_per_reader(generated):

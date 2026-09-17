@@ -57,9 +57,9 @@ title: page.title
     {%- endcomment -%}
     {%- comment -%}
     `submit_shape` (site.py, off `course.submit_shape` and so off the assignment's own
-    grading_config.yml) is the SHAPE in one word - `external`, `github-private`,
-    `github-public`, `github-student-choice`. `external` is handed in off GitHub - Moodle,
-    Kaggle, in class - and NO
+    grading_config.yml) is the SHAPE in one word - `external`, `assignment-repo-private`,
+    `assignment-repo-public`, `assignment-repo-student-choice`. `external` is handed in
+    off GitHub - Moodle, Kaggle, in class - and NO
     repo is created for it at all. So there is nothing to open and nothing to name: the
     brief below says where the work goes, and `submit_url` puts a button on it when the
     assignment names an address. This block used to print off `repo_url` alone, so a Moodle
@@ -86,7 +86,7 @@ title: page.title
     ONE arm for every shape that has a repo: one button, one link, and the `case` below
     branches only the SENTENCE. A shape that copied the button carried its own copy of the
     open_in.html contract to keep in step, and the two drifted the first time one of them
-    was reworded. A `github-public` assignment is portfolio work -
+    was reworded. An `assignment-repo-public` assignment is portfolio work -
     a hackathon, a showcase - and the whole internet can read the repo from the moment it
     is handed out, so the callout a student reads BEFORE their first push is where that has
     to be said; saying it in the brief alone leaves it to whoever wrote the brief.
@@ -98,7 +98,7 @@ title: page.title
     the private `grades-<handle>` repo is the only place feedback ever appears, and a
     student who does not know that is a student who thinks nobody marked their work.
 
-    `github-student-choice` is the same repo with the flag handed over: it starts private,
+    `assignment-repo-student-choice` is the same repo with the flag handed over: it starts private,
     the student is its admin, and the toolkit puts it back to private until the grading
     cutoff has passed (`scheduler._reprivatise_student_repos`). Both halves of that belong
     HERE - a student who reads only "you are an admin" publishes their work on day one and
@@ -106,8 +106,9 @@ title: page.title
     reason the public arm does not.
 
     `repo_name_is_shape` (site.py) is what decides whether the two data attributes are
-    written at all. `shared` is the one shape whose `repo_name` is a REAL repo and not a
-    shape: there is a single private drop box for the whole cohort, and what is the
+    written at all. `shared_dropbox_repo` is the one shape whose `repo_name` is a REAL
+    repo and not a shape: there is a single private drop box for the whole cohort, and
+    what is the
     student's own is a folder in it (`submit_path`). There is nothing in that name for
     open_in.html to substitute a handle into, and rewriting it would point every reader at
     a repo that does not exist - so the flag is false and the markers are left off.
@@ -125,17 +126,17 @@ title: page.title
     <div class="callout">
       <p><a class="btn" {% if page.repo_name_is_shape %}data-dsl-repo-url {% endif %}target="_blank" rel="noopener" href="{{ page.repo_url }}">Open the submission repo on GitHub</a></p>
       {% case page.submit_shape %}
-      {% when "shared" %}
+      {% when "shared-dropbox-repo" %}
       <p>Push your work into the <code>{{ page.submit_path | escape }}</code> folder of
       <code>{{ page.repo_name | escape }}</code> - that push is your submission. Everyone in the cohort can read
       the whole repo, so commit nothing you would not show the class. Your grade and feedback arrive in your
       private gradebook <code>grades-&lt;your-handle&gt;</code>, not here.</p>
-      {% when "github-public" %}
+      {% when "assignment-repo-public" %}
       <p>Your repo <code data-dsl-repo>{{ page.repo_name | escape }}</code> is <b>public</b>: anyone on the internet can
       read it. Push to <code>main</code> as usual, but commit nothing you would not publish and no data you were told
       to keep private. Your grade and feedback arrive in your private gradebook <code>grades-&lt;your-handle&gt;</code>,
       not here.</p>
-      {% when "github-student-choice" %}
+      {% when "assignment-repo-student-choice" %}
       <p>Your repo starts private. You are its admin: after the grading cutoff you may make it public from
       Settings &gt; Danger zone if you want it in your portfolio. Before then the toolkit turns it private again.
       Your grade and feedback arrive in your private gradebook, not here.</p>

@@ -3763,7 +3763,10 @@ def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
         "load",
         lambda cohort: _assignments(**{"assignment-1": _due(13)}),
     )
-    for submit_via, shared in (("shared", True), ("github", False)):
+    for submit_via, shared in (
+        ("shared_dropbox_repo", True),
+        ("assignment_repo", False),
+    ):
         taken.clear()
         monkeypatch.setattr(
             scheduler,

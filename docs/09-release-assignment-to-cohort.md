@@ -50,7 +50,7 @@ private `grades-<handle>` gradebook - which is where their feedback goes.
 
 ### An assignment handed into one shared drop box
 
-`submit_via: shared` freezes the cohort template as usual - the brief lives there - and
+`submit_via: shared_dropbox_repo` freezes the cohort template as usual - the brief lives there - and
 then creates exactly **one** repo, `<slug>-submissions`: private, with every onboarded
 student (or every vetted team) on `push`, and a ruleset asked to stop force-pushes and
 deletion - though that needs GitHub Team, and every Hertie org is on Free until the

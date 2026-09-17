@@ -3,7 +3,7 @@ title: Linear regression      # the assignment's name, shown to graders and on t
 type: individual              # individual | group
 # team_formation: self_select # group only: self_select (Join-team form) | assigned (teams.csv)
 # max_team_size: 5            # group only
-submit_via: external          # github (push to their repo) | external (handed in elsewhere) | shared (one drop-box repo for the whole cohort)
+submit_via: external          # assignment_repo (push to their repo) | external (handed in elsewhere) | shared_dropbox_repo (one drop-box repo for the whole cohort)
 submit_url: https://moodle.hertie-school.org/mod/assign/view.php?id=EXAMPLE
                               # external only: puts a `Submit on moodle...` button on the site
 # visibility: private         # external creates no repo, so there is nothing to make public

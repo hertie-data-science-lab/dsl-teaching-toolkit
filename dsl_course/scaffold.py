@@ -55,6 +55,8 @@ from .course import (
     TEAM_FORMATIONS,
     UPSTREAM_BRANCH,
     VISIBILITIES,
+    canonical_submit_via,
+    creates_unit_repos,
     pages_repo,
 )
 from .derive import BEGIN_SOLUTION, END_SOLUTION, SOLUTION_CHUNK_OPT
@@ -238,7 +240,8 @@ def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
     return f"{line:<29} # {comment}".rstrip()
 
 
-# What the three per-unit stages say on a `shared` assignment, where none of them runs.
+# What the three per-unit stages say on a `shared_dropbox_repo` assignment, where none of
+# them runs.
 _HAND_MARKED = "hand-marked: a drop box is one repo for the whole cohort"
 
 
@@ -256,12 +259,12 @@ def _grading_config(
     """`grading_config.yml` as New assignment writes it."""
     group = kind == "group"
     # A drop box is hand-marked, and the parse says so: all three per-unit stages are
-    # refused for `submit_via: shared` (`grades._cross_check`), because each of fifty
-    # students would have the whole cohort's work cloned, run and archived under their own
-    # key. Seeded true, the file the button had just written reported a `Dropped` line on
-    # every quarter-hourly tick and stood as an advisory in the cohort's digest issue - a
-    # fault about nothing anybody typed.
-    marked_by_hand = submit_via == "shared"
+    # refused for `submit_via: shared_dropbox_repo` (`grades._cross_check`), because each
+    # of fifty students would have the whole cohort's work cloned, run and archived under
+    # their own key. Seeded true, the file the button had just written reported a
+    # `Dropped` line on every quarter-hourly tick and stood as an advisory in the cohort's
+    # digest issue - a fault about nothing anybody typed.
+    marked_by_hand = submit_via == "shared_dropbox_repo"
     cap = defaults.get("max_team_size")
     window = defaults.get("late_window_days")
     penalty = defaults.get("late_penalty_per_day")
@@ -286,9 +289,10 @@ def _grading_config(
         _setting(
             "submit_via",
             submit_via,
-            "github (they push to their repo) | external (handed in elsewhere: Moodle, "
-            "Kaggle, in class - no repo is created) | shared (one private repo for the "
-            "whole cohort, each student pushes into their own folder, peers can read it)",
+            "assignment_repo (they push to their repo) | external (handed in elsewhere: "
+            "Moodle, Kaggle, in class - no repo is created) | shared_dropbox_repo (one "
+            "private repo for the whole cohort, each student pushes into their own "
+            "folder, peers can read it)",
         ),
         # COMMENTED on every shape, `external` included. The value here is a placeholder
         # with the right shape and no meaning, and a live line carrying it would put a
@@ -312,7 +316,7 @@ def _grading_config(
             "portfolio work, no Feedback issue) | student_choice (private, and the "
             "student is its admin: theirs to publish after the grading cutoff, and no "
             "Feedback issue) - read at hand-out only",
-            live=submit_via == "github",
+            live=creates_unit_repos(submit_via),
         ),
         # ONE format, because `grades` reads one: the key is the vocabulary this file
         # teaches, and the only thing it drives - the `completion_check` default - is
@@ -599,7 +603,7 @@ _CONTRIBUTIONS_STUB = """\
 
 
 def _brief_stub(
-    title: str, defaults: dict, formats: list[str], submit_via: str = "github"
+    title: str, defaults: dict, formats: list[str], submit_via: str = "assignment_repo"
 ) -> str:
     """`README.md` on `main` - the page students read, and the only one only faculty can
     write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
@@ -1294,7 +1298,7 @@ def scaffold_assignment(
     *,
     name: str = "",
     team_formation: str = "self_select",
-    submit_via: str = "github",
+    submit_via: str = "assignment_repo",
     visibility: str = "private",
     autograde: bool = False,
     copy_from: str = "",
@@ -1373,7 +1377,7 @@ def scaffold_assignment(
         log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
         return 0
     title = named or f"Assignment {number}"
-    if autograde and submit_via == "shared":
+    if autograde and submit_via == "shared_dropbox_repo":
         # Corrected here as well as in the file, because it also decides whether `tests/`
         # is seeded: placeholder hidden tests beside an assignment nothing will ever run
         # them for read as work the course is expected to do. See `_HAND_MARKED`.
@@ -1752,8 +1756,11 @@ def main() -> int:
     pa.add_argument(
         "--submit-via",
         dest="submit_via",
-        choices=list(SUBMIT_VIA),
-        default="github",
+        # `github` stays an accepted choice - not a documented one - for an org whose
+        # rendered New assignment workflow has not refreshed yet and so still sends the
+        # legacy word; `canonical_submit_via` below normalises it before use.
+        choices=[*SUBMIT_VIA, "github"],
+        default="assignment_repo",
         help="external = handed in off GitHub (Moodle, Kaggle, in class): no repo is "
         "created, and nothing is ever collected",
     )
@@ -1783,6 +1790,11 @@ def main() -> int:
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
+    if args.cmd == "assignment":
+        # Normalised once, here, so an un-refreshed org's workflow sending the legacy
+        # `github` still scaffolds an `assignment_repo` shape and never re-writes the old
+        # word into the file.
+        args.submit_via = canonical_submit_via(args.submit_via)
     # The `--format` box, refused here - before the repo exists, so a mistyped answer
     # costs a re-run and nothing else. Caught on its OWN, the way `deploy.main` catches
     # `parse_path_pairs`: a ValueError from anywhere deeper is a bug and still earns its

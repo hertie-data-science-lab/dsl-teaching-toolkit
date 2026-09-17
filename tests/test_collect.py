@@ -116,7 +116,7 @@ def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
     # from it - the Feedback issue, the submission arithmetic, whether there is a repo per
     # unit at all - is DERIVED, never declared.
     spec = collect.parse_grading_spec("")
-    assert (spec.submit_via, spec.visibility) == ("github", "private")
+    assert (spec.submit_via, spec.visibility) == ("assignment_repo", "private")
     assert spec.has_feedback_issue and spec.collects_commits
     assert spec.creates_unit_repos
     external = collect.parse_grading_spec("submit_via: external\n")
@@ -136,7 +136,7 @@ def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
     # thing that follows from it is derived, never declared: marks and receipts have
     # nowhere private to go, so the gradebook carries them instead.
     spec = collect.parse_grading_spec("visibility: public\n")
-    assert spec.visibility == "public" and spec.submit_shape == "github-public"
+    assert spec.visibility == "public" and spec.submit_shape == "assignment-repo-public"
     assert not spec.has_feedback_issue
     assert spec.collects_commits and spec.creates_unit_repos
     assert capsys.readouterr().err == ""
@@ -149,7 +149,7 @@ def test_student_choice_is_read_back_and_hands_the_flag_to_the_student(capsys):
     # a thread in a repo the student may publish tomorrow is a publishable mark.
     spec = collect.parse_grading_spec("visibility: student_choice\n")
     assert spec.visibility == "student_choice"
-    assert spec.submit_shape == "github-student-choice"
+    assert spec.submit_shape == "assignment-repo-student-choice"
     assert spec.visibility_is_students
     assert not spec.has_feedback_issue
     assert spec.collects_commits and spec.creates_unit_repos
@@ -174,7 +174,7 @@ def test_the_feedback_channel_over_every_pair_the_vocabulary_allows(
     # only that unit can read. Every other pair is answered by the gradebook, and adding
     # a word to either tuple without deciding this is what the parametrisation forbids.
     assert course.has_feedback_issue(submit_via, visibility) is (
-        submit_via == "github" and visibility == "private"
+        submit_via == "assignment_repo" and visibility == "private"
     )
 
 
@@ -183,21 +183,23 @@ def test_shared_collects_commits_without_a_repo_per_unit(capsys):
     # rather than in the word itself: there ARE commits to time (a folder in the drop box
     # is pushed to), there is no repo per unit to name or grant on, and there is a repo -
     # so the topics, the faculty floor and the visibility digest all still apply.
-    spec = collect.parse_grading_spec("submit_via: shared\n")
-    assert spec.submit_via == "shared" and spec.submit_shared
+    spec = collect.parse_grading_spec("submit_via: shared_dropbox_repo\n")
+    assert spec.submit_via == "shared_dropbox_repo" and spec.submit_shared
     assert spec.collects_commits
     assert not spec.creates_unit_repos
     assert spec.creates_repos
     # No Feedback issue: the drop box is the whole cohort's, so nothing about one
     # student's marking may be written in it.
     assert not spec.has_feedback_issue
-    assert spec.submit_shape == "shared"
+    assert spec.submit_shape == "shared-dropbox-repo"
     assert capsys.readouterr().err == ""
 
 
 def test_a_shared_drop_box_is_private_whatever_the_file_says(capsys):
     # One repo holds the whole cohort's work and no student can opt out of being in it.
-    spec = collect.parse_grading_spec("submit_via: shared\nvisibility: public\n")
+    spec = collect.parse_grading_spec(
+        "submit_via: shared_dropbox_repo\nvisibility: public\n"
+    )
     assert spec.visibility == "private"
     assert "one repo holds the whole cohort's work" in capsys.readouterr().err
 
@@ -208,7 +210,7 @@ def test_a_shared_assignment_is_hand_marked_whatever_the_file_says(capsys):
     # archived under their own key, and every one of them would get the same result.
     # Corrected at the parse, exactly as the visibility is.
     spec = collect.parse_grading_spec(
-        "submit_via: shared\nautograde: true\ncompletion_check: true\ngrader_pdf: true\n"
+        "submit_via: shared_dropbox_repo\nautograde: true\ncompletion_check: true\ngrader_pdf: true\n"
     )
     assert spec.autograde is False and spec.grader_pdf is False
     assert spec.runs_completion_check is False
@@ -223,7 +225,9 @@ def test_a_shared_notebook_assignment_runs_no_completion_check_either(capsys):
     # `format:` implies", and `ipynb` implies ON. So the drop box that says nothing at all
     # is exactly the one that would have executed the whole cohort's notebooks under every
     # student's key - and there is no line in the file to report as dropped.
-    spec = collect.parse_grading_spec("submit_via: shared\nformat: ipynb\n")
+    spec = collect.parse_grading_spec(
+        "submit_via: shared_dropbox_repo\nformat: ipynb\n"
+    )
     assert spec.runs_completion_check is False
     assert "completion_check" not in capsys.readouterr().err
     # ...and the same file without the drop box still runs it, so the default is intact.
@@ -232,9 +236,9 @@ def test_a_shared_notebook_assignment_runs_no_completion_check_either(capsys):
 
 def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(capsys):
     # `submit_url` is the address of the place work is handed in INSTEAD of GitHub, so a
-    # shape that collects commits has no use for it - the same drop `github` gets.
+    # shape that collects commits has no use for it - the same drop `assignment_repo` gets.
     spec = collect.parse_grading_spec(
-        "submit_via: shared\nsubmit_url: https://moodle.example.edu/x\n"
+        "submit_via: shared_dropbox_repo\nsubmit_url: https://moodle.example.edu/x\n"
     )
     assert spec.submit_url == ""
     assert "only read for `submit_via: external`" in capsys.readouterr().err
@@ -244,9 +248,39 @@ def test_a_submit_via_the_engine_cannot_act_on_is_refused_as_a_typo(capsys):
     # The dropdown offers exactly what the reader takes (`course.SUBMIT_VIA`), so a word
     # the engine cannot act on is not in the vocabulary at all and reads as a misspelling.
     spec = collect.parse_grading_spec("submit_via: dropbox\n")
-    assert spec.submit_via == "github"
-    assert "is not one of github/external/shared" in capsys.readouterr().err
+    assert spec.submit_via == "assignment_repo"
+    assert (
+        "is not one of assignment_repo/shared_dropbox_repo/external"
+        in capsys.readouterr().err
+    )
     assert "dropbox" not in course.SUBMIT_VIA
+
+
+def test_shared_renamed_before_it_shipped_has_no_alias_and_is_dropped(capsys):
+    # `shared` never reached a real org - it was renamed to `shared_dropbox_repo` before
+    # it ever shipped - so, unlike `github`, it earns no alias and is refused exactly
+    # like any other misspelling.
+    spec = collect.parse_grading_spec("submit_via: shared\n")
+    assert spec.submit_via == "assignment_repo"  # the safe default, not the old word
+    assert (
+        "is not one of assignment_repo/shared_dropbox_repo/external"
+        in capsys.readouterr().err
+    )
+
+
+def test_the_legacy_github_spelling_reads_as_assignment_repo_with_no_warning(capsys):
+    # Live INSTRUCTOR-OWNED `grading_config.yml` files in real course orgs carry
+    # `submit_via: github` for ever, so the alias must read clean - no Dropped line - and
+    # drive exactly the shape a fresh `assignment_repo` config would.
+    spec = collect.parse_grading_spec("submit_via: github\n")
+    assert spec.submit_via == "assignment_repo"
+    assert spec.dropped == ()
+    assert capsys.readouterr().err == ""
+    canonical = collect.parse_grading_spec("submit_via: assignment_repo\n")
+    assert spec.has_feedback_issue is canonical.has_feedback_issue is True
+    assert spec.collects_commits is canonical.collects_commits is True
+    assert spec.creates_unit_repos is canonical.creates_unit_repos is True
+    assert spec.submit_shape == canonical.submit_shape == "assignment-repo-private"
 
 
 def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(capsys):
@@ -308,7 +342,7 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
         "max_team_size: lots\ntype: gruop\n"
     )
     assert spec.title == "Bayes"
-    assert spec.submit_via == "github"  # the safe default, not the typo
+    assert spec.submit_via == "assignment_repo"  # the safe default, not the typo
     assert spec.type == "individual"
     assert spec.questions is None
     assert spec.late_window_days is None
@@ -1745,7 +1779,7 @@ def test_no_unit_of_a_shared_drop_box_is_ever_machine_marked(monkeypatch):
         collect,
         "load_grading_spec",
         lambda *a, **k: collect.grades.GradingSpec(
-            submit_via="shared", autograde=True, completion_check=True
+            submit_via="shared_dropbox_repo", autograde=True, completion_check=True
         ),
     )
     monkeypatch.setattr(
@@ -1757,7 +1791,7 @@ def test_no_unit_of_a_shared_drop_box_is_ever_machine_marked(monkeypatch):
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
     ((path, text),) = written
     assert path == "autograde/assignment-1/_skipped.json"
-    assert "submit_via: shared" in text and "hand-marked" in text
+    assert "submit_via: shared_dropbox_repo" in text and "hand-marked" in text
 
 
 def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatch):
@@ -5742,7 +5776,8 @@ def test_a_value_that_will_not_grade_as_written_cites_the_line_in_the_template()
 def test_the_fix_names_the_vocabulary_the_key_accepts():
     fault = next(f for f in _spec_faults() if f.field == "submit_via")
     assert fault.fix() == (
-        "correct the value on the line above (allowed: github/external/shared)"
+        "correct the value on the line above "
+        "(allowed: assignment_repo/shared_dropbox_repo/external)"
     )
     # A key the toolkit has no reader for has no value to correct: the KEY is the mistake.
     unknown = next(f for f in _spec_faults() if f.field == "mystery")
@@ -5961,7 +5996,9 @@ def test_a_scheduled_solution_for_a_shared_drop_box_is_a_fault(monkeypatch):
     from dsl_course.schedule import AssignmentEntry
 
     monkeypatch.setattr(
-        grades, "_grading_text", lambda course, template: "submit_via: shared\n"
+        grades,
+        "_grading_text",
+        lambda course, template: "submit_via: shared_dropbox_repo\n",
     )
     monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
     sched = Schedule(
@@ -6030,13 +6067,13 @@ def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):
 
 
 def test_a_public_drop_box_is_a_fault_like_any_other_published_repo(monkeypatch):
-    # `submit_via: shared` makes no repo per unit and still makes a repo, so `visibility:`
+    # `submit_via: shared_dropbox_repo` makes no repo per unit and still makes a repo, so `visibility:`
     # describes it exactly as it describes the many - and a drop box the listing says the
     # world can read is the whole cohort's work published. The check asks `creates_repos`
     # for that reason, never `creates_unit_repos`.
     found = _visibility_run(
         monkeypatch,
-        "submit_via: shared\n",
+        "submit_via: shared_dropbox_repo\n",
         _cohort_rows(("a3-submissions", "public")),
     )
     (fault,) = found
@@ -6181,7 +6218,7 @@ def test_an_assignment_that_has_created_no_repos_yet_never_reads_the_org(monkeyp
 
 # ------------------------------------------------------- one drop box, a folder per unit
 #
-# `submit_via: shared` hands every unit the SAME repo and one folder inside it. Three
+# `submit_via: shared_dropbox_repo` hands every unit the SAME repo and one folder inside it. Three
 # things follow: the targets all name that repo, each pin is narrowed to the unit's own
 # folder AND to a commit one of its members made, and the snapshot rows key on the folder
 # because the repo can no longer tell two of them apart.
@@ -6541,7 +6578,7 @@ def _shared_sheet(monkeypatch, *, targets, rows):
     written = _sheet_env(
         monkeypatch,
         targets=targets,
-        grading=GRADING_YML + "submit_via: shared\n",
+        grading=GRADING_YML + "submit_via: shared_dropbox_repo\n",
         rows=rows,
     )
     assert collect.sync_sheet(
@@ -6630,7 +6667,7 @@ def test_a_shared_assignment_posts_no_receipts(monkeypatch):
     _sheet_env(
         monkeypatch,
         targets=targets,
-        grading=GRADING_YML + "submit_via: shared\n",
+        grading=GRADING_YML + "submit_via: shared_dropbox_repo\n",
         rows={
             "ada-l": collect.SnapshotRow(
                 repo=_DROP_BOX,

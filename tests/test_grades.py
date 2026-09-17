@@ -1462,7 +1462,7 @@ def test_a_listed_repo_still_gets_its_comment(tmp_path, monkeypatch):
 _NO_THREAD_SHAPES = (
     "visibility: public\n",
     "visibility: student_choice\n",
-    "submit_via: shared\n",
+    "submit_via: shared_dropbox_repo\n",
     "submit_via: external\n",
 )
 
@@ -1483,7 +1483,7 @@ def test_the_dry_run_promises_no_comment_a_shape_has_nowhere_to_put(
     [
         ("visibility: public\n", repo_row("assignment-1-ada-l", visibility="public")),
         ("submit_via: external\n", None),
-        ("submit_via: shared\n", None),
+        ("submit_via: shared_dropbox_repo\n", None),
     ],
 )
 def test_the_two_runs_agree_about_how_many_comments_there_are(

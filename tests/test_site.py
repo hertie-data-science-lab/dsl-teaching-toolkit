@@ -582,7 +582,7 @@ def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert out.count('submit_shape: "github-public"') == 2
+    assert out.count('submit_shape: "assignment-repo-public"') == 2
     assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
 
 
@@ -604,7 +604,7 @@ def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
     )
-    assert out.count('submit_shape: "github-public"') == 2
+    assert out.count('submit_shape: "assignment-repo-public"') == 2
     assert "your public `assignment-1-<your-handle>` repo appears when it is." in out
 
 
@@ -625,7 +625,7 @@ def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert out.count('submit_shape: "github-student-choice"') == 2
+    assert out.count('submit_shape: "assignment-repo-student-choice"') == 2
     assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
 
 
@@ -647,7 +647,7 @@ def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
     )
-    assert out.count('submit_shape: "github-student-choice"') == 2
+    assert out.count('submit_shape: "assignment-repo-student-choice"') == 2
     assert "your private `assignment-1-<your-handle>` repo appears when it is." in out
 
 
@@ -677,7 +677,7 @@ def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert out.count('submit_shape: "github-private"') == 2
+    assert out.count('submit_shape: "assignment-repo-private"') == 2
     assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
 
 
@@ -697,7 +697,7 @@ def test_a_definition_that_cannot_be_read_leaves_the_github_wording(monkeypatch)
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert out.count('submit_shape: "github-private"') == 2
+    assert out.count('submit_shape: "assignment-repo-private"') == 2
     assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
 
 
@@ -2145,7 +2145,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: shared\n"),
+        lambda *a: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -2154,7 +2154,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-3"}),
     )
-    assert out.count('submit_shape: "shared"') == 2
+    assert out.count('submit_shape: "shared-dropbox-repo"') == 2
     assert out.count('repo_name: "assignment-3-submissions"') == 2
     assert (
         out.count(
@@ -2171,7 +2171,9 @@ def test_a_shared_group_assignment_names_the_team_s_folder(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: shared\ntype: group\n"),
+        lambda *a: grades.parse_grading_spec(
+            "submit_via: shared_dropbox_repo\ntype: group\n"
+        ),
     )
     out = site._assignment_entry(
         "Course",
@@ -2192,7 +2194,7 @@ def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypa
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: shared\n"),
+        lambda *a: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
     )
     out = site._assignment_entry(
         "Course",

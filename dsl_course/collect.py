@@ -486,7 +486,8 @@ class Target:
     @classmethod
     def of(cls, repo: str, unit: str, members: list[str], shared: bool) -> Target:
         """One unit of an assignment whose shape is known: `shared` is `submit_via:
-        shared`, where every unit was handed the SAME repo and works in its own folder."""
+        shared_dropbox_repo`, where every unit was handed the SAME repo and works in its
+        own folder."""
         return cls(repo, unit, members, f"{unit}/" if shared else "")
 
     @property
@@ -559,8 +560,8 @@ def submission_targets(
     one per onboarded student otherwise, each key ONCE (`one_per_unit`).
     Empty - with the reason logged - when there is nothing to grade.
 
-    `shared` is `submit_via: shared`: every unit was handed the SAME repo, the cohort's
-    one drop box, and works in its own folder inside it. Passed in by the caller that
+    `shared` is `submit_via: shared_dropbox_repo`: every unit was handed the SAME repo,
+    the cohort's one drop box, and works in its own folder inside it. Passed in by the caller that
     holds the assignment's definition, never guessed here - the repo a unit's work is in
     is the one thing a wrong answer cannot be recovered from.
 
@@ -1198,8 +1199,8 @@ def snapshot_assignment(
     read, and this takes one of its own; if that fails too the rows simply carry `commit`,
     as they always did.
 
-    `shared` is `submit_via: shared`, and it changes three things: every unit is frozen
-    against the same repo, each one's pin is the newest commit touching its own FOLDER and
+    `shared` is `submit_via: shared_dropbox_repo`, and it changes three things: every unit
+    is frozen against the same repo, each one's pin is the newest commit touching its own FOLDER and
     authored by one of its members, and the `pushed_at` rung is not consulted at all. That
     last one matters most - `pushed_at` is the whole REPO's last push, so one student
     pushing at one minute past the deadline would mark the entire cohort `suspect`. It is
@@ -3361,9 +3362,7 @@ def collect(
         tests_src: Path | None = None if drop_box else soldir / gspec.tests
         no_tests = ""
         if drop_box:
-            no_tests = (
-                f"`submit_via: shared` in {GRADING_FILE} - a drop box is hand-marked"
-            )
+            no_tests = f"`submit_via: shared_dropbox_repo` in {GRADING_FILE} - a drop box is hand-marked"
         elif not gspec.autograde:
             no_tests = f"`autograde: false` in {GRADING_FILE}"
         elif not tests_src.is_dir():

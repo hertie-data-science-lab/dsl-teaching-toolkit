@@ -84,19 +84,37 @@ SANDBOX_USER = "dsl-sandbox"
 # because three layers spell them: `workflows_render` builds the New assignment dropdowns
 # from them, `scaffold` writes the chosen values into the file, and `grades` reads them
 # back - and a dropdown offering a word the reader would refuse is a form that lies.
-# How the work reaches us. `github` = one repo per unit, pushed to; `external` = handed in
-# off GitHub (Moodle, Kaggle, in class), so no repo is created at all; `shared` = ONE
-# private drop box for the whole cohort, one folder per unit, every student pushing into
-# their own and reading everyone else's. The words are NEVER renamed: live
-# INSTRUCTOR-OWNED `grading_config.yml` files carry them. A word is added here when the
-# engine can ACT on it, because this same tuple is what the New assignment dropdown
-# offers, and a form offering a word the reader would refuse is a form that lies.
-SUBMIT_VIA = ("github", "external", "shared")
-# THE `shared` rationale, written down once so the five places that act on it can point
-# here instead of arguing it out again and drifting: a drop box is ONE repo that the whole
-# cohort reads, and no student can opt out of being in it. Everything that would otherwise
-# be written per unit therefore has nowhere private to go - no Feedback issue and so no
-# receipt (`has_feedback_issue`), no model solution (`can_hold_solution`), and no
+# Named for where the work LANDS. `assignment_repo` = one repo per unit, pushed to;
+# `external` = handed in off GitHub (Moodle, Kaggle, in class), so no repo is created at
+# all; `shared_dropbox_repo` = ONE private drop box for the whole cohort, one folder per
+# unit, every student pushing into their own and reading everyone else's. A word is added
+# here when the engine can ACT on it, because this same tuple is what the New assignment
+# dropdown offers, and a form offering a word the reader would refuse is a form that lies.
+SUBMIT_VIA = ("assignment_repo", "shared_dropbox_repo", "external")
+# `github` is the LEGACY spelling of `assignment_repo`: live INSTRUCTOR-OWNED
+# `grading_config.yml` files in real course orgs carry it, so it is accepted for ever at
+# every read boundary (`canonical_submit_via` below) and never written again by any
+# generator. `shared` was renamed to `shared_dropbox_repo` before it ever shipped to a
+# real org, so it gets no alias - an unrecognised `shared` is simply Dropped.
+LEGACY_SUBMIT_VIA = {"github": "assignment_repo"}
+
+
+def canonical_submit_via(value: object) -> str:
+    """A raw `submit_via` read off the outside world, normalised to its canonical spelling.
+
+    The ONE place every read boundary calls before trusting the value - the
+    `grading_config.yml` reader, the New assignment workflow's argv/env, the e2e harness -
+    so `github` reads as `assignment_repo` everywhere internal code compares against it,
+    and no second copy of the alias can drift from this one."""
+    text = str(value or "").strip().lower()
+    return LEGACY_SUBMIT_VIA.get(text, text)
+
+
+# THE `shared_dropbox_repo` rationale, written down once so the five places that act on it
+# can point here instead of arguing it out again and drifting: a drop box is ONE repo that
+# the whole cohort reads, and no student can opt out of being in it. Everything that would
+# otherwise be written per unit therefore has nowhere private to go - no Feedback issue and
+# no receipt (`has_feedback_issue`), no model solution (`can_hold_solution`), and no
 # `visibility:` to choose (v1 keeps it private, because `public` would publish every
 # student's submission on the strength of one instructor's line). It is hand-marked for a
 # different reason: the autograder and the grader's reading copy run per UNIT against the
@@ -165,21 +183,22 @@ def has_feedback_issue(submit_via: str, visibility: str) -> bool:
     DERIVED from the shape, never configured: the issue lives in the unit's own repo, so it
     exists exactly where there is one that only that unit can read. Every other shape gets
     its feedback in the private `grades-<handle>` gradebook."""
-    return submit_via == "github" and visibility == "private"
+    return submit_via == "assignment_repo" and visibility == "private"
 
 
 def collects_commits(submit_via: str) -> bool:
     """Whether there are commits to freeze, time and grade against the cutoff.
 
     The gate on every piece of submission arithmetic - the snapshot, the late days, the
-    receipts, the `info:` block - named for what it ASKS, which is why `shared` widened it
-    here and re-opened none of those call sites: work pushed into a folder of the drop box
-    is timed, and is late, exactly as work pushed to a repo of one's own.
+    receipts, the `info:` block - named for what it ASKS, which is why
+    `shared_dropbox_repo` widened it here and re-opened none of those call sites: work
+    pushed into a folder of the drop box is timed, and is late, exactly as work pushed to a
+    repo of one's own.
 
     Extensionally the same set as `creates_repos` today, and by COINCIDENCE: both are
     false for `external` alone. They are different questions, so widening either one means
     looking at the other."""
-    return submit_via in ("github", "shared")
+    return submit_via in ("assignment_repo", "shared_dropbox_repo")
 
 
 def creates_unit_repos(submit_via: str) -> bool:
@@ -188,7 +207,7 @@ def creates_unit_repos(submit_via: str) -> bool:
 
     Not the same question as `collects_commits`: a shared drop box collects commits into
     one repo for the whole cohort, not one per unit."""
-    return submit_via == "github"
+    return submit_via == "assignment_repo"
 
 
 def can_hold_solution(submit_via: str, visibility: str) -> bool:
@@ -196,8 +215,8 @@ def can_hold_solution(submit_via: str, visibility: str) -> bool:
 
     ONE predicate for a question two files ask independently: `assign.provision_all` skips
     the push, and the digest faults a `schedule.yml` `solution_datetime:` that would
-    therefore pass and release nothing. Asked apart, the two came to disagree - a `shared`
-    assignment was scheduled a release the handout silently declined.
+    therefore pass and release nothing. Asked apart, the two came to disagree - a
+    `shared_dropbox_repo` assignment was scheduled a release the handout silently declined.
 
     It takes a repo of the unit's OWN (`external` has none, and a shared drop box is one
     repo the whole cohort reads) AND a repo the toolkit can promise is private (`public`
@@ -221,20 +240,20 @@ def creates_repos(submit_via: str) -> bool:
 def submit_shape(submit_via: str, visibility: str) -> str:
     """The ONE word the cohort site branches an assignment on.
 
-    `github-private`, `github-public`, `github-student-choice`, `external`, `shared`. The two
-    axes are orthogonal in the config and are not on the page: a template that asked
-    "which `submit_via`, and then which `visibility`?" had to be re-opened for every shape
-    that is neither, and each of the four places that asked drifted from the others. So
-    the pair is collapsed HERE, beside the predicates it is derived from, and the theme
-    carries one `case`.
+    `assignment-repo-private`, `assignment-repo-public`, `assignment-repo-student-choice`,
+    `external`, `shared-dropbox-repo`. The two axes are orthogonal in the config and are
+    not on the page: a template that asked "which `submit_via`, and then which
+    `visibility`?" had to be re-opened for every shape that is neither, and each of the
+    four places that asked drifted from the others. So the pair is collapsed HERE, beside
+    the predicates it is derived from, and the theme carries one `case`.
 
     A shape that makes no repo per unit names itself and nothing else (`external`,
-    `shared`) - there is no per-unit repo for a visibility to describe, and the parse
-    drops the key there anyway (`shared` is private-only in v1).
+    `shared_dropbox_repo`) - there is no per-unit repo for a visibility to describe, and
+    the parse drops the key there anyway (`shared_dropbox_repo` is private-only in v1).
 
     Kebab throughout, whatever the config words look like: this is a word a THEME reads,
-    and one shape spelt `github-student_choice` beside `github-public` is a `when` arm
-    somebody eventually mistypes."""
+    and one shape spelt `assignment_repo-student_choice` beside `assignment-repo-public`
+    is a `when` arm somebody eventually mistypes."""
     if not creates_unit_repos(submit_via):
         return submit_via.replace("_", "-")
     return f"{submit_via}-{visibility}".replace("_", "-")
@@ -439,8 +458,8 @@ def submission_repo(slug: str, suffix: str) -> str:
 
 
 def shared_repo(slug: str) -> str:
-    """The ONE repo a `submit_via: shared` assignment hands out: `<slug>-submissions`, a
-    private drop box with a folder per unit inside it.
+    """The ONE repo a `submit_via: shared_dropbox_repo` assignment hands out:
+    `<slug>-submissions`, a private drop box with a folder per unit inside it.
 
     Never the bare slug - that is the frozen cohort TEMPLATE the brief lives in
     (`assign.ensure_cohort_template`). The suffix earns two things for free: the name

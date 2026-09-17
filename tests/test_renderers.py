@@ -956,6 +956,10 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
     assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
+    assert inputs["submit_via"]["default"] == "assignment_repo"
+    # The legacy `github` spelling is read for ever, but this form is a fresh choice, so
+    # it is never among the words the dropdown offers or defaults to.
+    assert "github" not in inputs["submit_via"]["options"]
     # The vocabulary itself: a word enters it when the handout can CREATE it, so the
     # dropdown and the reader can never disagree about what is on offer.
     assert inputs["visibility"]["options"] == list(course.VISIBILITIES)

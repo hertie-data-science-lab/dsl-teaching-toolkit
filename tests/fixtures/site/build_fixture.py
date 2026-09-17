@@ -59,7 +59,7 @@ EXTERNAL_PENDING = "assignment-5-f2026"
 # student is its admin and may publish it once the grading cutoff has passed. Its page has
 # to carry both halves of that, and its due row the one word that says the flag is theirs.
 STUDENT_CHOICE = "assignment-6-f2026"
-# One drop box for the whole cohort (`submit_via: shared`): `repo_name` is a REAL repo
+# One drop box for the whole cohort (`submit_via: shared_dropbox_repo`): `repo_name` is a REAL repo
 # rather than a shape, what is the student's own is a folder inside it, and the name must
 # NOT be rewritten to one per reader - which is the one thing open_in.html does to every
 # other assignment page.
@@ -150,7 +150,7 @@ def _grading_spec(_org: str, repo: str):
     if repo == STUDENT_CHOICE:
         return grades.parse_grading_spec("visibility: student_choice\n")
     if repo == SHARED:
-        return grades.parse_grading_spec("submit_via: shared\n")
+        return grades.parse_grading_spec("submit_via: shared_dropbox_repo\n")
     return grades.parse_grading_spec("")
 
 

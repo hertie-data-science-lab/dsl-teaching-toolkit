@@ -680,6 +680,19 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
 
 
+def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monkeypatch):
+    # `github` is the legacy spelling, accepted for ever on read - but never written
+    # again: a fresh template scaffolded with no `submit_via` box answered gets the
+    # canonical word, not the one live orgs still carry.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb"]) == 0
+    text = written["grading_config.yml"]
+    assert "\nsubmit_via: assignment_repo" in text
+    assert "github" not in text
+    spec = grades.parse_grading_spec(text)
+    assert spec.submit_via == "assignment_repo" and spec.dropped == ()
+
+
 def test_the_submit_url_line_is_seeded_commented_on_every_shape(fake, monkeypatch):
     # `submit_url` is the one thing the toolkit is ever told about a handover it does not
     # see, and it is not a form input - so the seeded file is where an instructor finds it.
@@ -687,7 +700,7 @@ def test_the_submit_url_line_is_seeded_commented_on_every_shape(fake, monkeypatc
     # live line carrying it would put a `Submit on ...` button in front of a whole cohort
     # pointing at a page nobody created.
     written = _solution_files(monkeypatch)
-    for number, via in (("1", "external"), ("2", "github")):
+    for number, via in (("1", "external"), ("2", "assignment_repo")):
         assert (
             scaffold.scaffold_assignment("Org", number, "f2026", [], submit_via=via)
             == 0
@@ -772,7 +785,12 @@ def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypa
     written = _solution_files(monkeypatch)
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", ["ipynb"], submit_via="shared", autograde=True
+            "Org",
+            "1",
+            "f2026",
+            ["ipynb"],
+            submit_via="shared_dropbox_repo",
+            autograde=True,
         )
         == 0
     )

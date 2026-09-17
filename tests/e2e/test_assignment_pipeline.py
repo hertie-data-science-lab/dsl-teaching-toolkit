@@ -1196,7 +1196,7 @@ def test_a_public_assignments_page_says_which_shape_it_is(pipeline):
     # nothing told a public cohort exactly what it told a private one.
     page = pipeline.stages["at_handout"].detail["pages"][PUBLIC.name]
     assert f'submit_shape: "{PUBLIC.key}"' in page
-    assert PUBLIC.key == "github-public"
+    assert PUBLIC.key == "assignment-repo-public"
 
 
 def test_a_public_assignments_feedback_goes_nowhere_but_the_gradebook(pipeline):

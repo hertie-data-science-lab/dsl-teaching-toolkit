@@ -33,9 +33,9 @@ so there is no name to print here. `submit_url` is the address the assignment na
 written only once the brief is out. This row said "Submit via <repo>" for those too, which
 is the one thing there is not.
 
-`shared` names ONE repo for the whole cohort, so `repo_name` is that repo rather than a
-shape, and `submit_path` is the folder inside it that is the reader's own - which is the
-half of the answer a name cannot carry.
+`shared_dropbox_repo` names ONE repo for the whole cohort, so `repo_name` is that repo
+rather than a shape, and `submit_path` is the folder inside it that is the reader's own -
+which is the half of the answer a name cannot carry.
 {%- endcomment -%}
 <div class="col col-4 markdown-content" data-label="Details">
     {%- if include.event.submit_shape == "external" -%}
@@ -54,9 +54,9 @@ half of the answer a name cannot carry.
     a public repo means for what a student may commit into it, and about when a repo whose
     flag the student holds may be published.
     {%- endcomment -%}
-    {%- if include.event.submit_shape == "github-public" %} (public)
-    {%- elsif include.event.submit_shape == "github-student-choice" %} (yours to publish)
-    {%- elsif include.event.submit_shape == "shared" %} ({{ include.event.submit_path | escape }} folder)
+    {%- if include.event.submit_shape == "assignment-repo-public" %} (public)
+    {%- elsif include.event.submit_shape == "assignment-repo-student-choice" %} (yours to publish)
+    {%- elsif include.event.submit_shape == "shared-dropbox-repo" %} ({{ include.event.submit_path | escape }} folder)
     {%- endif -%}
     {%- endif -%}
 </div>

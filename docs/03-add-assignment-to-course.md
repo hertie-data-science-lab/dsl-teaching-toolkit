@@ -30,12 +30,12 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
-      - `submit_via` = where students hand in. `github` = they push to their repo, and the
-        cutoff, the receipts and the late window apply; `external` = handed in elsewhere
-        (Moodle, Kaggle, in class), so **no repo is created**: the brief and a submit link
-        appear on the site and feedback goes to the student's gradebook; `shared` = one
-        private repo for the whole cohort, each student pushing into their own folder and
-        able to read everyone else's
+      - `submit_via` = where students hand in. `assignment_repo` = they push to their
+        repo, and the cutoff, the receipts and the late window apply; `external` = handed
+        in elsewhere (Moodle, Kaggle, in class), so **no repo is created**: the brief and
+        a submit link appear on the site and feedback goes to the student's gradebook;
+        `shared_dropbox_repo` = one private repo for the whole cohort, each student
+        pushing into their own folder and able to read everyone else's
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
@@ -166,13 +166,16 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 
 | Setting | Values | What it does |
 |---|---|---|
-| `submit_via` | `github` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
+| `submit_via` | `assignment_repo` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
-| | `shared` | **One private repo for the whole cohort**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Feedback issue and no receipt. |
+| | `shared_dropbox_repo` | **One private repo for the whole cohort**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Feedback issue and no receipt. |
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
 | `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
 | | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |
+
+Older `grading_config.yml` files spell `assignment_repo` as `github` - both are read, but
+`New assignment` and the scaffold only ever write `assignment_repo` now.
 
 GitHub's fourth visibility, `internal` - readable by every member of an enterprise and by
 nobody outside it - is **not supported**: it needs an Enterprise plan the courses do not
@@ -198,7 +201,7 @@ faults while either is wrong.
 
 #### A shared drop box
 
-`submit_via: shared` hands out ONE private repo for the assignment, `<slug>-submissions`,
+`submit_via: shared_dropbox_repo` hands out ONE private repo for the assignment, `<slug>-submissions`,
 and gives every onboarded student (or every team) `push` on it. Each unit works in its own
 `<handle>/` or `<team>/` folder; the whole cohort can read the whole repo, which is the
 point - peer-visible presentations, referee reports, a gallery of submissions.
@@ -233,7 +236,7 @@ What to know before you pick it:
 
 The **Feedback issue** - the thread the receipts and the final comment appear in - exists
 only where there is a private repo of the student's own to put it in, so an `external` or
-`shared` assignment has none. Its marks and its feedback go to the student's private
+`shared_dropbox_repo` assignment has none. Its marks and its feedback go to the student's private
 `grades-<handle>` gradebook, which every shape writes to and which exists from the day they
 onboard.
 

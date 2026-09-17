@@ -3,7 +3,7 @@ title: Gradient descent       # the assignment's name, shown to graders and on t
 type: individual              # individual | group
 # team_formation: self_select # group only: self_select (Join-team form) | assigned (teams.csv)
 # max_team_size: 5            # group only
-submit_via: github            # github (push to their repo) | external (handed in elsewhere) | shared (one drop-box repo for the whole cohort)
+submit_via: assignment_repo   # assignment_repo (push to their repo) | external (handed in elsewhere) | shared_dropbox_repo (one drop-box repo for the whole cohort)
 visibility: private           # private | public | student_choice - who may read it
 format: ipynb                 # ipynb | py | rmd | qmd | latex | none - the starter stub only
 

@@ -58,6 +58,7 @@ from .course import (
     TEAM_FORMATIONS,
     VISIBILITIES,
     can_hold_solution,
+    canonical_submit_via,
     collects_commits,
     course_phrase,
     creates_repos,
@@ -238,7 +239,7 @@ class _Shape:
     def submit_shared(self) -> bool:
         """Handed in by pushing into a folder of ONE private drop box the whole cohort
         shares, rather than into a repo of the unit's own."""
-        return self.submit_via == "shared"
+        return self.submit_via == "shared_dropbox_repo"
 
     @property
     def submit_shape(self) -> str:
@@ -257,8 +258,8 @@ class _Shape:
         Two conditions, and the second is the one easily lost: the shape must HAVE a
         Feedback issue, and the shape must have been read from a real definition. A sheet
         whose assignment the schedule no longer declares falls back to the defaults -
-        `github` + `private` - and a guess may keep writing in the thread a student was
-        told to read, but must never open a second one over it."""
+        `assignment_repo` + `private` - and a guess may keep writing in the thread a
+        student was told to read, but must never open a second one over it."""
         return self.shape_known and self.has_feedback_issue
 
     @property
@@ -303,7 +304,7 @@ class SheetSpec(_Shape):
     # The assignment's SHAPE, carried verbatim so the `_Shape` rules above are the
     # vocabulary's own rather than a second spelling of them here. The defaults are what an
     # assignment that says nothing gets: one private repo per unit.
-    submit_via: str = "github"
+    submit_via: str = "assignment_repo"
     visibility: str = "private"
     # False for a sheet whose assignment the schedule no longer declares
     # (`_spec_from_sheet`): the shape above is then a guess, and the one thing a guess may
@@ -1196,7 +1197,12 @@ _READERS = {
         v, TEAM_FORMATIONS, "team_formation", "self_select", w, d
     ),
     "max_team_size": _team_cap,
-    "submit_via": lambda v, w, d: _one_of(v, SUBMIT_VIA, "submit_via", "github", w, d),
+    # `canonical_submit_via` first, so the legacy `github` spelling reads as
+    # `assignment_repo` and never earns a Dropped warning; `shared` (renamed before it
+    # ever shipped) has no alias and is Dropped like any other unrecognised word.
+    "submit_via": lambda v, w, d: _one_of(
+        canonical_submit_via(v), SUBMIT_VIA, "submit_via", "assignment_repo", w, d
+    ),
     "visibility": lambda v, w, d: _one_of(
         v, VISIBILITIES, "visibility", "private", w, d
     ),
@@ -1241,7 +1247,7 @@ class GradingSpec(_Shape):
     type: str = "individual"
     team_formation: str = "self_select"
     max_team_size: int | None = None
-    submit_via: str = "github"
+    submit_via: str = "assignment_repo"
     # PRIVATE unless the assignment asks otherwise: everything the toolkit creates for a
     # student is private to them and the teaching team, and a default that published a
     # cohort's work would be a default nobody chose.
@@ -1349,7 +1355,7 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
     combination the toolkit will not act on is caught - and it is caught at the parse, once,
     rather than by each of the handout, the sheet, the receipts and the site making their
     own guess about what was meant."""
-    via = values.get("submit_via", "github")
+    via = values.get("submit_via", "assignment_repo")
     if via == "external" and values.get("visibility", "private") != "private":
         # Nothing is created, so there is nothing for a visibility to describe.
         values["visibility"] = "private"
@@ -1361,8 +1367,12 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 "no repo is created for it - ignored",
             )
         )
-    if via == "shared" and values.get("visibility", "private") != "private":
-        # Corrected rather than obeyed - see the `shared` note beside `course.SUBMIT_VIA`.
+    if (
+        via == "shared_dropbox_repo"
+        and values.get("visibility", "private") != "private"
+    ):
+        # Corrected rather than obeyed - see the `shared_dropbox_repo` note beside
+        # `course.SUBMIT_VIA`.
         values["visibility"] = "private"
         dropped.append(
             Dropped(
@@ -1372,7 +1382,7 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 "whole cohort's work, so v1 keeps it private - ignored",
             )
         )
-    if via == "shared":
+    if via == "shared_dropbox_repo":
         for key in ("autograde", "completion_check", "grader_pdf"):
             if values.get(key):
                 # All three stages run PER UNIT against the unit's own repo, and a drop box
@@ -1622,7 +1632,7 @@ def grading_spec_faults(
                 "classroom-config/schedule.yml - the model answer stays on this "
                 "template's `solution` branch, which is where the teaching team reads "
                 "it - or give this assignment a private repo per unit here "
-                "(`submit_via: github`, `visibility: private`)",
+                "(`submit_via: assignment_repo`, `visibility: private`)",
             )
         )
     return faults, spec
