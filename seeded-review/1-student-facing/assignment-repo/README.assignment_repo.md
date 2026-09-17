@@ -1,7 +1,5 @@
 # Gradient descent
 
-**Points:** __
-
 ## Task
 
 _Write the assignment here (dsl-stub: replace this whole file)._

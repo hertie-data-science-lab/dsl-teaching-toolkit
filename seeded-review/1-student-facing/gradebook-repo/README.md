@@ -17,21 +17,23 @@ This private repository is viewable only by you. Grades and feedback for each pi
 | `team_feedback` | Group assignments only: feedback shared with the whole team. |
 
 === after Distribute grades (rewritten wholesale on every run that touches this student,
-grades.render_readme) - anna-adams, one assignment_repo-private assignment and one external one ===
+grades.render_readme) - anna-adams, one assignment_repo-private assignment and one external one;
+row and section titles now `<identifier> · <name>` via `grades._readme_label` (course.identifier /
+course.row_name) ===
 
 This gradebook is private to you. It is regenerated each time grades are distributed; do not edit it.
 
 | Assignment | Final grade | Submitted | Late | Team |
 |---|---|---|---|---|
-| Linear regression | pass | external |  |  |
-| Gradient descent | 88 | 27 Oct 22:14 | on time |  |
+| Assignment 1 · Linear regression | pass | external |  |  |
+| Assignment 2 · Gradient descent | 88 | 27 Oct 22:14 | on time |  |
 
-## Linear regression
+## Assignment 1 · Linear regression
 **Final grade:** pass
 
 Graded off-platform; recorded here for the record.
 
-## Gradient descent
+## Assignment 2 · Gradient descent
 **Final grade:** 88
 
 Clear, correct solution.

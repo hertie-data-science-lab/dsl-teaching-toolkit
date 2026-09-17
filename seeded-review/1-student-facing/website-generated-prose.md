@@ -191,7 +191,20 @@ Released on Thursday 01/10/2026          # or: Hands out on Thursday 01/10/2026
 **Due Thursday 15/10/2026 23:59**
 ```
 (`page.due_event`, the same field the schedule's own due row reads - `page.due` has never
-existed, so the layout that once read it printed a bare time.)
+existed, so the layout that once read it printed a bare time.) The due paragraph itself now
+carries a `post-due` class beside `post-meta` (`5eaeadb`/`f599deb` - styling only, no new text).
+
+Under it, what the assignment is out of - written only when `grading_config.yml` declares
+numeric `questions:` maxima, off the same sum the gradebook prints beside a score
+(`grades.total_points`, read here as `page.max_points` - `site._assignment_entry`):
+```
+{% if page.max_points %}
+<p class="post-meta">Worth {{ page.max_points }} points</p>
+{% endif %}
+```
+e.g. `Worth 25 points` for two questions worth 15 and 10. The brief no longer opens with a
+`**Points:** __` line for its author to fill in (`scaffold._brief_stub`) - a fact the
+assignment's own definition already carries is read from there instead of retyped.
 
 The "open in your local copy" strip (`open_in.html`) is skipped for `external` - there is
 no repo shape to open a local copy of. The submission callout is now ONE `case` on
