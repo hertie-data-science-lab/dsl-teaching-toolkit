@@ -500,6 +500,38 @@ def test_an_external_assignment_is_never_told_to_push(generated):
     assert "repo_name" not in page and "repo_url" not in page
 
 
+_NOT_EXTERNAL = '{% unless page.submit_shape == "external" %}'
+
+
+def _gated_on_not_external(text: str) -> list[str]:
+    """Every block the layout renders only for an assignment that has a repo.
+
+    Textual, like `_external_arm`: the offline suite has no Liquid engine, so a gate is
+    what sits between its `unless` and the `endunless` that closes it."""
+    return [
+        part.split("{% endunless %}", 1)[0] for part in text.split(_NOT_EXTERNAL)[1:]
+    ]
+
+
+@pytest.mark.parametrize(
+    "block",
+    ["{% include open_in.html %}", "<h3>Late Policy</h3>"],
+)
+def test_an_external_assignments_page_carries_no_repo_shaped_furniture(
+    generated, block
+):
+    # Two blocks on this page describe a repo that is not there. `open_in.html` is the
+    # "open files in your local copy - set up" strip, which rewrites repo shapes to the
+    # reader's own and has none to rewrite here; the Late Policy box quotes a rule about
+    # a deadline nothing in this toolkit holds, because `external` collects no commits, so
+    # no day is counted and no penalty is ever applied (`course.collects_commits`).
+    gated = _gated_on_not_external(_liquid_templates()["_layouts/assignment.html"])
+    assert any(block in part for part in gated), block
+    # ...and the fixture really does generate one of these pages for it to matter on.
+    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
+    assert page["submit_shape"] == "external"
+
+
 def test_a_pending_assignment_gets_no_callout_at_all(generated):
     # The callout answers "where does the work go, now?", and for an assignment still to
     # come there is no brief to read and no address to go to. The layout gates the whole

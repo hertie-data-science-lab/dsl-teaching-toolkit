@@ -238,6 +238,10 @@ def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
     return f"{line:<29} # {comment}".rstrip()
 
 
+# What the three per-unit stages say on a `shared` assignment, where none of them runs.
+_HAND_MARKED = "hand-marked: a drop box is one repo for the whole cohort"
+
+
 def _grading_config(
     *,
     title: str,
@@ -251,6 +255,13 @@ def _grading_config(
 ) -> str:
     """`grading_config.yml` as New assignment writes it."""
     group = kind == "group"
+    # A drop box is hand-marked, and the parse says so: all three per-unit stages are
+    # refused for `submit_via: shared` (`grades._cross_check`), because each of fifty
+    # students would have the whole cohort's work cloned, run and archived under their own
+    # key. Seeded true, the file the button had just written reported a `Dropped` line on
+    # every quarter-hourly tick and stood as an advisory in the cohort's digest issue - a
+    # fault about nothing anybody typed.
+    marked_by_hand = submit_via == "shared"
     cap = defaults.get("max_team_size")
     window = defaults.get("late_window_days")
     penalty = defaults.get("late_penalty_per_day")
@@ -334,18 +345,24 @@ def _grading_config(
         "",
         _setting(
             "autograde",
-            "true" if autograde else "false",
-            "true: run tests/ at the cutoff and show the count to graders",
+            "true" if autograde and not marked_by_hand else "false",
+            _HAND_MARKED
+            if marked_by_hand
+            else "true: run tests/ at the cutoff and show the count to graders",
         ),
         _setting(
             "completion_check",
-            "true" if "ipynb" in formats else "false",
-            "true: execute the notebook at the cutoff, record whether it runs clean",
+            "true" if "ipynb" in formats and not marked_by_hand else "false",
+            _HAND_MARKED
+            if marked_by_hand
+            else "true: execute the notebook at the cutoff, record whether it runs clean",
         ),
         _setting(
             "grader_pdf",
             "false",
-            "true: at the cutoff, archive each submission filtered to its marked "
+            _HAND_MARKED
+            if marked_by_hand
+            else "true: at the cutoff, archive each submission filtered to its marked "
             "questions as a PDF for graders",
         ),
     ]
@@ -594,11 +611,14 @@ def _brief_stub(
     the knitted HTML has to come with the `.Rmd` is a brief that collects `.Rmd` files
     nobody can mark.
 
-    `submit_via` decides what "What to submit" asks for. On an `external` assignment the
-    repo collects nothing, and the Feedback issue students open says the hand-in is
-    "outside GitHub (see the brief)" - so the brief is the one place that can say WHERE,
-    and asking its author for the files they expect back pointed them at the wrong
-    question."""
+    `submit_via` decides what "What to submit" asks for, and an `external` assignment
+    drops two things the rest of the stub carries. The repo collects nothing, so the
+    artefact sentences - "commit the notebook with its outputs saved" - would tell a
+    cohort to hand in where nothing is ever read from; and nothing is TIMED, so the late
+    line would quote a penalty no run can apply. The Feedback issue students open says the
+    hand-in is "outside GitHub (see the brief)", so the brief is the one place that can
+    say where it really goes."""
+    external = submit_via == "external"
     window = defaults.get("late_window_days")
     penalty = defaults.get("late_penalty_per_day")
     if not window:
@@ -607,18 +627,24 @@ def _brief_stub(
         late = f"{penalty} per day, up to {window} days"
     else:
         late = f"accepted up to {window} days late"
-    artefacts = [sentence for fmt in formats if (sentence := _hand_in(fmt))]
+    facts = "**Points:** __ · **Due:** see the course schedule" + (
+        "" if external else f" · **Late work:** {late}"
+    )
+    artefacts = (
+        [] if external else [sentence for fmt in formats if (sentence := _hand_in(fmt))]
+    )
     return (
         f"# {title}\n\n"
-        f"**Points:** __ · **Due:** see the course schedule · **Late work:** {late}\n\n"
+        f"{facts}\n\n"
         "## Task\n\n"
         "_Write the assignment here (dsl-stub: replace this whole file)._\n\n"
         "## What to submit\n\n"
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + (
-            "_Say where and how students hand in (Moodle, Kaggle, in class) - nothing is "
-            "collected from this repo._\n"
-            if submit_via == "external"
+            "_Say where and how students hand in - nothing is collected from this repo. "
+            "`submit_url:` in `grading_config.yml` puts that address on the cohort site "
+            "as a button._\n"
+            if external
             else "_Say which files you expect back, and in what shape._\n"
         )
     )
@@ -1347,6 +1373,12 @@ def scaffold_assignment(
         log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
         return 0
     title = named or f"Assignment {number}"
+    if autograde and submit_via == "shared":
+        # Corrected here as well as in the file, because it also decides whether `tests/`
+        # is seeded: placeholder hidden tests beside an assignment nothing will ever run
+        # them for read as work the course is expected to do. See `_HAND_MARKED`.
+        log("  (autograde is not read for a shared drop box - it is hand-marked)")
+        autograde = False
     defaults = course_assignment_defaults(org)
     # main: the brief, a starter stub per format, and (group only) CONTRIBUTIONS.md -
     # what students receive on generate. No tests, no autograder - grading runs

@@ -321,6 +321,11 @@ class SheetSpec(_Shape):
     # has to act on it, where a grader scans the sheet's header and wants it short.
     due_long: str = ""
     cutoff_long: str = ""
+    # The due moment itself rather than a rendering of it, because one reader has to
+    # COMPARE it with the clock: `distribute` says out loud when a mark is going out
+    # before the submission facts behind it exist (`_undue_marks`). None for a sheet whose
+    # assignment the schedule no longer declares - there is no date to read.
+    due_at: datetime | None = None
 
     @property
     def container_key(self) -> str:
@@ -2038,6 +2043,7 @@ def sheet_spec(
         cutoff_display=_display_moment(cutoff_at(sched, key, gspec)),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
         cutoff_long=_display_long(cutoff_at(sched, key, gspec), sched.timezone),
+        due_at=entry.due_datetime if entry else None,
     )
 
 
@@ -3591,6 +3597,35 @@ def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
     return total
 
 
+def _undue_marks(
+    specs: dict[str, SheetSpec], books: dict[str, dict[str, dict]], now: datetime
+) -> int:
+    """How many marks are about to go out with nothing derived behind them, because the
+    assignment's due date has not passed yet.
+
+    Nothing fills `info:` before the due date - there is nothing to derive there, and a
+    handout must not cost an API call per student (`collect.sync_sheet`) - so a grade sent
+    early carries a gradebook row reading `not submitted` while the work sits in the repo.
+    A grader may well mean it (a mark released early, a cohort that has all handed in), so
+    this is counted and said out loud and never blocks: the alternative is withholding a
+    mark somebody decided to send.
+
+    Read off the student VIEWS rather than the sheet, because that is what the gradebook
+    row is rendered from: `submitted` is dropped from a view when there is no submission
+    time in it (`_allowlisted`), and a shape that collects no commits has none to want."""
+    return sum(
+        1
+        for book in books.values()
+        for slug, view in book.items()
+        if (spec := specs.get(slug)) is not None
+        and spec.collects_commits
+        and spec.due_at is not None
+        and now < spec.due_at
+        and "final_grade" in view
+        and "submitted" not in view
+    )
+
+
 def _issue_targets(
     spec: SheetSpec, sheet: dict, books: dict[str, dict[str, dict]]
 ) -> list[tuple[str, str, str]]:
@@ -3805,11 +3840,18 @@ def distribute(
     writes. Every one of those is skipped when `distributed.csv` says the same content has
     already gone out, which is what makes a correction to one grade reach one student.
 
-    `assignment` narrows the run to one slug. Empty - the default - is every sheet in the
-    repo, which is right at the end of term and wrong in the middle of it: a1's marks are
-    ready while a2 is half typed in, and the whole-repo run shipped both. Narrowing is not
-    a safety net for a half-marked sheet (a partial per-question map still totals, which is
-    the grader's call to make) - it is what lets them make it one assignment at a time.
+    `assignment` narrows what is SENT to one slug: only that assignment's feedback
+    comments are posted. It does NOT narrow what is READ. A student's gradebook is the
+    whole of what they have been given, and it is rendered from every sheet in the repo on
+    every run - so it stays a pure function of the sheets, and a scoped run and an unscoped
+    one write the same file rather than flip-flopping between two and re-mailing a cohort
+    each way. Rendering it from the selected sheet alone is what silently deleted every
+    other assignment from every gradebook it touched. The registrar's export is the same
+    file for the same reason: it is one column per assignment, not per run.
+
+    Narrowing is not a safety net for a half-marked sheet (a partial per-question map
+    still totals, which is the grader's call to make) - it is what lets a grader release
+    a1's feedback while a2 is still being typed in.
 
     Dry run - the default - reads everything, writes nothing, posts nothing, sends nothing,
     and prints the counts a grader checks before pressing it for real."""
@@ -3824,7 +3866,8 @@ def distribute(
     course_org = course_org_for_cohort(cohort_org)
     sched = schedule.load(cohort_org)
     students = roster.load(cohort_org)
-    now = datetime.now(UTC).isoformat(timespec="seconds")
+    moment = datetime.now(UTC)
+    now = moment.isoformat(timespec="seconds")
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
         if not clone(cohort_org, CONFIG_REPO, wd):
@@ -3844,17 +3887,19 @@ def distribute(
                 f"assignment (which creates its grading sheet) first"
             )
             return 1
+        # Which slugs this run may POST a comment for. Checked after the read, not
+        # during it: `load_sheets` is what refuses to distribute anything while one sheet
+        # is mid-edit, and that guard is about the repo, not about the slug somebody
+        # typed. `sheets` itself is never narrowed - see the note in the docstring.
+        selected = set(sheets)
         if assignment:
-            # Narrowed AFTER the read, not during it: `load_sheets` is what refuses to
-            # distribute anything while one sheet is mid-edit, and that guard is about the
-            # repo, not about the slug somebody typed.
             if assignment not in sheets:
                 log_err(
                     f"no grading sheet for `{assignment}` in {cohort_org} - "
                     f"nothing distributed"
                 )
                 return 1
-            sheets = {assignment: sheets[assignment]}
+            selected = {assignment}
         specs = sheet_specs(course_org, sched)
         sources: dict[str, tuple[SheetSpec, dict]] = {}
         for slug, sheet in sheets.items():
@@ -3893,6 +3938,20 @@ def distribute(
                 f"  [hold] {slug} for {handle} - {HOLD_REASONS[reason]}; nothing is sent "
                 f"until it is settled in the sheet"
             )
+    if assignment:
+        log(
+            f"  narrowed to {assignment}: only its feedback comments are posted - every "
+            f"gradebook still holds every assignment marked in this cohort"
+        )
+    undue = _undue_marks(specs, books, moment)
+    if undue:
+        # A count, in both the dry run and the real one, and never a block: the gradebook
+        # row will read `not submitted` for work that is sitting in the repo, because
+        # nothing derives the submission facts until the due date has passed.
+        log(
+            f"  WARNING: {undue} mark(s) distributed before the due date - the "
+            f"submission facts are not derived yet"
+        )
 
     # 1. The feedback comment on each submission repo's Feedback issue.
     # How many units had a thread the policy would not use because GitHub says the repo is
@@ -3900,7 +3959,7 @@ def distribute(
     # student published. One aggregate count, printed once below: the marks are in the
     # gradebook either way, and naming the repos here would name the students.
     not_private = 0
-    for slug in sorted(sheets):
+    for slug in sorted(selected):
         spec = specs[slug]
         withheld = {unit for unit, _reason in held.get(slug, {}).values()}
         for target, repo, body, members in _issue_targets(spec, sheets[slug], books):
@@ -3913,7 +3972,20 @@ def distribute(
             if said == digest:
                 continue  # already said, in these words
             if dry_run:
-                counts["comments"] += 1
+                # Counted AFTER the shape, never before it. A dry run takes no listing -
+                # it writes nothing and needs none - so the SHAPE is the whole of what
+                # can be asked here, and it is also what makes the real run's policy
+                # answer THREAD_NONE for every one of these (`feedback_thread_policy`):
+                # a public repo, a repo the student owns the flag of, a shared drop box
+                # and an external hand-in have no Feedback issue to post into. Counted
+                # before it, the preview promised a grader comments no run would post.
+                # The one thing it cannot see is a repo a cohort handed out BEFORE these
+                # shapes existed (Maths a1), whose thread a real run would still find -
+                # so the dry run under-promises there, which is the safe direction.
+                if spec.has_feedback_issue:
+                    counts["comments"] += 1
+                else:
+                    counts["skipped"] += 1
                 continue
             # The thread this unit's last comment landed on, where `distributed.csv`
             # recorded one - the same issue, and no lookup to pay for it. The POLICY is

@@ -1890,6 +1890,21 @@ def sync_sheet(
     written = True
     if not changed:
         log_skip(f"{path} (unchanged)")
+        if (
+            spec.collects_commits
+            and phase is SheetPhase.OPEN
+            and due is not None
+            and now < due
+        ):
+            # A grader who presses Collect submissions on hand-out day gets a skip and no
+            # reason for it, and reads it as a button that does not work. Nothing IS
+            # derived before the due date (see the note on `derive` above), so the honest
+            # answer is that there is nothing to refresh yet - said here rather than in
+            # the header, which a grader would have to open the file to read.
+            log(
+                f"    before the due date {spec.due_display}: submission facts are "
+                f"derived from the due date on; nothing to refresh yet"
+            )
     elif dry_run:
         log(f"    DRY-RUN  {path} ({status})")
     else:

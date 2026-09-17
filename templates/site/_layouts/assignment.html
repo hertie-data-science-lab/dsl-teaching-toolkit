@@ -28,7 +28,15 @@ title: page.title
   </header>
 
   <div>
+    {%- comment -%}
+    `open_in.html` is the "open this in your local copy" strip: it reads the reader's
+    profile and rewrites every repo shape on the page to their own. An `external`
+    assignment has no repo at either level, so the strip offers to set up a local copy of
+    nothing - and "set up" is the first thing on the page a student meets.
+    {%- endcomment -%}
+    {% unless page.submit_shape == "external" %}
     {% include open_in.html %}
+    {% endunless %}
 
     {% if page.due_event %}
     {%- comment -%}
@@ -159,10 +167,19 @@ title: page.title
     </p>
     {% endif %}
 
+    {%- comment -%}
+    Nothing is TIMED on an assignment handed in off GitHub: no repo is created, so no
+    commit is pinned, no day is counted and no penalty is ever applied
+    (`course.collects_commits`, `grades.late_policy`). The course's late policy on that
+    page is a rule about a deadline this toolkit does not hold - the brief says what the
+    hand-in service does about late work.
+    {%- endcomment -%}
+    {% unless page.submit_shape == "external" %}
     <div style="color: gray;">
       <h3>Late Policy</h3>
       {% include late_policy.html %}
     </div>
+    {% endunless %}
   </div>
 
   <br />

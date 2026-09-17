@@ -1101,6 +1101,7 @@ def test_ensure_cohort_template_repairs_a_half_created_template(monkeypatch):
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     calls: list[tuple[str, ...]] = []
 
     def fake_gh(*args, **kwargs):
@@ -1127,6 +1128,7 @@ def test_ensure_cohort_template_stamps_the_topic_the_site_gates_on(monkeypatch):
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     stamped: list[tuple] = []
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
     assign.ensure_cohort_template(
@@ -1143,6 +1145,7 @@ def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: False)
     errs: list[str] = []
     monkeypatch.setattr(assign, "log_err", errs.append)
@@ -1153,6 +1156,54 @@ def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch
         == "assignment-1"
     )
     assert "assignment-template" in errs[0] and "withheld" in errs[0]
+
+
+def test_the_frozen_cohort_template_grants_the_faculty_teams_read(monkeypatch):
+    # Every other repo a cohort receives is granted where it is created; this one was
+    # not, so an instructor who is not an org OWNER could not open the hand-out they had
+    # just pressed the button for until the nightly floor
+    # (`access.converge_faculty_access`) got round to it. READ, like the rest: the
+    # template is frozen and nothing is ever marked on it.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    granted: list[tuple] = []
+    monkeypatch.setattr(
+        assign,
+        "grant_faculty",
+        lambda org, repo, access, **kw: granted.append((org, repo, access, kw)),
+    )
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE", "assignment-1-f2026", "COHORT", "homework-1"
+        )
+        == "homework-1"
+    )
+    assert granted == [
+        ("COHORT", "homework-1", assign.FACULTY_READ_ACCESS, {"missing_is_note": True})
+    ]
+
+
+def test_a_ready_cohort_template_is_not_re_granted_every_tick(monkeypatch):
+    # The grant sits with the repair, behind the "already frozen, flagged and topiced"
+    # short circuit - so it costs one PUT per team at hand-out and nothing per hour.
+    monkeypatch.setattr(
+        assign,
+        "grant_faculty",
+        lambda *a, **k: pytest.fail("the hourly faculty grant is back"),
+    )
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE",
+            "assignment-1-f2026",
+            "COHORT",
+            "assignment-1",
+            {"assignment-1": _ready_template()},
+        )
+        == "assignment-1"
+    )
 
 
 def test_ensure_cohort_template_fails_loudly_when_is_template_patch_fails(monkeypatch):
@@ -1748,6 +1799,7 @@ def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
     # fail with a misleading "not a template", or the site would withhold the brief.
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     patched: list[tuple] = []
     monkeypatch.setattr(assign, "gh", lambda *a, **k: patched.append(a) or (0, ""))
     stamped: list[tuple] = []

@@ -3966,6 +3966,62 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
     assert collect.sync_sheet(*args, **kwargs).written
 
 
+def test_an_unchanged_sheet_before_the_due_date_says_why_there_was_nothing_to_do(
+    monkeypatch, capsys
+):
+    # A grader who presses Collect submissions on hand-out day gets `[skip] ...
+    # (unchanged)` and no reason for it, and reads it as a button that does not work.
+    # Nothing IS derived before the due date, so the skip needs the sentence that says so.
+    written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
+    args = (
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+    )
+    kwargs = {"is_group": False, "now": datetime(2026, 10, 1, tzinfo=BERLIN)}
+    assert collect.sync_sheet(*args, **kwargs).written
+    ((_path, first),) = written
+    monkeypatch.setattr(
+        collect,
+        "get_file_with_sha",
+        lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
+    )
+    capsys.readouterr()
+    assert collect.sync_sheet(*args, **kwargs).written
+    printed = capsys.readouterr().out
+    assert "(unchanged)" in printed
+    assert "before the due date Sun 4 Oct 2026 23:59" in printed
+    assert "nothing to refresh yet" in printed
+
+
+def test_an_unchanged_sheet_after_the_due_date_says_nothing_extra(monkeypatch, capsys):
+    # Past the due date the refresh really did look, and found nothing new: saying
+    # "nothing to refresh yet" there would be a claim about the toolkit, not the cohort.
+    written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
+    args = (
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+    )
+    kwargs = {"is_group": False, "now": datetime(2026, 10, 6, tzinfo=BERLIN)}
+    assert collect.sync_sheet(*args, **kwargs).written
+    ((_path, first),) = written
+    monkeypatch.setattr(
+        collect,
+        "get_file_with_sha",
+        lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
+    )
+    capsys.readouterr()
+    assert collect.sync_sheet(*args, **kwargs).written
+    assert "before the due date" not in capsys.readouterr().out
+
+
 def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
     monkeypatch,
 ):

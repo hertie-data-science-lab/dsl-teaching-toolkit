@@ -574,12 +574,19 @@ _HELD_TEAM_SHEET = _TEAM_SHEET.replace("score_group: 43", "score_group: pass").r
 ROSTER_ADA = "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
 
 
-def _schedule_with(*slugs: str) -> Schedule:
+# Far enough either side of any clock a run of this suite can be on. `distribute` now
+# compares the due date with the moment it runs (`_undue_marks`), so a fixed date would
+# make the tests that are not about that mean one thing this term and another the next.
+_DUE_AHEAD = datetime(2099, 10, 4, 23, 59, tzinfo=timezone.utc)
+_DUE_PASSED = datetime(2000, 10, 4, 23, 59, tzinfo=timezone.utc)
+
+
+def _schedule_with(*slugs: str, due: datetime = _DUE_PASSED) -> Schedule:
     return Schedule(
         assignments={
             slug: AssignmentEntry(
                 course_source_repo=f"{slug}-f2026",
-                due_datetime=datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc),
+                due_datetime=due,
             )
             for slug in slugs
         }
@@ -621,6 +628,7 @@ def _distribute(
     course_name=lambda org: "",
     assignment: str = "",
     listed: dict[str, dict] | None = _ANY_PRIVATE,
+    due: datetime = _DUE_PASSED,
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
@@ -680,7 +688,7 @@ def _distribute(
     monkeypatch.setattr(
         grades.schedule,
         "load",
-        lambda org: _schedule_with(*(sheets or {"assignment-1": ""})),
+        lambda org: _schedule_with(*(sheets or {"assignment-1": ""}), due=due),
     )
     monkeypatch.setattr(
         grades,
@@ -874,8 +882,10 @@ def test_a_handle_in_two_teams_is_held_rather_than_taking_the_last_one(
     assert out["gradebooks"] == []
 
 
-def test_distribute_can_be_narrowed_to_one_assignment(tmp_path, monkeypatch):
-    # a1's marks are ready while a2 is half typed in; the whole-repo run shipped both.
+def test_distribute_can_be_narrowed_to_one_assignments_comments(tmp_path, monkeypatch):
+    # a1's marks are ready while a2 is half typed in, so a whole-repo run posts a2's
+    # feedback before anybody meant to. Narrowing is what a grader releases one
+    # assignment at a time with - and it narrows the COMMENTS, nothing else.
     out = _distribute(
         monkeypatch,
         tmp_path,
@@ -884,9 +894,48 @@ def test_distribute_can_be_narrowed_to_one_assignment(tmp_path, monkeypatch):
     )
     assert out["rc"] == 0
     assert [repo for repo, _b, _m in out["comments"]] == ["assignment-1-ada-l"]
-    ((_repo, files, _delete),) = out["gradebooks"]
-    assert "assignment-1" in files["grades.yml"]
-    assert "assignment-2" not in files["grades.yml"]
+
+
+def test_a_scoped_run_writes_the_whole_gradebook_an_unscoped_one_does(
+    tmp_path, monkeypatch
+):
+    # THE defect a live showcase found: the gradebook was rendered from the selected
+    # sheet alone, so each scoped run left that one section and deleted every other -
+    # four of them in a row, and assignment-1's distributed grade was gone. A gradebook
+    # is the whole of what a student has been given, so the two runs write the same file
+    # and the registrar's export keeps a column per assignment.
+    sheets = {"assignment-1": _SHEET, "assignment-2": _SHEET}
+    whole = _distribute(monkeypatch, tmp_path / "whole", sheets=sheets)
+    scoped = _distribute(
+        monkeypatch, tmp_path / "scoped", sheets=sheets, assignment="assignment-2"
+    )
+    ((_r1, every, _d1),) = whole["gradebooks"]
+    ((_r2, after, _d2),) = scoped["gradebooks"]
+    assert after == every
+    assert "assignment-1:" in after["grades.yml"]
+    assert "assignment-2:" in after["grades.yml"]
+    ((_c1, whole_cfg, _e1),) = whole["config"]
+    ((_c2, scoped_cfg, _e2),) = scoped["config"]
+    registrar = scoped_cfg[grades.COHORT_CSV_NAME]
+    assert registrar == whole_cfg[grades.COHORT_CSV_NAME]
+    assert registrar.splitlines()[0].endswith("assignment-1,assignment-2")
+
+
+def test_a_scoped_run_says_what_it_narrowed_and_what_it_did_not(
+    tmp_path, monkeypatch, capsys
+):
+    # The counts do not say it: the gradebook count is the same either way, and a grader
+    # who reads "narrowed to assignment-2" has to be told the other marks are still in
+    # the file rather than assume the run wiped them.
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _SHEET, "assignment-2": _SHEET},
+        assignment="assignment-2",
+    )
+    printed = capsys.readouterr().out
+    assert "narrowed to assignment-2: only its feedback comments are posted" in printed
+    assert "every gradebook still holds every assignment" in printed
 
 
 def test_a_cohort_with_no_sheet_yet_distributes_nothing(tmp_path, monkeypatch, capsys):
@@ -1406,6 +1455,129 @@ def test_a_listed_repo_still_gets_its_comment(tmp_path, monkeypatch):
     assert out["issues"] == []
     ((repo, _body, _marker),) = out["comments"]
     assert repo == "assignment-1-ada-l"
+
+
+# ------------------------------------------ the dry run's counts and the real run's
+
+_NO_THREAD_SHAPES = (
+    "visibility: public\n",
+    "visibility: student_choice\n",
+    "submit_via: shared\n",
+    "submit_via: external\n",
+)
+
+
+@pytest.mark.parametrize("shape", _NO_THREAD_SHAPES)
+def test_the_dry_run_promises_no_comment_a_shape_has_nowhere_to_put(
+    tmp_path, monkeypatch, capsys, shape
+):
+    # The count was incremented before the policy was consulted, so the preview a grader
+    # checks before pressing the button for real said "would post 1 comment(s)" for four
+    # shapes that have no Feedback issue at all - and the real run then posted none.
+    _distribute(monkeypatch, tmp_path, grading=_GRADING_YML + shape, dry_run=True)
+    assert "would post 0 comment(s)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "shape, row",
+    [
+        ("visibility: public\n", repo_row("assignment-1-ada-l", visibility="public")),
+        ("submit_via: external\n", None),
+        ("submit_via: shared\n", None),
+    ],
+)
+def test_the_two_runs_agree_about_how_many_comments_there_are(
+    tmp_path, monkeypatch, capsys, shape, row
+):
+    # The preview is the only thing a grader has to check a run against, so the two
+    # counts have to be the same number. `row` is what the cohort listing really holds
+    # for that shape: a published repo for `public`, and nothing at all where the
+    # handout creates no repo per unit.
+    grading = _GRADING_YML + shape
+    _distribute(monkeypatch, tmp_path / "dry", grading=grading, dry_run=True)
+    previewed = capsys.readouterr().out
+    listed = {"assignment-1-ada-l": row} if row else {}
+    out = _distribute(
+        monkeypatch,
+        tmp_path / "real",
+        grading=grading,
+        listed=listed,
+        found_issue=7,
+    )
+    done = next(
+        line for line in capsys.readouterr().out.splitlines() if "Done - " in line
+    )
+    counts = json.loads(done.split("Done - ", 1)[1])
+    assert "would post 0 comment(s)" in previewed
+    assert counts["comments"] == 0 and out["comments"] == []
+    # ...and the mark still reaches the student where this shape puts it.
+    assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
+
+
+# -------------------------------------------- marks sent before the due date has passed
+
+# A unit the toolkit has looked at and found nothing for yet: `info:` is there, because
+# the sheet is created at handout, and empty, because nothing derives it before the due
+# date.
+_UNDERIVED_SHEET = """\
+submissions:
+  ada-l:
+    info:
+      submitted:
+      days_late:
+    score_individual: 43
+    adjustment_individual:
+    feedback_individual: |
+      Clean derivation.
+"""
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_a_mark_sent_before_the_due_date_is_counted_and_said_out_loud(
+    tmp_path, monkeypatch, capsys, dry_run
+):
+    # The gradebook row reads `not submitted` while the work is sitting in the repo,
+    # because nothing fills `info:` until the due date has passed. A grader may mean to
+    # send it, so this is a warning and a count, in both runs, and never a refusal.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _UNDERIVED_SHEET},
+        dry_run=dry_run,
+        due=_DUE_AHEAD,
+    )
+    printed = capsys.readouterr().out
+    assert (
+        "WARNING: 1 mark(s) distributed before the due date - the submission facts "
+        "are not derived yet" in printed
+    )
+    assert out["rc"] == 0  # counted, not blocked
+
+
+def test_nothing_is_warned_about_once_the_due_date_has_gone_by(
+    tmp_path, monkeypatch, capsys
+):
+    # Past the due date a blank `submitted` is a fact about the student, not about the
+    # clock: they handed nothing in, and saying "the facts are not derived yet" would
+    # send a grader looking for a bug in the toolkit.
+    _distribute(monkeypatch, tmp_path, sheets={"assignment-1": _UNDERIVED_SHEET})
+    assert "before the due date" not in capsys.readouterr().out
+
+
+def test_an_assignment_that_collects_nothing_is_never_warned_about(
+    tmp_path, monkeypatch, capsys
+):
+    # `external` has no commit to time at any moment, so its blank `submitted` is the
+    # shape of the assignment and the gradebook says `external` rather than `not
+    # submitted`. A due date still ahead changes nothing about it.
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _UNDERIVED_SHEET},
+        grading=_EXTERNAL_GRADING,
+        due=_DUE_AHEAD,
+    )
+    assert "before the due date" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

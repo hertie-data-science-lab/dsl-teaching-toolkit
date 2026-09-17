@@ -534,6 +534,27 @@ def test_an_external_hand_in_asks_the_brief_where_it_goes(fake, monkeypatch):
     assert "_Say which files you expect back" not in brief
 
 
+def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
+    # Two things the rest of the stub carries are wrong on a hand-in the repo never
+    # collects: "commit the notebook with its outputs saved" tells a cohort to hand in
+    # where nothing is read from, and the late line quotes a penalty no run can apply -
+    # `external` is timed by nobody here (`course.collects_commits`).
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", ["ipynb"], name="A", submit_via="external"
+        )
+        == 0
+    )
+
+    brief = fake.files[("assignment-1-f2026", "README.md")]
+    assert "Commit the notebook" not in brief
+    assert "**Late work:**" not in brief
+    assert "**Points:** __ · **Due:** see the course schedule\n" in brief
+    assert "`submit_url:`" in brief  # and it says where the address goes instead
+
+
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     # The page students read. Two headings, both empty: seeding a plausible-looking brief
     # is how a placeholder ships as the assignment.
@@ -740,6 +761,29 @@ def test_the_visibility_line_is_commented_where_no_repo_is_created(fake, monkeyp
     )
     assert "\n# visibility: private" in written["grading_config.yml"]
     assert grades.parse_grading_spec(written["grading_config.yml"]).dropped == ()
+
+
+def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypatch):
+    # The button wrote `completion_check: true` behind `format: ipynb` whatever the shape
+    # was, and the parse refuses all three per-unit stages for a drop box - so the file
+    # New assignment had just written reported a `Dropped` line on every quarter-hourly
+    # tick and stood in the cohort's digest issue as an advisory that escalates to mail.
+    # Nothing the scaffold seeds may be a value the reader will not take.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", ["ipynb"], submit_via="shared", autograde=True
+        )
+        == 0
+    )
+    text = written["grading_config.yml"]
+    spec = grades.parse_grading_spec(text)
+    assert spec.dropped == ()
+    assert not spec.autograde and not spec.grader_pdf
+    assert not spec.runs_completion_check
+    assert "completion_check: false" in text
+    # ...and no hidden tests for a run that will never happen.
+    assert "tests/test_solution.py" not in written
 
 
 def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):

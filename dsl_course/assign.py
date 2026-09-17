@@ -341,6 +341,16 @@ def ensure_cohort_template(
             f"generate FROM it, so this must succeed: {out[:160]}"
         )
         return None
+    # READ on the frozen hand-out, at the moment it is frozen. Every other repo a cohort
+    # receives is granted where it is created; this one was not, and the only reason older
+    # templates carry a grant at all is that the nightly floor
+    # (`access.converge_faculty_access`) added it overnight - so an instructor who is not
+    # an org owner could not open the handout they had just pressed the button for. READ,
+    # like every other one: the template is frozen, and nothing is marked here.
+    # `grant_faculty` goes through `repos.gh_settled`, which is what waits out a repo
+    # generated seconds ago, and a cohort whose faculty teams do not exist yet is a note
+    # rather than an error - the sweep repairs it.
+    grant_faculty(cohort_org, slug, FACULTY_READ_ACCESS, missing_is_note=True)
     # The topic is not decoration: discovery.discover_handed_out_assignments reads it back
     # as the record that this assignment went out, and the site withholds the brief until
     # it does. So a failure here is said out loud with its consequence attached rather than
