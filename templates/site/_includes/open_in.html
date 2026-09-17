@@ -323,14 +323,15 @@ day that sentence is reworded.
     resolveRepo(org, repo);
     /* Outlined, beside the solid one: the same destinations a file row offers, but full
        size here because this page has one repo rather than a list of files - and
-       secondary, because the repo on GitHub is still the thing to open first. Clone leads
-       them: this is the repo a student is least likely to have yet. */
-    var url = "https://github.com/" + encodeSegment(org) + "/" + encodeSegment(repo);
+       secondary, because the repo on GitHub is still the thing to open first.
+
+       No Clone button. It only ever worked for VS Code, it could not be told where to put
+       the repo (see cloneParent), and a student who took the folder its dialog opened at
+       broke the very button beside it. The clone is a command instead, under the buttons,
+       where it reads as the prerequisite for `Edit locally` that it is. */
     var offers = [
-      [me.editor === VSCODE ? "vscode://vscode.git/clone?url=" + encodeURIComponent(url) : "",
-       "Clone", "Clone " + repo + " in VS Code"],
       [onlineUrl(org, repo, ""), "Edit online", "Edit " + repo + " in the browser"],
-      [localUrl(me.editor, me.assignments, repo, ""), "Open locally",
+      [localUrl(me.editor, me.assignments, repo, ""), "Edit locally",
        "Open " + repo + " in your editor"]
     ];
     var at = btn;
@@ -340,9 +341,7 @@ day that sentence is reworded.
       btn.parentNode.insertBefore(el, at.nextSibling);
       at = el;
     }
-    /* Everything that follows belongs with the buttons, directly under them and in the
-       order a student meets it: where the dialog has to be pointed, then the command that
-       needs no dialog at all. Each goes after the last, so the brief's own sentence - the
+    /* The note goes directly under the buttons, and the brief's own sentence - the
        callout's, not this script's - stays where it was, at the end. */
     var row = btn.parentNode;
     function under(node) {
@@ -355,21 +354,13 @@ day that sentence is reworded.
       p.appendChild(document.createTextNode(text));
       return p;
     }
-    /* Nothing can point the clone dialog at a folder (see cloneParent), so the callout
-       names the one to choose - the answer /profile/ step 3 gives for `materials`, given
-       here for the assignment folder, which is where this repo belongs. */
-    if (offers[0][0] && me.assignments) {
-      var where = line("Clone asks where to put it: choose ");
-      var code = document.createElement("code");
-      code.appendChild(document.createTextNode(cloneParent(me.assignments, repo)));
-      where.appendChild(code);
-      where.appendChild(document.createTextNode("."));
-      under(where);
-    }
-    /* And the exact one, for the reader who would rather not navigate a dialog - or who
-       is not on VS Code, and has had no clone offered them at all until here. */
-    if (me.assignments) {
-      under(line("Or clone it straight there from a terminal:"));
+    /* `Edit locally` opens a folder that only a clone puts there, and the page cannot
+       know whether one has been made - so it says what the button needs rather than
+       leaving a student to find out by pressing it. Only beside that button: with no
+       editor and no folder saved there is nothing for the clone to be a prerequisite of,
+       and the rest of the way a student gets the repo down is theirs. */
+    if (offers[1][0]) {
+      under(line('NB: "Edit locally" requires you to have run the following clone command:'));
       var cmd = commandBlock();
       cmd.querySelector("code").textContent = cloneCommand(org, repo, me.assignments);
       under(cmd);

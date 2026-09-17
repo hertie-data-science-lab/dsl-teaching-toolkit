@@ -1077,28 +1077,35 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     assert '"<your-handle>"' in own
 
 
-def test_the_assignment_page_offers_a_clone():
-    # The repo a student is least likely to already have, so it leads the row - and only
-    # for the editor with a clone scheme worth offering.
+def test_the_assignment_page_offers_two_edits_and_no_clone_button():
+    # Edit online, edit locally - beside the solid button for the repo on GitHub that the
+    # page already carried. No Clone: it worked for VS Code alone, could not be told where
+    # to put the repo, and a student who accepted the folder its dialog opened at broke
+    # `Edit locally` next to it. The clone is a command under the buttons instead.
     body = _strip_comments(_open_in())
     block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
-    assert "vscode://vscode.git/clone?url=" in block
-    assert '"Clone"' in block
-    # And names the folder to point the dialog at, the way /profile/ step 3 does - the
-    # assignment folder, because that is where this repo belongs, not `materials`.
-    assert "cloneParent(me.assignments, repo)" in block
-    assert "if (offers[0][0] && me.assignments) {" in block
-    # And the exact command under it, which needs neither the dialog nor VS Code - the
-    # clone button is offered for VS Code alone, so for everyone else this is the only one.
+    assert "vscode://vscode.git/clone" not in block
+    offers = block.split("var offers = [")[1].split("];")[0]
+    labels = re.findall(r'"(Edit online|Edit locally|Clone)"', offers)
+    assert labels == ["Edit online", "Edit locally"]
+
+
+def test_the_clone_command_is_tied_to_the_button_it_is_needed_for():
+    # `Edit locally` opens a folder only a clone puts there, and the page cannot know
+    # whether one was made - so it says so rather than leaving a student to find out by
+    # pressing it. No local button, nothing for the clone to be a prerequisite of.
+    body = _strip_comments(_open_in())
+    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
+    assert "if (offers[1][0]) {" in block
     assert "cloneCommand(org, repo, me.assignments)" in block
-    assert "if (me.assignments) {" in block
+    note = 'NB: "Edit locally" requires you to have run the following clone command:'
+    assert "under(line('" + note + "'));" in block
 
 
-def test_the_callout_keeps_the_brief_last_and_the_clone_with_its_buttons():
-    # Where the dialog has to be pointed, then the command that needs none, then the
-    # callout's own sentence - which belongs to the brief and is nobody's to move. Each
-    # block goes under the last rather than at the end of the callout, which is how the
-    # command came to sit below the prose it explains.
+def test_the_callout_keeps_the_brief_last():
+    # Buttons, the note about them, then the callout's own sentence - which belongs to the
+    # brief and is nobody's to move. Each block goes under the last rather than at the end
+    # of the callout, which is how the command came to sit below the prose it explains.
     block = _strip_comments(_open_in()).split(
         "function decorateAssignment(root, me) {"
     )[1]
@@ -1107,8 +1114,6 @@ def test_the_callout_keeps_the_brief_last_and_the_clone_with_its_buttons():
     assert "row = node;" in block
     # Never onto the callout itself, which is what put the command below the prose.
     assert "parentNode.appendChild" not in block
-    # The command is announced, not dropped in bare.
-    assert 'under(line("Or clone it straight there from a terminal:"));' in block
     # Air under the command, so the brief's sentence does not read as part of it.
     scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
     cmd = scss.split(".cmd {")[1].split("}")[0]
