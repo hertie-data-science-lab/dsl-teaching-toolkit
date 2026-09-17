@@ -130,6 +130,15 @@ title: page.title
     open_in.html to substitute a handle into, and rewriting it would point every reader at
     a repo that does not exist - so the flag is false and the markers are left off.
 
+    `data-dsl-dropbox` / `data-dsl-dropbox-path` are what that shape gets INSTEAD, on the
+    callout itself: the real repo name handed over as a fact, and beside it the folder
+    shape that is the reader's own. open_in.html substitutes the handle into the FOLDER and
+    never into the name, which is the whole difference from `data-dsl-repo` above - and it
+    is why a drop box offers the same `Edit online` / `Edit locally` as every other shape
+    rather than nothing at all. Gated on `submit_path`, which is this shape's key and no
+    other's: asking `submit_shape` again here would be a second spelling of the same
+    question, and the two eventually disagree.
+
     `cutoff_sentence` and `late_rule` close the paragraph for every arm at once, which is
     why neither is inside the `case`: a sentence repeated per arm is a sentence three arms
     keep in step, and the first reword of it left one of them saying something else. The
@@ -154,7 +163,7 @@ title: page.title
       <p>Handed in outside GitHub.{% unless page.submit_url %} See the brief.{% endunless %}</p>
     </div>
     {% elsif page.repo_url %}
-    <div class="callout">
+    <div class="callout"{% if page.submit_path %} data-dsl-dropbox="{{ page.repo_name | escape }}" data-dsl-dropbox-path="{{ page.submit_path | escape }}"{% endif %}>
       <p><a class="btn" {% if page.repo_name_is_shape %}data-dsl-repo-url {% endif %}target="_blank" rel="noopener" href="{{ page.repo_url }}">Open the submission repo on GitHub</a></p>
       <p>
       {% case page.submit_shape %}

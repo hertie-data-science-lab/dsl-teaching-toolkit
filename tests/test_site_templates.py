@@ -1443,9 +1443,10 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     # The `shared` sentence names a REAL repo and not a shape: there is a single drop box
     # for the whole cohort, so there is nothing in that name to substitute a handle into
     # and rewriting it would point every reader at a repo that does not exist. It carries
-    # no marker of its own; the two the arm SHARES with every other shape - the button and
-    # the closing line - are written under `repo_name_is_shape`, which site.py writes for
-    # a per-unit repo and for nothing else.
+    # no `data-dsl-repo` of its own; the two the arm SHARES with every other shape - the
+    # button and the closing line - are written under `repo_name_is_shape`, which site.py
+    # writes for a per-unit repo and for nothing else. (The drop box's own markers, which
+    # name the repo rather than reshape it, are on the callout - see the test below.)
     shared = page.split('{% when "shared-dropbox-repo" %}')[1].split("{% when ")[0]
     assert "{{ page.repo_name | escape }}" in shared
     assert "data-dsl-repo" not in shared
@@ -1460,7 +1461,7 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     assert linked and all("data-dsl-repo-url" in attrs for attrs in linked), linked
     # A GROUP assignment is named for the team, which no browser can know, so it is left
     # exactly as rendered.
-    own = body.split("function ownRepo(shape, handle) {")[1].split("\n  }")[0]
+    own = body.split("function ownShape(shape, handle) {")[1].split("\n  }")[0]
     assert '"<your-handle>"' in own
 
 
@@ -1542,11 +1543,60 @@ def test_a_shared_page_names_the_drop_box_and_the_folder(generated):
 
 
 def test_a_shared_page_s_repo_name_is_never_rewritten_per_reader(generated):
-    # Two fences, and both have to hold. The layout marks nothing on this page for
-    # open_in.html to rewrite, and open_in.html would not rewrite it anyway: the shape it
-    # substitutes a handle into has to CONTAIN `<your-handle>`, and a real repo name does
-    # not. Rewriting would point every reader at a repo that does not exist.
+    # Two fences, and both have to hold. The layout marks no NAME on this page for
+    # open_in.html to rewrite - the drop box's markers hand its real name over as a fact,
+    # and it is the FOLDER beside it that is the reader's - and open_in.html would not
+    # rewrite the name anyway: the shape it substitutes a handle into has to CONTAIN
+    # `<your-handle>`, and a real repo name does not. Rewriting would point every reader at
+    # a repo that does not exist.
     page = generated["collections"]["_assignments"]["07-assignment-7.md"]
     assert "data-dsl-repo" not in _strip_comments(page)
-    own = _strip_comments(_open_in()).split("function ownRepo(shape, handle) {")[1]
+    own = _strip_comments(_open_in()).split("function ownShape(shape, handle) {")[1]
     assert 'shape.indexOf("<your-handle>") < 0' in own.split("\n  }")[0]
+
+
+def test_a_shared_page_s_edit_buttons_open_the_readers_own_folder(generated):
+    # The drop box was the one shape whose page offered no `Edit online` / `Edit locally`
+    # at all: the strip builds both off a repo the reader owns, and here the repo is the
+    # whole cohort's. What is theirs is a folder in it, so the layout hands the strip the
+    # REAL name as a fact and the folder as a shape, and only the shape is substituted.
+    layout = _strip_comments(_templates()["_layouts/assignment.html"])
+    marked = layout.split("{% elsif page.repo_url %}")[1].split("{% endunless %}")[0]
+    # On the drop box's callout and nowhere else. Gated on `submit_path`, that shape's key
+    # and no other's, so the key's presence is the test rather than a second `case` to keep
+    # in step with the first.
+    div = [ln for ln in marked.splitlines() if 'class="callout"' in ln]
+    assert len(div) == 1, div
+    assert "{% if page.submit_path %}" in div[0]
+    # Both halves on the one element, or the strip reads a name off a page that wrote no
+    # folder to go with it.
+    assert 'data-dsl-dropbox="{{ page.repo_name | escape }}"' in div[0]
+    assert 'data-dsl-dropbox-path="{{ page.submit_path | escape }}"' in div[0]
+    # And nothing else on the page carries them.
+    assert layout.count("data-dsl-dropbox") == 2
+    body = _strip_comments(_open_in())
+    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
+    assert 'document.querySelector("[data-dsl-dropbox]")' in block
+    # The name is taken exactly as written; the FOLDER is the half that goes through the
+    # substitution, which is what leaves a group drop box (`<your-team>/`) alone.
+    assert 'repo = box.getAttribute("data-dsl-dropbox");' in block
+    assert 'ownShape(box.getAttribute("data-dsl-dropbox-path"), me.handle)' in block
+    # So there is nothing to re-point either: the layout marks no shape on that page.
+    assert "if (!path) { resolveRepo(org, repo); }" in block
+    # Both buttons carry the folder, and a per-unit page's empty `path` leaves both calls
+    # exactly what they were.
+    assert 'var path = "";' in block
+    offers = block.split("var offers = [")[1].split("];")[0]
+    assert "onlineUrl(org, repo, onlineTail(path))" in offers
+    assert "localUrl(me.editor, me.assignments, repo, path)" in offers
+    # github.dev takes github.com's own path for a folder, and no attribute on the page
+    # carries a branch - `main` is the branch every repo this toolkit hands out is on.
+    tail = body.split("function onlineTail(path) {")[1].split("\n  }")[0]
+    assert '"/tree/main/" + out.join("/")' in tail
+    assert 'return out.length ? "/tree/main/"' in tail
+    # The clone command is the drop box's own, into the folder the profile names.
+    assert "cloneCommand(org, repo, me.assignments)" in block
+    # The page the fixture proves this against: a real repo name and a folder shape.
+    page = _front_matter(generated["collections"]["_assignments"]["07-assignment-7.md"])
+    assert page["repo_name"] == "assignment-7-submissions"
+    assert page["submit_path"] == "<your-handle>/"

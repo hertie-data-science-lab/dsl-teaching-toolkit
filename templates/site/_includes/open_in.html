@@ -111,6 +111,8 @@ day that sentence is reworded.
        source .../tree/main/labs/01           both segments open the FOLDER
        assignment repo "assignment-1-jane"    https://github.dev/hertie-x/assignment-1-jane
                                               vscode://file/Users/jane/hw/assignment-1-jane
+       drop box "a6-submissions", the         https://github.dev/hertie-x/a6-submissions/tree/main/jane
+       reader's folder in it "jane/"          vscode://file/Users/jane/hw/a6-submissions/jane
 
      `{path}` is the full path WITHOUT its leading slash, because the template supplies
      the separator - which is the only spelling that works for a Windows drive letter as
@@ -180,6 +182,19 @@ day that sentence is reworded.
     /* github.dev is VS Code in the browser, on whatever repo the path names - so the
        owner is the student (their fork) or the cohort org (their submission repo). */
     return "https://github.dev/" + encodeSegment(owner) + "/" + encodeSegment(repo) + tail;
+  }
+
+  /* A FOLDER inside that repo, as github.dev's own path - which is github.com's:
+     `/tree/<branch>/<folder>`. `main` is spelt here because nothing on the page carries a
+     branch and every repo this toolkit hands out is on `main` (the callout's own sentence
+     says so). A repo's ROOT needs no branch at all, so it keeps the empty tail. */
+  function onlineTail(path) {
+    var parts = (path || "").split("/");
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i]) { out.push(encodeSegment(parts[i])); }
+    }
+    return out.length ? "/tree/main/" + out.join("/") : "";
   }
 
   /* -------------------------------------------------------------------------------- */
@@ -283,13 +298,15 @@ day that sentence is reworded.
     }
   }
 
-  /* The student's own repo for an assignment, out of the SHAPE the page carries. A GROUP
-     assignment is named for the team (`<slug>-<your-team>`), which no browser can know, so
-     it gets nothing back and the page keeps what it rendered. The same bail is what keeps
-     a SHARED drop box safe - `<slug>-submissions` is a real repo name with no
-     `<your-handle>` in it, so nothing is substituted even if a marker ever reached the
-     page (the layout writes none: see `repo_name_is_shape`). */
-  function ownRepo(shape, handle) {
+  /* The reader's own half of a SHAPE the page carries: the repo name for a per-unit
+     assignment (`<slug>-<your-handle>`), the folder for a shared drop box
+     (`<your-handle>/`). A GROUP assignment is named for the team (`<slug>-<your-team>`),
+     which no browser can know, so it gets nothing back and the page keeps what it
+     rendered. The same bail is what keeps a drop box's NAME safe - `<slug>-submissions` is
+     a real repo name with no `<your-handle>` in it, so nothing is substituted even if a
+     marker ever reached the page (the layout writes none: see `repo_name_is_shape`). That
+     name reaches the buttons below as a fact instead, and never comes through here. */
+  function ownShape(shape, handle) {
     if (!handle || !shape || shape.indexOf("<your-handle>") < 0) { return ""; }
     return shape.replace("<your-handle>", handle);
   }
@@ -316,14 +333,30 @@ day that sentence is reworded.
   function decorateAssignment(root, me) {
     /* ONE assignment's page, and the resolve below takes the whole document: the callout
        and the closing line are far apart and both name the repo. Only an assignment page
-       carries `data-repo-name`, so everywhere else there is no repo to resolve and this
-       returns at once. */
+       carries a `data-repo-name` shape or a drop box marker, so everywhere else there is
+       nothing to resolve and this returns at once. */
     var org = root.getAttribute("data-org");
-    var repo = ownRepo(root.getAttribute("data-repo-name"), me.handle);
-    if (!repo) { return; }
+    var repo = ownShape(root.getAttribute("data-repo-name"), me.handle);
+    /* The drop box is the one page whose repo is not the reader's alone: there is a single
+       one for the cohort, and what is theirs is a folder inside it. So the name is taken
+       from the callout exactly as written and only the FOLDER is substituted - `path` is
+       what tells the two cases apart from here down. */
+    var path = "";
+    if (!repo) {
+      var box = document.querySelector("[data-dsl-dropbox]");
+      if (!box) { return; }
+      repo = box.getAttribute("data-dsl-dropbox");
+      path = ownShape(box.getAttribute("data-dsl-dropbox-path"), me.handle);
+      if (!repo || !path) { return; }
+    }
     var btn = document.querySelector(".callout a.btn");
     if (!btn) { return; }
-    resolveRepo(org, repo);
+    /* Nothing to resolve on a drop box page: the layout marks nothing there, because every
+       name it prints is already the real one. */
+    if (!path) { resolveRepo(org, repo); }
+    /* What the buttons open, for the tooltips that name it: the repo, or the reader's own
+       folder in it - one sentence either way, with a longer name in it. */
+    var what = repo + (path ? "/" + path.replace(/\/+$/, "") : "");
     /* Outlined, beside the solid one: the same destinations a file row offers, but full
        size here because this page has one repo rather than a list of files - and
        secondary, because the repo on GitHub is still the thing to open first.
@@ -333,9 +366,9 @@ day that sentence is reworded.
        broke the very button beside it. The clone is a command instead, under the buttons,
        where it reads as the prerequisite for `Edit locally` that it is. */
     var offers = [
-      [onlineUrl(org, repo, ""), "Edit online", "Edit " + repo + " in the browser"],
-      [localUrl(me.editor, me.assignments, repo, ""), "Edit locally",
-       "Open " + repo + " in your editor"]
+      [onlineUrl(org, repo, onlineTail(path)), "Edit online", "Edit " + what + " in the browser"],
+      [localUrl(me.editor, me.assignments, repo, path), "Edit locally",
+       "Open " + what + " in your editor"]
     ];
     var at = btn;
     for (var i = 0; i < offers.length; i++) {
