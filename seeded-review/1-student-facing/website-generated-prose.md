@@ -16,7 +16,7 @@ cover nearly everything a student sees:
 | --- | --- | --- |
 | Generic chrome | `hertie-data-science-lab/dsl-jekyll-theme`, pinned at `e4b8fdc9e87b4729c9dcef142591551a2361d4b5` (its **v2.0.0**) | header, footer, nav *rendering*, brand colours, the `default` / `page` / `post` layouts |
 | **This repo** | `templates/site/` (SYSTEM-OWNED, rewritten every sync) | the eight course layouts, the thirteen includes, `_sass/_course.scss` - **every heading, column header, row label, empty-state line, button and row colour listed below** |
-| **This repo** | `templates/site-seed/` (INSTRUCTOR-OWNED, seeded once) | `index.md`, `schedule.md`, `_config.yml`, `_data/late_policy.yml`, `_data/previous_offering.yml`, `Gemfile`, `.gitignore` - rendered copies under `site-repo/` beside this file |
+| **This repo** | `templates/site-seed/` (INSTRUCTOR-OWNED, seeded once) | `index.md`, `schedule.md`, `_config.yml`, `_data/previous_offering.yml`, `Gemfile`, `.gitignore` - rendered copies under `site-repo/` beside this file |
 | **This repo** | `dsl_course/site.py`, `site_repo.py`, `public_site.py` | the DATA and its prose: `_config.yml` values, `_data/nav.yml`, the tab pages, `_lectures/`, `_assignments/`, `_events/`, `_data/people.yml`, `_data/materials.yml`, `_publish-config.yml`, the site repo's own `README.md` |
 
 There is **no `course-website-template` repo any more**: `scaffold_site` creates
@@ -167,24 +167,43 @@ _**Assignment 1 is not yet released** - the brief appears here when it is._     
 shape of an unreleased session's line - they render in the same column and on adjacent tabs,
 so they read as one status vocabulary.
 
+**The heading is the NAME, not the identifier.** The assignment's name (from the plan, or
+failing that the template README's own heading) is now the page's `<h1>`, and the
+identifier that used to be the heading sits above it as a small kicker - it still has to be
+there, because it is what ties the page to its schedule row:
+```
+Assignment 1                      # kicker (page.title)
+Gradient descent                  # <h1> (page.subtitle)
+```
+A pending assignment has no subtitle - the name is embargoed in the withheld README - so
+there the identifier alone is still the heading, exactly as in the "not yet released" block
+above.
+
 Handed out - the body is the template README with its `# ` heading lines stripped, fenced in
 `{% raw %}`. The fallback when the README has nothing but a heading:
 ```
 Assignment brief.
 ```
-Plus, from the layout, unconditionally:
+Plus, from the layout, unconditionally - the deadline now bold beside the release date,
+not a separate line further down the page:
 ```
 Released on Thursday 01/10/2026          # or: Hands out on Thursday 01/10/2026
-Due Date: 15/10/2026 23:59
+**Due Thursday 15/10/2026 23:59**
 ```
+(`page.due_event`, the same field the schedule's own due row reads - `page.due` has never
+existed, so the layout that once read it printed a bare time.)
+
 The "open in your local copy" strip (`open_in.html`) is skipped for `external` - there is
 no repo shape to open a local copy of. The submission callout is now ONE `case` on
-`submit_shape`, one button, five sentences:
+`submit_shape`, one button, one paragraph - and that paragraph now closes with the
+late-work rule for every TIMED shape (`page.late_rule`, off `course.late_rule` and the
+assignment's own `grading_config.yml`):
 ```
                                                                               # assignment-repo-private (the default `else` arm)
 Open the submission repo on GitHub                                          # button
 Your work goes in your private repo `assignment-1-<your-handle>`. Clone it, commit
 as you go, and push to `main` - that push is your submission.
+Late work: 10% per day, up to 7 days.
 
                                                                               # assignment-repo-public
 Open the submission repo on GitHub                                          # button
@@ -192,12 +211,14 @@ Your repo `assignment-1-<your-handle>` is **public**: anyone on the internet can
 read it. Push to `main` as usual, but commit nothing you would not publish and no data you were told
 to keep private. Your grade and feedback arrive in your private gradebook `grades-<your-handle>`,
 not here.
+Late work: 10% per day, up to 7 days.
 
                                                                               # assignment-repo-student-choice
 Open the submission repo on GitHub                                          # button
 Your repo starts private. You are its admin: after the grading cutoff you may make it public from
 Settings > Danger zone if you want it in your portfolio. Before then the toolkit turns it private again.
 Your grade and feedback arrive in your private gradebook, not here.
+Late work: 10% per day, up to 7 days.
 
                                                                               # shared-dropbox-repo
 Open the submission repo on GitHub                                          # button, links the ONE drop-box repo
@@ -205,16 +226,24 @@ Push your work into the `<your-handle>/` folder of
 `assignment-1-submissions` - that push is your submission. Everyone in the cohort can read
 the whole repo, so commit nothing you would not show the class. Your grade and feedback arrive in your
 private gradebook `grades-<your-handle>`, not here.
+Late work: 10% per day, up to 7 days.
 
-                                                                              # external, with a submit_url
+                                                                              # external, with a submit_url - no late-work sentence: nothing is TIMED
 Submit on moodle.hertie-school.org                                          # button, only once handed out AND a submit_url is set
-Handed in outside GitHub. See the brief for what to hand in. Your grade and feedback arrive in your
+Handed in outside GitHub. Your grade and feedback arrive in your
 private gradebook `grades-<your-handle>`.
 
-                                                                              # external, no submit_url - the same paragraph, no button
-Handed in outside GitHub. See the brief for what to hand in. Your grade and feedback arrive in your
+                                                                              # external, no submit_url - the same paragraph, no button, "See the brief" added back
+Handed in outside GitHub. See the brief. Your grade and feedback arrive in your
 private gradebook `grades-<your-handle>`.
 ```
+The late-work sentence is written for every TIMED shape and no other: `external` collects
+no commits (`course.collects_commits`), so no day is counted and no penalty is ever
+applied - a sentence there would quote a rule about a deadline this toolkit does not hold.
+The theme reads the front matter KEY's presence (`late_rule`, written by `site.py` only
+when `spec.collects_commits`) rather than asking the shape again, so "which shapes are
+timed" has one spelling, not two.
+
 `repo_url` is the cohort org's repo list filtered to this assignment for every shape but
 `shared_dropbox_repo` (whose `repo_url` is the ONE drop-box repo's own address) - not one
 student's address: the page is public and identical for everyone, and GitHub shows a
@@ -225,17 +254,9 @@ team's). `repo_name_is_shape` (site.py) is false only for `shared_dropbox_repo`:
 into - substituting a handle into a name that already exists would point every reader at a
 repo that is not theirs.
 
-Late Policy is skipped entirely for `external`: nothing is timed on a hand-in this toolkit
-does not collect, so there is no deadline here to quote a penalty against
-(`course.collects_commits`).
-
-Quietly repeated under the brief, at the point a student has just finished reading it:
-```
-Submit by pushing to `main` in `assignment-1-<your-handle>`.                       # assignment-repo-*, no submit_path
-Submit by pushing into `<your-handle>/` in `assignment-1-submissions`.             # shared-dropbox-repo
-Hand in at moodle.hertie-school.org.                                              # external, with a submit_url
-                                                                                    # external, no submit_url - nothing is repeated here at all
-```
+The grey "Late Policy" box (`_includes/late_policy.html`) is gone, and nothing repeats the
+route under the brief any more - the callout above is the one place a student reads it, for
+both facts.
 
 The due row's Details column (`schedule_row_due.html`) says where to submit, one word
 narrower than the page's own callout - no gradebook reminder, this is a schedule table:
@@ -486,7 +507,6 @@ toolkit; every sync rewrites it.`
 | Schedule, narrow screens | the same four words reappear as per-cell labels (`data-label`) |
 | Session blocks (Lectures / Labs / Readings) | heading `Session 3 - Probability theory`, then the description, then `Files` above the link list |
 | All Materials | a section's `— 12 files` / `— 1 file` count; nested `(3 files)` |
-| Assignment page | `Late Policy` |
 | Home, Previous Offerings | each item is bulleted with a `●` glyph from the stylesheet |
 
 ### 3.2 Empty states
@@ -526,7 +546,6 @@ the loop. Unfiltered, the box announced the last week of term before week one ha
 | --- | --- |
 | `site-repo/index.md` | the landing page's `Welcome to **{course_name}** at the Hertie School Data Science Lab.` and the `**Questions?**` line. The one page of the site whose words are the instructor's - and the same file on both sites |
 | `site-repo/schedule.md` | front matter only; anything an instructor writes here appears above the generated table |
-| `site-repo/_data/late_policy.yml` | the three late-day bullets, shown on **every** assignment page |
 | `site-repo/_data/previous_offering.yml` | seeded as an empty list, so the home page's Previous Offerings block shows nothing until an instructor fills it |
 
 The `_config.yml` seed also carries `Hertie School`, the Friedrichstraße 180 address block

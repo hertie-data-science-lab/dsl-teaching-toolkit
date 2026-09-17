@@ -17,11 +17,8 @@ The other four shapes - `assignment_repo`/`public`, `assignment_repo`/`student_c
 `create=spec.has_feedback_issue`, so for those four it only ever finds an existing thread
 and never opens one; `grades.feedback_body` is never even called for them in the handout
 path. Their feedback goes to the student's private gradebook instead - see
-`gradebook-repo/README.md` beside this file, whose starter page and post-Distribute render
-both carry:
-
-> "Feedback for assignments handed in outside GitHub, in a shared repo, or in a repo that
-> is public or yours to publish appears here and nowhere else." (`grades._CHANNEL_NOTE`)
+`gradebook-repo/README.md` beside this file, the only place a mark or a word of feedback
+for any of these four shapes ever reaches the student.
 
 ### assignment_repo / private - individual (assignment-2, has a late window)
 

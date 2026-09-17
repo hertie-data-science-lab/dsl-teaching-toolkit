@@ -1,6 +1,6 @@
 # Linear regression
 
-**Points:** __ · **Due:** see the course schedule
+**Points:** __
 
 ## Task
 
