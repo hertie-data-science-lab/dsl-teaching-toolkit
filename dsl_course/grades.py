@@ -5,14 +5,15 @@ A grader fills ONE file per assignment, `classroom-config/grading_sheets/<slug>.
 
     grading_sheets/<slug>.yml   (the grader types here; the toolkit owns only `info:`)
           |
-          +--> a comment on each submission repo's Feedback issue
-          |      team repos get TEAM-level feedback only - the whole team can read them
           +--> cohort/grades-<handle>   (private; student = read) grades.yml + README.md
           +--> classroom-config/cohort-gradebook.csv   (the registrar export, never logged)
           +--> an email saying there is something new to read (no marks in it)
 
-Nothing is said twice: every comment carries a content hash and every send is recorded in
-`gradebook/distributed.csv`, so a re-run after one correction reaches one student.
+ONE place a mark is written, and it is the student's gradebook. Nothing is posted into a
+submission repo; that repo's issue carries the submission receipts and nothing else.
+
+Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so a re-run
+after one correction reaches one student.
 
 Usage:
     python3 -m dsl_course.grades distribute --cohort-org hertie-dsl-demo-f2026 [--dry-run]
@@ -69,7 +70,6 @@ from .course import (
     receipt_body,
     resolve_is_group,
     row_name,
-    submission_repo,
     submit_shape,
     visibility_is_students,
 )
@@ -2094,9 +2094,9 @@ def late_line(spec) -> str:
 def penalty_display(spec, days: int) -> str:
     """`-20%` for the receipt - `_penalty_display` under the spec the caller already holds.
 
-    The same function as the gradebook's and the feedback comment's, deliberately: those
-    are the three places one student reads one deduction, and two renderers of it drifted
-    apart above two decimal places the moment one of them rounded."""
+    The same function as the gradebook's, deliberately: those are the two places one
+    student reads one deduction, and two renderers of it drifted apart above two decimal
+    places the moment one of them rounded."""
     return _penalty_display(penalty_rate(spec.late_penalty_per_day), days)
 
 
@@ -2305,8 +2305,9 @@ def post_marked_comment(
     """Post one comment on the Feedback issue, unless it already carries `marker`.
 
     The marker is the whole idempotence story, and it is why both callers share this: the
-    refresh pass runs four times an hour for the length of the late window, and distribute
-    is re-run after every correction. Neither may say the same thing twice.
+    refresh pass runs four times an hour for the length of the late window, and Patch
+    released assignment is re-pressed after every correction. Neither may say the same
+    thing twice.
 
     Paginated, because "already said" is only true of the comments we actually read: a
     thread that outgrew one page would hide its own markers and be told everything
@@ -2359,9 +2360,9 @@ def post_receipt(
 # `submitted` and `days_late` (`autograde`, `completion`, `contributions`), and - because
 # a gradebook shows the final grade and never its disaggregation - the team's score and
 # the member's own `adjustment_individual`. Those last two are INPUTS to the number the
-# student sees, not results: the team score is shared with the whole team in the team's
-# own repo (`team_issue_body`), where it is already common knowledge, and the adjustment
-# stays between a member and their grader.
+# student sees, not results, and the gradebook is the ONE place a mark is written: the
+# team's shared feedback reaches each member through `team_feedback` below, and the
+# adjustment stays between a member and their grader.
 STUDENT_VIEW_KEYS = (
     "final_grade",  # derived on output, never stored - the authoritative mark
     "score",  # individual assignments only: what the grader typed, per question or flat
@@ -2396,10 +2397,6 @@ _PRIVACY_HEADER = (
     "This gradebook is private to you. It is regenerated each time grades are "
     "distributed; do not edit it."
 )
-_GRADEBOOK_POINTER = (
-    "Your own final grade and personal feedback are in your private gradebook: "
-    "`grades-<your handle>`."
-)
 _README_COLUMNS = ("Assignment", "Final grade", "Submitted", "Late", "Team")
 # What the Submitted column says where there is no time to show. The two are different
 # facts and a student reads them as such: `external` is "we never expected a commit here",
@@ -2408,7 +2405,6 @@ _README_COLUMNS = ("Assignment", "Final grade", "Submitted", "Late", "Team")
 # somewhere else.
 _EXTERNAL = "external"
 _NOT_SUBMITTED = "not submitted"
-_NO_SUBMISSION_LINE = "No submission was recorded."
 _REGISTRAR_FIELDS = ("hertie_email", "name", "github_handle")
 
 
@@ -2949,25 +2945,6 @@ def _late_display(days_late: object) -> str:
     return f"{_plain(days)} day{'' if days == 1 else 's'} late"
 
 
-def _when_clause(days_late: object, submitted: object) -> list[str]:
-    """The clause on a score line that says when the work came in: `submitted on time`,
-    `2 days late`, or - where nothing counted the days - `submitted 3 Oct 22:14`."""
-    late = _late_display(days_late)
-    if late:
-        return [f"submitted {late}" if late == "on time" else late]
-    if _blank(submitted) or submitted == _EXTERNAL:
-        return []  # nothing was timed, and "submitted external" says nothing
-    return [f"submitted {submitted}"]
-
-
-def _questions_clause(score: object) -> str:
-    """` (Q1 14, Q2 13)` - the marks behind a total, or "" for a flat score."""
-    marked = _marked(score)
-    if not marked:
-        return ""
-    return " (" + ", ".join(f"{name} {value}" for name, value in marked.items()) + ")"
-
-
 def _readme_label(slug: str, title: str) -> str:
     """`Assignment 5 · Portfolio piece`: the identifier the site and schedule show, then the
     name, with a name that merely repeats the identifier folded away (`course.row_name`).
@@ -3067,111 +3044,6 @@ def render_registrar_csv(
                 roster.enrolled(students), key=lambda s: s.hertie_email.casefold()
             )
         ),
-    )
-
-
-@dataclass(frozen=True)
-class TeamResult:
-    """Everything that may be said in a TEAM's repo, and nothing else.
-
-    A team repo grants the whole team `maintain`, so a comment posted there is read by
-    every member. This type is what enforces that: it carries no member fields at all, so
-    `team_issue_body` cannot name one member's adjustment, feedback or final grade even by
-    mistake. `team_score` is the `score_group` cell as the grader typed it - a per-question
-    map or a flat value - because the comment shows the breakdown beside the total."""
-
-    team: str
-    team_score: object = None
-    max_points: str = ""
-    submitted_display: str = ""
-    days_late: object = None
-    penalty: str = ""
-    feedback_group: str = ""
-
-
-def team_result(spec: SheetSpec, team: str, block: dict | None) -> TeamResult:
-    """One team's shareable result off its grading-sheet entry. `members:` is not read."""
-    block = block or {}
-    info = block.get(INFO_KEY) or {}
-    days_late = info.get("days_late")
-    return TeamResult(
-        team=team,
-        team_score=block.get(spec.score_key),
-        max_points=total_points(spec),
-        submitted_display=_submitted_display(
-            info.get("submitted"), not spec.collects_commits
-        ),
-        days_late=days_late,
-        penalty=_penalty_display(penalty_rate(spec.late_penalty_per_day), days_late),
-        feedback_group=block.get(spec.feedback_key) or "",
-    )
-
-
-def _feedback_body(title: str, score_line: str, *blocks: str) -> str:
-    """A feedback comment: the heading with the score line under it, then each block."""
-    heading = f"### Feedback · {title}"
-    return (
-        "\n\n".join(
-            [heading + (f"\n{score_line}" if score_line else "")]
-            + [block for block in blocks if block]
-        )
-        + "\n"
-    )
-
-
-def individual_issue_body(title: str, view: dict) -> str:
-    """The feedback comment for a student's OWN assignment repo.
-
-    Plain where nothing moved the mark (`**Grade:** 9`); where a late penalty applied, the
-    score, the days, the penalty and the grade they produced - the arithmetic done to
-    their work, rather than a number they cannot account for."""
-    final = _over_max(view.get("final_grade", ""), view.get("max_points"))
-    score = view.get("score")
-    when = _when_clause(view.get("days_late"), view.get("submitted"))
-    if "penalty" not in view:
-        clauses = [f"**Grade:** {final}{_questions_clause(score)}", *when]
-    else:
-        total = score_total(score)
-        earned = _plain(total) if total is not None else _verbatim(score)
-        clauses = [
-            (
-                f"**Score:** {_over_max(earned, view.get('max_points'))}"
-                f"{_questions_clause(score)}"
-            ),
-            *when,
-            f"penalty {view['penalty']}",
-            f"**Final grade:** {final}",
-        ]
-    feedback = "" if _blank(view.get("feedback")) else str(view["feedback"]).strip()
-    # A mark on a repo nothing was pushed to - a 0, usually - needs to say why it is one.
-    # An external assignment carries `submitted: external`, so it is never this case.
-    nothing_in = _NO_SUBMISSION_LINE if final and "submitted" not in view else ""
-    return _feedback_body(
-        title, _SEP.join(clauses) if final else "", nothing_in, feedback
-    )
-
-
-def team_issue_body(title: str, result: TeamResult) -> str:
-    """The feedback comment for a TEAM's repo - the shared result, and nothing personal.
-
-    No member's final grade appears here, and none can: `TeamResult` has no member fields.
-    The closing line is what stops that reading as an omission."""
-    total = score_total(result.team_score)
-    shown = _plain(total) if total is not None else _verbatim(result.team_score)
-    clauses = [
-        (
-            f"**Team score:** {_over_max(shown, result.max_points)}"
-            f"{_questions_clause(result.team_score)}"
-        ),
-        *_when_clause(result.days_late, result.submitted_display),
-    ]
-    if result.penalty:
-        clauses.append(f"penalty {result.penalty}")
-    feedback = (
-        "" if _blank(result.feedback_group) else str(result.feedback_group).strip()
-    )
-    return _feedback_body(
-        title, _SEP.join(clauses) if shown else "", feedback, _GRADEBOOK_POINTER
     )
 
 
@@ -3405,34 +3277,32 @@ def ensure_gradebooks(
 
 # One row per thing SAID, so a re-run says nothing twice and a failure is retried exactly
 # once. It replaces `gradebook/notified.csv`, which recorded only the email and only per
-# student - so a corrected grade re-emailed the whole cohort, and a comment that failed to
-# post was never retried because nothing recorded that it had not.
+# student - so a corrected grade re-emailed the whole cohort, and a write that failed was
+# never retried because nothing recorded that it had not.
 DISTRIBUTED_PATH = f"{GRADEBOOK_DIR}/distributed.csv"
 DISTRIBUTED_HEADER = (
-    "target",  # a handle, or a TEAM name for a team-repo comment
+    "target",  # a handle; a TEAM name on the rows the retired issue channel left behind
     "assignment",  # the cohort-side slug; "" for the whole-book email
     "channel",
     "content_hash",
     "distributed_at",
-    # The issue a feedback comment landed on, so a later run posts to the SAME thread
-    # without asking - and never opens a second one because a listing was unreadable.
-    # Blank on every other channel.
+    # The issue a retired `issue` row's comment landed on. Nothing writes it now; the
+    # column stays so a file written before marks moved to the gradebook alone still reads
+    # and still round-trips, rather than losing a column on its first rewrite.
     "issue",
 )
+# Marks and feedback go to ONE place, the student's gradebook, so the channels are the
+# gradebook, the registrar's export and the email. `issue` is RETIRED: no run writes it,
+# and it is named here only so a row left by an older run is recognisable as one.
 CHANNEL_ISSUE = "issue"
 CHANNEL_GRADEBOOK = "gradebook"
 CHANNEL_EMAIL = "email"
 # `{(target, assignment, channel): (content hash, when, issue number or "")}`
 Distributed = dict[tuple[str, str, str], tuple[str, str, str]]
 
-# The hidden marker on a feedback comment. Keyed on the CONTENT, so a corrected grade is a
-# new comment and an unchanged one is silence - and so a lost `distributed.csv` costs one
-# listing per repo rather than a duplicate comment for every student.
-GRADE_MARK = "<!-- dsl-grade:{} -->"
-
 
 def content_hash(text: str) -> str:
-    """The short hash a feedback comment is marked with and `distributed.csv` records."""
+    """The short hash `distributed.csv` records a gradebook commit under."""
     return blob_sha(text.encode())[:12]
 
 
@@ -3614,39 +3484,12 @@ def _undue_marks(
     )
 
 
-def _issue_targets(
-    spec: SheetSpec, sheet: dict, books: dict[str, dict[str, dict]]
-) -> list[tuple[str, str, str]]:
-    """`(target, submission repo, comment body, members)` for every unit of one assignment.
-
-    A TEAM's comment is built from `TeamResult`, which has no member fields at all, so the
-    thing that must never appear in a repo the whole team can read cannot be put there by
-    mistake. An individual's comment is built from their own allowlisted view. The members
-    come along because this may be the moment the Feedback issue is first opened, and a
-    team's body names them."""
-    out: list[tuple[str, str, str, list[str]]] = []
-    for unit, block in ((sheet or {}).get(spec.container_key) or {}).items():
-        if not isinstance(block, dict):
-            continue
-        repo = submission_repo(spec.slug, unit)
-        if spec.is_group:
-            result = team_result(spec, unit, block)
-            if _blank(result.team_score) and _blank(result.feedback_group):
-                continue  # nothing marked yet; a bare heading tells a team nothing
-            members = list(block.get("members") or {})
-            out.append((unit, repo, team_issue_body(spec.title, result), members))
-        else:
-            view = (books.get(unit) or {}).get(spec.slug) or {}
-            if not view:
-                continue
-            out.append((unit, repo, individual_issue_body(spec.title, view), [unit]))
-    return out
-
-
 # What a run may do about one unit's Feedback issue. THREE answers and one function that
-# gives them (`feedback_thread_policy`), because the question is asked by the feedback
-# comment, by the receipts and by nothing else - and two spellings of it meant a receipt
-# posted into a repo a grade would have been withheld from.
+# gives them (`feedback_thread_policy`), asked by the submission receipts and by nothing
+# else now that no mark is posted into a thread at all. THREE and not a boolean because
+# the answers are about the REPO: `find` is "there may be a thread here, but do not open
+# one", which is not the same fact as "there is nowhere to post", and the two used to be
+# conflated in each caller that asked the question for itself.
 THREAD_CREATE = "create"  # open one if this repo has none
 THREAD_FIND = "find"  # use the thread it has; never open one
 THREAD_NONE = "none"  # do not look, do not post
@@ -3662,23 +3505,22 @@ def feedback_thread_policy(
     and is it still private?). Both are needed - the file says what was handed out and the
     listing says what is there now - and each answer here is deliberately narrow in the
     direction that cannot hurt a student: a listing is a snapshot, and answering "no
-    thread" off it wrongly withholds a mark.
+    thread" off it wrongly drops a receipt.
 
     - `listed is None` - we could not look at all: FIND. The thread a student was told to
-      read is still the right place for their feedback; opening one on an org nobody could
+      read is still the right place for their receipts; opening one on an org nobody could
       list is how a second Feedback issue appears over it.
     - the repo is NOT in the listing: FIND where the shape creates a repo per unit (it may
-      have been created since the listing was taken, and that is exactly the student whose
-      feedback must not be dropped), NONE where it does not - an external assignment has
-      no repos, and probing each would be an issues call per student for an answer already
-      known.
-    - the listing says the repo is not private: NONE. Nothing about a student's marking
-      goes where the world can read it, not even into a thread `distributed.csv` says we
-      used before - which is what a `visibility:` edited after handout leaves behind.
+      have been created since the listing was taken), NONE where it does not - an external
+      assignment has no repos, and probing each would be an issues call per student for an
+      answer already known.
+    - the listing says the repo is not private: NONE. A hand-in time is a fact about a
+      student, and it does not go where the world can read it - which is what a
+      `visibility:` edited after handout leaves behind.
     - otherwise: CREATE for an assignment whose shape HAS a Feedback issue and whose shape
       was read from a real definition; FIND for every other one, which is what keeps a
-      cohort handed out before these shapes existed (Maths a1) receiving its feedback
-      where it was told to read it."""
+      cohort handed out before these shapes existed (Maths a1) getting its receipts in the
+      thread it was told to read."""
     if listed is None:
         return THREAD_FIND
     row = listed.get(repo)
@@ -3699,41 +3541,21 @@ def feedback_thread(
     members: list[str],
     listed: dict[str, dict] | None,
     *,
-    known: str = "",
-    only_ours: bool = False,
     dry_run: bool = False,
 ) -> int | IssueLookupFailed | None:
-    """The Feedback issue this unit's comment or receipt goes on: its number, None where
-    there is none this run may use, or `LOOKUP_FAILED` where the question could not be
-    answered.
+    """The Feedback issue this unit's receipt goes on: its number, None where there is none
+    this run may use, or `LOOKUP_FAILED` where the question could not be answered.
 
-    THE entry point, and the only consumer of `feedback_thread_policy`: the grade comment
-    and the submission receipts each used to ask the policy for themselves and act on the
-    answer slightly differently, which is exactly how a receipt came to be posted into a
-    repo a grade would have been withheld from.
-
-    `known` is the thread `distributed.csv` records this unit's last comment landing on.
-    It is used only AFTER the policy has been asked, never instead of it: a repo flipped
-    public since that row was written is a thread the internet can now read, and a
-    correction must not go into it on the strength of the row.
-
-    `only_ours` is the receipts' rule. A receipt is the one thing that would OPEN a thread
-    nobody has asked for yet, so it takes the strongest answer the policy gives and
-    nothing weaker: the repo is in the listing, the listing says it is private, and the
-    shape has a Feedback issue. A repo the listing does not carry, or a listing that could
-    not be read at all, waits for a tick that can say so - the grading sheet is the record
-    and the receipt is a courtesy."""
-    policy = feedback_thread_policy(spec, listed, repo)
-    if policy == THREAD_NONE or (only_ours and policy != THREAD_CREATE):
+    THE entry point, and the only consumer of `feedback_thread_policy`. It takes the
+    STRONGEST answer the policy gives and nothing weaker - the repo is in the listing, the
+    listing says it is private, and the shape has a Feedback issue - because a receipt is
+    the one thing that would OPEN a thread nobody has asked for yet. A repo the listing
+    does not carry, or a listing that could not be read at all, waits for a tick that can
+    say so: the grading sheet is the record and the receipt is a courtesy."""
+    if feedback_thread_policy(spec, listed, repo) != THREAD_CREATE:
         return None
-    if known.isdigit():
-        return int(known)
     return ensure_feedback_issue(
-        cohort_org,
-        repo,
-        feedback_body(spec, unit, members),
-        dry_run,
-        create=policy == THREAD_CREATE,
+        cohort_org, repo, feedback_body(spec, unit, members), dry_run
     )
 
 
@@ -3746,13 +3568,13 @@ def _hold_undecided(
     (`sheet_hold_reasons`); the rest is arithmetic that could not be done - `pass`, two
     days late, is not `pass minus 20%`. Sending either puts a line a student can read
     where a decision should have been, and the dry run that counted it has already gone
-    by. So the mark is HELD: no comment, no gradebook entry, no column in the registrar's
-    export, until a grader settles it in the sheet. Nothing else that student has is held
+    by. So the mark is HELD: no gradebook entry, no column in the registrar's export, no
+    email, until a grader settles it in the sheet. Nothing else that student has is held
     with it.
 
     Returns `{slug: {handle: (submission unit, reason)}}` - the unit, because a group's
-    comment is built from the team block rather than from any member's view, so it has to
-    be skipped by name.
+    mark is derived from the team block rather than from any member's view, so a grader
+    reading the hold line is told which row to go and settle.
     """
     held: dict[str, dict[str, tuple[str, str]]] = {}
     for handle, book in books.items():
@@ -3794,9 +3616,9 @@ def _commit_record(
     The ref update is deliberately not forced, so a commit that landed between reading the
     head and moving it makes this fail - and the quarter-hourly scheduler commits into the
     same repo (a snapshot, a grading sheet) all through the term. The cost of losing that
-    race was not a lost file but a lost RECORD: comments are guarded by the hash marker on
-    the comment itself and gradebooks by a blob compare, but the emails are guarded only by
-    this file, so the next run mailed every student again.
+    race was not a lost file but a lost RECORD: a gradebook commit is guarded by a blob
+    compare, but the emails are guarded only by this file, so the next run mailed every
+    student again.
 
     A retry is safe because the paths are DISJOINT from anything the cron writes and
     `put_files` re-reads the head, rebuilds the tree and re-filters the no-ops on each
@@ -3819,34 +3641,34 @@ def distribute(
     dry_run: bool = False,
     assignment: str = "",
 ) -> int:
-    """Send every mark a grader has written where it has to go: a feedback comment on each
-    submission repo's Feedback issue, each student's private gradebook, the registrar's
-    export, and an email saying there is something new to read.
+    """Send every mark a grader has written where it has to go: each student's private
+    gradebook, the registrar's export, and an email saying there is something new to read.
+
+    ONE place a mark is written, and it is the gradebook. Nothing is posted into a
+    submission repo: a thread in a repo the toolkit does not own the visibility of is a
+    mark one edited `visibility:` line publishes, and a student looking for a grade should
+    have one address rather than one per assignment. The per-repo issue is still there and
+    still carries the submission receipts (`collect._post_receipts`); it carries no mark.
 
     ONE clone of classroom-config and one pass over it - the sheets and `distributed.csv`
     are both read locally, so the only per-student calls left are the
     writes. Every one of those is skipped when `distributed.csv` says the same content has
     already gone out, which is what makes a correction to one grade reach one student.
 
-    `assignment` narrows what is SENT to one slug: only that assignment's feedback
-    comments are posted. It does NOT narrow what is READ. A student's gradebook is the
-    whole of what they have been given, and it is rendered from every sheet in the repo on
-    every run - so it stays a pure function of the sheets, and a scoped run and an unscoped
-    one write the same file rather than flip-flopping between two and re-mailing a cohort
-    each way. Rendering it from the selected sheet alone is what silently deleted every
-    other assignment from every gradebook it touched. The registrar's export is the same
-    file for the same reason: it is one column per assignment, not per run.
+    `assignment` no longer narrows a run, and says so in the log. It narrowed the feedback
+    comments and only ever those: a student's gradebook is the whole of what they have been
+    given and is rendered from every sheet in the repo on every run, so it stays a pure
+    function of the sheets rather than flip-flopping between a scoped and an unscoped
+    write and re-mailing a cohort each way. Rendering it from one selected sheet is what
+    silently deleted every other assignment from every gradebook it touched. The
+    registrar's export is the same file for the same reason. The input is still READ, and
+    a slug with no sheet still stops the run: a grader who types one is telling us
+    something about the cohort, and a typo is worth catching before a mark goes out.
 
-    Narrowing is not a safety net for a half-marked sheet (a partial per-question map
-    still totals, which is the grader's call to make) - it is what lets a grader release
-    a1's feedback while a2 is still being typed in.
-
-    Dry run - the default - reads everything, writes nothing, posts nothing, sends nothing,
-    and prints the counts a grader checks before pressing it for real."""
+    Dry run - the default - reads everything, writes nothing, sends nothing, and prints the
+    counts a grader checks before pressing it for real."""
     # ONE listing of the cohort for the whole run: it answers "does this student already
-    # have a gradebook?" below and, in stage 1, "is this submission repo there at all, and
-    # does GitHub say it is private?" - which is what a `visibility:` edited after handout
-    # would otherwise make a silent no-op. A dry run writes nothing and needs neither.
+    # have a gradebook?". A dry run writes nothing and needs none.
     listed = None if dry_run else listing_by_name(cohort_org)
     provisioning_failed = bool(
         ensure_gradebooks(cohort_org, dry_run=dry_run, existing=listed)
@@ -3875,19 +3697,17 @@ def distribute(
                 f"assignment (which creates its grading sheet) first"
             )
             return 1
-        # Which slugs this run may POST a comment for. Checked after the read, not
+        # A slug somebody typed is still checked against the sheets, though nothing is
+        # narrowed by it any more: a typo used to send a whole cohort's marks under the
+        # impression that one assignment's had gone out. Checked after the read, not
         # during it: `load_sheets` is what refuses to distribute anything while one sheet
-        # is mid-edit, and that guard is about the repo, not about the slug somebody
-        # typed. `sheets` itself is never narrowed - see the note in the docstring.
-        selected = set(sheets)
-        if assignment:
-            if assignment not in sheets:
-                log_err(
-                    f"no grading sheet for `{assignment}` in {cohort_org} - "
-                    f"nothing distributed"
-                )
-                return 1
-            selected = {assignment}
+        # is mid-edit, and that guard is about the repo, not about the slug.
+        if assignment and assignment not in sheets:
+            log_err(
+                f"no grading sheet for `{assignment}` in {cohort_org} - "
+                f"nothing distributed"
+            )
+            return 1
         specs = sheet_specs(course_org, sched)
         sources: dict[str, tuple[SheetSpec, dict]] = {}
         for slug, sheet in sheets.items():
@@ -3912,10 +3732,8 @@ def distribute(
     # spec does not name: marks for handles nobody enrolled are worth a count, and it is
     # slotted where it disturbs the spec's own sequence least.
     counts = {
-        "comments": 0,
         "gradebooks": 0,
         "emails": 0,
-        "skipped": 0,
         "held": sum(len(whose) for whose in held.values()),
         "unknown": unknown,
         "failed": 0,
@@ -3928,8 +3746,8 @@ def distribute(
             )
     if assignment:
         log(
-            f"  narrowed to {assignment}: only its feedback comments are posted - every "
-            f"gradebook still holds every assignment marked in this cohort"
+            f"  {assignment} is on record, but nothing is narrowed by it: a mark goes to "
+            f"the gradebook, and a gradebook holds every assignment marked in this cohort"
         )
     undue = _undue_marks(specs, books, moment)
     if undue:
@@ -3941,93 +3759,11 @@ def distribute(
             f"submission facts are not derived yet"
         )
 
-    # 1. The feedback comment on each submission repo's Feedback issue.
-    # How many units had a thread the policy would not use because GitHub says the repo is
-    # not private - a `visibility:` edited after handout, or a `student_choice` repo the
-    # student published. One aggregate count, printed once below: the marks are in the
-    # gradebook either way, and naming the repos here would name the students.
-    not_private = 0
-    for slug in sorted(selected):
-        spec = specs[slug]
-        withheld = {unit for unit, _reason in held.get(slug, {}).values()}
-        for target, repo, body, members in _issue_targets(spec, sheets[slug], books):
-            if target in withheld:
-                # A team's comment is built from the team block, not from a member's view,
-                # so pulling the views is not enough to keep this one back.
-                continue
-            digest = content_hash(body)
-            said, _when, known = record.get((target, slug, CHANNEL_ISSUE), ("", "", ""))
-            if said == digest:
-                continue  # already said, in these words
-            if dry_run:
-                # Counted AFTER the shape, never before it. A dry run takes no listing -
-                # it writes nothing and needs none - so the SHAPE is the whole of what
-                # can be asked here, and it is also what makes the real run's policy
-                # answer THREAD_NONE for every one of these (`feedback_thread_policy`):
-                # a public repo, a repo the student owns the flag of, a shared drop box
-                # and an external hand-in have no Feedback issue to post into. Counted
-                # before it, the preview promised a grader comments no run would post.
-                # The one thing it cannot see is a repo a cohort handed out BEFORE these
-                # shapes existed (Maths a1), whose thread a real run would still find -
-                # so the dry run under-promises there, which is the safe direction.
-                if spec.has_feedback_issue:
-                    counts["comments"] += 1
-                else:
-                    counts["skipped"] += 1
-                continue
-            # The thread this unit's last comment landed on, where `distributed.csv`
-            # recorded one - the same issue, and no lookup to pay for it. The POLICY is
-            # asked first either way (inside `feedback_thread`): a repo flipped public
-            # since that row was written is a thread the internet can now read, and a
-            # correction must not be posted into it on the strength of the row.
-            issue: int | IssueLookupFailed | None = feedback_thread(
-                spec, cohort_org, repo, target, members, listed, known=known
-            )
-            if isinstance(issue, IssueLookupFailed):
-                # The listing could not be READ. Opening one here is how a second Feedback
-                # issue appears over the thread the student was told to read, so this unit
-                # waits - counted, and the run goes red so somebody looks.
-                counts["failed"] += 1
-                log_person(f"  [wait] Feedback issue unreadable on {cohort_org}/{repo}")
-                continue
-            if issue is None:
-                # Looked, and there is no thread: a submission repo that is not there (a
-                # student who never onboarded, a team formed after the handout, an
-                # assignment handed in off GitHub), or a shape that may use a thread but
-                # never open one. The mark is in the gradebook either way. Counted, never
-                # named - one number in the `Done` line, not a red run.
-                counts["skipped"] += 1
-                if listed is not None and not listed_is_private(listed.get(repo) or {}):
-                    not_private += 1
-                continue
-            posted = post_marked_comment(
-                cohort_org, repo, issue, body, GRADE_MARK.format(digest)
-            )
-            if not posted and known:
-                # The recorded thread is gone (deleted, or transferred). Look it up once,
-                # rather than leaving this student unreachable for the rest of the term.
-                issue = feedback_thread(spec, cohort_org, repo, target, members, listed)
-                posted = isinstance(issue, int) and post_marked_comment(
-                    cohort_org, repo, issue, body, GRADE_MARK.format(digest)
-                )
-            if posted:
-                record[(target, slug, CHANNEL_ISSUE)] = (digest, now, str(issue))
-                counts["comments"] += 1
-                log_person(f"  [ok] feedback on {cohort_org}/{repo}#{issue}")
-            else:
-                counts["failed"] += 1
-
-    if not_private:
-        log(
-            f"  {not_private} repo(s) are not private - no comment posted; the marks are "
-            f"in the gradebooks"
-        )
-
-    # 2. The private gradebook: grades.yml and README.md in ONE commit per student, so a
+    # 1. The private gradebook: grades.yml and README.md in ONE commit per student, so a
     #    student never sees a page that disagrees with the data beside it.
     #
     #    A handle earns its place in `live` only where the gradebook really does hold that
-    #    content. `live` is what step 3 keys the email on, so a student whose write FAILED
+    #    content. `live` is what step 2 keys the email on, so a student whose write FAILED
     #    must not be told to go and read a page that never changed - and, worse, have that
     #    telling recorded, which would stop them being told when it lands.
     #    TWO digests per student, because the two channels are answering different
@@ -4062,7 +3798,7 @@ def distribute(
         else:
             counts["failed"] += 1
 
-    # 3. Who still needs telling. Keyed on the MARKS, so a student whose book changed only
+    # 2. Who still needs telling. Keyed on the MARKS, so a student whose book changed only
     #    because the page around their grades was reworded is not emailed, and one whose
     #    email FAILED last time is.
     pending: list[str] = []
@@ -4111,7 +3847,7 @@ def distribute(
     for handle in told:
         record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
 
-    # 4. The registrar's export and the record of what went out, in ONE commit - together
+    # 3. The registrar's export and the record of what went out, in ONE commit - together
     #    with the retired files this cohort is migrating off, so the old and the new can
     #    never both be present for a reader to choose between.
     writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
@@ -4130,8 +3866,8 @@ def distribute(
     recorded = _commit_record(
         cohort_org,
         writes,
-        f"grades: distribute ({counts['comments']} comment(s), "
-        f"{counts['gradebooks']} gradebook(s), {counts['emails']} email(s))",
+        f"grades: distribute ({counts['gradebooks']} gradebook(s), "
+        f"{counts['emails']} email(s))",
         [*([NOTIFIED_PATH] if migrating else []), *retired],
     )
     if not recorded:
@@ -4197,8 +3933,7 @@ def _preview(
         # Counted, not named: a handle nobody enrolled is still somebody's.
         log(f"  {counts['unknown']} mark(s) for handles not on the roster - ignored")
     log(
-        f"  would post {counts['comments']} comment(s), update "
-        f"{counts['gradebooks']} gradebook(s), email "
+        f"  would update {counts['gradebooks']} gradebook(s) and email "
         f"{len(pending) if notify else 0} student(s)"
     )
     if notify and pending:

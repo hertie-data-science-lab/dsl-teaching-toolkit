@@ -617,7 +617,6 @@ def _distribute(
     distributed: str | None = None,
     notified: str | None = None,
     stale_gradebooks: tuple[str, ...] = (),
-    existing_marks: str = "",
     sent: int = 1,
     notify: bool = True,
     dry_run: bool = False,
@@ -632,13 +631,12 @@ def _distribute(
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
-    `issue` is what `ensure_feedback_issue` answers when it may OPEN one; `found_issue` is
-    what it answers when it may only look (`create=False`), which is every shape with no
-    Feedback issue of its own.
-
-    Returns every effect it had: the comments posted, the gradebook commits, the
-    classroom-config commit and the mail batches - which between them are the four things
-    a student can be reached by."""
+    Returns every effect it had: the gradebook commits, the classroom-config commit and
+    the mail batches - which between them are every channel a mark reaches a student by -
+    plus `comments` and `issues`, which are TRIPWIRES. Nothing is posted into a submission
+    repo any more, so those two stay empty in every test here; `issue` and `found_issue`
+    are what a lookup WOULD answer, so a run that went near a thread would show up rather
+    than pass for want of a stub."""
     cfg = tmp_path / "cfg"
     (cfg / grades.SHEETS_DIR).mkdir(parents=True)
     sheets = {"assignment-1": _SHEET} if sheets is None else sheets
@@ -658,8 +656,6 @@ def _distribute(
         if args[:2] == ("repo", "clone"):
             copytree(cfg, Path(args[3]))
             return 0, ""
-        if "comments?" in " ".join(str(a) for a in args):
-            return 0, existing_marks
         return 0, ""
 
     effects: dict = {
@@ -739,14 +735,13 @@ def _distribute(
     return effects
 
 
-def test_a_real_run_reaches_all_four_channels(tmp_path, monkeypatch):
-    out = _distribute(monkeypatch, tmp_path)
+def test_a_real_run_reaches_every_channel_and_posts_no_comment(tmp_path, monkeypatch):
+    # THE shape of a run: three channels, and the submission repo is not one of them.
+    # `found_issue` says there IS a thread in that repo, so nothing here is silent for
+    # want of one - the run simply does not go near it.
+    out = _distribute(monkeypatch, tmp_path, found_issue=7)
     assert out["rc"] == 0
-    # the feedback comment, on the student's own submission repo
-    ((repo, body, marker),) = out["comments"]
-    assert repo == "assignment-1-ada-l"
-    assert "### Feedback · Neural networks" in body and "43" in body
-    assert marker.startswith("<!-- dsl-grade:") and marker.endswith("-->")
+    assert out["comments"] == [] and out["issues"] == []
     # ONE commit per gradebook, holding both files, so the page never disagrees with the
     # data beside it
     ((gb_repo, files, _delete),) = out["gradebooks"]
@@ -775,10 +770,8 @@ def test_the_done_line_is_the_spec_counts_in_the_spec_order(
     )
     counts = json.loads(done.split("Done - ", 1)[1])
     assert list(counts) == [
-        "comments",
         "gradebooks",
         "emails",
-        "skipped",
         "held",
         "unknown",
         "failed",
@@ -786,21 +779,23 @@ def test_the_done_line_is_the_spec_counts_in_the_spec_order(
 
 
 def test_nothing_a_student_may_not_see_reaches_them(tmp_path, monkeypatch):
-    # The two leaks this design exists to close: the grader's private notes, and one
-    # member's adjustment in a repo the whole team reads.
+    # The leak this design exists to close: the grader's private notes, and one member's
+    # adjustment. There is no team-wide channel for either to reach now - a group mark
+    # goes to each member's own gradebook and nowhere a team-mate reads.
     out = _distribute(
         monkeypatch,
         tmp_path,
         sheets={"assignment-1": _TEAM_SHEET},
         grading=_GRADING_YML + "type: group\n",
     )
-    ((repo, body, _marker),) = out["comments"]
-    assert repo == "assignment-1-alpha"  # the TEAM's repo
-    for secret in ("privately noted", "-3", "repeats the Q4 error"):
-        assert secret not in body
-    ((_gb, files, _d),) = out["gradebooks"]
-    assert "privately noted" not in files["grades.yml"]
-    assert "privately noted" not in files["README.md"]
+    assert out["comments"] == []
+    ((gb_repo, files, _d),) = out["gradebooks"]
+    assert gb_repo == "grades-ada-l"  # the member's OWN repo, read by nobody else
+    for page in (files["grades.yml"], files["README.md"]):
+        assert "privately noted" not in page  # the grader's note
+        assert "-3" not in page  # the adjustment behind the final grade
+    # Their own feedback is theirs to read, and it is here rather than anywhere shared.
+    assert "Your section repeats the Q4 error." in files["README.md"]
 
 
 def test_a_score_no_penalty_fits_is_held_rather_than_sent(
@@ -882,20 +877,6 @@ def test_a_handle_in_two_teams_is_held_rather_than_taking_the_last_one(
     assert out["gradebooks"] == []
 
 
-def test_distribute_can_be_narrowed_to_one_assignments_comments(tmp_path, monkeypatch):
-    # a1's marks are ready while a2 is half typed in, so a whole-repo run posts a2's
-    # feedback before anybody meant to. Narrowing is what a grader releases one
-    # assignment at a time with - and it narrows the COMMENTS, nothing else.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        sheets={"assignment-1": _SHEET, "assignment-2": _SHEET},
-        assignment="assignment-1",
-    )
-    assert out["rc"] == 0
-    assert [repo for repo, _b, _m in out["comments"]] == ["assignment-1-ada-l"]
-
-
 def test_a_scoped_run_writes_the_whole_gradebook_an_unscoped_one_does(
     tmp_path, monkeypatch
 ):
@@ -921,12 +902,12 @@ def test_a_scoped_run_writes_the_whole_gradebook_an_unscoped_one_does(
     assert registrar.splitlines()[0].endswith("assignment-1,assignment-2")
 
 
-def test_a_scoped_run_says_what_it_narrowed_and_what_it_did_not(
+def test_a_named_assignment_narrows_nothing_and_the_run_says_so(
     tmp_path, monkeypatch, capsys
 ):
-    # The counts do not say it: the gradebook count is the same either way, and a grader
-    # who reads "narrowed to assignment-2" has to be told the other marks are still in
-    # the file rather than assume the run wiped them.
+    # The input narrowed the feedback comments and only ever those, and there are none
+    # now. A grader who types a slug has to be told that, or they read the counts as one
+    # assignment's and believe the rest is still unsent.
     _distribute(
         monkeypatch,
         tmp_path,
@@ -934,8 +915,8 @@ def test_a_scoped_run_says_what_it_narrowed_and_what_it_did_not(
         assignment="assignment-2",
     )
     printed = capsys.readouterr().out
-    assert "narrowed to assignment-2: only its feedback comments are posted" in printed
-    assert "every gradebook still holds every assignment" in printed
+    assert "assignment-2 is on record, but nothing is narrowed by it" in printed
+    assert "a gradebook holds every assignment" in printed
 
 
 def test_a_cohort_with_no_sheet_yet_distributes_nothing(tmp_path, monkeypatch, capsys):
@@ -982,8 +963,8 @@ def test_a_half_marked_map_is_still_sent_on_a_real_run(tmp_path, monkeypatch):
     out = _distribute(
         monkeypatch, tmp_path, sheets={"assignment-1": sheet}, grading=grading
     )
-    ((_repo, body, _marker),) = out["comments"]
-    assert "15" in body
+    ((_repo, files, _delete),) = out["gradebooks"]
+    assert "15" in files["README.md"]
 
 
 def test_the_dry_run_says_what_each_hold_is(tmp_path, monkeypatch, capsys):
@@ -998,9 +979,9 @@ def test_the_dry_run_says_what_each_hold_is(tmp_path, monkeypatch, capsys):
     assert "1 with a non-numeric value in a per-question map" in printed
 
 
-def test_a_held_team_score_holds_the_teams_comment_too(tmp_path, monkeypatch):
-    # A team's comment is built from the team block rather than from a member's view, so
-    # taking the views out of the books is not on its own enough to keep it back.
+def test_a_held_team_score_holds_every_members_gradebook(tmp_path, monkeypatch):
+    # A team's result is derived from the team block rather than from a member's view, so
+    # a score nobody can act on holds every member of it, not just the one who was typed.
     out = _distribute(
         monkeypatch,
         tmp_path,
@@ -1008,7 +989,6 @@ def test_a_held_team_score_holds_the_teams_comment_too(tmp_path, monkeypatch):
         grading=_GRADING_YML + "type: group\n",
     )
     assert out["rc"] == 0
-    assert out["comments"] == []
     assert out["gradebooks"] == []
 
 
@@ -1020,7 +1000,6 @@ def test_holding_one_mark_leaves_the_students_other_marks_alone(tmp_path, monkey
         sheets={"assignment-1": _SHEET, "assignment-2": _HELD_SHEET},
     )
     assert out["rc"] == 0
-    assert [repo for repo, _body, _marker in out["comments"]] == ["assignment-1-ada-l"]
     ((_repo, files, _delete),) = out["gradebooks"]
     assert "assignment-1" in files["grades.yml"]
     assert "assignment-2" not in files["grades.yml"]
@@ -1066,9 +1045,7 @@ def test_the_dry_run_counts_what_it_would_hold(tmp_path, monkeypatch, capsys):
     printed = capsys.readouterr().out
     assert "assignment-1: 1 student(s) · 0 final grade(s) derived" in printed
     assert "1 held for a hand decision" in printed
-    assert (
-        "would post 0 comment(s), update 0 gradebook(s), email 0 student(s)" in printed
-    )
+    assert "would update 0 gradebook(s) and email 0 student(s)" in printed
 
 
 def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
@@ -1087,30 +1064,8 @@ def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     assert "assignment-1: 1 student(s) · 1 final grade(s) derived" in printed
     assert "0 held for a hand decision" in printed
     assert f"{grades.COHORT_CSV_NAME}: would gain column assignment-1" in printed
-    assert (
-        "would post 1 comment(s), update 1 gradebook(s), email 1 student(s)" in printed
-    )
+    assert "would update 1 gradebook(s) and email 1 student(s)" in printed
     assert "<handle>" in printed  # the sample email, from placeholders
-
-
-def test_a_team_issue_distribute_has_to_open_still_names_the_team(
-    tmp_path, monkeypatch
-):
-    # Distribute is the last opener of a Feedback issue, and it knows the unit and its
-    # members; it used to pass neither, so a team reached this way was never told which
-    # team the repo belonged to.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        sheets={"assignment-1": _TEAM_SHEET},
-        grading=_GRADING_YML + "type: group\n",
-    )
-    ((repo, body),) = out["issues"]
-    assert repo == "assignment-1-alpha"
-    assert (
-        "**Team:** alpha (@ada-l) - fill in CONTRIBUTIONS.md before the deadline."
-        in body.splitlines()
-    )
 
 
 def test_a_sheet_that_does_not_parse_sends_nothing_at_all(tmp_path, monkeypatch):
@@ -1167,42 +1122,6 @@ def test_a_re_run_says_nothing_twice(tmp_path, monkeypatch):
     assert again["rc"] == 0
 
 
-def test_the_record_remembers_which_issue_the_comment_landed_on(tmp_path, monkeypatch):
-    # A later run posts to the SAME thread without a listing to get wrong - and cannot open
-    # a second one because a listing came back unreadable.
-    first = _distribute(monkeypatch, tmp_path)
-    ((_cfg, cfg_files, _d),) = first["config"]
-    assert cfg_files[grades.DISTRIBUTED_PATH].splitlines()[0].endswith(",issue")
-    record = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
-    assert record[("ada-l", "assignment-1", grades.CHANNEL_ISSUE)][2] == "7"
-
-    corrected = _SHEET.replace("score_individual: 43", "score_individual: 45")
-    again = _distribute(
-        monkeypatch,
-        tmp_path / "again",
-        sheets={"assignment-1": corrected},
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
-        # A lookup would have to go through here. It does not run at all.
-        issue=grades.LOOKUP_FAILED,
-    )
-    ((_repo, body, _marker),) = again["comments"]
-    assert "45" in body
-    assert again["issues"] == []
-
-
-def test_an_unreadable_issue_lookup_posts_nothing_and_reds_the_run(
-    tmp_path, monkeypatch, capsys
-):
-    # Nothing is opened and nothing is posted for that unit; the run goes red so somebody
-    # looks, and the next one tries again.
-    out = _distribute(monkeypatch, tmp_path, issue=grades.LOOKUP_FAILED)
-    assert out["rc"] == 1
-    assert out["comments"] == []
-    printed = capsys.readouterr()
-    assert '"failed": 1' in printed.out
-    assert "ada-l" not in printed.out
-
-
 def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypatch):
     first = _distribute(monkeypatch, tmp_path)
     ((_cfg, cfg_files, _d),) = first["config"]
@@ -1213,9 +1132,8 @@ def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypa
         sheets={"assignment-1": corrected},
         distributed=cfg_files[grades.DISTRIBUTED_PATH],
     )
-    ((_repo, body, _marker),) = again["comments"]  # exactly one new comment
-    assert "45" in body
-    assert len(again["gradebooks"]) == 1
+    ((_repo, files, _delete),) = again["gradebooks"]  # exactly one gradebook
+    assert "45" in files["README.md"]
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
@@ -1245,7 +1163,6 @@ def test_a_reworded_gradebook_page_is_committed_and_nobody_is_emailed(
     ((_repo, files, _delete),) = again["gradebooks"]
     assert "A new standing section." in files["README.md"]
     assert again["outbox"] == []
-    assert again["comments"] == []  # the mark did not move, so nor did the comment
 
 
 def test_a_record_written_before_the_split_is_carried_over_not_re_mailed(
@@ -1278,27 +1195,6 @@ def test_a_record_written_before_the_split_is_carried_over_not_re_mailed(
     assert carried[("ada-l", "", grades.CHANNEL_EMAIL)][0] == grades.content_hash(
         book["grades.yml"]
     )
-
-
-def test_a_lost_record_still_does_not_duplicate_a_comment(tmp_path, monkeypatch):
-    # `distributed.csv` deleted, restored from a backup, never written: the hash on the
-    # comment itself is the second belt, and it is read from the issue.
-    first = _distribute(monkeypatch, tmp_path)
-    ((_repo, body, marker),) = first["comments"]
-    posted: list = []
-    monkeypatch.setattr(
-        grades,
-        "post_marked_comment",
-        grades.post_marked_comment,  # the real one, over the stubbed gh
-    )
-    again = _distribute(
-        monkeypatch,
-        tmp_path / "again",
-        existing_marks=f"an earlier comment\n{marker}\n",
-    )
-    del posted, body
-    # The real post_marked_comment saw its own marker on the issue and posted nothing.
-    assert again["rc"] == 0
 
 
 def test_the_registrar_export_is_written_only_on_a_real_run(tmp_path, monkeypatch):
@@ -1352,113 +1248,11 @@ def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
     assert grades.DISTRIBUTED_PATH in files
 
 
-def test_a_missing_submission_repo_is_a_counted_skip(tmp_path, monkeypatch, capsys):
-    out = _distribute(monkeypatch, tmp_path, issue=None)
-    assert out["comments"] == []
-    assert out["rc"] == 0  # a student who never onboarded is not a failure
-    assert '"skipped": 1' in capsys.readouterr().out
-
-
 _EXTERNAL_GRADING = _GRADING_YML + "submit_via: external\n"
 
-
-def test_an_external_assignment_never_has_a_feedback_issue_opened_for_it(
-    tmp_path, monkeypatch, capsys
-):
-    # Nothing was created for it, so there is nothing to open an issue in - and opening
-    # one would mint the very repo this shape exists not to create.
-    out = _distribute(monkeypatch, tmp_path, grading=_EXTERNAL_GRADING, issue=None)
-    assert out["issues"] == [] and out["comments"] == []
-    assert out["rc"] == 0
-    assert '"skipped": 1' in capsys.readouterr().out
-    # The mark still reaches the student, in the one place this shape puts it.
-    ((gb_repo, files, _delete),) = out["gradebooks"]
-    assert gb_repo == "grades-ada-l" and "43" in files["README.md"]
-
-
-def test_an_external_assignments_existing_issue_still_gets_the_comment(
-    tmp_path, monkeypatch
-):
-    # Maths a1: handed out before this shipped, so the repos and their Feedback issues are
-    # already there and the students were told to read them. Found, never opened.
-    out = _distribute(monkeypatch, tmp_path, grading=_EXTERNAL_GRADING, found_issue=7)
-    assert out["issues"] == []  # nothing was ENSURED
-    ((repo, _body, _marker),) = out["comments"]
-    assert repo == "assignment-1-ada-l"
-
-
-def test_no_feedback_issue_is_opened_in_a_repo_the_listing_calls_public(
-    tmp_path, monkeypatch
-):
-    # The static "issue iff github AND private" rule is a declaration in a file; this is
-    # the live half of it, against a `visibility:` edited after handout. The whole thread
-    # is skipped, not just the create: a repo the world can read is not one a mark goes in.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        found_issue=7,
-        listed={
-            "assignment-1-ada-l": {"name": "assignment-1-ada-l", "visibility": "public"}
-        },
-    )
-    assert out["issues"] == [] and out["comments"] == []
-
-
-def test_a_run_says_how_many_repos_it_would_not_comment_in(
-    tmp_path, monkeypatch, capsys
-):
-    # A count and nothing else. The repos are named after the students in them, and this
-    # log is world-readable; but a grader pressing Distribute and seeing `skipped` with no
-    # explanation has no way to find out that a repo went public after handout.
-    _distribute(
-        monkeypatch,
-        tmp_path,
-        found_issue=7,
-        listed={
-            "assignment-1-ada-l": {"name": "assignment-1-ada-l", "visibility": "public"}
-        },
-    )
-    printed = capsys.readouterr()
-    assert "1 repo(s) are not private - no comment posted" in printed.out
-    assert "ada-l" not in printed.out
-
-
-def test_a_repo_the_listing_does_not_carry_is_never_asked_about(tmp_path, monkeypatch):
-    # An external assignment creates no repos at all, so probing each one for an issue
-    # would be an API call per student answered 404 every time. The listing already says.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        grading=_EXTERNAL_GRADING,
-        found_issue=7,
-        listed={"grades-ada-l": {"name": "grades-ada-l", "visibility": "private"}},
-    )
-    assert out["issues"] == [] and out["comments"] == []
-    # The mark still reaches the student in their gradebook.
-    assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
-
-
-def test_a_listed_repo_still_gets_its_comment(tmp_path, monkeypatch):
-    # Maths a1 again: the repos ARE listed, so the compat rule still finds their threads.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        grading=_EXTERNAL_GRADING,
-        found_issue=7,
-        listed={
-            "assignment-1-ada-l": {
-                "name": "assignment-1-ada-l",
-                "visibility": "private",
-            }
-        },
-    )
-    assert out["issues"] == []
-    ((repo, _body, _marker),) = out["comments"]
-    assert repo == "assignment-1-ada-l"
-
-
-# ------------------------------------------ the dry run's counts and the real run's
-
+# The four shapes with no Feedback issue of their own. They used to be the interesting
+# half of distribute - each one a thread it must not post into - and they are ordinary
+# now: a mark goes to the gradebook whatever the shape, so there is one thing to prove.
 _NO_THREAD_SHAPES = (
     "visibility: public\n",
     "visibility: student_choice\n",
@@ -1468,50 +1262,71 @@ _NO_THREAD_SHAPES = (
 
 
 @pytest.mark.parametrize("shape", _NO_THREAD_SHAPES)
-def test_the_dry_run_promises_no_comment_a_shape_has_nowhere_to_put(
-    tmp_path, monkeypatch, capsys, shape
+def test_every_shape_sends_its_mark_to_the_gradebook_and_nowhere_else(
+    tmp_path, monkeypatch, shape
 ):
-    # The count was incremented before the policy was consulted, so the preview a grader
-    # checks before pressing the button for real said "would post 1 comment(s)" for four
-    # shapes that have no Feedback issue at all - and the real run then posted none.
-    _distribute(monkeypatch, tmp_path, grading=_GRADING_YML + shape, dry_run=True)
-    assert "would post 0 comment(s)" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize(
-    "shape, row",
-    [
-        ("visibility: public\n", repo_row("assignment-1-ada-l", visibility="public")),
-        ("submit_via: external\n", None),
-        ("submit_via: shared_dropbox_repo\n", None),
-    ],
-)
-def test_the_two_runs_agree_about_how_many_comments_there_are(
-    tmp_path, monkeypatch, capsys, shape, row
-):
-    # The preview is the only thing a grader has to check a run against, so the two
-    # counts have to be the same number. `row` is what the cohort listing really holds
-    # for that shape: a published repo for `public`, and nothing at all where the
-    # handout creates no repo per unit.
-    grading = _GRADING_YML + shape
-    _distribute(monkeypatch, tmp_path / "dry", grading=grading, dry_run=True)
-    previewed = capsys.readouterr().out
-    listed = {"assignment-1-ada-l": row} if row else {}
+    # `found_issue` is what a lookup would answer, and `listed` carries the repo as
+    # private: every excuse for the run to touch a thread is present, and it touches none.
     out = _distribute(
         monkeypatch,
-        tmp_path / "real",
-        grading=grading,
-        listed=listed,
+        tmp_path,
+        grading=_GRADING_YML + shape,
         found_issue=7,
+        listed={"assignment-1-ada-l": repo_row("assignment-1-ada-l")},
     )
-    done = next(
-        line for line in capsys.readouterr().out.splitlines() if "Done - " in line
+    assert out["rc"] == 0
+    assert out["comments"] == [] and out["issues"] == []
+    ((gb_repo, files, _delete),) = out["gradebooks"]
+    assert gb_repo == "grades-ada-l" and "43" in files["README.md"]
+
+
+def test_a_repo_the_listing_calls_public_is_no_longer_a_reason_to_hold_anything(
+    tmp_path, monkeypatch
+):
+    # A `visibility:` edited after handout used to decide whether a mark could be posted
+    # at all. It decides nothing here: the mark was never going to a repo.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        found_issue=7,
+        listed={
+            "assignment-1-ada-l": repo_row("assignment-1-ada-l", visibility="public")
+        },
     )
-    counts = json.loads(done.split("Done - ", 1)[1])
-    assert "would post 0 comment(s)" in previewed
-    assert counts["comments"] == 0 and out["comments"] == []
-    # ...and the mark still reaches the student where this shape puts it.
+    assert out["rc"] == 0
+    assert out["comments"] == [] and out["issues"] == []
     assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
+
+
+def test_a_listing_that_could_not_be_read_still_sends_every_mark(tmp_path, monkeypatch):
+    # An API blip used to cost a cohort its feedback for a tick. The listing answers one
+    # question now - has this student a gradebook yet - and `ensure_gradebooks` handles
+    # not being told.
+    out = _distribute(monkeypatch, tmp_path, listed=None)
+    assert out["rc"] == 0
+    assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
+
+
+def test_a_record_written_while_marks_were_commented_still_reads(tmp_path, monkeypatch):
+    # A live cohort's `distributed.csv` carries `issue` rows from before marks moved to
+    # the gradebook alone. They are read, they keep their columns, and nothing acts on
+    # them - the run must not trip over a channel it no longer writes.
+    recorded = (
+        "target,assignment,channel,content_hash,distributed_at,issue\n"
+        "ada-l,assignment-1,issue,anoldhash,2026-10-05T00:00:00,7\n"
+    )
+    out = _distribute(monkeypatch, tmp_path, distributed=recorded, found_issue=7)
+    assert out["rc"] == 0
+    assert out["comments"] == [] and out["issues"] == []
+    ((_cfg, files, _d),) = out["config"]
+    written = grades.parse_distributed(files[grades.DISTRIBUTED_PATH])
+    # The old row is still there, unchanged, and the gradebook row is new beside it.
+    assert written[("ada-l", "assignment-1", grades.CHANNEL_ISSUE)] == (
+        "anoldhash",
+        "2026-10-05T00:00:00",
+        "7",
+    )
+    assert ("ada-l", "", grades.CHANNEL_GRADEBOOK) in written
 
 
 # -------------------------------------------- marks sent before the due date has passed
@@ -1605,17 +1420,17 @@ def test_an_assignment_that_collects_nothing_is_never_warned_about(
             {"assignment-1-ada": "private"},
             grades.THREAD_FIND,
         ),
-        # Not in the listing. A `github` repo may have been created since it was taken -
-        # that is exactly the student whose feedback must not be dropped - where a shape
-        # that creates no repos has none to find, and probing each would be an issues call
-        # per student for an answer already known.
+        # Not in the listing. A `github` repo may have been created since it was taken,
+        # where a shape that creates no repos has none to find, and probing each would be
+        # an issues call per student for an answer already known.
         ({}, {"grades-ada": "private"}, grades.THREAD_FIND),
         ({"submit_via": "external"}, {"grades-ada": "private"}, grades.THREAD_NONE),
     ],
 )
 def test_the_feedback_thread_policy_answers_every_shape(shape, listed, want):
-    # ONE question - may this run touch a Feedback issue here, and may it open one? - and
-    # one place that answers it, because the grade comment and the receipts both ask.
+    # ONE question - may this run touch the issue here, and may it open one? - answered in
+    # one place, for the submission receipts, which are the whole of what is posted into
+    # a submission repo.
     spec = grades.SheetSpec(slug="assignment-1", title="A1", is_group=False, **shape)
     rows = (
         None
@@ -1628,7 +1443,7 @@ def test_the_feedback_thread_policy_answers_every_shape(shape, listed, want):
 def test_a_spec_read_off_the_sheet_alone_never_opens_an_issue():
     # No schedule entry, so no definition: `submit_via` and `visibility` are this spec's
     # defaults rather than anybody's decision, and the one thing a guess may not do is
-    # open a Feedback issue in a student's repo. Its marks still reach the thread it finds.
+    # open an issue in a student's repo. Its marks reach the gradebook either way.
     spec = grades._spec_from_sheet("assignment-1", {"submissions": {}})
     rows = {"assignment-1-ada": repo_row("assignment-1-ada")}
     assert (
@@ -1644,46 +1459,6 @@ def test_distribute_provisions_the_gradebooks_with_no_time_budget(
     # about to write a mark into every one of these repos, so one it stopped short of
     # would be a 404 per student in a public log, not a batch for tomorrow.
     assert _distribute(monkeypatch, tmp_path)["gradebook_calls"] == [{}]
-
-
-def test_a_repo_flipped_public_gets_no_comment_on_the_recorded_thread_either(
-    tmp_path, monkeypatch
-):
-    # `distributed.csv` says where this unit's last comment landed, and a repo flipped
-    # public since then is a thread the internet can now read. The live answer is taken
-    # BEFORE the shortcut, or a correction lands in it on the strength of a row written
-    # while the repo was still private.
-    first = _distribute(monkeypatch, tmp_path)
-    ((_cfg, cfg_files, _d),) = first["config"]
-    corrected = _SHEET.replace("score_individual: 43", "score_individual: 45")
-    again = _distribute(
-        monkeypatch,
-        tmp_path / "again",
-        sheets={"assignment-1": corrected},
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
-        listed={
-            "assignment-1-ada-l": repo_row("assignment-1-ada-l", visibility="public")
-        },
-        found_issue=9,
-    )
-    assert again["comments"] == [] and again["issues"] == []
-    assert again["rc"] == 0  # the mark is in the gradebook; this is not a failure
-
-
-def test_an_external_unit_with_no_repo_is_counted_and_leaves_the_run_green(
-    tmp_path, monkeypatch, capsys
-):
-    # Maths a1's shape on a tick whose listing failed: the lookup is made (it is the only
-    # way to reach an issue a cohort already has), the repo is not there, and a 404 is an
-    # answer rather than a failure - one count in the `Done` line, no red X.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        grading=_GRADING_YML + "submit_via: external\n",
-        listed=None,
-    )
-    assert out["comments"] == [] and out["issues"] == [] and out["rc"] == 0
-    assert '"skipped": 1' in capsys.readouterr().out
 
 
 def test_a_gradebook_this_run_creates_goes_into_the_listing_it_was_handed(monkeypatch):
@@ -1706,29 +1481,6 @@ def test_a_gradebook_this_run_creates_goes_into_the_listing_it_was_handed(monkey
         grades, "create_repo", lambda *a, **k: pytest.fail("made twice")
     )
     assert grades.provision_one("COHORT", "ada-l", existing) == "skipped"
-
-
-def test_a_listing_that_could_not_be_read_uses_a_thread_but_opens_none(
-    tmp_path, monkeypatch
-):
-    # An API blip must not hold a whole cohort's feedback back - the thread each student
-    # was told to read is still theirs, and the comment goes on it. But nothing is OPENED
-    # on an org nobody could list: the one repo whose visibility we cannot check is
-    # exactly the one a Feedback issue must not appear in, and a second issue over a
-    # thread they are already reading is not recoverable.
-    out = _distribute(monkeypatch, tmp_path, listed=None, found_issue=7)
-    assert [repo for repo, _body, _marker in out["comments"]] == ["assignment-1-ada-l"]
-    assert out["issues"] == []
-
-
-def test_a_listing_that_could_not_be_read_opens_nothing_and_skips(
-    tmp_path, monkeypatch, capsys
-):
-    # And where there is no thread to find either, the mark is simply not posted: it is in
-    # the gradebook, the count says how many, and the run stays green.
-    out = _distribute(monkeypatch, tmp_path, listed=None)
-    assert out["comments"] == [] and out["issues"] == [] and out["rc"] == 0
-    assert '"skipped": 1' in capsys.readouterr().out
 
 
 # A handle no roster row claims. A sheet is hand-typed, and the demo org carried six of
@@ -1763,7 +1515,6 @@ def test_marks_for_handles_not_on_the_roster_are_dropped_not_pushed(
     assert out["rc"] == 0
     # One gradebook, for the one student the roster has - not three.
     assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
-    assert [repo for repo, _b, _m in out["comments"]] == ["assignment-1-ada-l"]
     printed = capsys.readouterr()
     assert '"unknown": 2' in printed.out
     for stranger in ("zed-z", "mallory-m"):
@@ -1828,7 +1579,7 @@ def test_the_public_log_carries_counts_and_no_student(tmp_path, monkeypatch, cap
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     _distribute(monkeypatch, tmp_path)
     out = capsys.readouterr().out
-    assert '"comments": 1' in out and '"gradebooks": 1' in out
+    assert '"gradebooks": 1' in out
     assert "ada-l" not in out and "ada@uni.edu" not in out
 
 
@@ -1931,65 +1682,6 @@ def test_distribute_reds_on_a_header_only_roster_and_leaves_the_export(
 
 def test_a_dry_run_reds_on_a_header_only_roster_too(tmp_path, monkeypatch):
     assert _distribute(monkeypatch, tmp_path, roster_rows="", dry_run=True)["rc"] == 1
-
-
-def test_a_repo_flipped_public_gets_no_comment_even_on_a_recorded_thread(
-    tmp_path, monkeypatch
-):
-    # `distributed.csv` says where this unit's last comment landed, and it was written
-    # while the repo was still private. A correction posted on the strength of that row
-    # publishes a mark; the live listing is asked FIRST, ahead of the record.
-    recorded = (
-        "target,assignment,channel,content_hash,distributed_at,issue\n"
-        "ada-l,assignment-1,issue,stale,2026-10-05T00:00:00,7\n"
-    )
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        distributed=recorded,
-        listed={
-            "assignment-1-ada-l": repo_row("assignment-1-ada-l", visibility="public")
-        },
-    )
-    assert out["comments"] == [] and out["issues"] == []
-    # The mark still reaches them: the gradebook is the channel every shape writes to.
-    ((gb_repo, _files, _d),) = out["gradebooks"]
-    assert gb_repo == "grades-ada-l"
-
-
-def test_a_github_repo_missing_from_the_listing_is_still_asked_about(
-    tmp_path, monkeypatch
-):
-    # A listing is a SNAPSHOT: a repo created since it was taken is absent from it, and
-    # that is exactly the student whose feedback must not be silently dropped. Only a
-    # shape that creates no repos at all is answered off the listing's silence.
-    # `found_issue` is what a LOOKUP answers; `issues` is what was OPENED, and a repo the
-    # listing cannot vouch for is one nothing may be opened in.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        listed={"grades-ada-l": repo_row("grades-ada-l")},
-        found_issue=7,
-    )
-    assert [repo for repo, _body, _marker in out["comments"]] == ["assignment-1-ada-l"]
-    assert out["issues"] == []
-
-
-def test_an_external_assignment_never_probes_a_repo_nobody_created(
-    tmp_path, monkeypatch
-):
-    # The other half of the same rule: `submit_via: external` creates none, so every
-    # unit's lookup would be an issues call for a certain answer.
-    # `found_issue` is what a LOOKUP would answer, so a run that probed anyway would post.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        grading=_GRADING_YML + "submit_via: external\n",
-        listed={"grades-ada-l": repo_row("grades-ada-l")},
-        found_issue=9,
-    )
-    assert out["comments"] == [] and out["issues"] == []
-    assert out["rc"] == 0
 
 
 # ------------------------------------------------- the team-formation lock file

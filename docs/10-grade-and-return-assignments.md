@@ -8,8 +8,8 @@ One file to fill in, one button to send it. Everything else is the toolkit's.
 HANDOUT ─────► DUE ─────► late window ─────► CUTOFF ─────► DISTRIBUTE
 (cron)         (cron)     (cron refreshes)   (cron)        (button)
    │             │              │               │              │
-sheet created  sheet        sheet refreshed   sheet         feedback comment
-(empty, dated) filled       as late work      frozen        + gradebook + email
+sheet created  sheet        sheet refreshed   sheet         gradebook + CSV
+(empty, dated) filled       as late work      frozen        + email
                             arrives
 ```
 
@@ -121,11 +121,10 @@ repo's, so it would accuse the entire cohort of one student's late push), and
 
 1. **Handout.** The sheet appears with one row per student or team, every student has a
    private `grades-<handle>` gradebook, and a `submit_via: assignment_repo`, `visibility: private`
-   submission repo gets a **Feedback** issue. An `external` assignment has no repos, a
+   submission repo gets a **Submission receipts** issue. An `external` assignment has no repos, a
    `shared_dropbox_repo` one has a repo the whole cohort reads, and a `public` or `student_choice` repo
-   is not private - none of the three gets an issue. Marks and feedback go to the student's
-   private `grades-<handle>` gradebook whatever the shape, and for an `external` group
-   assignment the team score and team feedback go into each member's.
+   is not private - none of the three gets an issue, so none of the three gets receipts.
+   Nothing else turns on it: marks and feedback go to the gradebook for every shape alike.
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
    issue. Late pushes refresh both, quarter-hourly, until the cutoff.
 3. **Collect submissions** (button) does that refresh now instead of waiting. It never
@@ -136,27 +135,27 @@ repo's, so it would accuse the entire cohort of one student's late push), and
    pin and the sheet. Its header then reads `FROZEN`.
 6. **Distribute grades** (button), `dry_run` first. The dry run reads everything, writes
    nothing, and prints the counts - including how many marks are **held** for a hand
-   decision and how many units still have unmarked questions. Set `assignment` to one slug
-   to post only that assignment's feedback comments - a1's are ready while a2 is still
-   being typed in. It narrows the COMMENTS and nothing else: every gradebook and the
-   registrar's export are rebuilt from every sheet in the cohort on every run, so a
-   student's gradebook always shows everything they have been marked on (and the email
-   below still follows the gradebook).
+   decision and how many units still have unmarked questions. `assignment` is checked
+   against the sheets and narrows nothing: every gradebook and the registrar's export are
+   rebuilt from every sheet in the cohort on every run, so a student's gradebook always
+   shows everything they have been marked on. A half-typed sheet is therefore a reason to
+   wait, not a reason to scope.
 
 ## What Distribute sends
 
-- **A feedback comment** on each submission repo's Feedback issue. A team repo grants the
-  whole team `maintain`, so a team comment carries the team score and the team feedback and
-  **nothing personal** - no member's adjustment, feedback or final grade can appear there.
+Three channels, and a submission repo is not one of them. Nothing a grader typed is ever
+posted into a repo: a student has one address for a mark, and a repo whose `visibility:`
+could change is not it.
+
 - **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
-  one commit. The student sees their final grade, never the sum behind it.
+  one commit. The student sees their final grade, never the sum behind it. Each member of
+  a team reads the team's shared feedback here, in their own repo, beside their own grade.
 - **`cohort-gradebook.csv`** in `classroom-config` - the registrar export, one row per
   enrolled student including the ungraded. Private, never logged.
 - **An email** with a link and no marks in it.
 
-Nothing is said twice: every comment carries a content hash and every send is recorded in
-`gradebook/distributed.csv`, so a re-run after one correction reaches one student. `silent`
-skips the email.
+Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so a re-run
+after one correction reaches one student. `silent` skips the email.
 
 The gradebook and the email are decided separately, on purpose. The **commit** is made
 whenever anything in the repo would change, so an improvement to the page's own wording

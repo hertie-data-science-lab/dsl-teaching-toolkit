@@ -928,18 +928,18 @@ def provision_one(
         if existing is not None:
             existing[repo] = listing_row(cohort_org, repo, listed_as)
         _tag_submission(cohort_org, repo, slug, set())
-        # The Feedback issue, on the CREATE path only. It is where every receipt and,
-        # eventually, the grade is posted, so the student is told at handout where to
-        # look. Never re-probed for a repo that already exists: that would be one listing
+        # The Feedback issue, on the CREATE path only. It is where the submission
+        # receipts are posted, so the student is told at handout what the thread is for.
+        # Never re-probed for a repo that already exists: that would be one listing
         # per student per hourly tick for the rest of the term, for an issue that does not
         # go away - and the refresh pass opens a missing one lazily when it first has
         # something to say.
         if feedback_body and not grades.ensure_feedback_issue(
             cohort_org, repo, feedback_body
         ):
-            # Reported in the RETURN value, not just the log. The issue is where every
-            # receipt and, eventually, the grade is posted, and it is opened on the CREATE
-            # path only - the cron re-fires every handed-out release on every tick, so
+            # Reported in the RETURN value, not just the log. The issue is where the
+            # submission receipts are posted, and it is opened on the CREATE path only -
+            # the cron re-fires every handed-out release on every tick, so
             # re-probing an existing repo would cost one listing per student per tick for
             # the rest of the term. A repo that misses its one chance therefore has to red
             # the run, or a whole cohort's handout goes green with nowhere to post into.
@@ -1462,8 +1462,8 @@ def _release_units(
     # belong to the only shape that creates one.
     #
     # No body at all where the shape HAS no Feedback issue - a `public` repo is not a
-    # place to write a student's marks - and `provision_one` opens one only for a unit
-    # it was given a body for. The derived rule decides it, so nothing here re-states
+    # place to write a student's hand-in times - and `provision_one` opens one only for a
+    # unit it was given a body for. The derived rule decides it, so nothing here re-states
     # which shapes have a thread and which do not.
     solo_body = (
         grades.feedback_body(spec) if gspec.has_feedback_issue and not group else ""

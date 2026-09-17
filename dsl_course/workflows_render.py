@@ -184,7 +184,7 @@ _CHECK_TEAM = """  check-team:
 # 120 covers the jobs that grade: collect budgets 300s PER submission subprocess and walks
 #     a cohort serially - the manual Collect submissions button and the scheduler's
 #     autograde job, which is one matrix leg per cohort - and Distribute grades, which
-#     writes a gradebook, a comment and an email per student in series.
+#     writes a gradebook and an email per student in series.
 _TIMEOUT_DEFAULT = 30
 _TIMEOUT_MANY_REPOS = 60
 _TIMEOUT_GRADING = 120
@@ -1025,12 +1025,12 @@ def render_distribute_grades(cohort_orgs: list[str]) -> str:
     """Send every mark a grader has written where it has to go."""
     return f"""name: Distribute grades
 
-# Reads the grading sheets in classroom-config and sends what they hold: a feedback comment
-# on each submission repo's Feedback issue, each student's private grades-<handle> repo, the
-# registrar export, and (unless silenced) an email saying there is something new to read.
-# Nothing is said twice - a re-run after one correction reaches one student.
-# `assignment` narrows the run to one slug; blank is every sheet in the cohort, which is
-# right at the end of term and wrong in the middle of one.
+# Reads the grading sheets in classroom-config and sends what they hold: each student's
+# private grades-<handle> repo, the registrar export, and (unless silenced) an email saying
+# there is something new to read. Nothing is posted into a submission repo, and nothing is
+# said twice - a re-run after one correction reaches one student.
+# `assignment` is checked against the sheets and narrows nothing: every run rebuilds every
+# gradebook from every sheet, which is what keeps a gradebook the whole of a student's marks.
 # Dry run first; it writes nothing and prints the counts. Needs the GRAPH_* secrets to mail.
 
 on:
@@ -1038,7 +1038,7 @@ on:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
       assignment:
-        description: "One assignment slug - leave blank for every sheet in the cohort"
+        description: "One assignment slug - checked against the sheets; narrows nothing"
         type: string
         required: false
       dry_run:

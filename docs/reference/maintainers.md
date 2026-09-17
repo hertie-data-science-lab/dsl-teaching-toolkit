@@ -92,12 +92,16 @@ Things whose *literal spelling* is depended on from outside Python:
   oldest string must still reach the newest in one pass; for `STUB_MARKS`, a repo seeded with an
   older wording must still be recognised as unwritten, or its placeholder syllabus ships.
 - **`course.FEEDBACK_ISSUE_TITLE` / `FEEDBACK_ISSUE_LABEL` / `FEEDBACK_ISSUE_MARKS`** identify
-  the one Feedback issue in each submission repo. `assign` opens it, `grades` posts receipts and
-  grades into it, and the lookup (label -> body mark -> exact title) is what stops a second one
-  appearing over a thread a student is already reading. `FEEDBACK_ISSUE_MARKS` is a chain like
-  `STUB_MARKS`: add a wording, never edit one, or every issue opened under the old one becomes
-  invisible. The hidden `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what
-  makes the quarter-hourly refresh post once rather than four times an hour.
+  the one issue in each submission repo. It carries **submission receipts only** - `assign` opens
+  it, `collect` posts the receipts and `assign` the patch notes; no mark or feedback line is ever
+  posted into a repo, they go to `grades-<handle>` alone. The lookup (label -> body mark -> exact
+  title) is what stops a second one appearing over a thread a student is already reading, and it
+  is why the TITLE could be renamed to `Submission receipts` while the label `dsl-feedback` and
+  the marks keep the older word: those two are matched against live issues and a student never
+  reads either. `FEEDBACK_ISSUE_MARKS` is a chain like `STUB_MARKS`: add a wording, never edit
+  one, or every issue opened under the old one becomes invisible. The hidden
+  `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
+  refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
 - **An ARCHIVED `classroom-config`** is a cohort's "finished" marker. `teardown` archives it
@@ -568,7 +572,7 @@ this section.
 ONE ASSIGNMENT PER SUBMISSION SHAPE (`tests/e2e/shapes.py`): github/private,
 github/public, github/student_choice, external and shared, handed out under
 `<namespace>-<shape>` and driven serially through the same ticks. The shapes differ in what
-the handout creates, where the student pushes, whether there is a Feedback issue and what
+the handout creates, where the student pushes, whether there is a receipts issue and what
 the site page says, so a run that drove one of them proved the wiring for one of them. The
 student really publishes their `student_choice` repo - once before the grading cutoff,
 which the next tick undoes, and once after it, which stands.

@@ -178,11 +178,12 @@ def github_visibility(visibility: str) -> str:
 
 
 def has_feedback_issue(submit_via: str, visibility: str) -> bool:
-    """Whether the receipts and the final comment have a Feedback issue to go on.
+    """Whether the submission receipts have a Feedback issue to go on.
 
     DERIVED from the shape, never configured: the issue lives in the unit's own repo, so it
-    exists exactly where there is one that only that unit can read. Every other shape gets
-    its feedback in the private `grades-<handle>` gradebook."""
+    exists exactly where there is one that only that unit can read. A shape without one
+    simply gets no receipts; every shape's marks and feedback go to the same place, the
+    private `grades-<handle>` gradebook."""
     return submit_via == "assignment_repo" and visibility == "private"
 
 
@@ -373,11 +374,18 @@ ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
 
 # ------------------------------------------------------------------ the Feedback issue
 
-# Every submission repo carries ONE issue, opened at handout, where the student's receipts
-# and finally their feedback appear. The contract lives here, at layer 0, because `assign`
-# opens the issue and `grades` posts into it, and the two must agree on the spelling or the
-# second one opens a duplicate.
-FEEDBACK_ISSUE_TITLE = "Feedback"
+# Every submission repo carries ONE issue, opened at handout, where the student's
+# submission receipts appear. Marks and feedback are not posted here and never reach a
+# repo at all - they go to the student's private gradebook, which is the one address a
+# student has to know. The contract lives here, at layer 0, because `assign` opens the
+# issue and `collect` posts into it, and the two must agree on the spelling or the second
+# one opens a duplicate.
+FEEDBACK_ISSUE_TITLE = "Submission receipts"
+# The label and the marks keep the word `feedback` on purpose. They are not read by anyone:
+# they are what the lookup MATCHES against live issues, so changing either makes every
+# thread opened under the old one invisible and a second one appears over it. The lookup is
+# label, then mark, then title - the title is the weakest rung, which is what lets it be
+# renamed at all.
 FEEDBACK_ISSUE_LABEL = "dsl-feedback"
 # A tuple, like `gh_contents.STUB_MARKS`: an issue opened under an older wording must still
 # be RECOGNISED, so a mark is added to the chain, never edited. Recognition is what stops a
@@ -386,9 +394,9 @@ FEEDBACK_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
 
 _SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
-    "deadline is what we grade. A submission receipt is posted here at the deadline and "
-    "after any late push, and your feedback and grade follow as a comment once marking is "
-    "complete."
+    "deadline is what we grade. This thread is your receipt for that: one at the deadline "
+    "saying what was recorded, one after any late push, and one at the cutoff when the "
+    "commit we grade is fixed."
 )
 _CONTRIBUTIONS_ASK = "fill in CONTRIBUTIONS.md before the deadline."
 
@@ -406,7 +414,11 @@ def feedback_issue_body(
     late_policy_line: str = "",
     team_line: str = "",
 ) -> str:
-    """The body of a submission repo's Feedback issue.
+    """The body of a submission repo's Feedback issue - what the thread is FOR.
+
+    It says where the work goes and what will be posted here, and nothing about marks: a
+    student has one address for those, their private gradebook, and a repo they may be
+    told to publish is not a second one.
 
     The caller supplies only what it knows - the rendered dates, and (for a team) the team
     and its members; every word of boilerplate is here, so the two variants cannot drift

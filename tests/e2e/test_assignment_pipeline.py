@@ -643,8 +643,9 @@ def _config_restore(
 
 
 def _every_comment(stage: Stage) -> str:
-    """Every Feedback-issue comment one press left, across all five shapes, as one text -
-    what the privacy scans are made against."""
+    """Every issue comment one press left, across all five shapes, as one text - what the
+    privacy scans are made against. Receipts, now that a mark never reaches a repo, and
+    the scans stay because a receipt is still a fact about a person."""
     return "\n".join(
         body for bodies in stage.detail["comments"].values() for body in bodies
     )
@@ -1014,7 +1015,7 @@ def test_every_shape_gets_a_grading_sheet_with_the_students_row(pipeline, shape)
 
 @pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
 def test_every_shape_writes_its_feedback_into_the_students_gradebook(pipeline, shape):
-    # The one channel every shape has, and the only one four of them have.
+    # THE channel. Every shape has it and no shape has another.
     readme = _text(pipeline.stages["distribute"].detail["after"]["readme"])
     assert feedback_for(shape) in readme
     assert pipeline.slug(shape) in _text(
@@ -1023,16 +1024,15 @@ def test_every_shape_writes_its_feedback_into_the_students_gradebook(pipeline, s
 
 
 @pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
-def test_only_a_shape_with_a_thread_records_an_issue_channel(pipeline, shape):
-    # `distributed.csv` is the record of what was SENT, so it is where "no issue was
-    # opened" is proved rather than inferred: a shape with no thread must leave no row
-    # claiming one.
+def test_no_shape_records_an_issue_channel(pipeline, shape):
+    # `distributed.csv` is the record of what was SENT, so it is where "nothing was
+    # posted into a repo" is proved rather than inferred. The private shape HAS a thread
+    # and is in this list with the rest: having one is no longer a reason to use one.
     recorded = _text(pipeline.stages["distribute"].detail["after"]["distributed"])
     rows = [line for line in recorded.splitlines()[1:] if pipeline.student in line]
-    issued = [
+    assert not [
         r for r in rows if f",{pipeline.slug(shape)},{grades.CHANNEL_ISSUE}," in r
     ]
-    assert bool(issued) is shape.has_feedback_issue
 
 
 # --------------------------------------------------- github/private: the shape that was
@@ -1200,8 +1200,8 @@ def test_a_public_assignments_page_says_which_shape_it_is(pipeline):
 
 
 def test_a_public_assignments_feedback_goes_nowhere_but_the_gradebook(pipeline):
-    # The pair that makes the shape safe: no thread in a repo the internet can read, and
-    # the marks in the private gradebook instead.
+    # The pair that makes the shape safe: nothing at all in a repo the internet can read,
+    # and the marks in the private gradebook instead.
     assert pipeline.stages["distribute"].detail["comments"][PUBLIC.name] == []
     assert feedback_for(PUBLIC) in _text(
         pipeline.stages["distribute"].detail["after"]["readme"]
@@ -1368,21 +1368,20 @@ def test_a_dry_run_distributes_nothing(pipeline):
     stage = pipeline.stages["distribute_dry"]
     assert stage.conclusion == "success"
     assert stage.detail["after"] == pipeline.stages["shared_before"].detail
-    before = pipeline.stages["after_due"].detail["comments"][PRIVATE.name]
-    assert [b for b in stage.detail["comments"][PRIVATE.name] if "dsl-grade:" in b] == [
-        b for b in before if "dsl-grade:" in b
-    ]
+    assert stage.detail["comments"] == pipeline.stages["after_due"].detail["comments"]
 
 
-def test_the_real_run_posts_exactly_one_feedback_comment(pipeline):
+def test_the_real_run_posts_no_comment_on_any_repo(pipeline):
+    # Marks and feedback go to ONE place, the gradebook. Measured against every shape's
+    # thread, including the private one that HAS a thread and is read only by its student:
+    # the press must leave it exactly as the receipts pass left it.
     stage = pipeline.stages["distribute"]
     assert stage.conclusion == "success"
-    graded = [
-        b for b in stage.detail["comments"][PRIVATE.name] if "<!-- dsl-grade:" in b
-    ]
-    assert len(graded) == 1
-    assert feedback_for(PRIVATE) in graded[0]
-    assert E2E_SCORE in graded[0]
+    assert stage.detail["comments"] == pipeline.stages["after_due"].detail["comments"]
+    for name, bodies in stage.detail["comments"].items():
+        assert not [b for b in bodies if "<!-- dsl-grade:" in b], name
+        assert not [b for b in bodies if feedback_for(shapes.BY_NAME[name]) in b], name
+        assert not [b for b in bodies if E2E_SCORE in b], name
 
 
 def test_the_real_run_writes_the_students_private_gradebook(pipeline):
@@ -1403,10 +1402,9 @@ def test_the_real_run_records_what_it_sent(pipeline):
     recorded = _text(pipeline.stages["distribute"].detail["after"]["distributed"])
     assert recorded.splitlines()[0] == ",".join(grades.DISTRIBUTED_HEADER)
     rows = [line for line in recorded.splitlines()[1:] if pipeline.student in line]
-    assert any(
-        f",{pipeline.slug(PRIVATE)},{grades.CHANNEL_ISSUE}," in row for row in rows
-    )
-    assert any(f",,{grades.CHANNEL_GRADEBOOK}," in row for row in rows)
+    # The gradebook is the only channel a `silent` press records, and the only one a
+    # mark reaches a student by at all.
+    assert {row.split(",")[2] for row in rows} == {grades.CHANNEL_GRADEBOOK}
 
 
 def test_distribute_says_nothing_twice(pipeline):
@@ -1428,7 +1426,7 @@ def test_the_private_note_reaches_nobody(pipeline):
     stage = pipeline.stages["distribute"]
     after = stage.detail["after"]
     for where, text in (
-        ("the feedback comments", _every_comment(stage)),
+        ("the issue comments", _every_comment(stage)),
         ("grades.yml", _text(after["grades_yml"])),
         ("the gradebook README", _text(after["readme"])),
         ("the registrar export", _text(after["registrar"])),

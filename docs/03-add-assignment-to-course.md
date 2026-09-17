@@ -168,7 +168,7 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 |---|---|---|
 | `submit_via` | `assignment_repo` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
-| | `shared_dropbox_repo` | **One private repo for the whole cohort**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Feedback issue and no receipt. |
+| | `shared_dropbox_repo` | **One private repo for the whole cohort**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no receipts issue. |
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
 | `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
@@ -181,7 +181,7 @@ GitHub's fourth visibility, `internal` - readable by every member of an enterpri
 nobody outside it - is **not supported**: it needs an Enterprise plan the courses do not
 have, and a repo the whole institution can read is not a repo marks may be posted into.
 
-A `public` or `student_choice` repo gets **no Feedback issue**, and no **model solution**
+A `public` or `student_choice` repo gets **no submission receipts**, and no **model solution**
 is ever pushed into one - the answers would be published with the repo, so an assignment that is not
 `private` keeps its model answer on the template's `solution` branch (the digest says so if
 its `schedule.yml` entry asks for a solution release anyway). Students who want their own work public on
@@ -224,18 +224,19 @@ What to know before you pick it:
   are refused, as they are for every other shape.
 - **Private only.** One repo holds the whole cohort's work and no student can opt out of
   being in it, so a `visibility:` line on a shared assignment is dropped at the parse.
-- **No Feedback issue, no receipt, no model solution.** All three would be written where
-  the whole cohort can read them.
+- **No receipts issue, no model solution.** Both would be written where the whole cohort
+  can read them.
 - **Hand-marked.** `autograde:`, `completion_check:` and `grader_pdf:` are dropped at the
   parse if you set them (and the notebook completion check is off here whether or not the
   file mentions it): all three run per unit against the unit's own repo, so each student
   would have the whole drop box cloned and scored under their own name, and every one of
   them would get the same result.
 
-The **Feedback issue** - the thread the receipts and the final comment appear in - exists
-only where there is a private repo of the student's own to put it in, so an `external` or
-`shared_dropbox_repo` assignment has none. Where marks and feedback go for every shape is
-in [Grade and return assignments](10-grade-and-return-assignments.md).
+The **Submission receipts** issue - the thread a student is told what we recorded for them
+in - exists only where there is a private repo of the student's own to put it in, so an
+`external` or `shared_dropbox_repo` assignment has none. No mark is lost with it: marks and
+feedback go to the private `grades-<handle>` gradebook for every shape alike, which is
+[Grade and return assignments](10-grade-and-return-assignments.md).
 
 `submit_url` is not a form box: **New assignment** seeds a commented line for it in
 `grading_config.yml`, and you fill it in there. `visibility` is box 10 on that form, which

@@ -1,9 +1,12 @@
-"""The Feedback issue and its submission receipts.
+"""The per-repo issue and its submission receipts.
 
 One issue per submission repo, opened at handout, never a second one; additive receipt
-comments that a re-run cannot duplicate. Both halves are promises made to a student who
-reads that thread rather than the docs, so the bodies are pinned to the wording the
-mock-up specifies and the lookup is pinned against every way it could open a duplicate.
+comments that a re-run cannot duplicate. It is a RECEIPTS thread and nothing else - no
+mark and no feedback line is ever posted into a repo, they go to the student's private
+gradebook - so the body is pinned to saying what the thread is for and to saying nothing
+about where a grade lands. Both halves are promises made to a student who reads that
+thread rather than the docs, and the lookup is pinned against every way it could open a
+duplicate.
 """
 
 from __future__ import annotations
@@ -20,9 +23,9 @@ SHA = "a1b2c3d4e5f6" + "0" * 28
 
 SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
-    "deadline is what we grade. A submission receipt is posted here at the deadline and "
-    "after any late push, and your feedback and grade follow as a comment once marking "
-    "is complete."
+    "deadline is what we grade. This thread is your receipt for that: one at the deadline "
+    "saying what was recorded, one after any late push, and one at the cutoff when the "
+    "commit we grade is fixed."
 )
 
 
@@ -100,6 +103,32 @@ def test_no_run_ever_opens_a_feedback_issue_for_work_handed_in_off_github():
             )
             != grades.THREAD_CREATE
         )
+
+
+def test_the_thread_is_named_for_what_it_carries():
+    # A student reads the title before the body. It says receipts, because receipts are
+    # the whole of what is posted here: the lookup is by label, then by the hidden mark,
+    # and only then by the title, which is what lets the title be renamed at all.
+    assert course.FEEDBACK_ISSUE_TITLE == "Submission receipts"
+
+
+def test_the_handout_body_says_nothing_about_where_a_mark_goes():
+    # ONE address for a grade, and it is the gradebook. A repo the student may be told to
+    # publish, or that a `visibility:` line could publish for them, is not a second one -
+    # so the thread the toolkit opens in it never promises a mark will appear there.
+    for body in (
+        grades.feedback_body(spec()),
+        grades.feedback_body(spec(is_group=True), "team-alpha", ["ada-l"]),
+    ):
+        # Without the hidden mark, which is matched against and never read: it keeps the
+        # old word on purpose (`course.FEEDBACK_ISSUE_MARKS`).
+        lowered = body.replace(MARK, "").lower()
+        for word in ("feedback", "gradebook", "marking", "comment"):
+            assert word not in lowered, f"{word!r} is in the handout body"
+        # The only two things it may say the word "grade" about: which commit we grade,
+        # and what a day of lateness costs. Nothing about where the grade then appears.
+        left = lowered.replace("we grade", "").replace("of your grade per day", "")
+        assert "grade" not in left
 
 
 def test_the_body_always_opens_with_a_mark_the_lookup_can_find():
@@ -223,7 +252,10 @@ def test_an_issue_with_neither_label_nor_mark_is_found_by_its_exact_title(monkey
             "labels=dsl-feedback": (0, ""),
             "state=all&per_page=50": (
                 0,
-                "4\topen\t\tFeedback please\n5\topen\t\tFeedback",
+                (
+                    "4\topen\t\tSubmission receipts please\n"
+                    "5\topen\t\tSubmission receipts"
+                ),
             ),
         },
     )
