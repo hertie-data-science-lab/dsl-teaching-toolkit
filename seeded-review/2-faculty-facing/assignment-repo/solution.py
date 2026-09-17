@@ -2,4 +2,6 @@
 
 
 def solve():
-    return 42  # TODO
+    ### BEGIN SOLUTION
+    return 42  # TODO - the model answer
+    ### END SOLUTION

@@ -1,8 +1,20 @@
-# How the autograder marks this assignment (at the cutoff
-# set in schedule.yml). Delete this file (or set autograde: false) for a purely
-# manually-graded assignment.
-type: group      # individual (one repo per student) or group (one repo per team)
-autograde: true       # false -> skip autograding (all-manual)
-tests: tests          # path (on THIS solution branch) holding the hidden tests
-                      # how many passed is shown to you as `info.autograde` in the grading
-                      # sheet - never a mark by itself, and never something a student sees
+# INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's schedule.yml.
+title: Group project          # the assignment's name, shown to graders and on the site
+type: group                   # individual | group
+team_formation: self_select   # self_select (students use the Join-team form) | assigned (you write teams.csv)
+max_team_size: 5              # group only
+submit_via: github            # github (they push to their repo) | external (handed in elsewhere: Moodle, Kaggle, in class - no repo is created) | shared (one private repo for the whole cohort, each student pushes into their own folder, peers can read it)
+# submit_url: https://moodle.hertie-school.org/mod/assign/view.php?id=CHANGE-ME # external only: the `Submit on ...` button on the site (https only)
+visibility: private           # private (the student and the teaching team) | public (the whole internet: portfolio work, no Feedback issue) | student_choice (private, and the student is its admin: theirs to publish after the grading cutoff, and no Feedback issue) - read at hand-out only
+format: ipynb                 # ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; grading reads whatever is in the repo (also seeded: py)
+
+# questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
+#   Q1: 15                    # each blank in the grading sheet. The total is their sum;
+#   Q2: 10                    # there is no `points:` field anywhere.
+
+late_window_days: 7           # 0 or absent = nothing after the due date is accepted
+late_penalty_per_day: 10%     # of the EARNED grade, per day started
+
+autograde: false              # true: run tests/ at the cutoff and show the count to graders
+completion_check: true        # true: execute the notebook at the cutoff, record whether it runs clean
+grader_pdf: false             # true: at the cutoff, archive each submission filtered to its marked questions as a PDF for graders

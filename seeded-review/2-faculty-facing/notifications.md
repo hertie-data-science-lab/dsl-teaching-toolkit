@@ -465,7 +465,8 @@ The CURRENT wording of every repo the pipeline seeds:
 | course `assignment-N-<tag>` | `Assignment {number} template` | `scaffold.py:473` | faculty |
 | `<org>.github.io` (both tiers) | `[do not touch]: Course website (auto-deployed)` | `scaffold.py:679` | both |
 | cohort `materials` | `Released lectures, labs, readings, & other materials` | `deploy.py:218` | student |
-| cohort `<slug>-<handle>` | `{slug} - submission repo` | `assign.py:393` | student |
+| cohort `<slug>-<handle>` | `{slug} - submission repo` | `assign.py:876` | student |
+| cohort `<slug>-submissions` (new: `submit_via: shared`) | `{slug} - shared submission drop box` | `assign.py:1165` | student (the whole cohort reads it) |
 | cohort `grades-<handle>` | `Private gradebook for @{handle}` | `grades.py:2158` | student (own repo only) |
 | cohort assignment template | `{slug} - cohort assignment template` | `assign.py:238` | faculty |
 
@@ -501,3 +502,62 @@ Low-visibility but permanent in history: `grades: update`, `init gradebook`,
 `add solution`, `release: sync materials into {repo}`, and - one commit, once per
 **Distribute grades** run - `grades: distribute ({n} comment(s), {n} gradebook(s), {n}
 email(s))` (`grades.py:2775-2778`).
+
+---
+
+## 12. Assignment `grading_config.yml` digest (new: assignment shapes)
+
+`config_digest.GRADING_CONFIG` (`dsl_course/config_digest.py`) is a pre-existing
+self-updating issue - one per cohort, in `classroom-config`, titled `assignment
+grading_config.yml has values that will not grade as written` - that this round adds three
+new faults to. It runs the same engine as section 6 (body rewritten whole every tick,
+comment on appear/escalate/clear, closes itself), keyed `assignments.{slug}`, cited as
+`` <assignment template>/grading_config.yml ``. Two of the three faults are TIME-BOUND (they
+climb the same ladder as section 6, off the assignment's own `grading_datetime` or due
+date); the third is immediate.
+
+**1. Visibility mismatch** (`grades._visibility_faults`) - the repos an assignment actually
+handed out no longer match its own `visibility:` line. Read once, at repo CREATION
+(`repos.set_visibility`); editing the file afterwards is a silent no-op, so this is what
+notices. Exempted where `visibility: student_choice` (the student, not the file, decides -
+see fault 2) and for any shape that creates no repo of its own (`external`, `shared`).
+
+```
+`visibility: public` does not describe the repos this assignment handed out - 3 of 20 are not public. The value is read when each repo is CREATED, so editing it afterwards moves nothing on its own
+```
+Fix text: `set \`visibility:\` back to what those repos are, or make each of them public by
+hand from its GitHub Settings - the toolkit never re-opens a repo it has already created`.
+
+**2. `ORG_SETTINGS`** (`grades._org_settings_faults`, `ORG_SETTINGS = "org settings"`) -
+ONE key for the whole cohort (not per assignment), asked only once some assignment in the
+plan is `visibility: student_choice` - that shape makes each student `admin` of their own
+repo, the only permission carrying GitHub's visibility switch, so the org's own two
+member-privilege switches (read-only via `GET /orgs/{org}`, web-only settings) have to
+agree with it:
+
+```
+an assignment in this cohort is handed out with `visibility: student_choice`, which makes each student an admin of their own repo - and **Allow members to delete or transfer repositories** is ON, so a student can delete or move their own submission and **Allow members to change repository visibilities** is OFF, so no student can publish their work and the shape does nothing for them
+```
+(Either clause appears alone when only one switch is wrong.) Fix text points at
+`https://github.com/organizations/{cohort_org}/settings/member_privileges` and
+`docs/DEPLOYMENT-CHECKLIST.md`.
+
+**3. Shared-shape advisory (`Dropped` warnings, `grades._cross_check`)** - not a
+`ConfigFault` of its own, but the same `Dropped` line every other refused
+`grading_config.yml` setting produces (section 6's sibling parse), surfaced through
+`grading_spec_faults` into this same digest. For `submit_via: shared`, every one of
+`autograde:`, `completion_check:` and `grader_pdf:` that is set true is force-corrected to
+`false` and reported once each:
+
+```
+`autograde:` is not read for a shared drop box - one repo holds the whole cohort's work, so it is hand-marked - ignored
+`completion_check:` is not read for a shared drop box - one repo holds the whole cohort's work, so it is hand-marked - ignored
+`grader_pdf:` is not read for a shared drop box - one repo holds the whole cohort's work, so it is hand-marked - ignored
+```
+`visibility:` is corrected the same way for both `shared` and `external` (`visibility:` is
+not read for a shared drop box.../says nothing about an assignment handed in off GitHub...
+- ignored), and `submit_url:` is corrected to blank for anything but `external` (`` `submit_url:`
+is only read for `submit_via: external` - ignored ``) - see the scaffolded
+`grading_config.yml` variants in `2-faculty-facing/assignment-repo/` for where each of
+these lines is seeded already commented out, so an instructor is unlikely to trip them by
+hand; they exist for a copied-forward or hand-edited file that sets one anyway.

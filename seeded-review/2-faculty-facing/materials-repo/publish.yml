@@ -1,0 +1,19 @@
+# INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
+# rewritten by the toolkit, so anything you put here stays.
+#
+# What the cohort site hosts PUBLICLY, so a rendered deck opens in a browser instead of
+# showing as source on GitHub. Same syntax as .gitignore, relative to this repo - or,
+# strictly, to the cohort's copy, so a release that renames a path with cohort_dest_path
+# needs the pattern written the way the COHORT repo has it. Anything unmatched stays
+# exactly as it is today: enrolled students open it on GitHub. A deck's
+# <name>_files/ bundle follows its deck. solution/, tests/, grading files and .env are
+# never copied whatever is written here. Applies to every cohort of this course. Edit,
+# then press Sync site (or wait for the next release / daily sync) - a file that does not
+# parse stops the sync and is reported, rather than quietly publishing nothing. Full rules:
+# https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/11-configure-cohort-site.md
+public:
+  - "**/*.html"
+  - "**/*.pdf"
+  - "!readings/**"
+  # - "labs/**/*.pdf"
+  # - "!lectures/09_*/**"      # keep one session private

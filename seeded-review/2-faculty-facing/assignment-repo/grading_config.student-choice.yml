@@ -1,20 +1,20 @@
 # INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's schedule.yml.
-title: Gradient descent       # the assignment's name, shown to graders and on the site
+title: Capstone               # the assignment's name, shown to graders and on the site
 type: individual              # individual | group
 # team_formation: self_select # self_select (students use the Join-team form) | assigned (you write teams.csv)
 # max_team_size: 5            # group only
 submit_via: github            # github (they push to their repo) | external (handed in elsewhere: Moodle, Kaggle, in class - no repo is created) | shared (one private repo for the whole cohort, each student pushes into their own folder, peers can read it)
 # submit_url: https://moodle.hertie-school.org/mod/assign/view.php?id=CHANGE-ME # external only: the `Submit on ...` button on the site (https only)
-visibility: private           # private (the student and the teaching team) | public (the whole internet: portfolio work, no Feedback issue) | student_choice (private, and the student is its admin: theirs to publish after the grading cutoff, and no Feedback issue) - read at hand-out only
+visibility: student_choice    # private (the student and the teaching team) | public (the whole internet: portfolio work, no Feedback issue) | student_choice (private, and the student is its admin: theirs to publish after the grading cutoff, and no Feedback issue) - read at hand-out only
 format: py                    # ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; grading reads whatever is in the repo
 
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
 #   Q1: 15                    # each blank in the grading sheet. The total is their sum;
 #   Q2: 10                    # there is no `points:` field anywhere.
 
-late_window_days: 7           # 0 or absent = nothing after the due date is accepted
-late_penalty_per_day: 10%     # of the EARNED grade, per day started
+# late_window_days: 7         # 0 or absent = nothing after the due date is accepted
+# late_penalty_per_day: 10%   # of the EARNED grade, per day started
 
-autograde: true               # true: run tests/ at the cutoff and show the count to graders
+autograde: false              # true: run tests/ at the cutoff and show the count to graders
 completion_check: false       # true: execute the notebook at the cutoff, record whether it runs clean
 grader_pdf: false             # true: at the cutoff, archive each submission filtered to its marked questions as a PDF for graders

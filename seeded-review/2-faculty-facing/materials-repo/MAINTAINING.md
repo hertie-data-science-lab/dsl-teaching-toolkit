@@ -35,7 +35,7 @@ The course org's [`.github` Actions tab](https://github.com/hertie-dsl-demo-cour
 | **Release materials** | Copy any path - session folders, root files - into a cohort's `materials` repo by default, or a destination path you name. |
 | **Release assignment** | Freeze an assignment template, then generate one private repo per student (or per team) in the cohort org. |
 | **New materials repo** | Scaffold a correctly structured materials repo; the release workflows come bootstrapped with it. |
-| **New assignment** | Scaffold an assignment template (starter + hidden autograder); the release workflows come bootstrapped with it. |
+| **New assignment** | Scaffold an assignment template (brief + starter(s); the `solution` branch holds the model answer and `grading_config.yml`); the release workflows come bootstrapped with it. |
 | **Refresh actions** | Re-seed the workflows and repopulate dropdowns after you add sessions/sections/repos. |
 | **Check cohort setup** | Read-only per-cohort checklist of what's configured - it says what still needs doing. |
 
