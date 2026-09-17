@@ -15,7 +15,7 @@ def test_an_internal_repo_is_not_a_private_one():
     # do NOT agree and this one is the strict half. `internal` is readable by every member
     # of the enterprise, and a mark the whole institution can read is a published mark -
     # so the one thing that rides on this answer, whether a grade may be posted into a
-    # repo's Feedback issue, has to come back no.
+    # repo's receipts issue, has to come back no.
     assert repos.listed_is_private({"visibility": "private"}) is True
     assert repos.listed_is_private({"visibility": "internal"}) is False
     assert repos.listed_is_private({"visibility": "public"}) is False

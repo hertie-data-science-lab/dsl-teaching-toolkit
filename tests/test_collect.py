@@ -113,14 +113,14 @@ def test_the_group_shape_reads_off_type_and_team_formation():
 
 def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
     # `submit_via` + `visibility` are the whole of the shape, and everything that follows
-    # from it - the Feedback issue, the submission arithmetic, whether there is a repo per
+    # from it - the receipts issue, the submission arithmetic, whether there is a repo per
     # unit at all - is DERIVED, never declared.
     spec = collect.parse_grading_spec("")
     assert (spec.submit_via, spec.visibility) == ("assignment_repo", "private")
-    assert spec.has_feedback_issue and spec.collects_commits
+    assert spec.has_receipts_issue and spec.collects_commits
     assert spec.creates_unit_repos
     external = collect.parse_grading_spec("submit_via: external\n")
-    assert not external.has_feedback_issue and not external.collects_commits
+    assert not external.has_receipts_issue and not external.collects_commits
     assert not external.creates_unit_repos
     assert capsys.readouterr().err == ""
 
@@ -137,7 +137,7 @@ def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
     # nowhere private to go, so the gradebook carries them instead.
     spec = collect.parse_grading_spec("visibility: public\n")
     assert spec.visibility == "public" and spec.submit_shape == "assignment-repo-public"
-    assert not spec.has_feedback_issue
+    assert not spec.has_receipts_issue
     assert spec.collects_commits and spec.creates_unit_repos
     assert capsys.readouterr().err == ""
 
@@ -145,13 +145,13 @@ def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
 def test_student_choice_is_read_back_and_hands_the_flag_to_the_student(capsys):
     # The repo is created private like any other; what is different is WHO owns the flag
     # afterwards. One predicate answers that, in `course.py` and nowhere else, so every
-    # exemption `student_choice` earns asks the same question. No Feedback issue either:
+    # exemption `student_choice` earns asks the same question. No receipts issue either:
     # a thread in a repo the student may publish tomorrow is a publishable mark.
     spec = collect.parse_grading_spec("visibility: student_choice\n")
     assert spec.visibility == "student_choice"
     assert spec.submit_shape == "assignment-repo-student-choice"
     assert spec.visibility_is_students
-    assert not spec.has_feedback_issue
+    assert not spec.has_receipts_issue
     assert spec.collects_commits and spec.creates_unit_repos
     assert capsys.readouterr().err == ""
 
@@ -173,7 +173,7 @@ def test_the_feedback_channel_over_every_pair_the_vocabulary_allows(
     # issue lives in the unit's own repo, so it exists exactly where there is one that
     # only that unit can read. Every other pair is answered by the gradebook, and adding
     # a word to either tuple without deciding this is what the parametrisation forbids.
-    assert course.has_feedback_issue(submit_via, visibility) is (
+    assert course.has_receipts_issue(submit_via, visibility) is (
         submit_via == "assignment_repo" and visibility == "private"
     )
 
@@ -188,9 +188,9 @@ def test_shared_collects_commits_without_a_repo_per_unit(capsys):
     assert spec.collects_commits
     assert not spec.creates_unit_repos
     assert spec.creates_repos
-    # No Feedback issue: the drop box is the whole cohort's, so nothing about one
+    # No receipts issue: the drop box is the whole cohort's, so nothing about one
     # student's marking may be written in it.
-    assert not spec.has_feedback_issue
+    assert not spec.has_receipts_issue
     assert spec.submit_shape == "shared-dropbox-repo"
     assert capsys.readouterr().err == ""
 
@@ -277,7 +277,7 @@ def test_the_legacy_github_spelling_reads_as_assignment_repo_with_no_warning(cap
     assert spec.dropped == ()
     assert capsys.readouterr().err == ""
     canonical = collect.parse_grading_spec("submit_via: assignment_repo\n")
-    assert spec.has_feedback_issue is canonical.has_feedback_issue is True
+    assert spec.has_receipts_issue is canonical.has_receipts_issue is True
     assert spec.collects_commits is canonical.collects_commits is True
     assert spec.creates_unit_repos is canonical.creates_unit_repos is True
     assert spec.submit_shape == canonical.submit_shape == "assignment-repo-private"
@@ -3712,7 +3712,7 @@ def _sheet_env(
     )
     # Receipts have their own tests below; here they are a no-op, so a sheet test does not
     # also have to stand up an issue per submission repo.
-    monkeypatch.setattr(collect.grades, "ensure_feedback_issue", lambda *a, **k: 1)
+    monkeypatch.setattr(collect.grades, "ensure_receipts_issue", lambda *a, **k: 1)
     monkeypatch.setattr(collect.grades, "post_receipt", lambda *a, **k: True)
     return written
 
@@ -4872,7 +4872,7 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     posted: list[tuple[str, str, bool]] = []
     monkeypatch.setattr(
         collect.grades,
-        "ensure_feedback_issue",
+        "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False, create=True: 7,
     )
     monkeypatch.setattr(
@@ -4956,7 +4956,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     opened: list[str] = []
     monkeypatch.setattr(
         collect.grades,
-        "ensure_feedback_issue",
+        "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False, create=True: opened.append(body) or 7,
     )
     assert collect.sync_sheet(
@@ -5038,7 +5038,7 @@ def test_nothing_is_posted_for_work_handed_in_off_github(monkeypatch):
 
     _sheet_env(monkeypatch, targets=SOLO_TARGETS, grading="submit_via: external\n")
     monkeypatch.setattr(collect.grades, "post_receipt", boom)
-    monkeypatch.setattr(collect.grades, "ensure_feedback_issue", boom)
+    monkeypatch.setattr(collect.grades, "ensure_receipts_issue", boom)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
 
 
@@ -5202,7 +5202,7 @@ def test_a_receipt_is_not_posted_when_the_sheet_write_was_refused(monkeypatch):
 
 def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
     # `visibility:` edited back to `private` after hand-out leaves the FILE saying there is
-    # a private Feedback thread in each repo and the repos themselves world-readable. A
+    # a private receipts thread in each repo and the repos themselves world-readable. A
     # receipt says when a student submitted; posting it there publishes it. The repo wins,
     # per repo - the student whose repo really is private is still told.
     _sheet_env(
@@ -5219,7 +5219,7 @@ def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     assert [repo for repo, _body, _dry in posted] == ["assignment-1-ben-k"]
     assert (
-        "assignment-1-ada-l - no Feedback thread this run may post in"
+        "assignment-1-ada-l - no receipts thread this run may post in"
         in capsys.readouterr().out
     )
 
@@ -6661,7 +6661,7 @@ def test_a_sheet_says_why_a_row_is_empty_when_the_walk_gave_up(monkeypatch):
 
 
 def test_a_shared_assignment_posts_no_receipts(monkeypatch):
-    # `has_feedback_issue` is false for it - one repo the whole cohort reads has nowhere
+    # `has_receipts_issue` is false for it - one repo the whole cohort reads has nowhere
     # private to acknowledge a push - so nothing is ever opened or posted into.
     targets = [Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/")]
     _sheet_env(
@@ -6680,8 +6680,8 @@ def test_a_shared_assignment_posts_no_receipts(monkeypatch):
     # AFTER `_sheet_env`, whose own no-op receipt stubs this must win over.
     monkeypatch.setattr(
         collect.grades,
-        "ensure_feedback_issue",
-        lambda *a, **k: pytest.fail("a shared drop box has no Feedback issue"),
+        "ensure_receipts_issue",
+        lambda *a, **k: pytest.fail("a shared drop box has no receipts issue"),
     )
     monkeypatch.setattr(
         collect.grades,

@@ -44,7 +44,7 @@ def _empty_cohort_listing(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def feedback_issues(monkeypatch):
-    """The Feedback issue each new submission repo gets, recorded as `(repo, body)`.
+    """The receipts issue each new submission repo gets, recorded as `(repo, body)`.
 
     Its own tests live in tests/test_grades.py; the assignment tests care only that one is
     opened, on the create path, with this assignment's facts in it."""
@@ -56,7 +56,7 @@ def feedback_issues(monkeypatch):
     )
     monkeypatch.setattr(
         assign.grades,
-        "ensure_feedback_issue",
+        "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False: opened.append((repo, body)) or 1,
     )
     return opened
@@ -459,7 +459,7 @@ def test_the_new_repo_status_says_its_feedback_issue_never_opened(
 ):
     _provision_one_env(monkeypatch)
     monkeypatch.setattr(
-        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+        assign.grades, "ensure_receipts_issue", lambda *a, **k: grades.LOOKUP_FAILED
     )
     assert (
         assign.provision_one(
@@ -470,7 +470,7 @@ def test_the_new_repo_status_says_its_feedback_issue_never_opened(
             ["ada-l"],
             "assignment-1",
             existing={},
-            feedback_body="BODY",
+            receipts_thread_body="BODY",
         )
         == "failed-no-feedback-issue"
     )
@@ -483,7 +483,7 @@ def test_a_failed_solution_push_still_wins_over_a_missing_feedback_issue(
     # must never be masked is the push that did not happen.
     _provision_one_env(monkeypatch)
     monkeypatch.setattr(
-        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+        assign.grades, "ensure_receipts_issue", lambda *a, **k: grades.LOOKUP_FAILED
     )
     monkeypatch.setattr(assign, "_wait_for_content", lambda *a, **k: True)
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
@@ -497,7 +497,7 @@ def test_a_failed_solution_push_still_wins_over_a_missing_feedback_issue(
             "assignment-1",
             tmp_path,
             existing={},
-            feedback_body="BODY",
+            receipts_thread_body="BODY",
         )
         == "failed-solution"
     )
@@ -1846,7 +1846,7 @@ def test_a_solution_holding_a_symlink_still_pushes(tmp_path, monkeypatch):
     assert assign.push_solution("COHORT", "a1-ada", sol) is True
 
 
-# ---------------------------------------------------------------- the Feedback issue
+# ---------------------------------------------------------------- the receipts issue
 
 
 def _provision_one_env(monkeypatch):
@@ -1868,7 +1868,7 @@ def test_a_new_submission_repo_gets_its_feedback_issue(monkeypatch, feedback_iss
         ["ada-l"],
         "assignment-1",
         existing={},
-        feedback_body="BODY",
+        receipts_thread_body="BODY",
     )
     assert feedback_issues == [("assignment-1-ada-l", "BODY")]
 
@@ -1889,7 +1889,7 @@ def test_an_existing_repo_is_never_probed_for_its_feedback_issue(
         "assignment-1",
         touch_existing=True,
         existing={"assignment-1-ada-l": {"name": "assignment-1-ada-l", "topics": []}},
-        feedback_body="BODY",
+        receipts_thread_body="BODY",
     )
     assert feedback_issues == []
 
@@ -2024,7 +2024,7 @@ def test_the_handout_composes_one_feedback_body_per_team(
     monkeypatch.setattr(
         assign,
         "provision_one",
-        lambda *a, **k: bodies.append(k["feedback_body"]) or "ok",
+        lambda *a, **k: bodies.append(k["receipts_thread_body"]) or "ok",
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
@@ -2137,7 +2137,7 @@ def _cohort(monkeypatch, live: dict[str, dict[str, bytes]], corrected=None):
 
     monkeypatch.setattr(assign, "put_files", fake_put_files)
     monkeypatch.setattr(
-        assign.grades, "find_feedback_issue", lambda org, repo: (7, "open")
+        assign.grades, "find_receipts_issue", lambda org, repo: (7, "open")
     )
     monkeypatch.setattr(
         assign.grades, "post_marked_comment", lambda *a, **k: notes.append(a) or True
@@ -2545,7 +2545,7 @@ def test_the_marker_changes_when_the_correction_does():
 # ------------------------------------------- an assignment handed in somewhere else
 #
 # `submit_via: external` creates NOTHING in the cohort org: no frozen template, no repo per
-# student, no Feedback issue. What it still owes the cohort is the record of the handout,
+# student, no receipts issue. What it still owes the cohort is the record of the handout,
 # the grading sheet, a gradebook each and the site.
 
 
@@ -2730,7 +2730,7 @@ def test_an_unscheduled_external_release_is_refused_and_writes_nothing(
 # `visibility: public` creates the same repos world-readable. Two things follow, and both
 # are DERIVED: the generate endpoint takes `private` and nothing else, so the repo is born
 # private and flipped; and nothing about a student's marking may be written where the
-# internet can read it, so there is no Feedback issue.
+# internet can read it, so there is no receipts issue.
 
 
 @pytest.fixture
@@ -2930,7 +2930,7 @@ def test_a_student_choice_handout_opens_no_feedback_issue(
         "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
     ) == (0, True)
     assert feedback_issues == []
-    assert [k["feedback_body"] for k in seen] == [""]
+    assert [k["receipts_thread_body"] for k in seen] == [""]
     assert [k["visibility"] for k in seen] == ["student_choice"]
 
 
@@ -2956,7 +2956,7 @@ def test_a_public_handout_opens_no_feedback_issue(
         "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
     ) == (0, True)
     assert feedback_issues == []
-    assert [k["feedback_body"] for k in seen] == [""]
+    assert [k["receipts_thread_body"] for k in seen] == [""]
     assert [k["visibility"] for k in seen] == ["public"]
 
 
@@ -2964,7 +2964,7 @@ def test_a_public_handout_opens_no_feedback_issue(
 #
 # `submit_via: shared_dropbox_repo` freezes the cohort template as usual - the brief lives there - and
 # then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
-# no repo per unit, so there is no Feedback issue, no receipt and no model solution; and
+# no repo per unit, so there is no receipts issue, no receipt and no model solution; and
 # the drop box's existence is not the record a per-unit repo's is, so the grant loop
 # re-runs every tick and asks who is granted already.
 

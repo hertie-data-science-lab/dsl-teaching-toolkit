@@ -2,7 +2,7 @@
 
 An assignment's SHAPE is `submit_via` x `visibility`, and the five combinations the engine
 acts on behave differently at every stage of the pipeline: what the handout creates, where
-a student pushes, whether there is a Feedback issue, what the site page says. A harness
+a student pushes, whether there is a receipts issue, what the site page says. A harness
 that drove one of them proved the wiring for one of them.
 
 So the run hands out FIVE assignments in one pass, serially, over the same roster and the
@@ -70,9 +70,9 @@ class Shape:
         return course.collects_commits(self.submit_via)
 
     @property
-    def has_feedback_issue(self) -> bool:
-        """Whether a student's feedback has a Feedback issue to go on."""
-        return course.has_feedback_issue(self.submit_via, self.visibility or "private")
+    def has_receipts_issue(self) -> bool:
+        """Whether a student's feedback has a receipts issue to go on."""
+        return course.has_receipts_issue(self.submit_via, self.visibility or "private")
 
     @property
     def submit_shared(self) -> bool:

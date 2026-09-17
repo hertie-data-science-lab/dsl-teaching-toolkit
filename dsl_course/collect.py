@@ -1560,21 +1560,21 @@ def _post_receipts(
     dry_run: bool,
     changed: bool = True,
 ) -> None:
-    """Tell each student what we recorded for them, in their own repo's Feedback issue.
+    """Tell each student what we recorded for them, in their own repo's receipts issue.
 
     Never fatal: a receipt is a courtesy, and a repo whose issue cannot be opened must not
     stop the sheet - which is the record - from being written. Nothing at all where the
-    assignment has no Feedback issue to post into: work handed in off GitHub has no push to
+    assignment has no receipts issue to post into: work handed in off GitHub has no push to
     acknowledge, and a shape whose repo is not the student's own has nowhere private to say
     it. No mark is lost either way - marks go to the gradebook and never to a repo.
 
     That gate is the FILE's answer, and the loop below asks the LIVE one -
-    `grades.feedback_thread`. The two can disagree: `visibility:` edited back to `private`
+    `grades.receipts_thread`. The two can disagree: `visibility:` edited back to `private`
     after hand-out leaves the file saying there is a private thread here and the cohort's
     repos world-readable, and this would open one in each of them and post a student's
     submission times where the internet can read them. The repo wins. (The digest reports the disagreement itself - `grades._visibility_faults`; this
     is what keeps it from costing anything meanwhile.)"""
-    if not spec.has_feedback_issue:
+    if not spec.has_receipts_issue:
         return
     posted = 0
     for target in targets:
@@ -1601,12 +1601,12 @@ def _post_receipts(
         # Nothing weaker than "this repo is in the listing and the listing says it is
         # private" may be posted into. Off the rows this pass already holds, so the guard
         # costs no call.
-        issue = grades.feedback_thread(
+        issue = grades.receipts_thread(
             spec, cohort_org, repo, unit, target.members, listing, dry_run=dry_run
         )
         if issue is None:
             log_person(
-                f"    [skip] receipt on {cohort_org}/{repo} - no Feedback thread this "
+                f"    [skip] receipt on {cohort_org}/{repo} - no receipts thread this "
                 f"run may post in"
             )
             continue

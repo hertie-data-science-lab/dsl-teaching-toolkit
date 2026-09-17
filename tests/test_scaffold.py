@@ -739,7 +739,7 @@ def test_the_visibility_box_lands_in_the_file_the_handout_reads(fake, monkeypatc
     assert "\nvisibility: public" in public
     spec = grades.parse_grading_spec(public)
     assert spec.visibility == "public" and spec.dropped == ()
-    assert not spec.has_feedback_issue  # derived, never declared
+    assert not spec.has_receipts_issue  # derived, never declared
 
 
 def test_student_choice_lands_in_the_file_and_names_the_word_it_writes(
@@ -759,7 +759,7 @@ def test_student_choice_lands_in_the_file_and_names_the_word_it_writes(
     assert "\nvisibility: student_choice" in text
     spec = grades.parse_grading_spec(text)
     assert spec.visibility == "student_choice" and spec.dropped == ()
-    assert spec.visibility_is_students and not spec.has_feedback_issue
+    assert spec.visibility_is_students and not spec.has_receipts_issue
     # And the seeded line teaches its own vocabulary: every value the reader takes is
     # named in the comment beside it, or the file offers an instructor two of three.
     (line,) = [ln for ln in text.splitlines() if ln.startswith("visibility:")]

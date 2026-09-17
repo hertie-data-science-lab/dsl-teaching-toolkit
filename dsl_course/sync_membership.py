@@ -180,9 +180,9 @@ def sync(
             # one form for an assignment the template says is individual.
             errors += 0 if write_team_lock(course_org, org, dry_run=dry_run) else 1
             # A private gradebook per onboarded student, from the moment they onboard
-            # rather than from the first distribute: it is where feedback goes for every
-            # shape that has no Feedback issue, and the assignment brief points at it from
-            # the day it is published. Idempotent, one cohort listing.
+            # rather than from the first distribute: it is where every shape's marks and
+            # feedback go, and the assignment brief points at it from the day it is
+            # published. Idempotent, one cohort listing.
             # The ONE caller that bounds it: this run has 30 minutes for every cohort
             # at once and nothing waiting on the repos it makes, so a cohort that would
             # overrun stops and the next night takes the next batch.

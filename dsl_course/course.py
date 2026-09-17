@@ -113,8 +113,8 @@ def canonical_submit_via(value: object) -> str:
 # THE `shared_dropbox_repo` rationale, written down once so the five places that act on it
 # can point here instead of arguing it out again and drifting: a drop box is ONE repo that
 # the whole cohort reads, and no student can opt out of being in it. Everything that would
-# otherwise be written per unit therefore has nowhere private to go - no Feedback issue and
-# no receipt (`has_feedback_issue`), no model solution (`can_hold_solution`), and no
+# otherwise be written per unit therefore has nowhere private to go - no receipts issue
+# at all (`has_receipts_issue`), no model solution (`can_hold_solution`), and no
 # `visibility:` to choose (v1 keeps it private, because `public` would publish every
 # student's submission on the strength of one instructor's line). It is hand-marked for a
 # different reason: the autograder and the grader's reading copy run per UNIT against the
@@ -177,8 +177,8 @@ def github_visibility(visibility: str) -> str:
     return "public" if visibility == "public" else "private"
 
 
-def has_feedback_issue(submit_via: str, visibility: str) -> bool:
-    """Whether the submission receipts have a Feedback issue to go on.
+def has_receipts_issue(submit_via: str, visibility: str) -> bool:
+    """Whether this shape has a receipts issue at all.
 
     DERIVED from the shape, never configured: the issue lives in the unit's own repo, so it
     exists exactly where there is one that only that unit can read. A shape without one
@@ -372,7 +372,7 @@ COHORT_TEAMS = (
 ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
 
 
-# ------------------------------------------------------------------ the Feedback issue
+# ------------------------------------------------------------------ the receipts issue
 
 # Every submission repo carries ONE issue, opened at handout, where the student's
 # submission receipts appear. Marks and feedback are not posted here and never reach a
@@ -380,17 +380,17 @@ ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
 # student has to know. The contract lives here, at layer 0, because `assign` opens the
 # issue and `collect` posts into it, and the two must agree on the spelling or the second
 # one opens a duplicate.
-FEEDBACK_ISSUE_TITLE = "Submission receipts"
+RECEIPTS_ISSUE_TITLE = "Submission receipts"
 # The label and the marks keep the word `feedback` on purpose. They are not read by anyone:
 # they are what the lookup MATCHES against live issues, so changing either makes every
 # thread opened under the old one invisible and a second one appears over it. The lookup is
 # label, then mark, then title - the title is the weakest rung, which is what lets it be
 # renamed at all.
-FEEDBACK_ISSUE_LABEL = "dsl-feedback"
+RECEIPTS_ISSUE_LABEL = "dsl-feedback"
 # A tuple, like `gh_contents.STUB_MARKS`: an issue opened under an older wording must still
 # be RECOGNISED, so a mark is added to the chain, never edited. Recognition is what stops a
-# second Feedback issue appearing in a repo that already has one.
-FEEDBACK_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
+# second receipts issue appearing in a repo that already has one.
+RECEIPTS_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
 
 _SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
@@ -408,13 +408,13 @@ RECEIPT_UPDATED = "updated"
 RECEIPT_FROZEN = "frozen"
 
 
-def feedback_issue_body(
+def receipts_issue_body(
     *,
     due_display: str,
     late_policy_line: str = "",
     team_line: str = "",
 ) -> str:
-    """The body of a submission repo's Feedback issue - what the thread is FOR.
+    """The body of a submission repo's receipts issue - what the thread is FOR.
 
     It says where the work goes and what will be posted here, and nothing about marks: a
     student has one address for those, their private gradebook, and a repo they may be
@@ -424,11 +424,11 @@ def feedback_issue_body(
     and its members; every word of boilerplate is here, so the two variants cannot drift
     apart in two call sites.
 
-    There is no variant for an assignment handed in off GitHub: a Feedback issue exists
-    only where the shape HAS one (`has_feedback_issue`), and no run ever opens one for any
-    other shape (`grades.feedback_thread_policy`), so a body describing one would be words
+    There is no variant for an assignment handed in off GitHub: a receipts issue exists
+    only where the shape HAS one (`has_receipts_issue`), and no run ever opens one for any
+    other shape (`grades.receipts_thread_policy`), so a body describing one would be words
     nobody could reach."""
-    lines = [FEEDBACK_ISSUE_MARKS[0], f"**Due:** {due_display}"]
+    lines = [RECEIPTS_ISSUE_MARKS[0], f"**Due:** {due_display}"]
     if late_policy_line:
         lines.append(f"**Late work:** {late_policy_line}")
     if team_line:

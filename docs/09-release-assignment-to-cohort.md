@@ -182,7 +182,7 @@ What a real run does:
   matches the frozen cohort-side hand-out their repo was generated from;
 - patches that frozen hand-out too, so a student who onboards tomorrow is given the
   corrected file rather than the one everybody else was just patched off;
-- posts one note on each patched repo's **Feedback** issue: *"The teaching team updated
+- posts one note on each patched repo's **Submission receipts** issue: *"The teaching team updated
   `starter.ipynb` in this repository on 2026-10-14; pull before you continue. Your own
   commits are untouched."* A second press that changes nothing says nothing.
 

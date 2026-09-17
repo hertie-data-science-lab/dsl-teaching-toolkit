@@ -975,7 +975,7 @@ def test_the_config_the_harness_writes_parses_to_the_shape_it_meant(shape):
     assert spec.submit_via == shape.submit_via
     assert spec.submit_shape == shape.key
     assert spec.submit_url == shape.submit_url
-    assert spec.has_feedback_issue is shape.has_feedback_issue
+    assert spec.has_receipts_issue is shape.has_receipts_issue
     assert spec.creates_unit_repos is shape.creates_unit_repos
 
 
@@ -1288,7 +1288,7 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     monkeypatch.setattr(module.gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(module.schedule_edit, "put_schedule", lambda *a, **k: True)
     monkeypatch.setattr(module.discovery, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(module.grades, "find_feedback_issue", lambda org, repo: None)
+    monkeypatch.setattr(module.grades, "find_receipts_issue", lambda org, repo: None)
     monkeypatch.setattr(
         module.repos,
         "direct_collaborators",

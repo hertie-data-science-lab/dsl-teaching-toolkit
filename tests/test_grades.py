@@ -195,7 +195,7 @@ def _endpoint(args) -> str:
 def test_a_failed_label_or_collaborator_grant_names_nobody_publicly(
     monkeypatch, capsys
 ):
-    # Both are called once per SUBMISSION repo now (the Feedback issue's label, and the
+    # Both are called once per SUBMISSION repo now (the receipts issue's label, and the
     # student's own grant), so both name a `<slug>-<handle>` repo on failure.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
@@ -677,7 +677,7 @@ def _distribute(
     )
     # The cohort listing distribute takes to check what each repo is: there, and private.
     # None is "could not be read", which is a listing nothing may be CREATED on the
-    # strength of (`grades.feedback_thread_policy`).
+    # strength of (`grades.receipts_thread_policy`).
     monkeypatch.setattr(grades, "listing_by_name", lambda org: listed)
     monkeypatch.setattr(grades, "course_org_for_cohort", lambda org: "COURSE")
     monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: grading)
@@ -688,7 +688,7 @@ def _distribute(
     )
     monkeypatch.setattr(
         grades,
-        "ensure_feedback_issue",
+        "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False, create=True: (
             (effects["issues"].append((repo, body)) or issue) if create else found_issue
         ),
@@ -1250,7 +1250,7 @@ def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
 
 _EXTERNAL_GRADING = _GRADING_YML + "submit_via: external\n"
 
-# The four shapes with no Feedback issue of their own. They used to be the interesting
+# The four shapes with no receipts issue of their own. They used to be the interesting
 # half of distribute - each one a thread it must not post into - and they are ordinary
 # now: a mark goes to the gradebook whatever the shape, so there is one thing to prove.
 _NO_THREAD_SHAPES = (
@@ -1401,13 +1401,13 @@ def test_an_assignment_that_collects_nothing_is_never_warned_about(
         # We could not look at all: find the thread the student was told to read, open
         # nothing on an org nobody could list.
         ({}, None, grades.THREAD_FIND),
-        # There, and private: the one case a Feedback issue may be OPENED in.
+        # There, and private: the one case a receipts issue may be OPENED in.
         ({}, {"assignment-1-ada": "private"}, grades.THREAD_CREATE),
         # There, and not private. Nothing about a student's marking goes where the world
         # can read it - not even into a thread we used while it was still private.
         ({}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
         ({"visibility": "public"}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
-        # There and private, but a shape with no Feedback issue of its own: the thread a
+        # There and private, but a shape with no receipts issue of its own: the thread a
         # cohort handed out before these shapes existed still gets its comment.
         ({"visibility": "public"}, {"assignment-1-ada": "private"}, grades.THREAD_FIND),
         (
@@ -1437,7 +1437,7 @@ def test_the_feedback_thread_policy_answers_every_shape(shape, listed, want):
         if listed is None
         else {name: repo_row(name, visibility=v) for name, v in listed.items()}
     )
-    assert grades.feedback_thread_policy(spec, rows, "assignment-1-ada") == want
+    assert grades.receipts_thread_policy(spec, rows, "assignment-1-ada") == want
 
 
 def test_a_spec_read_off_the_sheet_alone_never_opens_an_issue():
@@ -1447,7 +1447,7 @@ def test_a_spec_read_off_the_sheet_alone_never_opens_an_issue():
     spec = grades._spec_from_sheet("assignment-1", {"submissions": {}})
     rows = {"assignment-1-ada": repo_row("assignment-1-ada")}
     assert (
-        grades.feedback_thread_policy(spec, rows, "assignment-1-ada")
+        grades.receipts_thread_policy(spec, rows, "assignment-1-ada")
         is grades.THREAD_FIND
     )
 

@@ -108,8 +108,8 @@ def listed_is_private(row: dict | None) -> bool:
     `private` - GitHub sets that on an `internal` repo too, and an `internal` repo is
     readable by every member of the enterprise. This reads `visibility`, so `internal`
     answers False. That is the answer its caller needs: what rides on it is whether a
-    student's marks may be posted into a repo's Feedback issue, and a mark read by the
-    whole institution is a published mark. `internal` is not a visibility the toolkit
+    student's submission receipts may be posted into a repo's issue, and a hand-in time
+    read by the whole institution is a published fact about that student. `internal` is not a visibility the toolkit
     hands out (`course.VISIBILITIES`); when it is, this still will not treat it as private.
 
     A row that is not there at all answers private, so a listing that could not be read

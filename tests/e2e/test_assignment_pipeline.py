@@ -457,17 +457,17 @@ def _sheet(slug: str) -> str:
     )
 
 
-def _feedback_issue(repo: str):
-    """This repo's Feedback issue, as `grades` finds it: `(number, state)`, None where
+def _receipts_issue(repo: str):
+    """This repo's receipts issue, as `grades` finds it: `(number, state)`, None where
     there is none (a repo with no issue, and a shape with no repo alike), or the
     `LOOKUP_FAILED` sentinel - which is deliberately NOT collapsed into None, because
     "there is no issue" is exactly what four of the five shapes are asserting."""
-    return grades.find_feedback_issue(COHORT_ORG, repo) if repo else None
+    return grades.find_receipts_issue(COHORT_ORG, repo) if repo else None
 
 
-def _feedback_comments(repo: str) -> list[str]:
-    """Every comment on a submission repo's Feedback issue, oldest first."""
-    found = _feedback_issue(repo)
+def _issue_comments(repo: str) -> list[str]:
+    """Every comment on a submission repo's receipts issue, oldest first."""
+    found = _receipts_issue(repo)
     if not isinstance(found, tuple):
         return []
     return ghcli.gh_json(
@@ -686,8 +686,8 @@ def _distributed(name: str, dry_run: bool, run_id: str, who: str) -> Stage:
         log=pressed.log,
         detail={
             "after": _shared_state(who),
-            "comments": _per_shape(lambda s: _feedback_comments(s.repo(run_id, who))),
-            "issues": _per_shape(lambda s: _feedback_issue(s.repo(run_id, who))),
+            "comments": _per_shape(lambda s: _issue_comments(s.repo(run_id, who))),
+            "issues": _per_shape(lambda s: _receipts_issue(s.repo(run_id, who))),
         },
     )
 
@@ -750,7 +750,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
         detail={
             "listing": listing,
             "sheets": _per_shape(lambda s: _sheet(shapes.slug(run_id, s))),
-            "issues": _per_shape(lambda s: _feedback_issue(s.repo(run_id, who))),
+            "issues": _per_shape(lambda s: _receipts_issue(s.repo(run_id, who))),
             "pages": _per_shape(lambda s: _site_page(shapes.slug(run_id, s))),
             # The gradebook the marks will land in, asked for BEFORE anything distributes:
             # that is the promise the external brief makes on day one.
@@ -787,7 +787,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
         detail={
             "listing": _listing(),
             "sheets": _per_shape(lambda s: _sheet(shapes.slug(run_id, s))),
-            "comments": _per_shape(lambda s: _feedback_comments(s.repo(run_id, who))),
+            "comments": _per_shape(lambda s: _issue_comments(s.repo(run_id, who))),
         },
     )
 
@@ -995,12 +995,12 @@ def test_a_feedback_issue_exists_only_where_the_shape_has_one(pipeline, shape):
     # that could open one.
     for when in ("at_handout", "distribute"):
         found = pipeline.stages[when].detail["issues"][shape.name]
-        if shape.has_feedback_issue:
+        if shape.has_receipts_issue:
             assert isinstance(found, tuple), (
-                f"{shape.name} has no Feedback issue ({when})"
+                f"{shape.name} has no receipts issue ({when})"
             )
         else:
-            assert found is None, f"{shape.name} was given a Feedback issue ({when})"
+            assert found is None, f"{shape.name} was given a receipts issue ({when})"
 
 
 @pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
@@ -1150,7 +1150,7 @@ def test_the_due_date_posts_one_submission_receipt(pipeline):
 
 
 def test_only_a_shape_with_a_thread_gets_a_receipt(pipeline):
-    # The receipt rides on the Feedback issue, so the four shapes without one are silent
+    # The receipt rides on the receipts issue, so the four shapes without one are silent
     # by construction. Measured rather than assumed: `_post_receipts` asks the live
     # visibility too, and a receipt posted into a public repo is a hand-in time published.
     for shape in shapes.SHAPES:
@@ -1251,7 +1251,7 @@ def test_publishing_after_the_cutoff_stands(pipeline):
 
 def test_an_external_assignment_creates_nothing(pipeline):
     # The bug this shape exists to fix: 33 private repos in a live cohort that held
-    # nothing but a Feedback issue, for an assignment handed in on Moodle.
+    # nothing but a receipts issue, for an assignment handed in on Moodle.
     assert pipeline.repo(EXTERNAL) == ""
     listing = pipeline.stages["at_handout"].detail["listing"]
     slug = pipeline.slug(EXTERNAL)
