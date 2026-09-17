@@ -498,11 +498,25 @@ def _role(repo: str, handle: str) -> str:
     return out.strip()
 
 
+PLAN_REFUSED = "plan-refused"
+
+
 def _ruleset_names(repo: str) -> list[str]:
-    """Every branch ruleset on `repo`, by name."""
-    return ghcli.gh_json(
-        "api", f"repos/{COHORT_ORG}/{repo}/rulesets?per_page=100", "--jq", "[.[].name]"
-    )
+    """Every branch ruleset on `repo`, by name - or `[PLAN_REFUSED]` where the org's plan
+    has no rulesets on private repos (GitHub Free), which is what every Hertie org runs
+    until the Education upgrade. The toolkit warns and hands out anyway in that case, so
+    the harness records the refusal rather than failing the walk on it."""
+    try:
+        return ghcli.gh_json(
+            "api",
+            f"repos/{COHORT_ORG}/{repo}/rulesets?per_page=100",
+            "--jq",
+            "[.[].name]",
+        )
+    except RuntimeError as exc:
+        if repos.plan_refused_rulesets(str(exc)):
+            return [PLAN_REFUSED]
+        raise
 
 
 def _site_page(slug: str) -> str:
@@ -1303,7 +1317,11 @@ def test_the_drop_box_cannot_be_force_pushed_or_deleted(pipeline):
     # Every student in the cohort has push on this one repo. Without the ruleset, one of
     # them can erase the whole cohort's work - and the frozen snapshot then pins commits
     # that no longer exist.
-    assert repos.DROP_BOX_RULESET in pipeline.stages["artefacts"].detail["rulesets"]
+    names = pipeline.stages["artefacts"].detail["rulesets"]
+    # Free orgs cannot carry a ruleset on a private repo; the toolkit warns and the
+    # handout stays green. Either the ruleset is there or the plan refused it - never
+    # a silent absence.
+    assert repos.DROP_BOX_RULESET in names or names == [PLAN_REFUSED], names
 
 
 def test_the_freeze_pins_the_students_own_folder(pipeline):

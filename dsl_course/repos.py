@@ -245,6 +245,16 @@ def allow_forking(org: str, name: str) -> bool:
 DROP_BOX_RULESET = "dsl-drop-box"
 
 
+# GitHub's refusal when a plan feature is asked of a private repo on Free; the same
+# sentence for rulesets, required reviewers and protected branches.
+_PLAN_REFUSAL = "upgrade to github pro or make this repository public"
+
+
+def plan_refused_rulesets(out: str) -> bool:
+    """Whether a rulesets call was refused because the org's PLAN lacks the feature."""
+    return _PLAN_REFUSAL in out.lower()
+
+
 def protect_shared_repo(org: str, name: str) -> bool:
     """Stop the default branch of a shared drop box being force-pushed or deleted.
 
@@ -299,6 +309,17 @@ def protect_shared_repo(org: str, name: str) -> bool:
     )
     if code == 0:
         log_ok(f"{org}/{name} cannot be force-pushed or deleted")
+        return True
+    if plan_refused_rulesets(out):
+        # Rulesets on a PRIVATE repo are a GitHub Team feature; every Hertie org is on Free
+        # until the Education upgrade lands. Not a failed handout: the drop box works, it is
+        # merely unprotected, and the next tick's POST succeeds the day the plan changes.
+        log_err(
+            f"{org}/{name} is NOT protected against force-push: rulesets on a private repo "
+            f"need GitHub Team (the org is on Free). Every student in the cohort has push, "
+            f"so a force-push could rewrite the cohort's work - git history is the only "
+            f"safety net until the plan is upgraded."
+        )
         return True
     log_err(
         f"could not protect {org}/{name} against force-push and deletion: {out[:160]}. "

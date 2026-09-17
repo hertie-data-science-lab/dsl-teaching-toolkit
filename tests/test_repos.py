@@ -374,3 +374,29 @@ def test_direct_collaborators_cannot_answer_when_either_listing_fails(
     assert "could not read Cohort/assignment-3-submissions's collaborators" in (
         capsys.readouterr().err
     )
+
+
+def test_a_plan_refusal_of_the_drop_box_ruleset_warns_but_does_not_fail(
+    monkeypatch, capsys
+):
+    """Rulesets on a private repo need GitHub Team; on Free the handout must stay green
+    and say plainly that the drop box is unprotected."""
+    calls = []
+
+    def fake_gh(*args, stdin=None):
+        calls.append(args)
+        return (
+            1,
+            "gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)",
+        )
+
+    monkeypatch.setattr(repos, "gh", fake_gh)
+    assert repos.protect_shared_repo("org", "a1-submissions") is True
+    err = capsys.readouterr().err
+    assert "NOT protected" in err and "GitHub Team" in err
+    assert len(calls) == 2  # the read, then the refused POST
+
+
+def test_any_other_ruleset_failure_is_still_counted(monkeypatch, capsys):
+    monkeypatch.setattr(repos, "gh", lambda *a, stdin=None: (1, "HTTP 502 bad gateway"))
+    assert repos.protect_shared_repo("org", "a1-submissions") is False
