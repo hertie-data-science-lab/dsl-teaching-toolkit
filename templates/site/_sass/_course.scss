@@ -394,6 +394,13 @@
     .profile-buttons {
         margin: 0 0 0.4em 0;
 
+        /* A little air around the step button: off the hint above it and off the one
+           beneath, so it reads as the step's one action rather than a word in a run of
+           text. */
+        .btn {
+            display: inline-block;
+            margin: 0.5em 0 0.6em 0;
+        }
         .profile-hint {
             display: block;
         }

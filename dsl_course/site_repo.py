@@ -359,8 +359,7 @@ _THEME_PAGES = (
         # The same slot as every other page's access rule, and this page has one of its
         # own: it is the only page that holds anything of the reader's, and it holds it
         # where nobody else - faculty included - can reach it.
-        "Saved in this browser and sent nowhere; fill it in once and every file on this "
-        "site offers to open in your own fork or your own clone.",
+        "Saved in your local browser only.",
         cohort_only=True,
     ),
 )

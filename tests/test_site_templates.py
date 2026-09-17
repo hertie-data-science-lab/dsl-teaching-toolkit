@@ -864,17 +864,40 @@ def test_the_profile_page_is_four_numbered_steps_in_the_order_they_happen():
     ]
 
 
-def test_the_folder_fields_default_to_one_folder_per_repo():
+def test_the_folder_fields_default_to_one_folder_per_repo_under_this_cohort():
     # The path a student is most likely to want, spelt out rather than described: the
     # clone itself, not the folder it sits in. `localUrl` accepts either - a folder that
     # already ends in the repo name does not get it twice - so the placeholder can be the
-    # more useful of the two.
+    # more useful of the two. It sits under a folder named for the cohort org, so a
+    # student on two courses is not steered into cloning two `materials` into one place.
     body = _strip_comments(_profile())
     placeholders = dict(
         re.findall(r'id="dsl-(materials|assignments)"[^>]*?placeholder="([^"]+)"', body)
     )
-    assert placeholders["materials"].endswith("/repositories/materials")
-    assert placeholders["assignments"].endswith("/repositories/assignments")
+    assert placeholders["materials"].endswith(
+        "/repositories/{{ site.github_org }}/materials"
+    )
+    assert placeholders["assignments"].endswith(
+        "/repositories/{{ site.github_org }}/assignments"
+    )
+
+
+def test_the_folder_examples_are_respelt_for_the_readers_platform():
+    # The placeholders ship as macOS spells a home folder; the script swaps that prefix for
+    # the Windows or Linux one where the browser can name the platform, and turns the
+    # separators round for Windows. A Windows student shown `/Users/j.doe/...` typed it in
+    # verbatim and got a path no editor could open.
+    body = _strip_comments(_profile())
+    placeholders = re.findall(
+        r'id="dsl-(?:materials|assignments)"[^>]*?placeholder="([^"]+)"', body
+    )
+    assert all(p.startswith("/Users/j.doe/Documents/") for p in placeholders)
+    assert 'var MAC_HOME = "/Users/j.doe/Documents";' in body
+    assert 'win: "C:\\\\Users\\\\j.doe\\\\Documents"' in body
+    assert 'linux: "/home/j.doe"' in body
+    ready = body.split("api.ready(function () {")[1]
+    assert "examples.materials = localExample(examples.materials);" in ready
+    assert "examples.assignments = localExample(examples.assignments);" in ready
 
 
 def test_nothing_is_stored_until_save_is_pressed():
