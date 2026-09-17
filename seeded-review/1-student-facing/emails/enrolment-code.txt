@@ -10,7 +10,7 @@ and paste this enrolment code when asked:
 
     dsl-k7qp2m
 
-Whichever GitHub account opens the issue is linked to your hertie email address automatically.
+Whichever GitHub account opens the issue is linked to your Hertie email address automatically.
 
 === course name UNRESOLVED - the degraded wording a real send produces ===
 Subject: Your course enrolment code
@@ -24,4 +24,4 @@ and paste this enrolment code when asked:
 
     dsl-k7qp2m
 
-Whichever GitHub account opens the issue is linked to your hertie email address automatically.
+Whichever GitHub account opens the issue is linked to your Hertie email address automatically.

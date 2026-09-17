@@ -6,30 +6,37 @@ repo, `TeamResult` - carries no member field at all, so no member's adjustment, 
 final grade can leak into a comment the whole team reads). Every send carries a content
 hash so a re-run after one correction updates nothing that already went out unchanged.
 
-### Individual - anna-adams, assignment-1 (external submission, no late window: plain grade)
+**Same gate as the receipts beside this file**: posted only for `github`/`private`. For
+`github`/`public`, `github`/`student_choice`, `shared` and `external`, this comment is
+never posted anywhere - the mark and the words reach the student only through
+`gradebook-repo/README.md`'s per-assignment section (`grades.render_readme`).
+
+### Individual - anna-adams, assignment-2 (plain grade)
 
 ```
-### Feedback · Linear regression
-**Grade:** 88
+### Feedback · Gradient descent
+**Grade:** 88 · submitted 27 Oct 22:14
 
 Clear, correct solution.
 Watch the vectorised edge cases.
 ```
 
-### Individual - ben-baker, assignment-1 (an `adjustment_individual` moved the grade: `80 -6 = 74`)
+### Individual - ben-baker, assignment-2 (an `adjustment_individual` moved the grade: `80 -6 = 74`)
 
-Still plain - `assignment-1` is external and carries no `penalty`, so the comment states the
-grade with no arithmetic shown, whatever produced it.
+Still plain - this `view` carries no `penalty` key, so the comment states the grade with no
+arithmetic shown, whatever produced it.
 
 ```
-### Feedback · Linear regression
-**Grade:** 74
+### Feedback · Gradient descent
+**Grade:** 74 · submitted 27 Oct 22:14
 
 Right idea; the proof in Q3 is incomplete.
 ```
 
-### Team - team-alpha, assignment-4-project (on time, per-member `adjustment_individual` set
-but never shown here - see anna-adams's own gradebook in `gradebook-repo/`)
+### Team - team-alpha, assignment-4-project (on time)
+
+Per-member `adjustment_individual` is never shown here - see each member's own gradebook in
+`gradebook-repo/`.
 
 ```
 ### Feedback · Group project
@@ -41,8 +48,7 @@ The evaluation section is thin - one baseline is not a comparison.
 Your own final grade and personal feedback are in your private gradebook: `grades-<your handle>`.
 ```
 
-### Team - team-beta, assignment-4-project (2 days late, one question (Q4) left unmarked -
-the total is what has been marked so far, with the late penalty already applied)
+### Team - team-beta, assignment-4-project (2 days late, one question (Q4) left unmarked)
 
 ```
 ### Feedback · Group project

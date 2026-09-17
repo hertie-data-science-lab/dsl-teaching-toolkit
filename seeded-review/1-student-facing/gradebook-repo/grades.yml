@@ -1,45 +1,22 @@
-# The file a student opens in their private grades-<handle> repo, written together
-# with README.md beside it in ONE commit, on every Distribute grades that touches them.
-# REAL RENDER for anna-adams via grades.render_yaml({"student": handle, "assignments": book}),
-# where `book` = {slug: grades.student_view(spec, unit, block, handle)} for every
-# assignment they have a mark or a word of feedback on - the same pivot
-# grades.build_gradebooks does for every student off the cohort's grading sheets.
-# anna-adams has one individual assignment (assignment-1, submitted outside GitHub) and one
-# group one (assignment-4-project, team-alpha) - the two shapes this file ever takes.
-#
-# ALLOWLISTED: the only keys that can ever appear are grades.STUDENT_VIEW_KEYS -
-# final_grade (derived on send, never stored), score, max_points, feedback, submitted,
-# days_late, penalty, team, team_feedback - and blanks are dropped, so an individual
-# assignment with no late window (assignment-1) reads as just final_grade/score/feedback.
-# `team_score` and this student's own `adjustment_individual` never reach here: the team's
-# score is shared with the whole team in the TEAM's own repo instead (feedback-comment.md),
-# and the adjustment stays between anna-adams and their grader - only its effect on
-# final_grade is shown.
-#
-# Every key below is defined in the README beside this file (grades._STARTER_README) -
-# that table is the only legend a student is given.
-student: anna-adams
-assignments:
-  assignment-1:
-    final_grade: '88'
-    score: '88'
-    feedback: 'Clear, correct solution.
+# grades.yml -- one student's view (grades.render_yaml(book)), written together with
+# README.md beside it in ONE commit, on every Distribute grades that touches them.
+# anna-adams: assignment-2 (github-private, has a late window) and assignment-1
+# (external - no repo, no Feedback issue; this file is her only channel for it).
+# STUDENT_VIEW_KEYS allowlist only; a blank field is dropped, never written null.
+assignment-2:
+  final_grade: '88'
+  score: 88
+  feedback: 'Clear, correct solution.
 
-      Watch the vectorised edge cases.
+    Watch the vectorised edge cases.
 
-      '
-    submitted: external
-  assignment-4-project:
-    final_grade: '47'
-    max_points: '50'
-    feedback: 'Led the architecture and carried the team''s core work.
+    '
+  submitted: 27 Oct 22:14
+  days_late: 0
+assignment-1:
+  final_grade: pass
+  score: pass
+  feedback: 'Graded off-platform; recorded here for the record.
 
-      '
-    submitted: 15 Nov 22:14
-    days_late: '0'
-    team: team-alpha
-    team_feedback: 'Excellent model design and a clear training story.
-
-      The evaluation section is thin - one baseline is not a comparison.
-
-      '
+    '
+  submitted: external
