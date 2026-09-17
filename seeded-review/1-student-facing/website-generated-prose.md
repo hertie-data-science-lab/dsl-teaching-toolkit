@@ -145,16 +145,17 @@ date on a `dateless:` row and `(TBC)` follows it on a `tbc:` one.
 
 ### 1.4 The assignment page
 
-**New this round: five shapes, not two.** `page.submit_shape` (`site.py`, off
-`course.submit_shape(submit_via, visibility)`) is the one word the layout branches on:
-`assignment-repo-private`, `assignment-repo-public`, `assignment-repo-student-choice`,
-`shared-dropbox-repo`, `external`. Only `assignment-repo-private` has a Feedback issue
-(`course.has_feedback_issue`) - every callout below for the other four shapes ends by
-naming the private gradebook as where marks actually land, because a thread in a public
-repo, a shared repo, or one the student may publish would be a published mark.
+**No "grade and feedback arrive" sentence is written anywhere on this page any more.**
+`page.submit_shape` (`site.py`, off `course.submit_shape(submit_via, visibility)`) is
+still the one word the layout branches on - `assignment-repo-private`,
+`assignment-repo-public`, `assignment-repo-student-choice`, `shared-dropbox-repo`,
+`external` - but the callout below now answers ROUTE alone. Where marks land is
+answered once, on the student's own private gradebook (`gradebook-repo/README.md`
+beside this file), which says so on every row it carries; the assignment page never
+repeats it.
 
 Not yet handed out - the brief is withheld, the row and its dates stay, `handout_pending:
-true`. The line is now shape-specific (`site._assignment_entry`):
+true`. The line is still shape-specific (`site._assignment_entry`):
 ```
 Assignment 1                      # title from the SLUG, title-cased, never the README
 _**Assignment 1 is not yet released** - your private `assignment-1-<your-handle>` repo appears when it is._            # assignment-repo-private
@@ -163,14 +164,11 @@ _**Assignment 1 is not yet released** - your private `assignment-1-<your-handle>
 _**Assignment 1 is not yet released** - the `assignment-1-submissions` drop box appears when it is._                   # shared-dropbox-repo - names the one shared repo, not a shape
 _**Assignment 1 is not yet released** - the brief appears here when it is._                                            # external - there is no repo to describe at all
 ```
-(Group assignments say `assignment-4-project-<your-team>`.) Deliberately word for word the
-shape of an unreleased session's line - they render in the same column and on adjacent tabs,
-so they read as one status vocabulary.
+(Group assignments say `assignment-4-project-<your-team>`.)
 
 **The heading is the NAME, not the identifier.** The assignment's name (from the plan, or
-failing that the template README's own heading) is now the page's `<h1>`, and the
-identifier that used to be the heading sits above it as a small kicker - it still has to be
-there, because it is what ties the page to its schedule row:
+failing that the template README's own heading) is the page's `<h1>`, and the identifier
+that used to be the heading sits above it as a small kicker:
 ```
 Assignment 1                      # kicker (page.title)
 Gradient descent                  # <h1> (page.subtitle)
@@ -184,78 +182,54 @@ Handed out - the body is the template README with its `# ` heading lines strippe
 ```
 Assignment brief.
 ```
-Plus, from the layout, unconditionally - the deadline now bold beside the release date,
-not a separate line further down the page:
+Plus, from the layout, unconditionally - the deadline bold beside the release date:
 ```
 Released on Thursday 01/10/2026          # or: Hands out on Thursday 01/10/2026
 **Due Thursday 15/10/2026 23:59**
+Worth 25 points                          # page.max_points - only when grading_config.yml declares numeric questions: maxima
 ```
-(`page.due_event`, the same field the schedule's own due row reads - `page.due` has never
-existed, so the layout that once read it printed a bare time.) The due paragraph itself now
-carries a `post-due` class beside `post-meta` (`5eaeadb`/`f599deb` - styling only, no new text).
 
-Under it, what the assignment is out of - written only when `grading_config.yml` declares
-numeric `questions:` maxima, off the same sum the gradebook prints beside a score
-(`grades.total_points`, read here as `page.max_points` - `site._assignment_entry`):
+**The submission callout is ONE `case`, and the case now branches only the sentence that
+genuinely differs** (`templates/site/_layouts/assignment.html`) - `assignment-repo-private`
+and `assignment-repo-student-choice` share the `case`'s `else` arm, worded once for both:
 ```
-{% if page.max_points %}
-<p class="post-meta">Worth {{ page.max_points }} points</p>
-{% endif %}
-```
-e.g. `Worth 25 points` for two questions worth 15 and 10. The brief no longer opens with a
-`**Points:** __` line for its author to fill in (`scaffold._brief_stub`) - a fact the
-assignment's own definition already carries is read from there instead of retyped.
-
-The "open in your local copy" strip (`open_in.html`) is skipped for `external` - there is
-no repo shape to open a local copy of. The submission callout is now ONE `case` on
-`submit_shape`, one button, one paragraph - and that paragraph now closes with the
-late-work rule for every TIMED shape (`page.late_rule`, off `course.late_rule` and the
-assignment's own `grading_config.yml`):
-```
-                                                                              # assignment-repo-private (the default `else` arm)
+                                                                              # assignment-repo-private AND assignment-repo-student-choice - the `else` arm
 Open the submission repo on GitHub                                          # button
 Your work goes in your private repo `assignment-1-<your-handle>`. Clone it, commit
 as you go, and push to `main` - that push is your submission.
+What is on main at the grading cutoff is what is marked.
 Late work: 10% per day, up to 7 days.
 
                                                                               # assignment-repo-public
 Open the submission repo on GitHub                                          # button
-Your repo `assignment-1-<your-handle>` is **public**: anyone on the internet can
-read it. Push to `main` as usual, but commit nothing you would not publish and no data you were told
-to keep private. Your grade and feedback arrive in your private gradebook `grades-<your-handle>`,
-not here.
-Late work: 10% per day, up to 7 days.
-
-                                                                              # assignment-repo-student-choice
-Open the submission repo on GitHub                                          # button
-Your repo starts private. You are its admin: after the grading cutoff you may make it public from
-Settings > Danger zone if you want it in your portfolio. Before then the toolkit turns it private again.
-Your grade and feedback arrive in your private gradebook, not here.
+Your work goes in your repo `assignment-1-<your-handle>`. Clone it, commit
+as you go, and push to `main` - that push is your submission.
+What is on main at the grading cutoff is what is marked.
 Late work: 10% per day, up to 7 days.
 
                                                                               # shared-dropbox-repo
 Open the submission repo on GitHub                                          # button, links the ONE drop-box repo
 Push your work into the `<your-handle>/` folder of
-`assignment-1-submissions` - that push is your submission. Everyone in the cohort can read
-the whole repo, so commit nothing you would not show the class. Your grade and feedback arrive in your
-private gradebook `grades-<your-handle>`, not here.
+`assignment-1-submissions` - that push is your submission.
+What is on main at the grading cutoff is what is marked.
 Late work: 10% per day, up to 7 days.
 
-                                                                              # external, with a submit_url - no late-work sentence: nothing is TIMED
+                                                                              # external, with a submit_url - its own `if` branch: no cutoff sentence, no late-work sentence - no repo, nothing TIMED
 Submit on moodle.hertie-school.org                                          # button, only once handed out AND a submit_url is set
-Handed in outside GitHub. Your grade and feedback arrive in your
-private gradebook `grades-<your-handle>`.
+Handed in outside GitHub.
 
-                                                                              # external, no submit_url - the same paragraph, no button, "See the brief" added back
-Handed in outside GitHub. See the brief. Your grade and feedback arrive in your
-private gradebook `grades-<your-handle>`.
+                                                                              # external, no submit_url - the same paragraph, no button
+Handed in outside GitHub. See the brief.
 ```
+`cutoff_sentence` (`course.CUTOFF_SENTENCE`, "What is on main at the grading cutoff is
+what is marked.") and `late_rule` close every arm that has a repo, and only those - they
+sit OUTSIDE the `case` in the layout, so a reword of either cannot leave one arm behind.
 The late-work sentence is written for every TIMED shape and no other: `external` collects
 no commits (`course.collects_commits`), so no day is counted and no penalty is ever
-applied - a sentence there would quote a rule about a deadline this toolkit does not hold.
-The theme reads the front matter KEY's presence (`late_rule`, written by `site.py` only
-when `spec.collects_commits`) rather than asking the shape again, so "which shapes are
-timed" has one spelling, not two.
+applied. The theme reads the front matter KEY's presence (`late_rule`, written by
+`site.py` only when `spec.collects_commits`) rather than asking the shape again, so "which
+shapes are timed" has one spelling, not two. `external`'s callout is a separate `if`
+branch with neither sentence at all: there is no repo for a cutoff to be read against.
 
 `repo_url` is the cohort org's repo list filtered to this assignment for every shape but
 `shared_dropbox_repo` (whose `repo_url` is the ONE drop-box repo's own address) - not one
@@ -263,13 +237,29 @@ student's address: the page is public and identical for everyone, and GitHub sho
 signed-in student only the repos they can see, so the filter lands on their own (or their
 team's). `repo_name_is_shape` (site.py) is false only for `shared_dropbox_repo`: its
 `repo_name` is a real repo, `assignment-1-submissions`, not a `<your-handle>` shape for
-`open_in.html` to substitute
-into - substituting a handle into a name that already exists would point every reader at a
-repo that is not theirs.
+`open_in.html` to substitute into.
 
 The grey "Late Policy" box (`_includes/late_policy.html`) is gone, and nothing repeats the
 route under the brief any more - the callout above is the one place a student reads it, for
 both facts.
+
+**Who can read it - once, under the brief, and nowhere in the callout.** An italic `NB:`
+box under the brief (`.shape-note`, `course.SHAPE_NOTES` via `page.shape_note`) - written
+for FOUR shapes, every one that hands out a repo, the ordinary private one included; not at
+all for `external`, which hands out none:
+```
+NB: this repo is private - only you and the teaching team can read it.                          # assignment-repo-private
+NB: this repo is public, anyone on the internet can read it. Push to main as usual, but         # assignment-repo-public
+commit nothing you would not publish and no data you were told to keep private.
+NB: this repo is private-by-default; you are its admin - after the grading cutoff you           # assignment-repo-student-choice
+may make it public from Settings > Danger zone if you want it in your portfolio.
+NB: everyone in the cohort can read the whole repo, so commit nothing you would not              # shared-dropbox-repo
+show the class.
+```
+The same four sentences the repo's own About line carries at creation (`assign._about`,
+§ 2 faculty-facing note below) - read minutes apart by the same student, so a note worded
+twice is a note with two answers. Only once the brief is out: a warning about a repo that
+does not exist yet would sit above the line saying the assignment has not been handed out.
 
 The due row's Details column (`schedule_row_due.html`) says where to submit, one word
 narrower than the page's own callout - no gradebook reminder, this is a schedule table:

@@ -465,8 +465,8 @@ The CURRENT wording of every repo the pipeline seeds:
 | course `assignment-N-<tag>` | `Assignment {number} template` | `scaffold.py:473` | faculty |
 | `<org>.github.io` (both tiers) | `[do not touch]: Course website (auto-deployed)` | `scaffold.py:679` | both |
 | cohort `materials` | `Released lectures, labs, readings, & other materials` | `deploy.py:218` | student |
-| cohort `<slug>-<handle>` | `{slug} - submission repo` | `assign.py:876` | student |
-| cohort `<slug>-submissions` (new: `submit_via: shared_dropbox_repo`) | `{slug} - shared submission drop box` | `assign.py:1165` | student (the whole cohort reads it) |
+| cohort `<slug>-<handle>` (new: `assign._about` appends the cutoff sentence + the shape's `NB:` note) | `{slug} - submission repo. What is on main at the grading cutoff is what is marked. NB: this repo is private - only you and the teaching team can read it.` (the note varies by shape - `course.SHAPE_NOTES`) | `assign.py:899-900` | student |
+| cohort `<slug>-submissions` (new: `submit_via: shared_dropbox_repo`, same `assign._about` composition) | `{slug} - shared submission drop box. What is on main at the grading cutoff is what is marked. NB: everyone in the cohort can read the whole repo, so commit nothing you would not show the class.` | `assign.py:1190-1191` | student (the whole cohort reads it) |
 | cohort `grades-<handle>` | `Private gradebook for @{handle}` | `grades.py:2158` | student (own repo only) |
 | cohort assignment template | `{slug} - cohort assignment template` | `assign.py:238` | faculty |
 
@@ -500,8 +500,11 @@ Team descriptions show on each team's page; the two labels show on every Join is
 ## 11. Commit messages in student-readable repos
 Low-visibility but permanent in history: `grades: update`, `init gradebook`,
 `add solution`, `release: sync materials into {repo}`, and - one commit, once per
-**Distribute grades** run - `grades: distribute ({n} comment(s), {n} gradebook(s), {n}
-email(s))` (`grades.py:2775-2778`).
+**Distribute grades** run - `grades: distribute ({n} gradebook(s), {n}
+email(s))` (`grades.py:3875-3876`). No `comment(s)` count any more: the `counts` dict
+(`grades.py:3745-3750`) that this line is built from carries `gradebooks`, `emails`,
+`held`, `unknown`, `failed` and nothing named `comments` - the per-repo Feedback issue
+comment Distribute used to post is gone, and so is its tally.
 
 ---
 

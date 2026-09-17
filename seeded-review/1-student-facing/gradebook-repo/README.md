@@ -17,8 +17,9 @@ This private repository is viewable only by you. Grades and feedback for each pi
 | `team_feedback` | Group assignments only: feedback shared with the whole team. |
 
 === after Distribute grades (rewritten wholesale on every run that touches this student,
-grades.render_readme) - anna-adams, one assignment_repo-private assignment and one external one;
-row and section titles now `<identifier> · <name>` via `grades._readme_label` (course.identifier /
+grades.render_readme) - anna-adams, one assignment_repo-private assignment (2 days late,
+so the score line renders: grades._readme_grade_line) and one external one; row and
+section titles now `<identifier> · <name>` via `grades._readme_label` (course.identifier /
 course.row_name) ===
 
 This gradebook is private to you. It is regenerated each time grades are distributed; do not edit it.
@@ -26,7 +27,7 @@ This gradebook is private to you. It is regenerated each time grades are distrib
 | Assignment | Final grade | Submitted | Late | Team |
 |---|---|---|---|---|
 | Assignment 1 · Linear regression | pass | external |  |  |
-| Assignment 2 · Gradient descent | 88 | 27 Oct 22:14 | on time |  |
+| Assignment 2 · Gradient descent | 16 / 50 | 29 Oct 22:14 | 2 days late |  |
 
 ## Assignment 1 · Linear regression
 **Final grade:** pass
@@ -34,7 +35,6 @@ This gradebook is private to you. It is regenerated each time grades are distrib
 Graded off-platform; recorded here for the record.
 
 ## Assignment 2 · Gradient descent
-**Final grade:** 88
+**Score:** 20 / 50 · 2 days late · penalty -20% · **Final grade:** 16 / 50
 
-Clear, correct solution.
-Watch the vectorised edge cases.
+Right idea; the proof in Q3 is incomplete.

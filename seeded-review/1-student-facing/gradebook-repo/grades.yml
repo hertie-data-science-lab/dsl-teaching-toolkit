@@ -1,22 +1,22 @@
-# grades.yml -- one student's view (grades.render_yaml(book)), written together with
-# README.md beside it in ONE commit, on every Distribute grades that touches them.
-# anna-adams: assignment-2 (assignment_repo-private, has a late window) and assignment-1
-# (external - no repo, no Feedback issue; this file is her only channel for it).
+# grades.yml -- _gradebook_files' GRADES_DATA (grades.render_yaml({"student": handle,
+# "assignments": book})), written together with README.md beside it in ONE commit, on
+# every Distribute grades that touches them.
+# anna-adams: assignment-2 (assignment_repo-private, 2 days late - the score line in the
+# README renders off this) and assignment-1 (external - no repo, no receipts issue; this
+# file is her only channel for it).
 # STUDENT_VIEW_KEYS allowlist only; a blank field is dropped, never written null.
-assignment-2:
-  final_grade: '88'
-  score: 88
-  feedback: 'Clear, correct solution.
-
-    Watch the vectorised edge cases.
-
-    '
-  submitted: 27 Oct 22:14
-  days_late: 0
-assignment-1:
-  final_grade: pass
-  score: pass
-  feedback: 'Graded off-platform; recorded here for the record.
-
-    '
-  submitted: external
+student: anna-adams
+assignments:
+  assignment-2:
+    final_grade: '16'
+    score: 20
+    max_points: '50'
+    feedback: Right idea; the proof in Q3 is incomplete.
+    submitted: 29 Oct 22:14
+    days_late: 2
+    penalty: -20%
+  assignment-1:
+    final_grade: pass
+    score: pass
+    feedback: Graded off-platform; recorded here for the record.
+    submitted: external

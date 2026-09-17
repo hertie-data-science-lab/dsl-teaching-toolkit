@@ -1,4 +1,4 @@
-# Submission receipts (posted into the Feedback issue)
+# Submission receipts (posted into the receipts thread)
 
 One comment per event, additive - a comment edited in place would leave no trace of when
 the work actually arrived. `grades.receipt` (`course.receipt_body` underneath) composes the
@@ -7,12 +7,13 @@ text; `grades.post_receipt` posts it once per `(commit, event)` pair (the hidden
 to a student). All four below render from assignment-2's spec (individual,
 `assignment_repo`/`private`, a 7-day late window at 10%/day).
 
-**Posted only where `spec.has_feedback_issue` is true - i.e. `assignment_repo`/`private`
-alone.** `collect._post_receipts` returns immediately `if not spec.has_feedback_issue:` for
+**Posted only where `spec.has_receipts_issue` is true - i.e. `assignment_repo`/`private`
+alone.** `collect._post_receipts` returns immediately `if not spec.has_receipts_issue:` for
 every other shape (`assignment_repo`/`public`, `assignment_repo`/`student_choice`,
-`shared_dropbox_repo`, `external`): there is no Feedback issue to post into for any of
-them, not merely (for `external`) no commit to time. Their Feedback issue only ever
-carries nothing at all - the gradebook is the one channel that reaches all five shapes.
+`shared_dropbox_repo`, `external`): there is no receipts thread to post into for any of
+them, not merely (for `external`) no commit to time. Their gradebook is the one channel
+that reaches all five shapes - it is where every shape's mark and feedback land, and it
+always has been; the receipts thread never carried either.
 
 ### At the due date - submitted on time
 

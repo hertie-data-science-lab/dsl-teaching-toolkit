@@ -41,9 +41,9 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `assignment-repo/CONTRIBUTIONS.md` | Group-only companion to the README, shape-independent | `scaffold._CONTRIBUTIONS_STUB` |
 | `assignment-repo/starter.*` | The starter they complete | `dsl_course/scaffold.py` |
 | `assignment-repo/solution-README.md` | Model-solution page, post-deadline | `dsl_course/scaffold.py` |
-| `assignment-repo/feedback-issue.md` | Feedback issue body opened at handout - **only for the `github`/`private` shape**; a one-line note (with why) for `github`/`public`, `github`/`student_choice`, `shared` and `external`, none of which ever open one | `grades.feedback_body`, `grades.ensure_feedback_issue`, `course.has_feedback_issue` |
+| `assignment-repo/receipts-issue.md` (renamed from `feedback-issue.md`) | Receipts issue body opened at handout - **only for the `github`/`private` shape**; a one-line note (with why) for `github`/`public`, `github`/`student_choice`, `shared` and `external`, none of which ever open one. Says WHERE the work goes and WHAT is posted here, never where a mark lands | `grades.receipts_thread_body`, `grades.ensure_receipts_issue`, `course.has_receipts_issue` |
 | `assignment-repo/submission-receipts.md` | Receipts posted on that issue at due date / late push / cutoff - same `github`/`private`-only gate | `grades.receipt`, `grades.post_receipt` |
-| `assignment-repo/feedback-comment.md` | The comment Distribute grades posts, individual + team - same gate; every other shape's mark reaches the student only via `gradebook-repo/README.md` | `grades.individual_issue_body`, `grades.team_issue_body` |
+| ~~`assignment-repo/feedback-comment.md`~~ | REMOVED - Distribute grades posts no per-repo comment any more, for any shape. `grades.individual_issue_body` and `grades.team_issue_body` are gone; every mark and every word of feedback reach the student only via `gradebook-repo/README.md`, which now carries the score line (`**Score:** ... · **Final grade:** ...`) that comment used to open with | gone |
 | `materials-repo/README.md` | Released to students with the README toggle | `scaffold.materials_readme` |
 | `materials-repo/SYLLABUS.md` | Syllabus stub, in the standard Hertie shape | `scaffold._SYLLABUS_STUB` |
 | `materials-repo/readings/01_session-1/READINGS.md` | The optional prose reading list seeded in each session's readings folder - public when released | `scaffold._READINGS_STUB` |
@@ -108,26 +108,28 @@ hand (Distribute grades, Collect submissions) - called out below where that's th
 | --- | --- | --- |
 | **SYSTEM** | every workflow in `3-infrastructure/` (incl. `dispatch-scheduled-release.yml`, `collect-submissions.yml`); the welcome **issue forms** and chooser config; `classroom-config/README.md`; all `*.sample` (incl. `SYLLABUS.md.sample` and `grading_sheets/*.yml.sample`); `MAINTAINING.md`; cohort `dsl-course.yml`; the course profile README and both `.github` READMEs | Rewritten by `seed.refresh` on every nightly cron. Your edits propagate to **every existing org** within 24h. |
 | **SYSTEM, in part** | cohort `profile/README.md` | Instructor-owned prose, except the region between the `dsl:repo-table` markers, which is regenerated whole on every refresh - and `retitle_renamed_org`, which rewrites a dead org name throughout. Edit the prose; do not hand-edit inside the markers. |
-| **SYSTEM, toolkit-posted (not the nightly refresh)** | gradebook `README.md` + `grades.yml` | Not touched by `seed.refresh` at all. `README.md` starts as `grades._STARTER_README` at gradebook provisioning (`grades.provision_one`); `grades.yml` does not exist until the first **Distribute grades** run, which then replaces both wholesale, together, in one commit, every time it touches that student (`grades.render_readme` / `grades.render_yaml` off `grades.student_view`, written at `grades.py:3796-3797`). Editing either by hand is undone the next time that student is distributed to, not within 24h. |
+| **SYSTEM, toolkit-posted (not the nightly refresh)** | gradebook `README.md` + `grades.yml` | Not touched by `seed.refresh` at all. `README.md` starts as `grades._STARTER_README` at gradebook provisioning (`grades.provision_one`); `grades.yml` does not exist until the first **Distribute grades** run, which then replaces both wholesale, together, in one commit, every time it touches that student (`grades.render_readme` / `grades.render_yaml` off `grades.student_view`, written at `grades.py:3631-3632`). Editing either by hand is undone the next time that student is distributed to, not within 24h. |
 | **SYSTEM, regenerated in part** | `classroom-config/grading_sheets/*.yml` (per-cohort grader files - the `*.sample` beside them, above, is the only copy in this corpus) | Created at handout, then re-merged by `grades.merge_sheet` on every **Collect submissions** run and scheduler tick. The header comment and the `info:` block are toolkit-derived and re-emitted every write (`_sheet_header`, `_annotate`); every mark, note, feedback string and grader-invented key is copied through untouched (`_merged_block`). Frozen at the cutoff (`sheet_is_frozen`), after which even `info:` stops being re-derived. |
 | **USER, create-only** | `classroom-config/{students,teams,schedule,people}`; `welcome/README.md`; materials `README.md`, `SYLLABUS.md`, `readings/*/READINGS.md`, `.releaseignore` and `publish.yml`; the assignment READMEs, `CONTRIBUTIONS.md` and starters; `grading_config.yml` (every shape), `hidden-test*.py` and `solution.*` (written once by `scaffold_assignment`, on the assignment's `solution` branch); the `site-repo/` pages and `_data/`; course `dsl-course.yml` | Seeded once, never rewritten. Your edits reach **newly bootstrapped orgs / newly scaffolded repos only** - existing ones keep what they have. `visibility:` and `submit_via:` in particular are read only at that write, at each repo's CREATION - editing a live assignment's `grading_config.yml` afterwards moves nothing and is what the new `grading_config.yml` digest fault (`notifications.md` §12) exists to catch. |
 
 > Consequence: editing a create-only scaffold changes nothing for live cohorts. If you want
 > a change to reach them, it has to go in a SYSTEM-owned file, or be propagated by hand.
 
-`assignment-repo/feedback-issue.md`, `submission-receipts.md` and `feedback-comment.md`,
-and everything rendered into `notifications.md` (and the `emails/` bodies) are **posted
-content, not seeded files** - there is nothing sitting in an org for a faculty member to
-hand-edit, so the ownership question above does not apply to them; a wording change goes
-into the generator (`grades.py`, `notify.py`, `source_digest.py`, `cadence.py`, `schedule.py`,
-`site_repo.py`) directly. The Feedback issue's body is fixed the moment
-`grades.ensure_feedback_issue` opens it at handout - a student closing it gets it reopened,
-but the body is never re-posted; the receipts and the Distribute-grades comment are
-additive, marker-gated comments appended to that same issue (`grades.post_receipt` /
-`post_marked_comment`), never a rewrite of anything already there. All three exist for
-exactly one shape, `github`/`private` (`course.has_feedback_issue`) - the other four
-(`github`/`public`, `github`/`student_choice`, `shared`, `external`) open no Feedback issue
-at all, and their marks and words reach the student only through `gradebook-repo/README.md`.
+`assignment-repo/receipts-issue.md` and `submission-receipts.md`, and everything rendered
+into `notifications.md` (and the `emails/` bodies) are **posted content, not seeded
+files** - there is nothing sitting in an org for a faculty member to hand-edit, so the
+ownership question above does not apply to them; a wording change goes into the generator
+(`grades.py`, `course.py`, `notify.py`, `source_digest.py`, `cadence.py`, `schedule.py`,
+`site_repo.py`) directly. The receipts issue's body is fixed the moment
+`grades.ensure_receipts_issue` opens it at handout - a student closing it gets it reopened,
+but the body is never re-posted; the receipts are additive, marker-gated comments
+appended to that same issue (`grades.post_receipt`), never a rewrite of anything already
+there. There is no per-repo comment any more at all: Distribute grades used to post one
+(`grades.individual_issue_body` / `grades.team_issue_body`), both are gone, and every
+mark and every word of feedback go to `gradebook-repo/README.md` alone, for every shape.
+The receipts issue itself exists for exactly one shape, `github`/`private`
+(`course.has_receipts_issue`) - the other four (`github`/`public`,
+`github`/`student_choice`, `shared`, `external`) open no receipts issue at all.
 
 The `dsl-stub:` marker is **not** an ownership class. It marks a seeded file as still
 unwritten, and only `SYLLABUS.md` acts on it: `deploy._is_withheld_stub` reads it to keep

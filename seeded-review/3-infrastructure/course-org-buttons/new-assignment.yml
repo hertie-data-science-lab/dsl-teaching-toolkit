@@ -41,7 +41,7 @@ on:
           - self_select
           - assigned
       submit_via:
-        description: "8. Where students hand in. assignment_repo = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site, feedback goes to the student's gradebook; shared_dropbox_repo = one private repo for the whole cohort, each student pushes into their own folder, peers can read it"
+        description: "8. Where students hand in. assignment_repo = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole cohort, each student pushes into their own folder, peers can read it"
         type: choice
         default: "assignment_repo"
         options:
@@ -53,7 +53,7 @@ on:
         type: boolean
         default: false
       visibility:
-        description: "10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. public and student_choice have no Feedback issue, and marks go only to the student's private gradebook. Read when the repo is created: editing it later changes nothing"
+        description: "10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing"
         type: choice
         default: "private"
         options:

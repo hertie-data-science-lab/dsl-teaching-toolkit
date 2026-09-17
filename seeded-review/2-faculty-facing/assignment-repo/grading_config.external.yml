@@ -5,7 +5,7 @@ type: individual              # individual | group
 # max_team_size: 5            # group only
 submit_via: external          # assignment_repo (they push to their repo) | external (handed in elsewhere: Moodle, Kaggle, in class - no repo is created) | shared_dropbox_repo (one private repo for the whole cohort, each student pushes into their own folder, peers can read it)
 # submit_url: https://moodle.hertie-school.org/mod/assign/view.php?id=CHANGE-ME # external only: the `Submit on ...` button on the site (https only)
-# visibility: private         # private (the student and the teaching team) | public (the whole internet: portfolio work, no Feedback issue) | student_choice (private, and the student is its admin: theirs to publish after the grading cutoff, and no Feedback issue) - read at hand-out only
+# visibility: private         # private (the student and the teaching team) | public (the whole internet: portfolio work, no receipts issue) | student_choice (private, and the student is its admin: theirs to publish after the grading cutoff, and no receipts issue) - read at hand-out only
 format: py                    # ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; grading reads whatever is in the repo
 
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
