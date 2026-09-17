@@ -79,8 +79,10 @@ from .course import (
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     github_visibility,
+    shape_note,
     shared_repo,
     submission_repo,
+    submit_shape,
     visibility_is_students,
 )
 from .discovery import (
@@ -169,6 +171,25 @@ def _template_is_ready(entry: dict | None, slug: str) -> bool:
         return False
     wanted = {topic_name(slug), ASSIGNMENT_TEMPLATE_TOPIC}
     return bool(entry.get("isTemplate")) and wanted <= set(entry.get("topics") or [])
+
+
+def _about(what: str, shape: str) -> str:
+    """A submission repo's About line: what it is, plus whatever this shape owes the
+    student who opens it (`course.SHAPE_NOTES` - the same sentence the assignment's page
+    prints under the brief).
+
+    BOTH places, because they are read at different moments and only one of them is the
+    repo: a student who clones from a link, or comes back to the repo in week nine, never
+    reopens the page - and "this repo is public" is a fact they need where the commits go.
+
+    Set at CREATION and never patched afterwards, like every other description the toolkit
+    writes (`repos.generate_from_template`); a reworded one reaches existing repos through
+    `repos.converge_descriptions` or not at all. Which is also why the notes are capped:
+    GitHub TRUNCATES a description past `course.MAX_REPO_DESCRIPTION` rather than refusing
+    it, so a note that outgrew the cap would lose its second half and say nothing about
+    it."""
+    note = shape_note(shape)
+    return f"{what}. {note}" if note else what
 
 
 def _tag_submission(cohort_org: str, repo: str, slug: str, have: set[str]) -> None:
@@ -874,7 +895,9 @@ def provision_one(
         owner=cohort_org,
         name=repo,
         private=True,
-        description=f"{slug} - submission repo",
+        description=_about(
+            f"{slug} - submission repo", submit_shape("assignment_repo", visibility)
+        ),
         person=True,
     ):
         return "failed-create"
@@ -1163,7 +1186,10 @@ def ensure_drop_box(
         owner=cohort_org,
         name=repo,
         private=True,
-        description=f"{slug} - shared submission drop box",
+        description=_about(
+            f"{slug} - shared submission drop box",
+            submit_shape("shared_dropbox_repo", "private"),
+        ),
     ):
         log_err(f"could not create the {slug} drop box in {cohort_org}.")
         return False, False

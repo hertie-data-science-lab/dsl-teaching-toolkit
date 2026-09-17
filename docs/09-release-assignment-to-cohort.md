@@ -46,7 +46,7 @@ creates **nothing**: no cohort template, no repo per student, no Feedback issue,
 solution push. The handout still records the moment in `schedule.yml`, publishes the brief
 and a **Submit on \<host\>** button (from `submit_url`) on the cohort site, writes the
 grading sheet with every student or team in it, and makes sure each student has their
-private `grades-<handle>` gradebook - which is where their feedback goes.
+private `grades-<handle>` gradebook.
 
 ### An assignment handed into one shared drop box
 
@@ -59,17 +59,16 @@ says so. Each unit pushes into its own `<handle>/` or `<team>/` folder and can r
 everyone else's.
 
 There is no Feedback issue, no receipt and no model solution push - one repo the whole
-cohort reads is not a place for any of them; marks and feedback go to each student's
-private `grades-<handle>` gradebook. The handout re-fires every quarter of an hour like
-any other, and a student who onboards later is granted push on the next tick.
+cohort reads is not a place for any of them. The handout re-fires every quarter of an hour
+like any other, and a student who onboards later is granted push on the next tick.
 
 ### An assignment whose repos are public
 
 `visibility: public` in the template's `grading_config.yml` hands out the same repos
 world-readable - portfolio work such as a hackathon. There is then **no Feedback issue**
-(nothing about a student's marking may be written where the internet can read it): marks
-and feedback go to their private `grades-<handle>` gradebook, and the assignment's page on
-the cohort site says the repo is public before they push anything into it.
+(nothing about a student's marking may be written where the internet can read it), and the
+assignment's page on the cohort site - and the repo's own About line - says the repo is
+public before they push anything into it.
 
 No **model solution** is pushed into these repos, whatever `include_solution` or
 `solution_datetime:` says - publishing the answers is not something a later run could take
@@ -86,8 +85,7 @@ credential rather than bypass the block.
 `visibility: student_choice` in the template's `grading_config.yml` hands out the same
 **private** repos, but makes the student - or every member of a team - **admin** of their
 own, which is the only permission that carries GitHub's visibility switch. There is no
-Feedback issue (the repo may be public tomorrow): marks and feedback go to their private
-`grades-<handle>` gradebook.
+Feedback issue (the repo may be public tomorrow).
 
 No model solution is pushed into these repos either, for the same reason: the student may
 publish the repo the day after the cutoff, and the answers would go with it.

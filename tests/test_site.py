@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from dsl_course import (
+    course,
     discovery,
     gh_contents,
     ghcli,
@@ -707,6 +708,29 @@ def test_the_late_rule_is_the_pages_alone_and_not_the_due_rows(monkeypatch):
     )
     assert out.count("late_rule:") == 1
     assert "late_rule" not in out.split("due_event:")[1]
+
+
+def test_a_shape_with_a_catch_carries_its_note_on_the_page_alone(monkeypatch):
+    # The aside the layout prints under the brief - one text per shape, off
+    # `course.SHAPE_NOTES`, so the page and the repo's own About line say the same words.
+    # The PAGE alone, like the late rule: the due row is a glance at when and where.
+    for config, shape in (
+        ("visibility: public\n", "assignment-repo-public"),
+        ("visibility: student_choice\n", "assignment-repo-student-choice"),
+        ("submit_via: shared_dropbox_repo\n", "shared-dropbox-repo"),
+    ):
+        out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
+        assert f'shape_note: "{course.shape_note(shape)}"\n' in out
+        assert out.count("shape_note:") == 1
+        assert "shape_note" not in out.split("due_event:")[1]
+
+
+def test_a_shape_with_nothing_unusual_about_it_carries_no_note(monkeypatch):
+    # A private repo of the student's own is what the callout already describes, and an
+    # `external` assignment hands out no repo for a note to be about.
+    for config in ("", "submit_via: external\n"):
+        out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
+        assert "shape_note" not in out
 
 
 def test_the_page_carries_the_total_the_questions_add_up_to(monkeypatch):

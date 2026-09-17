@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import assign, collect, grades, workflows_place
+from dsl_course import assign, collect, course, grades, workflows_place
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 
@@ -3285,3 +3285,80 @@ def test_patch_targets_finds_the_shared_drop_box(monkeypatch):
         repo_row("assignment-3-archived", archived=True),
     ]
     assert assign.patch_targets(listing, "assignment-3") == ["assignment-3-submissions"]
+
+
+# ------------------------------------ the About line a student reads inside the repo
+
+
+@pytest.fixture
+def _creations(monkeypatch):
+    """Every kwargs dict `generate_from_template` was called with, and nothing reaching
+    the network. The access half is let fail: what these are about is the CREATE."""
+    made: list[dict] = []
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: False)
+    monkeypatch.setattr(
+        assign, "generate_from_template", lambda **k: made.append(k) or True
+    )
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "set_visibility", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: False)
+    return made
+
+
+@pytest.mark.parametrize(
+    ("visibility", "shape"),
+    [
+        ("private", "assignment-repo-private"),
+        ("public", "assignment-repo-public"),
+        ("student_choice", "assignment-repo-student-choice"),
+    ],
+)
+def test_a_submission_repos_about_line_carries_its_shapes_note(
+    _creations, visibility, shape
+):
+    # The repo's About line is where a student meets the warning if they came to the repo
+    # from a link rather than from the assignment's page - which, weeks after hand-out, is
+    # everyone. Same text as the page, from `course.SHAPE_NOTES`, so the two cannot drift;
+    # a private repo of the student's own has nothing unusual to say, so its line is
+    # exactly what it always was.
+    assign.provision_one(
+        "COURSE",
+        "assignment-5",
+        "COHORT",
+        "assignment-5-ada",
+        ["ada-l"],
+        "assignment-5",
+        visibility=visibility,
+    )
+    description = _creations[0]["description"]
+    assert description.startswith("assignment-5 - submission repo")
+    note = course.shape_note(shape)
+    assert description == (
+        f"assignment-5 - submission repo. {note}"
+        if note
+        else "assignment-5 - submission repo"
+    )
+
+
+def test_the_drop_box_about_line_says_who_else_can_read_it(_creations, monkeypatch):
+    # One repo, and the whole cohort has push on it: the warning belongs on the repo
+    # itself as much as on the page, and it is the same sentence.
+    monkeypatch.setattr(assign, "_grant_drop_box", lambda *a, **k: (0, True))
+    monkeypatch.setattr(assign, "protect_shared_repo", lambda *a, **k: True)
+    assign.ensure_drop_box(
+        "COHORT", "assignment-7", "assignment-7", [], "key", group=False
+    )
+    assert _creations[0]["description"] == (
+        "assignment-7 - shared submission drop box. "
+        + course.shape_note("shared-dropbox-repo")
+    )
+
+
+def test_every_about_line_fits_inside_githubs_cap():
+    # GitHub TRUNCATES a description past its cap rather than refusing it, so a note that
+    # outgrew it would lose its second half and say nothing about having done so. The
+    # longest realistic prefix is an assignment slug plus the words around it.
+    prefix = "assignment-10-neural-networks-from-scratch - shared submission drop box. "
+    for shape, note in course.SHAPE_NOTES.items():
+        assert len(prefix) + len(note) <= course.MAX_REPO_DESCRIPTION, shape

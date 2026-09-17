@@ -259,6 +259,49 @@ def submit_shape(submit_via: str, visibility: str) -> str:
     return f"{submit_via}-{visibility}".replace("_", "-")
 
 
+# What a student has to know about the REPO they were handed, for the three shapes where
+# the answer is not "a private repo of your own". One text per shape and one place for it,
+# because two readers need the same words at two different moments: the assignment's page
+# on the cohort site (`site._assignment_entry` writes it into the front matter, the layout
+# prints it under the brief) and the repo's own About line on GitHub, which is what a
+# student reads when they open the repo rather than the page (`assign.provision_one`, and
+# the drop box). Written apart they drifted, and the About line said nothing at all.
+#
+# `NB:` opens every one of them: the box is an aside beside the brief, not a step in it.
+# Plain `>` rather than `&gt;` - this is a YAML scalar and a repo description, and the one
+# consumer that needs markup escapes it where it renders (`| escape`).
+#
+# The default shape has no note: a private repo of the student's own is what the route
+# sentence in the callout already describes, and a second box saying so is a page telling
+# a reader something they were not wondering about.
+SHAPE_NOTES = {
+    "assignment-repo-public": (
+        "NB: this repo is public - anyone on the internet can read it. Push to main as "
+        "usual, but commit nothing you would not publish and no data you were told to "
+        "keep private."
+    ),
+    "assignment-repo-student-choice": (
+        "NB: this repo is private by default and you are its admin. After the grading "
+        "cutoff you may make it public from Settings > Danger zone if you want it in "
+        "your portfolio. Before then the toolkit turns it private again."
+    ),
+    "shared-dropbox-repo": (
+        "NB: everyone in the cohort can read this whole repo, so commit nothing you "
+        "would not show the class."
+    ),
+}
+# GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
+# the note, so a note that grew past this would be TRUNCATED by GitHub rather than
+# refused, and the warning would lose its second half silently.
+MAX_REPO_DESCRIPTION = 350
+
+
+def shape_note(shape: str) -> str:
+    """The one-line warning this `submit_shape` owes a student, or "" for a shape that
+    owes none."""
+    return SHAPE_NOTES.get(shape, "")
+
+
 # The two answers the New materials repo form asks about PUBLISHING, out of which
 # `scaffold.publish_patterns` writes the repo's seeded `publish.yml`. Here, in the shared
 # vocabulary, for the same reason the assignment words are: `workflows_render` (layer 3)

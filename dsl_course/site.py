@@ -46,6 +46,7 @@ from .course import (
     pages_repo,
     row_name,
     session_number,
+    shape_note,
     shared_repo,
     submission_repo,
     term_tag,
@@ -1125,6 +1126,14 @@ def _assignment_entry(
     # glance at WHEN and WHERE.
     points = total_points(spec)
     points_fm = f'max_points: "{points}"\n' if points else ""
+    # What is unusual about the repo this shape hands out, as the aside the layout prints
+    # under the brief (`course.SHAPE_NOTES` - the same sentence the repo's own About line
+    # carries, so the page and the repo cannot come to say different things). Empty for the
+    # default shape, which owes no warning, and for `external`, which hands out no repo.
+    # The PAGE alone: the due row is a glance at when and where, and a warning in it would
+    # be read on the schedule by everyone, about every assignment, at once.
+    note = shape_note(spec.submit_shape)
+    note_fm = f'shape_note: "{q(note)}"\n' if note else ""
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1184,6 +1193,7 @@ def _assignment_entry(
         f"{repo_fm}"
         f"{late_fm}"
         f"{points_fm}"
+        f"{note_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"

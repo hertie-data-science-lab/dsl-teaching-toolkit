@@ -123,9 +123,9 @@ repo's, so it would accuse the entire cohort of one student's late push), and
    private `grades-<handle>` gradebook, and a `submit_via: assignment_repo`, `visibility: private`
    submission repo gets a **Feedback** issue. An `external` assignment has no repos, a
    `shared_dropbox_repo` one has a repo the whole cohort reads, and a `public` or `student_choice` repo
-   is not private - none of the three gets an issue: their marks and feedback reach students
-   through the gradebook alone, and for an `external` group assignment the team score and
-   team feedback go into each member's.
+   is not private - none of the three gets an issue. Marks and feedback go to the student's
+   private `grades-<handle>` gradebook whatever the shape, and for an `external` group
+   assignment the team score and team feedback go into each member's.
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
    issue. Late pushes refresh both, quarter-hourly, until the cutoff.
 3. **Collect submissions** (button) does that refresh now instead of waiting. It never

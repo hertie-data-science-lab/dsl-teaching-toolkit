@@ -1764,8 +1764,8 @@ def main() -> int:
         choices=list(VISIBILITIES),
         default="private",
         help="public = every student's repo is world-readable from hand-out (portfolio "
-        "work); there is then no Feedback issue and feedback goes to the gradebook. Read "
-        "when the repo is created - editing it later changes nothing",
+        "work); there is then no Feedback issue. Read when the repo is created - editing "
+        "it later changes nothing",
     )
     pa.add_argument(
         "--autograde",

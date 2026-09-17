@@ -121,3 +121,35 @@ def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
     # spelling is usable at all, at the parse, and a second reading of it here would be a
     # second answer to the same question.
     assert course.late_rule(7, "0.1") == "0.1 per day, up to 7 days"
+
+
+def test_only_the_shapes_with_something_unusual_about_them_owe_a_note():
+    # The note answers "what is odd about the repo I was just handed?", so the shape whose
+    # answer is "nothing - it is private and it is yours" owes none, and neither does the
+    # one that hands out no repo at all.
+    assert course.shape_note("assignment-repo-private") == ""
+    assert course.shape_note("external") == ""
+    assert set(course.SHAPE_NOTES) == {
+        "assignment-repo-public",
+        "assignment-repo-student-choice",
+        "shared-dropbox-repo",
+    }
+    # Every key is a shape the vocabulary actually derives, not a word typed twice.
+    derivable = {
+        course.submit_shape(via, vis)
+        for via in course.SUBMIT_VIA
+        for vis in course.VISIBILITIES
+    }
+    assert set(course.SHAPE_NOTES) <= derivable
+
+
+def test_every_note_opens_the_same_way_and_says_what_it_is_about():
+    # `NB:` on all three: the box is an aside beside the brief, not a step in it, and one
+    # note that opened differently would read as an instruction.
+    for shape, note in course.SHAPE_NOTES.items():
+        assert note.startswith("NB: "), shape
+        assert note.endswith("."), shape
+        # A plain `>`, never an HTML entity: this text is a YAML scalar and a GitHub repo
+        # description as well as page copy, and the one consumer that needs markup escapes
+        # it where it renders.
+        assert "&gt;" not in note, shape
