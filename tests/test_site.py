@@ -460,25 +460,25 @@ def test_a_declared_name_that_repeats_the_identifier_is_trimmed(monkeypatch):
     # linear regression..." and "Lab 1 / Lab 1". Both dash characters in live sources are
     # handled.
     assert (
-        site._row_name("Assignment 1 - linear regression", "Assignment 1")
+        site.row_name("Assignment 1 - linear regression", "Assignment 1")
         == "linear regression"
     )
     assert (
-        site._row_name("Assignment 1 \u2014 Introduce Yourself", "Assignment 1")
+        site.row_name("Assignment 1 \u2014 Introduce Yourself", "Assignment 1")
         == "Introduce Yourself"
     )
     # a heading that is the name already survives whole
     assert (
-        site._row_name("Group project - a report", "Assignment 3 Project")
+        site.row_name("Group project - a report", "Assignment 3 Project")
         == "Group project - a report"
     )
     # and `Assignment 10` is not `Assignment 1` plus a name of "0"
-    assert site._row_name("Assignment 10 revisited", "Assignment 1") == (
+    assert site.row_name("Assignment 10 revisited", "Assignment 1") == (
         "Assignment 10 revisited"
     )
     # a session's declared title gets the same trim
-    assert site._row_name("Lab 1", "Lab 1") == ""
-    assert site._row_name("Session 3 - Probability", "Session 3") == "Probability"
+    assert site.row_name("Lab 1", "Lab 1") == ""
+    assert site.row_name("Session 3 - Probability", "Session 3") == "Probability"
 
 
 def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):

@@ -517,7 +517,14 @@
     font-family: $display-font;
     font-size: 1.2em;
     letter-spacing: 0.04em;
+    font-weight: 600;
     color: $grey-color-dark;
+}
+
+/* The due line under the header: the one date a student acts on, so a step up from the
+   released line beside it. */
+.post-due {
+    font-size: 1.1em;
 }
 
 hr.session-rule {

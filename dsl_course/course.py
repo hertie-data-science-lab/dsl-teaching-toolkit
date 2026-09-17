@@ -673,3 +673,45 @@ def discover_sections(repo_root: Path) -> list[str]:
     return sorted(
         {parent for parent, _, _ in session_dirs(_local_dir_paths(repo_root)) if parent}
     )
+
+
+# How a slug is SHOWN. `identifier("assignment-5")` is "Assignment 5": the bold half of a
+# schedule row, the kicker over an assignment page, and the label beside the name in a
+# gradebook. One spelling, because the same assignment is read in all three places.
+
+
+def identifier(slug: str) -> str:
+    """The slug's own name, title-cased: `assignment-3-project` -> `Assignment 3 Project`."""
+    return slug.replace("-", " ").title()
+
+
+# Separators faculty put between a row's identifier and its name. Two dash characters are
+# in live sources already (`Assignment 1 - ...` and `Assignment 1 — ...`), which is exactly
+# why this is a set and not a `-`.
+_NAME_SEPARATORS = "-\u2013\u2014:|"
+
+
+def row_name(declared: str, identifier: str) -> str:
+    """A row's NAME out of what faculty wrote, given the identifier the site already shows
+    in bold beside it - so the pair reads "Session 3 / Probability theory" and never
+    "Session 3 / Session 3".
+
+    Faculty conventionally repeat the identifier: a template README opens `# Assignment 1 -
+    linear regression from scratch`, and a `releases:` entry is as likely to say
+    `title: Lab 1` as to name the lab. Printed whole under the identifier that reads
+    "Assignment 1 / Assignment 1 - linear regression from scratch" and "Lab 1 / Lab 1", so
+    drop the prefix and whatever separates it.
+
+    Text that does NOT open with the identifier (`Group project - an end-to-end modelling
+    report`) is the name already and is returned as it stands. Casefolded, so text that
+    differs from the identifier only in capitalisation still matches."""
+    name = declared.strip()
+    if name.casefold().startswith(identifier.casefold()):
+        rest = name[len(identifier) :].lstrip()
+        # Only when a separator actually follows: `Assignment 10` must not be read as
+        # `Assignment 1` plus the name "0".
+        if rest[:1] in tuple(_NAME_SEPARATORS):
+            return rest[1:].strip()
+        if not rest:
+            return ""
+    return name

@@ -65,8 +65,10 @@ from .course import (
     creates_unit_repos,
     feedback_issue_body,
     has_feedback_issue,
+    identifier,
     receipt_body,
     resolve_is_group,
+    row_name,
     submission_repo,
     submit_shape,
     visibility_is_students,
@@ -2960,6 +2962,15 @@ def _questions_clause(score: object) -> str:
     return " (" + ", ".join(f"{name} {value}" for name, value in marked.items()) + ")"
 
 
+def _readme_label(slug: str, title: str) -> str:
+    """`Assignment 5 · Portfolio piece`: the identifier the site and schedule show, then the
+    name, with a name that merely repeats the identifier folded away (`course.row_name`).
+    A book whose slug has no title yet is labelled by the identifier alone."""
+    ident = identifier(slug)
+    name = row_name(title, ident) if title != slug else ""
+    return f"{ident} · {name}" if name else ident
+
+
 def _readme_row(title: str, view: dict) -> str:
     """One assignment's row in the summary table."""
     values = (
@@ -3008,9 +3019,15 @@ def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) ->
     table = [
         "| " + " | ".join(_README_COLUMNS) + " |",
         "|" + "---|" * len(_README_COLUMNS),
-        *(_readme_row(titles.get(slug, slug), book[slug]) for slug in slugs),
+        *(
+            _readme_row(_readme_label(slug, titles.get(slug, slug)), book[slug])
+            for slug in slugs
+        ),
     ]
-    sections = [_readme_section(titles.get(slug, slug), book[slug]) for slug in slugs]
+    sections = [
+        _readme_section(_readme_label(slug, titles.get(slug, slug)), book[slug])
+        for slug in slugs
+    ]
     return "\n\n".join([_PRIVACY_HEADER, "\n".join(table), *sections]) + "\n"
 
 

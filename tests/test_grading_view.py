@@ -346,9 +346,9 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
         "\n"
         "| Assignment | Final grade | Submitted | Late | Team |\n"
         "|---|---|---|---|---|\n"
-        "| Neural networks from scratch | 40 / 50 | 3 Oct 22:14 | on time | team-alpha |\n"
+        "| Assignment 1 · Neural networks from scratch | 40 / 50 | 3 Oct 22:14 | on time | team-alpha |\n"
         "\n"
-        "## Neural networks from scratch\n"
+        "## Assignment 1 · Neural networks from scratch\n"
         "**Final grade:** 40 / 50\n"
         "\n"
         "Your section of the write-up repeats the Q4 error; see the team feedback.\n"
@@ -375,7 +375,7 @@ def test_the_submitted_column_tells_the_two_kinds_of_blank_apart(spec, expected)
     sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 9}}}
     books = build_gradebooks({"assignment-1": (spec, sheet)})
     row = render_readme("ada-l", books["ada-l"], {}).splitlines()[4]
-    assert row == f"| assignment-1 | 9 | {expected} |  |  |"
+    assert row == f"| Assignment 1 | 9 | {expected} |  |  |"
 
 
 def test_a_mark_on_a_repo_nothing_was_pushed_to_says_that_in_the_comment():
@@ -410,8 +410,8 @@ def test_one_row_per_assignment_sorted_by_slug():
         }
     )
     readme = render_readme("ada-l", books["ada-l"], {})
-    assert readme.index("| assignment-1 ") < readme.index("| assignment-2 ")
-    assert readme.index("## assignment-1") < readme.index("## assignment-2")
+    assert readme.index("| Assignment 1 ") < readme.index("| Assignment 2 ")
+    assert readme.index("## Assignment 1") < readme.index("## Assignment 2")
 
 
 @pytest.mark.parametrize(

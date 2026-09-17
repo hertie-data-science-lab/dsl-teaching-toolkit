@@ -234,6 +234,7 @@ def _classes(text: str) -> set[str]:
 _OWN_CLASSES = frozenset(
     {
         "post-kicker",
+        "post-due",
         "file-actions",
         "file-btns",
         "file-btn",

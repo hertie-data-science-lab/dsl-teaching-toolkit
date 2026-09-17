@@ -39,7 +39,7 @@ title: page.title
     never existed, so the block that read it printed a bare time.
     {%- endcomment -%}
     {% if page.due_event %}
-    <p class="post-meta"><strong>Due {{ page.due_event.date | date: "%A" }} {{ page.due_event.date | date: site.dateformat }} {{ page.due_event.date | date: "%H:%M" }}</strong></p>
+    <p class="post-meta post-due"><strong>Due {{ page.due_event.date | date: "%A" }} {{ page.due_event.date | date: site.dateformat }} {{ page.due_event.date | date: "%H:%M" }}</strong></p>
     {% endif %}
   </header>
 

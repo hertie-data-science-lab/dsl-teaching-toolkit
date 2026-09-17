@@ -41,8 +41,10 @@ from . import schedule
 from .course import (
     PUBLISH_FILE,
     assignment_slug,
+    identifier,
     late_rule,
     pages_repo,
+    row_name,
     session_number,
     shared_repo,
     submission_repo,
@@ -901,7 +903,7 @@ def _lecture_entry(
     # `_row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - the same trim an assignment's README heading gets, because faculty
     # repeat the identifier just as readily in the plan as in a README.
-    subtitle, description = _row_name(row.subtitle, title), row.description
+    subtitle, description = row_name(row.subtitle, title), row.description
     reading_list = ""
     if sources:
         flags = ""
@@ -959,38 +961,6 @@ def _lecture_entry(
         f"---\n"
         f"{body}\n"
     )
-
-
-# Separators faculty put between a row's identifier and its name. Two dash characters are
-# in live sources already (`Assignment 1 - ...` and `Assignment 1 — ...`), which is exactly
-# why this is a set and not a `-`.
-_NAME_SEPARATORS = "-\u2013\u2014:|"
-
-
-def _row_name(declared: str, identifier: str) -> str:
-    """A row's NAME out of what faculty wrote, given the identifier the site already shows
-    in bold beside it - so the pair reads "Session 3 / Probability theory" and never
-    "Session 3 / Session 3".
-
-    Faculty conventionally repeat the identifier: a template README opens `# Assignment 1 -
-    linear regression from scratch`, and a `releases:` entry is as likely to say
-    `title: Lab 1` as to name the lab. Printed whole under the identifier that reads
-    "Assignment 1 / Assignment 1 - linear regression from scratch" and "Lab 1 / Lab 1", so
-    drop the prefix and whatever separates it.
-
-    Text that does NOT open with the identifier (`Group project - an end-to-end modelling
-    report`) is the name already and is returned as it stands. Casefolded, so text that
-    differs from the identifier only in capitalisation still matches."""
-    name = declared.strip()
-    if name.casefold().startswith(identifier.casefold()):
-        rest = name[len(identifier) :].lstrip()
-        # Only when a separator actually follows: `Assignment 10` must not be read as
-        # `Assignment 1` plus the name "0".
-        if rest[:1] in tuple(_NAME_SEPARATORS):
-            return rest[1:].strip()
-        if not rest:
-            return ""
-    return name
 
 
 def _assignment_entry(
@@ -1085,7 +1055,7 @@ def _assignment_entry(
     # scratch (individual)" the moment it shipped - the same row apparently becoming a
     # different thing. Exactly `_lecture_entry`'s split: `title` identifies, `subtitle`
     # names (and the theme renders the pair identically for both).
-    title = slug.replace("-", " ").title()
+    title = identifier(slug)
     # The plan's own declaration wins, and is the only one that can appear BEFORE hand-out:
     # the README it otherwise comes from is embargoed until then.
     subtitle = found[1].title if found else ""
@@ -1155,7 +1125,7 @@ def _assignment_entry(
         readme = get_file_content(course_org, repo, "README.md") or ""
         for line in readme.splitlines():
             if line.startswith("# ") and not subtitle:
-                subtitle = _row_name(line[2:], title)
+                subtitle = row_name(line[2:], title)
                 break
         brief = "\n".join(
             ln for ln in readme.splitlines() if not ln.startswith("# ")

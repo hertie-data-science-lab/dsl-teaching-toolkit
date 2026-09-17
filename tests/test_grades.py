@@ -753,7 +753,7 @@ def test_a_real_run_reaches_all_four_channels(tmp_path, monkeypatch):
     assert gb_repo == "grades-ada-l"
     assert set(files) == {"grades.yml", "README.md"}
     assert "student: ada-l" in files["grades.yml"]
-    assert "| Neural networks | 43 |" in files["README.md"]
+    assert "| Assignment 1 · Neural networks | 43 |" in files["README.md"]
     # the registrar export and the record, in one classroom-config commit
     ((_cfg, cfg_files, _d),) = out["config"]
     assert set(cfg_files) == {grades.COHORT_CSV_NAME, grades.DISTRIBUTED_PATH}
