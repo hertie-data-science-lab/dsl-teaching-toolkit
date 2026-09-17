@@ -1,6 +1,6 @@
 # grades.yml -- one student's view (grades.render_yaml(book)), written together with
 # README.md beside it in ONE commit, on every Distribute grades that touches them.
-# anna-adams: assignment-2 (github-private, has a late window) and assignment-1
+# anna-adams: assignment-2 (assignment_repo-private, has a late window) and assignment-1
 # (external - no repo, no Feedback issue; this file is her only channel for it).
 # STUDENT_VIEW_KEYS allowlist only; a blank field is dropped, never written null.
 assignment-2:

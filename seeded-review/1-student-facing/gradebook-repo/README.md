@@ -30,7 +30,7 @@ git push -u origin main
 ```
 
 === after Distribute grades (rewritten wholesale on every run that touches this student,
-grades.render_readme) - anna-adams, one github-private assignment and one external one ===
+grades.render_readme) - anna-adams, one assignment_repo-private assignment and one external one ===
 
 This gradebook is private to you. It is regenerated each time grades are distributed; do not edit it.
 
