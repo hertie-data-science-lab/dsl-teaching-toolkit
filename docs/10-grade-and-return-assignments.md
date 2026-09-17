@@ -120,11 +120,12 @@ repo's, so it would accuse the entire cohort of one student's late push), and
 ## Marking, step by step
 
 1. **Handout.** The sheet appears with one row per student or team, every student has a
-   private `grades-<handle>` gradebook, and every submission repo gets a **Feedback**
-   issue. An `external` assignment has no repos and a `shared` one has a repo the whole
-   cohort reads, so neither gets an issue: their marks and feedback reach students through
-   the gradebook alone, and for an `external` group assignment the team score and team
-   feedback go into each member's.
+   private `grades-<handle>` gradebook, and a `submit_via: github`, `visibility: private`
+   submission repo gets a **Feedback** issue. An `external` assignment has no repos, a
+   `shared` one has a repo the whole cohort reads, and a `public` or `student_choice` repo
+   is not private - none of the three gets an issue: their marks and feedback reach students
+   through the gradebook alone, and for an `external` group assignment the team score and
+   team feedback go into each member's.
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
    issue. Late pushes refresh both, quarter-hourly, until the cutoff.
 3. **Collect submissions** (button) does that refresh now instead of waiting. It never

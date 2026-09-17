@@ -120,8 +120,9 @@ onboarded student (or every vetted team) holds **push** on it - the whole cohort
 one place, readable by all of them, which is what the shape is for. The faculty floor is
 unchanged: the name derives from the assignment's cohort template, so the same rule that
 recognises `<slug>-<handle>` recognises this, and `instructors` hold **read**. The repo
-carries a ruleset forbidding force-pushes and deletion, so push cannot be used to erase
-anybody's history.
+carries a ruleset forbidding force-pushes and deletion - but rulesets on a private repo need
+GitHub Team, and every Hertie org is on Free until the Education upgrade lands, so until then
+the drop box is left unprotected and the release run log says so.
 
 Push on that one repo CONVERGES on the roster, which no other submission repo needs to: the
 drop box holds the whole cohort's work, so a grant left behind is somebody who has left the

@@ -215,7 +215,9 @@ What to know before you pick it:
   members made, so a classmate's edit cannot be marked as a student's work - and when the
   most recent hand on a folder was not the unit's, the grading sheet says so
   (`submitted_note`). Nothing is lost either way: `git log` keeps every version, and the
-  repo is protected against force-pushes and deletion, so the history cannot be rewritten.
+  repo carries a ruleset against force-pushes and deletion - though that needs GitHub Team,
+  and every Hertie org is on Free until the Education upgrade lands, so until then the drop
+  box is left unprotected and the release run log says so.
 - **One drop box per assignment.** Two schedule entries resolving to one cohort-side name
   are refused, as they are for every other shape.
 - **Private only.** One repo holds the whole cohort's work and no student can opt out of

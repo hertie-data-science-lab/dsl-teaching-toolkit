@@ -27,9 +27,10 @@ a handout owes the cohort around the work itself.
 For `submit_via: shared` it freezes the cohort template as usual - the brief lives
 there - and then creates ONE private repo, `<slug>-submissions`, with every onboarded
 student (or every vetted team) on `push`. Each unit works in its own `<unit>/` folder and
-can read everyone else's; a ruleset stops the one repo being force-pushed or deleted. No
-Feedback issue and no model solution: one repo the whole cohort reads is not a place to
-put either.
+can read everyone else's; a ruleset asks to stop the one repo being force-pushed or deleted,
+though GitHub Free (every Hertie org, until the Education upgrade) refuses rulesets on a
+private repo, so until then it is left unprotected and the run log says so. No Feedback
+issue and no model solution: one repo the whole cohort reads is not a place to put either.
 
 For `visibility: public` it creates the same repos world-readable - portfolio work - and
 opens no Feedback issue: nothing about a student's marking may be written where the
