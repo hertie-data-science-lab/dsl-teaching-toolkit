@@ -57,7 +57,7 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
                spellcheck="false" placeholder="j.doe">
         <button type="button" class="btn btn--field" data-save="handle">Save</button>
       </span>
-      <p class="profile-hint">Your GitHub username - the last part of your profile address.</p>
+      <p class="profile-hint">Your GitHub username.</p>
       <p class="profile-hint profile-saved" id="dsl-saved-handle"></p>
     </div>
 
@@ -68,8 +68,7 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
                placeholder="/Users/j.doe/Documents/repositories/{{ site.github_org }}/materials">
         <button type="button" class="btn btn--field" data-save="materials">Save</button>
       </span>
-      <p class="profile-hint">Where your clone of <code>materials</code> is, or the folder
-        you are about to clone it into.</p>
+      <p class="profile-hint">Where your clone of <code>materials</code> is (or will go).</p>
       <p class="profile-hint profile-saved" id="dsl-saved-materials"></p>
     </div>
 
@@ -80,8 +79,7 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
                placeholder="/Users/j.doe/Documents/repositories/{{ site.github_org }}/assignments">
         <button type="button" class="btn btn--field" data-save="assignments">Save</button>
       </span>
-      <p class="profile-hint">Where your assignment repos sit. Blank means the same folder
-        as above.</p>
+      <p class="profile-hint">Where your assignment repos (will) sit.</p>
       <p class="profile-hint profile-saved" id="dsl-saved-assignments"></p>
     </div>
 
@@ -95,16 +93,14 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
         <button type="button" class="btn btn--field" data-save="editor">Save</button>
       </span>
       <p class="profile-hint">Your editor's link scheme, ending in <code>{path}</code>
-        where the file goes. The separator before it belongs to the scheme, as in the VS Code
-        one (<code>vscode://file/{path}</code>).</p>
+        where the file goes. As in the VS Code one (<code>vscode://file/{path}</code>).</p>
       <p class="profile-hint profile-saved" id="dsl-saved-editor"></p>
     </div>
   </section>
 
   <section class="profile-step">
     <h2 class="profile-step-title"><span class="profile-step-num">2</span> Fork the materials repo</h2>
-    <p class="profile-hint">Your own copy on GitHub, where your notes and your edits are
-      yours to keep.</p>
+    <p class="profile-hint">Your own editable repo copy on GitHub.</p>
     <p class="profile-buttons">
       <a class="btn" id="dsl-fork" target="_blank" rel="noopener"
          href="https://github.com/{{ site.github_org }}/materials/fork">Fork materials</a>
@@ -116,7 +112,6 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
 
   <section class="profile-step">
     <h2 class="profile-step-title"><span class="profile-step-num">3</span> Clone your fork</h2>
-    <p class="profile-hint">Brings the whole repo down into your materials folder.</p>
     <p class="profile-buttons">
       <a class="btn" id="dsl-clone">Clone your fork</a>
       <span class="profile-hint" id="dsl-clone-handle" hidden>Save a GitHub handle in step 1
