@@ -91,13 +91,17 @@ Things whose *literal spelling* is depended on from outside Python:
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the
   oldest string must still reach the newest in one pass; for `STUB_MARKS`, a repo seeded with an
   older wording must still be recognised as unwritten, or its placeholder syllabus ships.
-- **`course.FEEDBACK_ISSUE_TITLE` / `FEEDBACK_ISSUE_LABEL` / `FEEDBACK_ISSUE_MARKS`** identify
-  the one Feedback issue in each submission repo. `assign` opens it, `grades` posts receipts and
-  grades into it, and the lookup (label -> body mark -> exact title) is what stops a second one
-  appearing over a thread a student is already reading. `FEEDBACK_ISSUE_MARKS` is a chain like
-  `STUB_MARKS`: add a wording, never edit one, or every issue opened under the old one becomes
-  invisible. The hidden `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what
-  makes the quarter-hourly refresh post once rather than four times an hour.
+- **`course.RECEIPTS_ISSUE_TITLE` / `RECEIPTS_ISSUE_LABEL` / `RECEIPTS_ISSUE_MARKS`** identify
+  the one issue in each submission repo. It carries **submission receipts only** - `assign` opens
+  it, `collect` posts the receipts and `assign` the patch notes; no mark or feedback line is ever
+  posted into a repo, they go to `grades-<handle>` alone. The lookup (label -> body mark -> exact
+  title) is what stops a second one appearing over a thread a student is already reading, and it
+  is why the TITLE could be renamed to `Submission receipts` while the label `dsl-feedback` and
+  the marks keep the older word: those two are matched against live issues and a student never
+  reads either. `RECEIPTS_ISSUE_MARKS` is a chain like `STUB_MARKS`: add a wording, never edit
+  one, or every issue opened under the old one becomes invisible. The hidden
+  `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
+  refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
 - **An ARCHIVED `classroom-config`** is a cohort's "finished" marker. `teardown` archives it
@@ -355,6 +359,10 @@ Two placements are not where they read: `access` sits above `discovery`, because
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
 `welcome`, whose seeding it reuses.
 
+A write that can follow a create or a visibility flip goes through `repos.gh_settled`,
+which retries for ~60 s while GitHub answers that the repo is still busy or locked, and
+retries nothing else.
+
 `releaseignore` is the only module at layer 0 with a third-party dependency (`pathspec`).
 Keep it out of widely imported modules - an import in `repos` or `gh_contents` gives every
 CLI in the package that dependency.
@@ -554,11 +562,20 @@ CI and every seeded workflow run 3.12. Conventions:
 
 `tests/e2e` drives the REAL seeded workflows against the demo tier: New assignment ->
 schedule block -> Scheduled release (handout) -> a genuine student push -> Scheduled release
-(due-date sheet refresh) -> Scheduled release (snapshot + autograde), then puts both orgs
-back. It proves the wiring unit tests cannot - a click, a cron, a token and a repo - and it
-runs against the demo org between **merging to main and Promote to release**, alongside the
-manual inspection that is the actual gate. Three scheduler passes, not two - handout, due,
-cutoff - for the reason given with the cleanup notes at the end of this section.
+(due-date sheet refresh) -> Scheduled release (snapshot + autograde) -> Distribute grades,
+then puts both orgs back. It proves the wiring unit tests cannot - a click, a cron, a token
+and a repo - and it runs against the demo org between **merging to main and Promote to
+release**, alongside the manual inspection that is the actual gate. Three scheduler passes,
+not two - handout, due, cutoff - for the reason given with the cleanup notes at the end of
+this section.
+
+ONE ASSIGNMENT PER SUBMISSION SHAPE (`tests/e2e/shapes.py`): github/private,
+github/public, github/student_choice, external and shared, handed out under
+`<namespace>-<shape>` and driven serially through the same ticks. The shapes differ in what
+the handout creates, where the student pushes, whether there is a receipts issue and what
+the site page says, so a run that drove one of them proved the wiring for one of them. The
+student really publishes their `student_choice` repo - once before the grading cutoff,
+which the next tick undoes, and once after it, which stands.
 
     DSL_E2E=1 \
     DSL_ORG_ALLOWLIST=hertie-dsl-demo-course-e1234,hertie-dsl-demo-f2026 \
@@ -568,9 +585,10 @@ cutoff - for the reason given with the cleanup notes at the end of this section.
 
 Without `DSL_E2E=1` the whole directory is skipped (it still shows as a skip, so a broken
 gate is visible); the pure parts are covered by `tests/test_e2e_harness.py` in the ordinary
-suite. The student token is fine-grained, Contents R/W on the demo cohort org only. The
-maintainer token holds `delete_repo`, which the bot never does - that is why cleanup is a
-command and never a workflow. Environment variables only; no dotfile.
+suite. The student token is fine-grained, on the demo cohort org only: Contents R/W for the
+push, Administration R/W because the `student_choice` shape is the student publishing their
+own repo. The maintainer token holds `delete_repo`, which the bot never does - that is why
+cleanup is a command and never a workflow. Environment variables only; no dotfile.
 
 Three fences, and all three must hold. `DSL_ORG_ALLOWLIST` refuses any WRITE (`gh` or `git
 push`) outside the orgs it names - opt-in, unset everywhere else, and it raises rather than
@@ -578,7 +596,8 @@ returning a failure pair, which `repo_exists` would read as absence. `tests/e2e/
 names the two demo orgs as a literal; `DSL_E2E_ORGS` may only NARROW that. Preflight refuses
 to start unless the course org declares `central_ref: main`, `main` is this checkout's
 HEAD, every workflow the org holds is byte-for-byte what this checkout renders for it, the
-test student has a roster row, and the run's namespace is empty.
+test student has a roster row, every onboarded enrolled student already has a gradebook,
+and the run's namespace is empty.
 
 That workflow check is a blob-sha comparison, not a timestamp: the preflight renders the
 org's whole `.github/workflows` set with `seed.github_workflow_files` (the same call
@@ -588,23 +607,27 @@ and no file is excused. A named file means run **Refresh actions** and start aga
 `.last-refresh` heartbeat is only checked for existence - its content is the date, so it
 moves at most once a day and could never show a promotion made an hour ago.
 
-Everything a run creates is namespaced `assignment-90-<run id>`. If it dies halfway:
+Everything a run creates is namespaced `assignment-90-<run id>`, each shape under a
+`-<shape>` suffix of it. If it dies halfway:
 
     python -m tests.e2e.cleanup --run-id <run id> [--dry-run]
 
 which deletes only repos matching `assignment-90-<run id>(-.+)?`, removes only its own
 `# dsl-e2e:<run id>` fenced block from schedule.yml, and drops only its own snapshot /
 autograde / grading-sheet artefacts. Anything else that drifted is REPORTED, never deleted.
-Budget 20-30 minutes of wall clock, ~16 runs, all in public repos and therefore free.
+Budget 60-75 minutes of wall clock, ~25 runs, all in public repos and therefore free - run
+it under `nohup`. Most of that is New assignment, which is pressed once per shape and
+serially, because it re-renders the org's own workflows as its last step.
 Three Scheduled-release dispatches are needed, not two: the pass that hands out cannot
 also collect, and the DUE date and the CUTOFF drive different passes (refresh, then
 freeze). Each schedule edit the run makes drives a tick of its own as well (the cohort's
 `dispatch-scheduled-release.yml` fires on the push), which the harness waits out before
 dispatching. One-off setup:
 `python3 -c "from dsl_course import grades; grades.ensure_gradebooks('<demo cohort>')"`
-once, so the test student's `grades-<handle>` repo already exists - a repo the run created
-is drift the teardown cannot take back. There is no button and no subcommand for it any
-more: `distribute` provisions the gradebooks it needs, and that is the only caller.
+once, so every student in the demo cohort already has their `grades-<handle>` repo - a repo
+the run created in a student's namespace is drift the teardown cannot take back, and the
+handout provisions them now (gradebooks exist from onboarding, so the brief can point at
+one from day one).
 
 ## Working conventions
 

@@ -14,7 +14,8 @@ not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
-handed-out assignment, a pending one, one handed in off GitHub, a dated exam and a TBC
+handed-out assignment, a pending one, one handed in off GitHub, one handed in off GitHub
+that is not out yet, one whose repos are public, one handed into a shared drop box, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
 an All Materials index nested three directories deep, and - within the released session -
 a published file linked to the site's own hosted copy beside an unpublished one linked to
@@ -42,9 +43,27 @@ BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
 COHORT_ORG = "hertie-dsl-fixture-f2026"
 MATERIALS = "course-materials"
-# Handed in off GitHub (`submit_via: external`), so its page and its due row must not tell
-# the cohort to push to `main`.
+# Handed in off GitHub (`submit_via: external`), so NO repo is created for it: its page and
+# its due row must name none, and must not tell the cohort to push to `main`. It names a
+# `submit_url`, which is what puts the `Submit on <host>` button on both.
 EXTERNAL = "assignment-3-f2026"
+EXTERNAL_URL = "https://moodle.example.edu/mod/assign/view.php?id=EXAMPLE"
+# Portfolio work (`visibility: public`): the same repo per student, world-readable from
+# hand-out, and no receipts issue - so its page and its due row have to say so before a
+# student pushes anything into it.
+PUBLIC = "assignment-4-f2026"
+# External AND still pending, which is the pair of states that reaches no reader: the
+# brief is embargoed until hand-out, so the page may not yet say where the work goes.
+EXTERNAL_PENDING = "assignment-5-f2026"
+# The student's own call (`visibility: student_choice`): the same private repo, but the
+# student is its admin and may publish it once the grading cutoff has passed. Its page has
+# to carry both halves of that, and its due row the one word that says the flag is theirs.
+STUDENT_CHOICE = "assignment-6-f2026"
+# One drop box for the whole cohort (`submit_via: shared_dropbox_repo`): `repo_name` is a REAL repo
+# rather than a shape, what is the student's own is a folder inside it, and the name must
+# NOT be rewritten to one per reader - which is the one thing open_in.html does to every
+# other assignment page.
+SHARED = "assignment-7-f2026"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
 # by construction rather than by when CI happens to run.
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=BERLIN)
@@ -118,12 +137,30 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
 
 
 def _grading_spec(_org: str, repo: str):
-    """The assignment's own definition, which names the repo shape a student looks for and
-    says whether the work is handed in on GitHub at all. The fixture's assignments are
-    individual, so the empty file's defaults are otherwise exactly right - it is stubbed
-    only because the read would otherwise go to GitHub."""
+    """The assignment's own definition, which names the repo shape a student looks for,
+    says whether the work is handed in on GitHub at all, and declares what happens to work
+    that arrives late. The fixture's assignments are individual, so the rest of the empty
+    file's defaults are exactly right - it is stubbed only because the read would otherwise
+    go to GitHub.
+
+    The default carries a late WINDOW and a penalty and the named shapes do not, so the
+    generated pages hold both halves of `course.late_rule` - the rule quoted and the
+    deadline standing alone - and `external` holds neither. It declares `questions:` for
+    the same reason: the total off those maxima is what the page prints as `max_points`,
+    and the named shapes declare none, so the fixture holds a page with the line and pages
+    without it."""
+    if repo in (EXTERNAL, EXTERNAL_PENDING):
+        return grades.parse_grading_spec(
+            f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
+        )
+    if repo == PUBLIC:
+        return grades.parse_grading_spec("visibility: public\n")
+    if repo == STUDENT_CHOICE:
+        return grades.parse_grading_spec("visibility: student_choice\n")
+    if repo == SHARED:
+        return grades.parse_grading_spec("submit_via: shared_dropbox_repo\n")
     return grades.parse_grading_spec(
-        "submit_via: external\n" if repo == EXTERNAL else ""
+        "late_window_days: 7\nlate_penalty_per_day: 10%\nquestions:\n  Q1: 15\n  Q2: 10\n"
     )
 
 
@@ -197,8 +234,14 @@ def _lectures(hosted: dict) -> dict[str, str]:
 
 
 def _assignments() -> dict[str, str]:
-    """One handed out (repo link, brief, README-derived name), one still pending, and one
-    handed in off GitHub - the three ways an assignment says where the work goes."""
+    """Every way an assignment says where the work goes: one handed out (repo link, brief,
+    README-derived name), one still pending, one handed in off GitHub, one handed in off
+    GitHub but not out yet, one whose repos are public, and one whose repos the students
+    may publish themselves.
+
+    The external ones are handed out by their PIN rather than by a frozen cohort template:
+    that handout creates no repos at all, so `handed_out` never carries their name and
+    `site._assignment_entry`'s other half is what publishes the brief."""
     return {
         "01-assignment-1.md": site._assignment_entry(
             COURSE_ORG,
@@ -223,7 +266,45 @@ def _assignments() -> dict[str, str]:
             EXTERNAL,
             datetime(2026, 12, 8, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 30, 9, 0, tzinfo=BERLIN),
-            handed_out=frozenset({"assignment-3"}),
+            now=NOW,
+        ),
+        "04-assignment-4.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            PUBLIC,
+            datetime(2026, 12, 15, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handed_out=frozenset({"assignment-4"}),
+            now=NOW,
+        ),
+        "05-assignment-5.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            EXTERNAL_PENDING,
+            datetime(2026, 12, 22, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 11, 10, 9, 0, tzinfo=BERLIN),
+            now=NOW,
+        ),
+        # Handed out BEFORE the first lecture, and so is 07: the home page's Updates box lists
+        # the seven newest released items, and the jekyll-contract job greps that box for the
+        # first lecture's inline source link. Two more assignments dated after it pushed it
+        # to eighth place and the contract failed on a page nothing here had touched.
+        "06-assignment-6.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            STUDENT_CHOICE,
+            datetime(2027, 1, 12, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
+            handed_out=frozenset({"assignment-6"}),
+            now=NOW,
+        ),
+        "07-assignment-7.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            SHARED,
+            datetime(2027, 1, 19, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
+            handed_out=frozenset({"assignment-7"}),
             now=NOW,
         ),
     }

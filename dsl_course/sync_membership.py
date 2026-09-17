@@ -48,11 +48,12 @@ from .discovery import (
     discover_assignments,
     discover_cohorts,
     discover_content_repos,
+    listing_by_name,
 )
 from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login
-from .grades import write_team_lock
+from .grades import ensure_gradebooks, write_team_lock
 from .log import log_err, log_ok
 
 # What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -61,6 +62,16 @@ from .log import log_err, log_ok
 # nothing this run may reconcile from, and reconciling from what it does say would prune
 # a cohort's teams down to whatever survived the parse.
 _CONTENT_FAULT = (Unusable, yaml.YAMLError)
+
+# How long the NIGHTLY SYNC may spend provisioning gradebooks before it stops and leaves
+# the rest to the next one - the one caller that passes it, because it is the one with no
+# work waiting on the gradebooks it makes. A DEADLINE rather than a count of creations:
+# what has to be bounded is the wall clock of a job (Sync membership has a 30-minute one),
+# and four API calls per new gradebook take as long as the write pacer and the day's rate
+# limit make them - so a count is a guess at that and this is the thing itself. A run that
+# stops here has recorded everything it did; repos already there cost almost nothing, so
+# the next run starts from where this one left off.
+GRADEBOOK_BUDGET_MINUTES = 10
 
 
 def _unreadable_course_config(course_org: str, exc: Exception) -> int:
@@ -145,7 +156,20 @@ def sync(
         # transient failure must not abort the whole batch (the lesson seed.refresh
         # applied). Log it, count it, and carry on to the next cohort.
         try:
-            errors += sync_roster.sync(org, prune=True, dry_run=dry_run)
+            # ONE listing of the cohort for this pass. Two of the steps below ask the same
+            # question of it - which submission repos an off-boarded student still holds a
+            # grant on, and which students have no gradebook yet - and each used to take a
+            # paginated listing of its own, nightly, per cohort.
+            #
+            # `listing_by_name` and not `list_org_repos`: this is taken before the roster
+            # reconcile rather than inside it, and a listing that RAISED here would have
+            # skipped the whole cohort - enrolment included - over rows only the prune and
+            # the gradebooks need. None is "we could not look", and each of them answers
+            # it for itself.
+            existing = listing_by_name(org)
+            errors += sync_roster.sync(
+                org, prune=True, dry_run=dry_run, existing=existing
+            )
             errors += sync_teams.sync(org, prune=True, dry_run=dry_run)
             errors += sync_faculty.sync_cohort_instructors(
                 course_org, org, content_repos, assignments, dry_run=dry_run
@@ -155,6 +179,19 @@ def sync(
             # and a form answering off a stale mirror either refuses a real team or lets
             # one form for an assignment the template says is individual.
             errors += 0 if write_team_lock(course_org, org, dry_run=dry_run) else 1
+            # A private gradebook per onboarded student, from the moment they onboard
+            # rather than from the first distribute: it is where every shape's marks and
+            # feedback go, and the assignment brief points at it from the day it is
+            # published. Idempotent, one cohort listing.
+            # The ONE caller that bounds it: this run has 30 minutes for every cohort
+            # at once and nothing waiting on the repos it makes, so a cohort that would
+            # overrun stops and the next night takes the next batch.
+            errors += ensure_gradebooks(
+                org,
+                dry_run=dry_run,
+                existing=existing,
+                budget_minutes=GRADEBOOK_BUDGET_MINUTES,
+            )
         except _CONTENT_FAULT as exc:
             # A file faculty have to fix, not a run that broke. This cohort is skipped -
             # a roster nobody can read is not an empty roster, and acting on it would

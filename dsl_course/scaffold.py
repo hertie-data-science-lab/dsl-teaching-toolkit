@@ -31,6 +31,8 @@ from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
+    DEFAULT_LATE_PENALTY_PER_DAY,
+    DEFAULT_LATE_WINDOW_DAYS,
     DEFAULT_MAX_TEAM_SIZE,
     FACULTY_ONLY_HEADING,
     FORMATS,
@@ -46,6 +48,7 @@ from .course import (
     PUBLIC_LECTURES,
     PUBLIC_TYPES,
     PUBLISH_FILE,
+    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     STARTER_FORMATS,
@@ -53,6 +56,9 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     TEAM_FORMATIONS,
     UPSTREAM_BRANCH,
+    VISIBILITIES,
+    canonical_submit_via,
+    creates_unit_repos,
     pages_repo,
 )
 from .derive import BEGIN_SOLUTION, END_SOLUTION, SOLUTION_CHUNK_OPT
@@ -191,7 +197,8 @@ _READINGS_STUB = (
 # what the course declares in `dsl-course.yml assignment_defaults`. INSTRUCTOR-OWNED from
 # the moment it lands: nothing ever rewrites it, and every setting in it is meant to be
 # edited here afterwards. A setting the course has no default for is seeded COMMENTED OUT,
-# so the file teaches the whole vocabulary without asserting an opinion nobody expressed.
+# so the file teaches the whole vocabulary without asserting an opinion nobody expressed -
+# except the late-work pair, which the toolkit itself has an opinion about and writes live.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the cohort's schedule.yml."
@@ -236,18 +243,31 @@ def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
     return f"{line:<29} # {comment}".rstrip()
 
 
+# What the three per-unit stages say on a `shared_dropbox_repo` assignment, where none of
+# them runs.
+_HAND_MARKED = "hand-marked: a drop box is one repo for the whole cohort"
+
+
 def _grading_config(
     *,
     title: str,
     kind: str,
     team_formation: str,
     submit_via: str,
+    visibility: str,
     formats: list[str],
     autograde: bool,
     defaults: dict,
 ) -> str:
     """`grading_config.yml` as New assignment writes it."""
     group = kind == "group"
+    # A drop box is hand-marked, and the parse says so: all three per-unit stages are
+    # refused for `submit_via: shared_dropbox_repo` (`grades._cross_check`), because each
+    # of fifty students would have the whole cohort's work cloned, run and archived under
+    # their own key. Seeded true, the file the button had just written reported a
+    # `Dropped` line on every quarter-hourly tick and stood as an advisory in the cohort's
+    # digest issue - a fault about nothing anybody typed.
+    marked_by_hand = submit_via == "shared_dropbox_repo"
     cap = defaults.get("max_team_size")
     window = defaults.get("late_window_days")
     penalty = defaults.get("late_penalty_per_day")
@@ -270,7 +290,36 @@ def _grading_config(
             live=group and cap is not None,
         ),
         _setting(
-            "submit_via", submit_via, "github | external (Moodle, Kaggle, in class...)"
+            "submit_via",
+            submit_via,
+            "assignment_repo (they push to their repo) | external (handed in elsewhere: "
+            "Moodle, Kaggle, in class - no repo is created) | shared_dropbox_repo (one "
+            "private repo for the whole cohort, each student pushes into their own "
+            "folder, peers can read it)",
+        ),
+        # COMMENTED on every shape, `external` included. The value here is a placeholder
+        # with the right shape and no meaning, and a live line carrying it would put a
+        # `Submit on moodle.hertie-school.org` button in front of a whole cohort pointing
+        # at a page that does not exist. An instructor uncomments it once they have the
+        # real address; `grades._submit_url` refuses one still carrying the placeholder.
+        _setting(
+            "submit_url",
+            f"https://moodle.hertie-school.org/mod/assign/view.php?id={SETTING_PLACEHOLDER}",
+            "external only: the `Submit on ...` button on the site (https only)",
+            live=False,
+        ),
+        # Live only where there IS a repo for it to describe: an `external` assignment
+        # creates none, and the parse drops the key there. Read when each repo is CREATED,
+        # so the comment says what editing it afterwards does - which is nothing to the
+        # repos, and a digest fault until the line matches them again.
+        _setting(
+            "visibility",
+            visibility,
+            "private (the student and the teaching team) | public (the whole internet: "
+            "portfolio work, no receipts issue) | student_choice (private, and the "
+            "student is its admin: theirs to publish after the grading cutoff, and no "
+            "receipts issue) - read at hand-out only",
+            live=creates_unit_repos(submit_via),
         ),
         # ONE format, because `grades` reads one: the key is the vocabulary this file
         # teaches, and the only thing it drives - the `completion_check` default - is
@@ -288,33 +337,41 @@ def _grading_config(
         "",
         _QUESTIONS_STUB.rstrip(),
         "",
+        # Both LIVE, whatever the course declares: these two are the one setting the
+        # toolkit has an opinion about when nobody else does (`course.DEFAULT_LATE_*`, the
+        # Hertie syllabus rule), and a commented-out line carrying the numbers an
+        # assignment will actually be graded by is a file that hides its own policy.
         _setting(
             "late_window_days",
-            window if window is not None else 7,
-            "0 or absent = nothing after the due date is accepted",
-            live=window is not None,
+            window if window is not None else DEFAULT_LATE_WINDOW_DAYS,
+            "0 = nothing after the due date is accepted",
         ),
         _setting(
             "late_penalty_per_day",
-            penalty or "10%",
+            penalty or DEFAULT_LATE_PENALTY_PER_DAY,
             "of the EARNED grade, per day started",
-            live=penalty is not None,
         ),
         "",
         _setting(
             "autograde",
-            "true" if autograde else "false",
-            "true: run tests/ at the cutoff and show the count to graders",
+            "true" if autograde and not marked_by_hand else "false",
+            _HAND_MARKED
+            if marked_by_hand
+            else "true: run tests/ at the cutoff and show the count to graders",
         ),
         _setting(
             "completion_check",
-            "true" if "ipynb" in formats else "false",
-            "true: execute the notebook at the cutoff, record whether it runs clean",
+            "true" if "ipynb" in formats and not marked_by_hand else "false",
+            _HAND_MARKED
+            if marked_by_hand
+            else "true: execute the notebook at the cutoff, record whether it runs clean",
         ),
         _setting(
             "grader_pdf",
             "false",
-            "true: at the cutoff, archive each submission filtered to its marked "
+            _HAND_MARKED
+            if marked_by_hand
+            else "true: at the cutoff, archive each submission filtered to its marked "
             "questions as a PDF for graders",
         ),
     ]
@@ -551,43 +608,46 @@ _CONTRIBUTIONS_STUB = """\
 
 
 def _brief_stub(
-    title: str, defaults: dict, formats: list[str], submit_via: str = "github"
+    title: str, formats: list[str], submit_via: str = "assignment_repo"
 ) -> str:
     """`README.md` on `main` - the page students read, and the only one only faculty can
     write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
-    unedited. The late-work line repeats what the course already declared, so the two
-    cannot disagree on the page a student actually opens.
+    unedited.
+
+    NO facts line at all - two headings and what goes under them. The deadline, the late
+    rule and what the assignment is out of are the assignment's page on the cohort site,
+    which prints all three off the plan and off this assignment's own
+    `grading_config.yml` (the total being the sum of its `questions:` maxima); spelling
+    any of them here as well is how a cohort comes to read two answers to one question -
+    and the copy that is hand-edited prose is the one that goes stale. The `**Points:**
+    __` line this opened with was exactly that: a blank for an author to fill in beside a
+    number the assignment already declares.
 
     `formats` add the one line the stub is NOT free to leave to its author: what counts
     as handing each of them in (`_ARTEFACT_NOTE`), one per format. A brief that never says
     the knitted HTML has to come with the `.Rmd` is a brief that collects `.Rmd` files
     nobody can mark.
 
-    `submit_via` decides what "What to submit" asks for. On an `external` assignment the
-    repo collects nothing, and the Feedback issue students open says the hand-in is
-    "outside GitHub (see the brief)" - so the brief is the one place that can say WHERE,
-    and asking its author for the files they expect back pointed them at the wrong
-    question."""
-    window = defaults.get("late_window_days")
-    penalty = defaults.get("late_penalty_per_day")
-    if not window:
-        late = "not accepted after the deadline"
-    elif penalty:
-        late = f"{penalty} per day, up to {window} days"
-    else:
-        late = f"accepted up to {window} days late"
-    artefacts = [sentence for fmt in formats if (sentence := _hand_in(fmt))]
+    `submit_via` decides what "What to submit" asks for, and an `external` assignment
+    drops the artefact sentences the rest of the stub carries: the repo collects nothing,
+    so "commit the notebook with its outputs saved" would tell a cohort to hand in where
+    nothing is ever read from. That shape opens no receipts issue either, so the brief is
+    the one place that can say where the work really goes."""
+    external = submit_via == "external"
+    artefacts = (
+        [] if external else [sentence for fmt in formats if (sentence := _hand_in(fmt))]
+    )
     return (
         f"# {title}\n\n"
-        f"**Points:** __ · **Due:** see the course schedule · **Late work:** {late}\n\n"
         "## Task\n\n"
         "_Write the assignment here (dsl-stub: replace this whole file)._\n\n"
         "## What to submit\n\n"
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + (
-            "_Say where and how students hand in (Moodle, Kaggle, in class) - nothing is "
-            "collected from this repo._\n"
-            if submit_via == "external"
+            "_Say where and how students hand in - nothing is collected from this repo. "
+            "`submit_url:` in `grading_config.yml` puts that address on the cohort site "
+            "as a button._\n"
+            if external
             else "_Say which files you expect back, and in what shape._\n"
         )
     )
@@ -1237,7 +1297,8 @@ def scaffold_assignment(
     *,
     name: str = "",
     team_formation: str = "self_select",
-    submit_via: str = "github",
+    submit_via: str = "assignment_repo",
+    visibility: str = "private",
     autograde: bool = False,
     copy_from: str = "",
 ) -> int:
@@ -1303,7 +1364,8 @@ def scaffold_assignment(
         if not _copy_branches(org, copy_from, repo, needs=SOLUTION_BRANCH, head=head):
             return 1
         log(
-            "  (boxes 5-9 - format, type, team_formation, submit_via and autograde - "
+            "  (boxes 5-10 - format, type, team_formation, submit_via, autograde and "
+            "visibility - "
             "were ignored: the number and the tag name the repo, the name describes it, "
             "and the copied definition governs the rest: "
             f"https://github.com/{org}/{repo}/blob/"
@@ -1314,6 +1376,12 @@ def scaffold_assignment(
         log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
         return 0
     title = named or f"Assignment {number}"
+    if autograde and submit_via == "shared_dropbox_repo":
+        # Corrected here as well as in the file, because it also decides whether `tests/`
+        # is seeded: placeholder hidden tests beside an assignment nothing will ever run
+        # them for read as work the course is expected to do. See `_HAND_MARKED`.
+        log("  (autograde is not read for a shared drop box - it is hand-marked)")
+        autograde = False
     defaults = course_assignment_defaults(org)
     # main: the brief, a starter stub per format, and (group only) CONTRIBUTIONS.md -
     # what students receive on generate. No tests, no autograder - grading runs
@@ -1321,7 +1389,7 @@ def scaffold_assignment(
     # scaffold_materials seeds its skeleton: a re-run against a repo whose starter faculty
     # have since authored leaves it alone and logs the skip, and the repo they then author
     # by hand opens on one `init:` line rather than three identical ones.
-    seeds = {"README.md": _brief_stub(title, defaults, formats, submit_via)}
+    seeds = {"README.md": _brief_stub(title, formats, submit_via)}
     for fmt in formats:
         seeds[starter_name(fmt)] = _STARTERS[fmt][1](title)
     if kind == "group":
@@ -1407,6 +1475,7 @@ def scaffold_assignment(
                 kind=kind,
                 team_formation=team_formation,
                 submit_via=submit_via,
+                visibility=visibility,
                 formats=formats,
                 autograde=autograde,
                 defaults=defaults,
@@ -1686,10 +1755,21 @@ def main() -> int:
     pa.add_argument(
         "--submit-via",
         dest="submit_via",
-        choices=list(SUBMIT_VIA),
-        default="github",
-        help="external = handed in off GitHub (Moodle, Kaggle, in class): the repo "
-        "carries the brief and the Feedback issue, and nothing is ever collected",
+        # `github` stays an accepted choice - not a documented one - for an org whose
+        # rendered New assignment workflow has not refreshed yet and so still sends the
+        # legacy word; `canonical_submit_via` below normalises it before use.
+        choices=[*SUBMIT_VIA, "github"],
+        default="assignment_repo",
+        help="external = handed in off GitHub (Moodle, Kaggle, in class): no repo is "
+        "created, and nothing is ever collected",
+    )
+    pa.add_argument(
+        "--visibility",
+        choices=list(VISIBILITIES),
+        default="private",
+        help="public = every student's repo is world-readable from hand-out (portfolio "
+        "work); there is then no receipts issue. Read when the repo is created - editing "
+        "it later changes nothing",
     )
     pa.add_argument(
         "--autograde",
@@ -1709,6 +1789,11 @@ def main() -> int:
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
+    if args.cmd == "assignment":
+        # Normalised once, here, so an un-refreshed org's workflow sending the legacy
+        # `github` still scaffolds an `assignment_repo` shape and never re-writes the old
+        # word into the file.
+        args.submit_via = canonical_submit_via(args.submit_via)
     # The `--format` box, refused here - before the repo exists, so a mistyped answer
     # costs a re-run and nothing else. Caught on its OWN, the way `deploy.main` catches
     # `parse_path_pairs`: a ValueError from anywhere deeper is a bug and still earns its
@@ -1748,6 +1833,7 @@ def main() -> int:
             name=args.name,
             team_formation=args.team_formation,
             submit_via=args.submit_via,
+            visibility=args.visibility,
             autograde=args.autograde == "true",
             copy_from=args.copy_from,
         )

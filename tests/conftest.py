@@ -47,17 +47,14 @@ def repo_row(name: str, **extra) -> dict:
     Three test files kept their own partial builder, each missing a different key, so code
     that reads `archived` or `topics` off a listing was tested against rows that have
     neither. Defaults are the uninteresting answer; `extra` overrides what a test is about.
+
+    Built on `discovery.listing_row`, which is the package's own answer to "what shape is
+    a row?" - so a field added there cannot go missing here, which is the whole reason
+    this fixture exists. Two differences, both deliberate: `pushed_at` is blank rather
+    than the moment of the call (a test that cares says so), and the org in the URL is the
+    placeholder every caller of this already expects.
     """
-    return {
-        "name": name,
-        "description": "",
-        "visibility": "private",
-        "url": f"https://github.com/org/{name}",
-        "isTemplate": False,
-        "archived": False,
-        "topics": [],
-        **extra,
-    }
+    return discovery.listing_row("org", name) | {"pushed_at": "", **extra}
 
 
 @pytest.fixture(autouse=True)

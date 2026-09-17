@@ -147,6 +147,26 @@ def test_list_org_repos_reports_a_genuinely_empty_org_as_empty(monkeypatch):
     assert discovery.list_org_repos("Org") == []
 
 
+def test_listing_by_name_keys_one_listing_by_repo_name(monkeypatch):
+    # The shape every unattended pass wants: "is this repo there, and what does GitHub say
+    # about it?" for a hundred names at once, off ONE listing.
+    pages = (
+        '{"name":"a","topics":[],"isTemplate":false}\n'
+        '{"name":"b","topics":[],"isTemplate":true}\n'
+    )
+    monkeypatch.setattr(discovery, "gh", lambda *args: (0, pages))
+    listing = discovery.listing_by_name("Org")
+    assert sorted(listing) == ["a", "b"] and listing["b"]["isTemplate"] is True
+
+
+def test_listing_by_name_answers_none_when_it_could_not_look(monkeypatch, capsys):
+    # None and never `{}`: every caller has its own answer to "we could not look" - probe
+    # that one repo after all, report nothing, assume private - and an empty org is not it.
+    monkeypatch.setattr(discovery, "gh", lambda *args: (1, "gh: HTTP 502"))
+    assert discovery.listing_by_name("Org") is None
+    assert "could not list Org's repos" in capsys.readouterr().err
+
+
 TREES = {
     "labs": ["01_intro", "02_functions", "materials/01_intro", "readings"],
     "lectures": ["01_intro"],

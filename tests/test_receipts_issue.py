@@ -1,9 +1,12 @@
-"""The Feedback issue and its submission receipts.
+"""The per-repo issue and its submission receipts.
 
 One issue per submission repo, opened at handout, never a second one; additive receipt
-comments that a re-run cannot duplicate. Both halves are promises made to a student who
-reads that thread rather than the docs, so the bodies are pinned to the wording the
-mock-up specifies and the lookup is pinned against every way it could open a duplicate.
+comments that a re-run cannot duplicate. It is a RECEIPTS thread and nothing else - no
+mark and no feedback line is ever posted into a repo, they go to the student's private
+gradebook - so the body is pinned to saying what the thread is for and to saying nothing
+about where a grade lands. Both halves are promises made to a student who reads that
+thread rather than the docs, and the lookup is pinned against every way it could open a
+duplicate.
 """
 
 from __future__ import annotations
@@ -15,14 +18,14 @@ from dsl_course.grades import SheetSpec
 
 DUE_LONG = "Sunday 4 October 2026, 23:59 (Europe/Berlin)"
 CUTOFF_LONG = "Sunday 11 October 2026, 23:59 (Europe/Berlin)"
-MARK = course.FEEDBACK_ISSUE_MARKS[0]
+MARK = course.RECEIPTS_ISSUE_MARKS[0]
 SHA = "a1b2c3d4e5f6" + "0" * 28
 
 SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
-    "deadline is what we grade. A submission receipt is posted here at the deadline and "
-    "after any late push, and your feedback and grade follow as a comment once marking "
-    "is complete."
+    "deadline is what we grade. This thread is your receipt for that: one at the deadline "
+    "saying what was recorded, one after any late push, and one at the cutoff when the "
+    "commit we grade is fixed."
 )
 
 
@@ -43,7 +46,7 @@ def spec(**kw) -> SheetSpec:
 
 
 def test_the_issue_body_for_an_individual_repo():
-    body = grades.feedback_body(spec())
+    body = grades.receipts_thread_body(spec())
     assert body.splitlines() == [
         MARK,
         "**Due:** Sunday 4 October 2026, 23:59 (Europe/Berlin)",
@@ -60,18 +63,20 @@ def test_the_issue_and_the_receipts_quote_one_late_policy():
     # Two spellings of one rule is how a student ends up reading two different deadlines.
     policy = "accepted until Sunday 11 October 2026, 23:59 (Europe/Berlin), at 10% of your grade per day started."
     assert grades.late_policy(spec()) == policy
-    assert f"**Late work:** {policy}" in grades.feedback_body(spec())
+    assert f"**Late work:** {policy}" in grades.receipts_thread_body(spec())
     assert grades.late_line(spec()) == f"Late work is {policy}"
 
 
 def test_an_assignment_with_no_late_window_quotes_no_policy():
     assert grades.late_policy(spec(late_window_days=None)) == ""
     assert grades.late_line(spec(late_window_days=None)) == ""
-    assert "**Late work:**" not in grades.feedback_body(spec(late_window_days=None))
+    assert "**Late work:**" not in grades.receipts_thread_body(
+        spec(late_window_days=None)
+    )
 
 
 def test_the_issue_body_for_a_team_repo_names_the_team_and_asks_for_contributions():
-    body = grades.feedback_body(
+    body = grades.receipts_thread_body(
         spec(is_group=True), "team-alpha", ["ada-l", "ben-k", "chen-w"]
     )
     assert (
@@ -84,32 +89,56 @@ def test_an_individual_body_never_names_a_team_even_when_handed_one():
     # The variant follows the ASSIGNMENT's shape, not the caller's memory: `unit` is the
     # handle on an individual assignment, and putting it behind "**Team:**" would tell a
     # student they had team-mates.
-    body = grades.feedback_body(spec(), "ada-l", ["ada-l"])
+    body = grades.receipts_thread_body(spec(), "ada-l", ["ada-l"])
     assert "**Team:**" not in body
     assert "CONTRIBUTIONS.md" not in body
 
 
-def test_the_issue_body_for_work_handed_in_off_github_promises_no_receipts():
-    # There is no push to acknowledge, so the body must not tell a student to expect one.
-    body = grades.feedback_body(spec(submit_external=True))
-    assert body.splitlines() == [
-        MARK,
-        "**Due:** Sunday 4 October 2026, 23:59 (Europe/Berlin)",
-        "",
-        (
-            "This assignment is submitted outside GitHub (see the brief). This "
-            "repository holds the brief and your feedback."
-        ),
-    ]
-    assert "receipt" not in body
+def test_no_run_ever_opens_a_feedback_issue_for_work_handed_in_off_github():
+    # There is no body for that shape, because there is no issue to put one in: the policy
+    # never answers CREATE where the shape has no receipts issue, whatever the listing
+    # says. This is what the deleted `external=` variant of the body used to be for.
+    for listed in ({"assignment-1-ada-l": {"visibility": "private"}}, {}, None):
+        assert (
+            grades.receipts_thread_policy(
+                spec(submit_via="external"), listed, "assignment-1-ada-l"
+            )
+            != grades.THREAD_CREATE
+        )
+
+
+def test_the_thread_is_named_for_what_it_carries():
+    # A student reads the title before the body. It says receipts, because receipts are
+    # the whole of what is posted here: the lookup is by label, then by the hidden mark,
+    # and only then by the title, which is what lets the title be renamed at all.
+    assert course.RECEIPTS_ISSUE_TITLE == "Submission receipts"
+
+
+def test_the_handout_body_says_nothing_about_where_a_mark_goes():
+    # ONE address for a grade, and it is the gradebook. A repo the student may be told to
+    # publish, or that a `visibility:` line could publish for them, is not a second one -
+    # so the thread the toolkit opens in it never promises a mark will appear there.
+    for body in (
+        grades.receipts_thread_body(spec()),
+        grades.receipts_thread_body(spec(is_group=True), "team-alpha", ["ada-l"]),
+    ):
+        # Without the hidden mark, which is matched against and never read: it keeps the
+        # old word on purpose (`course.RECEIPTS_ISSUE_MARKS`).
+        lowered = body.replace(MARK, "").lower()
+        for word in ("feedback", "gradebook", "marking", "comment"):
+            assert word not in lowered, f"{word!r} is in the handout body"
+        # The only two things it may say the word "grade" about: which commit we grade,
+        # and what a day of lateness costs. Nothing about where the grade then appears.
+        left = lowered.replace("we grade", "").replace("of your grade per day", "")
+        assert "grade" not in left
 
 
 def test_the_body_always_opens_with_a_mark_the_lookup_can_find():
-    # The mark is how a second Feedback issue is prevented in a repo whose label was
+    # The mark is how a second receipts issue is prevented in a repo whose label was
     # removed by hand. It is a chain, never edited - so the FIRST is what we write.
     for body in (
-        grades.feedback_body(spec()),
-        grades.feedback_body(spec(submit_external=True)),
+        grades.receipts_thread_body(spec()),
+        grades.receipts_thread_body(spec(submit_via="external")),
     ):
         assert body.startswith(f"{MARK}\n")
 
@@ -198,7 +227,7 @@ def _gh(monkeypatch, answers):
 
 def test_the_issue_is_found_by_its_label_in_one_call(monkeypatch):
     calls = _gh(monkeypatch, {"labels=dsl-feedback": (0, "7\topen")})
-    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (7, "open")
+    assert grades.find_receipts_issue("Cohort", "assignment-1-ada-l") == (7, "open")
     assert len(calls) == 1  # the cheapest rung answered; no listing, no search
 
 
@@ -215,7 +244,7 @@ def test_an_unlabelled_issue_is_still_found_by_its_body_mark(monkeypatch):
             ),
         },
     )
-    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (9, "open")
+    assert grades.find_receipts_issue("Cohort", "assignment-1-ada-l") == (9, "open")
 
 
 def test_an_issue_with_neither_label_nor_mark_is_found_by_its_exact_title(monkeypatch):
@@ -225,18 +254,21 @@ def test_an_issue_with_neither_label_nor_mark_is_found_by_its_exact_title(monkey
             "labels=dsl-feedback": (0, ""),
             "state=all&per_page=50": (
                 0,
-                "4\topen\t\tFeedback please\n5\topen\t\tFeedback",
+                (
+                    "4\topen\t\tSubmission receipts please\n"
+                    "5\topen\t\tSubmission receipts"
+                ),
             ),
         },
     )
-    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (5, "open")
+    assert grades.find_receipts_issue("Cohort", "assignment-1-ada-l") == (5, "open")
 
 
 def test_a_pull_request_is_never_mistaken_for_the_feedback_issue(monkeypatch):
     # This endpoint returns PRs as issues. Commenting a grade onto a student's pull
     # request would put it somewhere the toolkit never looks again.
     calls = _gh(monkeypatch, {"issues?": (0, "")})
-    grades.find_feedback_issue("Cohort", "assignment-1-ada-l")
+    grades.find_receipts_issue("Cohort", "assignment-1-ada-l")
     assert all("select(.pull_request == null)" in " ".join(c) for c in calls)
 
 
@@ -244,24 +276,40 @@ def test_the_lookup_uses_the_list_endpoint_never_the_search_index(monkeypatch):
     # `gh issue list --search` lags by minutes, so a lookup that came back empty meant
     # "opened a second one" rather than "not there".
     calls = _gh(monkeypatch, {"issues?": (0, "")})
-    grades.find_feedback_issue("Cohort", "assignment-1-ada-l")
+    grades.find_receipts_issue("Cohort", "assignment-1-ada-l")
     assert not any("--search" in " ".join(c) or "issue" == c[0] for c in calls)
 
 
 def test_a_lookup_that_failed_opens_nothing(monkeypatch, capsys):
     # A 5xx or a secondary limit that outlived the retry ladder used to read as "this repo
-    # has no Feedback issue", and the next thing that happens is a SECOND issue opened over
+    # has no receipts issue", and the next thing that happens is a SECOND issue opened over
     # the thread the student was told to read.
     monkeypatch.setattr(grades, "gh", lambda *a, **k: (1, "gh: Internal Server Error"))
-    found = grades.find_feedback_issue("Cohort", "assignment-1-ada-l")
+    found = grades.find_receipts_issue("Cohort", "assignment-1-ada-l")
     assert isinstance(found, grades.IssueLookupFailed)
     assert not found  # falsy, so `if not found` still reads naturally
     assert found is not None  # but never mistaken for "there is none"
     assert isinstance(
-        grades.ensure_feedback_issue("Cohort", "assignment-1-ada-l", "body"),
+        grades.ensure_receipts_issue("Cohort", "assignment-1-ada-l", "body"),
         grades.IssueLookupFailed,
     )
     assert "posting none" in capsys.readouterr().err
+
+
+def test_a_repo_that_is_not_there_has_no_issue_rather_than_no_answer(monkeypatch):
+    # A 404 IS an answer: no repo, no receipts issue. Every shape reaches one - a student
+    # who never onboarded, a team formed after the handout, an assignment handed in off
+    # GitHub whose repos were never created - and reading it as "could not look" made a
+    # cohort of absent repos a red run with a `[wait]` line per student. Nothing is OPENED
+    # on the strength of it: `receipts_thread_policy` decides that, off the listing.
+    monkeypatch.setattr(grades, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert grades.find_receipts_issue("Cohort", "assignment-1-ada-l") is None
+    assert (
+        grades.ensure_receipts_issue(
+            "Cohort", "assignment-1-ada-l", "body", create=False
+        )
+        is None
+    )
 
 
 def test_the_oldest_labelled_issue_is_asked_for_first(monkeypatch):
@@ -273,7 +321,7 @@ def test_the_oldest_labelled_issue_is_asked_for_first(monkeypatch):
         "gh",
         lambda *a, **k: seen.append(" ".join(a)) or (0, "7\topen\tdsl-bot"),
     )
-    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (7, "open")
+    assert grades.find_receipts_issue("Cohort", "assignment-1-ada-l") == (7, "open")
     assert "direction=asc" in seen[0] and "sort=created" in seen[0]
 
 
@@ -286,7 +334,7 @@ def test_the_bot_authored_issue_wins_over_a_students_own(monkeypatch):
         "gh",
         lambda *a, **k: (0, "3\topen\tada-l\n9\topen\tdsl-bot-app"),
     )
-    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (9, "open")
+    assert grades.find_receipts_issue("Cohort", "assignment-1-ada-l") == (9, "open")
 
 
 def test_an_unreadable_bot_identity_takes_the_oldest(monkeypatch):
@@ -295,7 +343,7 @@ def test_an_unreadable_bot_identity_takes_the_oldest(monkeypatch):
     monkeypatch.setattr(
         grades, "gh", lambda *a, **k: (0, "3\topen\tada-l\n9\topen\tdsl-bot-app")
     )
-    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (3, "open")
+    assert grades.find_receipts_issue("Cohort", "assignment-1-ada-l") == (3, "open")
 
 
 def test_the_issue_is_opened_once_with_its_label(monkeypatch):
@@ -306,22 +354,22 @@ def test_the_issue_is_opened_once_with_its_label(monkeypatch):
         "ensure_label",
         lambda org, repo, name, **kw: labelled.append(name) or True,
     )
-    assert grades.ensure_feedback_issue("Cohort", "assignment-1-ada-l", "body") == 12
+    assert grades.ensure_receipts_issue("Cohort", "assignment-1-ada-l", "body") == 12
     assert labelled == [
-        course.FEEDBACK_ISSUE_LABEL
+        course.RECEIPTS_ISSUE_LABEL
     ]  # before the create, or GitHub drops it
     create = [c for c in calls if "POST" in c]
     assert len(create) == 1
-    assert f"labels[]={course.FEEDBACK_ISSUE_LABEL}" in create[0]
+    assert f"labels[]={course.RECEIPTS_ISSUE_LABEL}" in create[0]
 
 
 def test_an_existing_issue_is_never_opened_again(monkeypatch):
     def boom(*a, **k):
-        raise AssertionError("a repo must never get a second Feedback issue")
+        raise AssertionError("a repo must never get a second receipts issue")
 
     _gh(monkeypatch, {"labels=dsl-feedback": (0, "7\topen")})
     monkeypatch.setattr(grades, "ensure_label", boom)
-    assert grades.ensure_feedback_issue("Cohort", "assignment-1-ada-l", "body") == 7
+    assert grades.ensure_receipts_issue("Cohort", "assignment-1-ada-l", "body") == 7
 
 
 def test_a_closed_issue_is_reopened_rather_than_replaced(monkeypatch):
@@ -331,7 +379,7 @@ def test_a_closed_issue_is_reopened_rather_than_replaced(monkeypatch):
         monkeypatch,
         {"labels=dsl-feedback": (0, "7\tclosed"), "--method PATCH": (0, "")},
     )
-    assert grades.ensure_feedback_issue("Cohort", "assignment-1-ada-l", "body") == 7
+    assert grades.ensure_receipts_issue("Cohort", "assignment-1-ada-l", "body") == 7
     ((patch,),) = ([c for c in calls if "PATCH" in c],)
     assert "state=open" in patch and "issues/7" in " ".join(patch)
 
@@ -343,7 +391,7 @@ def test_a_dry_run_opens_nothing(monkeypatch):
     _gh(monkeypatch, {"issues?": (0, "")})
     monkeypatch.setattr(grades, "ensure_label", boom)
     assert (
-        grades.ensure_feedback_issue("Cohort", "assignment-1-ada-l", "body", True)
+        grades.ensure_receipts_issue("Cohort", "assignment-1-ada-l", "body", True)
         is None
     )
 
@@ -392,7 +440,7 @@ def test_a_comment_read_that_failed_posts_nothing(monkeypatch):
 @pytest.mark.parametrize(
     "call",
     [
-        lambda: grades.ensure_feedback_issue("C", "r", "body"),
+        lambda: grades.ensure_receipts_issue("C", "r", "body"),
         lambda: grades.post_receipt("C", "r", 7, "b", "m"),
         lambda: repos.ensure_label("C", "r", "l", color="fff", description="d"),
     ],

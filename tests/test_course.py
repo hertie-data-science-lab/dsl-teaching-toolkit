@@ -4,7 +4,7 @@ assertions are the whole contract."""
 
 from __future__ import annotations
 
-from dsl_course import course
+from dsl_course import course, discovery
 
 
 def test_session_number_extracts_ordinal_prefix():
@@ -92,3 +92,75 @@ def test_resolve_is_group_precedence():
     # else individual
     assert course.resolve_is_group(force=False, template_type=None) is False
     assert course.resolve_is_group(force=False, template_type="") is False
+
+
+def test_the_shared_drop_box_is_named_off_the_template_and_carries_no_handle():
+    # `<slug>-submissions`, never the bare slug (that is the frozen cohort TEMPLATE), and
+    # never a `<slug>-<handle>`: it is the one submission-repo name a public log may print.
+    assert course.shared_repo("assignment-3") == "assignment-3-submissions"
+    # And it is a name `classify_repos` reads off the template, which is what earns it the
+    # faculty read floor and the public-page exclusion with no rule of its own.
+    derived = discovery.classify_repos(
+        [
+            {"name": "assignment-3", "isTemplate": True},
+            {"name": course.shared_repo("assignment-3"), "isTemplate": False},
+        ]
+    )
+    assert derived[course.shared_repo("assignment-3")] == "assignment-3"
+
+
+def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
+    # What follows "Late work: " on an assignment's page. A window with a rate, a window
+    # without one - late but unpenalised, which is a real course policy - and no window at
+    # all, which is the strictest of the three and now the one a course has to ask for.
+    assert course.late_rule(7, "10%") == "10% per day, up to 7 days"
+    assert course.late_rule(7, None) == "accepted up to 7 days late"
+    assert course.late_rule(None, "10%") == "not accepted after the deadline"
+    assert course.late_rule(0, None) == "not accepted after the deadline"
+    # The sentence a cohort reads when nobody has declared anything: the toolkit's own
+    # default is the Hertie syllabus rule, not silence (`grades.parse_grading_spec`).
+    assert (
+        course.late_rule(
+            course.DEFAULT_LATE_WINDOW_DAYS, course.DEFAULT_LATE_PENALTY_PER_DAY
+        )
+        == "10% per day, up to 10 days"
+    )
+    # The rate is quoted as it was TYPED. `grades._penalty` is what decides whether a
+    # spelling is usable at all, at the parse, and a second reading of it here would be a
+    # second answer to the same question.
+    assert course.late_rule(7, "0.1") == "0.1 per day, up to 7 days"
+
+
+def test_every_shape_that_hands_out_a_repo_owes_a_note():
+    # The note answers "who else can read the repo I was just handed?", which is asked of
+    # every repo - including the ordinary private one, whose silence read as an oversight
+    # rather than as reassurance. The shape that hands out no repo owes none.
+    assert course.shape_note("external") == ""
+    assert set(course.SHAPE_NOTES) == {
+        "assignment-repo-private",
+        "assignment-repo-public",
+        "assignment-repo-student-choice",
+        "shared-dropbox-repo",
+    }
+    # Every key is a shape the vocabulary actually derives, not a word typed twice.
+    derivable = {
+        course.submit_shape(via, vis)
+        for via in course.SUBMIT_VIA
+        for vis in course.VISIBILITIES
+    }
+    assert set(course.SHAPE_NOTES) <= derivable
+
+
+def test_every_note_opens_the_same_way_and_says_what_it_is_about():
+    # `NB:` on all four: the box is an aside beside the brief, not a step in it, and one
+    # note that opened differently would read as an instruction.
+    for shape, note in course.SHAPE_NOTES.items():
+        assert note.startswith("NB: "), shape
+        assert note.endswith("."), shape
+        # A plain `>`, never an HTML entity: this text is a YAML scalar and a GitHub repo
+        # description as well as page copy, and the one consumer that needs markup escapes
+        # it where it renders.
+        assert "&gt;" not in note, shape
+        # And none of them says what is marked: that is the cutoff sentence's job, and the
+        # About line joins the two, so a note that carried it would say it twice.
+        assert course.CUTOFF_SENTENCE not in note, shape

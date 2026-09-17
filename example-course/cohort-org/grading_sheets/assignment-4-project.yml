@@ -3,7 +3,7 @@
 #
 # From grading_config.yml / schedule.yml (edit THERE, not here):
 #   group assignment · 50 points (Q1 15, Q2 15, Q3 10, Q4 10) · autograde off
-#   due Sun 15 Nov 2026 23:59 · late work to Sun 22 Nov 2026 23:59 at 10%/day
+#   due Sun 15 Nov 2026 23:59 · late work to Wed 25 Nov 2026 23:59 at 10%/day
 # Status: OPEN - 2 of 2 teams have submitted; late pushes still update `info:` until the cutoff.
 #
 # Auto-filled by the toolkit (you never type these): every `info:` block. `submitted` and

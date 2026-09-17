@@ -129,6 +129,35 @@ def _is_refusal(out: str) -> bool:
     return any(marker in lower for marker in _REFUSED)
 
 
+# The two org settings the toolkit READS and never writes. Both are web-only: they are
+# reported by `GET /orgs/{org}` and absent from `PATCH /orgs/{org}`, so the maintainer sets
+# them once per cohort org by hand (docs/DEPLOYMENT-CHECKLIST.md) and the digest says so
+# while either is wrong. Named here, beside the settings this module DOES converge, so it
+# is one list of "what an org has to be" rather than two.
+MEMBERS_CAN_DELETE = "members_can_delete_repositories"
+MEMBERS_CAN_PUBLISH = "members_can_change_repo_visibility"
+
+
+def org_settings(org: str) -> dict | None:
+    """`GET /orgs/{org}` - everything GitHub reports about one org, or None if it could
+    not be read.
+
+    The read half of `converge_org_settings`, and the only way to see the two switches
+    above at all: they are in this payload and in no PATCH body. None is "we could not
+    look", which every caller has to tell from "the setting is wrong" - a rate limit must
+    not report a correctly configured org as broken."""
+    code, out = gh("api", f"orgs/{org}")
+    if code != 0:
+        log_err(f"could not read {org}'s settings: {out[:160]}")
+        return None
+    try:
+        settings = json.loads(out)
+    except ValueError:
+        log_err(f"could not parse {org}'s settings")
+        return None
+    return settings if isinstance(settings, dict) else None
+
+
 def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     """Tighten one org: base permissions, member repo creation, and 2FA where possible.
 

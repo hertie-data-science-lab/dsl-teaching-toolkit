@@ -13,7 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import access, bootstrap_course, course, gh_contents, ghcli, scaffold
+from dsl_course import (
+    access,
+    bootstrap_course,
+    course,
+    discovery,
+    gh_contents,
+    ghcli,
+    scaffold,
+)
+from dsl_course import repos as repos_mod  # aliased: `repos` is a fixture name here
 from tests.conftest import repo_row
 
 
@@ -166,6 +175,17 @@ def test_the_floor_is_write_where_faculty_author_and_read_elsewhere():
     # An unplaceable listing reads as a cohort: only a listing that positively says
     # "course" earns the write-everywhere floor.
     assert access.faculty_floor("materials", None) is access.FACULTY_READ_ACCESS
+    # A PUBLIC submission repo (`visibility: public`) is a student repo like any other:
+    # the floor is computed off the NAME, never off who can read it, so a portfolio
+    # assignment does not quietly earn faculty a push on a student's work.
+    listing = [
+        repo_row("assignment-1", isTemplate=True),
+        repo_row("assignment-1-ada", visibility="public"),
+    ]
+    assert "assignment-1-ada" in discovery.student_repo_names(listing)
+    assert (
+        access.faculty_floor("assignment-1-ada", "cohort") is access.FACULTY_READ_ACCESS
+    )
     # And a protected repo takes read whatever the tier says.
     assert (
         access.faculty_floor("grades-ada", "course", frozenset({"grades-ada"}))
@@ -441,18 +461,40 @@ def test_a_protected_repo_takes_the_read_floor_whatever_the_tier_says(monkeypatc
     assert not any(p == "push" and r != "course-materials" for _, r, p in granted)
 
 
+def test_a_team_grant_waits_out_a_just_flipped_repo(monkeypatch):
+    # Live 2026-09-17: flipping an assignment repo to public locks it, and the team grant
+    # a second later was refused outright - the cohort could not see its own handout. The
+    # PUT goes through `repos.gh_settled`, so it waits the lock out.
+    answers = iter(
+        [
+            (1, "This repository is locked and cannot be modified. (HTTP 422)"),
+            (1, "This repository is locked and cannot be modified. (HTTP 422)"),
+            (0, ""),
+        ]
+    )
+    monkeypatch.setattr(repos_mod, "gh", lambda *a, **k: next(answers))
+    monkeypatch.setattr(repos_mod.time, "sleep", lambda s: None)
+    assert access.grant_team_repo_access("Cohort", "students", "a1", "pull") is True
+
+
 def test_a_missing_team_is_a_note_but_any_other_failure_is_an_error(
     monkeypatch, capsys
 ):
     # grant_read_teams used to print "team not found" for EVERY failure, so a 5xx or a
     # rate limit read as a cohort that had not made its teams yet.
-    monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    # The grant PUT goes through `repos.gh_settled`, which waits out a just-created or
+    # just-flipped repo; neither of these answers is that, so neither is retried.
+    monkeypatch.setattr(
+        access, "gh_settled", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
+    )
     assert not access.grant_team_repo_access(
         "O", "students", "r", "pull", missing_is_note=True
     )
     out = capsys.readouterr()
     assert "not found" in out.out and out.err == ""
-    monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "HTTP 502 bad gateway"))
+    monkeypatch.setattr(
+        access, "gh_settled", lambda *a, **k: (1, "HTTP 502 bad gateway")
+    )
     assert not access.grant_team_repo_access(
         "O", "students", "r", "pull", missing_is_note=True
     )
@@ -469,6 +511,7 @@ def _public_sweep(monkeypatch, listing_rows, put_ok):
         return 0, listing
 
     monkeypatch.setattr(access, "gh", fake_gh)
+    monkeypatch.setattr(access, "gh_settled", fake_gh)
     repos = [repo_row("grades-ada-l"), repo_row("assignment-1-ada-l")]
     return access.converge_faculty_access(
         "COHORT", repos, "cohort", protected=frozenset(r["name"] for r in repos)
@@ -619,3 +662,49 @@ def test_an_archived_repo_and_a_course_org_are_left_alone(monkeypatch):
 def test_a_failed_stamp_is_counted(monkeypatch):
     failures, _ = _converge(monkeypatch, _topic_repos(), ok=False)
     assert failures == 2
+
+
+def test_repo_teams_answers_which_teams_already_see_one_repo(monkeypatch):
+    # The shared drop box's grant loop asks this ONCE per tick, where a PUT per team per
+    # tick would run for the rest of the term.
+    asked: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **k):
+        asked.append(args)
+        return 0, "Assignment-3-Alpha\ninstructors\n"
+
+    monkeypatch.setattr(access, "gh", fake_gh)
+    assert access.repo_teams("Cohort", "assignment-3-submissions") == frozenset(
+        {"assignment-3-alpha", "instructors"}
+    )
+    assert "repos/Cohort/assignment-3-submissions/teams" in asked[0][2]
+
+
+def test_repo_teams_cannot_answer_when_the_listing_fails(monkeypatch, capsys):
+    # None, never the empty set: "we could not look" must not read as "nobody is granted",
+    # which is the answer that would leave a team without access and say nothing.
+    monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    assert access.repo_teams("Cohort", "assignment-3-submissions") is None
+    assert "could not read which teams can see" in capsys.readouterr().err
+
+
+def test_a_shared_drop_box_takes_the_read_floor_like_any_student_repo():
+    # `<slug>-submissions` derives from the frozen cohort template by NAME, so the rule
+    # that recognises a student repo already covers it - no new rule, and therefore no
+    # rule to forget. The floor is what keeps faculty off a push on the cohort's work:
+    # marking happens in classroom-config, so a commit here would reach no gradebook.
+    listing = [
+        repo_row("assignment-3", isTemplate=True),
+        repo_row("assignment-3-submissions"),
+    ]
+    protected = discovery.student_repo_names(listing)
+    assert "assignment-3-submissions" in protected
+    assert (
+        access.faculty_floor("assignment-3-submissions", "cohort", protected)
+        is access.FACULTY_READ_ACCESS
+    )
+    # And the same rule is what keeps it off the public org landing page and out of the
+    # content listing, where it would be read as a repo faculty author in.
+    derived = discovery.classify_repos(listing)
+    row = next(r for r in listing if r["name"] == "assignment-3-submissions")
+    assert discovery.is_student_repo(row, derived)

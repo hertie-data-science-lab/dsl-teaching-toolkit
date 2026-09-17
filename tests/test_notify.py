@@ -796,7 +796,7 @@ def test_a_dated_fault_is_not_introduced_as_a_recent_edit(wired):
     # table whose own row already says when it bites.
     dated = notify.ConfigFault(
         "assignments.a3",
-        "`submit_via: emial` is not one of github/email - using github",
+        "`submit_via: emial` is not one of assignment_repo/email - using assignment_repo",
         fires=NOW + timedelta(hours=6),
         file="grading_config.yml",
         field="submit_via",
@@ -914,7 +914,7 @@ def _grading_config_fault() -> notify.ConfigFault:
     at all."""
     return notify.ConfigFault(
         "assignments.a3",
-        "`submit_via: emial` is not one of github/external - using `github`",
+        "`submit_via: emial` is not one of assignment_repo/external - using `assignment_repo`",
         fires=NOW + timedelta(hours=8),
         field="submit_via",
         lineno=3,
@@ -922,7 +922,7 @@ def _grading_config_fault() -> notify.ConfigFault:
         in_repo="assignment-3-f2026",
         in_org=COURSE,
         ref="solution",
-        fix_text="correct the value on the line above (allowed: github/external)",
+        fix_text="correct the value on the line above (allowed: assignment_repo/external)",
     )
 
 

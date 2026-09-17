@@ -95,7 +95,7 @@ Two teams carry every faculty grant: `instructors` (this org's teaching team) an
 | course org - **every** repo, `.github` included | push | admin |
 | cohort `.github`, `welcome`, `classroom-config` | push | admin |
 | cohort released materials | push | admin |
-| cohort submission repos, `grades-<handle>` | **read** | admin |
+| cohort submission repos (incl. `<slug>-submissions`), `grades-<handle>` | **read** | admin |
 
 Push on released materials, because a release now lands on the repo's `upstream` branch and is
 **merged** into the branch students read - so a correction typed into the cohort's copy survives
@@ -110,6 +110,33 @@ requires write to trigger a `workflow_dispatch`.
 
 Grants are set at repo creation; the nightly **Refresh actions** sweep raises any repo below its
 floor and never demotes.
+
+A `visibility: public` assignment changes who may READ a submission repo and nothing else: the
+floor is computed off the repo's NAME, so `instructors` still hold **read** and never push on a
+student's work, and the student still holds `maintain` on their own.
+
+A `submit_via: shared_dropbox_repo` assignment hands out ONE repo, `<slug>-submissions`, and every
+onboarded student (or every vetted team) holds **push** on it - the whole cohort's work in
+one place, readable by all of them, which is what the shape is for. The faculty floor is
+unchanged: the name derives from the assignment's cohort template, so the same rule that
+recognises `<slug>-<handle>` recognises this, and `instructors` hold **read**. The repo
+carries a ruleset forbidding force-pushes and deletion - but rulesets on a private repo need
+GitHub Team, and every Hertie org is on Free until the Education upgrade lands, so until then
+the drop box is left unprotected and the release run log says so.
+
+Push on that one repo CONVERGES on the roster, which no other submission repo needs to: the
+drop box holds the whole cohort's work, so a grant left behind is somebody who has left the
+course able to overwrite everybody else's. Every tick grants whoever is missing and revokes
+every direct grant belonging to nobody on the enrolled, onboarded roster - including one added
+by hand. Team grants, the faculty teams and the bot are never touched: they reach the repo
+through a team or by owning the org, and the sweep only ever reads and revokes DIRECT
+collaborators. A listing that could not be read revokes nothing.
+
+A `visibility: student_choice` assignment changes the STUDENT's grant and nothing else: they
+hold **admin** on their own repo (or their team does, on a group one) so that they can publish
+it after the grading cutoff. The faculty floor is unchanged - still read, never push, on a
+student's work - and the floor never demotes the student either, so the admin grant stands for
+the life of the cohort.
 
 ## The four `instructors` teams
 
@@ -137,8 +164,14 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
   team or `instructors-<tag>` through the GitHub Teams UI survives only until the next Sync
   membership run, which removes anyone the config doesn't name. A hand-*removal* is likewise
   re-added. Edit the file.
-- **Students hold `maintain` on their own submission repo** and read on their own
+- **Students hold `maintain` on their own submission repo** - or `push` on the one
+  `<slug>-submissions` drop box, where the assignment has one - and read on their own
   `grades-<handle>`; nowhere else, so no faculty workflow is visible or runnable for them.
+  `maintain` does not include changing a repo's visibility, so a `public` assignment's repos
+  are public because the assignment said so and stay that way. The one exception is
+  `visibility: student_choice`, where the grant is **admin** precisely so that the student can
+  change it - bounded by the org's own Member privileges settings and by the scheduler, which
+  re-privatises such a repo until the grading cutoff ([03](../03-add-assignment-to-course.md)).
 - **New members must accept a one-time org invite** - membership shows `pending` until they do.
 - **Nobody ever holds the bot token.** Every workflow runs server-side under `DSL_BOT_TOKEN`; the
   actor's own permissions are only ever used as the gate.

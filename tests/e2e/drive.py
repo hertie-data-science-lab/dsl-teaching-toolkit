@@ -50,9 +50,11 @@ ACTIVE_STATUSES = frozenset(
 )
 
 POLL_SECONDS = 10
-# A grading tick clones and tests every submission repo; the seeded job's own budget is
-# far longer, but nothing in a two-student demo cohort should take more than this.
-RUN_TIMEOUT_SECONDS = 900
+# A grading tick clones and tests every submission repo, and one tick of this harness's
+# run now hands out FIVE assignments - one per submission shape - each of which re-syncs
+# the cohort site. The seeded job's own budget is far longer; this is the ceiling past
+# which something is wrong rather than slow.
+RUN_TIMEOUT_SECONDS = 1800
 # Between the POST and the run appearing in the listing.
 DISPATCH_TIMEOUT_SECONDS = 120
 

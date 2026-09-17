@@ -71,7 +71,7 @@ student-list, teams, schedule, grades, deadlines`"]
 lectures/readings/labs (students + auditors read)`"]
     repos["`**released assignments**
 
-one private repo per student/group (generated; autograder rides along)`"]
+one private repo per student/group by default (generated; autograder rides along) - or a shared drop box, or none, per submit_via`"]
     team["`**teams**
 
 student (& auditor) groups`"]

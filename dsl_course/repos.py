@@ -5,6 +5,7 @@ topic and describe it, add a collaborator - and what a published page may never 
 from __future__ import annotations
 
 import json
+import time
 from fnmatch import fnmatch
 from functools import cache
 from typing import NamedTuple
@@ -99,6 +100,23 @@ def repo_is_private(org: str, name: str) -> bool:
         return True
 
 
+def listed_is_private(row: dict | None) -> bool:
+    """Whether a row of an org listing describes a repo NOBODY outside its collaborators
+    can read.
+
+    Deliberately not the same answer as `repo_is_private`, which reads the boolean
+    `private` - GitHub sets that on an `internal` repo too, and an `internal` repo is
+    readable by every member of the enterprise. This reads `visibility`, so `internal`
+    answers False. That is the answer its caller needs: what rides on it is whether a
+    student's submission receipts may be posted into a repo's issue, and a hand-in time
+    read by the whole institution is a published fact about that student. `internal` is not a visibility the toolkit
+    hands out (`course.VISIBILITIES`); when it is, this still will not treat it as private.
+
+    A row that is not there at all answers private, so a listing that could not be read
+    never turns into a repo treated as world-readable."""
+    return ((row or {}).get("visibility") or "private") == "private"
+
+
 def repo_is_archived(org: str, name: str) -> bool:
     """Return True if the repo is archived (assume LIVE if the check fails).
 
@@ -110,6 +128,47 @@ def repo_is_archived(org: str, name: str) -> bool:
         return bool(_repo(org, name).get("archived"))
     except _RepoReadFailed:
         return False
+
+
+# GitHub's answers while a repo is still settling. A repo is BUSY for a few seconds after
+# it is created, and LOCKED for rather longer after its visibility is flipped; in either
+# window the next write is refused with a 409 or a 422 carrying one of these.
+_SETTLING = (
+    "operation is still in progress",
+    "locked and cannot be modified",
+    "conflicting repository operation",
+)
+# Twelve tries, five seconds apart: a ~60 s window. The lock after a flip outlasted the 8 s
+# a create's own settling took (both seen live, 2026-09-17).
+_SETTLE_ATTEMPTS = 12
+_SETTLE_DELAY = 5.0
+
+
+def _is_settling(out: str) -> bool:
+    """Whether gh's refusal is GitHub saying "this repo is busy, come back in a moment"."""
+    folded = out.lower()
+    return any(marker in folded for marker in _SETTLING)
+
+
+def gh_settled(*args: str, **kwargs) -> tuple[int, str]:
+    """`gh`, retried while GitHub says the repo is still settling - and ONLY then.
+
+    Creating a repo and flipping its visibility both lock it, and the next write is refused
+    outright rather than queued: seen live on 2026-09-17, a visibility PATCH one second
+    after `generate` ("a previous repository operation is still in progress"), then the
+    team grant, the collaborator grant and the topics PUT one second after that flip ("this
+    repository is locked and cannot be modified"). A handout does all of those in a row, so
+    one waits for the other. Every write that can land on a just-created or just-flipped
+    repo goes through this; reads do not, and no other refusal is retried - a 403 is a
+    scope problem that waiting cannot fix.
+    """
+    code, out = gh(*args, **kwargs)
+    for _ in range(_SETTLE_ATTEMPTS - 1):
+        if code == 0 or not _is_settling(out):
+            break
+        time.sleep(_SETTLE_DELAY)
+        code, out = gh(*args, **kwargs)
+    return code, out
 
 
 def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
@@ -128,7 +187,7 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
     verbose log (see `log.log_err_person`)."""
-    code, out = gh(
+    code, out = gh_settled(
         "api", "--method", "PATCH", f"repos/{org}/{name}", "--field", "archived=true"
     )
     if code == 0:
@@ -137,6 +196,46 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
         person,
         f"could not archive a repo in {org}",
         f"could not archive {org}/{name}: {out[:160]}",
+    )
+    return False
+
+
+def set_visibility(
+    org: str, name: str, visibility: str, *, person: bool = False
+) -> bool:
+    """Make an existing repo `private` or `public`. Idempotent (GitHub accepts the
+    visibility a repo already has).
+
+    A PATCH of its own because `POST /repos/{o}/{r}/generate` takes `private` and nothing
+    else: a repo generated from a template is born private, and an assignment whose
+    `visibility:` says `public` is that repo flipped immediately afterwards. So the flip
+    belongs to the CREATE path - re-PATCHing a repo that already exists would undo, on
+    every quarter-hourly tick, whatever a person had deliberately changed.
+
+    The ONE exception is the shape where a person changing it is the thing being
+    corrected: a `student_choice` repo published before its grading cutoff is put back
+    here by `scheduler._reprivatise_student_repos`, which is the promise the assignment's
+    own page makes to the rest of the cohort. After the cutoff nothing flips it again.
+
+    `person=True` when the repo is somebody's, so the failure line names it only in the
+    verbose log (see `log.log_err_person`)."""
+    # A repo generated from a template is still being populated for a few seconds, and a
+    # PATCH in that window is refused - so this is one of the writes that waits out a
+    # settling repo (`gh_settled`).
+    code, out = gh_settled(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{org}/{name}",
+        "--field",
+        f"visibility={visibility}",
+    )
+    if code == 0:
+        return True
+    _failed_on(
+        person,
+        f"could not set a repo's visibility in {org}",
+        f"could not make {org}/{name} {visibility}: {out[:160]}",
     )
     return False
 
@@ -181,6 +280,98 @@ def allow_forking(org: str, name: str) -> bool:
     if code == 0:
         return True
     log(f"  [warn] {org}/{name} could not be made forkable: {out[:120]}")
+    return False
+
+
+# The repository ruleset a shared drop box is handed out with, named so the GET below
+# can recognise our own and leave anything a maintainer added alone. A RULESET and not
+# classic branch protection: rulesets apply to private repositories on the Free plan,
+# where classic protection does not - and the drop box is private by definition.
+DROP_BOX_RULESET = "dsl-drop-box"
+
+
+# GitHub's refusal when a plan feature is asked of a private repo on Free; the same
+# sentence for rulesets, required reviewers and protected branches.
+_PLAN_REFUSAL = "upgrade to github pro or make this repository public"
+
+
+def plan_refused_rulesets(out: str) -> bool:
+    """Whether a rulesets call was refused because the org's PLAN lacks the feature."""
+    return _PLAN_REFUSAL in out.lower()
+
+
+def protect_shared_repo(org: str, name: str) -> bool:
+    """Stop the default branch of a shared drop box being force-pushed or deleted.
+
+    Every student in the cohort has `push` on that one repo, so without this ONE of them
+    can erase the whole cohort's work and the history it is pinned to - and the deadline
+    snapshot then points at a commit that no longer exists. Folders are a convention
+    inside the repo, not a boundary, and nothing GitHub offers makes them one; what CAN be
+    guaranteed is that whatever was pushed stays reachable, which is what these two rules
+    buy. `git log` keeps the rest.
+
+    `non_fast_forward` + `deletion` and nothing else: a rule requiring pull requests, or a
+    linear history, would stop the ordinary push the assignment is handed out to collect.
+    No bypass actors - an org owner can still edit the ruleset itself, which is the escape
+    hatch, and listing one would only widen who may rewrite the cohort's work.
+
+    Idempotent, and reads before it writes: the handout re-fires on every tick, so a
+    second POST would 422 on the name for the rest of the term. A listing that could not
+    be read falls through to the POST and, if that is refused, counts as a failed handout
+    - the next tick reads the listing again and skips, so it heals itself."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{name}/rulesets?per_page=100",
+        "--jq",
+        ".[].name",
+    )
+    if code == 0 and DROP_BOX_RULESET in {ln.strip() for ln in out.splitlines()}:
+        log_skip(f"{org}/{name} ruleset {DROP_BOX_RULESET}")
+        return True
+    code, out = gh_settled(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{org}/{name}/rulesets",
+        "--input",
+        "-",
+        stdin=json.dumps(
+            {
+                "name": DROP_BOX_RULESET,
+                "target": "branch",
+                "enforcement": "active",
+                "bypass_actors": [],
+                # `~DEFAULT_BRANCH` rather than `main`: the drop box is generated from the
+                # cohort template, so its default branch is whatever the course template's
+                # is, and a ruleset naming the wrong branch protects nothing.
+                "conditions": {
+                    "ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
+                },
+                "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+            }
+        ),
+    )
+    if code == 0:
+        log_ok(f"{org}/{name} cannot be force-pushed or deleted")
+        return True
+    if plan_refused_rulesets(out):
+        # Rulesets on a PRIVATE repo are a GitHub Team feature; every Hertie org is on Free
+        # until the Education upgrade lands. Not a failed handout: the drop box works, it is
+        # merely unprotected, and the next tick's POST succeeds the day the plan changes.
+        log_err(
+            f"{org}/{name} is NOT protected against force-push: rulesets on a private repo "
+            f"need GitHub Team (the org is on Free). Every student in the cohort has push, "
+            f"so a force-push could rewrite the cohort's work - git history is the only "
+            f"safety net until the plan is upgraded."
+        )
+        return True
+    log_err(
+        f"could not protect {org}/{name} against force-push and deletion: {out[:160]}. "
+        f"Every student in the cohort has push on that repo, so until the ruleset is "
+        f"there one of them can erase the whole cohort's work - add it by hand from "
+        f"Settings > Rules, or re-run the release."
+    )
     return False
 
 
@@ -515,7 +706,7 @@ def set_repo_topics(
     ]
     for t in normalised:
         args += ["--field", f"names[]={t}"]
-    code, out = gh(*args)
+    code, out = gh_settled(*args)
     if code == 0:
         return True
     detail = f"failed to set topics on {org}/{repo}: {out[:200]}"
@@ -580,7 +771,7 @@ def add_collaborator(
 
     `person=True` when the repo is somebody's - the failure line then names them only in
     the verbose log (see `log.log_err_person`)."""
-    code, out = gh(
+    code, out = gh_settled(
         "api",
         "--method",
         "PUT",
@@ -600,6 +791,22 @@ def add_collaborator(
     return False
 
 
+def _direct_logins(
+    org: str, repo: str, endpoint: str, jq: str
+) -> tuple[list[str] | None, str]:
+    """The non-blank lines `jq` selected from one paginated listing of `org/repo`, or
+    `(None, the error text)` when the call itself failed.
+
+    The three readers below ask GitHub in exactly the same way and differ only in WHICH
+    listing they read and what a failure MEANS to them - a 404 is "no such repo, so there
+    is nothing to revoke on it" to two of them and a read it may not guess at to the
+    third. That answer stays with each caller; the call does not."""
+    code, out = gh("api", "--paginate", f"repos/{org}/{repo}/{endpoint}", "--jq", jq)
+    if code != 0:
+        return None, out
+    return [line.strip() for line in out.splitlines() if line.strip()], out
+
+
 def is_collaborator(
     org: str, repo: str, login: str, *, person: bool = False
 ) -> bool | None:
@@ -615,15 +822,11 @@ def is_collaborator(
     None means the answer could not be read. Kept distinct from False on purpose: the
     caller is about to REVOKE access, and a rate limit or a network drop must never read
     as "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"repos/{org}/{repo}/collaborators?affiliation=direct&per_page=100",
-        "--jq",
-        ".[].login",
+    logins, out = _direct_logins(
+        org, repo, "collaborators?affiliation=direct&per_page=100", ".[].login"
     )
-    if code == 0:
-        return login.casefold() in {ln.strip().casefold() for ln in out.splitlines()}
+    if logins is not None:
+        return login.casefold() in {ln.casefold() for ln in logins}
     if is_missing_resource(out):
         return False  # no such repo - nothing to revoke on it
     _failed_on(
@@ -634,11 +837,52 @@ def is_collaborator(
     return None
 
 
+def direct_collaborators(
+    org: str, repo: str, *, person: bool = False
+) -> frozenset[str] | None:
+    """Every login that already holds a DIRECT grant on `repo`, casefolded - the
+    collaborators plus the people whose invitation is still un-accepted. None when the
+    answer could not be read.
+
+    DIRECT, and the name says so: a team grant and an org owner reach the repo without
+    appearing here, which is what makes this set safe to converge AGAINST - the caller
+    revokes off it, and faculty and the bot must never be in what it revokes.
+
+    TWO listings for a whole cohort, where asking `is_collaborator` per student is two
+    calls per student. That is what makes the shared drop box's grant loop affordable: the
+    handout re-fires on every tick (which is how a late onboarder gets their access), and
+    one repo serving fifty units has no per-unit repo whose existence records the grant.
+
+    The invitations half is not an optimisation. A student granted before they accepted
+    their org invite is an INVITATION and not a collaborator row, so a set built from the
+    collaborators alone would re-PUT for every un-onboarded student on every tick, for as
+    long as they never accept.
+
+    None, not the empty set, when either listing fails: the caller's answer to "we could
+    not look" is to grant everyone again - the PUT is idempotent, and an over-granted one
+    costs a call where an under-granted one costs a student their submission."""
+    logins: set[str] = set()
+    for endpoint, jq in (
+        ("collaborators?affiliation=direct&per_page=100", ".[].login"),
+        ("invitations?per_page=100", '.[].invitee.login // ""'),
+    ):
+        found, out = _direct_logins(org, repo, endpoint, jq)
+        if found is None:
+            _failed_on(
+                person,
+                f"could not read who already has access to a repo in {org}",
+                f"could not read {org}/{repo}'s {endpoint.split('?')[0]}: {out[:160]}",
+            )
+            return None
+        logins |= {login.casefold() for login in found}
+    return frozenset(logins)
+
+
 def remove_collaborator(
     org: str, repo: str, login: str, *, person: bool = False
 ) -> bool:
     """Revoke a direct collaborator grant. Idempotent - GitHub 204s either way."""
-    code, out = gh(
+    code, out = gh_settled(
         "api", "--method", "DELETE", f"repos/{org}/{repo}/collaborators/{login}"
     )
     if code == 0:
@@ -663,14 +907,10 @@ def pending_invitations(
 
     None is kept distinct from `[]` for the same reason as `is_collaborator`: the caller is
     about to revoke, and an unreadable listing must never read as "nothing to cancel"."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"repos/{org}/{repo}/invitations?per_page=100",
-        "--jq",
-        ".[] | [.id, .invitee.login] | @tsv",
+    rows, out = _direct_logins(
+        org, repo, "invitations?per_page=100", ".[] | [.id, .invitee.login] | @tsv"
     )
-    if code != 0:
+    if rows is None:
         if is_missing_resource(out):
             return []  # no such repo - nothing to cancel on it
         _failed_on(
@@ -681,8 +921,8 @@ def pending_invitations(
         return None
     fold = login.casefold()
     ids = []
-    for line in out.splitlines():
-        invitation_id, _, invitee = line.partition("\t")
+    for row in rows:
+        invitation_id, _, invitee = row.partition("\t")
         if invitee.strip().casefold() == fold:
             ids.append(invitation_id.strip())
     return ids

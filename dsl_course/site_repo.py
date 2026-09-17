@@ -175,8 +175,8 @@ def site_readme(org: str, cohort: bool) -> str:
         "from there.\n\n"
         "## Everything else is yours\n\n"
         "`index.md`, `schedule.md`, any page you add yourself, `_announcements/`, "
-        "`_images/`, `Gemfile`, `.gitignore`, `_data/late_policy.yml`, "
-        "`_data/previous_offering.yml`, further `_data/*.yml` - seeded once when the site "
+        "`_images/`, `Gemfile`, `.gitignore`, `_data/previous_offering.yml`, "
+        "further `_data/*.yml` - seeded once when the site "
         "is created, then never rewritten. Change them freely.\n\n"
         "The rendering is not yours to change here: `_layouts/`, `_includes/` and "
         "`_sass/_course.scss` are shipped from `templates/site/` in the DSL teaching "
@@ -449,7 +449,7 @@ def site_templates() -> dict[str, str]:
 def seed_templates() -> dict[str, str]:
     """`{repo-relative path: content}` for everything under `templates/site-seed/` - what a
     site repo NEEDS but has nothing generating it: `_config.yml`, `index.md`, `schedule.md`,
-    the `Gemfile`, `_data/late_policy.yml`.
+    the `Gemfile`, `_data/previous_offering.yml`.
 
     INSTRUCTOR-OWNED and seeded ONCE (`apply_plan` writes only the paths a site lacks), so
     a course's own words survive every sync. The `_config.yml` keys the templates depend on

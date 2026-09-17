@@ -30,6 +30,91 @@ def _team_lock_is_current(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def gradebooks(monkeypatch):
+    """A private gradebook per onboarded student, provisioned at the end of every cohort's
+    sync. It reads the roster and takes the cohort listing this pass already holds, so it
+    is stubbed here for the tests about the sync's own orchestration; the one about it sets
+    its own. Records `(org, the listing it was handed)`."""
+    calls: list[tuple[str, object, object]] = []
+    monkeypatch.setattr(
+        sync_membership,
+        "ensure_gradebooks",
+        lambda org, dry_run=False, existing=None, budget_minutes=None: (
+            calls.append((org, existing, budget_minutes)) or 0
+        ),
+    )
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def listed(monkeypatch):
+    """The ONE cohort listing a per-cohort pass takes, which the off-boarding prune and the
+    gradebooks then share. Live here, so a test that forgets it reaches GitHub."""
+    monkeypatch.setattr(
+        sync_membership,
+        "listing_by_name",
+        lambda org: {f"{org}-welcome": {"name": f"{org}-welcome"}},
+    )
+
+
+def test_every_live_cohorts_sync_provisions_its_gradebooks(monkeypatch, gradebooks):
+    # The gradebook is where feedback goes for every shape that has no receipts issue, and
+    # the assignment brief points at it from the day it is published - so it exists from
+    # the moment a student onboards, not from the first distribute.
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(sync_membership, "cohort_is_live", lambda org: True)
+    for name in ("sync_roster", "sync_teams"):
+        monkeypatch.setattr(getattr(sync_membership, name), "sync", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    # And off the listing this pass already took, keyed by name: the off-boarding prune
+    # asks the same rows, and each used to take a paginated listing of its own. This is
+    # also the ONE caller that bounds the wall clock, because nothing in this run waits on
+    # the repos it makes.
+    assert gradebooks == [
+        (
+            "Cohort-A",
+            {"Cohort-A-welcome": {"name": "Cohort-A-welcome"}},
+            sync_membership.GRADEBOOK_BUDGET_MINUTES,
+        )
+    ]
+
+
+def test_a_listing_that_could_not_be_read_still_reconciles_the_roster(
+    monkeypatch, gradebooks
+):
+    # The listing is taken for the off-boarding prune and the gradebooks, and it used to
+    # RAISE - before the roster reconcile, so a rate limit on it stopped a cohort's
+    # enrolment for the night. None is "we could not look", and each step answers it.
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(sync_membership, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(sync_membership, "cohort_is_live", lambda org: True)
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    rostered: list[object] = []
+    monkeypatch.setattr(
+        sync_membership.sync_roster,
+        "sync",
+        lambda org, **k: rostered.append(k.get("existing")) or 0,
+    )
+    monkeypatch.setattr(sync_membership.sync_teams, "sync", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
+    )
+
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert rostered == [None]
+    assert gradebooks == [("Cohort-A", None, sync_membership.GRADEBOOK_BUDGET_MINUTES)]
+
+
 def test_empty_registry_is_visible_but_not_fatal(monkeypatch, capsys):
     # An empty registry can be legitimate for a brand-new course org, so the run does not
     # fail - but it must be loudly visible, not a silent green "Sync complete".

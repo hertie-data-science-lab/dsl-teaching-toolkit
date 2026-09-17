@@ -303,7 +303,7 @@ def _spec_fault(fires) -> ConfigFault:
     fault with a MOMENT - the one it is used to grade at."""
     return ConfigFault(
         "assignments.a3",
-        "`submit_via: emial` is not one of github/external - using `github`",
+        "`submit_via: emial` is not one of assignment_repo/external - using `assignment_repo`",
         fires=fires,
         field="submit_via",
         lineno=3,
@@ -311,7 +311,7 @@ def _spec_fault(fires) -> ConfigFault:
         in_repo="assignment-3-f2026",
         in_org="Course-Org",
         ref="solution",
-        fix_text="correct the value on the line above (allowed: github/external)",
+        fix_text="correct the value on the line above (allowed: assignment_repo/external)",
     )
 
 

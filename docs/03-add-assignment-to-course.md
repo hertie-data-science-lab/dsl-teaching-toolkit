@@ -30,16 +30,26 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
-      - `submit_via` = where students hand in. `github` = they push to their repo, and the
-        cutoff, the receipts and the late window apply; `external` = handed in elsewhere
-        (Moodle, Kaggle, in class), so the repo only carries the brief and the Feedback
-        issue and nothing is ever collected from it
+      - `submit_via` = where students hand in. `assignment_repo` = they push to their
+        repo, and the cutoff, the receipts and the late window apply; `external` = handed
+        in elsewhere (Moodle, Kaggle, in class), so **no repo is created**: the brief and
+        a submit link appear on the site;
+        `shared_dropbox_repo` = one private repo for the whole cohort, each student
+        pushing into their own folder and able to read everyone else's
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
+      - `visibility` = who may read each student's repo: `private` (default), `public`, or
+        `student_choice` (private, and the student is its admin: theirs to publish once the
+        grading cutoff has passed). Read when the repo is created, so editing it afterwards
+        moves nothing
    - Everything else - the team cap, the late window, the penalty - comes from
      `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
      into the assignment's own `grading_config.yml`, where you can revise it per assignment.
+   - With neither file stating one, late work follows the Hertie standard:
+     `late_penalty_per_day: 10%` of the grade per day started, `late_window_days: 10`, the
+     day the penalty reaches the whole grade. Write `late_window_days: 0` to accept nothing
+     after the deadline.
    - this creates **`assignment-1-f2026`** with two branches of stubs for you to replace:
 
    | Branch | Holds | Who sees it |
@@ -153,6 +163,88 @@ as the moment approaches. Earlier than that nothing is said.
 
 A template still carrying the pre-rename `grading.yml` is reported the same way - nothing
 reads that file, so the assignment grades as if it declared nothing at all.
+
+### Where the work goes, and who sees it
+
+Two settings in `grading_config.yml`, and everything else follows from them.
+
+| Setting | Values | What it does |
+|---|---|---|
+| `submit_via` | `assignment_repo` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
+| | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
+| | `shared_dropbox_repo` | **One private repo for the whole cohort**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no receipts issue. |
+| `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
+| `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
+| | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
+| | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |
+
+Older `grading_config.yml` files spell `assignment_repo` as `github` - both are read, but
+`New assignment` and the scaffold only ever write `assignment_repo` now.
+
+GitHub's fourth visibility, `internal` - readable by every member of an enterprise and by
+nobody outside it - is **not supported**: it needs an Enterprise plan the courses do not
+have, and a repo the whole institution can read is not a repo marks may be posted into.
+
+A `public` or `student_choice` repo gets **no submission receipts**, and no **model solution**
+is ever pushed into one - the answers would be published with the repo, so an assignment that is not
+`private` keeps its model answer on the template's `solution` branch (the digest says so if
+its `schedule.yml` entry asks for a solution release anyway). Students who want their own work public on
+a `private` assignment publish a copy under their own account (the gradebook README tells
+them how); the org's copy stays private.
+
+`visibility` is read when each repo is **created**. Editing it after the assignment has
+gone out changes nothing on GitHub, so the cohort's *grading_config.yml* digest reports the
+disagreement until the line and the repos say the same thing again. `student_choice` is
+exempt from that check - a mixture is what it is for - and is checked against the ORG
+instead: it needs **Allow members to change repository visibilities** ON and **Allow
+members to delete or transfer repositories** OFF (cohort org → Settings → Member
+privileges, set by hand once - see the
+[deployment checklist](DEPLOYMENT-CHECKLIST.md#cohort-setup-per-year)). The same digest
+faults while either is wrong.
+
+#### A shared drop box
+
+`submit_via: shared_dropbox_repo` hands out ONE private repo for the assignment, `<slug>-submissions`,
+and gives every onboarded student (or every team) `push` on it. Each unit works in its own
+`<handle>/` or `<team>/` folder; the whole cohort can read the whole repo, which is the
+point - peer-visible presentations, referee reports, a gallery of submissions.
+
+The folder name is the student's GitHub handle (or the team name) spelt **exactly** as
+*students.csv* or *teams.csv* has it, including its capitals: GitHub matches a path
+case-sensitively, so work pushed to `Anna-Adams/` is not in `anna-adams/` and is not found.
+Say so in the brief, and check the spelling of a handle whose folder the sheet says is empty.
+
+What to know before you pick it:
+
+- **The folders are a convention, not a boundary.** Anyone with push can write into anyone
+  else's folder. A submission is pinned to the last commit in a folder that one of *its own*
+  members made, so a classmate's edit cannot be marked as a student's work - and when the
+  most recent hand on a folder was not the unit's, the grading sheet says so
+  (`submitted_note`). Nothing is lost either way: `git log` keeps every version, and the
+  repo carries a ruleset against force-pushes and deletion - though that needs GitHub Team,
+  and every Hertie org is on Free until the Education upgrade lands, so until then the drop
+  box is left unprotected and the release run log says so.
+- **One drop box per assignment.** Two schedule entries resolving to one cohort-side name
+  are refused, as they are for every other shape.
+- **Private only.** One repo holds the whole cohort's work and no student can opt out of
+  being in it, so a `visibility:` line on a shared assignment is dropped at the parse.
+- **No receipts issue, no model solution.** Both would be written where the whole cohort
+  can read them.
+- **Hand-marked.** `autograde:`, `completion_check:` and `grader_pdf:` are dropped at the
+  parse if you set them (and the notebook completion check is off here whether or not the
+  file mentions it): all three run per unit against the unit's own repo, so each student
+  would have the whole drop box cloned and scored under their own name, and every one of
+  them would get the same result.
+
+The **Submission receipts** issue - the thread a student is told what we recorded for them
+in - exists only where there is a private repo of the student's own to put it in, so an
+`external` or `shared_dropbox_repo` assignment has none. No mark is lost with it: marks and
+feedback go to the private `grades-<handle>` gradebook for every shape alike, which is
+[Grade and return assignments](10-grade-and-return-assignments.md).
+
+`submit_url` is not a form box: **New assignment** seeds a commented line for it in
+`grading_config.yml`, and you fill it in there. `visibility` is box 10 on that form, which
+is GitHub's cap of ten inputs - every further setting lives in `grading_config.yml` only.
 
 ### Group vs individual assignments
 

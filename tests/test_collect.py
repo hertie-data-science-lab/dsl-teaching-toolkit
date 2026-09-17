@@ -7,6 +7,7 @@ answer, so the pin's every branch is pinned down here with git/gh stubbed.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -23,8 +24,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
+from conftest import repo_row
 
-from dsl_course import collect, gh_contents, ghcli, grades
+from dsl_course import collect, course, gh_contents, ghcli, grades
+from dsl_course.collect import Target
 from dsl_course.faults import Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
@@ -108,6 +111,212 @@ def test_the_group_shape_reads_off_type_and_team_formation():
     )
 
 
+def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
+    # `submit_via` + `visibility` are the whole of the shape, and everything that follows
+    # from it - the receipts issue, the submission arithmetic, whether there is a repo per
+    # unit at all - is DERIVED, never declared.
+    spec = collect.parse_grading_spec("")
+    assert (spec.submit_via, spec.visibility) == ("assignment_repo", "private")
+    assert spec.has_receipts_issue and spec.collects_commits
+    assert spec.creates_unit_repos
+    external = collect.parse_grading_spec("submit_via: external\n")
+    assert not external.has_receipts_issue and not external.collects_commits
+    assert not external.creates_unit_repos
+    assert capsys.readouterr().err == ""
+
+
+def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(capsys):
+    spec = collect.parse_grading_spec("visibility: internal\n")
+    assert spec.visibility == "private"
+    assert "is not one of private/public/student_choice" in capsys.readouterr().err
+
+
+def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
+    # The handout creates a world-readable repo for it, so the value stands - and the one
+    # thing that follows from it is derived, never declared: marks and receipts have
+    # nowhere private to go, so the gradebook carries them instead.
+    spec = collect.parse_grading_spec("visibility: public\n")
+    assert spec.visibility == "public" and spec.submit_shape == "assignment-repo-public"
+    assert not spec.has_receipts_issue
+    assert spec.collects_commits and spec.creates_unit_repos
+    assert capsys.readouterr().err == ""
+
+
+def test_student_choice_is_read_back_and_hands_the_flag_to_the_student(capsys):
+    # The repo is created private like any other; what is different is WHO owns the flag
+    # afterwards. One predicate answers that, in `course.py` and nowhere else, so every
+    # exemption `student_choice` earns asks the same question. No receipts issue either:
+    # a thread in a repo the student may publish tomorrow is a publishable mark.
+    spec = collect.parse_grading_spec("visibility: student_choice\n")
+    assert spec.visibility == "student_choice"
+    assert spec.submit_shape == "assignment-repo-student-choice"
+    assert spec.visibility_is_students
+    assert not spec.has_receipts_issue
+    assert spec.collects_commits and spec.creates_unit_repos
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("visibility", course.VISIBILITIES)
+def test_only_student_choice_takes_the_visibility_out_of_the_toolkits_hands(visibility):
+    # Over the vocabulary itself: a word added to it without deciding this question would
+    # silently inherit "the toolkit owns it", which is the answer that re-privatises a
+    # student's portfolio repo every quarter of an hour.
+    assert course.visibility_is_students(visibility) is (visibility == "student_choice")
+
+
+@pytest.mark.parametrize("submit_via", course.SUBMIT_VIA)
+@pytest.mark.parametrize("visibility", course.VISIBILITIES)
+def test_the_feedback_channel_over_every_pair_the_vocabulary_allows(
+    submit_via, visibility
+):
+    # The whole truth table, off the vocabulary itself rather than a list beside it: the
+    # issue lives in the unit's own repo, so it exists exactly where there is one that
+    # only that unit can read. Every other pair is answered by the gradebook, and adding
+    # a word to either tuple without deciding this is what the parametrisation forbids.
+    assert course.has_receipts_issue(submit_via, visibility) is (
+        submit_via == "assignment_repo" and visibility == "private"
+    )
+
+
+def test_shared_collects_commits_without_a_repo_per_unit(capsys):
+    # The whole of what the third word means, in the predicates every consumer asks
+    # rather than in the word itself: there ARE commits to time (a folder in the drop box
+    # is pushed to), there is no repo per unit to name or grant on, and there is a repo -
+    # so the topics, the faculty floor and the visibility digest all still apply.
+    spec = collect.parse_grading_spec("submit_via: shared_dropbox_repo\n")
+    assert spec.submit_via == "shared_dropbox_repo" and spec.submit_shared
+    assert spec.collects_commits
+    assert not spec.creates_unit_repos
+    assert spec.creates_repos
+    # No receipts issue: the drop box is the whole cohort's, so nothing about one
+    # student's marking may be written in it.
+    assert not spec.has_receipts_issue
+    assert spec.submit_shape == "shared-dropbox-repo"
+    assert capsys.readouterr().err == ""
+
+
+def test_a_shared_drop_box_is_private_whatever_the_file_says(capsys):
+    # One repo holds the whole cohort's work and no student can opt out of being in it.
+    spec = collect.parse_grading_spec(
+        "submit_via: shared_dropbox_repo\nvisibility: public\n"
+    )
+    assert spec.visibility == "private"
+    assert "one repo holds the whole cohort's work" in capsys.readouterr().err
+
+
+def test_a_shared_assignment_is_hand_marked_whatever_the_file_says(capsys):
+    # All three stages run per UNIT against the unit's own repo, and here there is one repo
+    # for everybody: fifty students would each have the whole cohort's work cloned, run and
+    # archived under their own key, and every one of them would get the same result.
+    # Corrected at the parse, exactly as the visibility is.
+    spec = collect.parse_grading_spec(
+        "submit_via: shared_dropbox_repo\nautograde: true\ncompletion_check: true\ngrader_pdf: true\n"
+    )
+    assert spec.autograde is False and spec.grader_pdf is False
+    assert spec.runs_completion_check is False
+    said = capsys.readouterr().err
+    assert "`autograde:` is not read for a shared drop box" in said
+    assert "`completion_check:` is not read for a shared drop box" in said
+    assert "`grader_pdf:` is not read for a shared drop box" in said
+
+
+def test_a_shared_notebook_assignment_runs_no_completion_check_either(capsys):
+    # `completion_check:` is the one tri-state setting: undeclared means "whatever
+    # `format:` implies", and `ipynb` implies ON. So the drop box that says nothing at all
+    # is exactly the one that would have executed the whole cohort's notebooks under every
+    # student's key - and there is no line in the file to report as dropped.
+    spec = collect.parse_grading_spec(
+        "submit_via: shared_dropbox_repo\nformat: ipynb\n"
+    )
+    assert spec.runs_completion_check is False
+    assert "completion_check" not in capsys.readouterr().err
+    # ...and the same file without the drop box still runs it, so the default is intact.
+    assert collect.parse_grading_spec("format: ipynb\n").runs_completion_check is True
+
+
+def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(capsys):
+    # `submit_url` is the address of the place work is handed in INSTEAD of GitHub, so a
+    # shape that collects commits has no use for it - the same drop `assignment_repo` gets.
+    spec = collect.parse_grading_spec(
+        "submit_via: shared_dropbox_repo\nsubmit_url: https://moodle.example.edu/x\n"
+    )
+    assert spec.submit_url == ""
+    assert "only read for `submit_via: external`" in capsys.readouterr().err
+
+
+def test_a_submit_via_the_engine_cannot_act_on_is_refused_as_a_typo(capsys):
+    # The dropdown offers exactly what the reader takes (`course.SUBMIT_VIA`), so a word
+    # the engine cannot act on is not in the vocabulary at all and reads as a misspelling.
+    spec = collect.parse_grading_spec("submit_via: dropbox\n")
+    assert spec.submit_via == "assignment_repo"
+    assert (
+        "is not one of assignment_repo/shared_dropbox_repo/external"
+        in capsys.readouterr().err
+    )
+    assert "dropbox" not in course.SUBMIT_VIA
+
+
+def test_shared_renamed_before_it_shipped_has_no_alias_and_is_dropped(capsys):
+    # `shared` never reached a real org - it was renamed to `shared_dropbox_repo` before
+    # it ever shipped - so, unlike `github`, it earns no alias and is refused exactly
+    # like any other misspelling.
+    spec = collect.parse_grading_spec("submit_via: shared\n")
+    assert spec.submit_via == "assignment_repo"  # the safe default, not the old word
+    assert (
+        "is not one of assignment_repo/shared_dropbox_repo/external"
+        in capsys.readouterr().err
+    )
+
+
+def test_the_legacy_github_spelling_reads_as_assignment_repo_with_no_warning(capsys):
+    # Live INSTRUCTOR-OWNED `grading_config.yml` files in real course orgs carry
+    # `submit_via: github` for ever, so the alias must read clean - no Dropped line - and
+    # drive exactly the shape a fresh `assignment_repo` config would.
+    spec = collect.parse_grading_spec("submit_via: github\n")
+    assert spec.submit_via == "assignment_repo"
+    assert spec.dropped == ()
+    assert capsys.readouterr().err == ""
+    canonical = collect.parse_grading_spec("submit_via: assignment_repo\n")
+    assert spec.has_receipts_issue is canonical.has_receipts_issue is True
+    assert spec.collects_commits is canonical.collects_commits is True
+    assert spec.creates_unit_repos is canonical.creates_unit_repos is True
+    assert spec.submit_shape == canonical.submit_shape == "assignment-repo-private"
+
+
+def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(capsys):
+    # Nothing is created for an external assignment, so there is nothing for a visibility
+    # to describe - and leaving `public` standing there would read as a promise.
+    spec = collect.parse_grading_spec("submit_via: external\nvisibility: public\n")
+    assert spec.visibility == "private"
+    assert "no repo is created for it" in capsys.readouterr().err
+
+
+def test_submit_url_is_read_for_external_only_and_https_only(capsys):
+    url = "https://moodle.example.edu/mod/assign/view.php?id=42"
+    spec = collect.parse_grading_spec(f"submit_via: external\nsubmit_url: {url}\n")
+    assert spec.submit_url == url and spec.submit_host == "moodle.example.edu"
+    assert capsys.readouterr().err == ""
+    # The site's button is the one link that sends a whole cohort somewhere off the
+    # strength of one hand-typed line: https, or no button at all.
+    # And the seeded line uncommented but not answered is the same refusal: a button
+    # pointing a whole cohort at a Moodle page nobody created.
+    placeholder = f"https://moodle.example.edu/x?id={course.SETTING_PLACEHOLDER}"
+    for bad in (
+        "http://moodle.example.edu/x",
+        "javascript:alert(1)",
+        "moodle.edu",
+        placeholder,
+    ):
+        spec = collect.parse_grading_spec(f"submit_via: external\nsubmit_url: {bad}\n")
+        assert spec.submit_url == "" and spec.submit_host == ""
+        assert "is not a filled-in `https://` address" in capsys.readouterr().err
+    # And it describes a handover the toolkit does not see, so on any other shape it is a
+    # line pointing students away from the repo they are supposed to push to.
+    spec = collect.parse_grading_spec(f"submit_url: {url}\n")
+    assert spec.submit_url == ""
+    assert "only read for `submit_via: external`" in capsys.readouterr().err
+
+
 def test_a_setting_the_toolkit_does_not_read_is_flagged_by_name(capsys):
     # `type` and `max_team_size` moved here out of schedule.yml, and the reverse mistake -
     # a grading_config.yml carrying a schedule key - has to say so rather than be ignored.
@@ -133,7 +342,7 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
         "max_team_size: lots\ntype: gruop\n"
     )
     assert spec.title == "Bayes"
-    assert spec.submit_via == "github"  # the safe default, not the typo
+    assert spec.submit_via == "assignment_repo"  # the safe default, not the typo
     assert spec.type == "individual"
     assert spec.questions is None
     assert spec.late_window_days is None
@@ -270,18 +479,34 @@ def test_snapshot_csv_round_trips_and_keeps_a_blank_sha():
     # it and grading falls back to the student-datable pin for exactly the repos where a
     # backdated commit would be most valuable.
     rows = [
-        ("assignment-1-ben", "", "2026-10-16T00:04:12+00:00", "", ""),
+        ("assignment-1-ben", "", "2026-10-16T00:04:12+00:00", "", "", "", ""),
         (
             "assignment-1-anna",
             SHA,
             "2026-10-16T00:04:12+00:00",
             "2026-10-15T21:40:00Z",
             "commit",
+            "",
+            "",
         ),
     ]
     text = collect.dump_snapshots(rows)
-    assert text.splitlines()[0] == "repo,sha,recorded_at,submitted_at,submitted_source"
+    assert text.splitlines()[0] == (
+        "repo,sha,recorded_at,submitted_at,submitted_source,path,note"
+    )
     assert text.splitlines()[1].startswith("assignment-1-anna,")  # repo-sorted, stable
+    # And a drop box's rows, which all carry ONE repo, are ordered by the folder inside it
+    # rather than by whichever of them happens to have a sha.
+    shared = collect.dump_snapshots(
+        [
+            ("a3-submissions", SHA, "", "", "", "ben-k/", ""),
+            ("a3-submissions", "", "", "", "", "ada-l/", ""),
+        ]
+    )
+    assert [line.split(",")[5] for line in shared.splitlines()[1:]] == [
+        "ada-l/",
+        "ben-k/",
+    ]
     assert collect.parse_snapshots(text) == {
         "assignment-1-anna": SHA,
         "assignment-1-ben": "",
@@ -622,8 +847,8 @@ def test_submission_targets_individual_skips_unonboarded(monkeypatch):
     monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     assert collect.submission_targets("Cohort", "assignment-1", False) == [
-        ("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
-        ("assignment-1-ben-baker", "ben-baker", ["ben-baker"]),
+        Target("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-1-ben-baker", "ben-baker", ["ben-baker"]),
     ]
 
 
@@ -637,8 +862,8 @@ def test_submission_targets_individual_ignores_teams_csv(monkeypatch):
     monkeypatch.setattr(collect.teams, "load", lambda org: _TEAMS)
     monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
     assert collect.submission_targets("Cohort", "assignment-4-project", False) == [
-        ("assignment-4-project-anna-adams", "anna-adams", ["anna-adams"]),
-        ("assignment-4-project-ben-baker", "ben-baker", ["ben-baker"]),
+        Target("assignment-4-project-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-4-project-ben-baker", "ben-baker", ["ben-baker"]),
     ]
 
 
@@ -659,7 +884,7 @@ def test_a_handle_on_two_roster_rows_is_one_submission_unit(monkeypatch):
     monkeypatch.setattr(collect.roster, "load", lambda org: twice)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     assert collect.submission_targets("Cohort", "assignment-1", False) == [
-        ("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
     ]
 
 
@@ -679,7 +904,7 @@ def test_a_team_listed_twice_is_one_submission_unit(monkeypatch):
         ],
     )
     assert collect.submission_targets("Cohort", "assignment-4-project", True) == [
-        ("assignment-4-project-team-x", "team-x", ["anna-adams"]),
+        Target("assignment-4-project-team-x", "team-x", ["anna-adams"]),
     ]
 
 
@@ -688,11 +913,11 @@ def test_a_duplicated_unit_is_reported_without_naming_anyone(monkeypatch, capsys
     # through log_person like every other per-person detail.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     kept = collect.one_per_unit(
-        [("r-ada", "ada-l", ["ada-l"]), ("r-ada", "ada-l", ["ada-l"])]
+        [Target("r-ada", "ada-l", ["ada-l"]), Target("r-ada", "ada-l", ["ada-l"])]
     )
     captured = capsys.readouterr()
     said = captured.out + captured.err
-    assert kept == [("r-ada", "ada-l", ["ada-l"])]
+    assert kept == [Target("r-ada", "ada-l", ["ada-l"])]
     assert "1 duplicate submission unit(s)" in said
     assert "ada-l" not in said
 
@@ -706,10 +931,14 @@ def _commits_line(
     parents: int = 1,
     author: str = "anna-adams",
     email: str = "anna@uni.edu",
+    committer: str = "",
 ) -> str:
     """One row of what `_COMMIT_FIELDS` asks the commits API for. Defaults describe a
-    student's push ON TOP of the handout - the ordinary submission."""
-    return "\t".join([sha, committed, str(parents), author, email])
+    student's push ON TOP of the handout - the ordinary submission.
+
+    `committer` is the second login GitHub answers with, and it is blank in most of these
+    rows because the author's is the one that normally answers."""
+    return "\t".join([sha, committed, str(parents), author, email, committer])
 
 
 @pytest.mark.parametrize(
@@ -856,19 +1085,23 @@ def _stub_snapshot_write(
     ladder existed expect. Stubbed, never called: nothing here reaches GitHub."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
-    monkeypatch.setattr(collect, "_pushed_at", lambda org: pushed or {})
+    monkeypatch.setattr(
+        collect,
+        "listing_by_name",
+        lambda org: {r: repo_row(r, pushed_at=p) for r, p in (pushed or {}).items()},
+    )
     monkeypatch.setattr(
         collect, "_push_activity", lambda org, repo: (activity or {}).get(repo, [])
     )
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=False, teams_key=None: [
-            (r, r.split("-")[-1], []) for r in pins
+        lambda org, slug, is_group=False, teams_key=None, **k: [
+            Target(r, r.split("-")[-1], []) for r in pins
         ],
     )
     monkeypatch.setattr(
-        collect, "_snapshot_sha", lambda org, repo, deadline, at="": pins[repo]
+        collect, "_snapshot_sha", lambda org, repo, deadline, at="", **k: pins[repo]
     )
     monkeypatch.setattr(
         collect,
@@ -1186,7 +1419,7 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     # The grading sheet has its own tests below; here it is a no-op, so an autograding
     # test does not have to stand up a roster, a snapshot and a classroom-config read.
-    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: True)
+    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
 
 
 def _recorded_sheet_writes(
@@ -1202,7 +1435,7 @@ def _recorded_sheet_writes(
         calls.append({"slug": slug, **kw})
         if order is not None:
             order.append(collect.grades.sheet_path(slug))
-        return ok
+        return collect.SheetWrite(ok)
 
     monkeypatch.setattr(collect, "sync_sheet", fake_sync)
     return calls
@@ -1229,8 +1462,8 @@ def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [
-            (f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
+        lambda org, slug, is_group=None, teams_key=None, **k: [
+            Target(f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
         ],
     )
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: snapshots)
@@ -1256,7 +1489,7 @@ def test_collect_with_no_targets_at_all_records_the_skip(monkeypatch, capsys):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [],
+        lambda org, slug, is_group=None, teams_key=None, **k: [],
     )
     marked: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1278,7 +1511,7 @@ def test_the_cron_path_waits_instead_of_recording_a_no_targets_skip(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [],
+        lambda org, slug, is_group=None, teams_key=None, **k: [],
     )
 
     def boom(*a, **k):
@@ -1298,7 +1531,7 @@ def test_an_unwritten_no_targets_marker_goes_red(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [],
+        lambda org, slug, is_group=None, teams_key=None, **k: [],
     )
     monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: False)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -1346,7 +1579,7 @@ def test_collect_told_which_entry_keys_everything_on_that_entry(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: (
+        lambda org, slug, is_group=None, teams_key=None, **k: (
             asked.append((slug, teams_key)) or []
         ),
     )
@@ -1386,7 +1619,7 @@ def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypa
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: (
+        lambda org, slug, is_group=None, teams_key=None, **k: (
             asked.append((slug, teams_key)) or []
         ),
     )
@@ -1450,8 +1683,9 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: (
-            kinds.append(is_group) or [(f"{slug}-team-x", "team-x", ["anna", "ben"])]
+        lambda org, slug, is_group=None, teams_key=None, **k: (
+            kinds.append(is_group)
+            or [Target(f"{slug}-team-x", "team-x", ["anna", "ben"])]
         ),
     )
     sheets = _recorded_sheet_writes(monkeypatch)
@@ -1533,6 +1767,33 @@ def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
     assert "autograde: false" in text
 
 
+def test_no_unit_of_a_shared_drop_box_is_ever_machine_marked(monkeypatch):
+    # The second lock. `_cross_check` turns `autograde` and `completion_check` off for a
+    # drop box at the parse, so this spec cannot be written down - it is built by hand to
+    # stand for whatever gets past that one. Both stages clone the repo a TARGET names, and
+    # every target of a drop box names the same repo, so one of them reaching `_grade_target`
+    # would score each student on the whole cohort's work.
+    _stub_solution_clone(monkeypatch)
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(
+        collect,
+        "load_grading_spec",
+        lambda *a, **k: collect.grades.GradingSpec(
+            submit_via="shared_dropbox_repo", autograde=True, completion_check=True
+        ),
+    )
+    monkeypatch.setattr(
+        collect,
+        "_grade_target",
+        lambda *a, **k: pytest.fail("a drop box target reached the grader"),
+    )
+    written = _captured_writes(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+    ((path, text),) = written
+    assert path == "autograde/assignment-1/_skipped.json"
+    assert "submit_via: shared_dropbox_repo" in text and "hand-marked" in text
+
+
 def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatch):
     # `autograde` defaults to TRUE, so a template whose hidden tests were never written
     # lands here - and landed here red, every quarter of an hour, with the sheet left OPEN
@@ -1575,8 +1836,8 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [
-            (f"{slug}-team-x", "team-x", [])
+        lambda org, slug, is_group=None, teams_key=None, **k: [
+            Target(f"{slug}-team-x", "team-x", [])
         ],
     )
     written = _captured_writes(monkeypatch)
@@ -2987,7 +3248,7 @@ def test_snapshot_assignment_requires_and_passes_is_group_through(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group, teams_key=None: seen.append(is_group) or [],
+        lambda org, slug, is_group, teams_key=None, **k: seen.append(is_group) or [],
     )
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=False)
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=True)
@@ -3055,7 +3316,7 @@ def test_submission_targets_individual_excludes_auditors(monkeypatch):
     monkeypatch.setattr(collect.roster, "load", lambda org: students)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     assert collect.submission_targets("Cohort", "assignment-1", False) == [
-        ("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
+        Target("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
     ]
 
 
@@ -3282,7 +3543,7 @@ def test_submission_targets_vets_teams_csv_against_the_roster(monkeypatch, capsy
     )
     targets = collect.submission_targets("Cohort", "assignment-4", True)
     # the roster's casing wins; everyone else is dropped
-    assert targets == [("assignment-4-team-1", "team-1", ["ada-l"])]
+    assert targets == [Target("assignment-4-team-1", "team-1", ["ada-l"])]
     err = capsys.readouterr().err
     assert "3 handle(s) in teams.csv" in err
     assert "stranger-x" not in err, "a student's typing must not reach a public log"
@@ -3308,7 +3569,7 @@ def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
         "Cohort", "wk3-regression", True, teams_key="regression"
     )
     assert asked == ["regression"]
-    assert targets == [("wk3-regression-team-1", "team-1", ["ada-l"])]
+    assert targets == [Target("wk3-regression-team-1", "team-1", ["ada-l"])]
 
 
 def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
@@ -3320,7 +3581,7 @@ def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
         lambda rows, slug: {"team-1": ["ada-l"]} if slug == "assignment-4" else {},
     )
     assert collect.submission_targets("Cohort", "assignment-4", True) == [
-        ("assignment-4-team-1", "team-1", ["ada-l"])
+        Target("assignment-4-team-1", "team-1", ["ada-l"])
     ]
 
 
@@ -3349,7 +3610,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     # same clone attempt, and the same decision, every hour.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
-    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: True)
+    monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -3362,8 +3623,8 @@ def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [
-            (f"{slug}-team-x", "team-x", [])
+        lambda org, slug, is_group=None, teams_key=None, **k: [
+            Target(f"{slug}-team-x", "team-x", [])
         ],
     )
     _failing_put_file(monkeypatch)
@@ -3401,6 +3662,7 @@ def _sheet_env(
     rows=None,
     contributions=None,
     pushed=None,
+    visibility=None,
     write_ok=True,
 ):
     """Stand `sync_sheet` up on stubs and return the (path, text) writes it makes.
@@ -3408,26 +3670,35 @@ def _sheet_env(
     `pushed` is `{repo: pushed_at}` out of the org listing the refresh takes to find which
     repos can have moved. Unset means none of them carries one, so every repo is read -
     which is what every test written before that short-circuit existed expects.
+    `visibility` is `{repo: "public"}` for a repo the same listing says the world can
+    read; unset means every one of them is listed private, which is what a `github` +
+    `private` assignment - every test here but one - looks like.
     `write_ok=False` refuses the sheet write, which is what a lost compare-and-swap is."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(
         collect,
-        "list_org_repos",
-        lambda org: [
-            {"name": repo, "pushed_at": (pushed or {}).get(repo, "")}
-            for repo, _unit, _members in targets
-        ],
+        "listing_by_name",
+        lambda org: {
+            repo: repo_row(
+                repo,
+                pushed_at=(pushed or {}).get(repo, ""),
+                visibility=(visibility or {}).get(repo, "private"),
+            )
+            for repo in {target.repo for target in targets}
+        },
     )
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     monkeypatch.setattr(
-        collect, "submission_targets", lambda org, slug, is_group, key=None: targets
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group, key=None, **k: targets,
     )
     monkeypatch.setattr(collect, "get_file_with_sha", lambda org, repo, path: existing)
     monkeypatch.setattr(collect, "load_snapshot_rows", lambda org, slug: rows)
     monkeypatch.setattr(
         collect,
         "_snapshot_sha",
-        lambda org, repo, deadline: (pins or {}).get(repo, collect.Pin()),
+        lambda org, repo, deadline, **k: (pins or {}).get(repo, collect.Pin()),
     )
     monkeypatch.setattr(
         collect, "get_file_content", lambda org, repo, path, ref="": contributions
@@ -3441,14 +3712,14 @@ def _sheet_env(
     )
     # Receipts have their own tests below; here they are a no-op, so a sheet test does not
     # also have to stand up an issue per submission repo.
-    monkeypatch.setattr(collect.grades, "ensure_feedback_issue", lambda *a, **k: 1)
+    monkeypatch.setattr(collect.grades, "ensure_receipts_issue", lambda *a, **k: 1)
     monkeypatch.setattr(collect.grades, "post_receipt", lambda *a, **k: True)
     return written
 
 
 SOLO_TARGETS = [
-    ("assignment-1-ada-l", "ada-l", ["ada-l"]),
-    ("assignment-1-ben-k", "ben-k", ["ben-k"]),
+    Target("assignment-1-ada-l", "ada-l", ["ada-l"]),
+    Target("assignment-1-ben-k", "ben-k", ["ben-k"]),
 ]
 
 
@@ -3517,7 +3788,7 @@ def test_the_sheet_carries_the_note_for_a_contradicted_submission(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
@@ -3548,7 +3819,7 @@ def test_the_freeze_reads_the_note_back_off_the_snapshot(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
@@ -3578,7 +3849,7 @@ def test_a_commit_dated_row_says_so_in_the_sheet_at_the_freeze(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.COMMIT_ONLY_NOTE
@@ -3608,7 +3879,7 @@ def test_a_server_timed_row_carries_no_note_at_all(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert "submitted_note" not in info
@@ -3632,7 +3903,7 @@ def test_the_sheet_created_at_handout_has_every_row_and_derives_nothing(monkeypa
         is_group=False,
         now=datetime(2026, 9, 22, tzinfo=BERLIN),
         units=[("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])],
-    )
+    ).written
     ((path, text),) = written
     assert path == "grading_sheets/assignment-1.yml"
     assert "# Status: OPEN - 0 of 2 students have submitted" in text
@@ -3680,7 +3951,7 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, 12, 0, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     ada = sheet["submissions"]["ada-l"]
@@ -3714,7 +3985,7 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
         "assignment-1-f2026",
     )
     kwargs = {"is_group": False, "now": datetime(2026, 10, 6, tzinfo=BERLIN)}
-    assert collect.sync_sheet(*args, **kwargs)
+    assert collect.sync_sheet(*args, **kwargs).written
     ((_path, first),) = written
 
     def boom(*a, **k):
@@ -3726,7 +3997,63 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
         "get_file_with_sha",
         lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
     )
-    assert collect.sync_sheet(*args, **kwargs)
+    assert collect.sync_sheet(*args, **kwargs).written
+
+
+def test_an_unchanged_sheet_before_the_due_date_says_why_there_was_nothing_to_do(
+    monkeypatch, capsys
+):
+    # A grader who presses Collect submissions on hand-out day gets `[skip] ...
+    # (unchanged)` and no reason for it, and reads it as a button that does not work.
+    # Nothing IS derived before the due date, so the skip needs the sentence that says so.
+    written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
+    args = (
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+    )
+    kwargs = {"is_group": False, "now": datetime(2026, 10, 1, tzinfo=BERLIN)}
+    assert collect.sync_sheet(*args, **kwargs).written
+    ((_path, first),) = written
+    monkeypatch.setattr(
+        collect,
+        "get_file_with_sha",
+        lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
+    )
+    capsys.readouterr()
+    assert collect.sync_sheet(*args, **kwargs).written
+    printed = capsys.readouterr().out
+    assert "(unchanged)" in printed
+    assert "before the due date Sun 4 Oct 2026 23:59" in printed
+    assert "nothing to refresh yet" in printed
+
+
+def test_an_unchanged_sheet_after_the_due_date_says_nothing_extra(monkeypatch, capsys):
+    # Past the due date the refresh really did look, and found nothing new: saying
+    # "nothing to refresh yet" there would be a claim about the toolkit, not the cohort.
+    written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
+    args = (
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+    )
+    kwargs = {"is_group": False, "now": datetime(2026, 10, 6, tzinfo=BERLIN)}
+    assert collect.sync_sheet(*args, **kwargs).written
+    ((_path, first),) = written
+    monkeypatch.setattr(
+        collect,
+        "get_file_with_sha",
+        lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
+    )
+    capsys.readouterr()
+    assert collect.sync_sheet(*args, **kwargs).written
+    assert "before the due date" not in capsys.readouterr().out
 
 
 def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
@@ -3757,7 +4084,7 @@ def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),  # past the 11 Oct cutoff
-    )
+    ).written
     ((_path, text),) = written
     assert "submitted: 2026-10-06T09:30+02:00" in text
     assert "days_late: 2" in text
@@ -3799,7 +4126,7 @@ def test_a_comment_the_grader_added_is_not_rewritten_away(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     assert written == []
 
 
@@ -3819,7 +4146,7 @@ def test_a_real_change_is_still_written(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     assert "ben-k" in text
 
@@ -3840,7 +4167,7 @@ def test_a_status_line_that_moved_is_written(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: FROZEN" in text
 
@@ -3864,7 +4191,7 @@ def test_a_duplicate_key_leaves_the_sheet_exactly_as_it_is(monkeypatch, capsys):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 2, tzinfo=BERLIN),
-    )
+    ).written
     assert written == []
     assert "appears twice" in capsys.readouterr().err
 
@@ -3889,7 +4216,7 @@ def test_the_sheet_is_written_against_the_sha_it_was_read_at(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 9, 1, tzinfo=BERLIN),
-    )
+    ).written
     assert seen == {"expected_sha": "OLDSHA"}
 
 
@@ -3924,7 +4251,7 @@ def test_a_sheet_the_grader_broke_mid_edit_is_left_exactly_as_it_is(
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     assert written == []
 
 
@@ -3947,7 +4274,7 @@ def _read_repos(monkeypatch, env_pins=None) -> list[str]:
     """Record which repos the refresh actually asks the commits API about."""
     asked: list[str] = []
 
-    def fake(org, repo, deadline):
+    def fake(org, repo, deadline, **k):
         asked.append(repo)
         return (env_pins or {}).get(repo, collect.Pin())
 
@@ -3977,7 +4304,7 @@ def test_a_repo_nobody_has_pushed_to_is_not_read_again(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     assert asked == ["assignment-1-ben-k"]  # never submitted; always worth asking
     # And the fact it was not re-read for still stands, and still counts.
     ((_path, text),) = written
@@ -4004,7 +4331,7 @@ def test_a_repo_pushed_to_since_the_pin_is_re_read(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, 12, 0, tzinfo=BERLIN),
-    )
+    ).written
     assert asked == ["assignment-1-ada-l", "assignment-1-ben-k"]
     ((_path, text),) = written
     assert "submitted: 2026-10-06T09:30+02:00" in text
@@ -4018,7 +4345,7 @@ def test_a_refresh_whose_lookups_failed_leaves_the_sheet_alone(monkeypatch):
         raise AssertionError("a partial read must not be written")
 
     _sheet_env(monkeypatch, targets=SOLO_TARGETS)
-    monkeypatch.setattr(collect, "_snapshot_sha", lambda org, repo, deadline: None)
+    monkeypatch.setattr(collect, "_snapshot_sha", lambda org, repo, deadline, **k: None)
     monkeypatch.setattr(collect, "put_file", boom)
     assert not collect.sync_sheet(
         "Course",
@@ -4029,7 +4356,7 @@ def test_a_refresh_whose_lookups_failed_leaves_the_sheet_alone(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
 
 
 def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_why(
@@ -4051,7 +4378,7 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 2, tzinfo=BERLIN),  # still open
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: OPEN - submitted outside GitHub" in text
     assert "info" not in grades.parse_sheet(text)["submissions"]["ada-l"]
@@ -4087,7 +4414,7 @@ def test_the_freeze_reads_the_written_snapshot_and_seals_the_sheet(monkeypatch):
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),  # past the 11 Oct cutoff
         autograde={"ada-l": "7/9"},
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: FROZEN Sun 11 Oct 2026 23:59" in text
     ada = grades.parse_sheet(text)["submissions"]["ada-l"]
@@ -4126,7 +4453,7 @@ def test_a_frozen_sheet_is_never_re_derived(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     assert sheet["submissions"]["ada-l"]["info"] == {
@@ -4147,7 +4474,7 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
 
     written = _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
+        targets=[Target("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
         pins={"assignment-1-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
     )
     monkeypatch.setattr(collect, "get_file_content", contributions)
@@ -4160,12 +4487,33 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
         "assignment-1-f2026",
         is_group=True,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
     assert seen == [SHA]
     ((_path, text),) = written
     team = grades.parse_sheet(text)["teams"]["alpha"]
     assert team["info"]["contributions"] == "Ada: Q1. Ben: Q2.\n"
     assert list(team["members"]) == ["ada-l", "ben-k"]
+
+
+def test_a_team_in_a_drop_box_is_asked_for_its_own_contributions_file(monkeypatch):
+    # One repo, one file at the top of it: read from there, the first team to write a
+    # CONTRIBUTIONS.md would have answered for every team in the cohort. The unit's own
+    # folder is the only place its answer can be.
+    seen: list[str] = []
+
+    def contributions(org, repo, path, ref=""):
+        seen.append(path)
+        return "Ada: Q1. Ben: Q2.\n"
+
+    monkeypatch.setattr(collect, "get_file_content", contributions)
+    assert (
+        collect._contributions("Cohort", _DROP_BOX, SHA, "alpha/")
+        == "Ada: Q1. Ben: Q2.\n"
+    )
+    assert seen == [f"alpha/{collect.CONTRIBUTIONS_FILE}"]
+    # ...and a team with a repo of its own still reads the file at the top of it.
+    collect._contributions("Cohort", "assignment-1-alpha", SHA)
+    assert seen[-1] == collect.CONTRIBUTIONS_FILE
 
 
 def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
@@ -4181,7 +4529,7 @@ def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
 
     written = _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
+        targets=[Target("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
         rows={
             "assignment-1-alpha": collect.SnapshotRow(
                 repo="assignment-1-alpha",
@@ -4201,7 +4549,7 @@ def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
         "assignment-1-f2026",
         is_group=True,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
-    )
+    ).written
     assert seen == [frozen]
     ((_path, text),) = written
     assert (
@@ -4217,7 +4565,7 @@ def test_an_unwritten_contributions_stub_says_so_rather_than_reading_blank(monke
     # look", so blank is reserved for exactly that.
     written = _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-alpha", "alpha", ["ada-l"])],
+        targets=[Target("assignment-1-alpha", "alpha", ["ada-l"])],
         pins={"assignment-1-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
         contributions=f"{gh_contents.STUB_MARKS[0]}\nWho did what?\n",
     )
@@ -4242,7 +4590,7 @@ def test_a_team_with_nothing_pinned_has_a_blank_contributions_cell(monkeypatch):
     # Nothing was submitted, so there was nothing to have read - which is not the same as
     # a team that submitted and left the file as we seeded it.
     written = _sheet_env(
-        monkeypatch, targets=[("assignment-1-alpha", "alpha", ["ada-l"])]
+        monkeypatch, targets=[Target("assignment-1-alpha", "alpha", ["ada-l"])]
     )
     collect.sync_sheet(
         "Course",
@@ -4273,7 +4621,7 @@ def test_the_sheet_is_not_created_before_there_is_anyone_to_grade(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
-    )
+    ).written
 
 
 def test_the_header_facts_come_from_the_two_files_that_own_them(monkeypatch):
@@ -4475,7 +4823,7 @@ def test_a_re_fired_handout_after_the_cutoff_cannot_un_freeze_the_sheet(monkeypa
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
         units=[("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])],  # what a handout passes
-    )
+    ).written
     ((_path, text),) = written
     assert "# Status: FROZEN" in text
     assert "OPEN" not in text
@@ -4524,8 +4872,8 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     posted: list[tuple[str, str, bool]] = []
     monkeypatch.setattr(
         collect.grades,
-        "ensure_feedback_issue",
-        lambda org, repo, body, dry_run=False: 7,
+        "ensure_receipts_issue",
+        lambda org, repo, body, dry_run=False, create=True: 7,
     )
     monkeypatch.setattr(
         collect.grades,
@@ -4537,7 +4885,7 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     return posted
 
 
-def _refresh(monkeypatch, *, now, dry_run=False):
+def _refresh(monkeypatch, *, now, dry_run=False, **kw):
     return collect.sync_sheet(
         "Course",
         "Cohort",
@@ -4548,7 +4896,29 @@ def _refresh(monkeypatch, *, now, dry_run=False):
         is_group=False,
         now=now,
         dry_run=dry_run,
+        **kw,
+    ).written
+
+
+def test_a_refresh_reads_the_listing_its_caller_holds_and_takes_none(monkeypatch):
+    # The tick takes ONE listing of the cohort and hands it down; a pass that took its own
+    # here made the cost grow with the number of assignments rather than of cohorts.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
     )
+    monkeypatch.setattr(
+        collect,
+        "listing_by_name",
+        lambda org: pytest.fail("the sheet refresh listed the org for itself"),
+    )
+    posted = _receipt_env(monkeypatch)
+    rows = {"assignment-1-ada-l": repo_row("assignment-1-ada-l", visibility="public")}
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN), listing=rows)
+    # And it is those rows that decide it: a repo the listing says is PUBLIC is no place
+    # to post a student's submission times into.
+    assert posted == []
 
 
 def test_the_first_refresh_after_the_due_date_tells_everyone_what_was_recorded(
@@ -4578,7 +4948,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     # hand, and the CONTRIBUTIONS.md ask is only actionable while the window is still open.
     _sheet_env(
         monkeypatch,
-        targets=[("assignment-1-team-alpha", "team-alpha", ["ada-l", "ben-k"])],
+        targets=[Target("assignment-1-team-alpha", "team-alpha", ["ada-l", "ben-k"])],
         grading=GRADING_YML + "type: group\n",
         pins={"assignment-1-team-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
     )
@@ -4586,8 +4956,8 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     opened: list[str] = []
     monkeypatch.setattr(
         collect.grades,
-        "ensure_feedback_issue",
-        lambda org, repo, body, dry_run=False: opened.append(body) or 7,
+        "ensure_receipts_issue",
+        lambda org, repo, body, dry_run=False, create=True: opened.append(body) or 7,
     )
     assert collect.sync_sheet(
         "Course",
@@ -4598,7 +4968,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
         "assignment-1-f2026",
         is_group=True,
         now=datetime(2026, 10, 5, tzinfo=BERLIN),
-    )
+    ).written
     assert (
         "**Team:** team-alpha (@ada-l, @ben-k) - fill in CONTRIBUTIONS.md before the "
         "deadline." in opened[0].splitlines()
@@ -4668,7 +5038,7 @@ def test_nothing_is_posted_for_work_handed_in_off_github(monkeypatch):
 
     _sheet_env(monkeypatch, targets=SOLO_TARGETS, grading="submit_via: external\n")
     monkeypatch.setattr(collect.grades, "post_receipt", boom)
-    monkeypatch.setattr(collect.grades, "ensure_feedback_issue", boom)
+    monkeypatch.setattr(collect.grades, "ensure_receipts_issue", boom)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
 
 
@@ -4740,7 +5110,7 @@ def test_a_repo_quiet_since_we_last_looked_is_not_re_read(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN),
-    )
+    ).written
 
 
 DUPLICATED_SHEET = (
@@ -4774,7 +5144,7 @@ def test_a_handout_over_a_duplicated_unit_does_not_blank_what_was_derived(monkey
         is_group=False,
         now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN),
         units=[("ada-l", ["ada-l"]), ("ada-l", ["ada-l"])],
-    )
+    ).written
     text = written[-1][1] if written else DUPLICATED_SHEET
     info = grades.parse_sheet(text)["submissions"]["ada-l"][grades.INFO_KEY]
     assert info["submitted"] == "2026-10-03T20:14+02:00"
@@ -4788,7 +5158,7 @@ def test_a_refresh_that_derives_nothing_leaves_a_duplicated_unit_alone(monkeypat
     # derived nothing for it, and the duplicated key rebuilt the block blank. Losing
     # `checked` with it made the next tick re-read and re-fill, so the sheet flipped
     # between "1 of 2 submitted" and "0 of 2" on every tick until the freeze.
-    targets = [("assignment-1-ada-l", "ada-l", ["ada-l"])]
+    targets = [Target("assignment-1-ada-l", "ada-l", ["ada-l"])]
     written = _sheet_env(
         monkeypatch,
         targets=targets + targets,  # what an un-deduplicated roster used to hand over
@@ -4798,7 +5168,9 @@ def test_a_refresh_that_derives_nothing_leaves_a_duplicated_unit_alone(monkeypat
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group, key=None: collect.one_per_unit(targets + targets),
+        lambda org, slug, is_group, key=None, **k: collect.one_per_unit(
+            targets + targets
+        ),
     )
     monkeypatch.setattr(
         collect,
@@ -4825,6 +5197,51 @@ def test_a_receipt_is_not_posted_when_the_sheet_write_was_refused(monkeypatch):
     )
     posted = _receipt_env(monkeypatch)
     assert not _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    assert posted == []
+
+
+def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
+    # `visibility:` edited back to `private` after hand-out leaves the FILE saying there is
+    # a private receipts thread in each repo and the repos themselves world-readable. A
+    # receipt says when a student submitted; posting it there publishes it. The repo wins,
+    # per repo - the student whose repo really is private is still told.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        pins={
+            "assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z"),
+            "assignment-1-ben-k": collect.Pin(SHA, "2026-10-03T21:00:00Z"),
+        },
+        visibility={"assignment-1-ada-l": "public"},
+    )
+    posted = _receipt_env(monkeypatch)
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    assert [repo for repo, _body, _dry in posted] == ["assignment-1-ben-k"]
+    assert (
+        "assignment-1-ada-l - no receipts thread this run may post in"
+        in capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize("listing", [{}, None])
+def test_a_repo_the_listing_cannot_vouch_for_waits_for_its_receipt(
+    monkeypatch, listing
+):
+    # A receipt is the one thing that would OPEN a thread nobody has asked for, so it
+    # takes the strongest answer the policy gives: this repo is in the listing and the
+    # listing says it is private. A repo the listing does not carry, and a listing that
+    # could not be read at all, are both "we could not look" - and a receipt posted on
+    # that guess is a submission time in a repo that may since have gone public. The sheet
+    # is the record either way, and the gradebook carries the feedback.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+    )
+    monkeypatch.setattr(collect, "listing_by_name", lambda org: listing)
+    posted = _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     assert posted == []
 
 
@@ -4875,7 +5292,7 @@ def test_a_late_push_the_server_timed_reaches_the_final_grade(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     info = sheet["submissions"]["ada-l"]["info"]
@@ -4923,7 +5340,7 @@ def test_a_submission_on_the_deadline_is_not_late_and_loses_nothing(monkeypatch)
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
-    )
+    ).written
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     assert sheet["submissions"]["ada-l"]["info"]["days_late"] == "0"
@@ -5006,7 +5423,9 @@ def _checkout(monkeypatch, files: dict[str, str]):
         collect, "_pin_commit", lambda wd, deadline, snapshot=None: "abc"
     )
     monkeypatch.setattr(
-        collect, "submission_targets", lambda *a: [("a1-alice", "alice", ["alice"])]
+        collect,
+        "submission_targets",
+        lambda *a, **k: [Target("a1-alice", "alice", ["alice"])],
     )
     monkeypatch.setattr(
         collect, "load_snapshots", lambda org, slug: {"a1-alice": "abc"}
@@ -5043,6 +5462,39 @@ def test_the_grader_copy_is_the_marked_questions_and_nothing_else(
     assert "BEGIN QUESTION" not in body
 
 
+def test_a_grader_copy_from_a_drop_box_is_taken_from_the_units_own_folder(monkeypatch):
+    # The repo is the whole cohort's, so a picker let loose on the checkout exports
+    # whichever notebook it reaches first - here a classmate's - under this unit's key.
+    # `grader_pdf:` is dropped for a drop box at the parse; this is the second lock.
+    _checkout(
+        monkeypatch,
+        {"ben/submission.ipynb": _QUESTION_NB, "alice/mine.ipynb": _QUESTION_NB},
+    )
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda *a, **k: [Target("a1-submissions", "alice", ["alice"], "alice/")],
+    )
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {"alice": "abc"})
+    picked: list[str] = []
+    real_pick = collect.pick_grader_document
+    monkeypatch.setattr(
+        collect,
+        "pick_grader_document",
+        lambda wd: picked.append(wd.name) or real_pick(wd),
+    )
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: True)
+
+    collect.export_grader_documents(
+        "Cohort", "a1", "a1", False, "2026-10-13", False, True
+    )
+
+    assert picked == ["alice"]
+    assert list(written) == ["autograde/a1/alice.ipynb"]
+
+
 def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, capsys):
     _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
     written = _capture_archive(monkeypatch)
@@ -5074,7 +5526,10 @@ def test_an_export_that_never_started_costs_one_copy_not_the_whole_pass(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda *a: [("a1-alice", "alice", ["alice"]), ("a1-ben", "ben", ["ben"])],
+        lambda *a, **k: [
+            Target("a1-alice", "alice", ["alice"]),
+            Target("a1-ben", "ben", ["ben"]),
+        ],
     )
     monkeypatch.setattr(
         collect,
@@ -5297,9 +5752,11 @@ BROKEN_CONFIG = "title: Bayes\ntype: group\nsubmit_via: emial\nmystery: 4\n"
 
 
 def _spec_faults(text=BROKEN_CONFIG, fires=GRADES_AT):
-    return grades.grading_spec_faults(
+    """Just the faults: the spec beside them is what saves the caller a second parse."""
+    faults, _spec = grades.grading_spec_faults(
         "a3", "assignment-3-f2026", "Course-Org", text, fires
     )
+    return faults
 
 
 def test_a_value_that_will_not_grade_as_written_cites_the_line_in_the_template():
@@ -5319,7 +5776,8 @@ def test_a_value_that_will_not_grade_as_written_cites_the_line_in_the_template()
 def test_the_fix_names_the_vocabulary_the_key_accepts():
     fault = next(f for f in _spec_faults() if f.field == "submit_via")
     assert fault.fix() == (
-        "correct the value on the line above (allowed: github/external)"
+        "correct the value on the line above "
+        "(allowed: assignment_repo/shared_dropbox_repo/external)"
     )
     # A key the toolkit has no reader for has no value to correct: the KEY is the mistake.
     unknown = next(f for f in _spec_faults() if f.field == "mystery")
@@ -5359,7 +5817,7 @@ def _collect_configs(monkeypatch, text=BROKEN_CONFIG, grading=None, legacy=None)
     monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: legacy)
     found: list = []
     grades.grading_config_faults(
-        "Course-Org", "Cohort-Org", _sched_one_assignment(grading), found
+        "Course-Org", "Cohort-Org", _sched_one_assignment(grading), found, {}
     )
     return found
 
@@ -5391,6 +5849,852 @@ def test_a_template_that_could_not_be_read_reports_none_of_them(monkeypatch):
     found: list = []
     with pytest.raises(RuntimeError):
         grades.grading_config_faults(
-            "Course-Org", "Cohort-Org", _sched_one_assignment(), found
+            "Course-Org", "Cohort-Org", _sched_one_assignment(), found, {}
         )
     assert found == []
+
+
+# --------------------------- `visibility:` against the repos the assignment handed out
+#
+# The value is read when each repo is CREATED and nowhere else, so an edit after hand-out
+# moves nothing: the file says one thing, the cohort's repos are another, and every page
+# the toolkit writes describes repos that do not exist. Nothing else notices.
+
+HANDED_OUT = datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN_TZ)
+
+
+def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=None):
+    """`grading_config_faults` over one handed-out assignment and the tick's listing.
+
+    `rows=None` is a listing that could not be READ - which is what the tick hands down as
+    None."""
+    from dsl_course.schedule import AssignmentEntry
+
+    monkeypatch.setattr(grades, "_grading_text", lambda course, template: config)
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                cohort_dest_repo=dest,
+                due_datetime=DUE_AT,
+                handout_datetime=handed_out,
+            )
+        }
+    )
+    found: list = []
+    listing = None if rows is None else {r["name"]: r for r in rows}
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, listing)
+    return found
+
+
+def _cohort_rows(*repos: tuple[str, str], template="a3"):
+    return [repo_row(template, isTemplate=True)] + [
+        repo_row(name, visibility=vis) for name, vis in repos
+    ]
+
+
+def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
+    found = _visibility_run(
+        monkeypatch,
+        "visibility: public\n",
+        _cohort_rows(("a3-ada", "private"), ("a3-ben", "public")),
+    )
+    (fault,) = found
+    assert fault.field == "visibility"
+    assert "1 of 2 are not public" in fault.what
+    assert "read when each repo is CREATED" in fault.what
+    # A COUNT and never a name: this sentence reaches a public run log, a digest issue and
+    # an email alike, and a submission repo is `<slug>-<handle>`.
+    assert "ada" not in fault.what + fault.fix()
+    # It bites when the assignment is graded, like every other value in this file.
+    assert fault.fires == DUE_AT
+
+
+def test_a_private_assignment_whose_repos_are_public_is_the_same_fault(monkeypatch):
+    # The other direction, and the one that matters most: `public` was edited back to
+    # `private` and the cohort's work is still world-readable.
+    (fault,) = _visibility_run(monkeypatch, "", _cohort_rows(("a3-ada", "public")))
+    assert "1 of 1 are not private" in fault.what
+
+
+def test_repos_that_agree_with_the_file_are_no_fault(monkeypatch):
+    found = _visibility_run(
+        monkeypatch, "visibility: public\n", _cohort_rows(("a3-ada", "public"))
+    )
+    assert found == []
+
+
+def test_an_archived_repo_is_nobodys_fault(monkeypatch):
+    # A frozen cohort is meant to stay frozen: the repo is read-only and nothing can, or
+    # should, move it.
+    rows = _cohort_rows(("a3-ada", "public"))
+    rows.append(repo_row("a3-ben", visibility="private", archived=True))
+    found = _visibility_run(monkeypatch, "visibility: public\n", rows)
+    assert found == []
+
+
+def test_an_assignment_that_has_not_handed_out_is_never_asked_about(monkeypatch):
+    # A plan whose assignments are all still ahead has nothing to compare a file against.
+    found = _visibility_run(
+        monkeypatch,
+        "visibility: public\n",
+        _cohort_rows(("a3-ada", "private")),
+        handed_out=None,
+    )
+    assert found == []
+
+
+def test_an_assignment_that_creates_no_repos_is_never_asked_about(monkeypatch):
+    found = _visibility_run(
+        monkeypatch, "submit_via: external\n", _cohort_rows(("a3-ada", "private"))
+    )
+    assert found == []
+
+
+def test_a_listing_that_could_not_be_read_reports_nothing_and_keeps_the_rest(
+    monkeypatch,
+):
+    # "We could not look" is not "they agree" - and it is not worth dropping the whole
+    # file's digest for either, since every other fault in it was read from the template.
+    found = _visibility_run(monkeypatch, "visibility: public\nmystery: 4\n", None)
+    assert [f.field for f in found] == ["mystery"]
+
+
+def test_a_scheduled_solution_for_repos_that_are_not_private_is_a_fault(monkeypatch):
+    # The handout refuses to push the model answer into repos it cannot promise are
+    # private, so a `solution_datetime:` on such an assignment is a moment that passes and
+    # releases nothing. The plan and the definition are two files edited by two people, so
+    # nothing else would ever notice they disagree.
+    from dsl_course.schedule import AssignmentEntry
+
+    monkeypatch.setattr(
+        grades, "_grading_text", lambda course, template: "visibility: public\n"
+    )
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=DUE_AT,
+                solution_datetime=DUE_AT,
+            )
+        }
+    )
+    found: list = []
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, None)
+    (fault,) = found
+    assert fault.field == "visibility"
+    assert "solution_datetime" in fault.what and "public" in fault.what
+    assert "schedule.yml" in fault.fix_text
+
+
+def test_a_scheduled_solution_for_a_shared_drop_box_is_a_fault(monkeypatch):
+    # The same predicate, and the reason `course.can_hold_solution` is one and not two:
+    # a drop box is private, so a rule written as "is it private?" let this one through -
+    # and the model answer would have been published to the whole cohort if it had not.
+    from dsl_course.schedule import AssignmentEntry
+
+    monkeypatch.setattr(
+        grades,
+        "_grading_text",
+        lambda course, template: "submit_via: shared_dropbox_repo\n",
+    )
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=DUE_AT,
+                solution_datetime=DUE_AT,
+            )
+        }
+    )
+    found: list = []
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, None)
+    (fault,) = found
+    assert fault.field == "visibility"
+    assert "solution_datetime" in fault.what and "shared" in fault.what
+
+
+def test_a_private_assignment_may_schedule_its_solution(monkeypatch):
+    monkeypatch.setattr(grades, "_grading_text", lambda course, template: "")
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    from dsl_course.schedule import AssignmentEntry
+
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=DUE_AT,
+                solution_datetime=DUE_AT,
+            )
+        }
+    )
+    found: list = []
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found, None)
+    assert found == []
+
+
+def test_the_listings_own_word_is_what_is_compared(monkeypatch):
+    # Both sides are one of `VISIBILITIES` and are compared as written, so a value the
+    # listing reports that the file cannot hold is a disagreement like any other rather
+    # than something this has to have an opinion about.
+    spec = dataclasses.replace(grades.parse_grading_spec(""), visibility="private")
+    (fault,) = grades._visibility_faults(
+        spec,
+        "a3",
+        "assignment-3-f2026",
+        "Course-Org",
+        {},
+        DUE_AT,
+        [repo_row("a3-ada", visibility="internal")],
+    )
+    assert "1 of 1 are not private" in fault.what
+
+
+def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):
+    # `cohort_dest_repo` renames the cohort side, and a cohort holding both `a3` and
+    # `a3-project` must not read one template's repos as the other's - the same rule the
+    # faculty floor and the public pages use (`discovery.classify_repos`).
+    rows = _cohort_rows(("a3-project-ada", "private"), template="a3-project")
+    rows += [repo_row("a3", isTemplate=True), repo_row("a3-ada", visibility="public")]
+    found = _visibility_run(
+        monkeypatch, "visibility: public\n", rows, dest="a3-project"
+    )
+    (fault,) = found
+    assert "1 of 1 are not public" in fault.what
+
+
+def test_a_public_drop_box_is_a_fault_like_any_other_published_repo(monkeypatch):
+    # `submit_via: shared_dropbox_repo` makes no repo per unit and still makes a repo, so `visibility:`
+    # describes it exactly as it describes the many - and a drop box the listing says the
+    # world can read is the whole cohort's work published. The check asks `creates_repos`
+    # for that reason, never `creates_unit_repos`.
+    found = _visibility_run(
+        monkeypatch,
+        "submit_via: shared_dropbox_repo\n",
+        _cohort_rows(("a3-submissions", "public")),
+    )
+    (fault,) = found
+    assert "1 of 1 are not private" in fault.what
+
+
+def test_an_external_assignment_has_no_repos_to_compare(monkeypatch):
+    # Nothing is created, so there is nothing for a visibility to describe - and the file
+    # would have had its own `visibility:` line dropped at the parse anyway.
+    assert (
+        _visibility_run(
+            monkeypatch,
+            "submit_via: external\n",
+            _cohort_rows(("a3-ada", "public")),
+        )
+        == []
+    )
+
+
+def test_a_student_choice_assignment_is_exempt_from_the_consistency_check(monkeypatch):
+    # The STUDENT owns the flag on this shape, so twenty private repos and four public
+    # ones is the assignment working as written. Exempted by the vocabulary's own
+    # predicate (`course.visibility_is_students`), never by a name spelt in the check.
+    monkeypatch.setattr(grades.gh_teams, "org_settings", lambda org: {})
+    assert (
+        _visibility_run(
+            monkeypatch,
+            "visibility: student_choice\n",
+            _cohort_rows(("a3-ada", "private"), ("a3-ben", "public")),
+        )
+        == []
+    )
+
+
+# ------------------------- the org settings `visibility: student_choice` stands on
+#
+# That shape makes each student an `admin` of their own repo, because `admin` is the only
+# permission carrying GitHub's visibility control - and admin carries more than that. The
+# two switches that take the rest back are WEB-ONLY: `GET /orgs/{org}` reports them and
+# `PATCH /orgs/{org}` does not accept them, so the toolkit reads them and says so.
+
+_GOOD_ORG = {
+    "members_can_delete_repositories": False,
+    "members_can_change_repo_visibility": True,
+}
+
+
+def _org_run(
+    monkeypatch, settings, *, config="visibility: student_choice\n", rows=None
+):
+    """`grading_config_faults` over one handed-out assignment, with the org's own answer.
+
+    Returns `(faults, how many times the org was read)`."""
+    reads: list[str] = []
+
+    def _settings(org):
+        reads.append(org)
+        return settings
+
+    monkeypatch.setattr(grades.gh_teams, "org_settings", _settings)
+    found = _visibility_run(
+        monkeypatch,
+        config,
+        _cohort_rows(("a3-ada", "private")) if rows is None else rows,
+    )
+    return found, reads
+
+
+def test_a_cohort_whose_members_may_delete_their_repos_is_a_fault(monkeypatch):
+    found, reads = _org_run(
+        monkeypatch, {**_GOOD_ORG, "members_can_delete_repositories": True}
+    )
+    (fault,) = found
+    assert fault.where == grades.ORG_SETTINGS
+    assert "delete or transfer repositories** is ON" in fault.what
+    assert "change repository visibilities" not in fault.what
+    assert "settings/member_privileges" in fault.fix()
+    assert "DEPLOYMENT-CHECKLIST.md" in fault.fix()
+    assert reads == ["Cohort-Org"]
+
+
+def test_a_cohort_whose_members_may_not_publish_is_the_other_fault(monkeypatch):
+    # The shape does nothing for the student at all here: they hold admin and the org
+    # refuses the one thing admin was granted for.
+    found, _reads = _org_run(
+        monkeypatch, {**_GOOD_ORG, "members_can_change_repo_visibility": False}
+    )
+    (fault,) = found
+    assert "change repository visibilities** is OFF" in fault.what
+    assert "delete or transfer" not in fault.what
+
+
+def test_both_switches_wrong_is_still_one_fault(monkeypatch):
+    # The two are one problem - this org was never set up - and one issue key, so it is
+    # announced once, mailed once and cleared once.
+    found, _reads = _org_run(
+        monkeypatch,
+        {
+            "members_can_delete_repositories": True,
+            "members_can_change_repo_visibility": False,
+        },
+    )
+    (fault,) = found
+    assert "delete or transfer" in fault.what and "visibilities" in fault.what
+
+
+def test_a_correctly_configured_org_says_nothing(monkeypatch):
+    assert _org_run(monkeypatch, _GOOD_ORG) == ([], ["Cohort-Org"])
+
+
+def test_an_org_that_reports_neither_switch_is_not_a_fault(monkeypatch):
+    # A payload that omits a key has said nothing about it. Truthiness here would red
+    # every cohort on an account tier that does not carry the field.
+    assert _org_run(monkeypatch, {}) == ([], ["Cohort-Org"])
+
+
+def test_an_org_that_could_not_be_read_reports_nothing(monkeypatch):
+    assert _org_run(monkeypatch, None) == ([], ["Cohort-Org"])
+
+
+@pytest.mark.parametrize(
+    "config", ["", "visibility: public\n", "submit_via: external\n"]
+)
+def test_a_cohort_with_no_such_assignment_never_reads_the_org(monkeypatch, config):
+    # One GET per cohort per digest run, and none at all where the question does not
+    # apply: an org with no student-owned repo in it is not misconfigured.
+    _found, reads = _org_run(
+        monkeypatch, {"members_can_delete_repositories": True}, config=config
+    )
+    assert reads == []
+
+
+def test_an_assignment_that_has_created_no_repos_yet_never_reads_the_org(monkeypatch):
+    # Nobody holds admin on anything until the repos exist.
+    _found, reads = _org_run(
+        monkeypatch,
+        {"members_can_delete_repositories": True},
+        rows=[repo_row("a3", isTemplate=True)],
+    )
+    assert reads == []
+
+
+# ------------------------------------------------------- one drop box, a folder per unit
+#
+# `submit_via: shared_dropbox_repo` hands every unit the SAME repo and one folder inside it. Three
+# things follow: the targets all name that repo, each pin is narrowed to the unit's own
+# folder AND to a commit one of its members made, and the snapshot rows key on the folder
+# because the repo can no longer tell two of them apart.
+
+
+def _folder_commits(monkeypatch, per_path: dict[str, list[str]]):
+    """Answer the commits API per `path=` filter. Returns the queries it was asked."""
+    asked: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **k):
+        asked.append(args)
+        path = next(
+            (a.split("=", 1)[1] for a in args if a.startswith("path=")),
+            "",
+        )
+        return 0, "\n".join(per_path.get(path, []))
+
+    monkeypatch.setattr(collect, "gh", fake_gh)
+    return asked
+
+
+def test_shared_targets_all_name_the_one_drop_box(monkeypatch, capsys):
+    monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    assert collect.submission_targets("Cohort", "assignment-3", False, shared=True) == [
+        Target("assignment-3-submissions", "anna-adams", ["anna-adams"], "anna-adams/"),
+        Target("assignment-3-submissions", "ben-baker", ["ben-baker"], "ben-baker/"),
+    ]
+    # The unit keys still tell the rows apart, which is what `one_per_unit` keys on - so
+    # one repo named twice is not a duplicate.
+    assert "duplicate" not in capsys.readouterr().err
+
+
+def test_shared_group_targets_name_the_drop_box_once_per_team(monkeypatch):
+    monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
+    monkeypatch.setattr(
+        collect.teams,
+        "load",
+        lambda org: {"assignment-3": {"alpha": ["anna-adams"], "beta": ["ben-baker"]}},
+    )
+    assert collect.submission_targets("Cohort", "assignment-3", True, shared=True) == [
+        Target("assignment-3-submissions", "alpha", ["anna-adams"], "alpha/"),
+        Target("assignment-3-submissions", "beta", ["ben-baker"], "beta/"),
+    ]
+
+
+def test_a_folder_is_pinned_to_its_own_members_newest_commit(monkeypatch):
+    # The folders are a convention, not a boundary: every student has push on the whole
+    # drop box. So the pin is the newest commit in the folder that a MEMBER made - pinning
+    # a classmate's commit would time one student's submission by another's push.
+    asked = _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(
+                    sha="new", committed="2026-10-12T09:00:00Z", author="ada-l"
+                )
+            ]
+        },
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    ) == collect.Pin("new", "2026-10-12T09:00:00Z")
+    # The query says which folder, and asks for more than one commit - the walk needs them.
+    assert "path=ada-l/" in asked[0]
+    assert f"per_page={collect._COMMIT_PAGE}" in asked[0]
+
+
+def test_a_folder_a_classmate_touched_last_pins_the_member_and_says_so(monkeypatch):
+    # Both halves matter. The pin is the unit's own work, so the mark is theirs; and the
+    # note is on the sheet, because who else has been writing in there is a thing a grader
+    # decides about rather than a thing the toolkit can correct.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(
+                    sha="theirs", committed="2026-10-12T10:00:00Z", author="ben-k"
+                ),
+                _commits_line(
+                    sha="mine", committed="2026-10-12T09:00:00Z", author="ada-l"
+                ),
+            ]
+        },
+    )
+    pin = collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    )
+    assert pin == collect.Pin(
+        "mine", "2026-10-12T09:00:00Z", note=collect.OUTSIDE_TOUCH_NOTE
+    )
+
+
+def test_a_walk_that_ran_out_of_page_says_so_rather_than_reading_as_no_submission(
+    monkeypatch,
+):
+    # A blank pin means "nothing was submitted", and after a full page of somebody else's
+    # commits it means "we stopped looking" instead. The two are not the same thing to a
+    # grader, and only one of them is a fact about the student.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(sha=f"c{n:038d}", author="ben-k")
+                for n in range(collect._COMMIT_PAGE)
+            ]
+        },
+    )
+    pin = collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    )
+    assert pin == collect.Pin(note=collect.PAGE_EXHAUSTED_NOTE)
+
+
+def test_the_committers_login_answers_when_the_authors_is_missing(monkeypatch):
+    # GitHub fills `author` in from the git address on the commit, so it comes back null
+    # for anyone whose local git is set to an address their account has not verified. The
+    # committer end is filled in from the push, and for a `git push` it is the same person.
+    # Read from the author alone, the student's own commit looked like an outsider's.
+    _folder_commits(
+        monkeypatch,
+        {"ada-l/": [_commits_line(sha="mine", author="", committer="ada-l")]},
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    ) == collect.Pin("mine", "2026-10-12T08:00:00Z")
+
+
+def test_a_commit_github_can_link_to_nobody_is_counted_as_the_units_own(monkeypatch):
+    # Both logins null: the commit is in this unit's folder and GitHub cannot say whose it
+    # is. Counted as theirs - the alternative is walking past a student's real submission
+    # because of how their laptop is configured - and flagged, because that is a check a
+    # person makes and not one the toolkit can.
+    _folder_commits(
+        monkeypatch,
+        {"ada-l/": [_commits_line(sha="mine", author="", email="", committer="")]},
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    ) == collect.Pin("mine", "2026-10-12T08:00:00Z", note=collect.UNLINKED_AUTHOR_NOTE)
+
+
+def test_an_unlinked_commit_under_a_classmates_carries_both_notes(monkeypatch):
+    # Two different things a grader has to look at, and one row to say them in.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(
+                    sha="theirs", committed="2026-10-12T10:00:00Z", author="ben-k"
+                ),
+                _commits_line(
+                    sha="mine",
+                    committed="2026-10-12T09:00:00Z",
+                    author="",
+                    email="",
+                    committer="",
+                ),
+            ]
+        },
+    )
+    pin = collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    )
+    assert pin.sha == "mine"
+    assert pin.note == (f"{collect.OUTSIDE_TOUCH_NOTE}; {collect.UNLINKED_AUTHOR_NOTE}")
+
+
+def test_a_folder_with_no_commit_by_a_member_is_no_submission(monkeypatch):
+    # Somebody else put a file in this student's folder and the student never pushed. That
+    # is not a submission, and recording it as one would grade a classmate's work as theirs.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(sha="theirs", author="ben-k"),
+            ]
+        },
+    )
+    assert (
+        collect._snapshot_sha(
+            "Cohort",
+            "assignment-3-submissions",
+            "2026-10-13",
+            path="ada-l/",
+            members=["ada-l"],
+        )
+        == collect.Pin()
+    )
+
+
+def test_a_group_folder_takes_any_member_of_the_team(monkeypatch):
+    _folder_commits(
+        monkeypatch,
+        {
+            "alpha/": [
+                _commits_line(
+                    sha="bens", committed="2026-10-12T10:00:00Z", author="ben-k"
+                )
+            ]
+        },
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="alpha/",
+        members=["ada-l", "ben-k"],
+    ) == collect.Pin("bens", "2026-10-12T10:00:00Z")
+
+
+def _shared_snapshot(monkeypatch, pins: dict, pushed=""):
+    """`snapshot_assignment` over a shared drop box. Returns the CSV it wrote."""
+    written: list[tuple[str, str]] = []
+    drop_box = "assignment-3-submissions"
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(
+        collect,
+        "listing_by_name",
+        lambda org: {drop_box: repo_row(drop_box, pushed_at=pushed)},
+    )
+    monkeypatch.setattr(collect, "_push_activity", lambda org, repo: [])
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=False, teams_key=None, **k: [
+            Target(drop_box, unit, [unit], f"{unit}/") for unit in pins
+        ],
+    )
+    monkeypatch.setattr(
+        collect,
+        "_snapshot_sha",
+        lambda org, repo, deadline, at="", *, path="", members=None: pins[
+            path.strip("/")
+        ],
+    )
+    monkeypatch.setattr(
+        collect,
+        "put_file",
+        lambda org, repo, path, content, msg, **kw: (
+            written.append((path, content.decode())) or True
+        ),
+    )
+    collect.snapshot_assignment(
+        "Cohort",
+        "assignment-3",
+        "2026-10-15T23:59:00+02:00",
+        is_group=False,
+        shared=True,
+    )
+    return written[0][1] if written else ""
+
+
+def test_a_shared_snapshot_records_one_row_per_folder_of_the_one_repo(monkeypatch):
+    text = _shared_snapshot(
+        monkeypatch,
+        {
+            "ada-l": collect.Pin(SHA, "2026-10-12T08:00:00Z"),
+            "ben-k": collect.Pin(),
+        },
+    )
+    rows = collect.parse_snapshot_rows(text)
+    # Keyed on the FOLDER: both rows carry the same repo, so the repo cannot tell them
+    # apart and `unit` is what every reader keys on.
+    assert set(rows) == {"ada-l", "ben-k"}
+    assert rows["ada-l"].repo == "assignment-3-submissions"
+    assert rows["ada-l"].path == "ada-l/" and rows["ada-l"].sha == SHA
+    assert rows["ben-k"].sha == ""
+    assert collect.parse_snapshots(text) == {"ada-l": SHA, "ben-k": ""}
+
+
+def test_a_shared_snapshot_never_calls_a_whole_cohort_suspect(monkeypatch):
+    # `pushed_at` is the REPO's last push, and the repo is everybody's: one student pushing
+    # a minute after the deadline would otherwise mark every folder in the cohort as a
+    # commit dated before the push that delivered it.
+    text = _shared_snapshot(
+        monkeypatch,
+        {"ada-l": collect.Pin(SHA, "2026-10-12T08:00:00Z")},
+        pushed="2026-10-16T09:00:00Z",
+    )
+    assert collect.parse_snapshot_rows(text)["ada-l"].submitted_source == "commit"
+
+
+def test_a_shared_snapshot_carries_the_outside_toucher_note(monkeypatch):
+    # Recorded at the freeze because the sheet is sealed off the snapshot afterwards and
+    # this is the only pass that looks.
+    text = _shared_snapshot(
+        monkeypatch,
+        {
+            "ada-l": collect.Pin(
+                SHA, "2026-10-12T08:00:00Z", note=collect.OUTSIDE_TOUCH_NOTE
+            )
+        },
+    )
+    assert collect.parse_snapshot_rows(text)["ada-l"].note == collect.OUTSIDE_TOUCH_NOTE
+
+
+def test_a_blank_pin_still_records_why_it_is_blank(monkeypatch):
+    # The first of the two hops `PAGE_EXHAUSTED_NOTE` has to survive. The snapshot is
+    # written ONCE, so a note dropped beside a blank sha is a note lost for good - and a
+    # blank row with nothing on it reads as "this student pushed nothing", which is the
+    # one thing the walk did not find out.
+    text = _shared_snapshot(
+        monkeypatch,
+        {"ada-l": collect.Pin(note=collect.PAGE_EXHAUSTED_NOTE)},
+    )
+    row = collect.parse_snapshot_rows(text)["ada-l"]
+    assert row.sha == "" and row.note == collect.PAGE_EXHAUSTED_NOTE
+
+
+def test_a_snapshot_written_before_folders_existed_still_parses():
+    # Write-once and never backfilled: the Maths f2026 snapshots have five columns, and a
+    # reader that needed seven would strand the cohort that owns them. A row with no `path`
+    # is a repo of its own and keys on its own name, exactly as it always did.
+    text = (
+        "repo,sha,recorded_at,submitted_at,submitted_source\n"
+        f"assignment-1-anna,{SHA},2026-10-16T00:04:12+00:00,2026-10-15T21:40:00Z,push\n"
+        "assignment-1-ben,,2026-10-16T00:04:12+00:00,,\n"
+    )
+    rows = collect.parse_snapshot_rows(text)
+    assert set(rows) == {"assignment-1-anna", "assignment-1-ben"}
+    assert rows["assignment-1-anna"].sha == SHA
+    assert rows["assignment-1-anna"].path == "" and rows["assignment-1-anna"].note == ""
+    assert rows["assignment-1-anna"].unit == "assignment-1-anna"
+    assert collect.parse_snapshots(text)["assignment-1-ben"] == ""
+
+
+_DROP_BOX = "assignment-3-submissions"
+
+
+def _shared_sheet(monkeypatch, *, targets, rows):
+    """`sync_sheet` over a FROZEN shared assignment. Returns the text it wrote."""
+    written = _sheet_env(
+        monkeypatch,
+        targets=targets,
+        grading=GRADING_YML + "submit_via: shared_dropbox_repo\n",
+        rows=rows,
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    ).written
+    ((_path, text),) = written
+    return grades.parse_sheet(text)
+
+
+def test_a_shared_sheet_keys_its_rows_on_the_folder_not_the_repo(monkeypatch):
+    # One repo, two units: each unit's pin has to be looked up under its OWN key or both
+    # rows read as the same submission.
+    sheet = _shared_sheet(
+        monkeypatch,
+        targets=[
+            Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/"),
+            Target(_DROP_BOX, "ben-k", ["ben-k"], "ben-k/"),
+        ],
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX,
+                sha=SHA,
+                submitted_at="2026-10-03T20:14:00Z",
+                submitted_source="push",
+                path="ada-l/",
+            ),
+            "ben-k": collect.SnapshotRow(repo=_DROP_BOX, path="ben-k/"),
+        },
+    )
+    assert (
+        sheet["submissions"]["ada-l"]["info"]["submitted"] == "2026-10-03T22:14+02:00"
+    )
+    assert not sheet["submissions"]["ben-k"]["info"].get("submitted")
+
+
+def test_a_shared_sheet_carries_the_outside_toucher_note_into_info(monkeypatch):
+    # Both notes can apply to one row - a folder last touched by an outsider whose own pin
+    # GitHub could not time - and a grader is owed both.
+    sheet = _shared_sheet(
+        monkeypatch,
+        targets=[Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/")],
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX,
+                sha=SHA,
+                submitted_at="2026-10-03T20:14:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_COMMIT,
+                path="ada-l/",
+                note=collect.OUTSIDE_TOUCH_NOTE,
+            )
+        },
+    )
+    note = sheet["submissions"]["ada-l"]["info"]["submitted_note"]
+    assert collect.OUTSIDE_TOUCH_NOTE in note and "no push record matched" in note
+
+
+def test_a_sheet_says_why_a_row_is_empty_when_the_walk_gave_up(monkeypatch):
+    # The second hop. `info.submitted` is blank and `info.submitted_note` says the blank is
+    # OURS: a hundred commits by other people in this folder and none of the unit's under
+    # them. Emitted with no pin at all, which is exactly the row it is about.
+    sheet = _shared_sheet(
+        monkeypatch,
+        targets=[Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/")],
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX, path="ada-l/", note=collect.PAGE_EXHAUSTED_NOTE
+            )
+        },
+    )
+    info = sheet["submissions"]["ada-l"]["info"]
+    assert not info.get("submitted")
+    assert info["submitted_note"] == collect.PAGE_EXHAUSTED_NOTE
+
+
+def test_a_shared_assignment_posts_no_receipts(monkeypatch):
+    # `has_receipts_issue` is false for it - one repo the whole cohort reads has nowhere
+    # private to acknowledge a push - so nothing is ever opened or posted into.
+    targets = [Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/")]
+    _sheet_env(
+        monkeypatch,
+        targets=targets,
+        grading=GRADING_YML + "submit_via: shared_dropbox_repo\n",
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX,
+                sha=SHA,
+                submitted_at="2026-10-03T20:14:00Z",
+                path="ada-l/",
+            )
+        },
+    )
+    # AFTER `_sheet_env`, whose own no-op receipt stubs this must win over.
+    monkeypatch.setattr(
+        collect.grades,
+        "ensure_receipts_issue",
+        lambda *a, **k: pytest.fail("a shared drop box has no receipts issue"),
+    )
+    monkeypatch.setattr(
+        collect.grades,
+        "post_receipt",
+        lambda *a, **k: pytest.fail("a shared drop box has nowhere to post a receipt"),
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    ).written

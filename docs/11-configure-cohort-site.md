@@ -46,7 +46,7 @@ commit still holds the change, to be copied back out and made at the source.
 
 **Faculty are not expected to hand-edit the cohort site at all.** Everything it shows comes
 from the files in the table at the top of this page; edit those. What is left over -
-`index.md`, `schedule.md`, any other page of your own, `_announcements/`, `_data/late_policy.yml`,
+`index.md`, `schedule.md`, any other page of your own, `_announcements/`,
 further `_data/*.yml`, assets, `_images/`, `Gemfile`, `.gitignore` - is seeded once when the site
 is created and never rewritten.
 

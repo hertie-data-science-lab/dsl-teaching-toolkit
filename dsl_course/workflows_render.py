@@ -39,6 +39,7 @@ from .course import (
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
+    VISIBILITIES,
     term_tag,
 )
 
@@ -183,7 +184,7 @@ _CHECK_TEAM = """  check-team:
 # 120 covers the jobs that grade: collect budgets 300s PER submission subprocess and walks
 #     a cohort serially - the manual Collect submissions button and the scheduler's
 #     autograde job, which is one matrix leg per cohort - and Distribute grades, which
-#     writes a gradebook, a comment and an email per student in series.
+#     writes a gradebook and an email per student in series.
 _TIMEOUT_DEFAULT = 30
 _TIMEOUT_MANY_REPOS = 60
 _TIMEOUT_GRADING = 120
@@ -1024,22 +1025,18 @@ def render_distribute_grades(cohort_orgs: list[str]) -> str:
     """Send every mark a grader has written where it has to go."""
     return f"""name: Distribute grades
 
-# Reads the grading sheets in classroom-config and sends what they hold: a feedback comment
-# on each submission repo's Feedback issue, each student's private grades-<handle> repo, the
-# registrar export, and (unless silenced) an email saying there is something new to read.
-# Nothing is said twice - a re-run after one correction reaches one student.
-# `assignment` narrows the run to one slug; blank is every sheet in the cohort, which is
-# right at the end of term and wrong in the middle of one.
+# Reads the grading sheets in classroom-config and sends what they hold: each student's
+# private grades-<handle> repo, the registrar export, and (unless silenced) an email saying
+# there is something new to read. Nothing is posted into a submission repo, and nothing is
+# said twice - a re-run after one correction reaches one student.
+# There is no assignment to pick: every run rebuilds every gradebook from every sheet,
+# which is what keeps a gradebook the whole of a student's marks.
 # Dry run first; it writes nothing and prints the counts. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
-      assignment:
-        description: "One assignment slug - leave blank for every sheet in the cohort"
-        type: string
-        required: false
       dry_run:
         description: "Preview the grade emails - push nothing, send nothing"
         type: boolean
@@ -1056,13 +1053,11 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-          ASSIGNMENT: ${{{{ inputs.assignment }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           SILENT: ${{{{ inputs.silent }}}}
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
-          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
 {_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
@@ -1578,7 +1573,7 @@ _STARTER_FORMATS_INPUT = f"""\
 def render_new_assignment(assignments: list[str] | None = None) -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
-    NINE boxes, and between them they are the whole assignment: everything but `format`
+    TEN boxes, and between them they are the whole assignment: everything but `format`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
     grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
     - the team cap, the late window, the penalty, the question maxima - comes from the
@@ -1586,14 +1581,17 @@ def render_new_assignment(assignments: list[str] | None = None) -> str:
     file so it can be revised there per assignment afterwards.
 
     `copy_from` is the box that asks for none of it: last year's template arrives whole,
-    and the `grading_config.yml` that comes with it is the definition, so boxes 5-9 are
+    and the `grading_config.yml` that comes with it is the definition, so boxes 5-10 are
     ignored. It is box 4 for that reason - GitHub renders these top to bottom and the
-    answer that voids the rest belongs above them, not after the five boxes it voids. The
+    answer that voids the rest belongs above them, not after the six boxes it voids. The
     name and the number are asked for either way: they name the repo and describe it.
 
-    GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no tenth: an
-    assignment's remaining settings belong in a file the instructor can revise, not in a
-    form filled in once, before the brief has even been written."""
+    GitHub caps a workflow_dispatch at 10 inputs and `visibility` is the tenth, so this
+    form is now FULL: nothing may be added to it again. Every further setting belongs in
+    the `grading_config.yml` the scaffold writes - a file the instructor can revise once
+    the brief exists - and not in a form filled in before it has even been written.
+    `visibility` earned the last box because it cannot be revised afterwards: it is read
+    when each student's repo is CREATED, and editing it later moves nothing."""
     return f"""name: New assignment
 
 on:
@@ -1608,15 +1606,16 @@ on:
       semester_tag:
         description: "3. Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
         required: true
-{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-9 are then ignored", assignments or [])}
+{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-10 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
 {_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select", required=False)}
-{_choice_input("submit_via", "8. Where students hand in. github = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class), so the repo only carries the brief and nothing is collected", list(SUBMIT_VIA), "github", required=False)}
+{_choice_input("submit_via", "8. Where students hand in. assignment_repo = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole cohort, each student pushes into their own folder, peers can read it", list(SUBMIT_VIA), "assignment_repo", required=False)}
       autograde:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
+{_choice_input("visibility", "10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing", list(VISIBILITIES), "private", required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1633,12 +1632,14 @@ on:
           TYPE: ${{{{ inputs.type }}}}
           TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
+          VISIBILITY: ${{{{ inputs.visibility }}}}
           AUTOGRADE: ${{{{ inputs.autograde }}}}
         run: |
           gh auth setup-git
           args=(--org "$ORG" --number "$NUMBER" --tag "$TAG" --name "$NAME" \\
             --format "$FORMAT" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
-            --submit-via "$SUBMIT_VIA" --autograde "$AUTOGRADE")
+            --submit-via "$SUBMIT_VIA" --visibility "$VISIBILITY" \\
+            --autograde "$AUTOGRADE")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
           python3 -m dsl_course.scaffold assignment "${{args[@]}}"
@@ -1655,7 +1656,7 @@ def render_patch_assignment(
 # A broken cell, a wrong path, a dataset that moved - after the assignment went out.
 # Commit the fix to the TEMPLATE's default branch first, then run this: it pushes that
 # file (or folder) into every submission repo of the assignment, as a NEW COMMIT on each
-# student's own branch, and posts a note on each Feedback issue telling them to pull.
+# student's own branch, and posts a note on each receipts issue telling them to pull.
 # It never force-pushes, and it never replaces a file a student has already changed
 # unless `overwrite` says so - their version is kept and counted instead.
 # The frozen cohort-side hand-out is patched too, so a student who onboards tomorrow is

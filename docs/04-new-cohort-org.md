@@ -69,6 +69,14 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
   - The seeded `students.csv.sample` shows a filled row of each kind, and that repo's `README.md` documents every column.
   - Full details found in [06-enrol-students-to-cohort.md](06-enrol-students-to-cohort.md)
 
+7. *(only for `visibility: student_choice` assignments)* **Set the org's member privileges.**
+    - Cohort org → Settings → Member privileges: **Allow members to change repository
+      visibilities** ON, **Allow members to delete or transfer repositories** OFF.
+    - That shape makes each student an admin of their own repo so they can publish their
+      work after it is marked; these two switches are what stops admin meaning more than
+      that. Neither can be set through the API, so this is by hand, once.
+    - The cohort's *grading_config.yml* digest issue reports it while either is wrong.
+
 ## Next
 
 - [Manage the teaching team](05-manage-teaching-team.md) - the full version of step 5, incl.

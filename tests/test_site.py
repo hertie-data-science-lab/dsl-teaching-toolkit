@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from dsl_course import (
+    course,
     discovery,
     gh_contents,
     ghcli,
@@ -460,25 +461,25 @@ def test_a_declared_name_that_repeats_the_identifier_is_trimmed(monkeypatch):
     # linear regression..." and "Lab 1 / Lab 1". Both dash characters in live sources are
     # handled.
     assert (
-        site._row_name("Assignment 1 - linear regression", "Assignment 1")
+        site.row_name("Assignment 1 - linear regression", "Assignment 1")
         == "linear regression"
     )
     assert (
-        site._row_name("Assignment 1 \u2014 Introduce Yourself", "Assignment 1")
+        site.row_name("Assignment 1 \u2014 Introduce Yourself", "Assignment 1")
         == "Introduce Yourself"
     )
     # a heading that is the name already survives whole
     assert (
-        site._row_name("Group project - a report", "Assignment 3 Project")
+        site.row_name("Group project - a report", "Assignment 3 Project")
         == "Group project - a report"
     )
     # and `Assignment 10` is not `Assignment 1` plus a name of "0"
-    assert site._row_name("Assignment 10 revisited", "Assignment 1") == (
+    assert site.row_name("Assignment 10 revisited", "Assignment 1") == (
         "Assignment 10 revisited"
     )
     # a session's declared title gets the same trim
-    assert site._row_name("Lab 1", "Lab 1") == ""
-    assert site._row_name("Session 3 - Probability", "Session 3") == "Probability"
+    assert site.row_name("Lab 1", "Lab 1") == ""
+    assert site.row_name("Session 3 - Probability", "Session 3") == "Probability"
 
 
 def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
@@ -509,18 +510,73 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     assert 'repo_name: "assignment-3-<your-team>"' in out
 
 
-def test_an_assignment_handed_in_off_github_says_so(monkeypatch):
-    # `submit_via: external` means Moodle, Kaggle or in class: nothing is ever collected
-    # from the repo, which carries the brief. The page and the due row said "push to
-    # `main`" for these too, because the theme printed that off `repo_url` alone. At BOTH
-    # levels, since the due row is a sub-hash that cannot see its parent's fields.
+def _entry_for(monkeypatch, config: str, **kw) -> str:
+    """One assignment's page, off the `grading_config.yml` text `config` and a README the
+    read never leaves the process for."""
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Moodle essay\nThe brief."
     )
     monkeypatch.setattr(
+        site, "load_grading_spec", lambda *a: grades.parse_grading_spec(config)
+    )
+    return site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        **kw,
+    )
+
+
+def test_an_assignment_handed_in_off_github_names_no_repo_at_all(monkeypatch):
+    # `submit_via: external` means Moodle, Kaggle or in class, and the handout creates no
+    # repo for it. The page and the due row said "push to `main`" for these too, because
+    # the theme printed that off `repo_url` alone, and then named a repo that does not
+    # exist. At BOTH levels, since the due row is a sub-hash that cannot see its parent's.
+    out = _entry_for(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
+    )
+    assert out.count('submit_shape: "external"') == 2
+    assert "repo_name" not in out and "repo_url" not in out
+
+
+def test_an_external_assignment_carries_the_address_it_is_handed_in_at(monkeypatch):
+    # `submit_url` is the one thing the toolkit is ever told about a handover it does not
+    # see. The host rides along so the button can say where it goes before it is pressed.
+    out = _entry_for(
+        monkeypatch,
+        "submit_via: external\nsubmit_url: https://moodle.example.edu/x?id=7\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count('submit_url: "https://moodle.example.edu/x?id=7"') == 2
+    assert out.count('submit_host: "moodle.example.edu"') == 2
+
+
+def test_a_pending_external_assignment_offers_nowhere_to_submit_yet(monkeypatch):
+    # The address is a place to go NOW, so - like `repo_url` - it waits until the brief
+    # that explains what to take there is out. The shape itself is the plan's and is
+    # written either way.
+    out = _entry_for(
+        monkeypatch,
+        "submit_via: external\nsubmit_url: https://moodle.example.edu/x?id=7\n",
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert out.count('submit_shape: "external"') == 2
+    assert "submit_url" not in out
+    assert "is not yet released** - the brief appears here when it is." in out
+
+
+def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
+    # Who may READ the repo is part of its shape, and the shape is ONE word at both levels
+    # - the due row is a sub-hash that cannot see its parent's fields. The theme `case`s on
+    # it: a student has to know the repo is world-readable BEFORE their first push, not
+    # from the brief afterwards.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A1\nThe brief.")
+    monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a: grades.parse_grading_spec("submit_via: external\n"),
+        lambda *a: grades.parse_grading_spec("visibility: public\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -529,10 +585,216 @@ def test_an_assignment_handed_in_off_github_says_so(monkeypatch):
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert out.count("submit_external: true") == 2
-    # the repo is still named and still linked - the brief is in it
+    assert out.count('submit_shape: "assignment-repo-public"') == 2
     assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
-    assert out.count("repo_url:") == 2
+
+
+def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
+    # The shape is the plan's and is known before anything ships, so it is written while
+    # the assignment is pending too - and the placeholder line says `public` where it says
+    # `private` for every other assignment, rather than promising the wrong thing.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("visibility: public\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert out.count('submit_shape: "assignment-repo-public"') == 2
+    assert "your public `assignment-1-<your-handle>` repo appears when it is." in out
+
+
+def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
+    # The shape word is what the theme `case`s on, and the due row is a sub-hash that
+    # cannot see its parent's fields - so both levels carry it, kebab-cased like every
+    # other shape however the config spells the value.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A1\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("visibility: student_choice\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count('submit_shape: "assignment-repo-student-choice"') == 2
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
+
+
+def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch):
+    # The handout creates a PRIVATE repo; `student_choice` is a rule about who may change
+    # that afterwards. The placeholder line would otherwise promise a cohort their
+    # "student_choice repo".
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("visibility: student_choice\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert out.count('submit_shape: "assignment-repo-student-choice"') == 2
+    assert "your private `assignment-1-<your-handle>` repo appears when it is." in out
+
+
+def test_an_external_assignments_shape_names_no_visibility(monkeypatch):
+    # A visibility describes a repo and this shape creates none, so its shape is the bare
+    # word: a page that carried a visibility would describe something nobody made.
+    out = _entry_for(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
+    )
+    assert out.count('submit_shape: "external"') == 2
+    assert "visibility" not in out
+
+
+@pytest.mark.parametrize(
+    ("config", "rule"),
+    [
+        (
+            "late_window_days: 7\nlate_penalty_per_day: 10%\n",
+            "10% per day, up to 7 days",
+        ),
+        ("late_window_days: 7\n", "accepted up to 7 days late"),
+        ("late_window_days: 0\n", "not accepted after the deadline"),
+        ("", "10% per day, up to 10 days"),
+    ],
+)
+def test_the_page_carries_the_late_rule_the_assignment_declares(
+    monkeypatch, config, rule
+):
+    # The rule is the assignment's own (`grading_config.yml`), so the page prints what
+    # this assignment's own cutoff will actually do - `course.late_rule`, the same
+    # sentence wherever the toolkit spells the rule rather than the date. A file that
+    # declares neither setting is graded by the Hertie standard and the page says so;
+    # `late_window_days: 0` is the assignment that takes nothing after the deadline.
+    out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
+    assert f'late_rule: "{rule}"' in out
+
+
+def test_an_assignment_handed_in_off_github_carries_no_late_rule(monkeypatch):
+    # Nothing is TIMED there: no repo is created, so no commit is pinned, no day is
+    # counted and no penalty is ever applied (`course.collects_commits`). The key is the
+    # theme's gate, so writing one would put a rule about a deadline this toolkit does not
+    # hold on the page - and the brief is what says what the hand-in service does.
+    out = _entry_for(
+        monkeypatch,
+        "submit_via: external\nlate_window_days: 7\nlate_penalty_per_day: 10%\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert "late_rule" not in out
+
+
+def test_the_late_rule_is_the_pages_alone_and_not_the_due_rows(monkeypatch):
+    # The due row is a glance at WHEN and WHERE; the rule qualifies an answer the row does
+    # not give, and the page's callout is where that answer is.
+    out = _entry_for(
+        monkeypatch,
+        "late_window_days: 7\nlate_penalty_per_day: 10%\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count("late_rule:") == 1
+    assert "late_rule" not in out.split("due_event:")[1]
+
+
+def test_every_shape_that_hands_out_a_repo_carries_its_note_on_the_page_alone(
+    monkeypatch,
+):
+    # The aside the layout prints under the brief - one text per shape, off
+    # `course.SHAPE_NOTES`, so the page and the repo's own About line say the same words.
+    # The PAGE alone, like the late rule: the due row is a glance at when and where.
+    for config, shape in (
+        ("", "assignment-repo-private"),
+        ("visibility: public\n", "assignment-repo-public"),
+        ("visibility: student_choice\n", "assignment-repo-student-choice"),
+        ("submit_via: shared_dropbox_repo\n", "shared-dropbox-repo"),
+    ):
+        out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
+        assert f'shape_note: "{course.shape_note(shape)}"\n' in out
+        assert out.count("shape_note:") == 1
+        assert "shape_note" not in out.split("due_event:")[1]
+
+
+def test_a_pending_assignment_carries_no_shape_note_yet(monkeypatch):
+    # The box would otherwise sit above the "not handed out yet" line, warning about a repo
+    # that does not exist.
+    out = _entry_for(monkeypatch, "visibility: public\n", handed_out=frozenset())
+    assert "shape_note" not in out
+
+
+def test_a_shape_that_hands_out_no_repo_carries_no_note(monkeypatch):
+    # `external` is the one shape left without a note: the work is handed in somewhere
+    # else, so there is no repo for a sentence about who can read it to be about.
+    out = _entry_for(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
+    )
+    assert "shape_note" not in out
+
+
+def test_the_cutoff_sentence_is_the_pages_alone_and_never_the_external_ones(
+    monkeypatch,
+):
+    # What is marked, in the words the repo's own About line uses (`course.CUTOFF_SENTENCE`
+    # - one text, because a student reads the two minutes apart). Gated like the late rule:
+    # `external` pins no commit, so there is no `main` for a cutoff to be read off.
+    out = _entry_for(monkeypatch, "", handed_out=frozenset({"assignment-1"}))
+    assert f'cutoff_sentence: "{course.CUTOFF_SENTENCE}"\n' in out
+    assert out.count("cutoff_sentence:") == 1
+    assert "cutoff_sentence" not in out.split("due_event:")[1]
+    off_github = _entry_for(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
+    )
+    assert "cutoff_sentence" not in off_github
+
+
+def test_the_page_carries_the_total_the_questions_add_up_to(monkeypatch):
+    # What the assignment is out of is the assignment's own (`questions:` in
+    # grading_config.yml), summed by the one helper the gradebook sums it with
+    # (`grades.total_points`) - so the page and a student's gradebook cannot print two
+    # different totals. The page alone, like the late rule: the due row is a glance at
+    # WHEN and WHERE.
+    out = _entry_for(
+        monkeypatch,
+        "questions:\n  Q1: 15\n  Q2: 10\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert 'max_points: "25"' in out
+    assert out.count("max_points:") == 1
+    assert "max_points" not in out.split("due_event:")[1]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # No `questions:` at all: the assignment declares no maxima, so there is no total.
+        "",
+        # Declared, but not as numbers - a course may mark `Q1` against a rubric. Nothing
+        # adds up, and a page that printed "Worth points" would be worse than no line.
+        "questions:\n  Q1: see rubric\n  Q2: 10\n",
+    ],
+)
+def test_an_assignment_that_declares_no_total_carries_no_points_line(
+    monkeypatch, config
+):
+    # The key's presence is the theme's gate, so an absent key is an absent line.
+    out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
+    assert "max_points" not in out
 
 
 def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
@@ -551,7 +813,8 @@ def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert "submit_external" not in out
+    assert out.count('submit_shape: "assignment-repo-private"') == 2
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
 
 
 def test_a_definition_that_cannot_be_read_leaves_the_github_wording(monkeypatch):
@@ -570,7 +833,7 @@ def test_a_definition_that_cannot_be_read_leaves_the_github_wording(monkeypatch)
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert "submit_external" not in out
+    assert out.count('submit_shape: "assignment-repo-private"') == 2
     assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
 
 
@@ -2006,3 +2269,77 @@ def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
     # about at all.
     assert asked == [("Course-Org", "course-materials-f2026", "publish.yml")]
     assert policies["materials"][0].check_file("lectures/01_a/slides.html").include
+
+
+def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
+    monkeypatch,
+):
+    # The ONE shape whose `repo_name` is a real repo: there is a single drop box for the
+    # whole cohort, so the page can name it exactly - and `repo_url` is that repo rather
+    # than the org's filtered list, because there is nothing to filter to.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A3\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-3"}),
+    )
+    assert out.count('submit_shape: "shared-dropbox-repo"') == 2
+    assert out.count('repo_name: "assignment-3-submissions"') == 2
+    assert (
+        out.count(
+            'repo_url: "https://github.com/Cohort-f2026/assignment-3-submissions"'
+        )
+        == 2
+    )
+    # What is the reader's own is a FOLDER, which is the half a repo name cannot carry.
+    assert out.count('submit_path: "<your-handle>/"') == 2
+
+
+def test_a_shared_group_assignment_names_the_team_s_folder(monkeypatch):
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A3\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec(
+            "submit_via: shared_dropbox_repo\ntype: group\n"
+        ),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-3"}),
+    )
+    assert out.count('submit_path: "<your-team>/"') == 2
+    # One drop box either way: the repo is the cohort's, not the team's.
+    assert out.count('repo_name: "assignment-3-submissions"') == 2
+
+
+def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypatch):
+    # "your private <repo> repo appears when it is" would promise every student a repo of
+    # their own, which is the one thing this shape does not hand out.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert "the `assignment-3-submissions` drop box appears when it is." in out
+    # And no address, because there is nothing at the other end of it yet.
+    assert "repo_url" not in out

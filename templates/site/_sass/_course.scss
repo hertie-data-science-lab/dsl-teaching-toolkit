@@ -509,13 +509,39 @@
     }
 }
 
-/* An assignment page's name, under its identifier in the h1 (see _layouts/assignment.html).
-   Sized between the title and the body: it is the assignment's real name, not metadata. */
-.post-subtitle {
-    margin: -0.4em 0 0.8em 0;
+/* An assignment page's identifier, above its name in the h1 (see _layouts/assignment.html).
+   The name is the heading now, at the theme's `.post-title` size; the identifier is what
+   ties the page to its schedule row, so it is kept and made small rather than dropped. */
+.post-kicker {
+    margin: 0 0 0.1em 0;
     font-family: $display-font;
-    font-size: 1.15em;
+    font-size: 1.2em;
+    letter-spacing: 0.04em;
+    font-weight: 600;
     color: $grey-color-dark;
+}
+
+/* The due line under the header: the one date a student acts on, so a step up from the
+   released line beside it. */
+.post-due {
+    font-size: 1.1em;
+}
+
+/* The aside under an assignment's brief: what is unusual about the repo it hands out
+   (_layouts/assignment.html, off `shape_note`). A rule, not a box - a second callout
+   below the brief would compete with the real one above it, and this is read after the
+   assignment rather than instead of it.
+
+   Both colours are the brand colour at low alpha rather than a grey and a tint, so the
+   block takes its contrast from whatever the theme puts BEHIND it: a fixed pale fill
+   disappears on a dark background, and fixed dark text is unreadable on one. The text
+   colour is left to inherit for the same reason. */
+.shape-note {
+    margin: 1em 0 0 0;
+    padding: 0.6em 0.9em;
+    border-left: 3px solid rgba($brand-color, 0.55);
+    background: rgba($brand-color, 0.07);
+    font-size: 0.92em;
 }
 
 hr.session-rule {

@@ -5,8 +5,10 @@ the student - because that is what the snapshot pins and what `CONTRIBUTIONS.md`
 late arithmetic later read. Faking it through the Contents API with the bot token would
 test the harness rather than the pipeline.
 
-The token is a fine-grained PAT (Contents R/W on the demo cohort org) and it appears in
-the remote URL, so every failure message here goes through `_redact` first.
+The token is a fine-grained PAT on the demo cohort org and it appears in the remote URL,
+so every failure message here goes through `_redact` first. Contents R/W is what the push
+needs; `set_visibility` also needs Administration: write, because one of the five shapes
+this harness drives is the one whose repo the STUDENT is admin of and may publish.
 
 Every git call here runs with hooks off. A student's laptop has no repo hooks; the
 MAINTAINER'S has whatever their dotfiles install, and a `pre-push` that lints the working
@@ -17,12 +19,19 @@ style rather than on anything the pipeline did.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
-from dsl_course import ghcli
+from dsl_course import ghcli, repos
 
 HANDLE_ENV = "DSL_E2E_STUDENT"
 TOKEN_ENV = "DSL_E2E_STUDENT_TOKEN"
+
+# Every variable `gh` will take a token out of. Both are set, and `gh` prefers the first,
+# so nothing downstream can fall back to the maintainer's own token on a machine that
+# happens to export the other one.
+_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")
 
 
 def _env(name: str) -> str:
@@ -92,3 +101,42 @@ def push_file(repo: str, dest: Path, path: str, content: str, message: str) -> s
         token=token,
     )
     return _git("-C", str(dest), *HOOKS_OFF, "rev-parse", "HEAD", token=token).strip()
+
+
+@contextmanager
+def acting() -> Iterator[None]:
+    """Run the `gh` calls inside this block as the STUDENT rather than as the bot.
+
+    `ghcli` shells out to `gh`, which inherits this process's environment, so swapping the
+    token variables for the length of a call is all it takes - and it keeps the call
+    itself on `ghcli`, which is where the org fence and the write pacer live.
+
+    Restored in a `finally`, to the exact previous state including "was not set at all":
+    everything after this block is the maintainer's run again, and a leaked student token
+    would silently downgrade every write that follows."""
+    token = _env(TOKEN_ENV)
+    before = {name: os.environ.get(name) for name in _TOKEN_VARS}
+    os.environ.update(dict.fromkeys(_TOKEN_VARS, token))
+    try:
+        yield
+    finally:
+        for name, was in before.items():
+            if was is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = was
+
+
+def set_visibility(org: str, repo: str, visibility: str) -> bool:
+    """Flip `repo` public or private AS THE STUDENT - the `student_choice` promise, made
+    and broken from the student's own side.
+
+    The point of driving it with their token and not the maintainer's: what the assignment
+    page tells them is that the repo is THEIRS to publish, and what the scheduler promises
+    the rest of the cohort is that publishing it before the grading cutoff does not last.
+    A flip made with an org-owner token would prove the second and none of the first.
+
+    Needs Administration: write on the cohort org in the student's fine-grained PAT, on
+    top of the Contents R/W the push needs - see this suite's module docstring."""
+    with acting():
+        return repos.set_visibility(org, repo, visibility, person=True)

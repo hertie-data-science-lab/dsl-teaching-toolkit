@@ -106,7 +106,7 @@ def test_an_externally_submitted_assignment_has_no_info_block_at_all():
     # There is no commit to time, so an `info:` block full of blanks would read as a
     # toolkit that tried to fill one and failed. `adjustment_individual` still exists -
     # the override is the grader's, not the machine's.
-    block = new_sheet(individual(submit_external=True), SOLO)["submissions"]["ada-l"]
+    block = new_sheet(individual(submit_via="external"), SOLO)["submissions"]["ada-l"]
     assert "info" not in block
     assert list(block) == ["score_individual", *PERSON_KEYS]
 
@@ -359,7 +359,7 @@ def test_the_header_names_the_human_keys_of_this_shape(spec, units, expected):
 
 
 def test_an_external_sheet_says_the_toolkit_fills_nothing():
-    spec = individual(submit_external=True)
+    spec = individual(submit_via="external")
     text = dump_sheet(new_sheet(spec, SOLO), spec, "FROZEN 20 Sep 2026 23:59")
     assert "Auto-filled by the toolkit: nothing." in text
     assert "submitted outside GitHub" in text

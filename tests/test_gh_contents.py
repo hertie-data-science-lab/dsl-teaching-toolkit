@@ -237,11 +237,49 @@ def test_get_file_content_returns_none_only_for_a_genuine_404(monkeypatch):
         gh_contents.get_file_content("Org", "classroom-config", "students.csv")
 
 
+def _b64(text: str) -> str:
+    """What `gh api --jq .content` hands back: the API's base64 of the file's bytes."""
+    return base64.b64encode(text.encode()).decode()
+
+
 def test_get_file_content_returns_the_decoded_body(monkeypatch):
-    _stub_gh(monkeypatch, lambda *a, **k: (0, "handle,email\n"))
+    _stub_gh(monkeypatch, lambda *a, **k: (0, _b64("handle,email\n")))
     assert (
         gh_contents.get_file_content("Org", "repo", "students.csv") == "handle,email\n"
     )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a: 1\n",  # the ordinary case
+        "a: 1",  # no trailing newline - a file a person saved without one
+        "a: 1\n\n",  # two, which a rewrite must not quietly make one
+        "a,b\r\nAda,x\r\n",  # CRLF, which csv.writer produces
+        "  leading and trailing blanks  \n",
+    ],
+)
+def test_a_file_comes_back_byte_for_byte(monkeypatch, text):
+    # `ghcli.gh` returns `(stdout + stderr).strip()`, so decoding through jq's `@base64d`
+    # lost a file's trailing newline and a CRLF file's `\r`. Read that way and written
+    # back, a file faculty hand-edited is a different blob - the e2e teardown's fidelity
+    # check called a cohort's schedule.yml drifted on every single run. Base64 is what
+    # survives the strip, so the decode happens in Python.
+    _stub_gh(monkeypatch, lambda *a, **k: (0, _b64(text)))
+    assert gh_contents.get_file_content("Org", "repo", "schedule.yml") == text
+    _record_gh(monkeypatch, [(0, "abc123\n" + _b64(text))])
+    assert gh_contents.get_file_with_sha("Org", "repo", "schedule.yml") == (
+        text,
+        "abc123",
+    )
+
+
+def test_an_empty_file_is_empty_and_not_absent(monkeypatch):
+    # The API sends `content: ""` for a file with no bytes in it, and None is reserved for
+    # a 404 - a caller that reads "" as "not configured yet" seeds over a file faculty
+    # deliberately emptied.
+    _stub_gh(monkeypatch, lambda *a, **k: (0, ""))
+    assert gh_contents.get_file_content("Org", "repo", "students.csv") == ""
 
 
 def test_load_yaml_config_distinguishes_absent_empty_and_malformed(monkeypatch):
@@ -384,7 +422,9 @@ def test_put_file_sends_the_content_on_stdin_not_in_argv(monkeypatch):
 
 
 def test_get_file_with_sha_splits_the_sha_off_the_content(monkeypatch):
-    _record_gh(monkeypatch, [(0, "abc123\nname,email\nAda,a@x.edu")])
+    # The sha on its own line, then the base64 - which carries newlines of its own (the
+    # API wraps it), so the split is on the FIRST one and a sha has none.
+    _record_gh(monkeypatch, [(0, "abc123\n" + _b64("name,email\nAda,a@x.edu"))])
     assert gh_contents.get_file_with_sha("O", "R", "students.csv") == (
         "name,email\nAda,a@x.edu",
         "abc123",

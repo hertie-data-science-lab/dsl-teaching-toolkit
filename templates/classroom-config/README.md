@@ -58,9 +58,10 @@ every write.
 
 ### What reaches students, when
 
-**Nothing here reaches a student until you run Distribute grades.** It then writes
-`cohort-gradebook.csv` (the registrar export - generated, never hand-edited) and records
-every comment, gradebook and email in `gradebook/distributed.csv`. That file is SYSTEM-owned:
+**Nothing here reaches a student until you run Distribute grades.** It writes each
+student's private `grades-<handle>` gradebook - the one place a mark or a feedback line ever
+goes - and `cohort-gradebook.csv` (the registrar export - generated, never hand-edited), and
+records every gradebook and email in `gradebook/distributed.csv`. That file is SYSTEM-owned:
 it is what stops a re-run repeating itself and what lets a failed notification be retried.
 
 ## `teams.csv` - group membership (optional, for group assignments)

@@ -534,6 +534,23 @@ def test_an_external_hand_in_asks_the_brief_where_it_goes(fake, monkeypatch):
     assert "_Say which files you expect back" not in brief
 
 
+def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
+    # "Commit the notebook with its outputs saved" tells a cohort to hand in where nothing
+    # is ever read from: the repo collects nothing on a hand-in made off GitHub.
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", ["ipynb"], name="A", submit_via="external"
+        )
+        == 0
+    )
+
+    brief = fake.files[("assignment-1-f2026", "README.md")]
+    assert "Commit the notebook" not in brief
+    assert "`submit_url:`" in brief  # and it says where the address goes instead
+
+
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     # The page students read. Two headings, both empty: seeding a plausible-looking brief
     # is how a placeholder ships as the assignment.
@@ -545,9 +562,15 @@ def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
         == 0
     )
     brief = fake.files[("assignment-1-f2026", "README.md")]
-    assert brief.startswith("# Neural networks from scratch\n")
+    assert brief.startswith("# Neural networks from scratch\n\n## Task\n")
     assert "## Task" in brief and "## What to submit" in brief
-    assert "**Points:** __" in brief and "**Due:** see the course schedule" in brief
+    # No facts line at all. The deadline, the late rule and what the assignment is worth
+    # are the assignment's page on the cohort site, which prints all three off the plan
+    # and off this assignment's own grading_config.yml (the total being the sum of its
+    # `questions:` maxima) - spelt here as well, the hand-edited copy is the one that goes
+    # stale and a cohort reads two answers to one question.
+    assert "Points" not in brief
+    assert "Due" not in brief and "Late work" not in brief
 
 
 def test_a_format_of_none_seeds_the_brief_and_nothing_else(fake, monkeypatch):
@@ -659,6 +682,130 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
 
 
+def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monkeypatch):
+    # `github` is the legacy spelling, accepted for ever on read - but never written
+    # again: a fresh template scaffolded with no `submit_via` box answered gets the
+    # canonical word, not the one live orgs still carry.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb"]) == 0
+    text = written["grading_config.yml"]
+    assert "\nsubmit_via: assignment_repo" in text
+    assert "github" not in text
+    spec = grades.parse_grading_spec(text)
+    assert spec.submit_via == "assignment_repo" and spec.dropped == ()
+
+
+def test_the_submit_url_line_is_seeded_commented_on_every_shape(fake, monkeypatch):
+    # `submit_url` is the one thing the toolkit is ever told about a handover it does not
+    # see, and it is not a form input - so the seeded file is where an instructor finds it.
+    # COMMENTED even on the shape that uses it: the value seeded is a placeholder, and a
+    # live line carrying it would put a `Submit on ...` button in front of a whole cohort
+    # pointing at a page nobody created.
+    written = _solution_files(monkeypatch)
+    for number, via in (("1", "external"), ("2", "assignment_repo")):
+        assert (
+            scaffold.scaffold_assignment("Org", number, "f2026", [], submit_via=via)
+            == 0
+        )
+        text = written["grading_config.yml"]
+        assert "\n# submit_url: https://" in text
+        spec = grades.parse_grading_spec(text)
+        assert spec.submit_url == "" and spec.dropped == ()
+
+
+def test_a_seeded_submit_url_uncommented_but_unanswered_is_refused(fake, monkeypatch):
+    # The next thing an instructor does to that line is uncomment it. Until they also
+    # replace the placeholder, the site shows the brief and no button.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
+        == 0
+    )
+    live = written["grading_config.yml"].replace("# submit_url:", "submit_url:")
+    spec = grades.parse_grading_spec(live)
+    assert spec.submit_url == ""
+    assert [d.field for d in spec.dropped] == ["submit_url"]
+
+
+def test_the_visibility_box_lands_in_the_file_the_handout_reads(fake, monkeypatch):
+    # Box 10, and the last one the form can ever have. It is read when each student's repo
+    # is CREATED, so the answer given here is the only chance to give it - and the seeded
+    # line is live, because `private` is a real answer and not an absence.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment("Org", "1", "f2026", [], visibility="public") == 0
+    )
+    public = written["grading_config.yml"]
+    assert "\nvisibility: public" in public
+    spec = grades.parse_grading_spec(public)
+    assert spec.visibility == "public" and spec.dropped == ()
+    assert not spec.has_receipts_issue  # derived, never declared
+
+
+def test_student_choice_lands_in_the_file_and_names_the_word_it_writes(
+    fake, monkeypatch
+):
+    # The third answer box 10 offers. It has to survive the round trip as the WORD - the
+    # handout branches on it, and a value the scaffold wrote and the reader then refused
+    # would hand out repos nobody chose.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", [], visibility="student_choice"
+        )
+        == 0
+    )
+    text = written["grading_config.yml"]
+    assert "\nvisibility: student_choice" in text
+    spec = grades.parse_grading_spec(text)
+    assert spec.visibility == "student_choice" and spec.dropped == ()
+    assert spec.visibility_is_students and not spec.has_receipts_issue
+    # And the seeded line teaches its own vocabulary: every value the reader takes is
+    # named in the comment beside it, or the file offers an instructor two of three.
+    (line,) = [ln for ln in text.splitlines() if ln.startswith("visibility:")]
+    assert all(word in line for word in course.VISIBILITIES)
+
+
+def test_the_visibility_line_is_commented_where_no_repo_is_created(fake, monkeypatch):
+    # `visibility:` describes a repo and `external` creates none - the parse drops it
+    # there - so a live line would be a setting that reads as if it did something.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
+        == 0
+    )
+    assert "\n# visibility: private" in written["grading_config.yml"]
+    assert grades.parse_grading_spec(written["grading_config.yml"]).dropped == ()
+
+
+def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypatch):
+    # The button wrote `completion_check: true` behind `format: ipynb` whatever the shape
+    # was, and the parse refuses all three per-unit stages for a drop box - so the file
+    # New assignment had just written reported a `Dropped` line on every quarter-hourly
+    # tick and stood in the cohort's digest issue as an advisory that escalates to mail.
+    # Nothing the scaffold seeds may be a value the reader will not take.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment(
+            "Org",
+            "1",
+            "f2026",
+            ["ipynb"],
+            submit_via="shared_dropbox_repo",
+            autograde=True,
+        )
+        == 0
+    )
+    text = written["grading_config.yml"]
+    spec = grades.parse_grading_spec(text)
+    assert spec.dropped == ()
+    assert not spec.autograde and not spec.grader_pdf
+    assert not spec.runs_completion_check
+    assert "completion_check: false" in text
+    # ...and no hidden tests for a run that will never happen.
+    assert "tests/test_solution.py" not in written
+
+
 def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     # `derive` writes `solution/X` onto `main` as `X`. A model answer seeded as
     # `solution/solution.ipynb` therefore derived a SECOND notebook beside the untouched
@@ -724,16 +871,24 @@ def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypat
         assert "grader_pdf: false" in text
 
 
-def test_a_course_with_no_defaults_gets_the_settings_commented_out(fake, monkeypatch):
-    # Nothing is asserted on the course's behalf: the file teaches the whole vocabulary,
-    # and a late window nobody declared stays a comment rather than becoming a policy.
+def test_a_course_with_no_defaults_gets_the_toolkit_late_policy(fake, monkeypatch):
+    # Nothing is asserted on the course's behalf except late work, which the toolkit
+    # itself has a policy for (the Hertie syllabus rule): the file a grader opens carries
+    # the numbers the assignment will be graded by rather than a pair of comments and a
+    # default read from somewhere else. The team cap nobody declared stays a comment.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
-    spec = grades.parse_grading_spec(written["grading_config.yml"])
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (None, None)
+    text = written["grading_config.yml"]
+    spec = grades.parse_grading_spec(text)
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (
+        course.DEFAULT_LATE_WINDOW_DAYS,
+        course.DEFAULT_LATE_PENALTY_PER_DAY,
+    )
     assert spec.max_team_size is None
-    assert "# late_window_days:" in written["grading_config.yml"]
+    assert "# max_team_size:" in text
+    assert f"late_window_days: {course.DEFAULT_LATE_WINDOW_DAYS}" in text
+    assert f"late_penalty_per_day: {course.DEFAULT_LATE_PENALTY_PER_DAY}" in text
 
 
 @pytest.mark.parametrize(
@@ -1309,8 +1464,15 @@ def test_a_copied_assignment_says_which_boxes_it_ignored(origins, monkeypatch, c
     )
     assert made["assignment-1-f2026"] == "Assignment 1: Neural networks from scratch"
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "were ignored" in l]
-    assert "boxes 5-9" in line
-    for field in ("format", "type", "team_formation", "submit_via", "autograde"):
+    assert "boxes 5-10" in line
+    for field in (
+        "format",
+        "type",
+        "team_formation",
+        "submit_via",
+        "autograde",
+        "visibility",
+    ):
         assert field in line
     assert (
         "https://github.com/Org/assignment-1-f2026/blob/solution/grading_config.yml"

@@ -39,6 +39,67 @@ It asks nothing about the assignment itself: individual or group is the template
 
 Auditors (`role=auditor`) are skipped. The assignment's brief appears on the cohort site automatically - at hand-out, not before, however you hand out.
 
+### An assignment handed in somewhere else
+
+`submit_via: external` in the template's `grading_config.yml` (Moodle, Kaggle, in class)
+creates **nothing**: no cohort template, no repo per student, no receipts issue, no
+solution push. The handout still records the moment in `schedule.yml`, publishes the brief
+and a **Submit on \<host\>** button (from `submit_url`) on the cohort site, writes the
+grading sheet with every student or team in it, and makes sure each student has their
+private `grades-<handle>` gradebook.
+
+### An assignment handed into one shared drop box
+
+`submit_via: shared_dropbox_repo` freezes the cohort template as usual - the brief lives there - and
+then creates exactly **one** repo, `<slug>-submissions`: private, with every onboarded
+student (or every vetted team) on `push`, and a ruleset asked to stop force-pushes and
+deletion - though that needs GitHub Team, and every Hertie org is on Free until the
+Education upgrade lands, so until then the drop box is left unprotected and the run log
+says so. Each unit pushes into its own `<handle>/` or `<team>/` folder and can read
+everyone else's.
+
+There is no receipts issue and no model solution push - one repo the whole cohort reads
+is not a place for either. The handout re-fires every quarter of an hour
+like any other, and a student who onboards later is granted push on the next tick.
+
+### An assignment whose repos are public
+
+`visibility: public` in the template's `grading_config.yml` hands out the same repos
+world-readable - portfolio work such as a hackathon. There is then **no receipts issue**
+(a hand-in time is a fact about a student, and it does not go where the internet can read
+it; the marks were never going here anyway), and the
+assignment's page on the cohort site - and the repo's own About line - says the repo is
+public before they push anything into it.
+
+No **model solution** is pushed into these repos, whatever `include_solution` or
+`solution_datetime:` says - publishing the answers is not something a later run could take
+back - so it stays on the template's `solution` branch for the teaching team.
+
+GitHub turns **secret scanning and push protection** on for a public repository itself, so
+every one of these repos has both from the moment it is created. If a student pushes
+something that looks like a credential, GitHub refuses the push and prints a link; opening
+it lets them say why they are pushing it, which unblocks that push. Tell them to rotate the
+credential rather than bypass the block.
+
+### An assignment the students may publish themselves
+
+`visibility: student_choice` in the template's `grading_config.yml` hands out the same
+**private** repos, but makes the student - or every member of a team - **admin** of their
+own, which is the only permission that carries GitHub's visibility switch. There is no
+receipts issue (the repo may be public tomorrow).
+
+No model solution is pushed into these repos either, for the same reason: the student may
+publish the repo the day after the cutoff, and the answers would go with it.
+
+Until the assignment's **grading cutoff** the scheduler puts any of these repos back to
+private on its next tick, and the assignment's page on the cohort site says so. After the
+cutoff nothing touches the flag again: the repo is theirs to publish.
+
+One-time setup on the cohort org, by hand (these are web-only settings - no API sets them):
+Settings → Member privileges → **Allow members to change repository visibilities** ON,
+**Allow members to delete or transfer repositories** OFF. The cohort's *grading_config.yml*
+digest issue reports it while either is wrong.
+
 ## Group or individual?
 
 The shape is the template's own declaration - `type:` in the `grading_config.yml` on its
@@ -91,6 +152,9 @@ assignments:
 - **The late window** is the template `grading_config.yml`'s `late_window_days` (with
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
+  Where neither the assignment nor the course states them, the Hertie standard applies:
+  10% per day started, collected for up to 10 days. `late_window_days: 0` accepts nothing
+  after the deadline.
 - **The cutoff** is `grading_datetime` if set, else the due date plus that late window.
   - At that moment [the scheduler](07-schedule-releases.md#what-drives-the-scheduler) freezes the snapshot and the grading sheet, and autogrades it where the template asks for it (`autograde: true`, off by default).
 - **The commit that is considered submitted for grading** is frozen right after the grading deadline passes, into
@@ -121,7 +185,7 @@ What a real run does:
   matches the frozen cohort-side hand-out their repo was generated from;
 - patches that frozen hand-out too, so a student who onboards tomorrow is given the
   corrected file rather than the one everybody else was just patched off;
-- posts one note on each patched repo's **Feedback** issue: *"The teaching team updated
+- posts one note on each patched repo's **Submission receipts** issue: *"The teaching team updated
   `starter.ipynb` in this repository on 2026-10-14; pull before you continue. Your own
   commits are untouched."* A second press that changes nothing says nothing.
 

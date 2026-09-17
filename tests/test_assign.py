@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import assign, collect, grades, workflows_place
+from dsl_course import assign, collect, course, grades, workflows_place
 from dsl_course.schedule import Schedule
-from tests.conftest import ROSTER_HEADER
+from tests.conftest import ROSTER_HEADER, repo_row
 
 HEADER = ROSTER_HEADER
 
@@ -35,15 +35,16 @@ def _no_cohort_schedule(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _empty_cohort_listing(monkeypatch):
-    """provision_all takes ONE repo listing of the cohort and answers "does this repo
-    exist?" out of it. An empty org is the uninteresting answer for the tests below; the
-    ones about the listing itself set their own after this fixture and win."""
-    monkeypatch.setattr(assign, "list_org_repos", lambda org: [])
+    """provision_all answers "does this repo exist?" off the listing its CALLER holds, and
+    the tests below hand it none - so what they reach is the fallback, a probe per repo.
+    An empty org is the uninteresting answer for them; the ones about the listing itself
+    set their own after this fixture and win."""
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: False)
 
 
 @pytest.fixture(autouse=True)
 def feedback_issues(monkeypatch):
-    """The Feedback issue each new submission repo gets, recorded as `(repo, body)`.
+    """The receipts issue each new submission repo gets, recorded as `(repo, body)`.
 
     Its own tests live in tests/test_grades.py; the assignment tests care only that one is
     opened, on the create path, with this assignment's facts in it."""
@@ -55,7 +56,7 @@ def feedback_issues(monkeypatch):
     )
     monkeypatch.setattr(
         assign.grades,
-        "ensure_feedback_issue",
+        "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False: opened.append((repo, body)) or 1,
     )
     return opened
@@ -69,19 +70,44 @@ def _team_lock_is_current(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def gradebooks(monkeypatch):
+    """A gradebook per onboarded student, provisioned beside the handout so the brief can
+    point at one from the day it is published. What one CONTAINS has its own tests
+    (tests/test_grading_view.py); a handout test only needs to see that it was asked for,
+    and never to reach the roster in the org."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        assign.grades,
+        "ensure_gradebooks",
+        lambda org, dry_run=False, existing=None: calls.append(org) or 0,
+    )
+    return calls
+
+
+class _SheetWrites(list):
+    """The `sync_sheet` calls a handout made, and what each of them answered.
+
+    `created` is the half a shape that makes no repos reads to tell its first tick from its
+    thousandth - there is no new repo for it to notice - so a test sets it to False to be
+    the second tick."""
+
+    created = True
+
+
+@pytest.fixture(autouse=True)
 def sheet_writes(monkeypatch):
     """provision_all creates the assignment's grading sheet once the handout has landed.
 
     Recorded rather than written: what the sheet CONTAINS has its own tests
     (tests/test_collect.py); what matters here is that a handout produces one, keyed on the
     same units the repos were made for."""
-    written: list[dict] = []
+    written = _SheetWrites()
     monkeypatch.setattr(
         assign,
         "sync_sheet",
         lambda course, cohort, sched, key, slug, template, **kw: (
             written.append({"key": key, "slug": slug, "template": template, **kw})
-            or True
+            or collect.SheetWrite(True, created=written.created)
         ),
     )
     return written
@@ -114,6 +140,38 @@ def test_the_grading_sheet_is_created_at_handout_with_one_row_per_student(
     # One unit per onboarded student, keyed on the handle - the same key
     # `collect.submission_targets` uses, so every later refresh writes the same rows.
     assert sheet["units"] == [("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])]
+
+
+def test_the_repo_shape_runs_on_the_ticks_rows_and_lists_nothing_itself(
+    tmp_path, monkeypatch, sheet_writes
+):
+    # ONE listing per tick, for every pass and both arms of every handout. A second
+    # listing here cost one paginated read per handed-out assignment per quarter of an
+    # hour, and the rows it would have brought back are the ones this run writes itself.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign,
+        "list_org_repos",
+        lambda org: pytest.fail("a handout listed the org for itself"),
+    )
+    rows = {"assignment-1-ada-l": repo_row("assignment-1-ada-l")}
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE",
+        "assignment-1-f2026",
+        "COHORT",
+        roster_path=path,
+        listing=rows,
+    )
+
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["listing"] is rows, "the sheet read rows this run did not share"
 
 
 def test_a_handout_that_provisioned_nothing_does_not_rewrite_the_sheet(
@@ -290,6 +348,53 @@ def _marker_run(
     return rc, recorded
 
 
+@pytest.mark.parametrize("visibility", ["public", "student_choice"])
+def test_no_model_solution_is_pushed_into_repos_that_are_not_private(
+    tmp_path, monkeypatch, capsys, visibility
+):
+    # `public` publishes the model answer to the internet and `student_choice` hands the
+    # flag to the student, and neither can be taken back. The stage is skipped whole -
+    # and the fire-once marker is deliberately NOT written, so an instructor who corrects
+    # the shape can still release the solution on a later run.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(visibility=visibility),
+    )
+    monkeypatch.setattr(
+        assign,
+        "fetch_solution",
+        lambda *a, **k: pytest.fail("the model answer was fetched"),
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    sol_dirs: list = []
+    monkeypatch.setattr(
+        assign, "provision_one", lambda *a, **k: sol_dirs.append(a[6]) or "ok"
+    )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    recorded: list = []
+    monkeypatch.setattr(
+        assign, "record_solution_released", lambda *a, **k: recorded.append(a) or True
+    )
+
+    rc, _changed = assign.provision_all(
+        "COURSE",
+        "assignment-1-f2026",
+        "COHORT",
+        roster_path=path,
+        solution=True,
+    )
+
+    assert rc == 0, "a shape that withholds the solution is not a failed handout"
+    assert sol_dirs == [None], "the model answer reached a repo that is not private"
+    assert recorded == [], "the fire-once marker was written for a solution never sent"
+    assert "model solution not pushed" in capsys.readouterr().out
+
+
 def test_the_marker_is_not_written_when_a_solution_push_failed(tmp_path, monkeypatch):
     # The worst failure this feature can have: the marker is fire-once, so recording a
     # release whose pushes failed means the student NEVER receives the solution and no
@@ -354,7 +459,7 @@ def test_the_new_repo_status_says_its_feedback_issue_never_opened(
 ):
     _provision_one_env(monkeypatch)
     monkeypatch.setattr(
-        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+        assign.grades, "ensure_receipts_issue", lambda *a, **k: grades.LOOKUP_FAILED
     )
     assert (
         assign.provision_one(
@@ -365,7 +470,7 @@ def test_the_new_repo_status_says_its_feedback_issue_never_opened(
             ["ada-l"],
             "assignment-1",
             existing={},
-            feedback_body="BODY",
+            receipts_thread_body="BODY",
         )
         == "failed-no-feedback-issue"
     )
@@ -378,7 +483,7 @@ def test_a_failed_solution_push_still_wins_over_a_missing_feedback_issue(
     # must never be masked is the push that did not happen.
     _provision_one_env(monkeypatch)
     monkeypatch.setattr(
-        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+        assign.grades, "ensure_receipts_issue", lambda *a, **k: grades.LOOKUP_FAILED
     )
     monkeypatch.setattr(assign, "_wait_for_content", lambda *a, **k: True)
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
@@ -392,7 +497,7 @@ def test_a_failed_solution_push_still_wins_over_a_missing_feedback_issue(
             "assignment-1",
             tmp_path,
             existing={},
-            feedback_body="BODY",
+            receipts_thread_body="BODY",
         )
         == "failed-solution"
     )
@@ -614,7 +719,7 @@ def test_a_failed_withhold_stops_the_handout_too(monkeypatch, capsys):
 def test_ensure_cohort_template_refuses_when_the_filter_fails(monkeypatch):
     # Wiring: a failed filter must abort ensure_cohort_template rather than fall through to
     # `is_template`, which would hand the unfiltered template to every student.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: False)
     patched = []
@@ -663,7 +768,7 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     # The root of it: provision_one used to log the failure and return "ok" anyway, so
     # provision_all could not tell. Both the group and individual paths must report it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
@@ -816,7 +921,7 @@ def test_the_shape_is_read_off_the_templates_grading_yml(tmp_path, capsys, monke
 def _provisioned(monkeypatch):
     """A repo that creates cleanly, so provision_one exercises the access half. (An
     EXISTING repo with nothing due returns before any access call - see below.)"""
-    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: False)
     monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
 
@@ -992,10 +1097,11 @@ def test_ensure_cohort_template_repairs_a_half_created_template(monkeypatch):
     # A prior run left the repo existing but never set is_template (a _wait_for_content
     # timeout). The exists-path must still verify content and re-PATCH is_template
     # (idempotent), healing it instead of failing every later handout with "not a template".
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     calls: list[tuple[str, ...]] = []
 
     def fake_gh(*args, **kwargs):
@@ -1018,10 +1124,11 @@ def test_ensure_cohort_template_stamps_the_topic_the_site_gates_on(monkeypatch):
     # discovery.discover_handed_out_assignments reads this topic back as the record that
     # the assignment went out, and site._assignment_entry withholds the brief until it
     # does - so dropping the stamp silently blanks every brief on every cohort site.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     stamped: list[tuple] = []
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
     assign.ensure_cohort_template(
@@ -1034,10 +1141,11 @@ def test_ensure_cohort_template_stamps_the_topic_the_site_gates_on(monkeypatch):
 def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch):
     # The hand-out itself succeeded, so this must not fail the run - but a silent drop
     # leaves the site withholding a brief the students already hold.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: False)
     errs: list[str] = []
     monkeypatch.setattr(assign, "log_err", errs.append)
@@ -1050,10 +1158,58 @@ def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch
     assert "assignment-template" in errs[0] and "withheld" in errs[0]
 
 
+def test_the_frozen_cohort_template_grants_the_faculty_teams_read(monkeypatch):
+    # Every other repo a cohort receives is granted where it is created; this one was
+    # not, so an instructor who is not an org OWNER could not open the hand-out they had
+    # just pressed the button for until the nightly floor
+    # (`access.converge_faculty_access`) got round to it. READ, like the rest: the
+    # template is frozen and nothing is ever marked on it.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    granted: list[tuple] = []
+    monkeypatch.setattr(
+        assign,
+        "grant_faculty",
+        lambda org, repo, access, **kw: granted.append((org, repo, access, kw)),
+    )
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE", "assignment-1-f2026", "COHORT", "homework-1"
+        )
+        == "homework-1"
+    )
+    assert granted == [
+        ("COHORT", "homework-1", assign.FACULTY_READ_ACCESS, {"missing_is_note": True})
+    ]
+
+
+def test_a_ready_cohort_template_is_not_re_granted_every_tick(monkeypatch):
+    # The grant sits with the repair, behind the "already frozen, flagged and topiced"
+    # short circuit - so it costs one PUT per team at hand-out and nothing per hour.
+    monkeypatch.setattr(
+        assign,
+        "grant_faculty",
+        lambda *a, **k: pytest.fail("the hourly faculty grant is back"),
+    )
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE",
+            "assignment-1-f2026",
+            "COHORT",
+            "assignment-1",
+            {"assignment-1": _ready_template()},
+        )
+        == "assignment-1"
+    )
+
+
 def test_ensure_cohort_template_fails_loudly_when_is_template_patch_fails(monkeypatch):
     # The is_template PATCH result was discarded; now a failed PATCH returns None so the run
     # goes red rather than fanning out from a repo that isn't actually a template.
-    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (1, "403 Forbidden"))
@@ -1101,7 +1257,7 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
     captured: dict[str, str] = {}
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda org, slug, *a: captured.__setitem__("key", slug),
+        lambda org, slug, *a, **k: captured.update(key=slug, **k),
     )
     monkeypatch.setattr(assign, "ensure_cohort_template", lambda *a: "group-project")
     monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
@@ -1155,7 +1311,7 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
     # student's access. The faculty grant is not re-run on either path - the nightly sweep
     # owns that floor. With a solution to push, the push happens either way.
     calls = []
-    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: True)
     for name in (
         "add_collaborator",
         "grant_team_repo_access",
@@ -1418,7 +1574,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
     # reported `failed-no-access` / `failed-no-collaborator` had its missing solution
     # forgotten - and the marker guaranteed no later tick would ever retry it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
@@ -1440,7 +1596,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
 
 def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatch):
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
@@ -1461,7 +1617,7 @@ def test_a_team_of_rejected_handles_gets_no_repo_at_all(monkeypatch, capsys):
     # Every handle in the teams.csv row failed the roster allowlist, so the team is empty
     # and the repo can be granted to nobody. The check ran AFTER creation, so a typo'd team
     # left a private repo behind that no student could open, for the term.
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: False)
 
     def boom(*a, **k):
         raise AssertionError("a team with no vetted members must create nothing")
@@ -1481,7 +1637,7 @@ def test_a_solution_waits_for_the_repo_this_run_created_to_populate(
     # template-generate is async. Pushing into a repo that is still empty clones a repo with
     # no branch, so the solution landed on the runner's own default branch - invisible to
     # the student and to grading, on a green run.
-    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda *a, **k: False)
     monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
@@ -1505,27 +1661,18 @@ def test_a_solution_waits_for_the_repo_this_run_created_to_populate(
 
 
 def _ready_template(name="assignment-1"):
-    return {"name": name, "isTemplate": True, "topics": [name, "assignment-template"]}
+    return repo_row(name, isTemplate=True, topics=[name, "assignment-template"])
 
 
-def _listing_run(tmp_path, monkeypatch, listing):
-    """provision_all over two students, with `listing` standing in for the org listing.
-    Returns (the orgs listed, the repos generate_from_template was asked to create)."""
+def _listing_run(tmp_path, monkeypatch, listing, template="assignment-1-f2026"):
+    """provision_all over two students on the CALLER's `listing` (None = none to hand).
+    Returns the repos generate_from_template was asked to create."""
     path = _roster_file(
         tmp_path,
         "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
         "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def",
     )
-    listed: list[str] = []
-
-    def fake_listing(org):
-        listed.append(org)
-        if isinstance(listing, Exception):
-            raise listing
-        return listing
-
     created: list[str] = []
-    monkeypatch.setattr(assign, "list_org_repos", fake_listing)
     monkeypatch.setattr(
         assign, "generate_from_template", lambda **k: created.append(k["name"]) or True
     )
@@ -1537,40 +1684,74 @@ def _listing_run(tmp_path, monkeypatch, listing):
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
-    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
-    return listed, created
+    assign.provision_all(
+        "COURSE", template, "COHORT", roster_path=path, listing=listing
+    )
+    return created
 
 
-def test_provision_all_lists_the_org_once_and_probes_no_repo(tmp_path, monkeypatch):
+def test_provision_all_answers_every_repo_off_the_callers_listing(
+    tmp_path, monkeypatch
+):
     # A `repo_exists` per unit cost a GET per student per assignment on EVERY hourly tick
-    # (~1,200 an hour for a large cohort) where one paginated listing costs three.
+    # (~1,200 an hour for a large cohort) where one paginated listing costs three - and
+    # that listing is the tick's, taken once for every cohort pass there is.
     monkeypatch.setattr(
-        assign,
-        "repo_exists",
+        "dsl_course.discovery.repo_exists",
         lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
     )
-    listed, created = _listing_run(
+    created = _listing_run(
         tmp_path,
         monkeypatch,
-        [_ready_template(), {"name": "assignment-1-ada-l", "topics": []}],
+        {
+            "assignment-1": _ready_template(),
+            "assignment-1-ada-l": repo_row("assignment-1-ada-l"),
+        },
     )
-    assert listed == ["COHORT"], "one listing per run, not one per repo"
     assert created == ["assignment-1-bob-b"], "a listed repo was regenerated"
 
 
-def test_a_failed_listing_falls_back_to_probing_each_repo(tmp_path, monkeypatch):
-    # The listing is an optimisation. A rate limit on it must not stop the students who
-    # onboarded this hour from getting their repos.
+def test_no_listing_at_all_falls_back_to_probing_each_repo(tmp_path, monkeypatch):
+    # The listing is an optimisation, and None is what a caller that could not read one
+    # hands down. A rate limit there must not stop the students who onboarded this hour
+    # from getting their repos.
     probed: list[str] = []
     monkeypatch.setattr(
-        assign, "repo_exists", lambda org, name: probed.append(name) or False
+        "dsl_course.discovery.repo_exists",
+        lambda org, name: probed.append(name) or False,
     )
-    listed, created = _listing_run(
-        tmp_path, monkeypatch, RuntimeError("could not list repos in COHORT: 502")
-    )
-    assert listed == ["COHORT"]
+    created = _listing_run(tmp_path, monkeypatch, None)
     assert created == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
     assert probed == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+
+
+def test_every_repo_a_handout_creates_goes_into_the_listing_it_was_handed(
+    tmp_path, monkeypatch
+):
+    # A tick fires every handed-out release off ONE listing, so the repos an earlier
+    # assignment in it has just created have to be in the rows the next one reads - or it
+    # creates them again and counts GitHub's refusals as failures.
+    listing: dict[str, dict] = {}
+    monkeypatch.setattr(
+        "dsl_course.discovery.repo_exists",
+        lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
+    )
+    created = _listing_run(tmp_path, monkeypatch, listing)
+    assert created == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+    row = listing["assignment-1-ada-l"]
+    # Every field a reader of a listing asks of it: `classify_repos` and the faculty floor
+    # (`isTemplate`, `topics`), the sweeps that skip a frozen repo (`archived`), the
+    # student_choice re-privatise and the receipts (`visibility`), the sheet refresh's
+    # "has anything reached this repo?" (`pushed_at`).
+    assert (row["name"], row["visibility"]) == ("assignment-1-ada-l", "private")
+    assert (row["isTemplate"], row["archived"], row["topics"]) == (False, False, [])
+    assert row["pushed_at"]
+    # The cohort template goes in as the repair leaves it, so nothing freezes it twice.
+    assert listing["assignment-1"]["isTemplate"] is True
+
+    # The next pass over the same rows makes nothing at all.
+    again = _listing_run(tmp_path, monkeypatch, listing)
+    assert again == []
 
 
 def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
@@ -1597,7 +1778,7 @@ def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
             "assignment-1-f2026",
             "COHORT",
             "assignment-1",
-            [_ready_template()],
+            {"assignment-1": _ready_template()},
         )
         == "assignment-1"
     )
@@ -1606,8 +1787,8 @@ def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
 @pytest.mark.parametrize(
     "entry",
     [
-        {"name": "assignment-1", "isTemplate": False, "topics": ["assignment-1"]},
-        {"name": "assignment-1", "isTemplate": True, "topics": []},
+        repo_row("assignment-1", topics=["assignment-1"]),
+        repo_row("assignment-1", isTemplate=True),
     ],
 )
 def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
@@ -1618,13 +1799,18 @@ def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
     # fail with a misleading "not a template", or the site would withhold the brief.
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
     monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     patched: list[tuple] = []
     monkeypatch.setattr(assign, "gh", lambda *a, **k: patched.append(a) or (0, ""))
     stamped: list[tuple] = []
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
     assert (
         assign.ensure_cohort_template(
-            "COURSE", "assignment-1-f2026", "COHORT", "assignment-1", [entry]
+            "COURSE",
+            "assignment-1-f2026",
+            "COHORT",
+            "assignment-1",
+            {"assignment-1": entry},
         )
         == "assignment-1"
     )
@@ -1660,7 +1846,7 @@ def test_a_solution_holding_a_symlink_still_pushes(tmp_path, monkeypatch):
     assert assign.push_solution("COHORT", "a1-ada", sol) is True
 
 
-# ---------------------------------------------------------------- the Feedback issue
+# ---------------------------------------------------------------- the receipts issue
 
 
 def _provision_one_env(monkeypatch):
@@ -1682,7 +1868,7 @@ def test_a_new_submission_repo_gets_its_feedback_issue(monkeypatch, feedback_iss
         ["ada-l"],
         "assignment-1",
         existing={},
-        feedback_body="BODY",
+        receipts_thread_body="BODY",
     )
     assert feedback_issues == [("assignment-1-ada-l", "BODY")]
 
@@ -1703,7 +1889,7 @@ def test_an_existing_repo_is_never_probed_for_its_feedback_issue(
         "assignment-1",
         touch_existing=True,
         existing={"assignment-1-ada-l": {"name": "assignment-1-ada-l", "topics": []}},
-        feedback_body="BODY",
+        receipts_thread_body="BODY",
     )
     assert feedback_issues == []
 
@@ -1838,7 +2024,7 @@ def test_the_handout_composes_one_feedback_body_per_team(
     monkeypatch.setattr(
         assign,
         "provision_one",
-        lambda *a, **k: bodies.append(k["feedback_body"]) or "ok",
+        lambda *a, **k: bodies.append(k["receipts_thread_body"]) or "ok",
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
@@ -1951,7 +2137,7 @@ def _cohort(monkeypatch, live: dict[str, dict[str, bytes]], corrected=None):
 
     monkeypatch.setattr(assign, "put_files", fake_put_files)
     monkeypatch.setattr(
-        assign.grades, "find_feedback_issue", lambda org, repo: (7, "open")
+        assign.grades, "find_receipts_issue", lambda org, repo: (7, "open")
     )
     monkeypatch.setattr(
         assign.grades, "post_marked_comment", lambda *a, **k: notes.append(a) or True
@@ -2116,6 +2302,46 @@ def test_each_patched_repo_gets_one_note_on_its_feedback_issue(monkeypatch):
     assert marker.startswith("<!-- dsl-patch:")
 
 
+def test_a_repo_the_listing_says_is_public_is_patched_but_not_told(monkeypatch):
+    # The note names the files a student was handed wrong, and it goes into an issue that
+    # lives IN the repo. So it takes the same guard every other write into a Feedback
+    # thread takes: a `visibility: public` assignment - or one whose student has published
+    # theirs - is patched like any other, and told nothing where the internet would read
+    # it. The listing the run already holds is the answer.
+    commits = _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ben": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    monkeypatch.setattr(
+        assign,
+        "list_org_repos",
+        lambda org: [
+            {"name": "assignment-1", "isTemplate": True, "archived": False},
+            {"name": "assignment-1-ada", "isTemplate": False, "archived": False},
+            {
+                "name": "assignment-1-ben",
+                "isTemplate": False,
+                "archived": False,
+                "visibility": "public",
+            },
+        ],
+    )
+    assert _run(dry_run=False) == 0
+    # Both repos got the file; only the private one got the note.
+    assert sorted(repo for repo, _files in commits) == [
+        "assignment-1",
+        "assignment-1-ada",
+        "assignment-1-ben",
+    ]
+    assert [repo for _org, repo, _issue, _body, _marker in notes] == [
+        "assignment-1-ada"
+    ]
+
+
 def test_a_dry_run_writes_nothing_and_says_nothing(monkeypatch):
     commits = _cohort(
         monkeypatch,
@@ -2173,6 +2399,7 @@ def _cli(monkeypatch, *argv: str) -> dict:
     """Run `assign.main()` on `argv`, with both modes stubbed. Returns the keywords the
     mode that ran was called with."""
     seen: dict = {}
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: {"listed": org})
     monkeypatch.setattr(
         assign,
         "provision_all",
@@ -2207,6 +2434,12 @@ def test_each_mode_keeps_its_own_default_when_the_flag_is_not_given(monkeypatch)
     # success. Patching writes into repos students already hold, so it previews.
     assert _cli(monkeypatch)["dry_run"] is False
     assert _cli(monkeypatch, "--patch-path", "starter.py")["dry_run"] is True
+
+
+def test_the_release_button_lists_the_cohort_once_for_itself(monkeypatch):
+    # There is no tick above a button press to have taken the listing, and every repo
+    # question the handout asks is answered off one - so this press takes it, once.
+    assert _cli(monkeypatch)["listing"] == {"listed": "COHORT"}
 
 
 @pytest.mark.parametrize("flag, want", [("--dry-run", True), ("--no-dry-run", False)])
@@ -2307,3 +2540,821 @@ def test_the_marker_changes_when_the_correction_does():
 
     assert marker(AS_HANDED_OUT) != marker(FIXED)
     assert marker(AS_HANDED_OUT) == marker(AS_HANDED_OUT)
+
+
+# ------------------------------------------- an assignment handed in somewhere else
+#
+# `submit_via: external` creates NOTHING in the cohort org: no frozen template, no repo per
+# student, no receipts issue. What it still owes the cohort is the record of the handout,
+# the grading sheet, a gradebook each and the site.
+
+
+def _boom(*a, **k):
+    raise AssertionError("an external handout writes this")
+
+
+def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwargs):
+    """`provision_all` over an external assignment, with every write recorded."""
+    from datetime import datetime, timezone
+
+    from dsl_course.schedule import AssignmentEntry
+
+    # `order` is the tail's, and it is a fact about the handout rather than about the
+    # shape: the site goes up before the gradebook sweep, which is a call per student who
+    # has none yet.
+    effects: dict = {"handout": [], "site": [], "order": []}
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec(
+            "submit_via: external\n" + group
+        ),
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("an external assignment must create no repos")
+
+    monkeypatch.setattr(assign, "ensure_cohort_template", boom)
+    monkeypatch.setattr(assign, "provision_one", boom)
+    monkeypatch.setattr(assign, "generate_from_template", boom)
+    if scheduled:
+        entry = AssignmentEntry(
+            course_source_repo="assignment-1-f2026",
+            due_datetime=datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc),
+        )
+        monkeypatch.setattr(
+            "dsl_course.schedule.load",
+            lambda org: Schedule(assignments={"assignment-1": entry}),
+        )
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda org, slug, stamp=None: effects["handout"].append(slug),
+    )
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site",
+        lambda course, cohort: (
+            effects["site"].append(cohort) or effects["order"].append("site")
+        ),
+    )
+    # Wrapped rather than replaced, so a test that installed its own sweep above still
+    # sees its own calls - and so the order is recorded whichever one is in place.
+    swept = assign.grades.ensure_gradebooks
+
+    def record_sweep(org, dry_run=False, existing=None):
+        effects["order"].append("gradebooks")
+        return swept(org, dry_run=dry_run, existing=existing)
+
+    monkeypatch.setattr(assign.grades, "ensure_gradebooks", record_sweep)
+    path = _roster_file(
+        tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
+    )
+    effects["result"] = assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, **kwargs
+    )
+    return effects
+
+
+def test_an_external_handout_creates_no_repos_and_still_records_itself(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    out = _external(monkeypatch, tmp_path)
+    assert out["result"] == (0, True)
+    # The schedule is what the site reads to publish the brief: there is no cohort
+    # template repo for `discovery.handed_out_assignments` to find.
+    assert out["handout"] == ["assignment-1"]
+    assert out["site"] == ["COHORT"]
+    assert gradebooks == ["COHORT"]
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["units"] == [("ada-l", ["ada-l"])]
+
+
+def test_the_site_goes_up_before_the_gradebooks_are_swept(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    # Order, not presence. Everything ahead of the sweep is what a cohort is waiting on -
+    # the repos, then the page that tells them where to find them - and the sweep costs a
+    # call per student who has no gradebook yet.
+    out = _external(monkeypatch, tmp_path)
+    assert out["order"] == ["site", "gradebooks"]
+
+
+def test_an_external_handout_runs_on_the_ticks_listing_and_takes_none(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    # Nothing is created, so there is nothing fresher to see: the sheet and the gradebooks
+    # read the rows the tick already holds, and this shape lists the org not at all.
+    rows = {"grades-ada-l": repo_row("grades-ada-l", topics=["gradebook"])}
+    monkeypatch.setattr(
+        assign,
+        "list_org_repos",
+        lambda org: pytest.fail("an external handout listed the org for itself"),
+    )
+    given: list = []
+    monkeypatch.setattr(
+        assign.grades,
+        "ensure_gradebooks",
+        lambda org, dry_run=False, existing=None: given.append(existing) or 0,
+    )
+    out = _external(monkeypatch, tmp_path, listing=rows)
+    assert out["result"] == (0, True)
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["listing"] is rows and given == [rows]
+
+
+def test_a_second_tick_of_an_external_handout_hands_nothing_out_again(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    # `due_releases` is cumulative: this fires four times an hour for the rest of the term.
+    # The sheet is already there, which is this shape's "nothing new happened" signal.
+    sheet_writes.created = False
+    out = _external(monkeypatch, tmp_path)
+    assert out["result"] == (0, False)
+    assert out["site"] == [] and gradebooks == []
+    # The sheet is the exception: it is the only pass that knows this assignment's units
+    # before its due date, and a late onboarder has no repo to make the tick `changed`.
+    assert len(sheet_writes) == 1
+    # And the handout goes with it, on ANY tick whose sheet landed rather than only on the
+    # one that created it: `record_handout` is write-once, so repeating it costs a read and
+    # changes nothing - where gating it on creation left a manual release whose sheet
+    # already existed with no record at all, and the brief is published off that record.
+    assert out["handout"] == ["assignment-1"]
+
+
+def test_an_external_group_handout_forms_teams_and_keys_the_sheet_on_them(
+    tmp_path, monkeypatch, sheet_writes
+):
+    monkeypatch.setattr(
+        assign.teams,
+        "load",
+        lambda org: {"assignment-1": {"team-alpha": ["ada-l", "ben-k"]}},
+    )
+    out = _external(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+        group="type: group\n",
+    )
+    assert out["result"] == (0, True)
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["is_group"] is True
+    assert sheet["units"] == [("team-alpha", ["ada-l", "ben-k"])]
+
+
+def test_an_external_dry_run_writes_nothing_at_all(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    out = _external(monkeypatch, tmp_path, dry_run=True)
+    assert out["result"] == (0, False)
+    assert out["handout"] == [] and out["site"] == []
+    assert sheet_writes == [] and gradebooks == []
+
+
+def test_an_unscheduled_external_release_is_refused_and_writes_nothing(
+    tmp_path, monkeypatch, sheet_writes, gradebooks, capsys
+):
+    # The manual button on a template the plan does not name. A fabricated entry carries no
+    # `due_datetime`, and for this shape the entry is the only record that it went out at
+    # all - so the operator is sent to schedule.yml rather than left with a half-handout.
+    out = _external(monkeypatch, tmp_path, scheduled=False)
+    assert out["result"] == (1, False)
+    assert out["handout"] == [] and out["site"] == []
+    assert sheet_writes == [] and gradebooks == []
+    assert "due_datetime" in capsys.readouterr().err
+
+
+# ------------------------------------------------- an assignment handed out in the open
+#
+# `visibility: public` creates the same repos world-readable. Two things follow, and both
+# are DERIVED: the generate endpoint takes `private` and nothing else, so the repo is born
+# private and flipped; and nothing about a student's marking may be written where the
+# internet can read it, so there is no receipts issue.
+
+
+@pytest.fixture
+def _public_writes(monkeypatch, _provisioned):
+    """Every write `provision_one` makes on the create path, recorded by name."""
+    seen: dict = {"generated": [], "visibility": [], "granted": []}
+    monkeypatch.setattr(
+        assign,
+        "generate_from_template",
+        lambda **k: seen["generated"].append(k) or True,
+    )
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(
+        assign,
+        "add_collaborator",
+        lambda org, repo, handle, permission="", person=False: (
+            seen["granted"].append((handle, permission)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "set_visibility",
+        lambda org, repo, vis, person=False: (
+            seen["visibility"].append((repo, vis)) or True
+        ),
+    )
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+    monkeypatch.setattr(
+        assign,
+        "grant_team_repo_access",
+        lambda org, team, repo, permission, person=False: (
+            seen["granted"].append((team, permission)) or True
+        ),
+    )
+    return seen
+
+
+def _one_public(**kwargs) -> str:
+    return assign.provision_one(
+        "COURSE",
+        "assignment-1",
+        "COHORT",
+        "assignment-1-ada-l",
+        ["ada-l"],
+        "assignment-1",
+        **kwargs,
+    )
+
+
+def test_a_public_repo_is_generated_private_then_flipped(_public_writes):
+    # `POST /repos/{o}/{r}/generate` carries `private` and no `visibility`, so this is the
+    # only route to a public repo.
+    assert _one_public(visibility="public") == "ok"
+    assert [g["private"] for g in _public_writes["generated"]] == [True]
+    assert _public_writes["visibility"] == [("assignment-1-ada-l", "public")]
+    # The student's own permission is untouched by any of it.
+    assert _public_writes["granted"] == [("ada-l", "maintain")]
+
+
+def test_a_private_assignment_patches_no_visibility(_public_writes):
+    assert _one_public() == "ok"
+    assert _public_writes["visibility"] == []
+
+
+def test_a_repo_that_already_exists_is_never_re_patched(_public_writes, monkeypatch):
+    # The scheduler re-fires every handed-out assignment four times an hour. A PATCH here
+    # would undo, on every one of them, a visibility somebody had deliberately changed -
+    # and the cohort's grading_config.yml digest is what reports the disagreement instead.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: True)
+    assert _one_public(visibility="public", touch_existing=False) == "skipped"
+    assert _public_writes["visibility"] == []
+
+
+def test_a_failed_visibility_patch_is_counted_and_withholds_nothing(
+    _public_writes, monkeypatch, capsys
+):
+    # A repo the instructor said was portfolio work, left private, is not the assignment
+    # they handed out - so it is counted, and `provision_all`'s exit predicate keys on the
+    # `failed` prefix. But the repo EXISTS and the student has it, so nothing else is
+    # withheld: the access grant still happens, and so does the solution push.
+    monkeypatch.setattr(assign, "set_visibility", lambda *a, **k: False)
+    pushed: list[str] = []
+    monkeypatch.setattr(assign, "_wait_for_content", lambda *a, **k: True)
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append(repo) or True
+    )
+    status = _one_public(visibility="public", sol_dir=Path("/nowhere"))
+    assert status == "failed-visibility"
+    assert _public_writes["granted"] == [("ada-l", "maintain")]
+    assert pushed == ["assignment-1-ada-l"]
+    assert "assignment-1-ada-l" not in capsys.readouterr().out
+
+
+def test_the_listing_row_a_create_writes_back_carries_githubs_own_word(
+    _public_writes, monkeypatch
+):
+    # The row a pass writes back is what the NEXT pass of the same tick reads, and what
+    # the digest compares against the file. So it says what GitHub will report, never what
+    # the file asked for: a flip that failed leaves the repo private (and the fault the
+    # digest exists to raise depends on the row saying so), and `student_choice` is a rule
+    # about who may flip it later - not a word GitHub has ever heard of.
+    listing: dict[str, dict] = {}
+    assert _one_public(visibility="public", existing=listing) == "ok"
+    assert listing["assignment-1-ada-l"]["visibility"] == "public"
+
+    monkeypatch.setattr(assign, "set_visibility", lambda *a, **k: False)
+    failed: dict[str, dict] = {}
+    assert _one_public(visibility="public", existing=failed) == "failed-visibility"
+    assert failed["assignment-1-ada-l"]["visibility"] == "private"
+
+    chosen: dict[str, dict] = {}
+    assert _one_public(visibility="student_choice", existing=chosen) == "ok"
+    assert chosen["assignment-1-ada-l"]["visibility"] == "private"
+
+
+# ------------------------------- an assignment whose repos the students may publish
+#
+# `visibility: student_choice` creates the same PRIVATE repos and hands the flag over: the
+# student is `admin` of their own work, which is the only permission that carries GitHub's
+# visibility switch. Everything else follows from `course.visibility_is_students`.
+
+
+def test_a_student_choice_repo_is_created_private_and_never_patched(_public_writes):
+    # No PATCH at all: the repo IS private, which is what the assignment asked for. The
+    # student flips it themselves, and the tick puts it back until the cutoff.
+    assert _one_public(visibility="student_choice") == "ok"
+    assert [g["private"] for g in _public_writes["generated"]] == [True]
+    assert _public_writes["visibility"] == []
+
+
+def test_a_student_choice_student_is_admin_of_their_own_repo(_public_writes):
+    assert _one_public(visibility="student_choice") == "ok"
+    assert _public_writes["granted"] == [("ada-l", "admin")]
+
+
+def test_a_student_choice_team_is_admin_of_the_repo_it_shares(_public_writes):
+    # A team project belongs to all of its members, so the grant is on the TEAM: a repo
+    # only one of them could publish would not be theirs.
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-team-alpha",
+            ["ada-l", "ben-k"],
+            "assignment-1",
+            team="team-alpha",
+            visibility="student_choice",
+        )
+        == "ok"
+    )
+    assert _public_writes["granted"] == [("team-alpha", "admin")]
+
+
+@pytest.mark.parametrize("visibility", ["private", "public"])
+def test_every_other_shape_keeps_the_maintain_floor(_public_writes, visibility):
+    # `maintain` deliberately excludes the visibility switch, so a `public` assignment's
+    # repos are public because the assignment said so and stay that way.
+    assert _one_public(visibility=visibility) == "ok"
+    assert _public_writes["granted"] == [("ada-l", "maintain")]
+    _public_writes["granted"].clear()
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-team-alpha",
+            ["ada-l"],
+            "assignment-1",
+            team="team-alpha",
+            visibility=visibility,
+        )
+        == "ok"
+    )
+    assert _public_writes["granted"] == [("team-alpha", "maintain")]
+
+
+def test_a_student_choice_handout_opens_no_feedback_issue(
+    tmp_path, monkeypatch, feedback_issues, sheet_writes, gradebooks
+):
+    # The repo may be public tomorrow, so there is nowhere in it that a mark can be
+    # written and kept private - the gradebook carries the feedback instead.
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec("visibility: student_choice\n"),
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    seen: list[dict] = []
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: seen.append(k) or "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    assert assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
+    ) == (0, True)
+    assert feedback_issues == []
+    assert [k["receipts_thread_body"] for k in seen] == [""]
+    assert [k["visibility"] for k in seen] == ["student_choice"]
+
+
+def test_a_public_handout_opens_no_feedback_issue(
+    tmp_path, monkeypatch, feedback_issues, sheet_writes, gradebooks
+):
+    # There is nowhere private to write a mark in a repo the world can read, so the thread
+    # is not opened at all and the private gradebook carries the feedback instead.
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec("visibility: public\n"),
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    seen: list[dict] = []
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: seen.append(k) or "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    assert assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
+    ) == (0, True)
+    assert feedback_issues == []
+    assert [k["receipts_thread_body"] for k in seen] == [""]
+    assert [k["visibility"] for k in seen] == ["public"]
+
+
+# ---------------------------------------------- an assignment handed into one drop box
+#
+# `submit_via: shared_dropbox_repo` freezes the cohort template as usual - the brief lives there - and
+# then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
+# no repo per unit, so there is no receipts issue, no receipt and no model solution; and
+# the drop box's existence is not the record a per-unit repo's is, so the grant loop
+# re-runs every tick and asks who is granted already.
+
+
+@pytest.fixture
+def drop_box(monkeypatch):
+    """Every write the shared arm makes, recorded by name, and the reads it makes to
+    decide which grants are missing."""
+    seen: dict = {
+        "generated": [],
+        "topics": [],
+        "faculty": [],
+        "collaborators": [],
+        "revoked": [],
+        "teams": [],
+        "ensured": [],
+        "rulesets": [],
+        "handout": [],
+        "site": [],
+        "granted_already": frozenset(),
+        "teams_already": frozenset(),
+    }
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda org, slug, stamp=None: seen["handout"].append(slug),
+    )
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site", lambda course, cohort: seen["site"].append(cohort)
+    )
+    monkeypatch.setattr(
+        assign,
+        "ensure_cohort_template",
+        lambda course, template, cohort, slug, listing=None: slug,
+    )
+    monkeypatch.setattr(assign, "provision_one", _boom)
+    monkeypatch.setattr(
+        assign,
+        "generate_from_template",
+        lambda **kw: seen["generated"].append(kw) or True,
+    )
+    monkeypatch.setattr(
+        assign,
+        "set_repo_topics",
+        lambda org, repo, topics, person=False: (
+            seen["topics"].append((repo, topics)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "grant_faculty",
+        lambda org, repo, access, **kw: seen["faculty"].append((repo, access)),
+    )
+    monkeypatch.setattr(
+        assign,
+        "direct_collaborators",
+        lambda org, repo, **kw: seen["granted_already"],
+    )
+    monkeypatch.setattr(assign, "repo_teams", lambda org, repo: seen["teams_already"])
+    monkeypatch.setattr(
+        assign,
+        "add_collaborator",
+        lambda org, repo, handle, permission="push", person=False: (
+            seen["collaborators"].append((repo, handle, permission)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "remove_collaborator",
+        lambda org, repo, login, person=False: (
+            seen["revoked"].append((repo, login)) or True
+        ),
+    )
+    monkeypatch.setattr(assign, "bot_login", lambda: "dsl-bot")
+    monkeypatch.setattr(
+        assign,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **kw: (
+            seen["teams"].append((repo, team, perm)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign.sync_teams,
+        "ensure_team",
+        lambda org, team, members, prune=True: (
+            seen["ensured"].append((team, members)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "protect_shared_repo",
+        lambda org, repo: seen["rulesets"].append(repo) or True,
+    )
+    return seen
+
+
+def _shared(monkeypatch, tmp_path, *, rows=(), group="", **kwargs):
+    """`provision_all` over a shared assignment. Returns `(exit code, changed)`."""
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec(
+            "submit_via: shared_dropbox_repo\n" + group
+        ),
+    )
+    path = _roster_file(
+        tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
+    )
+    return assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, **kwargs
+    )
+
+
+def test_a_shared_handout_makes_one_drop_box_and_grants_every_student_push(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    assert _shared(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+    ) == (0, True)
+    # ONE generate, off the frozen cohort template, private, and named for the assignment
+    # rather than for anybody - which is what lets a public workflow log print it.
+    (made,) = drop_box["generated"]
+    assert made["name"] == "assignment-1-submissions"
+    assert made["template_name"] == "assignment-1" and made["owner"] == "COHORT"
+    assert made["private"] is True
+    # Two students, one repo, push each.
+    assert drop_box["collaborators"] == [
+        ("assignment-1-submissions", "ada-l", "push"),
+        ("assignment-1-submissions", "ben-k", "push"),
+    ]
+    # Read for faculty, like every other repo a cohort receives: the work is marked in
+    # classroom-config, so a commit here would reach no gradebook.
+    assert drop_box["faculty"] == [
+        ("assignment-1-submissions", assign.FACULTY_READ_ACCESS)
+    ]
+    assert drop_box["topics"] == [
+        ("assignment-1-submissions", ["assignment-1", "submission"])
+    ]
+    # And the ruleset, without which one force-push erases the whole cohort's work.
+    assert drop_box["rulesets"] == ["assignment-1-submissions"]
+
+
+def test_a_shared_group_handout_grants_the_teams_and_not_the_students(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(
+        assign.teams,
+        "load",
+        lambda org: {"assignment-1": {"alpha": ["ada-l", "ben-k"]}},
+    )
+    assert _shared(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+        group="type: group\n",
+    ) == (0, True)
+    assert drop_box["teams"] == [
+        ("assignment-1-submissions", "assignment-1-alpha", "push")
+    ]
+    assert drop_box["ensured"] == [("assignment-1-alpha", {"ada-l", "ben-k"})]
+    # Never both: a team project belongs to the team, and a collaborator grant beside it
+    # would outlive a membership change the team grant follows.
+    assert drop_box["collaborators"] == []
+
+
+def test_a_second_tick_grants_only_the_student_who_onboarded_since(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # The drop box already exists, so - unlike a repo per unit - its existence says nothing
+    # about who can push into it. The loop re-runs and the READ decides: everyone already
+    # granted is passed over, and the late onboarder is not.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    drop_box["granted_already"] = frozenset({"ada-l"})
+    assert _shared(
+        monkeypatch,
+        tmp_path,
+        rows=(
+            "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+            "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+        ),
+    ) == (0, True)
+    assert drop_box["generated"] == []
+    assert drop_box["collaborators"] == [("assignment-1-submissions", "ben-k", "push")]
+
+
+def test_a_tick_with_nothing_to_grant_hands_nothing_out_again(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # `due_releases` is cumulative, so this fires four times an hour for the rest of the
+    # term. Everyone is granted, so nothing changed - and the site is not re-rendered.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    drop_box["granted_already"] = frozenset({"ada-l"})
+    assert _shared(monkeypatch, tmp_path) == (0, False)
+    assert drop_box["collaborators"] == [] and gradebooks == []
+    assert drop_box["site"] == []
+
+
+def test_a_student_off_the_roster_loses_push_on_the_drop_box(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # The drop box holds the WHOLE cohort's work, so a grant left behind is not one
+    # student keeping their own repo: it is somebody who has left the course able to read
+    # and overwrite everyone else's. The grant loop re-runs every tick, so the tick after
+    # the roster changed is where the access follows it.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    drop_box["granted_already"] = frozenset({"ada-l", "gone-g", "dsl-bot"})
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    # Nobody new to grant; one grant to take away - and never the bot's, which is how the
+    # next tick repairs anything at all.
+    assert drop_box["collaborators"] == []
+    assert drop_box["revoked"] == [("assignment-1-submissions", "gone-g")]
+
+
+def test_a_grant_read_that_failed_revokes_nobody(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # None is "we could not look", never "nobody is granted". Granting again on a bad read
+    # costs one idempotent call; revoking on one costs a student their submission.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "direct_collaborators", lambda org, repo, **kw: None)
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    assert drop_box["revoked"] == []
+
+
+def test_a_grant_read_that_failed_grants_everybody_again(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # None is "we could not look", never "nobody is granted": the PUT is idempotent, and
+    # an over-granted one costs a call where an under-granted one costs a submission.
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "direct_collaborators", lambda org, repo, **kw: None)
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    assert drop_box["collaborators"] == [("assignment-1-submissions", "ada-l", "push")]
+
+
+def test_an_unprotected_drop_box_reds_the_handout(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # Not a warning. Every student has push on that one repo, so until the ruleset is
+    # there one of them can erase the cohort's work and the history the snapshot pins to.
+    monkeypatch.setattr(assign, "protect_shared_repo", lambda org, repo: False)
+    assert _shared(monkeypatch, tmp_path) == (1, True)
+
+
+def test_a_shared_handout_opens_no_feedback_issue_and_pushes_no_solution(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues, capsys
+):
+    # One repo the whole cohort can read is not a place to put a student's marks, nor the
+    # model answer. The fire-once solution marker is deliberately not written, so an
+    # instructor who corrects the shape can still release it.
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
+    assert feedback_issues == []
+    assert "no model solution to push" in capsys.readouterr().out
+
+
+def test_a_shared_dry_run_writes_nothing_at_all(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    assert _shared(monkeypatch, tmp_path, dry_run=True) == (0, False)
+    assert drop_box["generated"] == [] and drop_box["rulesets"] == []
+    assert sheet_writes == [] and gradebooks == []
+
+
+def test_a_shared_handout_writes_the_sheet_and_the_site_like_any_other(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    ((sheet,),) = (sheet_writes,)
+    # Keyed on the UNIT, not on the repo: every unit shares one repo here, so the repo
+    # name cannot tell two rows apart.
+    assert sheet["units"] == [("ada-l", ["ada-l"])]
+    assert drop_box["site"] == ["COHORT"] and gradebooks == ["COHORT"]
+    # And the handout is recorded ungated, like every shape that creates a repo: a first
+    # tick with nobody onboarded is still the moment the assignment went out.
+    assert drop_box["handout"] == ["assignment-1"]
+
+
+def test_patching_a_drop_box_names_the_drop_box_and_nobody_else(monkeypatch, capsys):
+    # This log runs in the course org's PUBLIC `.github`. The drop box may be named - its
+    # name carries no handle - but the TARGETS may not: the same template-prefix rule that
+    # finds it also matches any `<slug>-<handle>` repo the cohort was handed before the
+    # assignment became a drop box, and one of those in the log publishes who is in it.
+    _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-submissions": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada-l": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, tmpl: assign.grades.GradingSpec(submit_via="shared_dropbox_repo"),
+    )
+    assert _run(dry_run=False) == 0
+    said = capsys.readouterr()
+    printed = said.out + said.err
+    assert "assignment-1-submissions" in printed
+    assert "ada-l" not in printed
+
+
+def test_patch_targets_finds_the_shared_drop_box(monkeypatch):
+    # `--patch-path` has no arm of its own for this shape: the drop box derives from the
+    # cohort template by name, which is the same rule that finds a repo per unit.
+    listing = [
+        repo_row("assignment-3", isTemplate=True),
+        repo_row("assignment-3-submissions"),
+        repo_row("assignment-3-archived", archived=True),
+    ]
+    assert assign.patch_targets(listing, "assignment-3") == ["assignment-3-submissions"]
+
+
+# ------------------------------------ the About line a student reads inside the repo
+
+
+@pytest.fixture
+def _creations(monkeypatch):
+    """Every kwargs dict `generate_from_template` was called with, and nothing reaching
+    the network. The access half is let fail: what these are about is the CREATE."""
+    made: list[dict] = []
+    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: False)
+    monkeypatch.setattr(
+        assign, "generate_from_template", lambda **k: made.append(k) or True
+    )
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "set_visibility", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: False)
+    return made
+
+
+@pytest.mark.parametrize(
+    ("visibility", "shape"),
+    [
+        ("private", "assignment-repo-private"),
+        ("public", "assignment-repo-public"),
+        ("student_choice", "assignment-repo-student-choice"),
+    ],
+)
+def test_a_submission_repos_about_line_carries_its_shapes_note(
+    _creations, visibility, shape
+):
+    # The repo's About line is where a student meets both sentences if they came to the
+    # repo from a link rather than from the assignment's page - which, weeks after
+    # hand-out, is everyone. Same texts as the page, from `course.CUTOFF_SENTENCE` and
+    # `course.SHAPE_NOTES`, so the two places cannot drift.
+    assign.provision_one(
+        "COURSE",
+        "assignment-5",
+        "COHORT",
+        "assignment-5-ada",
+        ["ada-l"],
+        "assignment-5",
+        visibility=visibility,
+    )
+    assert _creations[0]["description"] == (
+        f"assignment-5 - submission repo. {course.CUTOFF_SENTENCE} "
+        f"{course.shape_note(shape)}"
+    )
+
+
+def test_the_drop_box_about_line_says_who_else_can_read_it(_creations, monkeypatch):
+    # One repo, and the whole cohort has push on it: the warning belongs on the repo
+    # itself as much as on the page, and it is the same sentence.
+    monkeypatch.setattr(assign, "_grant_drop_box", lambda *a, **k: (0, True))
+    monkeypatch.setattr(assign, "protect_shared_repo", lambda *a, **k: True)
+    assign.ensure_drop_box(
+        "COHORT", "assignment-7", "assignment-7", [], "key", group=False
+    )
+    assert _creations[0]["description"] == (
+        f"assignment-7 - shared submission drop box. {course.CUTOFF_SENTENCE} "
+        f"{course.shape_note('shared-dropbox-repo')}"
+    )
+
+
+def test_every_about_line_fits_inside_githubs_cap():
+    # GitHub TRUNCATES a description past its cap rather than refusing it, so a line that
+    # outgrew it would lose its second half and say nothing about having done so. Measured
+    # on the real composition, with the longest realistic label a slug can produce - the
+    # About line now carries the cutoff sentence as well as the note.
+    what = "assignment-10-neural-networks-from-scratch - shared submission drop box"
+    for shape in course.SHAPE_NOTES:
+        assert len(assign._about(what, shape)) <= course.MAX_REPO_DESCRIPTION, shape

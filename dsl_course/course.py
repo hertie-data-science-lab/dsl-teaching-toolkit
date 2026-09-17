@@ -84,10 +84,47 @@ SANDBOX_USER = "dsl-sandbox"
 # because three layers spell them: `workflows_render` builds the New assignment dropdowns
 # from them, `scaffold` writes the chosen values into the file, and `grades` reads them
 # back - and a dropdown offering a word the reader would refuse is a form that lies.
-SUBMIT_VIA = (
-    "github",
-    "external",
-)  # `external` = handed in off GitHub (Moodle, Kaggle)
+# Named for where the work LANDS. `assignment_repo` = one repo per unit, pushed to;
+# `external` = handed in off GitHub (Moodle, Kaggle, in class), so no repo is created at
+# all; `shared_dropbox_repo` = ONE private drop box for the whole cohort, one folder per
+# unit, every student pushing into their own and reading everyone else's. A word is added
+# here when the engine can ACT on it, because this same tuple is what the New assignment
+# dropdown offers, and a form offering a word the reader would refuse is a form that lies.
+SUBMIT_VIA = ("assignment_repo", "shared_dropbox_repo", "external")
+# `github` is the LEGACY spelling of `assignment_repo`: live INSTRUCTOR-OWNED
+# `grading_config.yml` files in real course orgs carry it, so it is accepted for ever at
+# every read boundary (`canonical_submit_via` below) and never written again by any
+# generator. `shared` was renamed to `shared_dropbox_repo` before it ever shipped to a
+# real org, so it gets no alias - an unrecognised `shared` is simply Dropped.
+LEGACY_SUBMIT_VIA = {"github": "assignment_repo"}
+
+
+def canonical_submit_via(value: object) -> str:
+    """A raw `submit_via` read off the outside world, normalised to its canonical spelling.
+
+    The ONE place every read boundary calls before trusting the value - the
+    `grading_config.yml` reader, the New assignment workflow's argv/env, the e2e harness -
+    so `github` reads as `assignment_repo` everywhere internal code compares against it,
+    and no second copy of the alias can drift from this one."""
+    text = str(value or "").strip().lower()
+    return LEGACY_SUBMIT_VIA.get(text, text)
+
+
+# THE `shared_dropbox_repo` rationale, written down once so the five places that act on it
+# can point here instead of arguing it out again and drifting: a drop box is ONE repo that
+# the whole cohort reads, and no student can opt out of being in it. Everything that would
+# otherwise be written per unit therefore has nowhere private to go - no receipts issue
+# at all (`has_receipts_issue`), no model solution (`can_hold_solution`), and no
+# `visibility:` to choose (v1 keeps it private, because `public` would publish every
+# student's submission on the strength of one instructor's line). It is hand-marked for a
+# different reason: the autograder and the grader's reading copy run per UNIT against the
+# unit's own repo, and here fifty units share one.
+# Who may read a unit's repo. `private` is the default and what every assignment gets until
+# an instructor says otherwise; `public` is portfolio work, world-readable from handout;
+# `student_choice` starts private and hands the flag to the student, who may publish their
+# own work once it has been marked. Same rule as `SUBMIT_VIA`: a word enters this tuple
+# when the handout can CREATE it, so `internal` joins if the plan ever buys an Enterprise.
+VISIBILITIES = ("private", "public", "student_choice")
 ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
@@ -100,16 +137,191 @@ NO_TEAMS = "none"
 # otherwise. Here because three places have to agree on it: the `grading_config.yml` the
 # New assignment button writes, the lock file the form reads, and the form itself.
 DEFAULT_MAX_TEAM_SIZE = 5
+# The late-work rule an assignment gets when neither its own `grading_config.yml` nor its
+# course's `assignment_defaults:` states one. It is the Hertie School standard, carried
+# verbatim in the Machine Learning, Causal ML and NLP syllabi: "For each day the assignment
+# is turned in late, the grade will be reduced by 10%", with no free days and no cap. Ten
+# days is where 10% a day has taken the whole grade, so that is where collecting late work
+# stops. A course that accepts nothing after the deadline writes `late_window_days: 0`.
+# Here, beside the team cap, because the same three places have to agree on it: the
+# `grading_config.yml` New assignment writes, the spec every reader parses, and the rule
+# the site and the receipts quote to a cohort.
+DEFAULT_LATE_WINDOW_DAYS = 10
+DEFAULT_LATE_PENALTY_PER_DAY = "10%"
 # Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever
 # is in the repo, and a student may commit anything. The button takes any number of them,
 # comma-separated; `none` is the raw-repo answer and the one that stands alone - which is
 # why it is named here, beside the vocabulary it belongs to, rather than spelt again in
 # each of the three layers that has to recognise it.
 NO_STARTER = "none"
+# The stand-in the scaffold seeds where a setting has no sensible default but a shape worth
+# showing (`submit_url`). Here because two layers have to agree on it: `scaffold` writes it
+# into the file and `grades` refuses to act on a line still carrying it, which is what a
+# commented example turning into a live one otherwise costs a cohort.
+SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
 # The starters an instructor may actually name, `none` being the answer that means none of
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.
 STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)
+
+
+def visibility_is_students(visibility: str) -> bool:
+    """Whether the toolkit does NOT own this repo's visibility - the student does.
+
+    THE question behind every exemption `student_choice` earns: the repo is created
+    private and the student is its admin, so what GitHub says about it later is their
+    answer and not the file's. The word is spelt HERE and nowhere else, so an exemption
+    cannot be written that agrees with this one only by coincidence - and so a second
+    student-owned visibility (an Enterprise `internal` the student may flip) widens every
+    one of them at once."""
+    return visibility == "student_choice"
+
+
+def github_visibility(visibility: str) -> str:
+    """What GITHUB will call a repo the toolkit handed out under this `visibility:`.
+
+    The config's vocabulary and GitHub's are not the same, in one place: `student_choice`
+    is a rule about who may flip the flag AFTER the handout, and the repo GitHub is asked
+    to make is private like any other. So a listing row - which carries GitHub's word and
+    only GitHub's - never says `student_choice`, and nothing that compares a row against
+    the file has to know that on its own account."""
+    return "public" if visibility == "public" else "private"
+
+
+def has_receipts_issue(submit_via: str, visibility: str) -> bool:
+    """Whether this shape has a receipts issue at all.
+
+    DERIVED from the shape, never configured: the issue lives in the unit's own repo, so it
+    exists exactly where there is one that only that unit can read. A shape without one
+    simply gets no receipts; every shape's marks and feedback go to the same place, the
+    private `grades-<handle>` gradebook."""
+    return submit_via == "assignment_repo" and visibility == "private"
+
+
+def collects_commits(submit_via: str) -> bool:
+    """Whether there are commits to freeze, time and grade against the cutoff.
+
+    The gate on every piece of submission arithmetic - the snapshot, the late days, the
+    receipts, the `info:` block - named for what it ASKS, which is why
+    `shared_dropbox_repo` widened it here and re-opened none of those call sites: work
+    pushed into a folder of the drop box is timed, and is late, exactly as work pushed to a
+    repo of one's own.
+
+    Extensionally the same set as `creates_repos` today, and by COINCIDENCE: both are
+    false for `external` alone. They are different questions, so widening either one means
+    looking at the other."""
+    return submit_via in ("assignment_repo", "shared_dropbox_repo")
+
+
+def creates_unit_repos(submit_via: str) -> bool:
+    """Whether the handout creates one repo per unit, which is what gives a unit a repo
+    NAME to print, link to and grant on.
+
+    Not the same question as `collects_commits`: a shared drop box collects commits into
+    one repo for the whole cohort, not one per unit."""
+    return submit_via == "assignment_repo"
+
+
+def can_hold_solution(submit_via: str, visibility: str) -> bool:
+    """Whether the model answer can be pushed into the repos this assignment hands out.
+
+    ONE predicate for a question two files ask independently: `assign.provision_all` skips
+    the push, and the digest faults a `schedule.yml` `solution_datetime:` that would
+    therefore pass and release nothing. Asked apart, the two came to disagree - a
+    `shared_dropbox_repo` assignment was scheduled a release the handout silently declined.
+
+    It takes a repo of the unit's OWN (`external` has none, and a shared drop box is one
+    repo the whole cohort reads) AND a repo the toolkit can promise is private (`public`
+    publishes the answers to the internet, `student_choice` lets any student publish
+    them). Neither can be taken back, which is why this is a refusal and not a warning."""
+    return creates_unit_repos(submit_via) and visibility == "private"
+
+
+def creates_repos(submit_via: str) -> bool:
+    """Whether the handout creates ANYTHING for the work to land in - a repo per unit, or
+    the one drop box the whole cohort pushes into.
+
+    The third question, and the one the two above cannot answer between them: a shared
+    assignment makes no repo per unit and still makes a repo, so everything that asks "is
+    there something here whose visibility, topics and faculty floor are ours?" asks this.
+    False for `external` alone, which creates nothing at all - which makes it, today and
+    by coincidence, the same set as `collects_commits`. See the note there."""
+    return submit_via != "external"
+
+
+def submit_shape(submit_via: str, visibility: str) -> str:
+    """The ONE word the cohort site branches an assignment on.
+
+    `assignment-repo-private`, `assignment-repo-public`, `assignment-repo-student-choice`,
+    `external`, `shared-dropbox-repo`. The two axes are orthogonal in the config and are
+    not on the page: a template that asked "which `submit_via`, and then which
+    `visibility`?" had to be re-opened for every shape that is neither, and each of the
+    four places that asked drifted from the others. So the pair is collapsed HERE, beside
+    the predicates it is derived from, and the theme carries one `case`.
+
+    A shape that makes no repo per unit names itself and nothing else (`external`,
+    `shared_dropbox_repo`) - there is no per-unit repo for a visibility to describe, and
+    the parse drops the key there anyway (`shared_dropbox_repo` is private-only in v1).
+
+    Kebab throughout, whatever the config words look like: this is a word a THEME reads,
+    and one shape spelt `assignment_repo-student_choice` beside `assignment-repo-public`
+    is a `when` arm somebody eventually mistypes."""
+    if not creates_unit_repos(submit_via):
+        return submit_via.replace("_", "-")
+    return f"{submit_via}-{visibility}".replace("_", "-")
+
+
+# WHO CAN READ the repo a student was just handed. One text per shape and one place for
+# it, because two readers need the same words at two different moments: the assignment's
+# page on the cohort site (`site._assignment_entry` writes it into the front matter, the
+# layout prints it under the brief) and the repo's own About line on GitHub, which is what
+# a student reads when they open the repo rather than the page (`assign.provision_one`,
+# and the drop box). Written apart they drifted, and the About line said nothing at all.
+#
+# `NB:` opens every one of them: the box is an aside beside the brief, not a step in it.
+# Plain `>` rather than `&gt;` - this is a YAML scalar and a repo description, and the one
+# consumer that needs markup escapes it where it renders (`| escape`).
+#
+# EVERY shape that hands out a repo has one, the ordinary private repo included. It was
+# left out as the case with nothing unusual to say, and that is the toolkit's reading, not
+# a student's: "who else can see this?" is asked of every repo, and a page that answers it
+# for three shapes and goes quiet on the fourth is read as an omission rather than as
+# reassurance. `external` has none - it hands out no repo for a sentence to be about.
+SHAPE_NOTES = {
+    "assignment-repo-private": (
+        "NB: this repo is private - only you and the teaching team can read it."
+    ),
+    "assignment-repo-public": (
+        "NB: this repo is public, anyone on the internet can read it. Push to main as "
+        "usual, but commit nothing you would not publish and no data you were told to "
+        "keep private."
+    ),
+    "assignment-repo-student-choice": (
+        "NB: this repo is private-by-default; you are its admin - after the grading "
+        "cutoff you may make it public from Settings > Danger zone if you want it in "
+        "your portfolio."
+    ),
+    "shared-dropbox-repo": (
+        "NB: everyone in the cohort can read the whole repo, so commit nothing you "
+        "would not show the class."
+    ),
+}
+# When the work is read, said wherever the work's address is given: the route callout on
+# the assignment's page (`site._assignment_entry`, then the layout) and the About line of
+# every submission repo (`assign._about`). ONE constant, because the two are read minutes
+# apart by the same student, and a cutoff worded twice is a cutoff with two answers.
+CUTOFF_SENTENCE = "What is on main at the grading cutoff is what is marked."
+# GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
+# the cutoff sentence plus the note, so a note that grew past this would be TRUNCATED by
+# GitHub rather than refused, and the warning would lose its second half silently.
+MAX_REPO_DESCRIPTION = 350
+
+
+def shape_note(shape: str) -> str:
+    """The one-line warning this `submit_shape` owes a student, or "" for a shape that
+    owes none."""
+    return SHAPE_NOTES.get(shape, "")
+
 
 # The two answers the New materials repo form asks about PUBLISHING, out of which
 # `scaffold.publish_patterns` writes the repo's seeded `publish.yml`. Here, in the shared
@@ -180,28 +392,31 @@ COHORT_TEAMS = (
 ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
 
 
-# ------------------------------------------------------------------ the Feedback issue
+# ------------------------------------------------------------------ the receipts issue
 
-# Every submission repo carries ONE issue, opened at handout, where the student's receipts
-# and finally their feedback appear. The contract lives here, at layer 0, because `assign`
-# opens the issue and `grades` posts into it, and the two must agree on the spelling or the
-# second one opens a duplicate.
-FEEDBACK_ISSUE_TITLE = "Feedback"
-FEEDBACK_ISSUE_LABEL = "dsl-feedback"
+# Every submission repo carries ONE issue, opened at handout, where the student's
+# submission receipts appear. Marks and feedback are not posted here and never reach a
+# repo at all - they go to the student's private gradebook, which is the one address a
+# student has to know. The contract lives here, at layer 0, because `assign` opens the
+# issue and `collect` posts into it, and the two must agree on the spelling or the second
+# one opens a duplicate.
+RECEIPTS_ISSUE_TITLE = "Submission receipts"
+# The label and the marks keep the word `feedback` on purpose. They are not read by anyone:
+# they are what the lookup MATCHES against live issues, so changing either makes every
+# thread opened under the old one invisible and a second one appears over it. The lookup is
+# label, then mark, then title - the title is the weakest rung, which is what lets it be
+# renamed at all.
+RECEIPTS_ISSUE_LABEL = "dsl-feedback"
 # A tuple, like `gh_contents.STUB_MARKS`: an issue opened under an older wording must still
 # be RECOGNISED, so a mark is added to the chain, never edited. Recognition is what stops a
-# second Feedback issue appearing in a repo that already has one.
-FEEDBACK_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
+# second receipts issue appearing in a repo that already has one.
+RECEIPTS_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
 
 _SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
-    "deadline is what we grade. A submission receipt is posted here at the deadline and "
-    "after any late push, and your feedback and grade follow as a comment once marking is "
-    "complete."
-)
-_EXTERNAL_PARAGRAPH = (
-    "This assignment is submitted outside GitHub (see the brief). This repository holds "
-    "the brief and your feedback."
+    "deadline is what we grade. This thread is your receipt for that: one at the deadline "
+    "saying what was recorded, one after any late push, and one at the cutoff when the "
+    "commit we grade is fixed."
 )
 _CONTRIBUTIONS_ASK = "fill in CONTRIBUTIONS.md before the deadline."
 
@@ -213,21 +428,27 @@ RECEIPT_UPDATED = "updated"
 RECEIPT_FROZEN = "frozen"
 
 
-def feedback_issue_body(
+def receipts_issue_body(
     *,
     due_display: str,
     late_policy_line: str = "",
     team_line: str = "",
-    external: bool = False,
 ) -> str:
-    """The body of a submission repo's Feedback issue.
+    """The body of a submission repo's receipts issue - what the thread is FOR.
+
+    It says where the work goes and what will be posted here, and nothing about marks: a
+    student has one address for those, their private gradebook, and a repo they may be
+    told to publish is not a second one.
 
     The caller supplies only what it knows - the rendered dates, and (for a team) the team
-    and its members; every word of boilerplate is here, so the three variants cannot drift
-    apart in three call sites."""
-    lines = [FEEDBACK_ISSUE_MARKS[0], f"**Due:** {due_display}"]
-    if external:
-        return "\n".join([*lines, "", _EXTERNAL_PARAGRAPH]) + "\n"
+    and its members; every word of boilerplate is here, so the two variants cannot drift
+    apart in two call sites.
+
+    There is no variant for an assignment handed in off GitHub: a receipts issue exists
+    only where the shape HAS one (`has_receipts_issue`), and no run ever opens one for any
+    other shape (`grades.receipts_thread_policy`), so a body describing one would be words
+    nobody could reach."""
+    lines = [RECEIPTS_ISSUE_MARKS[0], f"**Due:** {due_display}"]
     if late_policy_line:
         lines.append(f"**Late work:** {late_policy_line}")
     if team_line:
@@ -242,6 +463,29 @@ def receipt_marker(sha: str, event: str) -> str:
     nothing while a genuinely new push still gets its own receipt. A run with no submission
     to point at keys on `none`, which is equally once-only."""
     return f"<!-- dsl-receipt:{sha or 'none'}:{event} -->"
+
+
+def late_rule(window_days: int | None, penalty: str | None) -> str:
+    """The late-work rule an assignment declares, as the half-sentence that follows
+    "Late work: " - `10% per day, up to 10 days`, `accepted up to 7 days late`, or `not
+    accepted after the deadline`.
+
+    Takes the spec's RESOLVED values, which carry `DEFAULT_LATE_*` for an assignment whose
+    course said nothing (`grades.parse_grading_spec`); a window of 0 or None here is a
+    course that turned late work off, not one that has yet to choose.
+
+    The rule itself, spelt once. It is the deadline half of an assignment's page on the
+    cohort site, and a second spelling of it elsewhere is how one cohort comes to read two
+    different rules for one deadline.
+
+    NOT `grades.late_policy`, which answers a different question: that is this rule against
+    a real cutoff DATE (`accepted until Sunday 11 October 2026, 23:59 ...`), which only an
+    assignment with a due date on record can be told."""
+    if not window_days:
+        return "not accepted after the deadline"
+    if penalty:
+        return f"{penalty} per day, up to {window_days} days"
+    return f"accepted up to {window_days} days late"
 
 
 def _late_phrase(days_late: int, penalty_display: str = "") -> str:
@@ -309,6 +553,19 @@ def submission_repo(slug: str, suffix: str) -> str:
     group. One composition, so the provisioner, the grader and the "your repo is called"
     line on the site cannot spell it differently."""
     return f"{slug}-{suffix}"
+
+
+def shared_repo(slug: str) -> str:
+    """The ONE repo a `submit_via: shared_dropbox_repo` assignment hands out:
+    `<slug>-submissions`, a private drop box with a folder per unit inside it.
+
+    Never the bare slug - that is the frozen cohort TEMPLATE the brief lives in
+    (`assign.ensure_cohort_template`). The suffix earns two things for free: the name
+    derives from the template, so `discovery.classify_repos` reads it as a student repo and
+    the faculty READ floor and the public-page exclusion both apply with no new rule; and
+    it carries no handle, so it is the one submission-repo name a public workflow log may
+    print in full."""
+    return f"{slug}-submissions"
 
 
 def submission_suffix(repo: str, template: str) -> str:
@@ -495,3 +752,45 @@ def discover_sections(repo_root: Path) -> list[str]:
     return sorted(
         {parent for parent, _, _ in session_dirs(_local_dir_paths(repo_root)) if parent}
     )
+
+
+# How a slug is SHOWN. `identifier("assignment-5")` is "Assignment 5": the bold half of a
+# schedule row, the kicker over an assignment page, and the label beside the name in a
+# gradebook. One spelling, because the same assignment is read in all three places.
+
+
+def identifier(slug: str) -> str:
+    """The slug's own name, title-cased: `assignment-3-project` -> `Assignment 3 Project`."""
+    return slug.replace("-", " ").title()
+
+
+# Separators faculty put between a row's identifier and its name. Two dash characters are
+# in live sources already (`Assignment 1 - ...` and `Assignment 1 — ...`), which is exactly
+# why this is a set and not a `-`.
+_NAME_SEPARATORS = "-\u2013\u2014:|"
+
+
+def row_name(declared: str, identifier: str) -> str:
+    """A row's NAME out of what faculty wrote, given the identifier the site already shows
+    in bold beside it - so the pair reads "Session 3 / Probability theory" and never
+    "Session 3 / Session 3".
+
+    Faculty conventionally repeat the identifier: a template README opens `# Assignment 1 -
+    linear regression from scratch`, and a `releases:` entry is as likely to say
+    `title: Lab 1` as to name the lab. Printed whole under the identifier that reads
+    "Assignment 1 / Assignment 1 - linear regression from scratch" and "Lab 1 / Lab 1", so
+    drop the prefix and whatever separates it.
+
+    Text that does NOT open with the identifier (`Group project - an end-to-end modelling
+    report`) is the name already and is returned as it stands. Casefolded, so text that
+    differs from the identifier only in capitalisation still matches."""
+    name = declared.strip()
+    if name.casefold().startswith(identifier.casefold()):
+        rest = name[len(identifier) :].lstrip()
+        # Only when a separator actually follows: `Assignment 10` must not be read as
+        # `Assignment 1` plus the name "0".
+        if rest[:1] in tuple(_NAME_SEPARATORS):
+            return rest[1:].strip()
+        if not rest:
+            return ""
+    return name

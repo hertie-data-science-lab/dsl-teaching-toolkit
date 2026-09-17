@@ -17,7 +17,7 @@ from .discovery import classify_repos
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_err_person, log_ok, log_person
-from .repos import Converged, set_repo_topics, topic_name
+from .repos import Converged, gh_settled, set_repo_topics, topic_name
 
 
 def grant_team_repo_access(
@@ -40,7 +40,9 @@ def grant_team_repo_access(
     and the permission are the actionable half and stay public; the repo goes through
     `log_person`. The nightly sweep sets it on EVERY repo it walks, because it walks the
     whole org and the caller's `protected` set is optional."""
-    code, out = gh(
+    # A repo generated seconds ago, or one whose visibility has just been flipped, is
+    # locked and refuses this grant outright - `repos.gh_settled` waits it out.
+    code, out = gh_settled(
         "api",
         "-X",
         "PUT",
@@ -198,6 +200,32 @@ def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
             f"unparseable repo listing for {org}/{team}: {out[:200]}"
         ) from exc
     return {r["name"]: _strongest_permission(r["permissions"]) for r in rows}
+
+
+def repo_teams(org: str, repo: str) -> frozenset[str] | None:
+    """The slugs of every team that holds any access on ONE repo, casefolded. None when
+    the listing could not be read.
+
+    The team half of `repos.direct_collaborators`, and there for the same caller: a shared drop
+    box is handed out to one repo per assignment, so "which of this assignment's teams
+    have been granted already?" is one listing per tick rather than a PUT per team per
+    tick for the rest of the term.
+
+    None rather than the empty set on a failure, including a 404: the caller's answer to
+    "we could not look" is to grant every team again, which is idempotent - where reading
+    a failed listing as "nobody is granted" would be the same thing said with a promise
+    attached."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/teams?per_page=100",
+        "--jq",
+        ".[].slug",
+    )
+    if code != 0:
+        log_err(f"  ! could not read which teams can see {org}/{repo}: {out[:160]}")
+        return None
+    return frozenset(ln.strip().casefold() for ln in out.splitlines() if ln.strip())
 
 
 def converge_faculty_access(

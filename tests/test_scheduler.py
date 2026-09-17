@@ -32,6 +32,7 @@ from dsl_course import (
 from dsl_course import collect as collect_mod
 from dsl_course import faults as faults_mod
 from dsl_course import issues as issues_mod
+from dsl_course.collect import Target
 from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
@@ -57,6 +58,23 @@ def _verdict(
         recent_gaps=[],
         now=now,
     )
+
+
+@pytest.fixture(autouse=True)
+def tick_listings(monkeypatch):
+    """The ONE listing of the cohort `run` takes at the start of each tick, stubbed empty.
+
+    A real paginated `gh api`, which `conftest` refuses - so every `run` test below would
+    otherwise fail on the listing rather than on what it is about. Tests that care what is
+    IN it stub the consumer's own name; this fixture hands back the orgs it was taken for,
+    in order, which is how "once per cohort, never once per assignment" is asserted."""
+    listed: list[str] = []
+    monkeypatch.setattr(
+        scheduler.discovery,
+        "listing_by_name",
+        lambda org: listed.append(org) or {},
+    )
+    return listed
 
 
 @pytest.fixture(autouse=True)
@@ -91,11 +109,15 @@ def cadence_calls(monkeypatch):
 @pytest.fixture(autouse=True)
 def _grading_spec_defaults(monkeypatch):
     """The cutoff is read out of each template's grading_config.yml (`late_window_days`), which is
-    real gh I/O. Answered with the defaults - no window - so every test below keeps
-    measuring the behaviour it was written for; the tests that are ABOUT the window declare
-    their own spec."""
+    real gh I/O. Answered with `late_window_days: 0` - the assignment that takes nothing
+    after the deadline, so the cutoff IS the due date and every test below keeps measuring
+    the behaviour it was written for. Spelt out rather than left to the spec's own default,
+    which is the Hertie ten-day window; the tests that are ABOUT the window declare their
+    own spec."""
     monkeypatch.setattr(
-        scheduler, "load_grading_spec", lambda org, template: GradingSpec()
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(late_window_days=0),
     )
 
 
@@ -326,7 +348,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False, slug="": (
+        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
             (
                 calls.append(
                     (
@@ -344,7 +366,10 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r, None) == (
+        0,
+        True,
+    )
     # The hourly path never re-touches an existing repo (the manual button does), says it
     # is the cron - a group handout with no teams yet then waits instead of going red -
     # and names WHICH entry it is firing, since two may hand out from one template.
@@ -362,7 +387,10 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
     r.assignment_solution = True
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r, None) == (
+        0,
+        True,
+    )
     assert calls[1] == (
         "Course-Org",
         "assignment-2-f2026",
@@ -1079,6 +1107,7 @@ def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
         sched,
         datetime(2026, 10, 17, tzinfo=timezone.utc),
         False,
+        None,
     )
     assert refreshed == [("assignment-1", "assignment-1")]
 
@@ -1104,7 +1133,7 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         "snapshot_assignment",
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
-        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, **k: (
             taken.append((org, slug, deadline, teams_key))
             or scheduler.SnapshotResult.WRITTEN
         ),
@@ -1220,7 +1249,7 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, **k: (
             scheduler.SnapshotResult.FAILED
         ),
     )
@@ -1339,7 +1368,7 @@ def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
         scheduler,
         "sync_sheet",
         lambda course, cohort, sched, key, slug, template, **kw: (
-            refreshed.append((key, slug)) or True
+            refreshed.append((key, slug)) or collect_mod.SheetWrite(True)
         ),
     )
     return refreshed
@@ -1352,7 +1381,7 @@ def _only_snapshots_taken(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: (
+        lambda org, slug, dl, *, is_group, teams_key=None, listing=None: (
             scheduler.SnapshotResult.WRITTEN
         ),
     )
@@ -1384,6 +1413,85 @@ def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
         "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
     )
     assert refreshed == [("assignment-1", "assignment-1")]
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        {"a-ada": {"name": "a-ada", "visibility": "private"}},
+        # A listing that could not be READ reaches every one of them as None, never as an
+        # empty org: `{}` says this cohort holds no repos, and a pass that read a failure
+        # as that answer would post no receipt into a repo it could have, flip nothing
+        # back to private, and report a handed-out assignment as never handed out.
+        None,
+    ],
+)
+def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch, rows):
+    # The freeze's `pushed_at`, the sheet refresh's receipts, the grading-config digest's
+    # "what did this assignment actually hand out?" and both arms of every handout all ask
+    # the same org the same question. Each used to take a listing of its own, so the cost
+    # grew with the number of ASSIGNMENTS a cohort carries; it is now one per cohort per
+    # tick, and it is the SAME rows every pass reads.
+    taken: list[str] = []
+    monkeypatch.setattr(
+        scheduler.discovery,
+        "listing_by_name",
+        lambda org: taken.append(org) or rows,
+    )
+    seen: dict[str, object] = {}
+
+    def _snapshot(org, slug, dl, *, is_group, teams_key=None, listing=None, **k):
+        seen["snapshot"] = listing
+        return scheduler.SnapshotResult.WRITTEN
+
+    def _sheet(course, cohort, sched, key, slug, template, **kw):
+        seen["sheet"] = kw.get("listing")
+        return collect_mod.SheetWrite(True)
+
+    def _provision(master, template, cohort, **kw):
+        seen["handout"] = kw.get("listing")
+        return 0, False
+
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "snapshot_assignment", _snapshot)
+    monkeypatch.setattr(scheduler, "sync_sheet", _sheet)
+    monkeypatch.setattr(scheduler, "provision_all", _provision)
+    monkeypatch.setattr(
+        scheduler,
+        "grading_config_faults",
+        lambda course, cohort, sched, found, listing: seen.update(digest=listing),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_reprivatise_student_repos",
+        lambda course, cohort, sched, now, dry_run, listing: (
+            seen.update(reprivatise=listing) or 0
+        ),
+    )
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: True)
+    handed = AssignmentEntry(
+        course_source_repo="a-f2026",
+        handout_datetime=datetime(2026, 10, 1, 9, 0, tzinfo=BERLIN),
+        due_datetime=datetime(2026, 10, 30, 23, 59, tzinfo=BERLIN),
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _assignments(
+            **{
+                "assignment-1": _due(5),  # deadline passed: frozen this tick
+                "assignment-2": _due(13, grading_day=20),  # due passed, cutoff has not
+                "assignment-3": handed,  # handed out, so its release re-fires
+            }
+        ),
+    )
+    scheduler.run(
+        "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+    )
+    assert taken == ["Cohort-f2026"], "one listing per cohort, not one per assignment"
+    assert set(seen) == {"snapshot", "sheet", "digest", "handout", "reprivatise"}
+    assert all(v is rows for v in seen.values())
 
 
 def test_a_frozen_assignments_sheet_is_left_to_the_cutoff(monkeypatch):
@@ -1701,7 +1809,7 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: (
+        lambda org, slug, dl, *, is_group, teams_key=None, listing=None: (
             scheduler.SnapshotResult.WRITTEN
         ),
     )
@@ -1828,7 +1936,7 @@ def test_run_releases_counts_a_raised_site_sync(monkeypatch):
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
     due = [_r("wk1", WHEN, deploy=[Deploy("cm", "lectures/01", "materials", None)])]
-    assert scheduler._run_releases("Course-Org", "Cohort-Org", due, WHEN) == 1
+    assert scheduler._run_releases("Course-Org", "Cohort-Org", due, WHEN, None) == 1
 
 
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
@@ -2612,8 +2720,33 @@ def test_the_snapshot_pass_reads_each_passed_deadline_once(monkeypatch):
         **{"assignment-1": _due(13), "assignment-2": _due(14)},
     )
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False) == 1
+    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False, None) == 1
     assert reads == ["assignment-1", "assignment-2"], "one read per passed deadline"
+
+
+def test_neither_deadline_pass_touches_an_assignment_with_nothing_to_collect(
+    monkeypatch,
+):
+    # Handed in off GitHub: there are no repos, so the freeze would find every target
+    # absent and the autograde behind it has nothing to run. Before this gate that was a
+    # 404 per student per tick for the rest of the term, on a green run.
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(submit_via="external"),
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("nothing is collected from an external assignment")
+
+    monkeypatch.setattr(scheduler, "load_snapshots", boom)
+    monkeypatch.setattr(scheduler, "has_autograde_results", boom)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False, None) == 0
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    # The cutoff itself has still passed - that is what the sheet refresh reads this for.
+    assert scheduler.due_snapshots("C", sched, now) != []
 
 
 def _real_snapshot_then_autograde(monkeypatch, targets):
@@ -2628,14 +2761,14 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
     monkeypatch.setattr(
         collect_mod,
         "submission_targets",
-        lambda org, slug, is_group, teams_key=None: targets,
+        lambda org, slug, is_group, teams_key=None, **k: targets,
     )
     monkeypatch.setattr(
         collect_mod,
         "_snapshot_sha",
-        lambda org, repo, deadline, at="": collect_mod.Pin(absent=True),
+        lambda org, repo, deadline, at="", **k: collect_mod.Pin(absent=True),
     )
-    monkeypatch.setattr(collect_mod, "_pushed_at", lambda org: {})
+    monkeypatch.setattr(collect_mod, "listing_by_name", lambda org: {})
 
     def no_write(*a, **k):
         raise AssertionError("nothing may be written when there is nothing to freeze")
@@ -2646,7 +2779,7 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    errors = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
+    errors = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False, None)
     errors += scheduler._autograde_passed_deadlines("C", "K", sched, now, False)
     return errors, graded
 
@@ -2663,7 +2796,7 @@ def test_a_snapshot_whose_repos_are_all_absent_does_not_licence_autograding(
 ):
     # Same, one step later: the repos are declared but not generated yet (every target 404s).
     assert _real_snapshot_then_autograde(
-        monkeypatch, targets=[("assignment-1-anna", "anna", ["anna"])]
+        monkeypatch, targets=[Target("assignment-1-anna", "anna", ["anna"])]
     ) == (0, [])
 
 
@@ -2828,7 +2961,7 @@ def _config_preflight(
     monkeypatch.setattr(
         scheduler,
         "grading_config_faults",
-        lambda course, cohort, sched, found: found.extend(spec_faults or []),
+        lambda course, cohort, sched, found, listing: found.extend(spec_faults or []),
     )
     monkeypatch.setattr(
         scheduler.config_digest,
@@ -2843,7 +2976,7 @@ def _config_preflight(
         lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
     )
     rc = scheduler._preflight_configs(
-        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False, None
     )
     return rc, synced, mailed
 
@@ -2934,7 +3067,7 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
     )
     monkeypatch.setattr(scheduler.config_digest, "sync", boom)
     rc = scheduler._preflight_configs(
-        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False, None
     )
     assert rc == 0
 
@@ -3419,3 +3552,240 @@ def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
         "Cohort archives on 2027-02-16"
     ]
     assert seen["issues"] == []
+
+
+# ------------------- the repos whose visibility the toolkit gave away, taken back
+#
+# `visibility: student_choice` makes the student `admin` of their own repo so that they
+# can put their work in a portfolio once it has been marked. Until the grading cutoff a
+# published repo is one the rest of the cohort can copy from - so the tick closes it
+# again, off the listing it already holds, and after the cutoff never touches it again.
+
+CUTOFF = datetime(2026, 10, 30, 23, 59, 59, tzinfo=BERLIN)
+
+
+def _choice_rows(*names_and_visibility: tuple[str, str], **extra) -> list[dict]:
+    from conftest import repo_row
+
+    return [repo_row("assignment-1", isTemplate=True)] + [
+        repo_row(name, visibility=vis, **extra) for name, vis in names_and_visibility
+    ]
+
+
+def _reprivatise(
+    monkeypatch,
+    rows,
+    *,
+    now=datetime(2026, 10, 14, tzinfo=BERLIN),
+    visibility="student_choice",
+    dry_run=False,
+):
+    """The pass over one handed-out assignment, with every PATCH it makes recorded."""
+    patched: list[tuple[str, str]] = []
+    # No late window, so `CUTOFF` below is both the due date and the cutoff and the times
+    # these tests pass in read as before and after the one moment they are about.
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(visibility=visibility, late_window_days=0),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "set_visibility",
+        lambda org, repo, vis, person=False: patched.append((repo, vis)) or True,
+    )
+    sched = _assignments(
+        **{
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                handout_datetime=datetime(2026, 10, 1, 9, 0, tzinfo=BERLIN),
+                due_datetime=CUTOFF,
+            )
+        }
+    )
+    listing = None if rows is None else {r["name"]: r for r in rows}
+    rc = scheduler._reprivatise_student_repos(
+        "Course-Org", "Cohort-f2026", sched, now, dry_run, listing
+    )
+    return rc, patched
+
+
+def test_a_repo_published_before_the_cutoff_is_made_private_again(monkeypatch):
+    rc, patched = _reprivatise(
+        monkeypatch,
+        _choice_rows(
+            ("assignment-1-ada-l", "public"), ("assignment-1-ben-k", "private")
+        ),
+    )
+    assert rc == 0
+    # One PATCH, for the one repo whose row says public. Nothing is read of its own: the
+    # tick's listing already carries every row's visibility.
+    assert patched == [("assignment-1-ada-l", "private")]
+
+
+def test_the_public_log_counts_the_repos_and_never_names_one(monkeypatch, capsys):
+    # `<slug>-<handle>` is a student's handle and this line goes into a PUBLIC workflow
+    # log, so the count is what is printed and the names go to `log_person`.
+    _reprivatise(monkeypatch, _choice_rows(("assignment-1-ada-l", "public")))
+    out = capsys.readouterr().out
+    assert "1 repo(s) published before the cutoff" in out
+    assert "ada-l" not in out
+
+
+def test_after_the_cutoff_the_students_own_flag_stands(monkeypatch):
+    # The whole point of the shape: the assignment page promises a student their repo is
+    # theirs to publish once it has been marked, and a pass that kept flipping it back
+    # would make that promise false.
+    _rc, patched = _reprivatise(
+        monkeypatch,
+        _choice_rows(("assignment-1-ada-l", "public")),
+        now=CUTOFF + timedelta(minutes=1),
+    )
+    assert patched == []
+
+
+def test_a_repo_that_is_already_private_is_never_patched(monkeypatch):
+    _rc, patched = _reprivatise(
+        monkeypatch, _choice_rows(("assignment-1-ada-l", "private"))
+    )
+    assert patched == []
+
+
+def test_an_archived_repo_is_left_alone(monkeypatch):
+    # Read-only, so the PATCH would 403 on every tick for the rest of the term.
+    _rc, patched = _reprivatise(
+        monkeypatch, _choice_rows(("assignment-1-ada-l", "public"), archived=True)
+    )
+    assert patched == []
+
+
+@pytest.mark.parametrize("visibility", ["private", "public"])
+def test_no_other_shape_has_its_visibility_touched(monkeypatch, visibility):
+    # A `public` assignment's repos are public because the assignment said so; a `private`
+    # one's disagreement is a digest fault, not something this pass corrects behind
+    # somebody's back.
+    _rc, patched = _reprivatise(
+        monkeypatch,
+        _choice_rows(("assignment-1-ada-l", "public")),
+        visibility=visibility,
+    )
+    assert patched == []
+
+
+def test_a_listing_that_could_not_be_read_flips_nothing(monkeypatch):
+    # "We could not look" is not "nothing is public": guessing either way costs a PATCH
+    # per student per tick, or a cohort's work left open.
+    assert _reprivatise(monkeypatch, None) == (0, [])
+
+
+def test_a_dry_run_flips_nothing(monkeypatch):
+    _rc, patched = _reprivatise(
+        monkeypatch, _choice_rows(("assignment-1-ada-l", "public")), dry_run=True
+    )
+    assert patched == []
+
+
+def test_a_failed_patch_is_counted(monkeypatch):
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(visibility="student_choice"),
+    )
+    monkeypatch.setattr(scheduler, "set_visibility", lambda *a, **k: False)
+    sched = _assignments(
+        **{
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                handout_datetime=datetime(2026, 10, 1, 9, 0, tzinfo=BERLIN),
+                due_datetime=CUTOFF,
+            )
+        }
+    )
+    rows = _choice_rows(("assignment-1-ada-l", "public"))
+    assert (
+        scheduler._reprivatise_student_repos(
+            "Course-Org",
+            "Cohort-f2026",
+            sched,
+            datetime(2026, 10, 14, tzinfo=BERLIN),
+            False,
+            {r["name"]: r for r in rows},
+        )
+        == 1
+    )
+
+
+def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(visibility="student_choice"),
+    )
+    patched: list = []
+    monkeypatch.setattr(
+        scheduler,
+        "set_visibility",
+        lambda *a, **k: patched.append(a) or True,
+    )
+    sched = _assignments(
+        **{
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026", due_datetime=CUTOFF
+            )
+        }
+    )
+    rows = _choice_rows(("assignment-1-ada-l", "public"))
+    scheduler._reprivatise_student_repos(
+        "Course-Org",
+        "Cohort-f2026",
+        sched,
+        datetime(2026, 10, 14, tzinfo=BERLIN),
+        False,
+        {r["name"]: r for r in rows},
+    )
+    assert patched == []
+
+
+def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
+    # The shape decides WHICH repos are frozen and whether each pin is narrowed to a
+    # folder. Off the same memoised read that answers group-vs-individual, and never
+    # guessed downstream: a wrong answer freezes the cohort against repos that do not
+    # exist and cannot be corrected afterwards, because the snapshot is write-once.
+    taken: list[dict] = []
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(
+        scheduler,
+        "snapshot_assignment",
+        lambda org, slug, dl, **kw: (
+            taken.append(kw) or scheduler.SnapshotResult.WRITTEN
+        ),
+    )
+    _stub_autograde(monkeypatch)
+    monkeypatch.setattr(
+        scheduler, "_assignment_template", lambda org, slug, entry: "a-f2026"
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+    )
+    for submit_via, shared in (
+        ("shared_dropbox_repo", True),
+        ("assignment_repo", False),
+    ):
+        taken.clear()
+        monkeypatch.setattr(
+            scheduler,
+            "load_grading_spec",
+            # No late window: the freeze this test is about happens at the due date.
+            lambda org, template, via=submit_via: GradingSpec(
+                submit_via=via, late_window_days=0
+            ),
+        )
+        assert (
+            scheduler.run(
+                "Course-Org", "Cohort-Org", datetime(2026, 10, 14, tzinfo=timezone.utc)
+            )
+            == 0
+        )
+        assert taken[0]["shared"] is shared

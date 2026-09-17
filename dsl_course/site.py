@@ -39,10 +39,16 @@ from pathspec import GitIgnoreSpec
 
 from . import schedule
 from .course import (
+    CUTOFF_SENTENCE,
     PUBLISH_FILE,
     assignment_slug,
+    identifier,
+    late_rule,
     pages_repo,
+    row_name,
     session_number,
+    shape_note,
+    shared_repo,
     submission_repo,
     term_tag,
 )
@@ -59,7 +65,7 @@ from .discovery import (
 )
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
-from .grades import load_grading_spec
+from .grades import load_grading_spec, total_points
 from .log import log, log_err, log_step, log_withheld
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -899,7 +905,7 @@ def _lecture_entry(
     # `_row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - the same trim an assignment's README heading gets, because faculty
     # repeat the identifier just as readily in the plan as in a README.
-    subtitle, description = _row_name(row.subtitle, title), row.description
+    subtitle, description = row_name(row.subtitle, title), row.description
     reading_list = ""
     if sources:
         flags = ""
@@ -957,38 +963,6 @@ def _lecture_entry(
         f"---\n"
         f"{body}\n"
     )
-
-
-# Separators faculty put between a row's identifier and its name. Two dash characters are
-# in live sources already (`Assignment 1 - ...` and `Assignment 1 — ...`), which is exactly
-# why this is a set and not a `-`.
-_NAME_SEPARATORS = "-\u2013\u2014:|"
-
-
-def _row_name(declared: str, identifier: str) -> str:
-    """A row's NAME out of what faculty wrote, given the identifier the site already shows
-    in bold beside it - so the pair reads "Session 3 / Probability theory" and never
-    "Session 3 / Session 3".
-
-    Faculty conventionally repeat the identifier: a template README opens `# Assignment 1 -
-    linear regression from scratch`, and a `releases:` entry is as likely to say
-    `title: Lab 1` as to name the lab. Printed whole under the identifier that reads
-    "Assignment 1 / Assignment 1 - linear regression from scratch" and "Lab 1 / Lab 1", so
-    drop the prefix and whatever separates it.
-
-    Text that does NOT open with the identifier (`Group project - an end-to-end modelling
-    report`) is the name already and is returned as it stands. Casefolded, so text that
-    differs from the identifier only in capitalisation still matches."""
-    name = declared.strip()
-    if name.casefold().startswith(identifier.casefold()):
-        rest = name[len(identifier) :].lstrip()
-        # Only when a separator actually follows: `Assignment 10` must not be read as
-        # `Assignment 1` plus the name "0".
-        if rest[:1] in tuple(_NAME_SEPARATORS):
-            return rest[1:].strip()
-        if not rest:
-            return ""
-    return name
 
 
 def _assignment_entry(
@@ -1077,36 +1051,103 @@ def _assignment_entry(
     # template per process; the cohort's schedule.yml, which the site used to read it
     # from for free, no longer has a say.
     spec = load_grading_spec(course_org, repo)
-    repo_name = submission_repo(
-        slug, "<your-team>" if spec.is_group else "<your-handle>"
-    )
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so
     # a row published as "Assignment 2" became "Assignment 1 - linear regression from
     # scratch (individual)" the moment it shipped - the same row apparently becoming a
     # different thing. Exactly `_lecture_entry`'s split: `title` identifies, `subtitle`
     # names (and the theme renders the pair identically for both).
-    title = slug.replace("-", " ").title()
+    title = identifier(slug)
     # The plan's own declaration wins, and is the only one that can appear BEFORE hand-out:
     # the README it otherwise comes from is embargoed until then.
     subtitle = found[1].title if found else ""
-    # `repo_name` either way - the shape is the plan's, known before anything ships - and
-    # `repo_url` only once there is something at the other end of it. So the theme tests
-    # the flag for state and the URL only for "have I somewhere to link", rather than
-    # inferring one from the other.
-    repo_lines = [f'repo_name: "{q(repo_name)}"']
-    # The same spec, again: `submit_via: external` means the work is handed in off GitHub
-    # (Moodle, Kaggle, in class) and the repo carries only the brief. Off the flag the
-    # theme says so; without it both the page and the due row told a Moodle cohort to
-    # submit by pushing to `main`. Written whatever the handout state, because the shape
-    # it describes - like `repo_name` - is the spec's and is known before anything ships.
-    if spec.submit_external:
-        repo_lines.append("submit_external: true")
-    if out:
-        repo_lines.insert(
-            0,
-            f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"',
-        )
+    external = spec.submit_external
+    # Where the work goes. `submit_shape` is the SHAPE in one word (`course.submit_shape`:
+    # `assignment-repo-private`, `assignment-repo-public`, `external`), written whatever
+    # the handout state
+    # because it is the plan's and is known before anything ships - the theme `case`s on
+    # it, and without it both the page and the due row told a Moodle cohort to submit by
+    # pushing to `main`. ONE key and not the `submit_via`/`visibility` pair it is derived
+    # from: the two are orthogonal in the config and are not on the page, and a theme that
+    # branched on both had to be re-opened for every shape that is neither. An ADDRESS is a
+    # place to go NOW, so `repo_url` and `submit_url` both wait until there is something at
+    # the other end of them; a shape that creates no repo has no name to print at all.
+    repo_lines = [f'submit_shape: "{spec.submit_shape}"']
+    # Whose folder, or whose repo: a group assignment fans out per TEAM, and the two words
+    # are the same word wherever the page names one.
+    whose = "<your-team>" if spec.is_group else "<your-handle>"
+    repo_name = ""
+    if external:
+        if out and spec.submit_url:
+            repo_lines.append(f'submit_url: "{q(spec.submit_url)}"')
+            repo_lines.append(f'submit_host: "{q(spec.submit_host)}"')
+    elif spec.submit_shared:
+        # The REAL name, and a real URL: there is one drop box for the whole cohort, so
+        # unlike every other shape the page can name the repo exactly rather than describe
+        # its shape. No `repo_name_is_shape` with it - see below.
+        repo_name = shared_repo(slug)
+        repo_lines.append(f'submit_path: "{whose}/"')
+        if out:
+            repo_lines.append(
+                f'repo_url: "https://github.com/{cohort_org}/{q(repo_name)}"'
+            )
+        repo_lines.append(f'repo_name: "{q(repo_name)}"')
+    else:
+        repo_name = submission_repo(slug, whose)
+        if out:
+            repo_lines.append(
+                f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"'
+            )
+        repo_lines.append(f'repo_name: "{q(repo_name)}"')
+        # Whether `repo_name` is a SHAPE to substitute a handle into, or a real repo
+        # name. The theme marks the button and the link for `open_in.html` on this and on
+        # nothing else: a shared drop box is named exactly, has no `<your-handle>` to
+        # replace, and a rewrite of it would point every reader at a repo that does not
+        # exist. One flag rather than a second `case` in the theme, so a shape added later
+        # says which it is rather than being matched by name.
+        repo_lines.append("repo_name_is_shape: true")
+    # What happens after the deadline, as the sentence the page's callout closes with
+    # (`course.late_rule`, off the assignment's own grading_config.yml like every other
+    # shape fact). Written for every TIMED shape and for no other: `external` creates no
+    # repo, so no commit is pinned, no day is counted and no penalty is ever applied
+    # (`course.collects_commits`) - a rule quoted there would be about a deadline this
+    # toolkit does not hold. The page alone, not the due row: the row is a glance at WHEN
+    # and WHERE, and the rule belongs beside the answer it qualifies.
+    # When the work is READ, closing the route the callout has just given - one sentence
+    # from `course.CUTOFF_SENTENCE`, which the repo's own About line carries too, so the
+    # page and the repo cannot come to name two different moments. Front matter rather
+    # than a line in the layout for that reason alone: three arms of one `case` would
+    # otherwise hold three copies of it, and the About line a fourth.
+    # Gated exactly like `late_rule` below, and for the same reason: `external` pins no
+    # commit, so there is no `main` for a cutoff to be read off.
+    cutoff_fm = (
+        f'cutoff_sentence: "{q(CUTOFF_SENTENCE)}"\n' if spec.collects_commits else ""
+    )
+    late_fm = (
+        f'late_rule: "{q(late_rule(spec.late_window_days, spec.late_penalty_per_day))}"\n'
+        if spec.collects_commits
+        else ""
+    )
+    # What the assignment is out of, off the `questions:` maxima it declares - the same
+    # sum the gradebook prints beside a score (`grades.total_points`), so the two cannot
+    # disagree. Written only when there IS one: `questions:` is optional, and a course may
+    # write `Q1: see rubric`, where there is no total to print at all. The brief asks
+    # nobody to type it (`scaffold._brief_stub`): a fact the assignment already declares
+    # is read from the declaration. The page alone, like `late_rule` - the due row is a
+    # glance at WHEN and WHERE.
+    points = total_points(spec)
+    points_fm = f'max_points: "{points}"\n' if points else ""
+    # Who can read the repo this shape hands out, as the aside the layout prints under the
+    # brief (`course.SHAPE_NOTES` - the same sentence the repo's own About line carries, so
+    # the page and the repo cannot come to say different things). Written for every shape
+    # that hands one out, the ordinary private repo included; empty for `external`, which
+    # hands out no repo for a sentence to be about.
+    # The PAGE alone: the due row is a glance at when and where, and a warning in it would
+    # be read on the schedule by everyone, about every assignment, at once.
+    # And only once the brief is out: a warning about a repo that does not exist yet would
+    # sit above the line saying the assignment has not been handed out.
+    note = shape_note(spec.submit_shape) if out else ""
+    note_fm = f'shape_note: "{q(note)}"\n' if note else ""
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1116,7 +1157,7 @@ def _assignment_entry(
         readme = get_file_content(course_org, repo, "README.md") or ""
         for line in readme.splitlines():
             if line.startswith("# ") and not subtitle:
-                subtitle = _row_name(line[2:], title)
+                subtitle = row_name(line[2:], title)
                 break
         brief = "\n".join(
             ln for ln in readme.splitlines() if not ln.startswith("# ")
@@ -1137,10 +1178,19 @@ def _assignment_entry(
         # "**<what> is not yet released** - <where it will be> when <it is>", bold lead
         # inside italics. They render in the same table column and on adjacent tabs, so
         # they read as one status vocabulary or as two.
-        body = (
-            f"_**{title} is not yet released** - your private "
-            f"`{repo_name}` repo appears when it is._"
-        )
+        # The word describes the repo the handout will CREATE, which for the shape whose
+        # flag the students hold is a private one - `student_choice` is a rule about who
+        # may change it later, not a repo anybody is ever handed.
+        born = "private" if spec.visibility_is_students else spec.visibility
+        if external:
+            coming = "the brief appears here when it is"
+        elif spec.submit_shared:
+            # Not "your repo": there is one, it is the cohort's, and what is the student's
+            # own is a folder in it.
+            coming = f"the `{repo_name}` drop box appears when it is"
+        else:
+            coming = f"your {born} `{repo_name}` repo appears when it is"
+        body = f"_**{title} is not yet released** - {coming}._"
     title = q(title)
     # After the branch above, which is where a released entry learns its name from the
     # README. The due row is the same assignment, so it shows the same two halves -
@@ -1155,6 +1205,10 @@ def _assignment_entry(
         f"{sub_fm}"
         f"{flags}"
         f"{repo_fm}"
+        f"{cutoff_fm}"
+        f"{late_fm}"
+        f"{points_fm}"
+        f"{note_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"

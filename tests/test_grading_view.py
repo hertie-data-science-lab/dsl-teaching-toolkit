@@ -1,10 +1,11 @@
-"""What a student is shown: the allowlisted view, the private gradebook, the feedback
-comments and the registrar's export.
+"""What a student is shown: the allowlisted view, the private gradebook and the
+registrar's export.
 
-The promise these tests hold to is a privacy one, and it has three parts: a student sees
-their own final grade and their own feedback; they never see the grader's notes or any
-other `info:` fact; and no member of a team ever sees another member's marks, feedback or
-adjustment. Most of what follows is written as sentinels - a unique string in every field
+Marks and feedback go to ONE place, the student's gradebook, so that is the whole of what
+a student reads here. The promise these tests hold to is a privacy one, and it has three
+parts: a student sees their own final grade and their own feedback; they never see the
+grader's notes or any other `info:` fact; and no member of a team ever sees another
+member's marks, feedback or adjustment. Most of what follows is written as sentinels - a unique string in every field
 of every person - because that is the only way to assert the absence of a leak rather
 than the presence of the fields we happened to think of.
 """
@@ -18,17 +19,13 @@ from dsl_course.grades import (
     NOTES_KEY,
     STUDENT_VIEW_KEYS,
     SheetSpec,
-    TeamResult,
     _cell,
     build_gradebooks,
-    individual_issue_body,
     load_sheets,
     needs_hand_decision,
     render_readme,
     render_registrar_csv,
     student_view,
-    team_issue_body,
-    team_result,
 )
 
 TITLE = "Neural networks from scratch"
@@ -123,7 +120,6 @@ def everything_a_student_reads() -> dict[str, str]:
     """Every artefact this module hands to a student or a registrar, as text, keyed by
     what it is - so a failure names the file the sentinel escaped into."""
     books = sentinel_books()
-    sheet = sentinel_sheet()
     pages = {
         f"{handle} gradebook README": render_readme(
             handle, books[handle], SENTINEL_TITLES
@@ -132,9 +128,6 @@ def everything_a_student_reads() -> dict[str, str]:
     }
     pages |= {f"{handle} grades.yml view": repr(books[handle]) for handle in MEMBERS}
     pages["registrar CSV"] = render_registrar_csv(sentinel_students(), books)
-    pages["team comment"] = team_issue_body(
-        TITLE, team_result(group_spec(), "team-alpha", sheet["teams"]["team-alpha"])
-    )
     return pages
 
 
@@ -163,24 +156,16 @@ def test_the_graders_own_notes_never_reach_anything_a_student_reads():
             assert sentinel not in page, f"{sentinel} reached the {name}"
 
 
-def test_the_team_comment_carries_no_member_field_at_all():
-    # A team repo grants the whole team `maintain`, so this comment is read by everyone.
-    # TeamResult is what makes the leak impossible rather than merely absent.
-    sheet = sentinel_sheet()
-    body = team_issue_body(
-        TITLE, team_result(group_spec(), "team-alpha", sheet["teams"]["team-alpha"])
-    )
-    for handle in MEMBERS:
-        assert f"FEEDBACK-{handle}-SENTINEL" not in body
-        assert FINALS[handle] not in body
-    assert not [f for f in TeamResult.__dataclass_fields__ if "member" in f]
-    # ... and each member's own feedback still reaches their own gradebook.
+def test_the_shared_team_feedback_reaches_every_members_own_gradebook():
+    # A group result is split in two: the team's feedback is shared and each member reads
+    # it in their OWN gradebook, beside their own final grade and nobody else's. There is
+    # no team-wide channel to leak the rest into - a mark only ever goes to one person's
+    # repo.
     books = sentinel_books()
     for handle in MEMBERS:
-        assert f"FEEDBACK-{handle}-SENTINEL" in render_readme(
-            handle, books[handle], SENTINEL_TITLES
-        )
-    assert "TEAM-FEEDBACK-SENTINEL" in body
+        page = render_readme(handle, books[handle], SENTINEL_TITLES)
+        assert "TEAM-FEEDBACK-SENTINEL" in page
+        assert f"FEEDBACK-{handle}-SENTINEL" in page
 
 
 def test_a_gradebook_shows_the_final_grade_and_never_the_parts_it_came_from():
@@ -188,8 +173,6 @@ def test_a_gradebook_shows_the_final_grade_and_never_the_parts_it_came_from():
     # grader's working, not the student's result. Reading your own deduction beside the
     # mark your team-mates share is the conversation this workflow exists to avoid.
     for name, page in everything_a_student_reads().items():
-        if name == "team comment":
-            continue  # the team's score IS the team's to see, in the team's own repo
         assert TEAM_TOTAL not in page, f"the team score reached the {name}"
         for mark in QUESTION_MARKS:
             assert mark not in page, f"a question's mark reached the {name}"
@@ -223,6 +206,27 @@ def test_a_group_members_grade_is_the_team_total_plus_their_own_adjustment():
     assert view["max_points"] == "50"
     assert view["team"] == "team-alpha"
     assert "score" not in view  # a group's score is the team's, not the member's
+
+
+def test_an_external_groups_member_is_shown_the_team_score_in_their_gradebook():
+    # The rule that withholds a team's score from a member exists because the score is
+    # already in the team's own repo, where every member can read it. An external group
+    # assignment has no repo, so the gradebook is the ONLY place that score can be seen -
+    # and withholding it there leaves a team with a grade and no marks behind it.
+    sheet = sentinel_sheet()
+    view = student_view(
+        group_spec(submit_via="external"),
+        "team-alpha",
+        sheet["teams"]["team-alpha"],
+        "ben-k",
+    )
+    assert view["score"] == {"Q1": 14, "Q2": 13, "Q3": 10, "Q4": 6}
+    assert (
+        view["final_grade"] == "40"
+    )  # unchanged: still the team total + own adjustment
+    assert view["team_feedback"] == "TEAM-FEEDBACK-SENTINEL"
+    # The allowlist is still the guarantee: the relaxation opens no new key at all.
+    assert set(view) <= set(STUDENT_VIEW_KEYS)
 
 
 def test_the_late_penalty_is_taken_before_the_adjustment_is_added():
@@ -325,9 +329,9 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
         "\n"
         "| Assignment | Final grade | Submitted | Late | Team |\n"
         "|---|---|---|---|---|\n"
-        "| Neural networks from scratch | 40 / 50 | 3 Oct 22:14 | on time | team-alpha |\n"
+        "| Assignment 1 · Neural networks from scratch | 40 / 50 | 3 Oct 22:14 | on time | team-alpha |\n"
         "\n"
-        "## Neural networks from scratch\n"
+        "## Assignment 1 · Neural networks from scratch\n"
         "**Final grade:** 40 / 50\n"
         "\n"
         "Your section of the write-up repeats the Q4 error; see the team feedback.\n"
@@ -342,7 +346,7 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
     ("spec", "expected"),
     [
         # Handed in off GitHub: there was never a commit to time.
-        (individual_spec(submit_external=True), "external"),
+        (individual_spec(submit_via="external"), "external"),
         # A GitHub assignment whose repo nobody pushed to. Calling this one "external"
         # told a student who had missed the deadline that their work was handed in
         # somewhere else - and told their grader the same.
@@ -354,30 +358,7 @@ def test_the_submitted_column_tells_the_two_kinds_of_blank_apart(spec, expected)
     sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 9}}}
     books = build_gradebooks({"assignment-1": (spec, sheet)})
     row = render_readme("ada-l", books["ada-l"], {}).splitlines()[4]
-    assert row == f"| assignment-1 | 9 | {expected} |  |  |"
-
-
-def test_a_mark_on_a_repo_nothing_was_pushed_to_says_that_in_the_comment():
-    # A 0 with no explanation is the one grade a student writes in about.
-    sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 0}}}
-    view = build_gradebooks({"assignment-1": (individual_spec(), sheet)})["ada-l"][
-        "assignment-1"
-    ]
-    assert individual_issue_body("Introduce Yourself", view) == (
-        "### Feedback · Introduce Yourself\n"
-        "**Grade:** 0\n"
-        "\n"
-        "No submission was recorded.\n"
-    )
-
-
-def test_an_assignment_handed_in_off_github_is_never_called_unsubmitted():
-    spec = individual_spec(submit_external=True)
-    sheet = {"submissions": {"ada-l": {"score_individual": 9}}}
-    view = build_gradebooks({"assignment-1": (spec, sheet)})["ada-l"]["assignment-1"]
-    body = individual_issue_body("Introduce Yourself", view)
-    assert "No submission was recorded." not in body
-    assert "submitted external" not in body  # nor does it read as a timestamp
+    assert row == f"| Assignment 1 | 9 | {expected} |  |  |"
 
 
 def test_one_row_per_assignment_sorted_by_slug():
@@ -389,8 +370,8 @@ def test_one_row_per_assignment_sorted_by_slug():
         }
     )
     readme = render_readme("ada-l", books["ada-l"], {})
-    assert readme.index("| assignment-1 ") < readme.index("| assignment-2 ")
-    assert readme.index("## assignment-1") < readme.index("## assignment-2")
+    assert readme.index("| Assignment 1 ") < readme.index("| Assignment 2 ")
+    assert readme.index("## Assignment 1") < readme.index("## Assignment 2")
 
 
 @pytest.mark.parametrize(
@@ -452,67 +433,53 @@ def test_the_registrar_csv_has_one_column_per_assignment_sorted():
     assert lines[1] == "Ada@students.hertie-school.org,Ada L.,ada-l,9,8"
 
 
-# ----------------------------------------------------------------- the two comments
+# ---------------------------------------------------- one channel, and only the one
 
 
-def test_the_team_comment_is_exactly_the_text_the_spec_shows():
-    sheet = {
-        "teams": {
-            "team-alpha": {
-                "info": {"submitted": "2026-10-03T22:14+02:00", "days_late": 0},
-                "score_group": {"Q1": 14, "Q2": 13, "Q3": 10, "Q4": 6},
-                "feedback_group": (
-                    "Clean derivation in Q1-Q3. Q4 confuses the marginal with the "
-                    "conditional. Plots are excellent.\n"
-                ),
-                "members": {"ada-l": {}},
-            }
-        }
-    }
-    body = team_issue_body(
-        TITLE, team_result(group_spec(), "team-alpha", sheet["teams"]["team-alpha"])
-    )
-    assert body == (
-        "### Feedback · Neural networks from scratch\n"
-        "**Team score:** 43 / 50 (Q1 14, Q2 13, Q3 10, Q4 6) · submitted on time\n"
-        "\n"
-        "Clean derivation in Q1-Q3. Q4 confuses the marginal with the conditional. "
-        "Plots are excellent.\n"
-        "\n"
-        "Your own final grade and personal feedback are in your private gradebook: "
-        "`grades-<your handle>`.\n"
-    )
-
-
-def test_the_individual_comment_is_exactly_the_text_the_spec_shows():
-    spec = individual_spec(submit_external=True)
-    block = {
-        "score_individual": 9,
-        "feedback_individual": (
-            "Clear mapping of the screening-test example to Bayes' rule. Slightly over "
-            "two minutes.\n"
-        ),
-        NOTES_KEY: "not for them",
-    }
-    view = student_view(spec, "ada-l", block, "ada-l")
-    assert individual_issue_body("Introduce Yourself", view) == (
-        "### Feedback · Introduce Yourself\n"
-        "**Grade:** 9\n"
-        "\n"
-        "Clear mapping of the screening-test example to Bayes' rule. Slightly over two "
-        "minutes.\n"
-    )
-
-
-def test_a_late_individual_comment_shows_the_arithmetic_done_to_the_work():
+def test_a_late_mark_carries_its_arithmetic_into_the_gradebook():
+    # The score, the days and the deduction are what account for a final grade a student
+    # cannot otherwise reconstruct. They reach them in the gradebook, which is the only
+    # place any of it is written now.
     spec = individual_spec(
         questions={"Q1": "50"}, late_window_days=7, late_penalty_per_day="10%"
     )
     block = {"info": {"days_late": 2}, "score_individual": 20}
     view = student_view(spec, "ada-l", block, "ada-l")
-    assert individual_issue_body("Introduce Yourself", view).splitlines()[1] == (
+    assert view["score"] == 20
+    assert view["penalty"] == "-20%"
+    assert view["final_grade"] == "16"
+    readme = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()
+    assert readme[4] == "| Assignment 1 | 16 / 50 | not submitted | 2 days late |  |"
+    # The whole working on one line, under the heading: 16 out of 50 is otherwise a mark
+    # a student has no way to tell from a harsher one.
+    assert readme[7] == (
         "**Score:** 20 / 50 · 2 days late · penalty -20% · **Final grade:** 16 / 50"
     )
+
+
+def test_an_on_time_mark_says_so_rather_than_leaving_the_line_out():
+    # The same line, minus the deduction there was none of. A section that showed the
+    # arithmetic only when it cost something made "on time" the silent case, and a student
+    # comparing two assignments could not tell it from a section written before the rule
+    # existed.
+    spec = individual_spec(
+        questions={"Q1": "50"}, late_window_days=7, late_penalty_per_day="10%"
+    )
+    block = {"info": {"days_late": 0}, "score_individual": 20}
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert "penalty" not in view
+    readme = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()
+    assert readme[7] == "**Score:** 20 / 50 · on time · **Final grade:** 20 / 50"
+
+
+def test_a_grade_with_no_score_behind_it_is_shown_on_its_own():
+    # An assignment handed in off GitHub counts no days and a hand-marked one has no score
+    # in the sheet, so there is no arithmetic to show - and `**Score:** 40 · **Final
+    # grade:** 40` would be arithmetic theatre.
+    spec = individual_spec(submit_via="external", questions={"Q1": "50"})
+    view = student_view(spec, "ada-l", {"score_individual": 40}, "ada-l")
+    readme = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()
+    assert readme[7] == "**Final grade:** 40 / 50"
 
 
 # ------------------------------------------------------- the sources marks come from

@@ -23,6 +23,19 @@ END = "# dsl-e2e:{run_id} end"
 _ASSIGNMENTS = "assignments:"
 
 
+def _rejoin(lines: list[str], text: str) -> str:
+    """`lines` back into one document, ending exactly as `text` did.
+
+    The edit is fenced so that what faculty wrote is untouched TO THE BYTE, and a forced
+    trailing newline broke that promise for a schedule.yml that had none: the run put the
+    block in, took it out again, and handed the cohort back a file one byte longer than it
+    borrowed - which the teardown's fidelity check reads as drift, because a blob sha
+    cannot tell a harmless newline from a real edit. Observable only since
+    `gh_contents.get_file_content` stopped stripping what it reads."""
+    end = "\n" if text.endswith("\n") else ""
+    return "\n".join(lines) + end
+
+
 def _fences(text: str, run_id: str) -> tuple[int, int] | None:
     """The line indices of this run's begin/end fences, or None if it has none."""
     lines = text.splitlines()
@@ -47,7 +60,7 @@ def insert_block(text: str, run_id: str, block: str) -> str:
     if span is not None:
         begin, end = span
         lines[begin : end + 1] = fenced.splitlines()
-        return "\n".join(lines) + "\n"
+        return _rejoin(lines, text)
     where = next(
         (i for i, line in enumerate(lines) if line.rstrip() == _ASSIGNMENTS), None
     )
@@ -57,7 +70,7 @@ def insert_block(text: str, run_id: str, block: str) -> str:
             "under - the cohort is not set up for the e2e pipeline"
         )
     lines[where + 1 : where + 1] = fenced.splitlines()
-    return "\n".join(lines) + "\n"
+    return _rejoin(lines, text)
 
 
 def remove_block(text: str, run_id: str) -> str:
@@ -69,7 +82,7 @@ def remove_block(text: str, run_id: str) -> str:
     begin, end = span
     lines = text.splitlines()
     del lines[begin : end + 1]
-    return "\n".join(lines) + "\n"
+    return _rejoin(lines, text)
 
 
 def put_schedule(cohort: str, text: str, sha: str) -> bool:
