@@ -86,7 +86,10 @@ COLLECT_SUBMISSIONS = "collect-submissions.yml"
 DISTRIBUTE_GRADES = "distribute-grades.yml"
 
 # The tier the demo org must be on for this to be testing what is about to be released.
-EXPECTED_TIER = "main"
+# The tiers a demo course may run while the harness drives it: `main` between merges,
+# `preview` while a branch is pinned there for inspection. Either way the tip must be THIS
+# checkout, which the sha check below enforces.
+EXPECTED_TIERS = ("main", "preview")
 
 SUBMISSION = "submission.py"
 
@@ -252,12 +255,14 @@ def _preflight(run_id: str) -> None:
     _assert_can_delete_repos()
 
     tier = _declared_tier()
-    assert tier == EXPECTED_TIER, f"{COURSE_ORG} runs {tier}, not {EXPECTED_TIER}"
+    assert tier in EXPECTED_TIERS, (
+        f"{COURSE_ORG} runs {tier}, not one of {EXPECTED_TIERS}"
+    )
 
-    tip = ghcli.gh_json("api", f"repos/{central.CENTRAL}/commits/{EXPECTED_TIER}")
+    tip = ghcli.gh_json("api", f"repos/{central.CENTRAL}/commits/{tier}")
     local = ghcli.git("rev-parse", "HEAD")[1].strip()
     assert tip["sha"] == local, (
-        f"{EXPECTED_TIER} is at {tip['sha'][:8]} but this checkout is at {local[:8]} - "
+        f"{tier} is at {tip['sha'][:8]} but this checkout is at {local[:8]} - "
         "`git checkout main && git pull`, or check out the SHA the demo org is running"
     )
 
