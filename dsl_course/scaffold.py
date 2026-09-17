@@ -603,12 +603,17 @@ _CONTRIBUTIONS_STUB = """\
 
 
 def _brief_stub(
-    title: str, defaults: dict, formats: list[str], submit_via: str = "assignment_repo"
+    title: str, formats: list[str], submit_via: str = "assignment_repo"
 ) -> str:
     """`README.md` on `main` - the page students read, and the only one only faculty can
     write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
-    unedited. The late-work line repeats what the course already declared, so the two
-    cannot disagree on the page a student actually opens.
+    unedited.
+
+    Points and nothing else on the facts line. The deadline and the late rule are the
+    assignment's page on the cohort site, which prints both off the plan and off this
+    assignment's own `grading_config.yml`; spelling either here as well is how a cohort
+    comes to read two answers to one question - and the copy that is hand-edited prose is
+    the one that goes stale.
 
     `formats` add the one line the stub is NOT free to leave to its author: what counts
     as handing each of them in (`_ARTEFACT_NOTE`), one per format. A brief that never says
@@ -616,30 +621,18 @@ def _brief_stub(
     nobody can mark.
 
     `submit_via` decides what "What to submit" asks for, and an `external` assignment
-    drops two things the rest of the stub carries. The repo collects nothing, so the
-    artefact sentences - "commit the notebook with its outputs saved" - would tell a
-    cohort to hand in where nothing is ever read from; and nothing is TIMED, so the late
-    line would quote a penalty no run can apply. The Feedback issue students open says the
-    hand-in is "outside GitHub (see the brief)", so the brief is the one place that can
-    say where it really goes."""
+    drops the artefact sentences the rest of the stub carries: the repo collects nothing,
+    so "commit the notebook with its outputs saved" would tell a cohort to hand in where
+    nothing is ever read from. The Feedback issue students open says the hand-in is
+    "outside GitHub (see the brief)", so the brief is the one place that can say where it
+    really goes."""
     external = submit_via == "external"
-    window = defaults.get("late_window_days")
-    penalty = defaults.get("late_penalty_per_day")
-    if not window:
-        late = "not accepted after the deadline"
-    elif penalty:
-        late = f"{penalty} per day, up to {window} days"
-    else:
-        late = f"accepted up to {window} days late"
-    facts = "**Points:** __ · **Due:** see the course schedule" + (
-        "" if external else f" · **Late work:** {late}"
-    )
     artefacts = (
         [] if external else [sentence for fmt in formats if (sentence := _hand_in(fmt))]
     )
     return (
         f"# {title}\n\n"
-        f"{facts}\n\n"
+        "**Points:** __\n\n"
         "## Task\n\n"
         "_Write the assignment here (dsl-stub: replace this whole file)._\n\n"
         "## What to submit\n\n"
@@ -1390,7 +1383,7 @@ def scaffold_assignment(
     # scaffold_materials seeds its skeleton: a re-run against a repo whose starter faculty
     # have since authored leaves it alone and logs the skip, and the repo they then author
     # by hand opens on one `init:` line rather than three identical ones.
-    seeds = {"README.md": _brief_stub(title, defaults, formats, submit_via)}
+    seeds = {"README.md": _brief_stub(title, formats, submit_via)}
     for fmt in formats:
         seeds[starter_name(fmt)] = _STARTERS[fmt][1](title)
     if kind == "group":

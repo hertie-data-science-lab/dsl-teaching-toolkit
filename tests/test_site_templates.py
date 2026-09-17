@@ -136,7 +136,7 @@ def documents(generated) -> list[dict]:
 @pytest.fixture(scope="module")
 def site_data(generated) -> dict:
     """`site.data` as Jekyll would see it: the generated `_data/*.yml` plus the seeded ones
-    (late_policy, previous_offering)."""
+    (previous_offering)."""
     data = {
         Path(rel).stem: yaml.safe_load(text)
         for rel, text in site_repo.seed_templates().items()
@@ -228,11 +228,12 @@ def _classes(text: str) -> set[str]:
     }
 
 
-# Everything else the toolkit renders and so has to style itself: the Updates box's inline
-# source link, the row of buttons beside every other file link, and the form that fills in
-# the profile the last two of those buttons need.
+# Everything else the toolkit renders and so has to style itself: an assignment page's
+# kicker line, the Updates box's inline source link, the row of buttons beside every other
+# file link, and the form that fills in the profile the last two of those buttons need.
 _OWN_CLASSES = frozenset(
     {
+        "post-kicker",
         "file-actions",
         "file-btns",
         "file-btn",
@@ -287,7 +288,7 @@ def test_an_empty_site_checkout_is_seeded_with_everything_a_site_needs(tmp_path)
     assert 'course_name: "Deep Learning"' in cfg
     assert f"{site_repo.THEME_REPO}@{site_repo.THEME_REF}" in cfg
     assert "collections:" in cfg
-    for rel in ("index.md", "schedule.md", "Gemfile", "_data/late_policy.yml"):
+    for rel in ("index.md", "schedule.md", "Gemfile", "_data/previous_offering.yml"):
         assert (tmp_path / rel).is_file(), rel
 
 
@@ -427,6 +428,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "submit_url",
         "submit_host",
         "due_event",
+        "late_rule",
     ],
 )
 def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
@@ -482,11 +484,6 @@ def test_an_external_assignment_is_never_told_to_push(generated):
             "{% elsif page.repo_url %}",
         ),
         _external_arm(
-            layout,
-            '{% if page.submit_shape == "external" and page.submit_url %}',
-            "{% elsif page.repo_url %}",
-        ),
-        _external_arm(
             due_row,
             '{%- if include.event.submit_shape == "external" -%}',
             "{%- elsif include.event.repo_name -%}",
@@ -513,18 +510,10 @@ def _gated_on_not_external(text: str) -> list[str]:
     ]
 
 
-@pytest.mark.parametrize(
-    "block",
-    ["{% include open_in.html %}", "<h3>Late Policy</h3>"],
-)
-def test_an_external_assignments_page_carries_no_repo_shaped_furniture(
-    generated, block
-):
-    # Two blocks on this page describe a repo that is not there. `open_in.html` is the
-    # "open files in your local copy - set up" strip, which rewrites repo shapes to the
-    # reader's own and has none to rewrite here; the Late Policy box quotes a rule about
-    # a deadline nothing in this toolkit holds, because `external` collects no commits, so
-    # no day is counted and no penalty is ever applied (`course.collects_commits`).
+def test_an_external_assignments_page_carries_no_repo_shaped_furniture(generated):
+    # `open_in.html` is the "open files in your local copy - set up" strip: it rewrites
+    # repo shapes to the reader's own, and this page has none to rewrite.
+    block = "{% include open_in.html %}"
     gated = _gated_on_not_external(_liquid_templates()["_layouts/assignment.html"])
     assert any(block in part for part in gated), block
     # ...and the fixture really does generate one of these pages for it to matter on.
@@ -532,12 +521,107 @@ def test_an_external_assignments_page_carries_no_repo_shaped_furniture(
     assert page["submit_shape"] == "external"
 
 
+def test_the_assignments_name_is_the_heading_and_its_identifier_the_kicker(generated):
+    # The page used to head itself "Assignment 5" and print the assignment's own name
+    # underneath at 1.15em, so the one line a student is looking for was the smaller of
+    # the two. The identifier stays - it is what ties the page to its schedule row - as a
+    # small line above the h1.
+    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
+    flat = " ".join(layout.split())
+    assert '<p class="post-kicker">{{ page.title }}</p>' in flat
+    assert '<h1 class="post-title">{{ page.subtitle }}</h1>' in flat
+    # A pending assignment has no name to show - the README it comes from is embargoed -
+    # so there the identifier is still the heading.
+    assert '{% else %} <h1 class="post-title">{{ page.title }}</h1>' in flat
+    assert "post-subtitle" not in layout
+    page = _front_matter(generated["collections"]["_assignments"]["01-assignment-1.md"])
+    assert page["title"] == "Assignment 1"
+    assert page["subtitle"] == "Predicting rainfall from station data"
+    pending = _front_matter(
+        generated["collections"]["_assignments"]["02-assignment-2.md"]
+    )
+    assert "subtitle" not in pending
+
+
+def test_the_deadline_is_bold_under_the_release_date_and_printed_once():
+    # The deadline is what the page is opened for, so it sits with the release date at the
+    # top rather than in a "Due Date:" line further down - and it is printed ONCE: the
+    # same date in two places is two places to correct.
+    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
+    flat = " ".join(layout.split())
+    assert (
+        '<p class="post-meta"><strong>Due {{ page.due_event.date | date: "%A" }} '
+        "{{ page.due_event.date | date: site.dateformat }} "
+        '{{ page.due_event.date | date: "%H:%M" }}</strong></p>' in flat
+    )
+    assert "Due Date:" not in flat
+    assert flat.count("page.due_event.date") == 3  # weekday, date, time - one line
+
+
+def test_the_page_says_where_the_work_goes_exactly_once():
+    # The callout is the one place. The same two routes were repeated as a grey line under
+    # the whole brief, which is how the page came to answer "where do I hand in?" twice
+    # and, once the two were reworded apart, differently.
+    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
+    flat = " ".join(layout.split())
+    assert flat.count("page.repo_url") == 2  # the arm's own `elsif`, and its one button
+    assert "Submit by pushing" not in flat and "Hand in at" not in flat
+    # The arm's own `if`, its button, and the "See the brief" that stands in for an
+    # address the assignment never named.
+    assert flat.count("page.submit_url") == 3
+
+
+def test_a_timed_assignment_carries_the_late_rule_and_an_external_one_carries_none(
+    generated,
+):
+    # What happens after the deadline belongs with the deadline's own answer, so it closes
+    # the callout paragraph - off `late_rule`, which site.py writes for a shape that
+    # collects commits and for no other. `external` creates no repo, pins no commit and
+    # counts no day (`course.collects_commits`), so a rule quoted there would describe a
+    # deadline this toolkit does not hold.
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    flat = " ".join(_strip_comments(layout).split())
+    sentence = "{% if page.late_rule %}Late work: {{ page.late_rule }}.{% endif %}"
+    assert flat.count(sentence) == 1
+    repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
+    assert "page.late_rule" in repo_arm
+    external = _external_arm(
+        layout,
+        '{% if page.submit_shape == "external" %}',
+        "{% elsif page.repo_url %}",
+    )
+    assert "late_rule" not in external
+    timed = _front_matter(
+        generated["collections"]["_assignments"]["01-assignment-1.md"]
+    )
+    assert timed["late_rule"] == "10% per day, up to 7 days"
+    off_github = _front_matter(
+        generated["collections"]["_assignments"]["03-assignment-3.md"]
+    )
+    assert "late_rule" not in off_github
+
+
+def test_no_site_carries_a_late_policy_of_its_own_any_more():
+    # The seeded `_data/late_policy.yml` was INSTRUCTOR-OWNED prose ("8 free late days")
+    # beside a rule the toolkit actually enforces from each assignment's own
+    # `grading_config.yml`, and the two disagreed on every live site. The data file, its
+    # include and the box that rendered them are gone; a live site keeps its orphan copy
+    # and nothing reads it.
+    assert not [rel for rel in _templates() if "late_policy" in rel]
+    assert not [rel for rel in site_repo.seed_templates() if "late_policy" in rel]
+    for rel, text in _templates().items():
+        assert "late_policy" not in text, rel
+
+
 def test_a_pending_assignment_gets_no_callout_at_all(generated):
     # The callout answers "where does the work go, now?", and for an assignment still to
     # come there is no brief to read and no address to go to. The layout gates the whole
     # block rather than each arm, so this holds for every shape.
     layout = _liquid_templates()["_layouts/assignment.html"]
-    gated = layout.split("{% unless page.handout_pending %}", 1)[1].split(
+    # To the LAST `endunless`, not the first: the external arm has an `unless` of its own
+    # for the sentence that stands in for an address it was never given, and the gate is
+    # the outermost of the two.
+    gated = layout.split("{% unless page.handout_pending %}", 1)[1].rsplit(
         "{% endunless %}", 1
     )[0]
     assert "Handed in outside GitHub" in gated

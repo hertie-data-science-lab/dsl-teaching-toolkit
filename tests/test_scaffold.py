@@ -535,10 +535,8 @@ def test_an_external_hand_in_asks_the_brief_where_it_goes(fake, monkeypatch):
 
 
 def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
-    # Two things the rest of the stub carries are wrong on a hand-in the repo never
-    # collects: "commit the notebook with its outputs saved" tells a cohort to hand in
-    # where nothing is read from, and the late line quotes a penalty no run can apply -
-    # `external` is timed by nobody here (`course.collects_commits`).
+    # "Commit the notebook with its outputs saved" tells a cohort to hand in where nothing
+    # is ever read from: the repo collects nothing on a hand-in made off GitHub.
     _clone_ok(monkeypatch, _git_ok)
 
     assert (
@@ -550,8 +548,7 @@ def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
 
     brief = fake.files[("assignment-1-f2026", "README.md")]
     assert "Commit the notebook" not in brief
-    assert "**Late work:**" not in brief
-    assert "**Points:** __ · **Due:** see the course schedule\n" in brief
+    assert "**Points:** __\n" in brief
     assert "`submit_url:`" in brief  # and it says where the address goes instead
 
 
@@ -568,7 +565,12 @@ def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     brief = fake.files[("assignment-1-f2026", "README.md")]
     assert brief.startswith("# Neural networks from scratch\n")
     assert "## Task" in brief and "## What to submit" in brief
-    assert "**Points:** __" in brief and "**Due:** see the course schedule" in brief
+    # Points and nothing else on the facts line. The deadline and the late rule are the
+    # assignment's page on the cohort site, which prints both off the plan and off this
+    # assignment's own grading_config.yml - spelt here as well, the hand-edited copy is
+    # the one that goes stale and a cohort reads two answers to one question.
+    assert "**Points:** __\n" in brief
+    assert "Due" not in brief and "Late work" not in brief
 
 
 def test_a_format_of_none_seeds_the_brief_and_nothing_else(fake, monkeypatch):

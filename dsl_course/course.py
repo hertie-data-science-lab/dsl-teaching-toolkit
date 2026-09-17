@@ -390,6 +390,25 @@ def receipt_marker(sha: str, event: str) -> str:
     return f"<!-- dsl-receipt:{sha or 'none'}:{event} -->"
 
 
+def late_rule(window_days: int | None, penalty: str | None) -> str:
+    """The late-work rule an assignment declares, as the half-sentence that follows
+    "Late work: " - `10% per day, up to 7 days`, `accepted up to 7 days late`, or `not
+    accepted after the deadline`.
+
+    The rule itself, spelt once. It is the deadline half of an assignment's page on the
+    cohort site, and a second spelling of it elsewhere is how one cohort comes to read two
+    different rules for one deadline.
+
+    NOT `grades.late_policy`, which answers a different question: that is this rule against
+    a real cutoff DATE (`accepted until Sunday 11 October 2026, 23:59 ...`), which only an
+    assignment with a due date on record can be told."""
+    if not window_days:
+        return "not accepted after the deadline"
+    if penalty:
+        return f"{penalty} per day, up to {window_days} days"
+    return f"accepted up to {window_days} days late"
+
+
 def _late_phrase(days_late: int, penalty_display: str = "") -> str:
     """`on time`, `2 days late`, or `2 days late (-20%)`."""
     if days_late <= 0:

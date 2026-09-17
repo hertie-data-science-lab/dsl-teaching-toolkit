@@ -137,10 +137,15 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
 
 
 def _grading_spec(_org: str, repo: str):
-    """The assignment's own definition, which names the repo shape a student looks for and
-    says whether the work is handed in on GitHub at all. The fixture's assignments are
-    individual, so the empty file's defaults are otherwise exactly right - it is stubbed
-    only because the read would otherwise go to GitHub."""
+    """The assignment's own definition, which names the repo shape a student looks for,
+    says whether the work is handed in on GitHub at all, and declares what happens to work
+    that arrives late. The fixture's assignments are individual, so the rest of the empty
+    file's defaults are exactly right - it is stubbed only because the read would otherwise
+    go to GitHub.
+
+    The default carries a late WINDOW and a penalty and the named shapes do not, so the
+    generated pages hold both halves of `course.late_rule` - the rule quoted and the
+    deadline standing alone - and `external` holds neither."""
     if repo in (EXTERNAL, EXTERNAL_PENDING):
         return grades.parse_grading_spec(
             f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
@@ -151,7 +156,7 @@ def _grading_spec(_org: str, repo: str):
         return grades.parse_grading_spec("visibility: student_choice\n")
     if repo == SHARED:
         return grades.parse_grading_spec("submit_via: shared_dropbox_repo\n")
-    return grades.parse_grading_spec("")
+    return grades.parse_grading_spec("late_window_days: 7\nlate_penalty_per_day: 10%\n")
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:

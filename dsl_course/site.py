@@ -41,6 +41,7 @@ from . import schedule
 from .course import (
     PUBLISH_FILE,
     assignment_slug,
+    late_rule,
     pages_repo,
     session_number,
     shared_repo,
@@ -1133,6 +1134,18 @@ def _assignment_entry(
         # exist. One flag rather than a second `case` in the theme, so a shape added later
         # says which it is rather than being matched by name.
         repo_lines.append("repo_name_is_shape: true")
+    # What happens after the deadline, as the sentence the page's callout closes with
+    # (`course.late_rule`, off the assignment's own grading_config.yml like every other
+    # shape fact). Written for every TIMED shape and for no other: `external` creates no
+    # repo, so no commit is pinned, no day is counted and no penalty is ever applied
+    # (`course.collects_commits`) - a rule quoted there would be about a deadline this
+    # toolkit does not hold. The page alone, not the due row: the row is a glance at WHEN
+    # and WHERE, and the rule belongs beside the answer it qualifies.
+    late_fm = (
+        f'late_rule: "{q(late_rule(spec.late_window_days, spec.late_penalty_per_day))}"\n'
+        if spec.collects_commits
+        else ""
+    )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1190,6 +1203,7 @@ def _assignment_entry(
         f"{sub_fm}"
         f"{flags}"
         f"{repo_fm}"
+        f"{late_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"

@@ -509,12 +509,14 @@
     }
 }
 
-/* An assignment page's name, under its identifier in the h1 (see _layouts/assignment.html).
-   Sized between the title and the body: it is the assignment's real name, not metadata. */
-.post-subtitle {
-    margin: -0.4em 0 0.8em 0;
+/* An assignment page's identifier, above its name in the h1 (see _layouts/assignment.html).
+   The name is the heading now, at the theme's `.post-title` size; the identifier is what
+   ties the page to its schedule row, so it is kept and made small rather than dropped. */
+.post-kicker {
+    margin: 0 0 0.1em 0;
     font-family: $display-font;
-    font-size: 1.15em;
+    font-size: 0.9em;
+    letter-spacing: 0.04em;
     color: $grey-color-dark;
 }
 

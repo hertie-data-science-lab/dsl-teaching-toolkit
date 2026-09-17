@@ -509,7 +509,9 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     assert 'repo_name: "assignment-3-<your-team>"' in out
 
 
-def _external_entry(monkeypatch, config: str, **kw) -> str:
+def _entry_for(monkeypatch, config: str, **kw) -> str:
+    """One assignment's page, off the `grading_config.yml` text `config` and a README the
+    read never leaves the process for."""
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Moodle essay\nThe brief."
     )
@@ -530,7 +532,7 @@ def test_an_assignment_handed_in_off_github_names_no_repo_at_all(monkeypatch):
     # repo for it. The page and the due row said "push to `main`" for these too, because
     # the theme printed that off `repo_url` alone, and then named a repo that does not
     # exist. At BOTH levels, since the due row is a sub-hash that cannot see its parent's.
-    out = _external_entry(
+    out = _entry_for(
         monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
     )
     assert out.count('submit_shape: "external"') == 2
@@ -540,7 +542,7 @@ def test_an_assignment_handed_in_off_github_names_no_repo_at_all(monkeypatch):
 def test_an_external_assignment_carries_the_address_it_is_handed_in_at(monkeypatch):
     # `submit_url` is the one thing the toolkit is ever told about a handover it does not
     # see. The host rides along so the button can say where it goes before it is pressed.
-    out = _external_entry(
+    out = _entry_for(
         monkeypatch,
         "submit_via: external\nsubmit_url: https://moodle.example.edu/x?id=7\n",
         handed_out=frozenset({"assignment-1"}),
@@ -553,7 +555,7 @@ def test_a_pending_external_assignment_offers_nowhere_to_submit_yet(monkeypatch)
     # The address is a place to go NOW, so - like `repo_url` - it waits until the brief
     # that explains what to take there is out. The shape itself is the plan's and is
     # written either way.
-    out = _external_entry(
+    out = _entry_for(
         monkeypatch,
         "submit_via: external\nsubmit_url: https://moodle.example.edu/x?id=7\n",
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -654,11 +656,57 @@ def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch
 def test_an_external_assignments_shape_names_no_visibility(monkeypatch):
     # A visibility describes a repo and this shape creates none, so its shape is the bare
     # word: a page that carried a visibility would describe something nobody made.
-    out = _external_entry(
+    out = _entry_for(
         monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
     )
     assert out.count('submit_shape: "external"') == 2
     assert "visibility" not in out
+
+
+@pytest.mark.parametrize(
+    ("config", "rule"),
+    [
+        (
+            "late_window_days: 7\nlate_penalty_per_day: 10%\n",
+            "10% per day, up to 7 days",
+        ),
+        ("late_window_days: 7\n", "accepted up to 7 days late"),
+        ("", "not accepted after the deadline"),
+    ],
+)
+def test_the_page_carries_the_late_rule_the_assignment_declares(
+    monkeypatch, config, rule
+):
+    # The rule is the assignment's own (`grading_config.yml`), so the page prints what
+    # this assignment's own cutoff will actually do - `course.late_rule`, the same
+    # sentence wherever the toolkit spells the rule rather than the date.
+    out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
+    assert f'late_rule: "{rule}"' in out
+
+
+def test_an_assignment_handed_in_off_github_carries_no_late_rule(monkeypatch):
+    # Nothing is TIMED there: no repo is created, so no commit is pinned, no day is
+    # counted and no penalty is ever applied (`course.collects_commits`). The key is the
+    # theme's gate, so writing one would put a rule about a deadline this toolkit does not
+    # hold on the page - and the brief is what says what the hand-in service does.
+    out = _entry_for(
+        monkeypatch,
+        "submit_via: external\nlate_window_days: 7\nlate_penalty_per_day: 10%\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert "late_rule" not in out
+
+
+def test_the_late_rule_is_the_pages_alone_and_not_the_due_rows(monkeypatch):
+    # The due row is a glance at WHEN and WHERE; the rule qualifies an answer the row does
+    # not give, and the page's callout is where that answer is.
+    out = _entry_for(
+        monkeypatch,
+        "late_window_days: 7\nlate_penalty_per_day: 10%\n",
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count("late_rule:") == 1
+    assert "late_rule" not in out.split("due_event:")[1]
 
 
 def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):

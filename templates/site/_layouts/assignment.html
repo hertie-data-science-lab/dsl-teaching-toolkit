@@ -9,11 +9,18 @@ title: page.title
   <header class="post-header">
     {%- comment -%}
     `title` is the identifier (the slug's own name), `subtitle` the assignment's name from
-    the plan or, failing that, its template README's heading. A pending assignment has no
-    subtitle - the name is in the README, which is embargoed until hand-out.
+    the plan or, failing that, its template README's heading. The NAME is what a student
+    came to read, so it takes the heading and the identifier sits above it as a kicker -
+    the identifier still has to be there, because it is what ties the page to its schedule
+    row. A pending assignment has no subtitle - the name is in the README, which is
+    embargoed until hand-out - so there the identifier is the heading, as it always was.
     {%- endcomment -%}
+    {% if page.subtitle %}
+    <p class="post-kicker">{{ page.title }}</p>
+    <h1 class="post-title">{{ page.subtitle }}</h1>
+    {% else %}
     <h1 class="post-title">{{ page.title }}</h1>
-    {% if page.subtitle %}<p class="post-subtitle">{{ page.subtitle }}</p>{% endif %}
+    {% endif %}
     {%- comment -%}
     `handout_pending` (site.py): the plan has dated this assignment but it has not been
     handed out, so `date` is a hand-out still to come rather than a release that happened.
@@ -24,6 +31,15 @@ title: page.title
     <p class="post-meta">Hands out on {{ page.date | date: "%A" }} {{ page.date | date: site.dateformat }}</p>
     {% else %}
     <p class="post-meta">Released on {{ page.date | date: "%A" }} {{ page.date | date: site.dateformat }}</p>
+    {% endif %}
+    {%- comment -%}
+    The deadline, bold and beside the release date rather than further down the page: it is
+    the one fact a student opens this page for. The date lives on `due_event`, which is
+    where site.py writes it and what the schedule's own due row reads - `page.due` has
+    never existed, so the block that read it printed a bare time.
+    {%- endcomment -%}
+    {% if page.due_event %}
+    <p class="post-meta"><strong>Due {{ page.due_event.date | date: "%A" }} {{ page.due_event.date | date: site.dateformat }} {{ page.due_event.date | date: "%H:%M" }}</strong></p>
     {% endif %}
   </header>
 
@@ -37,14 +53,6 @@ title: page.title
     {% unless page.submit_shape == "external" %}
     {% include open_in.html %}
     {% endunless %}
-
-    {% if page.due_event %}
-    {%- comment -%}
-    The date lives on `due_event`, which is where site.py writes it and what the schedule's
-    own due row reads. `page.due` has never existed, so this printed a bare time.
-    {%- endcomment -%}
-    <p style="font-weight: bold">Due Date: {{ page.due_event.date | date: site.dateformat }} {{ page.due_event.date | date: "%H:%M" }}</p>
-    {% endif %}
 
     {%- comment -%}
     Where the student actually works. This is the first thing they need and it used to be a
@@ -112,6 +120,14 @@ title: page.title
     student's own is a folder in it (`submit_path`). There is nothing in that name for
     open_in.html to substitute a handle into, and rewriting it would point every reader at
     a repo that does not exist - so the flag is false and the markers are left off.
+
+    `late_rule` (site.py, off the assignment's own grading_config.yml) closes the
+    paragraph, so what happens after the deadline is read where the deadline's own answer
+    is. Written for every TIMED shape and for no other: `external` collects no commits, so
+    no day is counted and no penalty is ever applied (`course.collects_commits`), and a
+    sentence there would quote a rule about a deadline this toolkit does not hold. The
+    theme reads the KEY's presence rather than asking the shape again - a second
+    spelling of "which shapes are timed" is one that eventually disagrees with the first.
     {%- endcomment -%}
     {% unless page.handout_pending %}
     {% if page.submit_shape == "external" %}
@@ -119,31 +135,34 @@ title: page.title
       {% if page.submit_url %}
       <p><a class="btn" target="_blank" rel="noopener" href="{{ page.submit_url }}">Submit on {{ page.submit_host }}</a></p>
       {% endif %}
-      <p>Handed in outside GitHub. See the brief for what to hand in. Your grade and feedback arrive in your
+      <p>Handed in outside GitHub.{% unless page.submit_url %} See the brief.{% endunless %} Your grade and feedback arrive in your
       private gradebook <code>grades-&lt;your-handle&gt;</code>.</p>
     </div>
     {% elsif page.repo_url %}
     <div class="callout">
       <p><a class="btn" {% if page.repo_name_is_shape %}data-dsl-repo-url {% endif %}target="_blank" rel="noopener" href="{{ page.repo_url }}">Open the submission repo on GitHub</a></p>
+      <p>
       {% case page.submit_shape %}
       {% when "shared-dropbox-repo" %}
-      <p>Push your work into the <code>{{ page.submit_path | escape }}</code> folder of
+      Push your work into the <code>{{ page.submit_path | escape }}</code> folder of
       <code>{{ page.repo_name | escape }}</code> - that push is your submission. Everyone in the cohort can read
       the whole repo, so commit nothing you would not show the class. Your grade and feedback arrive in your
-      private gradebook <code>grades-&lt;your-handle&gt;</code>, not here.</p>
+      private gradebook <code>grades-&lt;your-handle&gt;</code>, not here.
       {% when "assignment-repo-public" %}
-      <p>Your repo <code data-dsl-repo>{{ page.repo_name | escape }}</code> is <b>public</b>: anyone on the internet can
+      Your repo <code data-dsl-repo>{{ page.repo_name | escape }}</code> is <b>public</b>: anyone on the internet can
       read it. Push to <code>main</code> as usual, but commit nothing you would not publish and no data you were told
       to keep private. Your grade and feedback arrive in your private gradebook <code>grades-&lt;your-handle&gt;</code>,
-      not here.</p>
+      not here.
       {% when "assignment-repo-student-choice" %}
-      <p>Your repo starts private. You are its admin: after the grading cutoff you may make it public from
+      Your repo starts private. You are its admin: after the grading cutoff you may make it public from
       Settings &gt; Danger zone if you want it in your portfolio. Before then the toolkit turns it private again.
-      Your grade and feedback arrive in your private gradebook, not here.</p>
+      Your grade and feedback arrive in your private gradebook, not here.
       {% else %}
-      <p>Your work goes in your private repo <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit
-      as you go, and push to <code>main</code> - that push is your submission.</p>
+      Your work goes in your private repo <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit
+      as you go, and push to <code>main</code> - that push is your submission.
       {% endcase %}
+      {% if page.late_rule %}Late work: {{ page.late_rule }}.{% endif %}
+      </p>
     </div>
     {% endif %}
     {% endunless %}
@@ -167,40 +186,11 @@ title: page.title
       {% endif %}
     </p>
     {% endif %}
-
-    {%- comment -%}
-    Nothing is TIMED on an assignment handed in off GitHub: no repo is created, so no
-    commit is pinned, no day is counted and no penalty is ever applied
-    (`course.collects_commits`, `grades.late_policy`). The course's late policy on that
-    page is a rule about a deadline this toolkit does not hold - the brief says what the
-    hand-in service does about late work.
-    {%- endcomment -%}
-    {% unless page.submit_shape == "external" %}
-    <div style="color: gray;">
-      <h3>Late Policy</h3>
-      {% include late_policy.html %}
-    </div>
-    {% endunless %}
   </div>
 
   <br />
   <article class="post-content">
     {{ content }}
   </article>
-
-  {%- comment -%}
-  And again under the brief, quietly: a student who has just finished reading the task is
-  at the point of starting it, and should not have to scroll back up for the link.
-  {%- endcomment -%}
-  {% if page.submit_shape == "external" and page.submit_url %}
-  <p class="post-meta">
-    Hand in at <a target="_blank" rel="noopener" href="{{ page.submit_url }}">{{ page.submit_host }}</a>.
-  </p>
-  {% elsif page.repo_url %}
-  <p class="post-meta">
-    Submit by pushing {% if page.submit_path %}into <code>{{ page.submit_path | escape }}</code>{% else %}to <code>main</code>{% endif %} in
-    <a {% if page.repo_name_is_shape %}data-dsl-repo-url {% endif %}target="_blank" rel="noopener" href="{{ page.repo_url }}"><code{% if page.repo_name_is_shape %} data-dsl-repo{% endif %}>{{ page.repo_name | escape }}</code></a>.
-  </p>
-  {% endif %}
 
 </div>
