@@ -17,12 +17,13 @@ is stored until a Save is pressed, and every button below step 1 reads the SAVED
 not what is currently in a box - a half-typed path that enabled a button would open the
 wrong folder and look like the page's fault.
 
-One Save per field, beside its own box, with what it stored on the line underneath. On a
-save the box empties and the value it stored becomes the box's placeholder, so the field
-shows its setting the way an unfilled field shows its example. That is also why an empty
-box plus Save is a no-op rather than a delete: the box is empty after every save, and the
-second press must not wipe what the first one stored. `clear` on the saved line is how a
-setting is actually removed.
+One Save per field, beside its own box, with what it stored on the line underneath. The
+box always holds something editable: the saved value, or until there is one the field's
+example (its placeholder, respelt for the reader's platform below) - so a student edits
+`j.doe` into their own name rather than retyping a whole path over a grey hint that goes
+at the first keystroke. Save stores what is in the box and leaves it there. An empty box,
+or the untouched example, plus Save is a no-op rather than a delete or a saved example;
+`clear` on the saved line is how a setting is removed, and it puts the example back.
 
 Four numbered steps, in the order they have to happen: details, fork, clone, open. Step 3
 stays greyed until step 2 has been taken, because cloning a fork that does not exist yet is
@@ -169,8 +170,8 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
     assignments: "assignment folder",
     editor: "editor"
   };
-  /* The placeholder each box shipped with - its EXAMPLE. A saved value takes the
-     placeholder's place, so the example has to be kept somewhere to come back to. */
+  /* The placeholder each box shipped with - its EXAMPLE. The box is seeded with it until
+     a value is saved, and `clear` puts it back, so it has to be kept somewhere. */
   var examples = {};
   /* The home-folder spelling the two folder examples ship with, and the one for each
      platform the browser can name. Unknown stays as shipped. */
@@ -223,11 +224,14 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
         e.preventDefault();
         api.save(name, "");
         if (name === "editor") { el("dsl-editor-template").value = ""; }
+        if (box(name)) { box(name).value = examples[name]; }
         refresh();
       });
       out.appendChild(a);
     }
-    if (typedIn(name)) {
+    /* The box differs from what is stored - and the untouched example is not a change. */
+    var typed = typedIn(name);
+    if (typed && typed !== value && (value || typed !== examples[name])) {
       if (value) { out.appendChild(document.createElement("br")); }
       out.appendChild(document.createTextNode("Not saved yet - press Save."));
     }
@@ -240,12 +244,7 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
     var me = api.profile();
     var forked = api.stored("forked");
 
-    for (var i = 0; i < FIELDS.length; i++) {
-      var name = FIELDS[i];
-      var b = box(name);
-      if (b) { b.setAttribute("placeholder", api.stored(name) || examples[name]); }
-      savedLine(name);
-    }
+    for (var i = 0; i < FIELDS.length; i++) { savedLine(FIELDS[i]); }
 
     show("dsl-fork-todo", !forked);
     show("dsl-fork-done", !!forked);
@@ -272,11 +271,10 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
       api.save("editor", editorValue());
     } else {
       var value = typedIn(name);
-      /* An empty box is "nothing new to store", never "forget what you stored" - see the
-         comment at the top of this page. */
-      if (!value) { return; }
+      /* An empty box is "nothing new to store", never "forget what you stored", and the
+         untouched example is not a setting - see the comment at the top of this page. */
+      if (!value || (value === examples[name] && !api.stored(name))) { return; }
       api.save(name, value);
-      box(name).value = "";
     }
     refresh();
   }
@@ -290,6 +288,10 @@ student shown `/Users/j.doe/...` typed it in verbatim and got a path no editor c
       }
       examples.materials = localExample(examples.materials);
       examples.assignments = localExample(examples.assignments);
+      /* Seed every box with its setting, or its example until there is one. */
+      for (i = 0; i < FIELDS.length; i++) {
+        if (box(FIELDS[i])) { box(FIELDS[i]).value = api.stored(FIELDS[i]) || examples[FIELDS[i]]; }
+      }
       /* The editor box is the one that is not cleared on save: it pairs with a radio, so
          an empty box would leave the choice ambiguous. */
       var stored = api.stored("editor");
