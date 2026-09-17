@@ -2966,11 +2966,38 @@ def _readme_row(title: str, view: dict) -> str:
     return "| " + " | ".join(_cell(value) for value in values) + " |"
 
 
+def _readme_grade_line(view: dict, grade: str) -> str:
+    """The final grade, and - where a deadline moved it - the arithmetic that produced it:
+    `**Score:** 20 / 50 · 2 days late · penalty -20% · **Final grade:** 16 / 50`.
+
+    A student cannot reconstruct that from the final grade alone, and without it a
+    deduction reads as a harsh mark. It used to be the opening line of the feedback comment
+    on their own repo; that channel is closed, and the gradebook is the only place any of
+    it is written now.
+
+    Written only where there is a separate score AND something timed it. A hand-marked unit
+    has a final grade and no score behind it, an `external` assignment counts no days, and
+    a team's score is not in a member's view at all (`student_view`) - in each of those the
+    final grade is the whole of what there is to say, and `**Score:** 40 · **Final grade:**
+    40` would be arithmetic theatre. The helpers are the display ones the table already
+    uses, so a row and its section cannot word the same fact differently."""
+    total = score_total(view.get("score"))
+    late = _late_display(view.get("days_late"))
+    if total is None or not late:
+        return f"**Final grade:** {grade}"
+    facts = [f"**Score:** {_over_max(_plain(total), view.get('max_points'))}", late]
+    if view.get("penalty"):
+        facts.append(f"penalty {view['penalty']}")
+    facts.append(f"**Final grade:** {grade}")
+    return _SEP.join(facts)
+
+
 def _readme_section(title: str, view: dict) -> str:
-    """One assignment's section: the final grade, the student's own feedback verbatim, and
-    the team's feedback as a blockquote that says who else has read it."""
+    """One assignment's section: the final grade with whatever was done to it, the
+    student's own feedback verbatim, and the team's feedback as a blockquote that says who
+    else has read it."""
     grade = _over_max(view.get("final_grade", ""), view.get("max_points"))
-    parts = [f"## {title}" + (f"\n**Final grade:** {grade}" if grade else "")]
+    parts = [f"## {title}" + (f"\n{_readme_grade_line(view, grade)}" if grade else "")]
     if not _blank(view.get("feedback")):
         parts.append(str(view["feedback"]).strip())
     if not _blank(view.get("team_feedback")):
@@ -3637,7 +3664,6 @@ def distribute(
     cohort_org: str,
     notify: bool = True,
     dry_run: bool = False,
-    assignment: str = "",
 ) -> int:
     """Send every mark a grader has written where it has to go: each student's private
     gradebook, the registrar's export, and an email saying there is something new to read.
@@ -3653,15 +3679,13 @@ def distribute(
     writes. Every one of those is skipped when `distributed.csv` says the same content has
     already gone out, which is what makes a correction to one grade reach one student.
 
-    `assignment` no longer narrows a run, and says so in the log. It narrowed the feedback
-    comments and only ever those: a student's gradebook is the whole of what they have been
-    given and is rendered from every sheet in the repo on every run, so it stays a pure
-    function of the sheets rather than flip-flopping between a scoped and an unscoped
-    write and re-mailing a cohort each way. Rendering it from one selected sheet is what
-    silently deleted every other assignment from every gradebook it touched. The
-    registrar's export is the same file for the same reason. The input is still READ, and
-    a slug with no sheet still stops the run: a grader who types one is telling us
-    something about the cohort, and a typo is worth catching before a mark goes out.
+    There is no assignment to scope a run to, and the button no longer offers one. It
+    narrowed the feedback comments and only ever those: a student's gradebook is the whole
+    of what they have been given and is rendered from every sheet in the repo on every run,
+    so it stays a pure function of the sheets rather than flip-flopping between a scoped
+    and an unscoped write and re-mailing a cohort each way. Rendering it from one selected
+    sheet is what silently deleted every other assignment from every gradebook it touched.
+    The registrar's export is the same file for the same reason.
 
     Dry run - the default - reads everything, writes nothing, sends nothing, and prints the
     counts a grader checks before pressing it for real."""
@@ -3693,17 +3717,6 @@ def distribute(
             log_err(
                 f"no {SHEETS_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand out an "
                 f"assignment (which creates its grading sheet) first"
-            )
-            return 1
-        # A slug somebody typed is still checked against the sheets, though nothing is
-        # narrowed by it any more: a typo used to send a whole cohort's marks under the
-        # impression that one assignment's had gone out. Checked after the read, not
-        # during it: `load_sheets` is what refuses to distribute anything while one sheet
-        # is mid-edit, and that guard is about the repo, not about the slug.
-        if assignment and assignment not in sheets:
-            log_err(
-                f"no grading sheet for `{assignment}` in {cohort_org} - "
-                f"nothing distributed"
             )
             return 1
         specs = sheet_specs(course_org, sched)
@@ -3742,11 +3755,6 @@ def distribute(
                 f"  [hold] {slug} for {handle} - {HOLD_REASONS[reason]}; nothing is sent "
                 f"until it is settled in the sheet"
             )
-    if assignment:
-        log(
-            f"  {assignment} is on record, but nothing is narrowed by it: a mark goes to "
-            f"the gradebook, and a gradebook holds every assignment marked in this cohort"
-        )
     undue = _undue_marks(specs, books, moment)
     if undue:
         # A count, in both the dry run and the real one, and never a block: the gradebook
@@ -4071,11 +4079,6 @@ def main() -> int:
     p = sub.add_parser("distribute")
     p.add_argument("--cohort-org", required=True)
     p.add_argument(
-        "--assignment",
-        default="",
-        help="One assignment slug; default is every sheet in the cohort.",
-    )
-    p.add_argument(
         "--no-notify",
         action="store_true",
         help="Skip the email notification (just push the grades).",
@@ -4097,7 +4100,6 @@ def main() -> int:
             args.cohort_org,
             notify=not args.no_notify,
             dry_run=args.dry_run,
-            assignment=args.assignment,
         )
     except RuntimeError as exc:
         log_err(str(exc))

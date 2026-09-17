@@ -1029,18 +1029,14 @@ def render_distribute_grades(cohort_orgs: list[str]) -> str:
 # private grades-<handle> repo, the registrar export, and (unless silenced) an email saying
 # there is something new to read. Nothing is posted into a submission repo, and nothing is
 # said twice - a re-run after one correction reaches one student.
-# `assignment` is checked against the sheets and narrows nothing: every run rebuilds every
-# gradebook from every sheet, which is what keeps a gradebook the whole of a student's marks.
+# There is no assignment to pick: every run rebuilds every gradebook from every sheet,
+# which is what keeps a gradebook the whole of a student's marks.
 # Dry run first; it writes nothing and prints the counts. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
-      assignment:
-        description: "One assignment slug - checked against the sheets; narrows nothing"
-        type: string
-        required: false
       dry_run:
         description: "Preview the grade emails - push nothing, send nothing"
         type: boolean
@@ -1057,13 +1053,11 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-          ASSIGNMENT: ${{{{ inputs.assignment }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           SILENT: ${{{{ inputs.silent }}}}
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
-          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
 {_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${{args[@]}}"

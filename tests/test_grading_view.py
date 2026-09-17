@@ -448,8 +448,38 @@ def test_a_late_mark_carries_its_arithmetic_into_the_gradebook():
     assert view["score"] == 20
     assert view["penalty"] == "-20%"
     assert view["final_grade"] == "16"
-    row = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()[4]
-    assert row == "| Assignment 1 | 16 / 50 | not submitted | 2 days late |  |"
+    readme = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()
+    assert readme[4] == "| Assignment 1 | 16 / 50 | not submitted | 2 days late |  |"
+    # The whole working on one line, under the heading: 16 out of 50 is otherwise a mark
+    # a student has no way to tell from a harsher one.
+    assert readme[7] == (
+        "**Score:** 20 / 50 · 2 days late · penalty -20% · **Final grade:** 16 / 50"
+    )
+
+
+def test_an_on_time_mark_says_so_rather_than_leaving_the_line_out():
+    # The same line, minus the deduction there was none of. A section that showed the
+    # arithmetic only when it cost something made "on time" the silent case, and a student
+    # comparing two assignments could not tell it from a section written before the rule
+    # existed.
+    spec = individual_spec(
+        questions={"Q1": "50"}, late_window_days=7, late_penalty_per_day="10%"
+    )
+    block = {"info": {"days_late": 0}, "score_individual": 20}
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert "penalty" not in view
+    readme = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()
+    assert readme[7] == "**Score:** 20 / 50 · on time · **Final grade:** 20 / 50"
+
+
+def test_a_grade_with_no_score_behind_it_is_shown_on_its_own():
+    # An assignment handed in off GitHub counts no days and a hand-marked one has no score
+    # in the sheet, so there is no arithmetic to show - and `**Score:** 40 · **Final
+    # grade:** 40` would be arithmetic theatre.
+    spec = individual_spec(submit_via="external", questions={"Q1": "50"})
+    view = student_view(spec, "ada-l", {"score_individual": 40}, "ada-l")
+    readme = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()
+    assert readme[7] == "**Final grade:** 40 / 50"
 
 
 # ------------------------------------------------------- the sources marks come from

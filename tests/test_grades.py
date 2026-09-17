@@ -625,7 +625,6 @@ def _distribute(
     found_issue: int | None = None,
     put_files_ok: bool = True,
     course_name=lambda org: "",
-    assignment: str = "",
     listed: dict[str, dict] | None = _ANY_PRIVATE,
     due: datetime = _DUE_PASSED,
 ) -> dict:
@@ -729,9 +728,7 @@ def _distribute(
             [m[0] for m in msgs[:sent]],
         )[1],
     )
-    effects["rc"] = grades.distribute(
-        "COHORT", notify=notify, dry_run=dry_run, assignment=assignment
-    )
+    effects["rc"] = grades.distribute("COHORT", notify=notify, dry_run=dry_run)
     return effects
 
 
@@ -877,46 +874,26 @@ def test_a_handle_in_two_teams_is_held_rather_than_taking_the_last_one(
     assert out["gradebooks"] == []
 
 
-def test_a_scoped_run_writes_the_whole_gradebook_an_unscoped_one_does(
+def test_a_run_writes_every_sheet_the_cohort_has_into_every_gradebook(
     tmp_path, monkeypatch
 ):
-    # THE defect a live showcase found: the gradebook was rendered from the selected
-    # sheet alone, so each scoped run left that one section and deleted every other -
-    # four of them in a row, and assignment-1's distributed grade was gone. A gradebook
-    # is the whole of what a student has been given, so the two runs write the same file
-    # and the registrar's export keeps a column per assignment.
-    sheets = {"assignment-1": _SHEET, "assignment-2": _SHEET}
-    whole = _distribute(monkeypatch, tmp_path / "whole", sheets=sheets)
-    scoped = _distribute(
-        monkeypatch, tmp_path / "scoped", sheets=sheets, assignment="assignment-2"
+    # THE defect a live showcase found, back when a run could be scoped to one slug: the
+    # gradebook was rendered from the selected sheet alone, so each scoped run left that
+    # one section and deleted every other - four in a row, and assignment-1's distributed
+    # grade was gone. The button offers no slug now, and a gradebook is the whole of what
+    # a student has been given: every sheet in the cohort, and a registrar's column each.
+    out = _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": _SHEET, "assignment-2": _SHEET}
     )
-    ((_r1, every, _d1),) = whole["gradebooks"]
-    ((_r2, after, _d2),) = scoped["gradebooks"]
-    assert after == every
-    assert "assignment-1:" in after["grades.yml"]
-    assert "assignment-2:" in after["grades.yml"]
-    ((_c1, whole_cfg, _e1),) = whole["config"]
-    ((_c2, scoped_cfg, _e2),) = scoped["config"]
-    registrar = scoped_cfg[grades.COHORT_CSV_NAME]
-    assert registrar == whole_cfg[grades.COHORT_CSV_NAME]
-    assert registrar.splitlines()[0].endswith("assignment-1,assignment-2")
-
-
-def test_a_named_assignment_narrows_nothing_and_the_run_says_so(
-    tmp_path, monkeypatch, capsys
-):
-    # The input narrowed the feedback comments and only ever those, and there are none
-    # now. A grader who types a slug has to be told that, or they read the counts as one
-    # assignment's and believe the rest is still unsent.
-    _distribute(
-        monkeypatch,
-        tmp_path,
-        sheets={"assignment-1": _SHEET, "assignment-2": _SHEET},
-        assignment="assignment-2",
+    ((_repo, book, _detail),) = out["gradebooks"]
+    assert "assignment-1:" in book["grades.yml"]
+    assert "assignment-2:" in book["grades.yml"]
+    ((_cfg_repo, cfg, _e),) = out["config"]
+    assert (
+        cfg[grades.COHORT_CSV_NAME]
+        .splitlines()[0]
+        .endswith("assignment-1,assignment-2")
     )
-    printed = capsys.readouterr().out
-    assert "assignment-2 is on record, but nothing is narrowed by it" in printed
-    assert "a gradebook holds every assignment" in printed
 
 
 def test_a_cohort_with_no_sheet_yet_distributes_nothing(tmp_path, monkeypatch, capsys):
@@ -926,13 +903,6 @@ def test_a_cohort_with_no_sheet_yet_distributes_nothing(tmp_path, monkeypatch, c
     assert out["rc"] == 1
     assert (out["comments"], out["gradebooks"], out["config"]) == ([], [], [])
     assert f"no {grades.SHEETS_DIR}/ in COHORT" in capsys.readouterr().err
-
-
-def test_a_slug_no_sheet_matches_distributes_nothing(tmp_path, monkeypatch, capsys):
-    out = _distribute(monkeypatch, tmp_path, assignment="assignment-9")
-    assert out["rc"] == 1
-    assert (out["comments"], out["gradebooks"], out["config"]) == ([], [], [])
-    assert "no grading sheet for `assignment-9`" in capsys.readouterr().err
 
 
 def test_the_dry_run_counts_units_with_questions_still_unmarked(
