@@ -1092,3 +1092,31 @@ def test_the_assignment_page_offers_a_clone():
     # clone button is offered for VS Code alone, so for everyone else this is the only one.
     assert "cloneCommand(org, repo, me.assignments)" in block
     assert "if (me.assignments) {" in block
+
+
+def test_the_callout_keeps_the_brief_last_and_the_clone_with_its_buttons():
+    # Where the dialog has to be pointed, then the command that needs none, then the
+    # callout's own sentence - which belongs to the brief and is nobody's to move. Each
+    # block goes under the last rather than at the end of the callout, which is how the
+    # command came to sit below the prose it explains.
+    block = _strip_comments(_open_in()).split(
+        "function decorateAssignment(root, me) {"
+    )[1]
+    block = block.split("\n  }")[0]
+    assert "row.parentNode.insertBefore(node, row.nextSibling);" in block
+    assert "row = node;" in block
+    # Never onto the callout itself, which is what put the command below the prose.
+    assert "parentNode.appendChild" not in block
+    # The command is announced, not dropped in bare.
+    assert 'under(line("Or clone it straight there from a terminal:"));' in block
+    # Air under the command, so the brief's sentence does not read as part of it.
+    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
+    cmd = scss.split(".cmd {")[1].split("}")[0]
+    assert "margin: 0.3em 0 1em 0;" in cmd
+    # Quiet: the clone lines are small and grey, so the brief's own sentence stays the
+    # black, full-size thing in the callout. Not `@extend %quiet-note` - that sizes the
+    # block too, and the `code` inside sizes itself off it.
+    assert "color: $grey-color-dark;" in cmd
+    assert "@extend %quiet-note;" not in cmd
+    where = scss.split(".callout .open-in-where {")[1].split("}")[0]
+    assert "@extend %quiet-note;" in where

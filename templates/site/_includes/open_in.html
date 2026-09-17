@@ -340,25 +340,39 @@ day that sentence is reworded.
       btn.parentNode.insertBefore(el, at.nextSibling);
       at = el;
     }
+    /* Everything that follows belongs with the buttons, directly under them and in the
+       order a student meets it: where the dialog has to be pointed, then the command that
+       needs no dialog at all. Each goes after the last, so the brief's own sentence - the
+       callout's, not this script's - stays where it was, at the end. */
+    var row = btn.parentNode;
+    function under(node) {
+      row.parentNode.insertBefore(node, row.nextSibling);
+      row = node;
+    }
+    function line(text) {
+      var p = document.createElement("p");
+      p.className = "open-in-where";
+      p.appendChild(document.createTextNode(text));
+      return p;
+    }
     /* Nothing can point the clone dialog at a folder (see cloneParent), so the callout
        names the one to choose - the answer /profile/ step 3 gives for `materials`, given
        here for the assignment folder, which is where this repo belongs. */
     if (offers[0][0] && me.assignments) {
-      var where = document.createElement("p");
-      where.className = "open-in-where";
-      where.appendChild(document.createTextNode("Clone asks where to put it: choose "));
+      var where = line("Clone asks where to put it: choose ");
       var code = document.createElement("code");
       code.appendChild(document.createTextNode(cloneParent(me.assignments, repo)));
       where.appendChild(code);
       where.appendChild(document.createTextNode("."));
-      btn.parentNode.parentNode.insertBefore(where, btn.parentNode.nextSibling);
+      under(where);
     }
     /* And the exact one, for the reader who would rather not navigate a dialog - or who
        is not on VS Code, and has had no clone offered them at all until here. */
     if (me.assignments) {
+      under(line("Or clone it straight there from a terminal:"));
       var cmd = commandBlock();
       cmd.querySelector("code").textContent = cloneCommand(org, repo, me.assignments);
-      btn.parentNode.parentNode.appendChild(cmd);
+      under(cmd);
     }
   }
 

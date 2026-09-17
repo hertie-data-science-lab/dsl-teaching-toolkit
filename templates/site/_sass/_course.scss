@@ -295,7 +295,14 @@
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    margin: 0.3em 0 0 0;
+    /* Clear air underneath: in a callout the brief's own sentence follows, and a command
+       butted straight against it reads as part of the same thought. */
+    margin: 0.3em 0 1em 0;
+    /* Grey like the hint above it, and NOT `@extend %quiet-note`: that would size the
+       block as well, and the `code` inside sizes itself off this - 0.85em of 0.85em is a
+       command no one can read. The brief's own text stays the theme's, black and full
+       size, because it is the thing on the page that matters. */
+    color: $grey-color-dark;
 
     code {
         flex: 1;
