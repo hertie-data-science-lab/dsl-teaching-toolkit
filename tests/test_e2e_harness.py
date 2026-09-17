@@ -10,14 +10,23 @@ from __future__ import annotations
 
 import base64
 import importlib
+import os
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 import yaml
 
-from dsl_course import course, ghcli, grades, schedule
-from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit, student
+from dsl_course import course, ghcli, grades, repos, roster, scaffold, schedule
+from tests.e2e import (
+    allowlist,
+    cleanup,
+    drive,
+    estate,
+    schedule_edit,
+    shapes,
+    student,
+)
 
 GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
 OTHER = "hertie-ml-26-deep"
@@ -414,9 +423,16 @@ def test_another_runs_leavings_are_reported_not_deleted():
         ("snapshots/assignment-90-e2eab12cd.csv", True),
         ("autograde/assignment-90-e2eab12cd/_graded.json", True),
         ("grading_sheets/assignment-90-e2eab12cd.yml", True),
+        # One assignment per shape, so every artefact this run writes is named after the
+        # NAMESPACE plus a shape - `-` is as much a boundary here as `/` and `.`.
+        ("snapshots/assignment-90-e2eab12cd-shared.csv", True),
+        ("grading_sheets/assignment-90-e2eab12cd-student-choice.yml", True),
+        ("autograde/assignment-90-e2eab12cd-private/_graded.json", True),
         ("snapshots/assignment-1.csv", False),
         ("schedule.yml", False),
         ("autograde/assignment-90-e2effffff/_graded.json", False),
+        # A longer run id, not a shape of ours.
+        ("snapshots/assignment-90-e2eab12cd2-private.csv", False),
     ],
 )
 def test_only_this_runs_artefacts_are_dropped(path, mine):
@@ -857,10 +873,560 @@ def test_a_fine_grained_token_is_probed_instead(monkeypatch, capsys):
         module._assert_can_delete_repos()
 
 
-def test_the_shared_drop_box_is_inside_this_run_s_namespace():
-    # Cleanup deletes only what matches the run's own slug. `<slug>-submissions` is inside
-    # that rule already - it is a `-<suffix>` of the slug like every submission repo - so
-    # a shared assignment's drop box is removed rather than reported as somebody's drift.
-    run = "e2eabc123"
-    assert cleanup.is_run_repo(f"{cleanup.slug(run)}-submissions", run)
-    assert not cleanup.is_drift(f"{cleanup.slug(run)}-submissions", run)
+# ------------------------------------------------ one assignment per submission shape
+
+
+def _seeded(shape: shapes.Shape) -> str:
+    """`grading_config.yml` exactly as New assignment writes it for this shape - the real
+    scaffold, so the harness's edits are exercised against the file they will actually
+    meet and not against a hand-written sample of it."""
+    return scaffold._grading_config(
+        title="E2E",
+        kind="individual",
+        team_formation="self_select",
+        submit_via=shape.submit_via,
+        visibility=shape.visibility or "private",
+        formats=["py"],
+        autograde=shape.autograde,
+        defaults={},
+    )
+
+
+def test_the_run_drives_every_shape_the_engine_can_make():
+    # The table is the run's plan and the vocabulary is the engine's. A shape the toolkit
+    # cannot make would be a stage that hangs; a shape it can make and nothing here drives
+    # is a shape no live run has ever proved.
+    assert {s.submit_via for s in shapes.SHAPES} == set(course.SUBMIT_VIA)
+    assert {s.visibility for s in shapes.SHAPES if s.visibility} == set(
+        course.VISIBILITIES
+    )
+    assert len(shapes.BY_NAME) == len(shapes.SHAPES)
+
+
+def test_the_shape_words_are_the_ones_the_page_carries():
+    # The live run asserts these strings in a page's front matter, and the theme `case`s
+    # on them. Pinned here so a rename in `course.submit_shape` breaks in CI rather than
+    # an hour into a live run.
+    assert [s.key for s in shapes.SHAPES] == [
+        "github-private",
+        "github-public",
+        "github-student-choice",
+        "external",
+        "shared",
+    ]
+
+
+@pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
+def test_everything_a_shape_creates_is_inside_the_runs_namespace(shape):
+    # Five assignments in one run, and one sweep for all of them: every name any shape
+    # hands out has to be one `cleanup` deletes rather than one it reports as somebody
+    # else's leavings.
+    slug = shapes.slug(RUN, shape)
+    assert cleanup.is_run_repo(slug, RUN)
+    assert not cleanup.is_drift(slug, RUN)
+    repo = shape.repo(RUN, "henrycgbaker")
+    if repo:
+        assert cleanup.is_run_repo(repo, RUN)
+        assert not cleanup.is_drift(repo, RUN)
+
+
+def test_an_external_assignment_has_no_repo_to_name():
+    # The shape's whole point: the handout creates nothing, so there is no name for the
+    # harness to look for and none for the log to leak.
+    assert shapes.BY_NAME["external"].repo(RUN, "henrycgbaker") == ""
+    assert shapes.BY_NAME["external"].folder("henrycgbaker") == ""
+
+
+def test_the_drop_box_is_one_repo_and_the_work_is_a_folder_in_it():
+    shape = shapes.BY_NAME["shared"]
+    slug = shapes.slug(RUN, shape)
+    assert shape.repo(RUN, "henrycgbaker") == f"{slug}-submissions"
+    # Never the bare slug: that is the frozen cohort template the brief lives in.
+    assert shape.repo(RUN, "henrycgbaker") != slug
+    # The name carries no handle, which is what makes it the one submission repo a public
+    # workflow log may print in full.
+    assert "henrycgbaker" not in shape.repo(RUN, "henrycgbaker")
+    assert shape.folder("henrycgbaker") == "henrycgbaker/"
+
+
+@pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
+def test_the_config_the_harness_writes_parses_to_the_shape_it_meant(shape):
+    # The whole run rests on this file: it is the only place a shape is declared, and a
+    # value the parser drops hands out the DEFAULT shape under another name.
+    spec = grades.parse_grading_spec(shapes.configure(_seeded(shape), shape))
+    assert spec.submit_via == shape.submit_via
+    assert spec.submit_shape == shape.key
+    assert spec.submit_url == shape.submit_url
+    assert spec.has_feedback_issue is shape.has_feedback_issue
+    assert spec.creates_unit_repos is shape.creates_unit_repos
+
+
+@pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
+def test_declaring_the_same_shape_twice_changes_nothing(shape):
+    # Idempotent, so a config the New assignment form already got right is left alone and
+    # the run commits nothing to the template it just created.
+    once = shapes.configure(_seeded(shape), shape)
+    assert shapes.configure(once, shape) == once
+
+
+def test_a_commented_setting_is_uncommented_and_keeps_its_explanation():
+    # `submit_url` is seeded commented out, with the sentence that says what it is for.
+    # An instructor uncommenting it keeps that sentence; so does this.
+    external = shapes.BY_NAME["external"]
+    line = next(
+        ln
+        for ln in shapes.configure(_seeded(external), external).splitlines()
+        if ln.startswith("submit_url:")
+    )
+    assert shapes.SUBMIT_URL in line
+    assert "external only" in line
+
+
+def test_the_scaffolds_placeholder_never_reaches_a_live_setting():
+    # `grades._submit_url` refuses a line still carrying `CHANGE-ME`, so a `configure`
+    # that merely uncommented the seeded line would ship a cohort a button pointing at a
+    # page that does not exist - and the reader would drop the value on the way.
+    for shape in shapes.SHAPES:
+        for line in shapes.configure(_seeded(shape), shape).splitlines():
+            if not line.startswith("#"):
+                assert course.SETTING_PLACEHOLDER not in line
+
+
+def test_a_setting_the_scaffold_never_writes_is_refused():
+    with pytest.raises(ValueError, match="appears 0 time"):
+        shapes.set_setting("title: x\n", "submit_shape", "github-public")
+
+
+def test_a_setting_that_appears_twice_is_refused():
+    with pytest.raises(ValueError, match="appears 2 time"):
+        shapes.set_setting("visibility: a\nvisibility: b\n", "visibility", "public")
+
+
+def test_only_the_top_level_setting_is_edited():
+    # `questions:` seeds an indented block, and a key nested inside one is a grader's
+    # data rather than a setting: rewriting it would be editing somebody's question.
+    text = "visibility: private\nquestions:\n  visibility: no\n"
+    assert shapes.set_setting(text, "visibility", "public") == (
+        "visibility: public\nquestions:\n  visibility: no\n"
+    )
+
+
+# --------------------------------------- the definition lives on the solution branch
+
+
+def test_the_definition_is_read_off_the_solution_branch(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        shapes.gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path, ref="": (
+            seen.append((org, repo, path, ref)) or ("title: x\n", "sha1")
+        ),
+    )
+    assert shapes.read_config("course-org", "assignment-90-x") == ("title: x\n", "sha1")
+    assert seen == [
+        ("course-org", "assignment-90-x", grades.GRADING_FILE, course.SOLUTION_BRANCH)
+    ]
+
+
+def test_a_template_with_no_definition_says_so(monkeypatch):
+    monkeypatch.setattr(shapes.gh_contents, "get_file_with_sha", lambda *a, **k: None)
+    with pytest.raises(RuntimeError, match="New assignment"):
+        shapes.read_config("course-org", "assignment-90-x")
+
+
+def test_the_definition_is_written_back_on_the_solution_branch(monkeypatch):
+    # THE reason this write is not `gh_contents.put_file`: that helper has no `branch`,
+    # and the Contents API writes to the default branch when nothing says otherwise. The
+    # run would then hand out under the form's config while asserting against its own.
+    calls = []
+    monkeypatch.setattr(
+        shapes.ghcli,
+        "gh",
+        lambda *args, **kw: calls.append((args, kw)) or (0, ""),
+    )
+    shapes.write_config("course-org", "assignment-90-x", "title: x\n", "sha1")
+    args, kw = calls[0]
+    assert f"repos/course-org/assignment-90-x/contents/{grades.GRADING_FILE}" in args
+    assert f"branch={course.SOLUTION_BRANCH}" in args
+    # The sha the text was READ at, so a commit that landed in between is refused rather
+    # than silently reverted.
+    assert "sha=sha1" in args
+    assert base64.b64decode(kw["stdin"]).decode() == "title: x\n"
+
+
+def test_a_refused_write_is_never_read_as_a_written_one(monkeypatch):
+    monkeypatch.setattr(shapes.ghcli, "gh", lambda *a, **k: (1, "409 conflict"))
+    with pytest.raises(RuntimeError, match=course.SOLUTION_BRANCH):
+        shapes.write_config("course-org", "assignment-90-x", "title: x\n", "sha1")
+
+
+# ------------------------------------------- the student publishes their own repo
+
+
+def _tokens(monkeypatch) -> None:
+    monkeypatch.setenv(student.HANDLE_ENV, "ada-l")
+    monkeypatch.setenv(student.TOKEN_ENV, "ghp_thestudents")
+    monkeypatch.setenv("GH_TOKEN", "ghp_themaintainers")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+
+def test_the_flip_is_made_with_the_students_own_token(monkeypatch):
+    # `student_choice` is the shape where what the STUDENT can do is the thing under
+    # test. Flipping it with the maintainer's org-owner token would prove the scheduler's
+    # half and none of the student's.
+    _tokens(monkeypatch)
+    seen: dict[str, str] = {}
+
+    def _flip(org, name, visibility, person=False):
+        seen.update(
+            org=org,
+            name=name,
+            visibility=visibility,
+            gh=os.environ["GH_TOKEN"],
+            github=os.environ["GITHUB_TOKEN"],
+        )
+        return True
+
+    monkeypatch.setattr(student.repos, "set_visibility", _flip)
+    assert student.set_visibility("cohort", "assignment-90-x-ada-l", "public")
+    assert seen["gh"] == "ghp_thestudents"
+    # Both, because `gh` will fall back to the second on a machine that exports it.
+    assert seen["github"] == "ghp_thestudents"
+    assert (seen["org"], seen["name"], seen["visibility"]) == (
+        "cohort",
+        "assignment-90-x-ada-l",
+        "public",
+    )
+
+
+def test_the_maintainers_token_is_back_afterwards(monkeypatch):
+    _tokens(monkeypatch)
+    with student.acting():
+        assert os.environ["GH_TOKEN"] == "ghp_thestudents"
+    # Restored to what it WAS, including the variable that was never set: everything after
+    # the block is the maintainer's run again, and a leaked student token would silently
+    # downgrade every write that follows.
+    assert os.environ["GH_TOKEN"] == "ghp_themaintainers"
+    assert "GITHUB_TOKEN" not in os.environ
+
+
+def test_the_token_goes_back_even_when_the_call_raises(monkeypatch):
+    _tokens(monkeypatch)
+    with pytest.raises(RuntimeError, match="boom"), student.acting():
+        raise RuntimeError("boom")
+    assert os.environ["GH_TOKEN"] == "ghp_themaintainers"
+
+
+def test_a_refused_flip_is_not_read_as_a_successful_one(monkeypatch):
+    _tokens(monkeypatch)
+    monkeypatch.setattr(student.repos, "set_visibility", lambda *a, **k: False)
+    assert not student.set_visibility("cohort", "assignment-90-x-ada-l", "public")
+
+
+def test_the_flip_goes_through_the_engines_own_writer():
+    # Not a hand-rolled PATCH: `repos.set_visibility` is what the provisioner and the
+    # scheduler both use, so the harness exercises the same call the toolkit makes.
+    assert student.repos is repos
+
+
+# -------------------------------------------- five assignments, one fenced block
+
+
+def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
+    """The fenced text goes into a file the scheduler parses every fifteen minutes: an
+    indentation slip here would not fail the harness, it would fail the cohort. One
+    fence for all five, so the teardown takes the whole run out in one edit whatever it
+    got as far as adding."""
+    module = _pipeline_module(monkeypatch)
+    when = datetime(2026, 9, 4, 14, 0)
+    due = datetime(2026, 9, 4, 15, 0)
+    cutoff = datetime(2026, 9, 4, 16, 0)
+    blocks = module._schedule_blocks("e2eab12cd", when, due, cutoff)
+    doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks))
+    assert set(doc) == {"timezone", "assignments", "events"}
+    mine = set(doc["assignments"]) - {"assignment-1"}
+    assert mine == {shapes.slug("e2eab12cd", s) for s in shapes.SHAPES}
+    for slug in mine:
+        entry = doc["assignments"][slug]
+        assert entry["course_source_repo"] == slug
+        assert set(entry) <= schedule.KNOWN_ASSIGNMENT | {"title"}
+        # The due date and the cutoff are separate instants: collapsing them would skip
+        # the refresh pass entirely, which is most of what the live run is there to
+        # exercise.
+        assert entry["due_datetime"] != entry["grading_datetime"]
+    # And removing the one fence takes all five out again.
+    fenced = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks)
+    assert schedule_edit.remove_block(fenced, "e2eab12cd") == SCHEDULE
+
+
+def test_the_pipeline_names_the_shapes_it_asserts_about(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    named = {
+        module.PRIVATE,
+        module.PUBLIC,
+        module.CHOICE,
+        module.EXTERNAL,
+        module.SHARED,
+    }
+    assert named == set(shapes.SHAPES)
+
+
+def test_every_reading_is_filed_under_its_shape(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    assert module._per_shape(lambda s: s.key) == {s.name: s.key for s in shapes.SHAPES}
+
+
+def test_each_shapes_feedback_says_which_shape_it_is(monkeypatch):
+    # All five land in ONE gradebook README, so "the feedback arrived" is only an answer
+    # if each one says whose it is - and no one's may be a substring of another's, or the
+    # assertion passes on the wrong section.
+    module = _pipeline_module(monkeypatch)
+    texts = [module.feedback_for(s) for s in shapes.SHAPES]
+    for text in texts:
+        assert sum(text in other for other in texts) == 1
+
+
+def test_every_comment_the_press_left_is_scanned(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    stage = module.Stage(
+        "distribute", detail={"comments": {"private": ["a", "b"], "public": []}}
+    )
+    assert module._every_comment(stage) == "a\nb"
+
+
+def _student_row(handle: str, role: str = "enrolled"):
+    return roster.Student(
+        hertie_email=f"{handle}@example.org",
+        name=handle,
+        github_handle=handle,
+        github_id="1",
+        role=role,
+    )
+
+
+def test_a_cohort_short_of_a_gradebook_is_counted_not_named(monkeypatch):
+    # The handout provisions gradebooks now, and a repo it makes in a STUDENT's namespace
+    # is drift the teardown cannot sweep - it owns only its own. So the preflight refuses
+    # first, and says how many rather than who.
+    module = _pipeline_module(monkeypatch)
+    students = [_student_row("ada-l"), _student_row("bob-k")]
+    assert module.missing_gradebooks(students, {"grades-ada-l", "grades-bob-k"}) == 0
+    assert module.missing_gradebooks(students, {"grades-ada-l"}) == 1
+
+
+def test_an_auditor_needs_no_gradebook(monkeypatch):
+    # Auditors are read-only and are never assessed, so `ensure_gradebooks` makes them
+    # none - and a preflight that demanded one would refuse every cohort that has one.
+    module = _pipeline_module(monkeypatch)
+    students = [_student_row("ada-l"), _student_row("zoe-m", role="auditor")]
+    assert module.missing_gradebooks(students, {"grades-ada-l"}) == 0
+
+
+def test_a_student_who_has_not_onboarded_needs_no_gradebook(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    students = [_student_row("ada-l"), _student_row("")]
+    assert module.missing_gradebooks(students, {"grades-ada-l"}) == 0
+
+
+# ----------------------------------------------- the walk itself, against a fake estate
+
+# The walk is ~100 lines of code that only ever runs against two real orgs, and a typo in
+# it surfaces an hour into a live run with repos already made. So it is driven HERE, over
+# stubs, for its control flow: every stage recorded, every shape reached, and - the part a
+# 422 would kill the run over - the exact inputs each button is pressed with.
+
+SHEET_TEXT = f"""\
+# GRADING SHEET
+# Status: OPEN - 0 of 2 students
+submissions:
+  ada-l:
+    info:
+    score_individual:
+    feedback_individual:
+    {grades.NOTES_KEY}:
+"""
+
+
+def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
+    """Answer every live call the walk makes. Returns the dispatch log."""
+    dispatched: list[tuple[str, dict]] = []
+
+    def content(org, repo, path, ref=""):
+        if path.endswith("schedule.yml"):
+            return SCHEDULE
+        if path.startswith(f"{grades.SHEETS_DIR}/"):
+            return SHEET_TEXT
+        if path.startswith("_assignments/"):
+            return '---\nsubmit_shape: "github-private"\n---\n'
+        return ""
+
+    monkeypatch.setattr(module.gh_contents, "get_file_content", content)
+    monkeypatch.setattr(
+        module.gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path, ref="": (content(org, repo, path), "sha1"),
+    )
+    monkeypatch.setattr(module.gh_contents, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(module.schedule_edit, "put_schedule", lambda *a, **k: True)
+    monkeypatch.setattr(module.discovery, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(module.grades, "find_feedback_issue", lambda org, repo: None)
+    monkeypatch.setattr(
+        module.repos,
+        "direct_collaborators",
+        lambda org, repo, **k: frozenset({"ada-l"}),
+    )
+    monkeypatch.setattr(module.cleanup, "file_bytes", lambda org, repo, path: b"x")
+    monkeypatch.setattr(module.ghcli, "gh", lambda *a, **k: (0, "admin"))
+
+    def gh_json(*args):
+        url = args[1] if len(args) > 1 else ""
+        if "contents/_assignments" in url:
+            return [f"01-{shapes.slug(RUN, s)}.md" for s in shapes.SHAPES]
+        return []
+
+    monkeypatch.setattr(module.ghcli, "gh_json", gh_json)
+
+    seeded = scaffold._grading_config(
+        title="E2E",
+        kind="individual",
+        team_formation="self_select",
+        submit_via="github",
+        visibility="private",
+        formats=["py"],
+        autograde=True,
+        defaults={},
+    )
+    monkeypatch.setattr(
+        module.shapes, "read_config", lambda org, slug: (seeded, "sha1")
+    )
+    monkeypatch.setattr(module.shapes, "write_config", lambda *a: None)
+
+    monkeypatch.setattr(module.student, "handle", lambda: "ada-l")
+    monkeypatch.setattr(
+        module.student, "push_file", lambda repo, dest, path, body, msg: "abc1234"
+    )
+    monkeypatch.setattr(module.student, "set_visibility", lambda *a: True)
+
+    def dispatch(repo, workflow, inputs, **kwargs):
+        dispatched.append((workflow, dict(inputs)))
+        return len(dispatched)
+
+    monkeypatch.setattr(module.drive, "dispatch", dispatch)
+    monkeypatch.setattr(module.drive, "wait_for_run", lambda *a, **k: "success")
+    monkeypatch.setattr(module.drive, "run_log", lambda *a, **k: "")
+    monkeypatch.setattr(module.drive, "wait_for_idle", lambda *a, **k: None)
+    monkeypatch.setattr(module.drive, "run_ids", lambda *a, **k: set())
+    monkeypatch.setattr(module.drive, "wait_for_push_driven_tick", lambda *a, **k: None)
+    return dispatched
+
+
+def test_the_walk_reaches_every_stage_and_every_shape(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    _stub_estate(monkeypatch, module)
+    stages = module._walk(RUN, {})
+    assert set(stages) == {
+        "scaffold",
+        "configure",
+        "schedule",
+        "handout",
+        "at_handout",
+        "submission",
+        "published_early",
+        "due",
+        "refresh",
+        "after_due",
+        "collect_button",
+        "cutoff",
+        "published_late",
+        "grading",
+        "artefacts",
+        "marked",
+        "shared_before",
+        "distribute_dry",
+        "distribute",
+        "distribute_again",
+    }
+    names = {s.name for s in shapes.SHAPES}
+    assert set(stages["scaffold"].detail["conclusions"]) == names
+    assert set(stages["configure"].detail["configs"]) == names
+    assert set(stages["marked"].detail["sheets"]) == names
+    assert set(stages["at_handout"].detail["pages"]) == names
+    # Only the shapes that take a push get one - `external` hands in off GitHub.
+    assert set(stages["submission"].detail["pushed"]) == {
+        s.name for s in shapes.SHAPES if s.collects_commits
+    }
+
+
+def test_the_walk_presses_new_assignment_once_per_shape_with_its_own_answers(
+    monkeypatch,
+):
+    # A form input this does not know about is a 422 an hour into a live run, and a shape
+    # answered with the wrong box is a run that proves the same thing five times.
+    module = _pipeline_module(monkeypatch)
+    dispatched = _stub_estate(monkeypatch, module)
+    module._walk(RUN, {})
+    presses = [i for w, i in dispatched if w == module.NEW_ASSIGNMENT]
+    assert len(presses) == len(shapes.SHAPES)
+    for shape, inputs in zip(shapes.SHAPES, presses, strict=True):
+        assert inputs["semester_tag"] == f"{RUN}-{shape.name}"
+        assert inputs["submit_via"] == shape.submit_via
+        assert inputs["visibility"] == (shape.visibility or "private")
+        assert inputs["autograde"] is shape.autograde
+        assert inputs["assignment_number"] == cleanup.ASSIGNMENT_NUMBER
+
+
+def test_the_walk_drives_the_ticks_in_the_order_the_passes_need(monkeypatch):
+    # `scheduler.run` freezes what is already past its deadline BEFORE it hands anything
+    # out, so the pass that hands out can never be the pass that collects: three ticks,
+    # in this order, with a schedule edit before each.
+    module = _pipeline_module(monkeypatch)
+    dispatched = _stub_estate(monkeypatch, module)
+    module._walk(RUN, {})
+    workflows = [w for w, _ in dispatched]
+    assert workflows.count(module.SCHEDULED_RELEASE) == 3
+    assert workflows.count(module.DISTRIBUTE_GRADES) == 3
+    assert workflows.count(module.COLLECT_SUBMISSIONS) == 1
+    # The collect button is pressed against ONE assignment - the shape whose assertions
+    # this harness carried before the others existed.
+    pressed = next(i for w, i in dispatched if w == module.COLLECT_SUBMISSIONS)
+    assert pressed["course_source_repo"] == shapes.slug(RUN, module.PRIVATE)
+    # A live run must never put a real message in a real inbox.
+    for workflow, inputs in dispatched:
+        if workflow == module.DISTRIBUTE_GRADES:
+            assert inputs["silent"] is True
+    assert [i["dry_run"] for w, i in dispatched if w == module.DISTRIBUTE_GRADES] == [
+        True,
+        False,
+        False,
+    ]
+
+
+def test_the_student_publishes_before_the_cutoff_and_after_it(monkeypatch):
+    # The two halves of the `student_choice` promise, and they have to happen either side
+    # of the schedule edit that moves the cutoff into the past - or the run proves neither.
+    module = _pipeline_module(monkeypatch)
+    order: list[str] = []
+    _stub_estate(monkeypatch, module)
+    monkeypatch.setattr(
+        module.student,
+        "set_visibility",
+        lambda org, repo, visibility: order.append(f"flip {repo}") or True,
+    )
+    real_write = module._write_schedule
+    monkeypatch.setattr(
+        module,
+        "_write_schedule",
+        lambda run_id, handout, due, cutoff: (
+            order.append(f"schedule cutoff={cutoff}")
+            or real_write(run_id, handout, due, cutoff)
+        ),
+    )
+    module._walk(RUN, {})
+    flips = [i for i, step in enumerate(order) if step.startswith("flip ")]
+    edits = [i for i, step in enumerate(order) if step.startswith("schedule ")]
+    assert len(flips) == 2 and len(edits) == 3
+    # published while the cutoff was still ahead, then again once it had passed
+    assert edits[0] < flips[0] < edits[1] < edits[2] < flips[1]
+    choice = shapes.slug(RUN, module.CHOICE)
+    assert all(order[i] == f"flip {choice}-ada-l" for i in flips)

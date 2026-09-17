@@ -3,11 +3,12 @@
     python -m tests.e2e.cleanup --run-id e2eab12cd [--dry-run]
 
 Re-runnable and narrow by construction. It deletes ONLY repos whose names match this run's
-own namespace (`assignment-90-<run>`, plus the `-<handle>`, `-submissions` and `-template` repos GitHub
-Classroom-style provisioning hangs off it), removes only the fenced schedule block this run
-inserted, and only the snapshot / autograde / grading-sheet artefacts named after this
-run's slug. Anything else that looks like e2e leavings is REPORTED and left alone: a
-cleanup that guesses is how a demo org loses a real repo.
+own namespace (`assignment-90-<run>`, plus the `-<shape>` slug each of the run's five
+assignments hands out under and the `-<handle>`, `-submissions` and `-template` repos
+GitHub Classroom-style provisioning hangs off those), removes only the fenced schedule
+block this run inserted, and only the snapshot / autograde / grading-sheet artefacts named
+inside that namespace. Anything else that looks like e2e leavings is REPORTED and left
+alone: a cleanup that guesses is how a demo org loses a real repo.
 
 Then it re-renders the course org's org-level workflows (`_refresh_workflows`), because
 deleting the run's template leaves four of the buttons still offering it in their
@@ -72,14 +73,19 @@ def check_run_id(run_id: str) -> str:
 
 
 def slug(run_id: str) -> str:
-    """The assignment slug this run hands out under."""
+    """The NAMESPACE this run hands out under - the root every name it creates hangs off.
+
+    One run drives one assignment per submission shape (`shapes.SHAPES`), and each of them
+    hands out under this plus `-<shape name>`. So nothing is ever named exactly this; it
+    is the prefix the two rules below are written around, and the reason they need no list
+    of shapes to stay exact."""
     return f"assignment-{ASSIGNMENT_NUMBER}-{check_run_id(run_id)}"
 
 
 def is_run_repo(name: str, run_id: str) -> bool:
-    """Whether `name` is a repo THIS run created: the template, the assignment itself,
-    one of its `-<handle>` submission repos, or the `-submissions` drop box a shared
-    assignment hands out - and nothing else."""
+    """Whether `name` is a repo THIS run created: one of its per-shape assignment
+    templates, one of their `-<handle>` submission repos, or the `-submissions` drop box a
+    shared assignment hands out - and nothing else."""
     return re.fullmatch(rf"{re.escape(slug(run_id))}(-.+)?", name) is not None
 
 
@@ -154,13 +160,19 @@ def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
 
 
 def _is_artefact(path: str, run_id: str) -> bool:
-    """A classroom-config path this run's slug owns - `snapshots/<slug>.csv`,
-    `autograde/<slug>/...`, `grading_sheets/<slug>.yml`."""
+    """A classroom-config path inside this run's namespace - `snapshots/<slug>.csv`,
+    `autograde/<slug>/...`, `grading_sheets/<slug>.yml`, for each of the run's per-shape
+    slugs.
+
+    The same boundary rule as `is_run_repo`, in the three spellings a path can put after
+    the namespace: `-` starts a shape name, `.` an extension, `/` a directory. A prefix
+    rule rather than a list of shapes, so a shape added to `shapes.SHAPES` cannot leave
+    its artefacts behind."""
     head, _, rest = path.partition("/")
     if head not in ARTEFACT_DIRS:
         return False
     mine = slug(run_id)
-    return rest == mine or rest.startswith((f"{mine}/", f"{mine}."))
+    return rest == mine or rest.startswith((f"{mine}/", f"{mine}.", f"{mine}-"))
 
 
 def _refresh_workflows(org: str, run_id: str, dry_run: bool) -> int:
