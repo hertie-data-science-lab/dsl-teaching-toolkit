@@ -923,16 +923,37 @@ def test_every_field_carries_its_own_save_and_its_own_saved_line():
     assert body.count('class="btn btn--field"') == len(saves)
 
 
-def test_saving_empties_the_box_and_an_empty_box_saves_nothing():
-    # The pair that makes the cleared box safe. A save empties the box and promotes what it
-    # stored to the placeholder; a second press must therefore NOT read that empty box as
-    # "forget it". `clear` is the only way back to unset, so it has to exist.
+def test_the_boxes_hold_an_editable_value_and_save_leaves_it_there():
+    # The box is seeded with the saved value, or the example until there is one, so a
+    # student edits `j.doe` into their own name instead of retyping a path over a grey
+    # hint that goes at the first keystroke. Save keeps what it stored in the box; an
+    # empty box or the untouched example saves nothing; `clear` is the way back to unset
+    # and puts the example back.
     body = _strip_comments(_profile())
+    ready = body.split("api.ready(function () {")[1]
+    assert (
+        "box(FIELDS[i]).value = api.stored(FIELDS[i]) || examples[FIELDS[i]]" in ready
+    )
     save = body.split("function save(name) {")[1].split("\n  }")[0]
-    assert "if (!value) { return; }" in save
-    assert 'box(name).value = ""' in save
-    assert 'setAttribute("placeholder", api.stored(name) || examples[name])' in body
+    assert (
+        "if (!value || (value === examples[name] && !api.stored(name))) { return; }"
+        in save
+    )
+    assert 'box(name).value = ""' not in save
+    assert 'setAttribute("placeholder"' not in body
     assert '"clear"' in body
+    assert "if (box(name)) { box(name).value = examples[name]; }" in body
+
+
+def test_the_folder_boxes_run_the_width_of_the_page():
+    # An absolute path with the cohort org in it does not fit a 26em box; only the handle
+    # box, which holds a username, stays capped.
+    scss = _templates()["_sass/_course.scss"]
+    entry = scss.split(".profile-entry {")[1].split("}")[0]
+    assert "max-width" not in entry
+    text_input = scss.split('input[type="text"] {')[1].split("}")[0]
+    assert "max-width" not in text_input
+    assert "#dsl-handle," in scss
 
 
 def test_the_clone_button_waits_for_the_fork():
