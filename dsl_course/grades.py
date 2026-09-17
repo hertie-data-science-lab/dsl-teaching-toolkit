@@ -45,6 +45,8 @@ from .course import (
     ASSIGNMENT_TYPES,
     CONFIG_REPO,
     COURSE_CONFIG,
+    DEFAULT_LATE_PENALTY_PER_DAY,
+    DEFAULT_LATE_WINDOW_DAYS,
     DEFAULT_MAX_TEAM_SIZE,
     FORMATS,
     GRADEBOOK_PREFIX,
@@ -1228,8 +1230,12 @@ class GradingSpec(_Shape):
     submit_url: str = ""
     format: str = "none"
     questions: dict[str, str] | None = None
-    late_window_days: int | None = None
-    late_penalty_per_day: str | None = None
+    # The Hertie standard from `course` unless this file says otherwise, so an assignment
+    # nobody has written a late policy for is still graded by the one the syllabi state.
+    # A file that declares ONE of the two leaves the other empty rather than taking half a
+    # default it never asked for - see `_late_pair`.
+    late_window_days: int | None = DEFAULT_LATE_WINDOW_DAYS
+    late_penalty_per_day: str | None = DEFAULT_LATE_PENALTY_PER_DAY
     # OFF unless the assignment asks for it. Most assignments are hand-marked, and a
     # default of true made every template without the key try to run hidden tests that
     # were never written - a red tick every quarter of an hour for the rest of the term.
@@ -1388,20 +1394,40 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
         )
 
 
+def _late_pair(values: dict) -> None:
+    """The late-work default is a PAIR, and a file that states half of it gets no half.
+
+    `late_window_days` and `late_penalty_per_day` describe one rule, so the standard
+    (10% a day for 10 days) only stands behind a file that says nothing about late work at
+    all. A file naming just one of them has stated a rule of its own - `late_window_days:
+    3` with no penalty is three days late accepted free, and a penalty with no window is a
+    rate nothing is collected to spend it on - and completing it from the syllabus would
+    grade a cohort by a sentence nobody wrote."""
+    declared = [
+        key for key in ("late_window_days", "late_penalty_per_day") if key in values
+    ]
+    if len(declared) == 1:
+        values.setdefault("late_window_days", None)
+        values.setdefault("late_penalty_per_day", None)
+
+
 def parse_grading_spec(text: str) -> GradingSpec:
     """Parse a `grading_config.yml` into a `GradingSpec`.
 
     A missing key falls back to the field's own default, and to nothing else: the course's
     `assignment_defaults` stand behind an assignment at WRITE time, stamped into the file
     by `New assignment` (see `course_assignment_defaults`), so what a reader sees is what
-    the file says. A malformed VALUE is logged and dropped, never raised and never passed
-    through: this file is hand-edited by faculty and read by an hourly cron, so one bad
-    line costs the field it sits on and nothing else."""
+    the file says. The late-work pair is the one default a reader may still supply, because
+    a file written before the course had a policy would otherwise grade by "nothing after
+    the deadline" - a rule no syllabus states. A malformed VALUE is logged and dropped,
+    never raised and never passed through: this file is hand-edited by faculty and read by
+    an hourly cron, so one bad line costs the field it sits on and nothing else."""
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
     dropped: list[str] = []
     values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
+    _late_pair(values)
     _cross_check(values, dropped)
     for line in dropped:
         log_err(line)

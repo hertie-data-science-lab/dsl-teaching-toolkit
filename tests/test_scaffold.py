@@ -871,16 +871,24 @@ def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypat
         assert "grader_pdf: false" in text
 
 
-def test_a_course_with_no_defaults_gets_the_settings_commented_out(fake, monkeypatch):
-    # Nothing is asserted on the course's behalf: the file teaches the whole vocabulary,
-    # and a late window nobody declared stays a comment rather than becoming a policy.
+def test_a_course_with_no_defaults_gets_the_toolkit_late_policy(fake, monkeypatch):
+    # Nothing is asserted on the course's behalf except late work, which the toolkit
+    # itself has a policy for (the Hertie syllabus rule): the file a grader opens carries
+    # the numbers the assignment will be graded by rather than a pair of comments and a
+    # default read from somewhere else. The team cap nobody declared stays a comment.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
-    spec = grades.parse_grading_spec(written["grading_config.yml"])
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (None, None)
+    text = written["grading_config.yml"]
+    spec = grades.parse_grading_spec(text)
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (
+        course.DEFAULT_LATE_WINDOW_DAYS,
+        course.DEFAULT_LATE_PENALTY_PER_DAY,
+    )
     assert spec.max_team_size is None
-    assert "# late_window_days:" in written["grading_config.yml"]
+    assert "# max_team_size:" in text
+    assert f"late_window_days: {course.DEFAULT_LATE_WINDOW_DAYS}" in text
+    assert f"late_penalty_per_day: {course.DEFAULT_LATE_PENALTY_PER_DAY}" in text
 
 
 @pytest.mark.parametrize(

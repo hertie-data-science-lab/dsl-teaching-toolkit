@@ -672,7 +672,8 @@ def test_an_external_assignments_shape_names_no_visibility(monkeypatch):
             "10% per day, up to 7 days",
         ),
         ("late_window_days: 7\n", "accepted up to 7 days late"),
-        ("", "not accepted after the deadline"),
+        ("late_window_days: 0\n", "not accepted after the deadline"),
+        ("", "10% per day, up to 10 days"),
     ],
 )
 def test_the_page_carries_the_late_rule_the_assignment_declares(
@@ -680,7 +681,9 @@ def test_the_page_carries_the_late_rule_the_assignment_declares(
 ):
     # The rule is the assignment's own (`grading_config.yml`), so the page prints what
     # this assignment's own cutoff will actually do - `course.late_rule`, the same
-    # sentence wherever the toolkit spells the rule rather than the date.
+    # sentence wherever the toolkit spells the rule rather than the date. A file that
+    # declares neither setting is graded by the Hertie standard and the page says so;
+    # `late_window_days: 0` is the assignment that takes nothing after the deadline.
     out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
     assert f'late_rule: "{rule}"' in out
 

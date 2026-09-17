@@ -31,6 +31,8 @@ from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
+    DEFAULT_LATE_PENALTY_PER_DAY,
+    DEFAULT_LATE_WINDOW_DAYS,
     DEFAULT_MAX_TEAM_SIZE,
     FACULTY_ONLY_HEADING,
     FORMATS,
@@ -195,7 +197,8 @@ _READINGS_STUB = (
 # what the course declares in `dsl-course.yml assignment_defaults`. INSTRUCTOR-OWNED from
 # the moment it lands: nothing ever rewrites it, and every setting in it is meant to be
 # edited here afterwards. A setting the course has no default for is seeded COMMENTED OUT,
-# so the file teaches the whole vocabulary without asserting an opinion nobody expressed.
+# so the file teaches the whole vocabulary without asserting an opinion nobody expressed -
+# except the late-work pair, which the toolkit itself has an opinion about and writes live.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the cohort's schedule.yml."
@@ -334,17 +337,19 @@ def _grading_config(
         "",
         _QUESTIONS_STUB.rstrip(),
         "",
+        # Both LIVE, whatever the course declares: these two are the one setting the
+        # toolkit has an opinion about when nobody else does (`course.DEFAULT_LATE_*`, the
+        # Hertie syllabus rule), and a commented-out line carrying the numbers an
+        # assignment will actually be graded by is a file that hides its own policy.
         _setting(
             "late_window_days",
-            window if window is not None else 7,
-            "0 or absent = nothing after the due date is accepted",
-            live=window is not None,
+            window if window is not None else DEFAULT_LATE_WINDOW_DAYS,
+            "0 = nothing after the due date is accepted",
         ),
         _setting(
             "late_penalty_per_day",
-            penalty or "10%",
+            penalty or DEFAULT_LATE_PENALTY_PER_DAY,
             "of the EARNED grade, per day started",
-            live=penalty is not None,
         ),
         "",
         _setting(

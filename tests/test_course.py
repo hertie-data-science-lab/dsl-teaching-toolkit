@@ -112,11 +112,19 @@ def test_the_shared_drop_box_is_named_off_the_template_and_carries_no_handle():
 def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
     # What follows "Late work: " on an assignment's page. A window with a rate, a window
     # without one - late but unpenalised, which is a real course policy - and no window at
-    # all, which is the toolkit's own default and the strictest of the three.
+    # all, which is the strictest of the three and now the one a course has to ask for.
     assert course.late_rule(7, "10%") == "10% per day, up to 7 days"
     assert course.late_rule(7, None) == "accepted up to 7 days late"
     assert course.late_rule(None, "10%") == "not accepted after the deadline"
     assert course.late_rule(0, None) == "not accepted after the deadline"
+    # The sentence a cohort reads when nobody has declared anything: the toolkit's own
+    # default is the Hertie syllabus rule, not silence (`grades.parse_grading_spec`).
+    assert (
+        course.late_rule(
+            course.DEFAULT_LATE_WINDOW_DAYS, course.DEFAULT_LATE_PENALTY_PER_DAY
+        )
+        == "10% per day, up to 10 days"
+    )
     # The rate is quoted as it was TYPED. `grades._penalty` is what decides whether a
     # spelling is usable at all, at the parse, and a second reading of it here would be a
     # second answer to the same question.

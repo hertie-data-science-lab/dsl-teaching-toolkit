@@ -15,7 +15,7 @@ questions:                    # the score skeleton, and the maximum shown beside
   Q3: 10
   Q4: 10
 
-late_window_days: 7           # 0 or absent = nothing after the due date is accepted
+late_window_days: 10          # 0 = nothing after the due date is accepted
 late_penalty_per_day: 10%     # of the EARNED grade, per day started
 
 autograde: false              # hand-marked, so no tests/ is seeded on the solution branch

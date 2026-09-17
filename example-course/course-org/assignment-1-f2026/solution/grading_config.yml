@@ -13,7 +13,7 @@ format: py                    # ipynb | py | rmd | qmd | latex | none - the star
 #   Q1: 15                    # each blank in the grading sheet. The total is their sum;
 #   Q2: 10                    # there is no `points:` field anywhere.
 
-# late_window_days: 7         # nothing is collected from GitHub here, so nothing is late
+# late_window_days: 10        # nothing is collected from GitHub here, so nothing is late
 # late_penalty_per_day: 10%   # of the EARNED grade, per day started
 
 autograde: false              # true: run tests/ at the cutoff and show the count to graders

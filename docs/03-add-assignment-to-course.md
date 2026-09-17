@@ -46,6 +46,10 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - Everything else - the team cap, the late window, the penalty - comes from
      `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
      into the assignment's own `grading_config.yml`, where you can revise it per assignment.
+   - With neither file stating one, late work follows the Hertie standard:
+     `late_penalty_per_day: 10%` of the grade per day started, `late_window_days: 10`, the
+     day the penalty reaches the whole grade. Write `late_window_days: 0` to accept nothing
+     after the deadline.
    - this creates **`assignment-1-f2026`** with two branches of stubs for you to replace:
 
    | Branch | Holds | Who sees it |

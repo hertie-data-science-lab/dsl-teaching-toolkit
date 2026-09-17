@@ -109,11 +109,15 @@ def cadence_calls(monkeypatch):
 @pytest.fixture(autouse=True)
 def _grading_spec_defaults(monkeypatch):
     """The cutoff is read out of each template's grading_config.yml (`late_window_days`), which is
-    real gh I/O. Answered with the defaults - no window - so every test below keeps
-    measuring the behaviour it was written for; the tests that are ABOUT the window declare
-    their own spec."""
+    real gh I/O. Answered with `late_window_days: 0` - the assignment that takes nothing
+    after the deadline, so the cutoff IS the due date and every test below keeps measuring
+    the behaviour it was written for. Spelt out rather than left to the spec's own default,
+    which is the Hertie ten-day window; the tests that are ABOUT the window declare their
+    own spec."""
     monkeypatch.setattr(
-        scheduler, "load_grading_spec", lambda org, template: GradingSpec()
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: GradingSpec(late_window_days=0),
     )
 
 
@@ -3578,10 +3582,12 @@ def _reprivatise(
 ):
     """The pass over one handed-out assignment, with every PATCH it makes recorded."""
     patched: list[tuple[str, str]] = []
+    # No late window, so `CUTOFF` below is both the due date and the cutoff and the times
+    # these tests pass in read as before and after the one moment they are about.
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: GradingSpec(visibility=visibility),
+        lambda org, template: GradingSpec(visibility=visibility, late_window_days=0),
     )
     monkeypatch.setattr(
         scheduler,
@@ -3771,7 +3777,10 @@ def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
         monkeypatch.setattr(
             scheduler,
             "load_grading_spec",
-            lambda org, template, via=submit_via: GradingSpec(submit_via=via),
+            # No late window: the freeze this test is about happens at the due date.
+            lambda org, template, via=submit_via: GradingSpec(
+                submit_via=via, late_window_days=0
+            ),
         )
         assert (
             scheduler.run(

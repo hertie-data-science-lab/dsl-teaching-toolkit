@@ -14,7 +14,7 @@ from shutil import copytree
 import pytest
 import yaml
 
-from dsl_course import gh_contents, ghcli, grades, repos, roster
+from dsl_course import course, gh_contents, ghcli, grades, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 
@@ -1804,3 +1804,53 @@ def test_no_log_line_from_the_lock_file_names_a_person(monkeypatch, capsys):
     _lock(monkeypatch, _sched(a2="assignment-2-f2026"), {"assignment-2-f2026": None})
     printed = capsys.readouterr()
     assert "@" not in printed.out + printed.err
+
+
+# ------------------------------------------- the late-work rule a silent file is graded by
+
+
+def test_a_file_that_says_nothing_about_late_work_gets_the_hertie_rule():
+    # The default an assignment is graded by when neither it nor its course states one.
+    # It was "nothing after the deadline", which no syllabus says: the school's own
+    # sentence is 10% a day, and ten days is where that has taken the whole grade.
+    spec = grades.parse_grading_spec("title: Neural networks\n")
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (
+        course.DEFAULT_LATE_WINDOW_DAYS,
+        course.DEFAULT_LATE_PENALTY_PER_DAY,
+    )
+    assert (
+        course.late_rule(spec.late_window_days, spec.late_penalty_per_day)
+        == "10% per day, up to 10 days"
+    )
+
+
+def test_an_explicit_zero_window_still_means_nothing_after_the_deadline():
+    # The one way to say it, and it must survive a default that now fills the silence.
+    spec = grades.parse_grading_spec("late_window_days: 0\nlate_penalty_per_day: 10%\n")
+    assert spec.late_window_days == 0
+    assert (
+        course.late_rule(spec.late_window_days, spec.late_penalty_per_day)
+        == "not accepted after the deadline"
+    )
+
+
+def test_an_explicit_late_rule_wins():
+    spec = grades.parse_grading_spec("late_window_days: 3\nlate_penalty_per_day: 25%\n")
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "25%")
+
+
+@pytest.mark.parametrize(
+    ("config", "window", "penalty"),
+    [
+        ("late_window_days: 3\n", 3, None),
+        ("late_penalty_per_day: 25%\n", None, "25%"),
+        ("late_window_days: 0\n", 0, None),
+    ],
+    ids=["window-alone", "penalty-alone", "zero-alone"],
+)
+def test_half_a_late_rule_is_never_completed_from_the_default(config, window, penalty):
+    # A course that names one of the two has stated its own rule - three days late
+    # accepted free, or a rate with nothing collected to spend it on - and finishing the
+    # sentence out of the syllabus would grade a cohort by words nobody wrote.
+    spec = grades.parse_grading_spec(config)
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)

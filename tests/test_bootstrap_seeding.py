@@ -627,7 +627,7 @@ def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys
         # both on every run.
         assert grades.parse_assignment_defaults(block) == {
             "max_team_size": 5,
-            "late_window_days": 7,
+            "late_window_days": 10,
             "late_penalty_per_day": "10%",
         }
     assert capsys.readouterr().err == ""

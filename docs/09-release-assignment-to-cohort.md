@@ -152,6 +152,9 @@ assignments:
 - **The late window** is the template `grading_config.yml`'s `late_window_days` (with
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
+  Where neither the assignment nor the course states them, the Hertie standard applies:
+  10% per day started, collected for up to 10 days. `late_window_days: 0` accepts nothing
+  after the deadline.
 - **The cutoff** is `grading_datetime` if set, else the due date plus that late window.
   - At that moment [the scheduler](07-schedule-releases.md#what-drives-the-scheduler) freezes the snapshot and the grading sheet, and autogrades it where the template asks for it (`autograde: true`, off by default).
 - **The commit that is considered submitted for grading** is frozen right after the grading deadline passes, into

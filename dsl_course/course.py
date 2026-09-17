@@ -137,6 +137,17 @@ NO_TEAMS = "none"
 # otherwise. Here because three places have to agree on it: the `grading_config.yml` the
 # New assignment button writes, the lock file the form reads, and the form itself.
 DEFAULT_MAX_TEAM_SIZE = 5
+# The late-work rule an assignment gets when neither its own `grading_config.yml` nor its
+# course's `assignment_defaults:` states one. It is the Hertie School standard, carried
+# verbatim in the Machine Learning, Causal ML and NLP syllabi: "For each day the assignment
+# is turned in late, the grade will be reduced by 10%", with no free days and no cap. Ten
+# days is where 10% a day has taken the whole grade, so that is where collecting late work
+# stops. A course that accepts nothing after the deadline writes `late_window_days: 0`.
+# Here, beside the team cap, because the same three places have to agree on it: the
+# `grading_config.yml` New assignment writes, the spec every reader parses, and the rule
+# the site and the receipts quote to a cohort.
+DEFAULT_LATE_WINDOW_DAYS = 10
+DEFAULT_LATE_PENALTY_PER_DAY = "10%"
 # Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever
 # is in the repo, and a student may commit anything. The button takes any number of them,
 # comma-separated; `none` is the raw-repo answer and the one that stands alone - which is
@@ -456,8 +467,12 @@ def receipt_marker(sha: str, event: str) -> str:
 
 def late_rule(window_days: int | None, penalty: str | None) -> str:
     """The late-work rule an assignment declares, as the half-sentence that follows
-    "Late work: " - `10% per day, up to 7 days`, `accepted up to 7 days late`, or `not
+    "Late work: " - `10% per day, up to 10 days`, `accepted up to 7 days late`, or `not
     accepted after the deadline`.
+
+    Takes the spec's RESOLVED values, which carry `DEFAULT_LATE_*` for an assignment whose
+    course said nothing (`grades.parse_grading_spec`); a window of 0 or None here is a
+    course that turned late work off, not one that has yet to choose.
 
     The rule itself, spelt once. It is the deadline half of an assignment's page on the
     cohort site, and a second spelling of it elsewhere is how one cohort comes to read two
