@@ -47,7 +47,7 @@ teams:
 | `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.completion`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
 | `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
-| `score_group` | you | the team's, in the TEAM repo's comment - never in a member's gradebook |
+| `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
 | `adjustment_individual` | you - the ONLY override, in both shapes | **no** - only the final grade it produced |
 | `notes_not_shared_with_students` | you | **never** |
 | final grade | derived on output, never stored | yes |
