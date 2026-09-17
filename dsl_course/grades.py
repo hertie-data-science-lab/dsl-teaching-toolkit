@@ -111,45 +111,15 @@ GRADEBOOK_DIR = (
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
-# The two things a gradebook has to say whatever else is on it. CONSTANTS, because
-# `render_readme` replaces the whole file on the first distribute: written into the starter
-# alone, both would vanish the moment a student was first marked - which is the moment the
-# first of them starts mattering.
-#
-# Not every assignment has a Feedback issue to read: an assignment handed in off GitHub
-# creates no repo at all, a shared or public one is not private to the student, and one
-# they may publish themselves could stop being private at any moment. This page is the
-# channel every shape writes to, so it says so under the line that says the repo is theirs.
-_CHANNEL_NOTE = (
-    "Feedback for assignments handed in outside GitHub, in a shared repo, or in a repo "
-    "that is public or yours to publish appears here and nowhere else."
-)
-# A cohort org is closed out at the end of the term, so the answer to "can I show this to
-# an employer?" is a recipe rather than a setting - and it belongs where the student is
-# already looking.
-_KEEPING_YOUR_WORK = (
-    "## Keeping your work\n\n"
-    "Your assignment repos stay readable after the course ends, and unless the assignment "
-    "says otherwise they are private to you and the teaching team. To show one publicly, "
-    "publish a copy under your own account; the original is untouched.\n\n"
-    "```\n"
-    "git clone https://github.com/<cohort-org>/<slug>-<your-handle>\n"
-    "cd <slug>-<your-handle>\n"
-    "git remote set-url origin https://github.com/<you>/<new-public-repo>\n"
-    "git push -u origin main\n"
-    "```"
-)
 # What a gradebook says before its student has been marked in anything. The legend names
 # the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
 # and promising them a team score or their own adjustment - neither of which a gradebook
 # ever shows - contradicts the one thing the page is for. Replaced wholesale by
-# `render_readme` on the first distribute, which carries the two constants above forward.
+# `render_readme` on the first distribute.
 _STARTER_README = (
     "# Your gradebook\n\n"
     "This private repository is viewable only by you. Grades and feedback for each "
     "piece of assessment appear in `grades.yml` as the course progresses.\n\n"
-    + _CHANNEL_NOTE
-    + "\n\n"
     "## What each field means\n\n"
     "| Field | Meaning |\n"
     "| --- | --- |\n"
@@ -160,7 +130,6 @@ _STARTER_README = (
     "late days cost. |\n"
     "| `team` | Group assignments only: the team you submitted with. |\n"
     "| `team_feedback` | Group assignments only: feedback shared with the whole team. |\n"
-    "\n" + _KEEPING_YOUR_WORK + "\n"
 )
 
 
@@ -3042,21 +3011,7 @@ def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) ->
         *(_readme_row(titles.get(slug, slug), book[slug]) for slug in slugs),
     ]
     sections = [_readme_section(titles.get(slug, slug), book[slug]) for slug in slugs]
-    # The same two constants the starter page opens and closes with: this REPLACES that
-    # page, and a student first marked in week three must not lose the two things it told
-    # them - where feedback for the other shapes lands, and how to keep their work.
-    return (
-        "\n\n".join(
-            [
-                _PRIVACY_HEADER,
-                _CHANNEL_NOTE,
-                "\n".join(table),
-                *sections,
-                _KEEPING_YOUR_WORK,
-            ]
-        )
-        + "\n"
-    )
+    return "\n\n".join([_PRIVACY_HEADER, "\n".join(table), *sections]) + "\n"
 
 
 def render_registrar_csv(
