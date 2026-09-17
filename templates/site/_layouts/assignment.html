@@ -108,13 +108,14 @@ title: page.title
     open_in.html contract to keep in step, and the two drifted the first time one of them
     was reworded.
 
-    The callout answers ROUTE and nothing else - where the work goes, and what the deadline
-    costs. Every shape's route is the same route: clone, commit, push to `main`. So the
+    The callout answers ROUTE and nothing else - where the work goes, which of it is read,
+    and what the deadline costs. Every shape's route is the same route: clone, commit,
+    push to `main`. So the
     `case` is down to the two arms that genuinely differ - a shared drop box, where the
     address is a folder in one named repo, and `assignment-repo-public`, whose repo is not
-    private and must not be called so. What is UNUSUAL about a repo is a different
-    question, asked after the brief has been read rather than above it, and it is answered
-    once, in the `shape_note` box at the foot of this page (`course.SHAPE_NOTES`).
+    private and must not be called so. WHO CAN READ the repo is a different question,
+    asked after the brief has been read rather than above it, and it is answered once, in
+    the `shape_note` box at the foot of this page (`course.SHAPE_NOTES`).
 
     Where the marks land is not answered here at all. It was, on four of the five arms, in
     four wordings of one sentence - and the page a student opens to find out what to do is
@@ -128,6 +129,13 @@ title: page.title
     student's own is a folder in it (`submit_path`). There is nothing in that name for
     open_in.html to substitute a handle into, and rewriting it would point every reader at
     a repo that does not exist - so the flag is false and the markers are left off.
+
+    `cutoff_sentence` and `late_rule` close the paragraph for every arm at once, which is
+    why neither is inside the `case`: a sentence repeated per arm is a sentence three arms
+    keep in step, and the first reword of it left one of them saying something else. The
+    cutoff text is written in Python (`course.CUTOFF_SENTENCE`), not here, because the
+    About line of every submission repo says the same thing and the two are read minutes
+    apart.
 
     `late_rule` (site.py, off the assignment's own grading_config.yml) closes the
     paragraph, so what happens after the deadline is read where the deadline's own answer
@@ -160,6 +168,7 @@ title: page.title
       Your work goes in your private repo <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit
       as you go, and push to <code>main</code> - that push is your submission.
       {% endcase %}
+      {% if page.cutoff_sentence %}{{ page.cutoff_sentence }}{% endif %}
       {% if page.late_rule %}Late work: {{ page.late_rule }}.{% endif %}
       </p>
     </div>
@@ -193,11 +202,10 @@ title: page.title
   </article>
 
   {%- comment -%}
-  What is unusual about the repo this assignment hands out - that it is public, that its
-  flag is the student's to flip, that the whole cohort reads it. Written for the three
-  shapes that have something to say and for no other (`course.SHAPE_NOTES`, via
-  `site._assignment_entry`), so the box is its own presence test and the layout carries
-  none of the words.
+  Who can read the repo this assignment hands out - only the teaching team, the whole
+  internet, the cohort, or whoever the student later decides. Written for every shape that
+  hands one out (`course.SHAPE_NOTES`, via `site._assignment_entry`), so the box is its
+  own presence test and the layout carries none of the words.
 
   UNDER the brief, not in the callout above it: the callout is the route, read in a
   hurry and acted on, and a warning stapled to it was read as part of the instruction.

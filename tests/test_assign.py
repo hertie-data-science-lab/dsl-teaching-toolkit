@@ -3317,11 +3317,10 @@ def _creations(monkeypatch):
 def test_a_submission_repos_about_line_carries_its_shapes_note(
     _creations, visibility, shape
 ):
-    # The repo's About line is where a student meets the warning if they came to the repo
-    # from a link rather than from the assignment's page - which, weeks after hand-out, is
-    # everyone. Same text as the page, from `course.SHAPE_NOTES`, so the two cannot drift;
-    # a private repo of the student's own has nothing unusual to say, so its line is
-    # exactly what it always was.
+    # The repo's About line is where a student meets both sentences if they came to the
+    # repo from a link rather than from the assignment's page - which, weeks after
+    # hand-out, is everyone. Same texts as the page, from `course.CUTOFF_SENTENCE` and
+    # `course.SHAPE_NOTES`, so the two places cannot drift.
     assign.provision_one(
         "COURSE",
         "assignment-5",
@@ -3331,13 +3330,9 @@ def test_a_submission_repos_about_line_carries_its_shapes_note(
         "assignment-5",
         visibility=visibility,
     )
-    description = _creations[0]["description"]
-    assert description.startswith("assignment-5 - submission repo")
-    note = course.shape_note(shape)
-    assert description == (
-        f"assignment-5 - submission repo. {note}"
-        if note
-        else "assignment-5 - submission repo"
+    assert _creations[0]["description"] == (
+        f"assignment-5 - submission repo. {course.CUTOFF_SENTENCE} "
+        f"{course.shape_note(shape)}"
     )
 
 
@@ -3350,15 +3345,16 @@ def test_the_drop_box_about_line_says_who_else_can_read_it(_creations, monkeypat
         "COHORT", "assignment-7", "assignment-7", [], "key", group=False
     )
     assert _creations[0]["description"] == (
-        "assignment-7 - shared submission drop box. "
-        + course.shape_note("shared-dropbox-repo")
+        f"assignment-7 - shared submission drop box. {course.CUTOFF_SENTENCE} "
+        f"{course.shape_note('shared-dropbox-repo')}"
     )
 
 
 def test_every_about_line_fits_inside_githubs_cap():
-    # GitHub TRUNCATES a description past its cap rather than refusing it, so a note that
-    # outgrew it would lose its second half and say nothing about having done so. The
-    # longest realistic prefix is an assignment slug plus the words around it.
-    prefix = "assignment-10-neural-networks-from-scratch - shared submission drop box. "
-    for shape, note in course.SHAPE_NOTES.items():
-        assert len(prefix) + len(note) <= course.MAX_REPO_DESCRIPTION, shape
+    # GitHub TRUNCATES a description past its cap rather than refusing it, so a line that
+    # outgrew it would lose its second half and say nothing about having done so. Measured
+    # on the real composition, with the longest realistic label a slug can produce - the
+    # About line now carries the cutoff sentence as well as the note.
+    what = "assignment-10-neural-networks-from-scratch - shared submission drop box"
+    for shape in course.SHAPE_NOTES:
+        assert len(assign._about(what, shape)) <= course.MAX_REPO_DESCRIPTION, shape

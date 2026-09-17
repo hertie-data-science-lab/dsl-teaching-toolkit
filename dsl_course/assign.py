@@ -76,6 +76,7 @@ from .collect import (
 from .course import (
     ASSIGNED,
     CONFIG_REPO,
+    CUTOFF_SENTENCE,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     github_visibility,
@@ -174,9 +175,9 @@ def _template_is_ready(entry: dict | None, slug: str) -> bool:
 
 
 def _about(what: str, shape: str) -> str:
-    """A submission repo's About line: what it is, plus whatever this shape owes the
-    student who opens it (`course.SHAPE_NOTES` - the same sentence the assignment's page
-    prints under the brief).
+    """A submission repo's About line: what it is, when what is in it is read
+    (`course.CUTOFF_SENTENCE`), and who can see it (`course.SHAPE_NOTES`) - the same two
+    sentences the assignment's page carries, in its callout and under its brief.
 
     BOTH places, because they are read at different moments and only one of them is the
     repo: a student who clones from a link, or comes back to the repo in week nine, never
@@ -189,7 +190,7 @@ def _about(what: str, shape: str) -> str:
     it, so a note that outgrew the cap would lose its second half and say nothing about
     it."""
     note = shape_note(shape)
-    return f"{what}. {note}" if note else what
+    return f"{what}. {CUTOFF_SENTENCE} {note}" if note else what
 
 
 def _tag_submission(cohort_org: str, repo: str, slug: str, have: set[str]) -> None:

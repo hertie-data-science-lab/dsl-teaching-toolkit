@@ -39,6 +39,7 @@ from pathspec import GitIgnoreSpec
 
 from . import schedule
 from .course import (
+    CUTOFF_SENTENCE,
     PUBLISH_FILE,
     assignment_slug,
     identifier,
@@ -1112,6 +1113,16 @@ def _assignment_entry(
     # (`course.collects_commits`) - a rule quoted there would be about a deadline this
     # toolkit does not hold. The page alone, not the due row: the row is a glance at WHEN
     # and WHERE, and the rule belongs beside the answer it qualifies.
+    # When the work is READ, closing the route the callout has just given - one sentence
+    # from `course.CUTOFF_SENTENCE`, which the repo's own About line carries too, so the
+    # page and the repo cannot come to name two different moments. Front matter rather
+    # than a line in the layout for that reason alone: three arms of one `case` would
+    # otherwise hold three copies of it, and the About line a fourth.
+    # Gated exactly like `late_rule` below, and for the same reason: `external` pins no
+    # commit, so there is no `main` for a cutoff to be read off.
+    cutoff_fm = (
+        f'cutoff_sentence: "{q(CUTOFF_SENTENCE)}"\n' if spec.collects_commits else ""
+    )
     late_fm = (
         f'late_rule: "{q(late_rule(spec.late_window_days, spec.late_penalty_per_day))}"\n'
         if spec.collects_commits
@@ -1126,10 +1137,11 @@ def _assignment_entry(
     # glance at WHEN and WHERE.
     points = total_points(spec)
     points_fm = f'max_points: "{points}"\n' if points else ""
-    # What is unusual about the repo this shape hands out, as the aside the layout prints
-    # under the brief (`course.SHAPE_NOTES` - the same sentence the repo's own About line
-    # carries, so the page and the repo cannot come to say different things). Empty for the
-    # default shape, which owes no warning, and for `external`, which hands out no repo.
+    # Who can read the repo this shape hands out, as the aside the layout prints under the
+    # brief (`course.SHAPE_NOTES` - the same sentence the repo's own About line carries, so
+    # the page and the repo cannot come to say different things). Written for every shape
+    # that hands one out, the ordinary private repo included; empty for `external`, which
+    # hands out no repo for a sentence to be about.
     # The PAGE alone: the due row is a glance at when and where, and a warning in it would
     # be read on the schedule by everyone, about every assignment, at once.
     # And only once the brief is out: a warning about a repo that does not exist yet would
@@ -1193,6 +1205,7 @@ def _assignment_entry(
         f"{sub_fm}"
         f"{flags}"
         f"{repo_fm}"
+        f"{cutoff_fm}"
         f"{late_fm}"
         f"{points_fm}"
         f"{note_fm}"

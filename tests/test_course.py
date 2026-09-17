@@ -123,13 +123,13 @@ def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
     assert course.late_rule(7, "0.1") == "0.1 per day, up to 7 days"
 
 
-def test_only_the_shapes_with_something_unusual_about_them_owe_a_note():
-    # The note answers "what is odd about the repo I was just handed?", so the shape whose
-    # answer is "nothing - it is private and it is yours" owes none, and neither does the
-    # one that hands out no repo at all.
-    assert course.shape_note("assignment-repo-private") == ""
+def test_every_shape_that_hands_out_a_repo_owes_a_note():
+    # The note answers "who else can read the repo I was just handed?", which is asked of
+    # every repo - including the ordinary private one, whose silence read as an oversight
+    # rather than as reassurance. The shape that hands out no repo owes none.
     assert course.shape_note("external") == ""
     assert set(course.SHAPE_NOTES) == {
+        "assignment-repo-private",
         "assignment-repo-public",
         "assignment-repo-student-choice",
         "shared-dropbox-repo",
@@ -144,7 +144,7 @@ def test_only_the_shapes_with_something_unusual_about_them_owe_a_note():
 
 
 def test_every_note_opens_the_same_way_and_says_what_it_is_about():
-    # `NB:` on all three: the box is an aside beside the brief, not a step in it, and one
+    # `NB:` on all four: the box is an aside beside the brief, not a step in it, and one
     # note that opened differently would read as an instruction.
     for shape, note in course.SHAPE_NOTES.items():
         assert note.startswith("NB: "), shape
@@ -153,3 +153,6 @@ def test_every_note_opens_the_same_way_and_says_what_it_is_about():
         # description as well as page copy, and the one consumer that needs markup escapes
         # it where it renders.
         assert "&gt;" not in note, shape
+        # And none of them says what is marked: that is the cutoff sentence's job, and the
+        # About line joins the two, so a note that carried it would say it twice.
+        assert course.CUTOFF_SENTENCE not in note, shape

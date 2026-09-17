@@ -260,40 +260,49 @@ def submit_shape(submit_via: str, visibility: str) -> str:
     return f"{submit_via}-{visibility}".replace("_", "-")
 
 
-# What a student has to know about the REPO they were handed, for the three shapes where
-# the answer is not "a private repo of your own". One text per shape and one place for it,
-# because two readers need the same words at two different moments: the assignment's page
-# on the cohort site (`site._assignment_entry` writes it into the front matter, the layout
-# prints it under the brief) and the repo's own About line on GitHub, which is what a
-# student reads when they open the repo rather than the page (`assign.provision_one`, and
-# the drop box). Written apart they drifted, and the About line said nothing at all.
+# WHO CAN READ the repo a student was just handed. One text per shape and one place for
+# it, because two readers need the same words at two different moments: the assignment's
+# page on the cohort site (`site._assignment_entry` writes it into the front matter, the
+# layout prints it under the brief) and the repo's own About line on GitHub, which is what
+# a student reads when they open the repo rather than the page (`assign.provision_one`,
+# and the drop box). Written apart they drifted, and the About line said nothing at all.
 #
 # `NB:` opens every one of them: the box is an aside beside the brief, not a step in it.
 # Plain `>` rather than `&gt;` - this is a YAML scalar and a repo description, and the one
 # consumer that needs markup escapes it where it renders (`| escape`).
 #
-# The default shape has no note: a private repo of the student's own is what the route
-# sentence in the callout already describes, and a second box saying so is a page telling
-# a reader something they were not wondering about.
+# EVERY shape that hands out a repo has one, the ordinary private repo included. It was
+# left out as the case with nothing unusual to say, and that is the toolkit's reading, not
+# a student's: "who else can see this?" is asked of every repo, and a page that answers it
+# for three shapes and goes quiet on the fourth is read as an omission rather than as
+# reassurance. `external` has none - it hands out no repo for a sentence to be about.
 SHAPE_NOTES = {
+    "assignment-repo-private": (
+        "NB: this repo is private - only you and the teaching team can read it."
+    ),
     "assignment-repo-public": (
-        "NB: this repo is public - anyone on the internet can read it. Push to main as "
+        "NB: this repo is public, anyone on the internet can read it. Push to main as "
         "usual, but commit nothing you would not publish and no data you were told to "
         "keep private."
     ),
     "assignment-repo-student-choice": (
-        "NB: this repo is private by default and you are its admin. After the grading "
+        "NB: this repo is private-by-default; you are its admin - after the grading "
         "cutoff you may make it public from Settings > Danger zone if you want it in "
-        "your portfolio. Before then the toolkit turns it private again."
+        "your portfolio."
     ),
     "shared-dropbox-repo": (
-        "NB: everyone in the cohort can read this whole repo, so commit nothing you "
+        "NB: everyone in the cohort can read the whole repo, so commit nothing you "
         "would not show the class."
     ),
 }
+# When the work is read, said wherever the work's address is given: the route callout on
+# the assignment's page (`site._assignment_entry`, then the layout) and the About line of
+# every submission repo (`assign._about`). ONE constant, because the two are read minutes
+# apart by the same student, and a cutoff worded twice is a cutoff with two answers.
+CUTOFF_SENTENCE = "What is on main at the grading cutoff is what is marked."
 # GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
-# the note, so a note that grew past this would be TRUNCATED by GitHub rather than
-# refused, and the warning would lose its second half silently.
+# the cutoff sentence plus the note, so a note that grew past this would be TRUNCATED by
+# GitHub rather than refused, and the warning would lose its second half silently.
 MAX_REPO_DESCRIPTION = 350
 
 

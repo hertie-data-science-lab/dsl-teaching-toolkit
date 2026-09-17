@@ -710,11 +710,14 @@ def test_the_late_rule_is_the_pages_alone_and_not_the_due_rows(monkeypatch):
     assert "late_rule" not in out.split("due_event:")[1]
 
 
-def test_a_shape_with_a_catch_carries_its_note_on_the_page_alone(monkeypatch):
+def test_every_shape_that_hands_out_a_repo_carries_its_note_on_the_page_alone(
+    monkeypatch,
+):
     # The aside the layout prints under the brief - one text per shape, off
     # `course.SHAPE_NOTES`, so the page and the repo's own About line say the same words.
     # The PAGE alone, like the late rule: the due row is a glance at when and where.
     for config, shape in (
+        ("", "assignment-repo-private"),
         ("visibility: public\n", "assignment-repo-public"),
         ("visibility: student_choice\n", "assignment-repo-student-choice"),
         ("submit_via: shared_dropbox_repo\n", "shared-dropbox-repo"),
@@ -732,12 +735,29 @@ def test_a_pending_assignment_carries_no_shape_note_yet(monkeypatch):
     assert "shape_note" not in out
 
 
-def test_a_shape_with_nothing_unusual_about_it_carries_no_note(monkeypatch):
-    # A private repo of the student's own is what the callout already describes, and an
-    # `external` assignment hands out no repo for a note to be about.
-    for config in ("", "submit_via: external\n"):
-        out = _entry_for(monkeypatch, config, handed_out=frozenset({"assignment-1"}))
-        assert "shape_note" not in out
+def test_a_shape_that_hands_out_no_repo_carries_no_note(monkeypatch):
+    # `external` is the one shape left without a note: the work is handed in somewhere
+    # else, so there is no repo for a sentence about who can read it to be about.
+    out = _entry_for(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
+    )
+    assert "shape_note" not in out
+
+
+def test_the_cutoff_sentence_is_the_pages_alone_and_never_the_external_ones(
+    monkeypatch,
+):
+    # What is marked, in the words the repo's own About line uses (`course.CUTOFF_SENTENCE`
+    # - one text, because a student reads the two minutes apart). Gated like the late rule:
+    # `external` pins no commit, so there is no `main` for a cutoff to be read off.
+    out = _entry_for(monkeypatch, "", handed_out=frozenset({"assignment-1"}))
+    assert f'cutoff_sentence: "{course.CUTOFF_SENTENCE}"\n' in out
+    assert out.count("cutoff_sentence:") == 1
+    assert "cutoff_sentence" not in out.split("due_event:")[1]
+    off_github = _entry_for(
+        monkeypatch, "submit_via: external\n", handed_out=frozenset({"assignment-1"})
+    )
+    assert "cutoff_sentence" not in off_github
 
 
 def test_the_page_carries_the_total_the_questions_add_up_to(monkeypatch):

@@ -430,6 +430,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "submit_url",
         "submit_host",
         "due_event",
+        "cutoff_sentence",
         "late_rule",
         "max_points",
         "shape_note",
@@ -627,6 +628,30 @@ def test_a_timed_assignment_carries_the_late_rule_and_an_external_one_carries_no
     assert "late_rule" not in off_github
 
 
+def test_every_repo_arm_closes_with_the_cutoff_and_the_late_rule_in_that_order(
+    generated,
+):
+    # What is marked, then what being late costs - after the route sentence and outside
+    # the `case`, so the three repo arms share one copy of each. The words are in Python
+    # (`course.CUTOFF_SENTENCE`), because the repo's own About line says the same thing.
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
+    flat = " ".join(_strip_comments(repo_arm).split())
+    cutoff = "{% if page.cutoff_sentence %}{{ page.cutoff_sentence }}{% endif %}"
+    assert flat.count(cutoff) == 1
+    assert flat.index("{% endcase %}") < flat.index(cutoff)
+    assert flat.index(cutoff) < flat.index("Late work:")
+    assert course.CUTOFF_SENTENCE not in flat
+    # And the sentence itself reaches the page for every shape with a repo.
+    for rel in ("01-assignment-1.md", "04-assignment-4.md", "07-assignment-7.md"):
+        page = _front_matter(generated["collections"]["_assignments"][rel])
+        assert page["cutoff_sentence"] == course.CUTOFF_SENTENCE
+    off_github = _front_matter(
+        generated["collections"]["_assignments"]["03-assignment-3.md"]
+    )
+    assert "cutoff_sentence" not in off_github
+
+
 def test_no_site_carries_a_late_policy_of_its_own_any_more():
     # The seeded `_data/late_policy.yml` was INSTRUCTOR-OWNED prose ("8 free late days")
     # beside a rule the toolkit actually enforces from each assignment's own
@@ -748,20 +773,23 @@ def test_the_shape_note_is_the_one_place_a_repos_catch_is_named(generated):
 @pytest.mark.parametrize(
     ("rel", "shape", "opening"),
     [
+        ("01-assignment-1.md", "assignment-repo-private", "NB: this repo is private -"),
         ("04-assignment-4.md", "assignment-repo-public", "NB: this repo is public"),
         (
             "06-assignment-6.md",
             "assignment-repo-student-choice",
-            "NB: this repo is private by default",
+            "NB: this repo is private-by-default",
         ),
         (
             "07-assignment-7.md",
             "shared-dropbox-repo",
-            "NB: everyone in the cohort can read this whole repo",
+            "NB: everyone in the cohort can read the whole repo",
         ),
     ],
 )
-def test_a_shape_with_a_catch_carries_its_note(generated, rel, shape, opening):
+def test_every_shape_that_hands_out_a_repo_carries_its_note(
+    generated, rel, shape, opening
+):
     page = _front_matter(generated["collections"]["_assignments"][rel])
     assert page["submit_shape"] == shape
     assert page["due_event"]["submit_shape"] == shape
@@ -772,11 +800,11 @@ def test_a_shape_with_a_catch_carries_its_note(generated, rel, shape, opening):
     assert "shape_note" not in page["due_event"]
 
 
-@pytest.mark.parametrize("rel", ["01-assignment-1.md", "03-assignment-3.md"])
-def test_a_shape_with_no_catch_carries_no_note(generated, rel):
-    # A private repo of the student's own is what the callout already describes, and an
-    # `external` assignment hands out no repo at all - so neither page gets a box.
-    page = _front_matter(generated["collections"]["_assignments"][rel])
+def test_a_shape_that_hands_out_no_repo_carries_no_note(generated):
+    # `external` hands the work in somewhere else, so there is no repo for a box about who
+    # can read it to be about. The one shape left without one.
+    page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
+    assert page["submit_shape"] == "external"
     assert "shape_note" not in page
 
 
@@ -792,19 +820,17 @@ def test_a_public_assignments_page_warns_before_the_first_push(generated):
 
 
 def test_a_student_choice_page_says_when_the_repo_may_be_published(generated):
-    # The student is an admin of this repo, so the note has to carry BOTH halves of that:
-    # what they may do, and that the toolkit undoes it until the grading cutoff. A page
-    # that said only the first has a student publishing on day one and finding it closed
-    # again an hour later.
+    # The student is an admin of this repo, so the note has to say what they may do and
+    # WHEN: a page that said only "you may make it public" has a student publishing the
+    # work on day one, with the marking still to come.
     page = _front_matter(generated["collections"]["_assignments"]["06-assignment-6.md"])
     assert page["repo_name"] == "assignment-6-<your-handle>"
     note = page["shape_note"]
     assert "you are its admin" in note
     assert (
-        "After the grading cutoff you may make it public from Settings > Danger zone"
+        "after the grading cutoff you may make it public from Settings > Danger zone"
         in note
     )
-    assert "Before then the toolkit turns it private again." in note
     # And the due row says at a glance that the flag is the student's.
     due_row = _liquid_templates()["_includes/schedule_row_due.html"]
     assert '"assignment-repo-student-choice" %} (yours to publish)' in due_row
@@ -1506,7 +1532,7 @@ def test_a_shared_page_names_the_drop_box_and_the_folder(generated):
         in flat
     )
     # Who else can read it is the shape note's half, under the brief, not the callout's.
-    assert "everyone in the cohort can read this whole repo" in page["shape_note"]
+    assert "everyone in the cohort can read the whole repo" in page["shape_note"]
     # And the due row says at a glance that the reader's own work goes in a folder.
     due_row = _liquid_templates()["_includes/schedule_row_due.html"]
     assert (
