@@ -551,7 +551,7 @@ def test_the_deadline_is_bold_under_the_release_date_and_printed_once():
     layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
     flat = " ".join(layout.split())
     assert (
-        '<p class="post-meta"><strong>Due {{ page.due_event.date | date: "%A" }} '
+        '<p class="post-meta post-due"><strong>Due {{ page.due_event.date | date: "%A" }} '
         "{{ page.due_event.date | date: site.dateformat }} "
         '{{ page.due_event.date | date: "%H:%M" }}</strong></p>' in flat
     )
