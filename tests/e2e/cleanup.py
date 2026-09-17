@@ -231,15 +231,12 @@ def _refresh_workflows(org: str, run_id: str, dry_run: bool) -> int:
 def file_bytes(org: str, repo: str, path: str) -> bytes | None:
     """A file's content BYTE FOR BYTE, or None if it is absent.
 
-    `gh_contents.get_file_content` is the wrong instrument for a restore: it comes back
-    through `ghcli.gh`, which reads the subprocess in text mode and strips the result - so
-    a CRLF file arrives with every `\r` gone and every file arrives without its trailing
-    newline. Written back, that is a different blob, and the estate check at teardown saw
-    exactly that: `cohort-gradebook.csv` is `csv.writer` output, so it is CRLF, and every
-    run "restored" it eight bytes shorter than it found it.
-
-    So the base64 is decoded HERE, in Python, and only the base64 alphabet passes through
-    the pipe. Same 404-is-None, anything-else-raises rule as `get_file_content`."""
+    `gh_contents.get_file_content` is byte-exact now too, but it decodes to TEXT, and a
+    restore is measured as a blob sha: a file that is not valid UTF-8 has no text to make
+    a round trip through. So the base64 is decoded HERE and kept as bytes, and only the
+    base64 alphabet passes through the pipe - which is what `gh()`'s
+    `(stdout + stderr).strip()` cannot damage. Same 404-is-None, anything-else-raises rule
+    as `get_file_content`."""
     code, out = ghcli.gh(
         "api", f"repos/{org}/{repo}/contents/{path}", "--jq", ".content"
     )

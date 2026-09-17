@@ -356,11 +356,10 @@ def get_blob(org: str, repo: str, sha: str) -> bytes | None:
 
     The read to use when the bytes have to come back EXACTLY - when they will be hashed,
     compared against a tree, or written into another repo. `get_file_content` cannot do
-    that and is not meant to: the Contents API refuses to inline anything over 1 MiB (it
-    returns `content: ""` on a 200, which reads as an empty file - a plot-heavy notebook
-    silently becomes nothing), and `gh()` hands every caller `(stdout+stderr).strip()`,
-    which eats a trailing newline. The git blobs API answers for anything up to 100 MiB,
-    and base64 survives that strip unharmed.
+    that and is not meant to: it decodes to TEXT, and the Contents API it reads refuses to
+    inline anything over 1 MiB (it returns `content: ""` on a 200, which reads as an empty
+    file - a plot-heavy notebook silently becomes nothing). The git blobs API answers for
+    anything up to 100 MiB, and base64 survives `gh()`'s strip unharmed either way.
 
     What comes back is checked against the sha it was asked for, so an empty or truncated
     payload is a failure here rather than an empty file somewhere downstream. Same
@@ -709,6 +708,19 @@ def is_untouched_stub(text: str) -> bool:
     return any(m in text for m in STUB_MARKS)
 
 
+def _decoded(encoded: str) -> str:
+    """The Contents API's base64 payload as text, byte for byte.
+
+    Decoded HERE rather than by jq's `@base64d`, because `ghcli.gh` hands its caller
+    `(stdout + stderr).strip()` - so a file read through jq arrived without its trailing
+    newline, and a CRLF file without its leading and trailing `\\r`. Written straight back
+    that is a different blob: the e2e teardown's fidelity check saw a cohort's
+    hand-edited `schedule.yml` "drift" by exactly one newline on every run. Base64 is the
+    one payload that strip cannot damage - the API wraps it at 60 columns, and
+    `b64decode` ignores whitespace anywhere in it."""
+    return base64.b64decode(encoded).decode("utf-8")
+
+
 def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | None:
     """Fetch a file's decoded text content (from `ref`, default branch if empty).
 
@@ -719,17 +731,12 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
-    code, out = gh(
-        "api",
-        url,
-        "--jq",
-        ".content | @base64d",
-    )
+    code, out = gh("api", url, "--jq", ".content")
     if code != 0:
         if is_missing_resource(out):
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
-    return out
+    return _decoded(out)
 
 
 def get_file_with_sha(
@@ -743,18 +750,19 @@ def get_file_with_sha(
     NOT a 404 raises, because a caller treating it as "not there" would write over a file
     it never managed to read.
 
-    The sha comes first in the jq output, on its own line, because the content may contain
-    newlines and a sha may not."""
+    The sha comes first in the jq output, on its own line, and the content follows as the
+    base64 the API sent - decoded here (`_decoded`) so the text is byte-exact, and split
+    off on the FIRST newline because a sha carries none."""
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
-    code, out = gh("api", url, "--jq", r'"\(.sha)\n" + (.content | @base64d)')
+    code, out = gh("api", url, "--jq", r'"\(.sha)\n" + .content')
     if code != 0:
         if is_missing_resource(out):
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
-    sha, _, text = out.partition("\n")
-    return text, sha
+    sha, _, encoded = out.partition("\n")
+    return _decoded(encoded), sha
 
 
 def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ...]:

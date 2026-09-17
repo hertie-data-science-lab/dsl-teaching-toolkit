@@ -5,12 +5,20 @@ neither may be reported as an inventory of zero (or mis-tiered) orgs.
 
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
 import yaml
 
 from dsl_course import gh_contents, list_orgs, repos
+
+
+def _contents(text: str):
+    """A `gh` stub answering the Contents API: `.content` is base64, which is what
+    `gh_contents` decodes (and the only payload `gh()`'s strip cannot damage)."""
+    encoded = base64.b64encode(text.encode()).decode()
+    return lambda *a, **k: (0, encoded)
 
 
 def test_main_reports_a_failed_search_and_exits_nonzero(monkeypatch, capsys):
@@ -161,12 +169,10 @@ def test_a_malformed_dsl_course_yml_is_not_read_as_no_metadata(monkeypatch):
     # `except Exception: return {}` turned unparseable YAML into "this org declares
     # nothing", which files a cohort under Course orgs and rewrites the whole inventory
     # around it - the wrong refresh this reader exists to avoid.
-    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (0, "course: [unclosed\n"))
+    monkeypatch.setattr(gh_contents, "gh", _contents("course: [unclosed\n"))
     with pytest.raises(yaml.YAMLError):
         list_orgs.org_meta("Cohort-f2026")
-    monkeypatch.setattr(
-        gh_contents, "gh", lambda *a, **k: (0, "- a list, not a mapping\n")
-    )
+    monkeypatch.setattr(gh_contents, "gh", _contents("- a list, not a mapping\n"))
     with pytest.raises(RuntimeError, match="not a YAML mapping"):
         list_orgs.org_meta("Cohort-f2026")
 
@@ -229,7 +235,7 @@ def test_only_a_404_counts_as_a_deleted_org(monkeypatch):
 
 
 def test_metadata_parses_the_yaml_body(monkeypatch):
-    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (0, "course: My-Course\n"))
+    monkeypatch.setattr(gh_contents, "gh", _contents("course: My-Course\n"))
     assert list_orgs.org_meta("Cohort-f2026") == {"course": "My-Course"}
 
 

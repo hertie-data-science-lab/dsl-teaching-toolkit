@@ -384,6 +384,24 @@ def test_one_run_does_not_remove_another_runs_block():
     assert "e2ebbbbbb2 begin" in left and "e2eaaaaaa1" not in left
 
 
+@pytest.mark.parametrize(
+    "schedule",
+    [
+        SCHEDULE,  # one trailing newline, the ordinary case
+        SCHEDULE.rstrip("\n"),  # none - a file somebody saved without one
+        SCHEDULE + "\n",  # two, which the edit may not quietly make one
+    ],
+)
+def test_the_round_trip_leaves_the_file_byte_for_byte_as_it_was(schedule):
+    # The whole point of fencing the edit rather than re-emitting the YAML: the cohort
+    # gets its own file back. The edit used to end every write with exactly one newline,
+    # so a schedule.yml that had none came back one byte longer - and the teardown's
+    # fidelity check, which compares blob shas, cannot tell that from a real edit. It was
+    # invisible until `gh_contents.get_file_content` stopped stripping what it reads.
+    with_block = schedule_edit.insert_block(schedule, "e2eab12cd", BLOCK)
+    assert schedule_edit.remove_block(with_block, "e2eab12cd") == schedule
+
+
 def test_a_schedule_with_no_assignments_key_is_refused():
     with pytest.raises(ValueError, match="assignments:"):
         schedule_edit.insert_block("timezone: Europe/Berlin\n", "e2eab12cd", BLOCK)

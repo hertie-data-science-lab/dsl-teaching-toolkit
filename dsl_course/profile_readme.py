@@ -175,9 +175,9 @@ def retitle_renamed_org(existing: str, org: str) -> tuple[str, str | None]:
 def splice_repo_table(existing: str, repos: list[dict]) -> str | None:
     """Refresh only the marked repo table in `existing`, leaving the rest of the page alone.
 
-    "The rest of the page" is everything outside the markers, with one caveat worth naming:
-    `get_file_content` returns `gh()`'s output, which is `.strip()`ed - so a page's leading
-    and trailing blank lines do not survive the round trip. The prose itself is untouched.
+    "The rest of the page" is everything outside the markers, to the byte: the read
+    decodes the API's base64 in Python (`gh_contents._decoded`), so a page's leading and
+    trailing blank lines survive the round trip.
 
     None when the markers aren't both there in order - which is the signal to leave the
     page entirely alone rather than guess where the table belongs. An instructor who
