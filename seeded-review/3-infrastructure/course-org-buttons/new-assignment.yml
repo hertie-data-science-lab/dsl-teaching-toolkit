@@ -20,9 +20,9 @@ on:
         type: choice
         options:
           - (fresh starter)
-          - assignment-1
-          - assignment-2
-          - assignment-4-project
+          - assignment-1-f2026
+          - assignment-2-f2026
+          - assignment-4-project-f2026
       format:
         description: "5. Starter file(s) to seed, comma-separated: ipynb, py, rmd, qmd, latex - or none for the README.md only"
         default: "ipynb"
