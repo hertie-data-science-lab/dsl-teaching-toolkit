@@ -967,6 +967,72 @@ def test_the_clone_button_waits_for_the_fork():
     assert 'el("dsl-forked").addEventListener' in body
 
 
+def test_step_three_names_the_folder_the_clone_dialog_should_be_pointed_at():
+    # No clone URL can carry a destination - `vscode://vscode.git/clone` takes a url and a
+    # ref, and the git extension hands the dialog no parent path - so the page names the
+    # folder instead. Without it a student takes whatever folder the dialog opens at, and
+    # step 4 and every `local` button then point at a clone that is not there.
+    body = _strip_comments(_profile())
+    assert 'id="dsl-clone-parent"' in body
+    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
+    assert "api.cloneParent(me.materials, repo)" in refresh
+    # Only once there is a folder to name and a clone about to be made.
+    assert 'show("dsl-clone-where", !!parent && !!me.handle && !!forked);' in refresh
+    # The rule lives beside the one it inverts: a saved folder that already names the repo
+    # is where the clone GOES, so the dialog wants the folder above it - and a folder that
+    # does not is the dialog's answer as it stands.
+    helper = _strip_comments(_open_in()).split("function cloneParent(folder, repo) {")[
+        1
+    ]
+    helper = helper.split("\n  }")[0]
+    assert "trimmed.slice(cut + 1) !== repo" in helper
+    assert "cloneParent: cloneParent," in _strip_comments(_open_in())
+
+
+def test_step_three_also_prints_the_command_that_needs_no_dialog():
+    # The page cannot RUN anything - no browser API executes a shell command - but the line
+    # it prints clones into the exact folder, which no dialog and no URL can be told. It is
+    # also the only clone a student whose editor is not VS Code is offered at all.
+    body = _strip_comments(_profile())
+    assert 'id="dsl-clone-cmd"' in body
+    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
+    assert "api.cloneCommand(me.handle, repo, me.materials)" in refresh
+    assert 'show("dsl-clone-cmd", !!parent && !!me.handle && !!forked);' in refresh
+    # Built once, not per keystroke: `refresh` runs on every one, and a block rebuilt each
+    # time would hang a fresh Copy listener on every one.
+    assert 'var cmd = api.commandBlock().querySelector("code");' in body
+    assert "api.commandBlock()" not in refresh
+
+
+def test_the_clone_command_targets_the_repo_folder_itself():
+    # One segment further down than the dialog hint: the dialog is given the folder the
+    # clone goes INTO, `git clone` the folder it becomes. Both off the same saved path.
+    body = _strip_comments(_open_in())
+    path = body.split("function localPath(folder, repo) {")[1].split("\n  }")[0]
+    assert "cloneParent(folder, repo)" in path
+    cmd = body.split("function cloneCommand(owner, repo, folder) {")[1].split("\n  }")[
+        0
+    ]
+    assert "localPath(folder, repo)" in cmd
+    # Quoted, because nothing stops a space in a home folder - and double quotes are what
+    # bash, zsh, PowerShell and cmd all honour.
+    assert cmd.count("'\"'") == 1 and '.git "' in cmd
+
+
+def test_copy_falls_back_to_a_selection_and_never_leaves_a_dead_button():
+    # `navigator.clipboard` is the whole of it on an https Pages site; the selection trick
+    # covers the rest. Either way the command stays on the page to select by hand, and the
+    # button says which happened rather than silently doing nothing.
+    body = _strip_comments(_open_in())
+    copy = body.split("function copy(text, btn) {")[1].split("\n  }")[0]
+    assert "navigator.clipboard.writeText" in copy
+    assert "selectCopy(text)" in copy
+    assert '"Copied"' in copy and '"Copy failed"' in copy
+    # Copy reads the block's own <code>, so a refilled block cannot copy the old command.
+    block = body.split("function commandBlock() {")[1].split("\n  }")[0]
+    assert "copy(code.textContent, btn)" in block
+
+
 def test_a_custom_scheme_link_never_opens_a_new_tab():
     # `target=_blank` on a `vscode://` link hands the URL to the handler and leaves an
     # empty tab behind for the reader to close. One helper decides, so every button that
@@ -1011,10 +1077,51 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     assert '"<your-handle>"' in own
 
 
-def test_the_assignment_page_offers_a_clone():
-    # The repo a student is least likely to already have, so it leads the row - and only
-    # for the editor with a clone scheme worth offering.
+def test_the_assignment_page_offers_two_edits_and_no_clone_button():
+    # Edit online, edit locally - beside the solid button for the repo on GitHub that the
+    # page already carried. No Clone: it worked for VS Code alone, could not be told where
+    # to put the repo, and a student who accepted the folder its dialog opened at broke
+    # `Edit locally` next to it. The clone is a command under the buttons instead.
     body = _strip_comments(_open_in())
     block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
-    assert "vscode://vscode.git/clone?url=" in block
-    assert '"Clone"' in block
+    assert "vscode://vscode.git/clone" not in block
+    offers = block.split("var offers = [")[1].split("];")[0]
+    labels = re.findall(r'"(Edit online|Edit locally|Clone)"', offers)
+    assert labels == ["Edit online", "Edit locally"]
+
+
+def test_the_clone_command_is_tied_to_the_button_it_is_needed_for():
+    # `Edit locally` opens a folder only a clone puts there, and the page cannot know
+    # whether one was made - so it says so rather than leaving a student to find out by
+    # pressing it. No local button, nothing for the clone to be a prerequisite of.
+    body = _strip_comments(_open_in())
+    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
+    assert "if (offers[1][0]) {" in block
+    assert "cloneCommand(org, repo, me.assignments)" in block
+    note = 'NB: "Edit locally" requires you to have run the following clone command:'
+    assert "under(line('" + note + "'));" in block
+
+
+def test_the_callout_keeps_the_brief_last():
+    # Buttons, the note about them, then the callout's own sentence - which belongs to the
+    # brief and is nobody's to move. Each block goes under the last rather than at the end
+    # of the callout, which is how the command came to sit below the prose it explains.
+    block = _strip_comments(_open_in()).split(
+        "function decorateAssignment(root, me) {"
+    )[1]
+    block = block.split("\n  }")[0]
+    assert "row.parentNode.insertBefore(node, row.nextSibling);" in block
+    assert "row = node;" in block
+    # Never onto the callout itself, which is what put the command below the prose.
+    assert "parentNode.appendChild" not in block
+    # Air under the command, so the brief's sentence does not read as part of it.
+    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
+    cmd = scss.split(".cmd {")[1].split("}")[0]
+    assert "margin: 0.3em 0 1em 0;" in cmd
+    # Quiet: the clone lines are small and grey, so the brief's own sentence stays the
+    # black, full-size thing in the callout. Not `@extend %quiet-note` - that sizes the
+    # block too, and the `code` inside sizes itself off it.
+    assert "color: $grey-color-dark;" in cmd
+    assert "@extend %quiet-note;" not in cmd
+    where = scss.split(".callout .open-in-where {")[1].split("}")[0]
+    assert "@extend %quiet-note;" in where

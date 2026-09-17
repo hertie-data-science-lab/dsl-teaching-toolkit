@@ -105,7 +105,8 @@ day that sentence is reworded.
        local    vscode://file/Users/jane/hertie/materials/labs/01/lab.ipynb
 
        folder "/Users/jane/hertie/materials"  same local URL - a folder already naming
-                                              the repo does not get it twice
+                                              the repo does not get it twice, and the
+                                              clone dialog wants /Users/jane/hertie
        folder "C:\Users\jane\hertie"          vscode://file/C:/Users/jane/hertie/...
        source .../tree/main/labs/01           both segments open the FOLDER
        assignment repo "assignment-1-jane"    https://github.dev/hertie-x/assignment-1-jane
@@ -144,6 +145,37 @@ day that sentence is reworded.
     return editor.replace("{path}", out.join("/"));
   }
 
+  /* The folder an editor's clone dialog should be pointed at, which /profile/ prints
+     because no clone URL can carry one: `vscode://vscode.git/clone` takes a url and a ref,
+     and the git extension hands the dialog no parent path. The rule above, read the other
+     way round - a saved folder that already names the repo is where the clone GOES, so the
+     dialog wants the folder above it. Given back in the reader's own spelling, separators
+     and all, because a file picker is where they have to recognise it. */
+  function cloneParent(folder, repo) {
+    if (!folder) { return ""; }
+    var trimmed = folder.replace(/[\/\\]+$/, "");
+    var cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    if (!repo || cut < 0 || trimmed.slice(cut + 1) !== repo) { return trimmed; }
+    return trimmed.slice(0, cut) || trimmed;
+  }
+
+  /* Where a clone of `repo` belongs, as a PATH in the reader's own spelling: what
+     `localUrl` builds, given back unencoded, because a `git clone` target is typed into a
+     shell rather than handed to a URL handler. */
+  function localPath(folder, repo) {
+    var parent = cloneParent(folder, repo);
+    if (!parent || !repo) { return parent; }
+    return parent + (parent.indexOf("\\") >= 0 ? "\\" : "/") + repo;
+  }
+
+  /* The command that clones into it. The page cannot run anything - no browser API
+     executes a shell command and no `vscode://` handler takes one - so the reader runs it,
+     and in exchange it needs no dialog and no VS Code. */
+  function cloneCommand(owner, repo, folder) {
+    return 'git clone https://github.com/' + owner + '/' + repo + '.git "'
+      + localPath(folder, repo) + '"';
+  }
+
   function onlineUrl(owner, repo, tail) {
     /* github.dev is VS Code in the browser, on whatever repo the path names - so the
        owner is the student (their fork) or the cohort org (their submission repo). */
@@ -160,6 +192,58 @@ day that sentence is reworded.
     newTab(a, href);
     a.appendChild(document.createTextNode(label));
     return a;
+  }
+
+  /* A command and the button that takes it. The caller writes the command into the
+     `<code>`, which is also what Copy reads - one copy of the text, so a block whose
+     command is rebuilt cannot go on copying the old one. */
+  function commandBlock() {
+    var p = document.createElement("p");
+    p.className = "cmd";
+    var code = document.createElement("code");
+    p.appendChild(code);
+    var btn = document.createElement("button");
+    btn.setAttribute("type", "button");
+    btn.className = "btn cmd-copy";
+    btn.appendChild(document.createTextNode("Copy"));
+    btn.addEventListener("click", function () { copy(code.textContent, btn); });
+    p.appendChild(btn);
+    return p;
+  }
+
+  /* `navigator.clipboard` is the whole of it on a modern https page, which a Pages site
+     is; the old selection trick is the fallback for everything else. If both fail the
+     command is still on the page to select by hand, which is what the button saved. */
+  function copy(text, btn) {
+    function done(ok) {
+      btn.textContent = ok ? "Copied" : "Copy failed";
+      window.setTimeout(function () { btn.textContent = "Copy"; }, 2000);
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function () { done(true); },
+          function () { done(selectCopy(text)); }
+        );
+        return;
+      }
+    } catch (e) { /* Falls through to the selection path. */ }
+    done(selectCopy(text));
+  }
+
+  function selectCopy(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
   }
 
   function decorateFiles(root, me) {
@@ -239,14 +323,15 @@ day that sentence is reworded.
     resolveRepo(org, repo);
     /* Outlined, beside the solid one: the same destinations a file row offers, but full
        size here because this page has one repo rather than a list of files - and
-       secondary, because the repo on GitHub is still the thing to open first. Clone leads
-       them: this is the repo a student is least likely to have yet. */
-    var url = "https://github.com/" + encodeSegment(org) + "/" + encodeSegment(repo);
+       secondary, because the repo on GitHub is still the thing to open first.
+
+       No Clone button. It only ever worked for VS Code, it could not be told where to put
+       the repo (see cloneParent), and a student who took the folder its dialog opened at
+       broke the very button beside it. The clone is a command instead, under the buttons,
+       where it reads as the prerequisite for `Edit locally` that it is. */
     var offers = [
-      [me.editor === VSCODE ? "vscode://vscode.git/clone?url=" + encodeURIComponent(url) : "",
-       "Clone", "Clone " + repo + " in VS Code"],
       [onlineUrl(org, repo, ""), "Edit online", "Edit " + repo + " in the browser"],
-      [localUrl(me.editor, me.assignments, repo, ""), "Open locally",
+      [localUrl(me.editor, me.assignments, repo, ""), "Edit locally",
        "Open " + repo + " in your editor"]
     ];
     var at = btn;
@@ -255,6 +340,30 @@ day that sentence is reworded.
       var el = button(offers[i][0], offers[i][1], offers[i][2], "btn btn--ghost");
       btn.parentNode.insertBefore(el, at.nextSibling);
       at = el;
+    }
+    /* The note goes directly under the buttons, and the brief's own sentence - the
+       callout's, not this script's - stays where it was, at the end. */
+    var row = btn.parentNode;
+    function under(node) {
+      row.parentNode.insertBefore(node, row.nextSibling);
+      row = node;
+    }
+    function line(text) {
+      var p = document.createElement("p");
+      p.className = "open-in-where";
+      p.appendChild(document.createTextNode(text));
+      return p;
+    }
+    /* `Edit locally` opens a folder that only a clone puts there, and the page cannot
+       know whether one has been made - so it says what the button needs rather than
+       leaving a student to find out by pressing it. Only beside that button: with no
+       editor and no folder saved there is nothing for the clone to be a prerequisite of,
+       and the rest of the way a student gets the repo down is theirs. */
+    if (offers[1][0]) {
+      under(line('NB: "Edit locally" requires you to have run the following clone command:'));
+      var cmd = commandBlock();
+      cmd.querySelector("code").textContent = cloneCommand(org, repo, me.assignments);
+      under(cmd);
     }
   }
 
@@ -278,6 +387,9 @@ day that sentence is reworded.
     stored: read,
     save: save,
     localUrl: localUrl,
+    cloneParent: cloneParent,
+    cloneCommand: cloneCommand,
+    commandBlock: commandBlock,
     newTab: newTab,
     VSCODE: VSCODE,
     ready: ready
