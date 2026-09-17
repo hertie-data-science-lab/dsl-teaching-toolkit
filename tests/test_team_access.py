@@ -22,6 +22,7 @@ from dsl_course import (
     ghcli,
     scaffold,
 )
+from dsl_course import repos as repos_mod  # aliased: `repos` is a fixture name here
 from tests.conftest import repo_row
 
 
@@ -460,18 +461,40 @@ def test_a_protected_repo_takes_the_read_floor_whatever_the_tier_says(monkeypatc
     assert not any(p == "push" and r != "course-materials" for _, r, p in granted)
 
 
+def test_a_team_grant_waits_out_a_just_flipped_repo(monkeypatch):
+    # Live 2026-09-17: flipping an assignment repo to public locks it, and the team grant
+    # a second later was refused outright - the cohort could not see its own handout. The
+    # PUT goes through `repos.gh_settled`, so it waits the lock out.
+    answers = iter(
+        [
+            (1, "This repository is locked and cannot be modified. (HTTP 422)"),
+            (1, "This repository is locked and cannot be modified. (HTTP 422)"),
+            (0, ""),
+        ]
+    )
+    monkeypatch.setattr(repos_mod, "gh", lambda *a, **k: next(answers))
+    monkeypatch.setattr(repos_mod.time, "sleep", lambda s: None)
+    assert access.grant_team_repo_access("Cohort", "students", "a1", "pull") is True
+
+
 def test_a_missing_team_is_a_note_but_any_other_failure_is_an_error(
     monkeypatch, capsys
 ):
     # grant_read_teams used to print "team not found" for EVERY failure, so a 5xx or a
     # rate limit read as a cohort that had not made its teams yet.
-    monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    # The grant PUT goes through `repos.gh_settled`, which waits out a just-created or
+    # just-flipped repo; neither of these answers is that, so neither is retried.
+    monkeypatch.setattr(
+        access, "gh_settled", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
+    )
     assert not access.grant_team_repo_access(
         "O", "students", "r", "pull", missing_is_note=True
     )
     out = capsys.readouterr()
     assert "not found" in out.out and out.err == ""
-    monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "HTTP 502 bad gateway"))
+    monkeypatch.setattr(
+        access, "gh_settled", lambda *a, **k: (1, "HTTP 502 bad gateway")
+    )
     assert not access.grant_team_repo_access(
         "O", "students", "r", "pull", missing_is_note=True
     )
@@ -488,6 +511,7 @@ def _public_sweep(monkeypatch, listing_rows, put_ok):
         return 0, listing
 
     monkeypatch.setattr(access, "gh", fake_gh)
+    monkeypatch.setattr(access, "gh_settled", fake_gh)
     repos = [repo_row("grades-ada-l"), repo_row("assignment-1-ada-l")]
     return access.converge_faculty_access(
         "COHORT", repos, "cohort", protected=frozenset(r["name"] for r in repos)

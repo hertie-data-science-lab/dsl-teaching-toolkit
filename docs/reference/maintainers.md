@@ -355,6 +355,10 @@ Two placements are not where they read: `access` sits above `discovery`, because
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
 `welcome`, whose seeding it reuses.
 
+A write that can follow a create or a visibility flip goes through `repos.gh_settled`,
+which retries for ~60 s while GitHub answers that the repo is still busy or locked, and
+retries nothing else.
+
 `releaseignore` is the only module at layer 0 with a third-party dependency (`pathspec`).
 Keep it out of widely imported modules - an import in `repos` or `gh_contents` gives every
 CLI in the package that dependency.

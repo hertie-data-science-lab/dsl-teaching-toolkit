@@ -436,3 +436,70 @@ def test_any_other_visibility_refusal_is_not_retried(monkeypatch, capsys):
     monkeypatch.setattr(repos.time, "sleep", lambda s: None)
     assert repos.set_visibility("org", "a1-ada", "public") is False
     assert len(calls) == 1
+
+
+# The three refusals that mean "the repo is busy, ask again" - one per live shape seen on
+# 2026-09-17: a PATCH straight after `generate`, a grant straight after a visibility flip,
+# and a topics PUT/DELETE in either window.
+SETTLING_ANSWERS = (
+    "Failed to update visibility. A previous repository operation is still in progress. (HTTP 422)",
+    (
+        '{"errors":[{"resource":"TeamRepository","code":"unprocessable",'
+        '"message":"This repository is locked and cannot be modified."}]}'
+    ),
+    "A conflicting repository operation is still in progress. (HTTP 409)",
+)
+
+
+@pytest.mark.parametrize("answer", SETTLING_ANSWERS)
+def test_the_settle_retry_waits_out_every_answer_that_means_busy(monkeypatch, answer):
+    answers = iter([(1, answer), (1, answer), (0, "done")])
+    slept: list[float] = []
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
+    monkeypatch.setattr(repos.time, "sleep", slept.append)
+    assert repos.gh_settled("api", "-X", "PUT", "whatever") == (0, "done")
+    assert slept == [repos._SETTLE_DELAY, repos._SETTLE_DELAY]
+
+
+def test_the_settle_retry_ignores_any_other_refusal(monkeypatch):
+    # A 403 is a scope or a permission problem: waiting a minute cannot fix it, and
+    # retrying would turn one wrong answer into a minute of them on every repo.
+    calls = []
+    monkeypatch.setattr(
+        repos, "gh", lambda *a, **k: calls.append(a) or (1, "gh: HTTP 403 Forbidden")
+    )
+    monkeypatch.setattr(repos.time, "sleep", lambda s: None)
+    assert repos.gh_settled("api", "-X", "PUT", "whatever")[0] == 1
+    assert len(calls) == 1
+
+
+def test_the_settle_retry_gives_up_after_the_whole_window(monkeypatch):
+    # It has to END: a repo that is still locked a minute later is a real failure, and the
+    # caller's own error line is what says so.
+    calls = []
+    monkeypatch.setattr(
+        repos,
+        "gh",
+        lambda *a, **k: calls.append(a) or (1, SETTLING_ANSWERS[1]),
+    )
+    monkeypatch.setattr(repos.time, "sleep", lambda s: None)
+    assert repos.gh_settled("api", "-X", "PUT", "whatever")[0] == 1
+    assert len(calls) == repos._SETTLE_ATTEMPTS
+
+
+def test_a_collaborator_grant_waits_out_a_locked_repo(monkeypatch, capsys):
+    # Live 2026-09-17: the flip to public locked the repo, and the collaborator PUT a
+    # second later came back "not a real account?" - the student was left off their own
+    # assignment repo and the handout recorded `failed-no-collaborator`.
+    answers = iter([(1, SETTLING_ANSWERS[1]), (1, SETTLING_ANSWERS[1]), (0, "")])
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
+    monkeypatch.setattr(repos.time, "sleep", lambda s: None)
+    assert repos.add_collaborator("Cohort-f2026", "a1-ada", "ada", person=True) is True
+    assert capsys.readouterr().err == ""
+
+
+def test_a_topics_put_waits_out_a_locked_repo(monkeypatch):
+    answers = iter([(1, SETTLING_ANSWERS[2]), (0, "")])
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
+    monkeypatch.setattr(repos.time, "sleep", lambda s: None)
+    assert repos.set_repo_topics("Cohort-f2026", "a1-ada", ["Assignment"]) is True

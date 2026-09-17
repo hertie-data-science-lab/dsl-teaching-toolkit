@@ -130,6 +130,47 @@ def repo_is_archived(org: str, name: str) -> bool:
         return False
 
 
+# GitHub's answers while a repo is still settling. A repo is BUSY for a few seconds after
+# it is created, and LOCKED for rather longer after its visibility is flipped; in either
+# window the next write is refused with a 409 or a 422 carrying one of these.
+_SETTLING = (
+    "operation is still in progress",
+    "locked and cannot be modified",
+    "conflicting repository operation",
+)
+# Twelve tries, five seconds apart: a ~60 s window. The lock after a flip outlasted the 8 s
+# a create's own settling took (both seen live, 2026-09-17).
+_SETTLE_ATTEMPTS = 12
+_SETTLE_DELAY = 5.0
+
+
+def _is_settling(out: str) -> bool:
+    """Whether gh's refusal is GitHub saying "this repo is busy, come back in a moment"."""
+    folded = out.lower()
+    return any(marker in folded for marker in _SETTLING)
+
+
+def gh_settled(*args: str, **kwargs) -> tuple[int, str]:
+    """`gh`, retried while GitHub says the repo is still settling - and ONLY then.
+
+    Creating a repo and flipping its visibility both lock it, and the next write is refused
+    outright rather than queued: seen live on 2026-09-17, a visibility PATCH one second
+    after `generate` ("a previous repository operation is still in progress"), then the
+    team grant, the collaborator grant and the topics PUT one second after that flip ("this
+    repository is locked and cannot be modified"). A handout does all of those in a row, so
+    one waits for the other. Every write that can land on a just-created or just-flipped
+    repo goes through this; reads do not, and no other refusal is retried - a 403 is a
+    scope problem that waiting cannot fix.
+    """
+    code, out = gh(*args, **kwargs)
+    for _ in range(_SETTLE_ATTEMPTS - 1):
+        if code == 0 or not _is_settling(out):
+            break
+        time.sleep(_SETTLE_DELAY)
+        code, out = gh(*args, **kwargs)
+    return code, out
+
+
 def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     """Archive a repo - GitHub's reversible read-only freeze. Idempotent (an archived repo
     re-archives fine).
@@ -146,7 +187,7 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
     verbose log (see `log.log_err_person`)."""
-    code, out = gh(
+    code, out = gh_settled(
         "api", "--method", "PATCH", f"repos/{org}/{name}", "--field", "archived=true"
     )
     if code == 0:
@@ -157,12 +198,6 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
         f"could not archive {org}/{name}: {out[:160]}",
     )
     return False
-
-
-# GitHub's answer while a just-created repo is still being populated.
-_SETTLING = "operation is still in progress"
-_SETTLE_ATTEMPTS = 6
-_SETTLE_DELAY = 5.0
 
 
 def set_visibility(
@@ -184,24 +219,19 @@ def set_visibility(
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
     verbose log (see `log.log_err_person`)."""
-    # A repo generated from a template is still being populated for a few seconds; a PATCH
-    # in that window is refused with 422 "A previous repository operation is still in
-    # progress" (seen live 2026-09-17: refused at once, accepted 8 s later). Retry on
-    # exactly that answer and nothing else.
-    for attempt in range(_SETTLE_ATTEMPTS):
-        code, out = gh(
-            "api",
-            "--method",
-            "PATCH",
-            f"repos/{org}/{name}",
-            "--field",
-            f"visibility={visibility}",
-        )
-        if code == 0:
-            return True
-        if _SETTLING not in out.lower() or attempt == _SETTLE_ATTEMPTS - 1:
-            break
-        time.sleep(_SETTLE_DELAY)
+    # A repo generated from a template is still being populated for a few seconds, and a
+    # PATCH in that window is refused - so this is one of the writes that waits out a
+    # settling repo (`gh_settled`).
+    code, out = gh_settled(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{org}/{name}",
+        "--field",
+        f"visibility={visibility}",
+    )
+    if code == 0:
+        return True
     _failed_on(
         person,
         f"could not set a repo's visibility in {org}",
@@ -299,7 +329,7 @@ def protect_shared_repo(org: str, name: str) -> bool:
     if code == 0 and DROP_BOX_RULESET in {ln.strip() for ln in out.splitlines()}:
         log_skip(f"{org}/{name} ruleset {DROP_BOX_RULESET}")
         return True
-    code, out = gh(
+    code, out = gh_settled(
         "api",
         "--method",
         "POST",
@@ -676,7 +706,7 @@ def set_repo_topics(
     ]
     for t in normalised:
         args += ["--field", f"names[]={t}"]
-    code, out = gh(*args)
+    code, out = gh_settled(*args)
     if code == 0:
         return True
     detail = f"failed to set topics on {org}/{repo}: {out[:200]}"
@@ -741,7 +771,7 @@ def add_collaborator(
 
     `person=True` when the repo is somebody's - the failure line then names them only in
     the verbose log (see `log.log_err_person`)."""
-    code, out = gh(
+    code, out = gh_settled(
         "api",
         "--method",
         "PUT",
@@ -852,7 +882,7 @@ def remove_collaborator(
     org: str, repo: str, login: str, *, person: bool = False
 ) -> bool:
     """Revoke a direct collaborator grant. Idempotent - GitHub 204s either way."""
-    code, out = gh(
+    code, out = gh_settled(
         "api", "--method", "DELETE", f"repos/{org}/{repo}/collaborators/{login}"
     )
     if code == 0:

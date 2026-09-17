@@ -17,7 +17,7 @@ from .discovery import classify_repos
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_err_person, log_ok, log_person
-from .repos import Converged, set_repo_topics, topic_name
+from .repos import Converged, gh_settled, set_repo_topics, topic_name
 
 
 def grant_team_repo_access(
@@ -40,7 +40,9 @@ def grant_team_repo_access(
     and the permission are the actionable half and stay public; the repo goes through
     `log_person`. The nightly sweep sets it on EVERY repo it walks, because it walks the
     whole org and the caller's `protected` set is optional."""
-    code, out = gh(
+    # A repo generated seconds ago, or one whose visibility has just been flipped, is
+    # locked and refuses this grant outright - `repos.gh_settled` waits it out.
+    code, out = gh_settled(
         "api",
         "-X",
         "PUT",
