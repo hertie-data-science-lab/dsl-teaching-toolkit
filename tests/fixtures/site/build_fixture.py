@@ -285,12 +285,16 @@ def _assignments() -> dict[str, str]:
             handout=datetime(2026, 11, 10, 9, 0, tzinfo=BERLIN),
             now=NOW,
         ),
+        # Handed out BEFORE the first lecture, and so is 07: the home page's Updates box lists
+        # the seven newest released items, and the jekyll-contract job greps that box for the
+        # first lecture's inline source link. Two more assignments dated after it pushed it
+        # to eighth place and the contract failed on a page nothing here had touched.
         "06-assignment-6.md": site._assignment_entry(
             COURSE_ORG,
             COHORT_ORG,
             STUDENT_CHOICE,
             datetime(2027, 1, 12, 23, 59, tzinfo=BERLIN),
-            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
             handed_out=frozenset({"assignment-6"}),
             now=NOW,
         ),
@@ -299,7 +303,7 @@ def _assignments() -> dict[str, str]:
             COHORT_ORG,
             SHARED,
             datetime(2027, 1, 19, 23, 59, tzinfo=BERLIN),
-            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
             handed_out=frozenset({"assignment-7"}),
             now=NOW,
         ),
