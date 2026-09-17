@@ -576,6 +576,10 @@ def submission_targets(
     "Join team" issue can add a row against an individual assignment), so trusting its rows to
     decide the assignment's KIND would let a student turn an individual assignment into a group
     one - it is read only to enumerate a KNOWN-group assignment's teams."""
+    # ONE repo for every unit where the cohort shares a drop box, and one named after the
+    # unit where it does not. Resolved once, above both arms: the repo a unit's work is in
+    # is the one thing a wrong answer cannot be recovered from.
+    drop_box = shared_repo(slug) if shared else ""
     if is_group:
         key = teams_key or slug
         groups = teams.teams_for(teams.load(cohort_org), key)
@@ -588,9 +592,6 @@ def submission_targets(
         # Unvetted, a typo'd or invented handle earned a block of its OWN in the grading
         # sheet - the file faculty mark in, and `distribute` fans out from - for an account
         # with no place in the cohort at all.
-        # ONE repo for every unit where the cohort shares a drop box, and one named after
-        # the unit where it does not.
-        drop_box = shared_repo(slug) if shared else ""
         out: list[Target] = []
         for team, vetted, rejected in sync_teams.vet_groups(
             groups, roster.enrolled(roster.load(cohort_org) or [])
@@ -610,7 +611,6 @@ def submission_targets(
     # submission repo, so listing one makes it an unclonable phantom target (noise, and a
     # spurious "could not be read"). `roster.enrolled` drops auditors; `onboarded` drops
     # the not-yet-joined.
-    drop_box = shared_repo(slug) if shared else ""
     targets = [
         Target.of(
             drop_box or submission_repo(slug, s.github_handle),
@@ -658,10 +658,15 @@ def _until_param(deadline: str, tz: str | None = None) -> str:
 # what tells the toolkit's own handout commit from a student's push - how many parents it
 # has, and who GitHub says wrote it. Tab-joined because a git author's name and email are
 # free text and a space is not a separator in them.
+#
+# BOTH logins, because either can be null: GitHub fills `author` and `committer` in from
+# the git identity on the commit, and an address the account has not verified matches
+# nothing, so the field comes back null for a student who pushed from a laptop configured
+# with their personal email. `_commit_facts` is what merges the two.
 _COMMIT_FIELDS = (
     '.[] | [(.sha // ""), (.commit.committer.date // ""), '
     '((.parents // [] | length) | tostring), (.author.login // ""), '
-    '(.commit.author.email // "")] | join("\t")'
+    '(.commit.author.email // ""), (.committer.login // "")] | join("\t")'
 )
 
 
@@ -673,12 +678,24 @@ def _commit_facts(out: str) -> tuple[str, str, int | None, str, str]:
     newest commit: the newest commit by a MEMBER of the unit is, so the walk needs every
     row the query returned rather than its first.
 
+    The LOGIN is the author's, falling back to the committer's: GitHub answers null for
+    either where the git address on that end is not one of some account's verified ones,
+    and a student pushing from a personal email is the ordinary way that happens. "" means
+    neither end could be linked to an account at all, which is a fact about the account
+    rather than about the work - see `UNLINKED_AUTHOR_NOTE`.
+
     The parent count is None when the answer did not carry one - an older shape, or a
     truncated read. None means "cannot tell", and every caller must read it that way."""
     parts = out.strip().split("\t")
-    parts += [""] * (5 - len(parts))
-    sha, committed, parents, author, email = parts[:5]
-    return sha, committed, int(parents) if parents.isdigit() else None, author, email
+    parts += [""] * (6 - len(parts))
+    sha, committed, parents, author, email, committer = parts[:6]
+    return (
+        sha,
+        committed,
+        int(parents) if parents.isdigit() else None,
+        author or committer,
+        email,
+    )
 
 
 def _is_handout_commit(parents: int | None, author: str, email: str) -> bool:
@@ -721,6 +738,11 @@ class Pin:
 OUTSIDE_TOUCH_NOTE = (
     "last change to this folder was by someone outside the team - check"
 )
+# A commit in the unit's own folder that GitHub could not attribute to ANY account. It is
+# counted as the unit's own - the alternative is walking past a student's real submission
+# because they pushed from an address GitHub does not know is theirs, and a folder is
+# already only a convention - and the note is what a grader checks it against.
+UNLINKED_AUTHOR_NOTE = "commit author not linked to a GitHub account - check"
 # How many commits deep the walk for a member's own commit goes. One page: a folder with a
 # hundred commits above the unit's own by people outside it is not a timing question any
 # more, and the note above is what a grader acts on either way.
@@ -800,7 +822,8 @@ def _snapshot_sha(
                 # a commit dated at the handout. Pinning it recorded them as having
                 # submitted, on time, and posted them a receipt saying so.
                 break
-            if wanted is not None and author.casefold() not in wanted:
+            unlinked = wanted is not None and not author
+            if wanted is not None and author and author.casefold() not in wanted:
                 # Somebody else's commit in this unit's folder. Keep walking - the unit's
                 # own work is still in there, under it - and remember that the newest hand
                 # on this folder was not the unit's.
@@ -813,7 +836,21 @@ def _snapshot_sha(
                     f"freeze was taken ({committed} > {recorded_at}) - a committer date is "
                     f"client-supplied, so check for a skewed clock before marking"
                 )
-            return Pin(sha, committed, note=OUTSIDE_TOUCH_NOTE if outsider else "")
+            return Pin(
+                sha,
+                committed,
+                # Both can be true of one pin - an outsider touched the folder later, and
+                # the unit's own commit carries no account - so they are joined rather
+                # than chosen between, as the freeze joins its own notes.
+                note="; ".join(
+                    said
+                    for said in (
+                        OUTSIDE_TOUCH_NOTE if outsider else "",
+                        UNLINKED_AUTHOR_NOTE if unlinked else "",
+                    )
+                    if said
+                ),
+            )
         if wanted is not None and len(lines) >= _COMMIT_PAGE:
             # A whole page of commits in this folder and not one of them the unit's. The
             # pin is still blank - there is nothing of theirs we can point at - but the
@@ -1230,8 +1267,11 @@ def snapshot_assignment(
             rows.append((repo, pin.sha, recorded_at, *submitted, target.path, pin.note))
         else:
             # Absent, or reachable with nothing pushed by the deadline. Either way there is
-            # no submission, so there is no submission time: both cells stay blank.
-            rows.append((repo, "", recorded_at, "", "", target.path, ""))
+            # no submission, so there is no submission time: both cells stay blank. The
+            # NOTE is not: `PAGE_EXHAUSTED_NOTE` says the pin is blank because we stopped
+            # looking rather than because the student pushed nothing, and the snapshot is
+            # written once, so a note dropped here is a note lost for good.
+            rows.append((repo, "", recorded_at, "", "", target.path, pin.note))
     if not any_present:
         # EVERY target repo is ABSENT (404): not generated yet, or a handout typo. This is
         # NOT the same as reachable-but-empty repos (a real "nobody submitted", which we DO
@@ -1318,9 +1358,14 @@ def days_late(submitted: datetime, due: datetime, tz: str | None = None) -> int:
 CONTRIBUTIONS_UNFILLED = "(not filled in)"
 
 
-def _contributions(cohort_org: str, repo: str, ref: str) -> str | None:
+def _contributions(cohort_org: str, repo: str, ref: str, path: str = "") -> str | None:
     """CONTRIBUTIONS.md as it stood AT THE PIN - not as it stands now, which is a file the
     team can still edit after the deadline.
+
+    `path` is the unit's own folder inside `repo` (`Target.path`), so a team sharing the
+    cohort's drop box is asked for ITS `<team>/CONTRIBUTIONS.md` rather than for a file at
+    the top of a repo fifty units share - where the first team to write one would have
+    answered for all of them.
 
     A team that submitted but never wrote the file gets `(not filled in)`, not a blank: the
     blank would read as "the toolkit did not look", and whether the team said who did what
@@ -1329,7 +1374,9 @@ def _contributions(cohort_org: str, repo: str, ref: str) -> str | None:
     if not ref:
         return None
     try:
-        text = get_file_content(cohort_org, repo, CONTRIBUTIONS_FILE, ref=ref)
+        text = get_file_content(
+            cohort_org, repo, f"{path}{CONTRIBUTIONS_FILE}", ref=ref
+        )
     except RuntimeError:
         return None  # a read failure is not a fact about the team
     if not text or not text.strip() or is_untouched_stub(text):
@@ -1370,15 +1417,19 @@ def _sheet_info(
         if when is not None:
             info["submitted"] = submitted_display(submitted_at, tz)
             info["days_late"] = days_late(when, due, tz) if due is not None else None
-            note = (notes or {}).get(target.key)
-            if note:
-                # The one fact in `info:` that is not about the work: whether the time this
-                # row is built from is the SERVER's or the student's. A row GitHub timed
-                # carries nothing here; one built from a committer date says so, because a
-                # grader acting on `days_late: 0` has to know which they are reading.
-                info["submitted_note"] = note
+        note = (notes or {}).get(target.key)
+        if note:
+            # The one fact in `info:` that is not about the work: how this row was arrived
+            # at. Usually that is whether the time above is the SERVER's or the student's -
+            # but NOT ONLY, and so it is emitted beside a blank pin too: a walk that ran
+            # out of page says the row is empty because we stopped looking rather than
+            # because nothing was pushed, and that is the one reading a grader must not
+            # have to guess at.
+            info["submitted_note"] = note
         if is_group:
-            info["contributions"] = _contributions(cohort_org, target.repo, sha)
+            info["contributions"] = _contributions(
+                cohort_org, target.repo, sha, target.path
+            )
         out[target.unit] = info
     return out
 
@@ -1774,7 +1825,10 @@ def sync_sheet(
                     if said
                 )
                 for u, row in rows.items()
-                if row.sha and (row.note or row.submitted_source in SUBMITTED_NOTES)
+                # `row.note` is asked of every row, pinned or not: a blank pin carrying
+                # `PAGE_EXHAUSTED_NOTE` is exactly the row whose emptiness has to be
+                # explained. The SOURCE note only means anything beside a real pin.
+                if row.note or (row.sha and row.submitted_source in SUBMITTED_NOTES)
             }
     elif derive:
         found = _provisional_pins(
@@ -2857,8 +2911,15 @@ def _grader_document_for(
     deadline: str,
     snapshot: str | None,
     env: dict,
+    path: str = "",
 ) -> str:
-    """Archive one submission's grader copy. Returns one of the GRADER_* verdicts."""
+    """Archive one submission's grader copy. Returns one of the GRADER_* verdicts.
+
+    `path` is the unit's own folder inside `repo` (`Target.path`), and only a shared drop
+    box has one: the repo is the whole cohort's, so a picker let loose on the checkout
+    would export whichever classmate's notebook it found first, under this unit's key. A
+    drop box is hand-marked and `grader_pdf:` is dropped for it at the parse, so this is
+    the second lock rather than the first."""
     # Tolerant cleanup for the same reason `_run_tests`' runspace has it: the exporter runs
     # in this tree as the sandbox user, and a failed chown-back leaves it undeletable.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
@@ -2873,7 +2934,10 @@ def _grader_document_for(
         # first. Rendering does not execute the notebook - but it does import a stack of
         # Python from a directory the student wrote.
         _harden_checkout(wd)
-        picked = pick_grader_document(wd)
+        folder = wd / path if path else wd
+        if not folder.is_dir():
+            return GRADER_NONE  # nothing pushed into this unit's folder at all
+        picked = pick_grader_document(folder)
         if picked is None:
             return GRADER_NONE
         source, filtered = picked
@@ -2964,6 +3028,7 @@ def export_grader_documents(
             deadline,
             None if snapshots is None else snapshots.get(target.key),
             env,
+            target.path,
         )
         tally[verdict] = tally.get(verdict, 0) + 1
     log_ok(
@@ -3271,9 +3336,20 @@ def collect(
         # both, or nothing at all. The two are independent - a hand-marked notebook
         # assignment still gets its completion check - so neither can exit early on the
         # other's behalf, and only "neither" is the hand-marked exit that records a skip.
-        tests_src: Path | None = soldir / gspec.tests
+        #
+        # A drop box does NEITHER, whatever its spec says. `_cross_check` turns both
+        # settings off for one at the parse and this is the second lock, asked before
+        # either stage does any work: both clone the repo a TARGET names, and every target
+        # of a drop box names the same repo - so each student would have the whole cohort's
+        # work run under their own key and every one of them would get the same result.
+        drop_box = gspec.submit_shared
+        tests_src: Path | None = None if drop_box else soldir / gspec.tests
         no_tests = ""
-        if not gspec.autograde:
+        if drop_box:
+            no_tests = (
+                f"`submit_via: shared` in {GRADING_FILE} - a drop box is hand-marked"
+            )
+        elif not gspec.autograde:
             no_tests = f"`autograde: false` in {GRADING_FILE}"
         elif not tests_src.is_dir():
             # An assignment that asked to be autograded and whose hidden tests were never
@@ -3286,7 +3362,7 @@ def collect(
 
         starters: frozenset[str] | None = None
         no_completion = ""
-        if gspec.runs_completion_check:
+        if gspec.runs_completion_check and not drop_box:
             # Every missing one named, not just the first probed: a runner missing both
             # should have to read the log once.
             if [dep for dep in COMPLETION_DEPS if _grader_dep_missing(dep)]:

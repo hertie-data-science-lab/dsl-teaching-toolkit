@@ -108,9 +108,14 @@ last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **an
 by one of that unit's own members**, so a classmate's edit is never marked as their work. A
 folder nobody in the unit ever pushed to has no submission. Two things differ from the
 shapes with a repo each: `suspect` never appears (GitHub's last-push record is the whole
-repo's, so it would accuse the entire cohort of one student's late push), and when the most
-recent hand on a folder was not the unit's, `submitted_note` says
-`last change to this folder was by someone outside the team - check`.
+repo's, so it would accuse the entire cohort of one student's late push), and
+`submitted_note` carries what the search through the folder found:
+
+| `info.submitted_note` | what it means |
+|---|---|
+| `last change to this folder was by someone outside the team - check` | the pin is the unit's own last commit, but a classmate touched the folder more recently |
+| `commit author not linked to a GitHub account - check` | the pinned commit's git address is not one GitHub can match to any account - usually a laptop configured with a personal email. It is counted as the unit's own work, which is why you are told |
+| `no commit by this unit in the 100 newest commits touching its folder - check` | we stopped looking, rather than found nothing: `submitted` is blank because the unit's own commits are buried under a hundred of somebody else's, not because they pushed nothing |
 
 ## Marking, step by step
 
@@ -147,6 +152,14 @@ recent hand on a folder was not the unit's, `submitted_note` says
 Nothing is said twice: every comment carries a content hash and every send is recorded in
 `gradebook/distributed.csv`, so a re-run after one correction reaches one student. `silent`
 skips the email.
+
+The gradebook and the email are decided separately, on purpose. The **commit** is made
+whenever anything in the repo would change, so an improvement to the page's own wording
+reaches every student. The **email** is sent only when `grades.yml` changes - when a MARK
+moves - so nobody is told to go and read a page that says the same as it did. The first run
+after the toolkit changes that wording carries each student's record over and says how many
+it carried; a mark that first appears in that same run is inside that window, so tell those
+students yourself if you have one.
 
 ## Autograding (optional)
 

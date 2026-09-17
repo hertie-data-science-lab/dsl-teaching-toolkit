@@ -203,17 +203,31 @@ def test_a_shared_drop_box_is_private_whatever_the_file_says(capsys):
 
 
 def test_a_shared_assignment_is_hand_marked_whatever_the_file_says(capsys):
-    # Both stages run per UNIT against the unit's own repo, and here there is one repo for
-    # everybody: fifty students would each have the whole cohort's work cloned, run and
-    # archived under their own key, and every one of them would get the same score.
+    # All three stages run per UNIT against the unit's own repo, and here there is one repo
+    # for everybody: fifty students would each have the whole cohort's work cloned, run and
+    # archived under their own key, and every one of them would get the same result.
     # Corrected at the parse, exactly as the visibility is.
     spec = collect.parse_grading_spec(
-        "submit_via: shared\nautograde: true\ngrader_pdf: true\n"
+        "submit_via: shared\nautograde: true\ncompletion_check: true\ngrader_pdf: true\n"
     )
     assert spec.autograde is False and spec.grader_pdf is False
+    assert spec.runs_completion_check is False
     said = capsys.readouterr().err
     assert "`autograde:` is not read for a shared drop box" in said
+    assert "`completion_check:` is not read for a shared drop box" in said
     assert "`grader_pdf:` is not read for a shared drop box" in said
+
+
+def test_a_shared_notebook_assignment_runs_no_completion_check_either(capsys):
+    # `completion_check:` is the one tri-state setting: undeclared means "whatever
+    # `format:` implies", and `ipynb` implies ON. So the drop box that says nothing at all
+    # is exactly the one that would have executed the whole cohort's notebooks under every
+    # student's key - and there is no line in the file to report as dropped.
+    spec = collect.parse_grading_spec("submit_via: shared\nformat: ipynb\n")
+    assert spec.runs_completion_check is False
+    assert "completion_check" not in capsys.readouterr().err
+    # ...and the same file without the drop box still runs it, so the default is intact.
+    assert collect.parse_grading_spec("format: ipynb\n").runs_completion_check is True
 
 
 def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(capsys):
@@ -883,10 +897,14 @@ def _commits_line(
     parents: int = 1,
     author: str = "anna-adams",
     email: str = "anna@uni.edu",
+    committer: str = "",
 ) -> str:
     """One row of what `_COMMIT_FIELDS` asks the commits API for. Defaults describe a
-    student's push ON TOP of the handout - the ordinary submission."""
-    return "\t".join([sha, committed, str(parents), author, email])
+    student's push ON TOP of the handout - the ordinary submission.
+
+    `committer` is the second login GitHub answers with, and it is blank in most of these
+    rows because the author's is the one that normally answers."""
+    return "\t".join([sha, committed, str(parents), author, email, committer])
 
 
 @pytest.mark.parametrize(
@@ -1713,6 +1731,33 @@ def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
     ((path, text),) = written
     assert path == "autograde/assignment-1/_skipped.json"
     assert "autograde: false" in text
+
+
+def test_no_unit_of_a_shared_drop_box_is_ever_machine_marked(monkeypatch):
+    # The second lock. `_cross_check` turns `autograde` and `completion_check` off for a
+    # drop box at the parse, so this spec cannot be written down - it is built by hand to
+    # stand for whatever gets past that one. Both stages clone the repo a TARGET names, and
+    # every target of a drop box names the same repo, so one of them reaching `_grade_target`
+    # would score each student on the whole cohort's work.
+    _stub_solution_clone(monkeypatch)
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(
+        collect,
+        "load_grading_spec",
+        lambda *a, **k: collect.grades.GradingSpec(
+            submit_via="shared", autograde=True, completion_check=True
+        ),
+    )
+    monkeypatch.setattr(
+        collect,
+        "_grade_target",
+        lambda *a, **k: pytest.fail("a drop box target reached the grader"),
+    )
+    written = _captured_writes(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+    ((path, text),) = written
+    assert path == "autograde/assignment-1/_skipped.json"
+    assert "submit_via: shared" in text and "hand-marked" in text
 
 
 def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatch):
@@ -4360,6 +4405,27 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
     assert list(team["members"]) == ["ada-l", "ben-k"]
 
 
+def test_a_team_in_a_drop_box_is_asked_for_its_own_contributions_file(monkeypatch):
+    # One repo, one file at the top of it: read from there, the first team to write a
+    # CONTRIBUTIONS.md would have answered for every team in the cohort. The unit's own
+    # folder is the only place its answer can be.
+    seen: list[str] = []
+
+    def contributions(org, repo, path, ref=""):
+        seen.append(path)
+        return "Ada: Q1. Ben: Q2.\n"
+
+    monkeypatch.setattr(collect, "get_file_content", contributions)
+    assert (
+        collect._contributions("Cohort", _DROP_BOX, SHA, "alpha/")
+        == "Ada: Q1. Ben: Q2.\n"
+    )
+    assert seen == [f"alpha/{collect.CONTRIBUTIONS_FILE}"]
+    # ...and a team with a repo of its own still reads the file at the top of it.
+    collect._contributions("Cohort", "assignment-1-alpha", SHA)
+    assert seen[-1] == collect.CONTRIBUTIONS_FILE
+
+
 def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
     # The freeze derives off the write-once snapshot, so the file is read at the sha that
     # was pinned - not at the one the last refresh happened to see, and not at HEAD, which
@@ -5306,6 +5372,39 @@ def test_the_grader_copy_is_the_marked_questions_and_nothing_else(
     assert "BEGIN QUESTION" not in body
 
 
+def test_a_grader_copy_from_a_drop_box_is_taken_from_the_units_own_folder(monkeypatch):
+    # The repo is the whole cohort's, so a picker let loose on the checkout exports
+    # whichever notebook it reaches first - here a classmate's - under this unit's key.
+    # `grader_pdf:` is dropped for a drop box at the parse; this is the second lock.
+    _checkout(
+        monkeypatch,
+        {"ben/submission.ipynb": _QUESTION_NB, "alice/mine.ipynb": _QUESTION_NB},
+    )
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda *a, **k: [Target("a1-submissions", "alice", ["alice"], "alice/")],
+    )
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {"alice": "abc"})
+    picked: list[str] = []
+    real_pick = collect.pick_grader_document
+    monkeypatch.setattr(
+        collect,
+        "pick_grader_document",
+        lambda wd: picked.append(wd.name) or real_pick(wd),
+    )
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: True)
+
+    collect.export_grader_documents(
+        "Cohort", "a1", "a1", False, "2026-10-13", False, True
+    )
+
+    assert picked == ["alice"]
+    assert list(written) == ["autograde/a1/alice.ipynb"]
+
+
 def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, capsys):
     _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
     written = _capture_archive(monkeypatch)
@@ -6153,6 +6252,72 @@ def test_a_walk_that_ran_out_of_page_says_so_rather_than_reading_as_no_submissio
     assert pin == collect.Pin(note=collect.PAGE_EXHAUSTED_NOTE)
 
 
+def test_the_committers_login_answers_when_the_authors_is_missing(monkeypatch):
+    # GitHub fills `author` in from the git address on the commit, so it comes back null
+    # for anyone whose local git is set to an address their account has not verified. The
+    # committer end is filled in from the push, and for a `git push` it is the same person.
+    # Read from the author alone, the student's own commit looked like an outsider's.
+    _folder_commits(
+        monkeypatch,
+        {"ada-l/": [_commits_line(sha="mine", author="", committer="ada-l")]},
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    ) == collect.Pin("mine", "2026-10-12T08:00:00Z")
+
+
+def test_a_commit_github_can_link_to_nobody_is_counted_as_the_units_own(monkeypatch):
+    # Both logins null: the commit is in this unit's folder and GitHub cannot say whose it
+    # is. Counted as theirs - the alternative is walking past a student's real submission
+    # because of how their laptop is configured - and flagged, because that is a check a
+    # person makes and not one the toolkit can.
+    _folder_commits(
+        monkeypatch,
+        {"ada-l/": [_commits_line(sha="mine", author="", email="", committer="")]},
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    ) == collect.Pin("mine", "2026-10-12T08:00:00Z", note=collect.UNLINKED_AUTHOR_NOTE)
+
+
+def test_an_unlinked_commit_under_a_classmates_carries_both_notes(monkeypatch):
+    # Two different things a grader has to look at, and one row to say them in.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(
+                    sha="theirs", committed="2026-10-12T10:00:00Z", author="ben-k"
+                ),
+                _commits_line(
+                    sha="mine",
+                    committed="2026-10-12T09:00:00Z",
+                    author="",
+                    email="",
+                    committer="",
+                ),
+            ]
+        },
+    )
+    pin = collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    )
+    assert pin.sha == "mine"
+    assert pin.note == (f"{collect.OUTSIDE_TOUCH_NOTE}; {collect.UNLINKED_AUTHOR_NOTE}")
+
+
 def test_a_folder_with_no_commit_by_a_member_is_no_submission(monkeypatch):
     # Somebody else put a file in this student's folder and the student never pushed. That
     # is not a submission, and recording it as one would grade a classmate's work as theirs.
@@ -6282,6 +6447,19 @@ def test_a_shared_snapshot_carries_the_outside_toucher_note(monkeypatch):
     assert collect.parse_snapshot_rows(text)["ada-l"].note == collect.OUTSIDE_TOUCH_NOTE
 
 
+def test_a_blank_pin_still_records_why_it_is_blank(monkeypatch):
+    # The first of the two hops `PAGE_EXHAUSTED_NOTE` has to survive. The snapshot is
+    # written ONCE, so a note dropped beside a blank sha is a note lost for good - and a
+    # blank row with nothing on it reads as "this student pushed nothing", which is the
+    # one thing the walk did not find out.
+    text = _shared_snapshot(
+        monkeypatch,
+        {"ada-l": collect.Pin(note=collect.PAGE_EXHAUSTED_NOTE)},
+    )
+    row = collect.parse_snapshot_rows(text)["ada-l"]
+    assert row.sha == "" and row.note == collect.PAGE_EXHAUSTED_NOTE
+
+
 def test_a_snapshot_written_before_folders_existed_still_parses():
     # Write-once and never backfilled: the Maths f2026 snapshots have five columns, and a
     # reader that needed seven would strand the cohort that owns them. A row with no `path`
@@ -6369,6 +6547,24 @@ def test_a_shared_sheet_carries_the_outside_toucher_note_into_info(monkeypatch):
     )
     note = sheet["submissions"]["ada-l"]["info"]["submitted_note"]
     assert collect.OUTSIDE_TOUCH_NOTE in note and "no push record matched" in note
+
+
+def test_a_sheet_says_why_a_row_is_empty_when_the_walk_gave_up(monkeypatch):
+    # The second hop. `info.submitted` is blank and `info.submitted_note` says the blank is
+    # OURS: a hundred commits by other people in this folder and none of the unit's under
+    # them. Emitted with no pin at all, which is exactly the row it is about.
+    sheet = _shared_sheet(
+        monkeypatch,
+        targets=[Target(_DROP_BOX, "ada-l", ["ada-l"], "ada-l/")],
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX, path="ada-l/", note=collect.PAGE_EXHAUSTED_NOTE
+            )
+        },
+    )
+    info = sheet["submissions"]["ada-l"]["info"]
+    assert not info.get("submitted")
+    assert info["submitted_note"] == collect.PAGE_EXHAUSTED_NOTE
 
 
 def test_a_shared_assignment_posts_no_receipts(monkeypatch):

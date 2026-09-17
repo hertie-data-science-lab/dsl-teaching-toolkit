@@ -1367,21 +1367,30 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 "whole cohort's work, so v1 keeps it private - ignored",
             )
         )
-    for key in ("autograde", "grader_pdf"):
-        if via == "shared" and values.get(key):
-            # Both stages run PER UNIT against the unit's own repo, and a drop box is one
-            # repo for the whole cohort: each of fifty students would have the whole
-            # cohort's work cloned, run and archived under their own key, and every one of
-            # them would get the same score. Same note beside `course.SUBMIT_VIA`.
-            values[key] = False
-            dropped.append(
-                Dropped(
-                    GRADING_FILE,
-                    key,
-                    f"`{key}:` is not read for a shared drop box - one repo holds the "
-                    f"whole cohort's work, so it is hand-marked - ignored",
+    if via == "shared":
+        for key in ("autograde", "completion_check", "grader_pdf"):
+            if values.get(key):
+                # All three stages run PER UNIT against the unit's own repo, and a drop box
+                # is one repo for the whole cohort: each of fifty students would have the
+                # whole cohort's work cloned, run and archived under their own key, and
+                # every one of them would get the same result. Same note beside
+                # `course.SUBMIT_VIA`.
+                values[key] = False
+                dropped.append(
+                    Dropped(
+                        GRADING_FILE,
+                        key,
+                        f"`{key}:` is not read for a shared drop box - one repo holds "
+                        f"the whole cohort's work, so it is hand-marked - ignored",
+                    )
                 )
-            )
+            elif key == "completion_check":
+                # The one tri-state setting: undeclared means "whatever `format:` implies",
+                # so a drop box of notebooks would switch the check on with no line in the
+                # file to report as dropped. Turned off here rather than in
+                # `runs_completion_check`, so the whole "is this hand-marked?" answer is
+                # settled at the parse.
+                values[key] = False
     if via != "external" and values.get("submit_url"):
         values["submit_url"] = ""
         dropped.append(
@@ -2086,7 +2095,6 @@ def feedback_body(
         due_display=spec.due_long,
         late_policy_line=late,
         team_line=team_line,
-        external=spec.submit_external,
     )
 
 
@@ -3740,12 +3748,17 @@ def _hold_undecided(
     return held
 
 
+# The data file of a gradebook, named here because two things key on it: the commit, which
+# is over the whole book, and the EMAIL, which is over this file alone (see `distribute`).
+GRADES_DATA = "grades.yml"
+
+
 def _gradebook_files(
     handle: str, book: dict[str, dict], titles: dict[str, str]
 ) -> dict[str, bytes]:
     """The two files a student's private gradebook holds: the data and the page."""
     return {
-        "grades.yml": render_yaml({"student": handle, "assignments": book}).encode(),
+        GRADES_DATA: render_yaml({"student": handle, "assignments": book}).encode(),
         "README.md": render_readme(handle, book, titles).encode(),
     }
 
@@ -3882,6 +3895,11 @@ def distribute(
             )
 
     # 1. The feedback comment on each submission repo's Feedback issue.
+    # How many units had a thread the policy would not use because GitHub says the repo is
+    # not private - a `visibility:` edited after handout, or a `student_choice` repo the
+    # student published. One aggregate count, printed once below: the marks are in the
+    # gradebook either way, and naming the repos here would name the students.
+    not_private = 0
     for slug in sorted(sheets):
         spec = specs[slug]
         withheld = {unit for unit, _reason in held.get(slug, {}).values()}
@@ -3919,6 +3937,8 @@ def distribute(
                 # never open one. The mark is in the gradebook either way. Counted, never
                 # named - one number in the `Done` line, not a red run.
                 counts["skipped"] += 1
+                if listed is not None and not listed_is_private(listed.get(repo) or {}):
+                    not_private += 1
                 continue
             posted = post_marked_comment(
                 cohort_org, repo, issue, body, GRADE_MARK.format(digest)
@@ -3937,6 +3957,12 @@ def distribute(
             else:
                 counts["failed"] += 1
 
+    if not_private:
+        log(
+            f"  {not_private} repo(s) are not private - no comment posted; the marks are "
+            f"in the gradebooks"
+        )
+
     # 2. The private gradebook: grades.yml and README.md in ONE commit per student, so a
     #    student never sees a page that disagrees with the data beside it.
     #
@@ -3944,15 +3970,22 @@ def distribute(
     #    content. `live` is what step 3 keys the email on, so a student whose write FAILED
     #    must not be told to go and read a page that never changed - and, worse, have that
     #    telling recorded, which would stop them being told when it lands.
+    #    TWO digests per student, because the two channels are answering different
+    #    questions. The COMMIT is keyed on the whole book, so every wording change the
+    #    toolkit makes to the README lands; the EMAIL is keyed on `grades.yml` alone, so
+    #    "there is something new to read" means a MARK moved. Keyed on one hash, a single
+    #    standing sentence added to the page re-mailed every student in every live cohort
+    #    to tell them nothing.
     live: dict[str, str] = {}
     for handle in sorted(books):
         files = _gradebook_files(handle, books[handle], titles)
         digest = content_hash("".join(f.decode() for f in files.values()))
+        marks = content_hash(files[GRADES_DATA].decode())
         if record.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0] == digest:
-            live[handle] = digest
+            live[handle] = marks
             continue
         if dry_run:
-            live[handle] = digest
+            live[handle] = marks
             counts["gradebooks"] += 1
             continue
         if put_files(
@@ -3963,19 +3996,40 @@ def distribute(
             person=True,
         ):
             record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now, "")
-            live[handle] = digest
+            live[handle] = marks
             counts["gradebooks"] += 1
             log_person(f"  [ok] {GRADEBOOK_PREFIX}{handle}")
         else:
             counts["failed"] += 1
 
-    # 3. Who still needs telling. Keyed on the gradebook's content, so a student whose
-    #    book did not change is not emailed and one whose email FAILED last time is.
-    pending = [
-        handle
-        for handle, digest in sorted(live.items())
-        if record.get((handle, "", CHANNEL_EMAIL), ("",))[0] != digest
-    ]
+    # 3. Who still needs telling. Keyed on the MARKS, so a student whose book changed only
+    #    because the page around their grades was reworded is not emailed, and one whose
+    #    email FAILED last time is.
+    pending: list[str] = []
+    carried = 0
+    for handle, marks in sorted(live.items()):
+        told = record.get((handle, "", CHANNEL_EMAIL), ("",))[0]
+        if told == marks:
+            continue
+        if told and told == distributed.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0]:
+            # A row written when BOTH channels were keyed on the whole book: it holds the
+            # digest of the content this cohort's last run committed, so this student has
+            # already been told about everything their book then held. Carried over to the
+            # marks digest in place - the CSV keeps its columns, and the row means what it
+            # says once more. Without this, the first run after any change to the README
+            # wording mails a whole live cohort about nothing.
+            record[(handle, "", CHANNEL_EMAIL)] = (marks, now, "")
+            carried += 1
+            continue
+        pending.append(handle)
+    if carried:
+        # A count in the public log, and worth saying out loud once: a mark that first
+        # appears in this very run is inside the window this carry-over covers, and
+        # telling those students is then a person's job.
+        log(
+            f"  {carried} student(s) already knew what their gradebook said - their "
+            f"record now keys on the marks alone and nothing is re-sent"
+        )
 
     if dry_run:
         _preview(cohort_org, sheets, specs, books, counts, pending, notify, held)

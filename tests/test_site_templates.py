@@ -516,6 +516,29 @@ def test_a_pending_assignment_gets_no_callout_at_all(generated):
     assert pending["handout_pending"] is True
 
 
+def test_every_shape_without_a_feedback_issue_names_the_gradebook(generated):
+    # The default shape's marks arrive in the repo's own Feedback issue, and its page says
+    # nothing about a gradebook. The other four have no thread at all
+    # (`course.has_feedback_issue`), so the page is the only place a student finds out
+    # where their feedback went - and the external arm, which has no repo either, is the
+    # one where "nobody marked my work" is easiest to conclude.
+    layout = _liquid_templates()["_layouts/assignment.html"]
+    flat = " ".join(layout.split())
+    external = " ".join(
+        _external_arm(
+            layout,
+            '{% if page.submit_shape == "external" %}',
+            "{% elsif page.repo_url %}",
+        ).split()
+    )
+    assert (
+        "Your grade and feedback arrive in your private gradebook "
+        "<code>grades-&lt;your-handle&gt;</code>." in external
+    )
+    # ...and the default arm still does not: there is a Feedback issue on that repo.
+    assert flat.count("private gradebook") == 4
+
+
 def test_a_public_assignments_page_warns_before_the_first_push(generated):
     # The one callout that has to be read BEFORE a student pushes: the repo is
     # world-readable from hand-out, so "commit nothing you would not publish" belongs on

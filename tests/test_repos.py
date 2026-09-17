@@ -10,6 +10,20 @@ import pytest
 from dsl_course import repos
 
 
+def test_an_internal_repo_is_not_a_private_one():
+    # GitHub sets the boolean `private` on an `internal` repo as well, so the two readers
+    # do NOT agree and this one is the strict half. `internal` is readable by every member
+    # of the enterprise, and a mark the whole institution can read is a published mark -
+    # so the one thing that rides on this answer, whether a grade may be posted into a
+    # repo's Feedback issue, has to come back no.
+    assert repos.listed_is_private({"visibility": "private"}) is True
+    assert repos.listed_is_private({"visibility": "internal"}) is False
+    assert repos.listed_is_private({"visibility": "public"}) is False
+    # A row nobody could read is not a repo the world can read.
+    assert repos.listed_is_private(None) is True
+    assert repos.listed_is_private({}) is True
+
+
 def test_repo_is_archived_reads_the_flag_and_assumes_live_when_it_cannot(monkeypatch):
     # This gates whether the nightly refresh skips a cohort, so the failure default is the
     # whole point: an unreadable repo must read as LIVE. Guessing "archived" on a transient

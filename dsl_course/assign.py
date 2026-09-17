@@ -717,11 +717,13 @@ def patch_released(
         # One repo for the whole cohort, and `patch_targets` finds it by the same
         # template-prefix rule that finds a repo per unit - so the loop below needs no arm
         # of its own. Said out loud because "1 submission repo" would otherwise read as a
-        # cohort of one, and because the name is the one submission repo name a public log
-        # may print in full.
+        # cohort of one, and the drop box is NAMED because its name carries no handle.
+        # The targets are counted and never listed: the same prefix rule also matches any
+        # `<slug>-<handle>` repo a cohort was handed before the assignment became a drop
+        # box, and this log runs in the course org's PUBLIC `.github`.
         log(
-            f"  {len(corrected)} file(s) -> the {cohort_slug} drop box "
-            f"({', '.join(targets) or 'not handed out yet'})"
+            f"  {len(corrected)} file(s) -> the {shared_repo(cohort_slug)} drop box "
+            f"({len(targets)} repo(s) to patch)"
         )
     else:
         log(f"  {len(corrected)} file(s) -> {len(targets)} submission repo(s)")
@@ -1302,6 +1304,13 @@ _SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
 _Released = tuple[dict[str, int], bool, list[tuple[str, list[str], str | None]], bool]
 
 
+def _dry_run_cohort_template(cohort_org: str, slug: str) -> None:
+    """The line every arm that CREATES repos prints first in a dry run: whatever shape
+    follows, the cohort-side template is frozen before it. One spelling, so the two arms
+    cannot describe the same step differently."""
+    log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
+
+
 def _release_external(
     cohort_org: str, slug: str, what: str, solution: bool, dry_run: bool
 ) -> _Released | None:
@@ -1357,7 +1366,7 @@ def _release_shared(
             f"cohort can read)"
         )
     if dry_run:
-        log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
+        _dry_run_cohort_template(cohort_org, slug)
         log(f"    DRY-RUN  {cohort_org}/{drop_box}  <- push for {what}")
         return None
     drop_box_ok, changed = ensure_drop_box(
@@ -1444,7 +1453,7 @@ def _release_units(
         f"{what}{shape_note}{' + solution' if solution else ''}"
     )
     if dry_run:
-        log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
+        _dry_run_cohort_template(cohort_org, slug)
         for repo, handles, team in units:
             via = f" (team {team})" if team else ""
             log_person(
@@ -1813,11 +1822,6 @@ def provision_all(
         grades.write_team_lock(
             cohort_org=cohort_org, course_org=master_org, sched=sched
         )
-        # A gradebook per onboarded student, from the handout rather than from the first
-        # distribute: the brief points at "your gradebook" from the day it is published,
-        # and a student who onboarded this hour has just been given their repo. Idempotent,
-        # and off the listing this run already took rather than a second one.
-        grades.ensure_gradebooks(cohort_org, existing=listing)
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
     # file that doesn't parse raises yaml.YAMLError - which is NOT a RuntimeError. The repos
@@ -1836,6 +1840,16 @@ def provision_all(
             f"site refreshes on the next Sync site or scheduler tick: {exc}"
         )
         site_failed = True
+
+    # A gradebook per onboarded student, from the handout rather than from the first
+    # distribute: the brief points at "your gradebook" from the day it is published, and a
+    # student who onboarded this hour has just been given their repo. Idempotent, and off
+    # the listing this run already took rather than a second one. LAST, after the site: it
+    # is a call per student who has none yet, and everything ahead of it is what a cohort
+    # is waiting on - the repos, then the page that tells them where to find them.
+    if changed:
+        grades.ensure_gradebooks(cohort_org, existing=listing)
+
     failed = site_failed or any(k.startswith("failed") for k in results)
     # Record the release only when every solution push in this run landed, and only when
     # there was at least one repo to push into. Deliberately NOT gated on `failed`:

@@ -100,9 +100,19 @@ def repo_is_private(org: str, name: str) -> bool:
 
 
 def listed_is_private(row: dict | None) -> bool:
-    """The same answer as `repo_is_private`, off a row of an org listing rather than a read
-    of its own. Optimistic the same way: an unknown row answers private, so an API blip
-    never leaves a caller treating a private repo as one the world can read."""
+    """Whether a row of an org listing describes a repo NOBODY outside its collaborators
+    can read.
+
+    Deliberately not the same answer as `repo_is_private`, which reads the boolean
+    `private` - GitHub sets that on an `internal` repo too, and an `internal` repo is
+    readable by every member of the enterprise. This reads `visibility`, so `internal`
+    answers False. That is the answer its caller needs: what rides on it is whether a
+    student's marks may be posted into a repo's Feedback issue, and a mark read by the
+    whole institution is a published mark. `internal` is not a visibility the toolkit
+    hands out (`course.VISIBILITIES`); when it is, this still will not treat it as private.
+
+    A row that is not there at all answers private, so a listing that could not be read
+    never turns into a repo treated as world-readable."""
     return ((row or {}).get("visibility") or "private") == "private"
 
 

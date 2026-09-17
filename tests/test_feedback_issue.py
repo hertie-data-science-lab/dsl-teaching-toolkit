@@ -89,19 +89,17 @@ def test_an_individual_body_never_names_a_team_even_when_handed_one():
     assert "CONTRIBUTIONS.md" not in body
 
 
-def test_the_issue_body_for_work_handed_in_off_github_promises_no_receipts():
-    # There is no push to acknowledge, so the body must not tell a student to expect one.
-    body = grades.feedback_body(spec(submit_via="external"))
-    assert body.splitlines() == [
-        MARK,
-        "**Due:** Sunday 4 October 2026, 23:59 (Europe/Berlin)",
-        "",
-        (
-            "This assignment is submitted outside GitHub (see the brief). This "
-            "repository holds the brief and your feedback."
-        ),
-    ]
-    assert "receipt" not in body
+def test_no_run_ever_opens_a_feedback_issue_for_work_handed_in_off_github():
+    # There is no body for that shape, because there is no issue to put one in: the policy
+    # never answers CREATE where the shape has no Feedback issue, whatever the listing
+    # says. This is what the deleted `external=` variant of the body used to be for.
+    for listed in ({"assignment-1-ada-l": {"visibility": "private"}}, {}, None):
+        assert (
+            grades.feedback_thread_policy(
+                spec(submit_via="external"), listed, "assignment-1-ada-l"
+            )
+            != grades.THREAD_CREATE
+        )
 
 
 def test_the_body_always_opens_with_a_mark_the_lookup_can_find():

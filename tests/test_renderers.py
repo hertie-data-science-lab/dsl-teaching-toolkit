@@ -896,7 +896,7 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert "contents/dsl-course.yml" in tmpl
 
 
-# The whole assignment, in the order the nine boxes are numbered. Pinned as a LIST: the
+# The whole assignment, in the order the ten boxes are numbered. Pinned as a LIST: the
 # order is what a person reads down, and GitHub caps a workflow_dispatch at ten - which
 # `visibility` now reaches, so the form is FULL: an eleventh box is impossible and a
 # replacement for one of these is a decision, not a diff nobody noticed.

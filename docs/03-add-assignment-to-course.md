@@ -174,6 +174,10 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
 | | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |
 
+GitHub's fourth visibility, `internal` - readable by every member of an enterprise and by
+nobody outside it - is **not supported**: it needs an Enterprise plan the courses do not
+have, and a repo the whole institution can read is not a repo marks may be posted into.
+
 A `public` or `student_choice` repo gets **no Feedback issue**: marks and feedback go only
 to the student's private `grades-<handle>` repo, and no **model solution** is ever pushed
 into one - the answers would be published with the repo, so an assignment that is not
@@ -199,6 +203,11 @@ and gives every onboarded student (or every team) `push` on it. Each unit works 
 `<handle>/` or `<team>/` folder; the whole cohort can read the whole repo, which is the
 point - peer-visible presentations, referee reports, a gallery of submissions.
 
+The folder name is the student's GitHub handle (or the team name) spelt **exactly** as
+*students.csv* or *teams.csv* has it, including its capitals: GitHub matches a path
+case-sensitively, so work pushed to `Anna-Adams/` is not in `anna-adams/` and is not found.
+Say so in the brief, and check the spelling of a handle whose folder the sheet says is empty.
+
 What to know before you pick it:
 
 - **The folders are a convention, not a boundary.** Anyone with push can write into anyone
@@ -214,10 +223,11 @@ What to know before you pick it:
 - **No Feedback issue, no receipt, no model solution.** All three would be written where
   the whole cohort can read them. Marks and feedback go to the private `grades-<handle>`
   gradebook.
-- **Hand-marked.** `autograde:` and `grader_pdf:` are dropped at the parse if you set
-  them: both run per unit against the unit's own repo, so each student would have the whole
-  drop box cloned and scored under their own name, and every one of them would get the same
-  result.
+- **Hand-marked.** `autograde:`, `completion_check:` and `grader_pdf:` are dropped at the
+  parse if you set them (and the notebook completion check is off here whether or not the
+  file mentions it): all three run per unit against the unit's own repo, so each student
+  would have the whole drop box cloned and scored under their own name, and every one of
+  them would get the same result.
 
 The **Feedback issue** - the thread the receipts and the final comment appear in - exists
 only where there is a private repo of the student's own to put it in, so an `external` or

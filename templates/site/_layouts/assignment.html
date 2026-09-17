@@ -81,9 +81,14 @@ title: page.title
     was reworded. A `github-public` assignment is portfolio work -
     a hackathon, a showcase - and the whole internet can read the repo from the moment it
     is handed out, so the callout a student reads BEFORE their first push is where that has
-    to be said; saying it in the brief alone leaves it to whoever wrote the brief. It also
-    has no Feedback issue (`course.has_feedback_issue`: a thread in a public repo is a
-    published mark), which is why that arm is the one that names the gradebook.
+    to be said; saying it in the brief alone leaves it to whoever wrote the brief.
+
+    EVERY arm but the default one names the gradebook, and for one reason: the default is
+    the only shape with a Feedback issue (`course.has_feedback_issue` - a thread in a
+    public repo, or in a repo the whole cohort reads, is a published mark), so it is the
+    only page whose reader can expect their marks where the work is. On the other four,
+    the private `grades-<handle>` repo is the only place feedback ever appears, and a
+    student who does not know that is a student who thinks nobody marked their work.
 
     `github-student-choice` is the same repo with the flag handed over: it starts private,
     the student is its admin, and the toolkit puts it back to private until the grading
@@ -105,7 +110,8 @@ title: page.title
       {% if page.submit_url %}
       <p><a class="btn" target="_blank" rel="noopener" href="{{ page.submit_url }}">Submit on {{ page.submit_host }}</a></p>
       {% endif %}
-      <p>Handed in outside GitHub. See the brief for what to hand in.</p>
+      <p>Handed in outside GitHub. See the brief for what to hand in. Your grade and feedback arrive in your
+      private gradebook <code>grades-&lt;your-handle&gt;</code>.</p>
     </div>
     {% elsif page.repo_url %}
     <div class="callout">

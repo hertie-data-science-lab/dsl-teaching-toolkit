@@ -1170,6 +1170,67 @@ def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypa
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
+def test_a_reworded_gradebook_page_is_committed_and_nobody_is_emailed(
+    tmp_path, monkeypatch
+):
+    # The two channels are keyed on different things on purpose. The COMMIT is keyed on
+    # the whole book, so a change the toolkit makes to the page's own standing text lands
+    # in every gradebook; the EMAIL is keyed on `grades.yml`, so "there is something new to
+    # read" still means a mark moved. On one hash, adding a sentence to the README re-mailed
+    # every student in every live cohort to tell them nothing.
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, cfg_files, _d),) = first["config"]
+    page = grades.render_readme
+    monkeypatch.setattr(
+        grades,
+        "render_readme",
+        lambda *a, **k: (
+            page(*a, **k) + "\n## Keeping your work\nA new standing section.\n"
+        ),
+    )
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+    )
+    ((_repo, files, _delete),) = again["gradebooks"]
+    assert "A new standing section." in files["README.md"]
+    assert again["outbox"] == []
+    assert again["comments"] == []  # the mark did not move, so nor did the comment
+
+
+def test_a_record_written_before_the_split_is_carried_over_not_re_mailed(
+    tmp_path, monkeypatch, capsys
+):
+    # What a live cohort's `distributed.csv` holds: rows written when BOTH channels were
+    # keyed on the whole book, so the email row carries the same digest the gradebook row
+    # does. The columns do not change - the row is carried over in place, and a re-run on
+    # an unchanged cohort mails nobody.
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, cfg_files, _d),) = first["config"]
+    record = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
+    whole = record[("ada-l", "", grades.CHANNEL_GRADEBOOK)][0]
+    record[("ada-l", "", grades.CHANNEL_EMAIL)] = (whole, "2026-09-01T00:00:00", "")
+    page = grades.render_readme
+    monkeypatch.setattr(
+        grades, "render_readme", lambda *a, **k: page(*a, **k) + "\nstanding text\n"
+    )
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=grades.dump_distributed(record),
+    )
+    assert again["outbox"] == []
+    assert "already knew what their gradebook said" in capsys.readouterr().out
+    ((_repo, book, _delete),) = again["gradebooks"]
+    ((_cfg2, files, _d2),) = again["config"]
+    carried = grades.parse_distributed(files[grades.DISTRIBUTED_PATH])
+    # ...and the row now keys on the marks alone, so the next real mark does mail.
+    assert carried[("ada-l", "", grades.CHANNEL_EMAIL)][0] == grades.content_hash(
+        book["grades.yml"]
+    )
+
+
 def test_a_lost_record_still_does_not_duplicate_a_comment(tmp_path, monkeypatch):
     # `distributed.csv` deleted, restored from a backup, never written: the hash on the
     # comment itself is the second belt, and it is read from the issue.
@@ -1292,6 +1353,25 @@ def test_no_feedback_issue_is_opened_in_a_repo_the_listing_calls_public(
         },
     )
     assert out["issues"] == [] and out["comments"] == []
+
+
+def test_a_run_says_how_many_repos_it_would_not_comment_in(
+    tmp_path, monkeypatch, capsys
+):
+    # A count and nothing else. The repos are named after the students in them, and this
+    # log is world-readable; but a grader pressing Distribute and seeing `skipped` with no
+    # explanation has no way to find out that a repo went public after handout.
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        found_issue=7,
+        listed={
+            "assignment-1-ada-l": {"name": "assignment-1-ada-l", "visibility": "public"}
+        },
+    )
+    printed = capsys.readouterr()
+    assert "1 repo(s) are not private - no comment posted" in printed.out
+    assert "ada-l" not in printed.out
 
 
 def test_a_repo_the_listing_does_not_carry_is_never_asked_about(tmp_path, monkeypatch):

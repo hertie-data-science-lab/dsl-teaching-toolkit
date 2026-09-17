@@ -328,10 +328,6 @@ _SUBMIT_PARAGRAPH = (
     "after any late push, and your feedback and grade follow as a comment once marking is "
     "complete."
 )
-_EXTERNAL_PARAGRAPH = (
-    "This assignment is submitted outside GitHub (see the brief). This repository holds "
-    "the brief and your feedback."
-)
 _CONTRIBUTIONS_ASK = "fill in CONTRIBUTIONS.md before the deadline."
 
 # The three receipt events. One comment each, additive: a comment edited in place leaves no
@@ -347,16 +343,18 @@ def feedback_issue_body(
     due_display: str,
     late_policy_line: str = "",
     team_line: str = "",
-    external: bool = False,
 ) -> str:
     """The body of a submission repo's Feedback issue.
 
     The caller supplies only what it knows - the rendered dates, and (for a team) the team
-    and its members; every word of boilerplate is here, so the three variants cannot drift
-    apart in three call sites."""
+    and its members; every word of boilerplate is here, so the two variants cannot drift
+    apart in two call sites.
+
+    There is no variant for an assignment handed in off GitHub: a Feedback issue exists
+    only where the shape HAS one (`has_feedback_issue`), and no run ever opens one for any
+    other shape (`grades.feedback_thread_policy`), so a body describing one would be words
+    nobody could reach."""
     lines = [FEEDBACK_ISSUE_MARKS[0], f"**Due:** {due_display}"]
-    if external:
-        return "\n".join([*lines, "", _EXTERNAL_PARAGRAPH]) + "\n"
     if late_policy_line:
         lines.append(f"**Late work:** {late_policy_line}")
     if team_line:

@@ -2507,7 +2507,10 @@ def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwa
 
     from dsl_course.schedule import AssignmentEntry
 
-    effects: dict = {"handout": [], "site": []}
+    # `order` is the tail's, and it is a fact about the handout rather than about the
+    # shape: the site goes up before the gradebook sweep, which is a call per student who
+    # has none yet.
+    effects: dict = {"handout": [], "site": [], "order": []}
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
@@ -2537,8 +2540,19 @@ def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwa
     )
     monkeypatch.setattr(
         "dsl_course.site.sync_site",
-        lambda course, cohort: effects["site"].append(cohort),
+        lambda course, cohort: (
+            effects["site"].append(cohort) or effects["order"].append("site")
+        ),
     )
+    # Wrapped rather than replaced, so a test that installed its own sweep above still
+    # sees its own calls - and so the order is recorded whichever one is in place.
+    swept = assign.grades.ensure_gradebooks
+
+    def record_sweep(org, dry_run=False, existing=None):
+        effects["order"].append("gradebooks")
+        return swept(org, dry_run=dry_run, existing=existing)
+
+    monkeypatch.setattr(assign.grades, "ensure_gradebooks", record_sweep)
     path = _roster_file(
         tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
     )
@@ -2560,6 +2574,16 @@ def test_an_external_handout_creates_no_repos_and_still_records_itself(
     assert gradebooks == ["COHORT"]
     ((sheet,),) = (sheet_writes,)
     assert sheet["units"] == [("ada-l", ["ada-l"])]
+
+
+def test_the_site_goes_up_before_the_gradebooks_are_swept(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    # Order, not presence. Everything ahead of the sweep is what a cohort is waiting on -
+    # the repos, then the page that tells them where to find them - and the sweep costs a
+    # call per student who has no gradebook yet.
+    out = _external(monkeypatch, tmp_path)
+    assert out["order"] == ["site", "gradebooks"]
 
 
 def test_an_external_handout_runs_on_the_ticks_listing_and_takes_none(
@@ -3171,6 +3195,31 @@ def test_a_shared_handout_writes_the_sheet_and_the_site_like_any_other(
     # And the handout is recorded ungated, like every shape that creates a repo: a first
     # tick with nobody onboarded is still the moment the assignment went out.
     assert drop_box["handout"] == ["assignment-1"]
+
+
+def test_patching_a_drop_box_names_the_drop_box_and_nobody_else(monkeypatch, capsys):
+    # This log runs in the course org's PUBLIC `.github`. The drop box may be named - its
+    # name carries no handle - but the TARGETS may not: the same template-prefix rule that
+    # finds it also matches any `<slug>-<handle>` repo the cohort was handed before the
+    # assignment became a drop box, and one of those in the log publishes who is in it.
+    _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-submissions": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada-l": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, tmpl: assign.grades.GradingSpec(submit_via="shared"),
+    )
+    assert _run(dry_run=False) == 0
+    said = capsys.readouterr()
+    printed = said.out + said.err
+    assert "assignment-1-submissions" in printed
+    assert "ada-l" not in printed
 
 
 def test_patch_targets_finds_the_shared_drop_box(monkeypatch):
