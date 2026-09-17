@@ -725,6 +725,13 @@ def test_a_shape_with_a_catch_carries_its_note_on_the_page_alone(monkeypatch):
         assert "shape_note" not in out.split("due_event:")[1]
 
 
+def test_a_pending_assignment_carries_no_shape_note_yet(monkeypatch):
+    # The box would otherwise sit above the "not handed out yet" line, warning about a repo
+    # that does not exist.
+    out = _entry_for(monkeypatch, "visibility: public\n", handed_out=frozenset())
+    assert "shape_note" not in out
+
+
 def test_a_shape_with_nothing_unusual_about_it_carries_no_note(monkeypatch):
     # A private repo of the student's own is what the callout already describes, and an
     # `external` assignment hands out no repo for a note to be about.
