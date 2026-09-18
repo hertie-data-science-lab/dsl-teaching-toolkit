@@ -48,9 +48,7 @@ lifecycle, `events` are display-only calendar rows.
 Every block takes the same vocabulary, named for the site column it fills: `title:` (the
 Title column), `details:` (the Details column - markdown, and additive: it renders ABOVE
 whatever that cell already generates), a `*_datetime:`, `show_on_site:` and `tbc:`, plus
-`type:` on the two blocks where it discriminates. `details:` was once `description:`, and
-`archive.event_datetime` once `archive.date`; both old spellings are still parsed - see
-the TRANSITIONAL markers below, which go when every live cohort has been migrated.
+`type:` on the two blocks where it discriminates.
 
 Every field is optional - a cohort with no schedule.yml (or a blank one) behaves exactly
 as before everywhere that reads it (releases are skipped, dates synthesised).
@@ -626,12 +624,6 @@ KNOWN_RELEASE = frozenset(
         "type",
         "title",
         "details",
-        # TRANSITIONAL: the old spelling of `details`. Still accepted because every live
-        # cohort's schedule.yml says `description:` and an unknown key is an IMMEDIATE
-        # ConfigFault - it would mail the faculty of every org mid-term for a file they
-        # wrote correctly on the day they wrote it. Delete this, and the fallback in
-        # `_flagged_details`, once the live orgs have been migrated by hand.
-        "description",
         "tbc",
         "show_on_site",
     }
@@ -817,18 +809,12 @@ def _flagged_details(
     means the same thing wherever it is written, so it has to be READ the same way
     wherever it is written. Guarding one block is three blocks on which the mapping still
     ships."""
-    # TRANSITIONAL: `description:` is the old spelling (see KNOWN_RELEASE / KNOWN_ARCHIVE
-    # - the only two blocks that ever accepted it, and a block that does not is a block
-    # where it is already an unknown key). The key that is PRESENT is the one flagged when
-    # its value is unusable, so the fault names the line faculty actually typed. Delete
-    # the second half once every org is migrated.
-    key = "details" if "details" in entry else "description"
-    said = entry.get(key)
+    said = entry.get("details")
     if said is None:
         return None
     if isinstance(said, str) and said.strip():
         return said
-    _flag_bad_value(drops, where, key, said, DETAILS_COST, lines)
+    _flag_bad_value(drops, where, "details", said, DETAILS_COST, lines)
     return None
 
 
@@ -981,7 +967,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
             # any `releases:` entry, so they are writing prose they expect to read on the
             # schedule, and an empty cell is the one outcome they cannot tell apart from
             # a rendering bug.
-            for key in ("title", "details", "description"):
+            for key in ("title", "details"):
                 if str(entry.get(key) or "").strip():
                     drops.note(
                         where,
@@ -1323,13 +1309,6 @@ KNOWN_ARCHIVE = frozenset(
         "details",
         "show_on_site",
         "tbc",
-        # TRANSITIONAL: `date` and `description` are the old spellings of
-        # `event_datetime` and `details`. Kept for exactly as long as live cohorts carry
-        # them - an unknown key here is an immediate ConfigFault that mails their faculty.
-        # Delete both, and the fallbacks in `_parse_archive` / `_flagged_details`, once
-        # every org has been migrated by hand.
-        "date",
-        "description",
     }
 )
 
@@ -1387,14 +1366,9 @@ def _parse_archive(
     _flag_unknown_keys(
         drops, raw, KNOWN_ARCHIVE, "archive", "that setting is ignored", lines
     )
-    # TRANSITIONAL: `date:` is the old spelling of `event_datetime:` (see KNOWN_ARCHIVE).
-    # The new key wins where a block carries both, and the OLD one is only read when the
-    # new one is absent entirely - so a cohort that has migrated never has its freeze
-    # date pulled back to a stale line somebody forgot to delete. Delete this once every
-    # org has been migrated by hand.
-    when_key = "event_datetime" if "event_datetime" in raw else "date"
     return ArchiveRow(
-        when=_flagged_date(raw, when_key, drops, "archive", cost, lines) or default,
+        when=_flagged_date(raw, "event_datetime", drops, "archive", cost, lines)
+        or default,
         show_on_site=_flagged_flag(
             raw,
             "show_on_site",
