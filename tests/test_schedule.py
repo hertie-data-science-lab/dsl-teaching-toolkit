@@ -2374,13 +2374,33 @@ def test_an_unusable_details_value_is_dropped_rather_than_printed():
     # A list reaching the deployed site as `['a', 'b']` is a hand edit that did not take -
     # flagged, never raised, and never printed. The row then reads as it does for a
     # cohort that wrote no details at all.
-    for said in (["a", "b"], {"text": "x"}, "", "   ", 7):
+    for said in (["a", "b"], {"text": "x"}, 7):
         sched = parse({"semester_end": "2026-12-18", "archive": {"details": said}})
         assert sched.archive.details is None
         assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
         (drop,) = sched.dropped
         assert drop.startswith("archive.details: unusable value")
         assert "no sentence at all" in drop
+
+
+def test_a_blank_details_is_an_empty_slot_rather_than_a_mistake():
+    # `details:` with nothing after it is how a file carries a slot for prose nobody has
+    # written yet - the shape a teaching team is handed to fill in. A bare key and a `""`
+    # are one intention typed two ways, so both read as no details and NEITHER is
+    # reported: flagging one and not the other emailed faculty about a difference they
+    # could not see in their own file.
+    for said in ("", "   ", "\n"):
+        for block, entry in (
+            ("archive", {"details": said}),
+            (
+                "releases",
+                {"lecture-1": {"event_datetime": "2026-09-01", "details": said}},
+            ),
+            ("events", {"exam": {"event_datetime": "2026-11-03", "details": said}}),
+        ):
+            sched = parse({block: entry})
+            assert sched.dropped == [], (block, said)
+            assert sched.faults == [], (block, said)
 
 
 def test_a_block_with_no_details_says_nothing_about_one():

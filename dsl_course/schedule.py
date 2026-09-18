@@ -799,11 +799,14 @@ def _flagged_details(
 ) -> str | None:
     """`entry`'s optional `details:` - the prose that fills its row's Details column.
 
-    Anything that is not a usable sentence is FLAGGED and dropped, never raised and never
-    printed: a list or a mapping here would otherwise reach the deployed site as
-    `['a', 'b']`. The row then reads as it does for a cohort that wrote no `details:` at
-    all - its title and its date - which is a hand edit that visibly did not take, and
-    that is what `dropped` is for.
+    Anything that is not a STRING is FLAGGED and dropped, never raised and never printed:
+    a list or a mapping here would otherwise reach the deployed site as `['a', 'b']`. The
+    row then reads as it does for a cohort that wrote no `details:` at all - its title and
+    its date - which is a hand edit that visibly did not take, and that is what `dropped`
+    is for.
+
+    A BLANK string is not that. It is an empty slot - the shape a file carries for prose
+    nobody has written yet - so it reads as absent, and is never reported.
 
     ONE guard for all four blocks that take the key, like `_flagged_flag` above: the word
     means the same thing wherever it is written, so it has to be READ the same way
@@ -812,8 +815,12 @@ def _flagged_details(
     said = entry.get("details")
     if said is None:
         return None
-    if isinstance(said, str) and said.strip():
-        return said
+    if isinstance(said, str):
+        # Blank reads as absent, NOT as a mistake. `details:` with nothing after it is how
+        # a schedule.yml carries a slot for prose somebody has yet to write, and a bare key
+        # and a `""` are the same intention typed two ways - so flagging one and not the
+        # other emailed faculty about a difference they could not see.
+        return said if said.strip() else None
     _flag_bad_value(drops, where, "details", said, DETAILS_COST, lines)
     return None
 
