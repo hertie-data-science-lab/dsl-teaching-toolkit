@@ -2388,7 +2388,9 @@ def test_a_block_with_no_details_says_nothing_about_one():
 
 
 def test_a_declared_archive_date_wins_over_the_default():
-    sched = parse({"semester_end": "2026-12-18", "archive": {"date": "2027-01-15"}})
+    sched = parse(
+        {"semester_end": "2026-12-18", "archive": {"event_datetime": "2027-01-15"}}
+    )
     assert sched.archive.when == date(2027, 1, 15)
 
 
@@ -2402,7 +2404,9 @@ def test_a_block_with_no_term_end_and_no_date_has_no_archive_date():
 
 
 def test_a_cohort_with_no_term_end_can_still_name_its_own_archive_date():
-    assert parse({"archive": {"date": "2027-01-15"}}).archive.when == date(2027, 1, 15)
+    assert parse({"archive": {"event_datetime": "2027-01-15"}}).archive.when == date(
+        2027, 1, 15
+    )
 
 
 def test_show_on_site_is_only_switched_off_by_a_real_false():
@@ -2415,7 +2419,9 @@ def test_an_unreadable_show_on_site_is_flagged_and_the_row_still_shows():
     # to take the row off the site did nothing and said nothing. Flagged like the two
     # keys beside it; the row still shows, which is the default.
     for shown in ("nope", 0, [], {"when": True}):
-        sched = parse({"archive": {"date": "2027-02-16", "show_on_site": shown}})
+        sched = parse(
+            {"archive": {"event_datetime": "2027-02-16", "show_on_site": shown}}
+        )
         assert sched.archive.show_on_site is True
         (drop,) = sched.dropped
         assert drop.startswith("archive.show_on_site: unusable value")
@@ -2493,10 +2499,12 @@ def test_an_unreadable_archive_date_falls_back_and_is_flagged():
     # A date nobody can read must not freeze the cohort on a day they did not choose, and
     # must not crash the tick that reads the file either: it falls back to the default and
     # is reported through the digest issue like any other unusable value.
-    sched = parse({"semester_end": "2026-12-18", "archive": {"date": "16/02/2027"}})
+    sched = parse(
+        {"semester_end": "2026-12-18", "archive": {"event_datetime": "16/02/2027"}}
+    )
     assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     assert len(sched.dropped) == 1
-    assert sched.dropped[0].startswith("archive.date: unusable value")
+    assert sched.dropped[0].startswith("archive.event_datetime: unusable value")
     assert "freezes at its default date" in sched.dropped[0]
 
 
@@ -2521,21 +2529,23 @@ def test_a_stray_key_under_archive_is_flagged_and_ignored():
 def test_archive_is_a_known_top_level_key():
     # Not in KNOWN_TOP_LEVEL, the whole block reads as a typo and every cohort that writes
     # one gets a red `Validate schedule` run for a key the parser now understands.
-    assert parse({"archive": {"date": "2027-02-16"}}).dropped == []
+    assert parse({"archive": {"event_datetime": "2027-02-16"}}).dropped == []
 
 
 # ---------------------------------------- one word per column (title / details / type)
 # The four display fields every block takes, one per column of the site's schedule table.
-# Two of them are renames, and every live cohort's schedule.yml is still written in the
-# old vocabulary while its term runs - so the parser has to read both.
+# Two of them are renames - `details:` was `description:`, and `archive.event_datetime:`
+# was `archive.date:`. Every live cohort has been migrated and the dual-key shim is gone,
+# so the old spellings are now ordinary unknown keys with nothing special behind them.
 
 
-def test_a_live_cohorts_old_spelling_still_parses_and_raises_no_fault():
-    # An unknown key is an IMMEDIATE ConfigFault, which MAILS the cohort's faculty. Every
-    # org mid-term says `description:`, so accepting only the new spelling would red every
-    # one of their digests for a file that was correct the day it was written.
+def test_the_old_spelling_is_now_an_unknown_key_like_any_other_typo():
+    # No special casing and no bespoke message: `description:` and `archive.date:` reach
+    # `_flag_unknown_keys` exactly as `grading_dateime:` would, and the row falls back to
+    # what a cohort that wrote no sentence at all gets.
     sched = parse(
         {
+            "semester_end": "2026-12-18",
             "releases": {
                 "lecture-1": {
                     "event_datetime": "2026-09-01T10:00",
@@ -2546,14 +2556,24 @@ def test_a_live_cohorts_old_spelling_still_parses_and_raises_no_fault():
             "archive": {"date": "2027-02-16", "description": "Read-only from {date}."},
         }
     )
-    assert sched.releases[0].details == "Sample spaces."
-    assert sched.archive.when == date(2027, 2, 16)
-    assert sched.archive.details == "Read-only from {date}."
-    assert sched.dropped == [] and sched.faults == []
+    assert sched.releases[0].details == ""
+    assert sched.archive.details is None
+    # And a stale `date:` no longer moves the freeze - the default date stands.
+    assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert len(sched.dropped) == 3 and len(sched.faults) == 3
+    assert all("unrecognised key" in line for line in sched.dropped)
+    for loc in (
+        "releases.lecture-1.description",
+        "archive.date",
+        "archive.description",
+    ):
+        assert any(line.startswith(f"{loc}: ") for line in sched.dropped), loc
 
 
-def test_the_new_spelling_wins_where_a_file_carries_both():
-    # A cohort migrating one entry at a time must never read the line it forgot to delete.
+def test_only_the_new_spelling_is_read_where_a_file_carries_both():
+    # The other direction of the same fact, so the file's meaning is pinned both ways: a
+    # half-swept file reads its new keys and the line somebody forgot to delete is flagged
+    # rather than quietly preferred.
     sched = parse(
         {
             "releases": {
@@ -2574,7 +2594,8 @@ def test_the_new_spelling_wins_where_a_file_carries_both():
     assert sched.releases[0].details == "The new one."
     assert sched.archive.when == date(2027, 3, 1)
     assert sched.archive.details == "The new one."
-    assert sched.dropped == []
+    assert len(sched.dropped) == 3
+    assert all("unrecognised key" in line for line in sched.dropped)
 
 
 def test_an_event_carries_its_details_and_can_be_kept_off_the_site():
@@ -2724,6 +2745,28 @@ def test_display_text_on_a_readings_entry_is_reported_rather_than_swallowed():
         {"releases": {"lecture-4": {"event_datetime": "2026-09-15T09:00", **display}}}
     )
     assert same.dropped == []
+
+
+def test_the_retired_spelling_on_a_readings_entry_is_reported_once_not_twice():
+    # The readings check used to sweep `description` too, from when that was still an
+    # accepted spelling of `details`. Now that it is an ordinary unknown key, sweeping it
+    # here as well reports one line twice, under two different explanations - and the
+    # readings one sends faculty to rewrite prose on another entry, where the key is just
+    # as unknown.
+    sched = parse(
+        {
+            "releases": {
+                "readings-4": {
+                    "event_datetime": "2026-09-15T09:00",
+                    "type": "readings",
+                    "description": "Two papers on attention.",
+                }
+            }
+        }
+    )
+    assert len(sched.dropped) == 1
+    assert "unrecognised key" in sched.dropped[0]
+    assert "claims no row of its own" not in sched.dropped[0]
 
 
 def test_the_archive_row_can_be_named_and_marked_provisional():
