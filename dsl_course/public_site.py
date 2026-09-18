@@ -172,7 +172,7 @@ def _public_lecture_entry(
     and so the text needs no `{% raw %}` fence (front matter is data, not a template).
 
     A public course site has no schedule.yml to read, so it declares no `subtitle:` or
-    `description:` of its own; the theme simply shows the ordinal.
+    `details:` of its own; the theme simply shows the ordinal.
 
     `section_links` is `(section, [Link, ...])` in publication order; each link is
     named `<section-singular> - <file>`, as on the cohort site."""

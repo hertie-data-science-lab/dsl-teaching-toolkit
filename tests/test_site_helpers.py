@@ -8,6 +8,7 @@ publish citations as text without leaking copyrighted bytes.
 from __future__ import annotations
 
 from datetime import date, datetime
+from textwrap import indent
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -33,15 +34,17 @@ def test_slug():
 def test_exam_entry_date_only_keeps_the_nine_am_placeholder():
     # Unchanged rendering for every schedule that gives a bare `date:` (and for the
     # synthesised mid/end-of-semester fallback rows).
-    out = site._exam_entry("MidTerm Exam", date(2026, 11, 3))
+    out = site._event_row("exam", "MidTerm Exam", date(2026, 11, 3))
     assert "date: 2026-11-03T09:00:00" in out
-    assert 'description: "MidTerm Exam"' in out
+    assert 'title: "MidTerm Exam"' in out
     assert "type: exam" in out
 
 
 def test_exam_entry_renders_the_real_time_when_one_was_given():
-    out = site._exam_entry(
-        "Final Exam", datetime(2026, 12, 15, 14, 0, tzinfo=ZoneInfo("Europe/Berlin"))
+    out = site._event_row(
+        "exam",
+        "Final Exam",
+        datetime(2026, 12, 15, 14, 0, tzinfo=ZoneInfo("Europe/Berlin")),
     )
     assert "date: 2026-12-15T14:00:00" in out
     assert "09:00" not in out
@@ -945,16 +948,29 @@ def test_nav_order_does_not_depend_on_a_string_tie_break():
     assert names.index("All Materials") == names.index("Assignments") + 1
 
 
-def test_describe_keeps_the_paragraphs_of_a_multi_line_objective():
+def test_details_keeps_the_paragraphs_of_a_multi_line_objective():
     # Hertie learning objectives run to a paragraph, sometimes two. `_q` folds newlines, so
     # a one-line scalar silently ran them together.
-    one = site._describe("Sample spaces and Bayes' rule.")
-    assert one == 'description: "Sample spaces and Bayes\' rule."\n'
-    many = site._describe("First paragraph.\n\nSecond paragraph.")
-    assert (
-        yaml.safe_load(many)["description"] == "First paragraph.\n\nSecond paragraph.\n"
+    one = site._details("Sample spaces and Bayes' rule.")
+    assert one == 'details: "Sample spaces and Bayes\' rule."\n'
+    many = site._details("First paragraph.\n\nSecond paragraph.")
+    assert yaml.safe_load(many)["details"] == "First paragraph.\n\nSecond paragraph.\n"
+    assert site._details("") == "" and site._details("   ") == ""
+
+
+def test_an_indented_details_block_nests_under_its_parent_key():
+    # The due row is a sub-hash the theme reaches through `map: "due_event"`, so it cannot
+    # see the parent's copy and needs its own - which has to be legal YAML two levels in.
+    # A uniform `textwrap.indent` shift is all it takes: the `|2` indicator counts from
+    # the key's own column, and whitespace-only lines are left alone.
+    nested = "due_event:\n" + indent(
+        site._details("First paragraph.\n\nSecond."), "    "
     )
-    assert site._describe("") == "" and site._describe("   ") == ""
+    assert (
+        yaml.safe_load(nested)["due_event"]["details"]
+        == "First paragraph.\n\nSecond.\n"
+    )
+    assert indent(site._details("One line."), "    ") == '    details: "One line."\n'
 
 
 def test_a_planned_destination_links_only_where_something_exists(monkeypatch):

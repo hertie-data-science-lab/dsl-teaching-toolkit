@@ -50,7 +50,10 @@ DUE = date(2026, 3, 1)
 
 
 def _sched(archive: date | None, end: date | None = date(2025, 12, 18)):
-    return schedule.Schedule(semester_end=end, archive_date=archive)
+    return schedule.Schedule(
+        semester_end=end,
+        archive=schedule.ArchiveRow(when=archive) if archive else None,
+    )
 
 
 @pytest.fixture

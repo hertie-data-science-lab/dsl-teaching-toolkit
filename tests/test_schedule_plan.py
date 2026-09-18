@@ -134,7 +134,7 @@ def test_session_dates_use_the_event_datetime_not_the_deploy_datetime():
     )
 
 
-def test_the_plan_carries_a_rows_title_description_and_readings(monkeypatch):
+def test_the_plan_carries_a_rows_title_details_and_readings(monkeypatch):
     s = _sched(
         [
             Release(
@@ -145,13 +145,13 @@ def test_the_plan_carries_a_rows_title_description_and_readings(monkeypatch):
                     Deploy("cm", "readings/01_a", "materials", None),
                 ],
                 title="Probability Theory",
-                description="Sample spaces.",
+                details="Sample spaces.",
             )
         ]
     )
     row = schedule_plan.planned_sessions(s)[("1", "lecture")]
     assert row.subtitle == "Probability Theory"
-    assert row.description == "Sample spaces."
+    assert row.details == "Sample spaces."
     # Readings are lecture material, so they land on this row - and the row knows a
     # reading list is coming even before it ships.
     assert row.readings_planned is True
@@ -179,6 +179,40 @@ def test_the_earliest_entry_naming_a_row_is_the_one_that_titles_it():
     assert (
         schedule_plan.planned_sessions(s)[("2", "lecture")].subtitle
         == "Random Variables"
+    )
+
+
+def test_a_provisional_date_travels_with_the_date_it_is_about():
+    # `tbc:` says the row's DATE is provisional, and the row shows the earliest entry's
+    # date - so it is carried by that entry rather than or-ed over every entry touching
+    # the row. Or-ing would let a provisional readings drop mark a settled class "(TBC)",
+    # and a settled one un-mark a provisional class.
+    def rows(early_tbc: bool, late_tbc: bool):
+        return schedule_plan.planned_sessions(
+            _sched(
+                [
+                    Release(
+                        "late",
+                        datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
+                        deploy=[Deploy("cm", "lectures/02_x", "lectures", None)],
+                        tbc=late_tbc,
+                    ),
+                    Release(
+                        "early",
+                        datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
+                        deploy=[Deploy("cm", "readings/02_y", "materials", None)],
+                        tbc=early_tbc,
+                    ),
+                ]
+            )
+        )[("2", "lecture")]
+
+    assert rows(early_tbc=True, late_tbc=False).tbc is True
+    assert rows(early_tbc=False, late_tbc=True).tbc is False
+    assert rows(early_tbc=False, late_tbc=False).tbc is False
+    # It says nothing about the date itself, which is the earliest either way.
+    assert rows(early_tbc=True, late_tbc=False).when == datetime(
+        2026, 9, 10, 9, 0, tzinfo=BERLIN
     )
 
 
@@ -329,14 +363,14 @@ def test_an_entry_with_no_deploy_still_raises_its_row_from_its_label():
                 "lecture-12",
                 datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN),
                 title="Tutorial presentations",
-                description="Students present their topic.",
+                details="Students present their topic.",
             )
         ]
     )
     row = schedule_plan.planned_sessions(s)[("12", "lecture")]
     assert row.when == datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN)
     assert row.subtitle == "Tutorial presentations"
-    assert row.description == "Students present their topic."
+    assert row.details == "Students present their topic."
     # nothing staged, so nothing to name as a destination - the row says only that its
     # materials are not released yet
     assert row.dests == {}
@@ -399,3 +433,80 @@ def test_row_kind_splits_labs_from_lectures():
     assert schedule_plan.row_kind("labs") == "lab"
     for section in ("lectures", "readings", "faq", ""):
         assert schedule_plan.row_kind(section) == "lecture"
+
+
+# ------------------------------------------------- `type:`, the declared row override
+# Optional, and purely additive: an entry that declares none is placed by where its files
+# land, exactly as every live cohort's is.
+
+
+def test_a_declared_type_places_a_row_its_path_would_not():
+    # Lab material that does not land under `labs/` - the destination path cannot say what
+    # the row is, so the entry says it.
+    s = _sched(
+        [
+            Release(
+                "clinic-1",
+                datetime(2026, 9, 3, 14, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "clinics/01_week-1", "materials", None)],
+                type="lab",
+            )
+        ]
+    )
+    assert set(schedule_plan.planned_sessions(s)) == {("1", "lab")}
+
+
+def test_a_declared_type_overrides_the_label_fallback_too():
+    # A row raised from its own label (nothing staged yet) is placed by the same rule as
+    # one raised from a destination, or the row moves column the day its files ship.
+    s = _sched(
+        [Release("lecture-4", datetime(2026, 10, 1, 14, 0, tzinfo=BERLIN), type="lab")]
+    )
+    assert set(schedule_plan.planned_sessions(s)) == {("4", "lab")}
+
+
+def test_a_readings_type_contributes_to_a_row_without_raising_one():
+    # `readings` names no row of its own, exactly as a `readings-N` label does not - so it
+    # cannot invent a session, and cannot pull an existing one's date or name back to the
+    # day the PDFs went up. Its destinations still count.
+    s = _sched(
+        [
+            Release(
+                "week-1-papers",
+                datetime(2026, 8, 25, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "readings/01_week-1", "materials", None)],
+                type="readings",
+                title="Not this one",
+            ),
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/01_week-1", "materials", None)],
+                title="Perceptrons",
+            ),
+        ]
+    )
+    rows = schedule_plan.planned_sessions(s)
+    assert set(rows) == {("1", "lecture")}
+    row = rows[("1", "lecture")]
+    assert row.when == datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN)
+    assert row.subtitle == "Perceptrons"
+    assert row.readings_planned is True
+    assert "materials/readings/01_week-1" in row.dests
+
+
+def test_an_entry_that_declares_no_type_is_placed_exactly_as_before():
+    # The whole of the compatibility promise: 15 live orgs declare none.
+    s = _sched(
+        [
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN),
+                deploy=[
+                    Deploy("cm", "lectures/01_week-1", "materials", None),
+                    Deploy("cm", "labs/01_week-1", "materials", None),
+                ],
+            )
+        ]
+    )
+    assert set(schedule_plan.planned_sessions(s)) == {("1", "lecture"), ("1", "lab")}

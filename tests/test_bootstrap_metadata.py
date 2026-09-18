@@ -9,10 +9,13 @@ welcome.template - so these also pin what a fresh cohort's config repo actually 
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
+import yaml
+
 from dsl_course import bootstrap_course as bc
-from dsl_course import roster, welcome
+from dsl_course import roster, schedule, site, welcome
 
 
 def test_course_metadata_carries_faculty_block():
@@ -59,9 +62,7 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
     assert all(
         line.startswith("#") or not line.strip() for line in skeleton.splitlines()
     )
-    assert (
-        live.startswith("  date:") and "description: >-" in live and "{{date}}" in live
-    )
+    assert live.startswith("  event_datetime:") and "details: >-" in live
     for key in (
         "timezone",
         "releases",
@@ -77,8 +78,40 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "handout_datetime",
         "grading_datetime",
         "events",
+        # The four display fields the schedule table's four columns read, which every
+        # block now takes: a skeleton that teaches them on one block only is a skeleton
+        # that teaches faculty they belong to that block alone.
+        "title",
+        "details",
+        "show_on_site",
+        "tbc",
     ):
         assert key in schedule
+
+
+def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
+    # End to end over the ONE token in the seeded file, because the two halves of it are
+    # spelled differently and only the round trip can tell they agree. The scaffold is
+    # `.format`-rendered at bootstrap (tag/year), so the template writes `{{date}}` and
+    # the cohort receives `{date}` - which is what `site._archive_entry` substitutes.
+    # Asserting on the template text alone cannot catch either way of getting that wrong:
+    # a `{date}` in the template raises KeyError for every bootstrap, and a `{{date}}` the
+    # renderer never touched puts a stray brace pair on the Schedule tab and in the
+    # Updates box of every cohort that uncomments the sentence.
+    seeded = welcome.template("classroom-config/schedule.yml").format(
+        tag="f2026", year=2026, year_next=2027
+    )
+    meta = yaml.safe_load(seeded)
+    # The skeleton leaves `semester_end:` commented out, and the archive date defaults off
+    # it - so pin one, exactly as the cohort filling this file in will.
+    meta["semester_end"] = "2026-12-18"
+    sched = schedule.parse(meta)
+    assert sched.dropped == []
+    row = site._archive_entry(sched.archive, date(2026, 12, 1))
+    assert sched.archive.when.isoformat() in row.split("details:")[1]
+    # Nothing left for a student to read as punctuation: no `{date}` the renderer missed,
+    # and no leftover brace from an over-escaped one.
+    assert "{" not in row and "}" not in row
 
 
 def test_classroom_readme_documents_the_cohort_files_it_holds():

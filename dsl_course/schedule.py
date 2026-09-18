@@ -9,8 +9,10 @@ lifecycle, `events` are display-only calendar rows.
     releases:                        # the auto-release plan - label ->
       lecture_02:                    # {event_datetime + deploys}. Each deploy ships at its
         event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
-        title: Linear regression           # optional, display-only: the session's name,
-        description: Least squares by hand # and a sentence about what is in it.
+        title: Linear regression           # the session's name - the site's TITLE column
+        details: Least squares by hand     # its DETAILS column, and the session's own page
+        type: lecture                      # optional override: lecture/lab/readings.
+                                           # Omitted, the deploy path decides, as before.
         show_on_site: true                 # optional (default true) - false deploys
         deploy:                            # silently, off the site's schedule.
           - course_source_repo: course-materials-f2026   # course_source_repo + course_source_path
@@ -21,25 +23,34 @@ lifecycle, `events` are display-only calendar rows.
     assignments:                     # each assignment's whole lifecycle. The slug is a
       assignment-1:                  # label; course_source_repo names the COURSE-org repo
         course_source_repo: assignment-1-f2026   # it hands out from, and is REQUIRED.
-        title: Linear regression     # optional, display-only: the assignment's name,
-                                     # beside the slug on the site
+        title: Linear regression     # the assignment's name, beside the slug on the site
+        details: Fit it by hand      # the DETAILS column, on its hand-out and due rows
         handout_datetime: 2026-09-22T09:00  # A bare due_datetime is END of day (23:59:59)
         due_datetime: 2026-10-13     # - "due on the 13th" closes at day's end.
         grading_datetime: 2026-10-15 # Snapshot freezes + autograder fires (default: due).
     events:                          # display-only rows - nothing deploys, the site just
       mid-term:                      # shows them. `type` is `exam` or `special_event`
-        type: exam                   # (the default when omitted).
-        title: MidTerm Exam          # `event_datetime` is a whole day, or a full datetime
-        event_datetime: 2026-11-03   # when the start time is known.
+        type: exam                   # (the default when omitted). `event_datetime` is a
+        title: MidTerm Exam          # whole day, or a full datetime when the start time
+        details: Open book, 2 hours  # is known.
+        event_datetime: 2026-11-03
       project-clinic:
         title: Project Clinic
         event_datetime: 2026-10-14T10:00
     semester_start: 2026-09-07
     semester_end: 2026-12-18
     archive:                         # OPTIONAL - and the SWITCH: with no block, nothing
-      date: 2027-02-16               # ever freezes this cohort. default: semester_end + 60
+      event_datetime: 2027-02-16     # ever freezes this cohort. default: semester_end + 60
+      title: Cohort archived         # optional: the row's TITLE (the default, as shown)
+      details: We freeze here.       # optional: ALL that row and the Updates box say
       show_on_site: true             # default true: a row on the site's Schedule tab
-      description: We freeze here.   # optional: ALL that row and the Updates box say
+
+Every block takes the same vocabulary, named for the site column it fills: `title:` (the
+Title column), `details:` (the Details column - markdown, and additive: it renders ABOVE
+whatever that cell already generates), a `*_datetime:`, `show_on_site:` and `tbc:`, plus
+`type:` on the two blocks where it discriminates. `details:` was once `description:`, and
+`archive.event_datetime` once `archive.date`; both old spellings are still parsed - see
+the TRANSITIONAL markers below, which go when every live cohort has been migrated.
 
 Every field is optional - a cohort with no schedule.yml (or a blank one) behaves exactly
 as before everywhere that reads it (releases are skipped, dates synthesised).
@@ -115,7 +126,8 @@ SCHEDULE_PATH = "schedule.yml"
 # read-only (see `dsl_course.teardown`). Sixty days, because the real courses this toolkit
 # was measured against went on being pushed to for about three weeks past their last class,
 # and a cohort that freezes while somebody is still finishing their marking is worse than
-# one that freezes late. A cohort that wants another date says so in `archive.date`, and
+# one that freezes late. A cohort that wants another date says so in
+# `archive.event_datetime`, and
 # only a cohort that writes the block at all is ever archived off this (`_parse_archive`).
 ARCHIVE_GRACE = timedelta(days=60)
 
@@ -126,6 +138,12 @@ ARCHIVE_GRACE = timedelta(days=60)
 # notice issue-and-mail the scheduler files - and a fortnight on one and ten days on the
 # other would be the site and the inbox disagreeing about when a term ends.
 ARCHIVE_NOTICE = timedelta(days=14)
+
+# What the archive row is CALLED when the block names no `title:` of its own. A default
+# rather than a fixed string in the renderer, because `archive:` now takes the same
+# `title:`/`details:` pair as every other block and faculty may name the day whatever
+# their programme calls it ("Cohort closed", "Repositories frozen").
+ARCHIVE_TITLE = "Cohort archived"
 
 # What a fault in schedule.yml has always been called here, and still is: `ConfigFault`
 # with a `kind` set. One type rather than two, so the digest, the mail and the ladder are
@@ -281,9 +299,19 @@ class Release:
     # repo it already made. Never set from the YAML - the scheduler owns it.
     assignment_solution: bool = False
     title: str = ""  # display-only: the session's name, beside its ordinal on the site
-    # display-only: a sentence about the session, shown under its heading on the Lectures
-    # tab. `title` names the session, this says what is in it.
-    description: str = ""
+    # display-only: a sentence about the session. `title` names the session, this says
+    # what is in it - so it fills the schedule table's Details column, and renders again
+    # under the session's heading on the Lectures/Labs/Readings tabs. One word per column:
+    # `title` is the Title cell everywhere, `details` the Details cell everywhere.
+    details: str = ""
+    # Which schedule row this entry belongs to: 'lecture' | 'lab' | 'readings', or ""
+    # to infer it from where the deploys LAND, which is what every cohort relies on today.
+    # An override for an entry whose destination path cannot say - materials that belong
+    # to a lab but do not land under `labs/`. It travels with the DESTINATION
+    # (`schedule_plan.dest_row_kind`), so the plan and the discovered folder place the
+    # same row rather than one each.
+    # 'readings' names no row of its own, exactly as a `readings-N` label does.
+    type: str = ""
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
     tbc: bool = False
@@ -354,6 +382,22 @@ class AssignmentEntry:
     # embargoed until hand-out, so a name that lives only there cannot appear on the
     # schedule that publishes the assignment's dates. "" = fall back to the heading.
     title: str = ""
+    # Display-only: a sentence about the assignment, filling the Details column of both
+    # its schedule rows (out and due) exactly as a `releases:` entry's does on a session
+    # row. It is written ABOVE what those cells already generate (the link to the brief,
+    # the "submit via" address), never instead of it.
+    details: str = ""
+    # `tbc: true` = a provisional deadline: the site marks both rows "(TBC)". DISPLAY-ONLY
+    # and nothing else - the snapshot freeze, the late window and the grading cutoff all
+    # derive from `due_datetime`, which this does not touch. An assignment cannot be
+    # undated the way a release can (`due_datetime` is required), so there is no
+    # `event_datetime: tbc` twin here: this marks a real date as still moveable.
+    tbc: bool = False
+    # `show_on_site: false` = the assignment runs exactly as written - handed out, due,
+    # snapshotted, graded - and the cohort site says nothing about it: no schedule row, no
+    # due row, no Assignments-tab entry. The twin of a silent release, for an assignment
+    # announced somewhere other than the site.
+    show_on_site: bool = True
     # When to push the template's `solution/` folder into every provisioned repo - the
     # scheduled twin of Release assignment's `include_solution` tick. Deliberately NOT
     # defaulted to the due date: a solution released the moment submissions close is a
@@ -378,6 +422,49 @@ class Event:
     # 'exam' | 'special_event'. Exams render as their own (red) row on the site.
     type: str = "special_event"
     tbc: bool = False
+    # Display-only: the row's Details cell. `title` says which row this is, `details` what
+    # there is to say about it - the same two words, and the same two columns, as on a
+    # session row and on an assignment's.
+    details: str = ""
+    # `show_on_site: false` = the row stays in the plan and off the schedule. An event
+    # fires nothing, so this is the whole of what it does here; the twin of a silent
+    # release, for a date faculty keep in the file without publishing it.
+    show_on_site: bool = True
+
+
+@dataclass
+class ArchiveRow:
+    """The optional `archive:` block - when this cohort freezes read-only, and what the
+    site says about it.
+
+    A row like an `events:` one, modelled like one: it carries the same display vocabulary
+    (`title`, `details`, `show_on_site`, `tbc`) over a date of its own. It was six parallel
+    `archive_*` fields on `Schedule` and a six-element tuple out of the parser, where the
+    seventh key would have cost six edits.
+
+    Its PRESENCE is the switch. `Schedule.archive` is None for a cohort that wrote no
+    block at all, and that cohort is never frozen automatically. A block written but
+    undatable is an ArchiveRow with `when=None`: it asked, and there is no clock to freeze
+    it against. `scheduler._no_archive_date` tells those two apart, because they need
+    different sentences."""
+
+    # The day the scheduler acts on. None = the block was written and no date can be
+    # derived from it, which is a different thing from no block at all.
+    when: date | None = None
+    show_on_site: bool = True
+    # The row's Title cell. A field with a default rather than a fixed string in the
+    # renderer, because `archive:` takes the same `title:`/`details:` pair as every other
+    # block and faculty may name the day whatever their programme calls it ("Cohort
+    # closed", "Repositories frozen").
+    title: str = ARCHIVE_TITLE
+    # What the site's archive row and its Updates box SAY - the whole of it, because the
+    # toolkit writes no sentence of its own here. None leaves the row as its title and
+    # date and the Updates bullet unwritten (`site._archive_entry`); the seeded skeleton
+    # carries a sentence ready to uncomment.
+    details: str | None = None
+    # `tbc: true` = the freeze date is provisional and the row says so. Display-only: the
+    # date the scheduler acts on is `when`, which this does not touch.
+    tbc: bool = False
 
 
 @dataclass
@@ -388,21 +475,13 @@ class Schedule:
     semester_end: date | None = None
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
-    # When this cohort is frozen read-only, and whether the site says so. Resolved by
-    # `parse`, never re-derived downstream: None unless the cohort writes an `archive:`
-    # block at all, then `archive.date` if that block names one, else `semester_end +
-    # ARCHIVE_GRACE` - which is what stops a term with no dates freezing off a guess.
-    archive_date: date | None = None
-    archive_show_on_site: bool = True
-    # What the site's archive row and its Updates box SAY - the whole of it, because the
-    # toolkit writes no sentence of its own here. None leaves the row as its label and
-    # date and the Updates bullet unwritten (`site._archive_entry`); the seeded skeleton
-    # carries a sentence ready to uncomment.
-    archive_description: str | None = None
-    # Whether the cohort wrote an `archive:` block at all. Only `scheduler._no_archive_date`
-    # reads it, to tell "nobody asked for archiving" from "asked, but no date can be
-    # derived" - two different things to say, and `archive_date` is None for both.
-    archive_declared: bool = False
+    # The `archive:` block, or None where the cohort wrote none - see `ArchiveRow`, which
+    # holds every key of it. None IS "nobody asked for archiving", which is a different
+    # answer from an ArchiveRow whose `when` could not be derived. Resolved by `parse` and
+    # never re-derived downstream: `archive.event_datetime` where the block names one,
+    # else `semester_end + ARCHIVE_GRACE` - which is what stops a term with no dates
+    # freezing off a guess.
+    archive: ArchiveRow | None = None
     # Everything this parse could not use, one human-readable line each, naming the YAML
     # path and what it costs the cohort: entries thrown away outright (`_drop` - no date,
     # no source), and entries KEPT but not as written (`_flag_unknown_keys` for a stray
@@ -544,12 +623,23 @@ KNOWN_RELEASE = frozenset(
         "event_datetime",
         "deploy",
         "assignment",
+        "type",
         "title",
+        "details",
+        # TRANSITIONAL: the old spelling of `details`. Still accepted because every live
+        # cohort's schedule.yml says `description:` and an unknown key is an IMMEDIATE
+        # ConfigFault - it would mail the faculty of every org mid-term for a file they
+        # wrote correctly on the day they wrote it. Delete this, and the fallback in
+        # `_flagged_details`, once the live orgs have been migrated by hand.
         "description",
         "tbc",
         "show_on_site",
     }
 )
+# What `releases.<label>.type` may say. 'readings' is here and is not a row: it declares
+# that the entry belongs to no session row of its own, exactly as a `readings-N` label
+# does (`schedule_plan._LABEL_ROW_KINDS`, which is the one table both routes read).
+KNOWN_RELEASE_TYPES = frozenset({"lecture", "lab", "readings"})
 KNOWN_DEPLOY = frozenset(
     {
         "course_source_repo",
@@ -568,6 +658,9 @@ KNOWN_ASSIGNMENT = frozenset(
         "handout_datetime",
         "solution_datetime",
         "title",
+        "details",
+        "tbc",
+        "show_on_site",
     }
 )
 # Settings that USED to live in an `assignments:` entry and now live in the assignment's
@@ -588,7 +681,9 @@ MOVED_ASSIGNMENT_KEYS = {
         "the 'Join team' flow uses the cap declared there, or the course default"
     ),
 }
-KNOWN_EVENT = frozenset({"type", "title", "event_datetime", "tbc"})
+KNOWN_EVENT = frozenset(
+    {"type", "title", "details", "event_datetime", "tbc", "show_on_site"}
+)
 
 
 def _flag_unknown_keys(
@@ -668,6 +763,75 @@ def _flagged_date(
     return when
 
 
+def _flagged_flag(
+    entry: dict,
+    key: str,
+    default: bool,
+    drops: Drops,
+    where: str,
+    cost: str,
+    lines: dict[str, int] | None = None,
+) -> bool:
+    """`entry[key]` as a boolean, flagging a value that is there but is not one. The
+    boolean twin of `_flagged_date`, with the same absent-vs-unusable rule: no key means
+    "not declared", and `default` stands.
+
+    NOT `entry.get(key) is not False` / `is True`, which is how all four of these were
+    written. That form reads every value it cannot parse as the default, so the one thing
+    the key exists to do silently does not happen - `show_on_site: "no"` publishes the row
+    it was written to hide. YAML spells both booleans several ways and they all arrive
+    here as a bool; anything else - `"nope"`, `0`, a list - is a hand edit that did not
+    take, and is flagged like an unreadable date. The default still stands, because that
+    is what the file said before the edit, and the fault is now visible to whoever made
+    it."""
+    raw = entry.get(key)
+    if isinstance(raw, bool):
+        return raw
+    if raw is not None:
+        _flag_bad_value(drops, where, key, raw, cost, lines)
+    return default
+
+
+# What an unusable `tbc:` costs, wherever one is written: the same key on four blocks,
+# doing the same one display-only thing on all of them.
+TBC_COST = 'the row is not marked "(TBC)"'
+# The same, for `details:`: one key on four blocks, filling one column on all of them.
+DETAILS_COST = "the row shows no sentence at all - only what its own cell generates"
+
+
+def _flagged_details(
+    entry: dict,
+    drops: Drops,
+    where: str,
+    lines: dict[str, int] | None = None,
+) -> str | None:
+    """`entry`'s optional `details:` - the prose that fills its row's Details column.
+
+    Anything that is not a usable sentence is FLAGGED and dropped, never raised and never
+    printed: a list or a mapping here would otherwise reach the deployed site as
+    `['a', 'b']`. The row then reads as it does for a cohort that wrote no `details:` at
+    all - its title and its date - which is a hand edit that visibly did not take, and
+    that is what `dropped` is for.
+
+    ONE guard for all four blocks that take the key, like `_flagged_flag` above: the word
+    means the same thing wherever it is written, so it has to be READ the same way
+    wherever it is written. Guarding one block is three blocks on which the mapping still
+    ships."""
+    # TRANSITIONAL: `description:` is the old spelling (see KNOWN_RELEASE / KNOWN_ARCHIVE
+    # - the only two blocks that ever accepted it, and a block that does not is a block
+    # where it is already an unknown key). The key that is PRESENT is the one flagged when
+    # its value is unusable, so the fault names the line faculty actually typed. Delete
+    # the second half once every org is migrated.
+    key = "details" if "details" in entry else "description"
+    said = entry.get(key)
+    if said is None:
+        return None
+    if isinstance(said, str) and said.strip():
+        return said
+    _flag_bad_value(drops, where, key, said, DETAILS_COST, lines)
+    return None
+
+
 def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[Deploy]:
     """Parse a release's `deploy:` - a list (or a single mapping) of source->dest copies.
     Entries missing course_source_repo/course_source_path are skipped (nothing to copy).
@@ -734,7 +898,13 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
     TBC: `event_datetime: tbc` keeps the entry as an UNDATED site row (when=None -
     nothing can fire); `tbc: true` next to a real date keeps everything firing but marks
     the site row "(TBC)". An entry with no date and no tbc can never fire or be shown,
-    so it's dropped."""
+    so it's dropped.
+
+    `type:` is an OPTIONAL override of which row the entry belongs to. Left out - which is
+    every cohort today - the row is placed by where the deploys land, unchanged. A value
+    that is not a known row type is flagged and ignored rather than dropping the entry:
+    the cost of a typo here is a row in the wrong column, never a session missing from the
+    schedule."""
     out: list[Release] = []
     mapping = _require_mapping(
         raw, drops, "releases", "label", "the whole release plan is ignored"
@@ -751,7 +921,8 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
         lines = take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_datetime(raw_when, tz)
-        tbc = _is_tbc(raw_when) or entry.get("tbc") is True
+        marked = _flagged_flag(entry, "tbc", False, drops, where, TBC_COST, lines)
+        tbc = marked or _is_tbc(raw_when)
         if when is None and not tbc:
             _drop(
                 drops,
@@ -785,16 +956,60 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 lines,
             )
         assignment = entry.get("assignment")
+        kind = str(entry.get("type") or "").strip().lower()
+        if kind and kind not in KNOWN_RELEASE_TYPES:
+            # Flagged, not dropped, and not obeyed: the entry keeps its row, placed by
+            # where its files land exactly as an entry that declared no type at all. A
+            # typo'd override must not be able to take a session off the schedule.
+            _flag_bad_value(
+                drops,
+                where,
+                "type",
+                kind,
+                "the row is placed by where its deploys land, as if no type were "
+                f"declared (expected one of {', '.join(sorted(KNOWN_RELEASE_TYPES))})",
+                lines,
+            )
+            kind = ""
+        if kind == "readings":
+            # `type: readings` says the entry claims no row of its own, so its display
+            # text has nowhere to render: the session's row is named and described by the
+            # entry that RAISES it, and a readings entry only folds its destinations in.
+            # Kept-but-ignored, like an unknown key or an unusable value - the entry
+            # deploys exactly as written. Flagged rather than swallowed because faculty
+            # writing a title here are not making a typo: docs/07 offers both fields on
+            # any `releases:` entry, so they are writing prose they expect to read on the
+            # schedule, and an empty cell is the one outcome they cannot tell apart from
+            # a rendering bug.
+            for key in ("title", "details", "description"):
+                if str(entry.get(key) or "").strip():
+                    drops.note(
+                        where,
+                        key,
+                        "ignored, because a `type: readings` entry claims no row of its "
+                        "own - so nothing on the site shows this. Write it on the entry "
+                        "that raises the session's row instead",
+                        lines,
+                    )
         out.append(
             Release(
                 label=str(label),
                 when=when,
                 deploy=_parse_deploy(entry.get("deploy"), tz, drops, str(label)),
                 assignment=str(assignment) if assignment else None,
+                type=kind,
                 title=str(entry.get("title") or ""),
-                description=str(entry.get("description") or ""),
+                details=_flagged_details(entry, drops, where, lines) or "",
                 tbc=tbc,
-                show_on_site=entry.get("show_on_site") is not False,
+                show_on_site=_flagged_flag(
+                    entry,
+                    "show_on_site",
+                    True,
+                    drops,
+                    where,
+                    "this entry's session row is shown on the site anyway",
+                    lines,
+                ),
             )
         )
     # Undated (TBC) entries sort to the end of the plan.
@@ -984,6 +1199,20 @@ def _parse_assignments(
             course_source_repo=source_repo,
             cohort_dest_repo=dest or None,
             title=str(entry.get("title") or "").strip(),
+            details=_flagged_details(entry, drops, where, lines) or "",
+            # Display-only, and deliberately read nowhere near the dates above: an
+            # assignment marked provisional still freezes, closes and grades on exactly
+            # the moments `due_datetime` and `grading_datetime` name.
+            tbc=_flagged_flag(entry, "tbc", False, drops, where, TBC_COST, lines),
+            show_on_site=_flagged_flag(
+                entry,
+                "show_on_site",
+                True,
+                drops,
+                where,
+                "this assignment's schedule rows are shown on the site anyway",
+                lines,
+            ),
             grading_datetime=_flagged_datetime(
                 entry,
                 "grading_datetime",
@@ -1027,7 +1256,8 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
         lines = take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_date_or_datetime(raw_when, tz)
-        tbc = _is_tbc(raw_when) or entry.get("tbc") is True
+        marked = _flagged_flag(entry, "tbc", False, drops, where, TBC_COST, lines)
+        tbc = marked or _is_tbc(raw_when)
         if when is None and not tbc:
             _drop(
                 drops,
@@ -1058,6 +1288,16 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
             Event(
                 label=str(label),
                 title=str(entry.get("title") or ""),
+                details=_flagged_details(entry, drops, where, lines) or "",
+                show_on_site=_flagged_flag(
+                    entry,
+                    "show_on_site",
+                    True,
+                    drops,
+                    where,
+                    "the row is shown on the site anyway",
+                    lines,
+                ),
                 when=when,
                 # anything other than the two known values -> the display-only default:
                 # a typo'd `type` still shows the row (flagged above, not silent)
@@ -1076,14 +1316,28 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
     return out
 
 
-KNOWN_ARCHIVE = frozenset({"date", "description", "show_on_site"})
+KNOWN_ARCHIVE = frozenset(
+    {
+        "event_datetime",
+        "title",
+        "details",
+        "show_on_site",
+        "tbc",
+        # TRANSITIONAL: `date` and `description` are the old spellings of
+        # `event_datetime` and `details`. Kept for exactly as long as live cohorts carry
+        # them - an unknown key here is an immediate ConfigFault that mails their faculty.
+        # Delete both, and the fallbacks in `_parse_archive` / `_flagged_details`, once
+        # every org has been migrated by hand.
+        "date",
+        "description",
+    }
+)
 
 
 def _parse_archive(
     meta: dict, semester_end: date | None, drops: Drops
-) -> tuple[date | None, bool, bool, str | None]:
-    """The optional `archive:` block - `(when this cohort freezes, whether the site says
-    so, whether it asked to freeze at all, what the site says about it)`.
+) -> ArchiveRow | None:
+    """The optional `archive:` block as an `ArchiveRow`, or None where none was written.
 
     The block IS the switch. A cohort that writes none is never frozen automatically:
     every repository in an org going read-only is far too large a thing to happen off a
@@ -1097,11 +1351,16 @@ def _parse_archive(
     the cohort on a day they did not choose. A block that is not a mapping at all is
     dropped the same way.
 
-    A block with neither `date:` nor a `semester_end` to count from resolves to None: it
-    asked, but there is no clock to freeze it against, which `scheduler._no_archive_date`
-    says out loud."""
+    A block with neither `event_datetime:` nor a `semester_end` to count from is an
+    `ArchiveRow` with no `when` - it asked, but there is no clock to freeze it against,
+    which is a different answer from the None a cohort that wrote no block gets, and
+    `scheduler._no_archive_date` says which out loud.
+
+    `title:` and `tbc:` are display only and never reach the freeze: the row may be called
+    anything and may say the day is still moving, and the day the scheduler acts on is the
+    one this returns either way."""
     if "archive" not in meta:
-        return None, True, False, None
+        return None
     raw = meta["archive"]
     default = semester_end + ARCHIVE_GRACE if semester_end else None
     cost = (
@@ -1109,69 +1368,46 @@ def _parse_archive(
         if default
         else "nothing freezes this cohort automatically"
     )
-    if raw is None:
-        return default, True, True, None
     if not isinstance(raw, dict):
-        _drop(
-            drops,
-            "archive",
-            "not a mapping (it must be `date:`, `description:` and/or "
-            "`show_on_site:` under it)",
-            cost,
-            field_name="archive",
-        )
-        return default, True, True, None
+        # `archive:` with nothing under it asks for the default date and says nothing
+        # else, which is the seeded skeleton's own shape. Anything that is not a mapping
+        # at all - a scalar, a list - asked for the same thing and got the keys wrong, so
+        # it is dropped and lands in the same place.
+        if raw is not None:
+            _drop(
+                drops,
+                "archive",
+                "not a mapping (it must be `event_datetime:`, `title:`, `details:` "
+                "and/or `show_on_site:` under it)",
+                cost,
+                field_name="archive",
+            )
+        return ArchiveRow(when=default)
     lines = take_lines(raw)
     _flag_unknown_keys(
         drops, raw, KNOWN_ARCHIVE, "archive", "that setting is ignored", lines
     )
-    shown = raw.get("show_on_site")
-    if shown is not None and not isinstance(shown, bool):
-        # `is not False` alone read every value it could not parse as true, so the one
-        # thing this key exists to do was silently not done. YAML spells false several
-        # ways and they all arrive here as a bool; anything else - `"nope"`, `0`, a list -
-        # is a hand edit that did not take, and is flagged like `date:` and
-        # `description:`. The row still shows, because that is the default and the fault
-        # is now visible to whoever meant to hide it.
-        _flag_bad_value(
+    # TRANSITIONAL: `date:` is the old spelling of `event_datetime:` (see KNOWN_ARCHIVE).
+    # The new key wins where a block carries both, and the OLD one is only read when the
+    # new one is absent entirely - so a cohort that has migrated never has its freeze
+    # date pulled back to a stale line somebody forgot to delete. Delete this once every
+    # org has been migrated by hand.
+    when_key = "event_datetime" if "event_datetime" in raw else "date"
+    return ArchiveRow(
+        when=_flagged_date(raw, when_key, drops, "archive", cost, lines) or default,
+        show_on_site=_flagged_flag(
+            raw,
+            "show_on_site",
+            True,
             drops,
             "archive",
-            "show_on_site",
-            shown,
             "the site's archive row is shown anyway",
             lines,
-        )
-        shown = None
-    return (
-        _flagged_date(raw, "date", drops, "archive", cost, lines) or default,
-        shown is not False,
-        True,
-        _archive_description(raw, drops, lines),
+        ),
+        title=str(raw.get("title") or "").strip() or ARCHIVE_TITLE,
+        details=_flagged_details(raw, drops, "archive", lines),
+        tbc=_flagged_flag(raw, "tbc", False, drops, "archive", TBC_COST, lines),
     )
-
-
-def _archive_description(raw: dict, drops: Drops, lines: dict[str, int]) -> str | None:
-    """The block's optional `description:` - what the site's archive row SAYS.
-
-    Anything that is not a usable sentence is FLAGGED and dropped, never raised and never
-    printed: a list or a mapping here would otherwise reach the deployed site as
-    `['a', 'b']`. The row then reads as it does for a cohort that wrote no `description:`
-    at all - its label and its date - which is a hand edit that visibly did not take, and
-    that is what `dropped` is for."""
-    said = raw.get("description")
-    if said is None:
-        return None
-    if isinstance(said, str) and said.strip():
-        return said
-    _flag_bad_value(
-        drops,
-        "archive",
-        "description",
-        said,
-        "the site's archive row carries no sentence at all",
-        lines,
-    )
-    return None
 
 
 def parse(meta: dict) -> Schedule:
@@ -1208,9 +1444,6 @@ def parse(meta: dict) -> Schedule:
     term_cost = "the site synthesises term dates, shifting every session row"
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
     semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
-    archive_date, archive_show_on_site, archive_declared, archive_description = (
-        _parse_archive(meta, semester_end, drops)
-    )
     return Schedule(
         timezone=str(tz_name or DEFAULT_TZ),
         releases=_parse_releases(meta.get("releases"), tz, drops),
@@ -1221,10 +1454,7 @@ def parse(meta: dict) -> Schedule:
         semester_end=semester_end,
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=_parse_events(meta.get("events"), tz, drops),
-        archive_date=archive_date,
-        archive_show_on_site=archive_show_on_site,
-        archive_declared=archive_declared,
-        archive_description=archive_description,
+        archive=_parse_archive(meta, semester_end, drops),
         dropped=drops.report,
         faults=drops.faults,
     )

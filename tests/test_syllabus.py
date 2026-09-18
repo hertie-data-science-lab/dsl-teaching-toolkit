@@ -42,14 +42,14 @@ def wired(monkeypatch):
                 datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
                 title="Random Variables",
-                description="Distributions, expectation\nand variance.",
+                details="Distributions, expectation\nand variance.",
             ),
             Release(
                 "lecture-1",
                 datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "lectures/01_intro", "materials", None)],
                 title="Probability Theory",
-                description="Sample spaces and Bayes' rule.",
+                details="Sample spaces and Bayes' rule.",
             ),
         ]
     )

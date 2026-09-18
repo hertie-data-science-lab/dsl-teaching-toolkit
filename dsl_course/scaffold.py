@@ -189,7 +189,7 @@ _READINGS_STUB = (
     b"What you write here is PUBLIC (it is a citation list). The files beside it\n"
     b"stay behind the enrolled-student/auditor gate (unless the course runs a\n"
     b"public open-courseware site in `actual-readings` mode, which serves them\n"
-    b"too). The session's learning objectives come from `description:` in\n"
+    b"too). The session's learning objectives come from `details:` in\n"
     b"schedule.yml.\n"
 )
 

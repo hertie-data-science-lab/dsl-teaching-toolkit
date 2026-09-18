@@ -24,6 +24,19 @@ Three blocks carry the whole term, and each is defined by what it **does**:
 
 Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the term and render as rows of their own. An optional `archive:` block freezes the cohort read-only - writing it is what turns that on.
 
+### One word per column
+
+The site's schedule table has four columns, and every block below fills them with the same four fields - so a field means the same thing wherever you write it:
+
+| Column | Field |
+|---|---|
+| **Event** | `type:` - what KIND of row this is |
+| **Date** | `event_datetime:` |
+| **Title** | `title:` |
+| **Details** | `details:` |
+
+`show_on_site:` (default `true`) and `tbc:` (default `false`) go with them everywhere. `details:` renders **above** whatever the Details cell already generates - the materials links, the "not released yet" note, the submit address - never instead of it.
+
 ## `releases:` 
 
 Use this for releasing teaching materials, code, datasets, anything else.
@@ -34,8 +47,9 @@ Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows, and the default fire time for this entry's deploys |
 | `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
+| `type` | no | inferred from where the deploys land | `lecture` / `lab` / `readings` - which row this entry belongs to. Only needed when the destination path cannot say it (lab material that does not land under `labs/`); `readings` claims no row of its own - so a `title:` or `details:` written beside it has no row to appear on, and **Validate schedule** says so (write them on the entry that raises the session's row instead). The declaration travels with this entry's own deploy destination, so that destination must name the session's folder (`clinics/03_week-3`) rather than a parent holding it. An unrecognised value is flagged by **Validate schedule** and the row is placed as if you had declared none |
 | `title` | no | - | the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the schedule, Lectures, Materials and Labs tabs |
-| `description` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown under the session heading on the Lectures, Labs and Readings tabs; may run to several paragraphs (use a `>` or `\|` block) |
+| `details` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown in the schedule's Details column AND under the session heading on the Lectures, Labs and Readings tabs; may run to several paragraphs (use a `>` or `\|` block) |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
 | `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry raises no row of its own and never sets an existing row's date or name (it still contributes where its files will land). For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
 
@@ -160,6 +174,9 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `title` | no | - | the assignment's **name**, shown beside the slug on the schedule and the Assignments tab ("Assignment 1 / Fraud detection"). Declare it here and it appears from the day you write the plan; leave it out and the site falls back to the template README's `# ` heading, which only appears at hand-out |
+| `details` | no | - | a sentence about it, in the Details column of **both** its rows (out and due), above the links each already carries |
+| `show_on_site` | no | `true` | `false` and the site says nothing about this assignment at all - no rows, no Assignments-tab entry. It still hands out, snapshots, grades and returns exactly as written |
+| `tbc` | no | `false` | the deadline is provisional: both rows are marked **(TBC)**. **Display only** - the deadline, the late window and the grading snapshot all still fire on the dates above |
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `grading_datetime` | no | `due_datetime` + the template's `late_window_days` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) - i.e. the END of the late window, not the deadline it is measured from |
@@ -200,7 +217,9 @@ Could be an exam, a drop-in clinic, a guest lecture, a revision session: anythin
 | `event_datetime` | **yes** | - | when it happens; as displayed on the deployed site schedule |
 | `type` | no | `special_event` | e.g. `exam` or `special_event` - affects which colour the row takes |
 | `title` | no | prettified label | the row label on the site |
+| `details` | no | - | what the row's Details column says: the room, the format, what to bring. There is no default - an exam with no `details:` says nothing, rather than the "Details to be confirmed." the toolkit used to write into every one |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)** |
+| `show_on_site` | no | `true` | `false` keeps the row in this file and off the site |
 
 ```yaml
 events:
@@ -228,27 +247,29 @@ When this cohort is frozen read-only: every repository in the org archived, noth
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `date` | no | `semester_end` + 60 days | the day the whole cohort org is archived |
+| `event_datetime` | no | `semester_end` + 60 days | the day the whole cohort org is archived |
+| `title` | no | `Cohort archived` | the row's Title column |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
-| `description` | no | *none* | the sentence that row and that notice say - all of it; `{date}` in it is filled in with the archive date |
+| `details` | no | *none* | the sentence that row and that notice say - all of it; `{date}` in it is filled in with the archive date |
+| `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**. **Display only** - the freeze still happens on the date above |
 
 ```yaml
 semester_end: 2026-12-18
 archive:
-  date: 2027-02-16        # optional - without it, 60 days after semester_end
-  description: >-         # optional - what students are told, in your own words
+  event_datetime: 2027-02-16  # optional - without it, 60 days after semester_end
+  details: >-                 # optional - what students are told, in your own words
     This cohort is archived on 2027-02-16: every repository in it becomes read-only.
     You keep read access.
 ```
 
-`description:` is where the sentence comes from, and the only place: there is no wording
+`details:` is where the sentence comes from, and the only place: there is no wording
 of the toolkit's own behind it, because what a freeze means for your students is yours to
 say. Write none and the row still shows - "Cohort archived", with its date - and says
 nothing under it, and nothing goes in the Updates box. The skeleton in a new cohort's
 `schedule.yml` carries a suggested sentence ready to uncomment.
 
 `archive:` on its own means "yes, on the default date". With no block, or a block with
-neither a `date` nor a `semester_end` to count from, nothing is archived automatically and
+neither an `event_datetime` nor a `semester_end` to count from, nothing is archived automatically and
 the cohort's digest issue says so. Closing such a cohort out is the **Archive cohort**
 button with `force`.
 

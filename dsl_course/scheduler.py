@@ -930,7 +930,7 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
 
     Two ways to earn it, and they need different sentences: writing no `archive:` block at
     all, which is a decision - archiving is opt-in - and writing one no date can be
-    derived from, which is a mistake. `archive_date` is None for both.
+    derived from, which is a mistake. There is no date in either case.
 
     A fault with no `fires`, because there is no moment it bites at - that is exactly
     what is wrong with it. Raised here rather than by the parser, because a term with no
@@ -944,15 +944,17 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
     then re-mailed by the digest's age ladder every term for ever, about a cohort whose
     only sin is that nobody has typed a term end yet. The `.releaseignore` case caps
     itself for the same reason: listed, never anybody's inbox."""
-    if sched.archive_date is not None:
+    if sched.archive is not None and sched.archive.when is not None:
         return []
-    if sched.archive_declared:
+    if sched.archive is not None:
         what = (
-            "this cohort's `archive:` block names no `date:` and the cohort no "
-            "`semester_end`, so its archive date cannot be derived - nothing will ever "
-            "archive it"
+            "this cohort's `archive:` block names no `event_datetime:` and the cohort "
+            "no `semester_end`, so its archive date cannot be derived - nothing will "
+            "ever archive it"
         )
-        fix_text = "give the `archive:` block a `date:`, or add a `semester_end:`"
+        fix_text = (
+            "give the `archive:` block an `event_datetime:`, or add a `semester_end:`"
+        )
     else:
         what = (
             "this cohort writes no `archive:` block, so nothing will ever archive it - "
@@ -1113,7 +1115,7 @@ def _archive_phase(
     now: datetime,
     dry_run: bool,
 ) -> int:
-    """Close the cohort out on its own `archive.date`, and give a fortnight's notice
+    """Close the cohort out on its own archive date, and give a fortnight's notice
     first. Returns the error count.
 
     AFTER the releases, so a copy due on the archive date still ships before the freeze;
@@ -1128,24 +1130,25 @@ def _archive_phase(
     simply picked up by the next tick - which is why this needs no fire-once marker of its
     own. The tick after a successful one never reaches here at all: the sealed
     `classroom-config` takes the cohort out of `discovery.live_cohorts`."""
-    if sched.archive_date is None:
+    archives = sched.archive.when if sched.archive else None
+    if archives is None:
         return _stale_archive_notices(cohort_org, "", dry_run)
     today = now.date()
-    if today >= sched.archive_date:
+    if today >= archives:
         if dry_run:
-            log(f"    DRY-RUN  archive {cohort_org} (due {sched.archive_date})")
+            log(f"    DRY-RUN  archive {cohort_org} (due {archives})")
             return 0
         # `today`, not its own clock: this tick has just decided the cohort is due, and
         # a `--now` past the archive date would otherwise fire a close-out that refused.
         return teardown.close_out(course_org, cohort_org, dry_run=False, today=today)
-    if sched.archive_date - today > schedule.ARCHIVE_NOTICE:
+    if archives - today > schedule.ARCHIVE_NOTICE:
         return _stale_archive_notices(cohort_org, "", dry_run)
-    errors = _archive_notice(course_org, cohort_org, sched.archive_date, now, dry_run)
+    errors = _archive_notice(course_org, cohort_org, archives, now, dry_run)
     # The notice for TODAY's date is the one that should stand; any other dated one is a
     # date somebody moved, and two open notices naming two dates tell the teaching team
     # nothing.
     return errors + _stale_archive_notices(
-        cohort_org, teardown.archive_notice_title(sched.archive_date), dry_run
+        cohort_org, teardown.archive_notice_title(archives), dry_run
     )
 
 

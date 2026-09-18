@@ -260,8 +260,9 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 | `assignment` | one private repo per onboarded student - or per team, when the template's `grading_config.yml` says `type: group` | the template repo name |
 
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
-and it is the default fire time), `title` and `description` (optional - the session's name,
-shown beside its ordinal, and a sentence about it on the Lectures tab), and the `deploy`
+and it is the default fire time), `title` and `details` (optional - the session's name,
+shown beside its ordinal, and a sentence about it in the schedule's Details column and on
+the Lectures tab), `type` (optional - which row it belongs to), and the `deploy`
 actions. A deploy item may carry its own `deploy_datetime` to ship earlier or later than
 the calendar event.
 An assignment's whole lifecycle (handout_datetime/due_datetime/grading_datetime), grading
@@ -303,8 +304,11 @@ releases:
   session_2:
     event_datetime: 2026-09-15T10:00  # the class - what the site announces
     tbc: false                        # true = provisional date, shown "(TBC)"
+    type: lecture                     # optional override: lecture | lab | readings.
+                                      # Default: worked out from where the deploy lands
     title: Linear regression          # the session's name, beside its "Session 2" ordinal
-    description: Least squares by hand  # a sentence about it, on the Lectures tab
+    details: Least squares by hand    # a sentence about it - the Details column, and
+                                      # again on the Lectures tab
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_intro
@@ -338,6 +342,9 @@ assignments:
 |---|---|---|---|
 | `due_datetime` | **yes** | - (entry dropped without it) | what students see; bare date = 23:59:59 |
 | `title` | no | the template README's `# ` heading | the assignment's name, beside the slug on the site. Declared here it shows from day one; the README fallback only appears at hand-out |
+| `details` | no | - | a sentence about it, in the Details column of both its rows |
+| `show_on_site` | no | `true` | `false` and the site says nothing about it - it still hands out, snapshots and grades |
+| `tbc` | no | `false` | both rows marked "(TBC)". Display only - nothing about the deadline moves |
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
 | `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
@@ -370,7 +377,9 @@ the row simply appears on the site's schedule.
 | `event_datetime` | **yes** | - (entry dropped without it) | when it happens; a bare date is a whole day, shown as 09:00 |
 | `type` | no | `special_event` | `exam` / `special_event` - which colour the row takes |
 | `title` | no | prettified label | site row label |
+| `details` | no | - | the row's Details column: the room, the format, what to bring |
 | `tbc` | no | `false` | provisional date - shown "(TBC)" |
+| `show_on_site` | no | `true` | `false` keeps the row off the site |
 
 ```yaml
 events:
@@ -397,15 +406,17 @@ the cohort is archived automatically; left out, it never is.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `date` | no | `semester_end` + 60 days | the day every repository in the cohort org is archived |
+| `event_datetime` | no | `semester_end` + 60 days | the day every repository in the cohort org is archived |
+| `title` | no | `Cohort archived` | the row's Title column |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
-| `description` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing, and `{date}` in it is filled in with the archive date |
+| `details` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing, and `{date}` in it is filled in with the archive date |
+| `tbc` | no | `false` | provisional date - shown "(TBC)". Display only - the freeze still happens on the date above |
 
 ```yaml
 archive:
-  date: 2027-02-16        # optional - without it, 60 days after semester_end
-  show_on_site: true      # optional - false keeps it off the site
-  description: >-         # optional - what students are told, in your own words
+  event_datetime: 2027-02-16  # optional - without it, 60 days after semester_end
+  show_on_site: true          # optional - false keeps it off the site
+  details: >-                 # optional - what students are told, in your own words
     This cohort is archived on 2027-02-16: every repository in it becomes read-only.
 ```
 
