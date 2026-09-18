@@ -108,7 +108,11 @@ def block(key: str, text: str) -> str:
     indentation from its first non-empty line, so a list that happens to start indented
     would make every following line look like the end of the block and break the whole
     file. Tabs are expanded for the same reason. Front matter is data, not a Liquid
-    template, so unlike the body route (`liquid_raw`) a `{{` in the text needs no fence."""
+    template, so unlike the body route (`liquid_raw`) a `{{` in the text needs no fence.
+
+    Always at column zero. A caller that needs the block nested under a parent key shifts
+    the whole thing with `textwrap.indent` - a uniform shift, so the `|2` indicator still
+    counts from the key's own column and still means what it says."""
     lines = text.expandtabs(4).rstrip().splitlines()
     body = "\n".join(f"  {ln}" if ln.strip() else "" for ln in lines)
     return f"{key}: |2\n{body}\n"

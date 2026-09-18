@@ -8,6 +8,7 @@ anything - `site` turns these rows into pages, `syllabus` into a table.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -52,17 +53,24 @@ class PlannedRow:
     """What the release PLAN says about one session row, before anything has shipped.
 
     `when` is the earliest event_datetime touching the row; `dests` the cohort-side
-    `repo/path`s its deploys will land in (ordered, deduped); `subtitle` and `description`
+    `repo/path`s its deploys will land in (ordered, deduped); `subtitle` and `details`
     the display text its entry declared; `readings_planned` whether any of its deploys
     targets the readings section - which is how a row can say a reading list is still to
     come rather than leaving the session off the Materials tab entirely."""
 
     when: date | datetime
+    # `tbc: true` on the entry that DATES the row: the date is provisional and the site
+    # marks it "(TBC)". Display-only, like the same key on every other block - every
+    # deploy on the row still fires exactly when its own entry says. There is no dateless
+    # twin here (the one an event or an exam row has): `event_datetime: tbc` on a
+    # `releases:` entry leaves it undated, and `planned_sessions` places no row for it at
+    # all, so a lecture row always has a real date to mark.
+    tbc: bool = False
     dests: dict[str, None] = field(default_factory=dict)
     subtitle: str = ""
-    description: str = ""
+    details: str = ""
     readings_planned: bool = False
-    # When the entry that supplied `subtitle`/`description` happens. Kept on the row so
+    # When the entry that supplied `subtitle`/`details` happens. Kept on the row so
     # one row's state lives in one object: `when` is the min over every entry touching the
     # row, which is not the same thing as "which entry named it".
     named_at: datetime | None = None
@@ -94,6 +102,51 @@ _LABEL_ROW_KINDS = {
 }
 
 
+def _declared_kind(release: schedule.Release) -> str | None:
+    """The row kind a `releases:` entry DECLARED: 'lecture' or 'lab'; `""` when it declared
+    nothing at all, which is every cohort today and means the row is placed by where the
+    entry's files land; None when it declared that it belongs to no session row
+    (`type: readings`), which must NOT fall back to that inference.
+
+    Through the same table a label head goes through, because they name the same thing:
+    `type: lab` and the label `lab-3` both say "this is the week's lab row", and a second
+    table would let the two disagree. Indexed rather than looked up with a default: the
+    parser writes only a `KNOWN_RELEASE_TYPES` value here (it flags a typo and blanks it),
+    so a key this table does not hold is a toolkit bug, and one better raised than turned
+    into a row placement nobody asked for."""
+    return _LABEL_ROW_KINDS[release.type] if release.type else ""
+
+
+def declared_dest_kinds(sched: schedule.Schedule) -> dict[str, str]:
+    """Every cohort-side destination (`repo/path`) whose `releases:` entry declared the row
+    kind for it, mapped to that kind.
+
+    The declaration travels with the DESTINATION because two sides place the same folder
+    and they have to agree about it: the plan places it before anything ships, and
+    `site.sync_site` places it again from what discovery finds in the org. The read side
+    has a folder and no entry, so an override keyed on the entry is one it cannot ask
+    about - and a placement rule applied on the plan side alone is exactly how a session
+    comes to hold two rows. Entries that declared nothing are absent, and the destination
+    path decides for them as it always has."""
+    return {
+        f"{d.cohort_dest_repo}/{deploy_dest(d)}": kind
+        for release in sched.releases
+        if (kind := _declared_kind(release))
+        for d in release.deploy
+    }
+
+
+def dest_row_kind(dest: str, section: str, declared: Mapping[str, str]) -> str:
+    """Which schedule row a cohort-side destination belongs to: the kind its entry
+    declared, else the kind its section implies.
+
+    THE placement rule, stated once and asked by both sides - `planned_sessions` of a
+    deploy the plan describes, `site.sync_site` of a folder discovery found. Two copies of
+    it put a permanently "not yet released" lab row on the schedule beside the lecture row
+    carrying that lab's links, for as long as the override existed."""
+    return declared.get(dest) or row_kind(section)
+
+
 def row_from_label(label: str) -> tuple[str, str] | None:
     """The (ordinal, kind) row a schedule label names, or None if it names no session.
 
@@ -123,8 +176,16 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
     order (deduped - two deploys of one entry can name the same one) so a placeholder row
     can name where its materials are going to appear. An entry marked `show_on_site:
     false` raises, dates and names nothing, but still contributes its destinations to a row
-    another entry already raised - see the two loops."""
+    another entry already raised - see the two loops. `type: readings` is the same shape
+    for a different reason: the entry says outright that it is not a session, so it only
+    ever contributes.
+
+    `type: lecture` / `type: lab` override which row a deploy places, for materials that
+    belong to a lab without landing under `labs/`. Declared nowhere, which is every cohort
+    today, the destination path decides exactly as it always has - and it decides for
+    discovery too, through the one rule `dest_row_kind` states."""
     out: dict[tuple[str, str], PlannedRow] = {}
+    declared = declared_dest_kinds(sched)
 
     def place(
         key: tuple[str, str],
@@ -134,8 +195,14 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
     ) -> None:
         """Fold one entry into the row it touches. Shared by the deploy-keyed path and the
         label fallback so a row means the same thing however it was placed."""
-        row = out.setdefault(key, PlannedRow(when=release.when))
-        row.when = min(row.when, release.when)
+        row = out.setdefault(key, PlannedRow(when=release.when, tbc=release.tbc))
+        if release.when < row.when:
+            # `tbc` travels WITH the date rather than being or-ed over every entry
+            # touching the row: it is a statement about the date the row shows, and the
+            # row shows the earliest one. A provisional readings drop must not be able to
+            # mark a settled class "(TBC)", nor a settled one un-mark a provisional class.
+            row.when = release.when
+            row.tbc = release.tbc
         if dest is not None:
             # dict-as-ordered-set, not a list: dedupe where the destinations are
             # collected, so the consumer is a plain join and the returned value means
@@ -144,20 +211,21 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
         if section is not None:
             row.readings_planned = row.readings_planned or section == READINGS_SECTION
         # A row is NAMED by the same entry it is DATED by: the earliest one touching
-        # it. Title and description are adopted as a pair - they describe one session,
+        # it. Title and details are adopted as a pair - they describe one session,
         # and taking the name from one entry and the blurb from another would read as
         # a mismatch nobody wrote.
-        if (release.title or release.description) and (
+        if (release.title or release.details) and (
             row.named_at is None or release.when < row.named_at
         ):
             row.named_at = release.when
             row.subtitle = release.title
-            row.description = release.description
+            row.details = release.details
 
     for release in sched.releases:
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
-        if not release.show_on_site:
+        kind = _declared_kind(release)
+        if not release.show_on_site or kind is None:
             continue  # second pass, below - a silent entry may not raise or date a row
         placed = False
         for d in release.deploy:
@@ -166,10 +234,11 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
             if n is None:
                 continue
             section = deploy_section(d)
+            full = f"{d.cohort_dest_repo}/{dest}"
             place(
-                (str(n), row_kind(section)),
+                (str(n), dest_row_kind(full, section, declared)),
                 release,
-                dest=f"{d.cohort_dest_repo}/{dest}",
+                dest=full,
                 section=section,
             )
             placed = True
@@ -183,7 +252,7 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
         # and flagged unreleased, with no destinations to name yet.
         key = row_from_label(release.label)
         if key is not None:
-            place(key, release)
+            place((key[0], kind or key[1]), release)
 
     # SECOND pass for the silent entries. A silent release ships on its own clock but says
     # nothing here, so it may neither raise a row of its own nor pull an existing one's date
@@ -196,7 +265,9 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
     # AHEAD of their session, so a silent readings entry is reached before the lecture entry
     # that raises its row. Folding in one pass would silently lose exactly the common case.
     for release in sched.releases:
-        if release.show_on_site or release.when is None:
+        if (release.show_on_site and _declared_kind(release) is not None) or (
+            release.when is None
+        ):
             continue
         for d in release.deploy:
             dest = deploy_dest(d)
@@ -204,9 +275,10 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
             if n is None:
                 continue
             section = deploy_section(d)
-            row = out.get((str(n), row_kind(section)))
+            full = f"{d.cohort_dest_repo}/{dest}"
+            row = out.get((str(n), dest_row_kind(full, section, declared)))
             if row is None:
                 continue  # raising a row is precisely what silence forbids
-            row.dests[f"{d.cohort_dest_repo}/{dest}"] = None
+            row.dests[full] = None
             row.readings_planned = row.readings_planned or section == READINGS_SECTION
     return out

@@ -1129,12 +1129,12 @@ def test_the_worked_example_shows_the_archive_block():
         Path(__file__).resolve().parents[1] / "example-course/cohort-org/schedule.yml"
     )
     sched, _ = schedule.load_file(str(full))
-    assert sched.archive_date == date(2027, 2, 16)
-    assert sched.archive_date == sched.semester_end + schedule.ARCHIVE_GRACE
-    assert sched.archive_show_on_site is True
+    assert sched.archive.when == date(2027, 2, 16)
+    assert sched.archive.when == sched.semester_end + schedule.ARCHIVE_GRACE
+    assert sched.archive.show_on_site is True
     # And it asks for its date by name rather than typing it twice - the habit the
     # example is there to teach (`site._archive_entry` fills the token in).
-    assert "{date}" in sched.archive_description
+    assert "{date}" in sched.archive.details
 
 
 # ------------------------------------- a block authored as a list (never-raise contract)
@@ -2346,8 +2346,7 @@ def test_a_cohort_that_writes_no_block_is_never_archived():
     # not happen off a date nobody typed - not even a term end.
     for meta in ({}, {"semester_end": "2026-12-18"}):
         sched = parse(meta)
-        assert sched.archive_date is None
-        assert sched.archive_declared is False
+        assert sched.archive is None
         assert sched.dropped == []
 
 
@@ -2357,9 +2356,8 @@ def test_writing_the_block_at_all_turns_archiving_on():
     # pushed to for about three weeks past their last class.
     for block in (None, {}, {"show_on_site": True}):
         sched = parse({"semester_end": "2026-12-18", "archive": block})
-        assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
-        assert sched.archive_show_on_site is True
-        assert sched.archive_declared is True
+        assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+        assert sched.archive.show_on_site is True
         assert sched.dropped == []
 
 
@@ -2367,48 +2365,49 @@ def test_the_block_can_say_what_the_site_says():
     # The row and the Updates box are the two places students read about the freeze, and
     # a cohort that wants to say it in its own words says it once, here.
     said = "Everything here goes read-only on the 16th. Grab what you want first."
-    sched = parse({"archive": {"date": "2027-02-16", "description": said}})
-    assert sched.archive_description == said
+    sched = parse({"archive": {"event_datetime": "2027-02-16", "details": said}})
+    assert sched.archive.details == said
     assert sched.dropped == []
 
 
-def test_an_unusable_description_is_dropped_rather_than_printed():
+def test_an_unusable_details_value_is_dropped_rather_than_printed():
     # A list reaching the deployed site as `['a', 'b']` is a hand edit that did not take -
     # flagged, never raised, and never printed. The row then reads as it does for a
-    # cohort that wrote no description at all.
+    # cohort that wrote no details at all.
     for said in (["a", "b"], {"text": "x"}, "", "   ", 7):
-        sched = parse({"semester_end": "2026-12-18", "archive": {"description": said}})
-        assert sched.archive_description is None
-        assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+        sched = parse({"semester_end": "2026-12-18", "archive": {"details": said}})
+        assert sched.archive.details is None
+        assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
         (drop,) = sched.dropped
-        assert drop.startswith("archive.description: unusable value")
+        assert drop.startswith("archive.details: unusable value")
         assert "no sentence at all" in drop
 
 
-def test_a_block_with_no_description_says_nothing_about_one():
-    assert parse({"archive": {"date": "2027-02-16"}}).archive_description is None
+def test_a_block_with_no_details_says_nothing_about_one():
+    assert parse({"archive": {"event_datetime": "2027-02-16"}}).archive.details is None
 
 
 def test_a_declared_archive_date_wins_over_the_default():
     sched = parse({"semester_end": "2026-12-18", "archive": {"date": "2027-01-15"}})
-    assert sched.archive_date == date(2027, 1, 15)
+    assert sched.archive.when == date(2027, 1, 15)
 
 
 def test_a_block_with_no_term_end_and_no_date_has_no_archive_date():
     # It asked to be archived, but there is no clock to archive it against. Neither a
     # crash nor a freeze - `scheduler._no_archive_date` says so in the digest instead.
     sched = parse({"archive": {"show_on_site": False}})
-    assert sched.archive_date is None
-    assert sched.archive_declared is True
+    # Declared - the block is there - but with nothing to date it from.
+    assert sched.archive is not None
+    assert sched.archive.when is None
 
 
 def test_a_cohort_with_no_term_end_can_still_name_its_own_archive_date():
-    assert parse({"archive": {"date": "2027-01-15"}}).archive_date == date(2027, 1, 15)
+    assert parse({"archive": {"date": "2027-01-15"}}).archive.when == date(2027, 1, 15)
 
 
 def test_show_on_site_is_only_switched_off_by_a_real_false():
-    assert parse({"archive": {"show_on_site": False}}).archive_show_on_site is False
-    assert parse({"archive": {}}).archive_show_on_site is True
+    assert parse({"archive": {"show_on_site": False}}).archive.show_on_site is False
+    assert parse({"archive": {}}).archive.show_on_site is True
 
 
 def test_an_unreadable_show_on_site_is_flagged_and_the_row_still_shows():
@@ -2417,9 +2416,77 @@ def test_an_unreadable_show_on_site_is_flagged_and_the_row_still_shows():
     # keys beside it; the row still shows, which is the default.
     for shown in ("nope", 0, [], {"when": True}):
         sched = parse({"archive": {"date": "2027-02-16", "show_on_site": shown}})
-        assert sched.archive_show_on_site is True
+        assert sched.archive.show_on_site is True
         (drop,) = sched.dropped
         assert drop.startswith("archive.show_on_site: unusable value")
+
+
+def test_an_unreadable_flag_is_flagged_on_every_block_that_takes_one():
+    # Not the archive block alone. `show_on_site:` and `tbc:` are one key doing one thing
+    # on four blocks, and three of them read an unparseable value as the default and said
+    # nothing - so the one thing the key exists for silently did not happen. One helper
+    # now, and a hand edit that did not take is visible wherever it was made.
+    sched = parse(
+        {
+            "releases": {
+                "lecture-1": {"event_datetime": "2026-09-01", "show_on_site": "nope"}
+            },
+            "assignments": {
+                "a1": {
+                    "course_source_repo": "a1-f2026",
+                    "due_datetime": "2026-10-13",
+                    "tbc": "yes",
+                }
+            },
+            "events": {"clinic": {"event_datetime": "2026-11-10", "show_on_site": 0}},
+        }
+    )
+    # Every one keeps its default, which is what the file said before the edit.
+    assert sched.releases[0].show_on_site is True
+    assert sched.assignments["a1"].tbc is False
+    assert sched.events[0].show_on_site is True
+    assert {drop.split(":")[0] for drop in sched.dropped} == {
+        "releases.lecture-1.show_on_site",
+        "assignments.a1.tbc",
+        "events.clinic.show_on_site",
+    }
+    assert all("unusable value" in drop for drop in sched.dropped)
+
+
+def test_an_unusable_details_is_flagged_on_every_block_that_takes_one():
+    # The twin of the flag test above, for the other shared display key. The archive block
+    # guarded this and the other three read `str(entry.get("details") or "")`, so
+    # `details: ["a", "b"]` parsed clean and reached the deployed site as the literal
+    # `['a', 'b']`. One key, one meaning, one guard.
+    sched = parse(
+        {
+            "releases": {
+                "lecture-1": {"event_datetime": "2026-09-01", "details": ["a", "b"]}
+            },
+            "assignments": {
+                "a1": {
+                    "course_source_repo": "a1-f2026",
+                    "due_datetime": "2026-10-13",
+                    "details": {"text": "x"},
+                }
+            },
+            "events": {"clinic": {"event_datetime": "2026-11-10", "details": 7}},
+            "archive": {"event_datetime": "2027-02-16", "details": ["a", "b"]},
+        }
+    )
+    # Every row reads as it does for a cohort that wrote no sentence at all.
+    assert sched.releases[0].details == ""
+    assert sched.assignments["a1"].details == ""
+    assert sched.events[0].details == ""
+    assert sched.archive.details is None
+    assert {drop.split(":")[0] for drop in sched.dropped} == {
+        "releases.lecture-1.details",
+        "assignments.a1.details",
+        "events.clinic.details",
+        "archive.details",
+    }
+    assert all("unusable value" in drop for drop in sched.dropped)
+    assert all("no sentence at all" in drop for drop in sched.dropped)
 
 
 def test_an_unreadable_archive_date_falls_back_and_is_flagged():
@@ -2427,7 +2494,7 @@ def test_an_unreadable_archive_date_falls_back_and_is_flagged():
     # must not crash the tick that reads the file either: it falls back to the default and
     # is reported through the digest issue like any other unusable value.
     sched = parse({"semester_end": "2026-12-18", "archive": {"date": "16/02/2027"}})
-    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     assert len(sched.dropped) == 1
     assert sched.dropped[0].startswith("archive.date: unusable value")
     assert "freezes at its default date" in sched.dropped[0]
@@ -2435,18 +2502,18 @@ def test_an_unreadable_archive_date_falls_back_and_is_flagged():
 
 def test_an_archive_block_that_is_not_a_mapping_is_dropped_not_raised():
     sched = parse({"semester_end": "2026-12-18", "archive": "2027-02-16"})
-    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     assert len(sched.dropped) == 1
     assert "not a mapping" in sched.dropped[0]
     # And it names every key that goes under it: the message is the only place a faculty
     # member reading the digest learns what the block accepts.
-    for key in ("`date:`", "`description:`", "`show_on_site:`"):
+    for key in ("`event_datetime:`", "`title:`", "`details:`", "`show_on_site:`"):
         assert key in sched.dropped[0]
 
 
 def test_a_stray_key_under_archive_is_flagged_and_ignored():
     sched = parse({"semester_end": "2026-12-18", "archive": {"when": "2027-02-16"}})
-    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     assert len(sched.dropped) == 1
     assert "archive.when" in sched.dropped[0]
 
@@ -2455,3 +2522,228 @@ def test_archive_is_a_known_top_level_key():
     # Not in KNOWN_TOP_LEVEL, the whole block reads as a typo and every cohort that writes
     # one gets a red `Validate schedule` run for a key the parser now understands.
     assert parse({"archive": {"date": "2027-02-16"}}).dropped == []
+
+
+# ---------------------------------------- one word per column (title / details / type)
+# The four display fields every block takes, one per column of the site's schedule table.
+# Two of them are renames, and every live cohort's schedule.yml is still written in the
+# old vocabulary while its term runs - so the parser has to read both.
+
+
+def test_a_live_cohorts_old_spelling_still_parses_and_raises_no_fault():
+    # An unknown key is an IMMEDIATE ConfigFault, which MAILS the cohort's faculty. Every
+    # org mid-term says `description:`, so accepting only the new spelling would red every
+    # one of their digests for a file that was correct the day it was written.
+    sched = parse(
+        {
+            "releases": {
+                "lecture-1": {
+                    "event_datetime": "2026-09-01T10:00",
+                    "title": "Probability",
+                    "description": "Sample spaces.",
+                }
+            },
+            "archive": {"date": "2027-02-16", "description": "Read-only from {date}."},
+        }
+    )
+    assert sched.releases[0].details == "Sample spaces."
+    assert sched.archive.when == date(2027, 2, 16)
+    assert sched.archive.details == "Read-only from {date}."
+    assert sched.dropped == [] and sched.faults == []
+
+
+def test_the_new_spelling_wins_where_a_file_carries_both():
+    # A cohort migrating one entry at a time must never read the line it forgot to delete.
+    sched = parse(
+        {
+            "releases": {
+                "lecture-1": {
+                    "event_datetime": "2026-09-01T10:00",
+                    "details": "The new one.",
+                    "description": "The stale one.",
+                }
+            },
+            "archive": {
+                "date": "2027-02-16",
+                "event_datetime": "2027-03-01",
+                "details": "The new one.",
+                "description": "The stale one.",
+            },
+        }
+    )
+    assert sched.releases[0].details == "The new one."
+    assert sched.archive.when == date(2027, 3, 1)
+    assert sched.archive.details == "The new one."
+    assert sched.dropped == []
+
+
+def test_an_event_carries_its_details_and_can_be_kept_off_the_site():
+    sched = parse(
+        {
+            "events": {
+                "mid-term": {
+                    "type": "exam",
+                    "title": "MidTerm",
+                    "details": "Room A1. Two hours, open book.",
+                    "event_datetime": "2026-11-03",
+                },
+                "reserve-slot": {
+                    "title": "Reserve slot",
+                    "event_datetime": "2026-11-10",
+                    "show_on_site": False,
+                },
+            }
+        }
+    )
+    exam, reserve = sched.events
+    assert exam.details == "Room A1. Two hours, open book."
+    assert exam.show_on_site is True
+    # Kept in the plan, so faculty keep the date in the one file that holds their term.
+    assert reserve.show_on_site is False
+    assert sched.dropped == []
+
+
+def test_an_assignment_takes_the_same_four_display_fields():
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "assignment-1-f2026",
+                    "due_datetime": "2026-10-13",
+                    "title": "Linear regression",
+                    "details": "Closed form first, then gradient descent.",
+                    "tbc": True,
+                    "show_on_site": False,
+                }
+            }
+        }
+    )
+    entry = sched.assignments["assignment-1"]
+    assert entry.details == "Closed form first, then gradient descent."
+    assert entry.tbc is True and entry.show_on_site is False
+    assert sched.dropped == []
+
+
+def test_a_tbc_assignment_moves_no_date_at_all():
+    # `tbc:` is a MARK on the row. The snapshot freeze, the late window and the grading
+    # cutoff all derive from `due_datetime`, and a deadline that says "(TBC)" still closes
+    # exactly when it says it does.
+    def parsed(tbc: bool) -> AssignmentEntry:
+        return parse(
+            {
+                "assignments": {
+                    "assignment-1": {
+                        "course_source_repo": "assignment-1-f2026",
+                        "handout_datetime": "2026-09-22T09:00",
+                        "due_datetime": "2026-10-13",
+                        "grading_datetime": "2026-10-15",
+                        "solution_datetime": "2026-10-16T09:00",
+                        "tbc": tbc,
+                    }
+                }
+            }
+        ).assignments["assignment-1"]
+
+    marked, plain = parsed(True), parsed(False)
+    assert marked.tbc is True and plain.tbc is False
+    for field_name in (
+        "due_datetime",
+        "grading_datetime",
+        "handout_datetime",
+        "solution_datetime",
+    ):
+        assert getattr(marked, field_name) == getattr(plain, field_name)
+
+
+def test_a_release_can_declare_which_row_it_belongs_to():
+    sched = parse(
+        {
+            "releases": {
+                "week-1-clinic": {
+                    "event_datetime": "2026-09-03T14:00",
+                    "type": "lab",
+                    "deploy": [
+                        {
+                            "course_source_repo": "cm",
+                            "course_source_path": "clinics/01_week-1",
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    assert sched.releases[0].type == "lab"
+    assert sched.dropped == []
+
+
+def test_an_unknown_release_type_is_flagged_and_falls_back_to_inference():
+    # Never dropped: the cost of a typo here is a row in the wrong column, and taking a
+    # whole session off the schedule instead would be far the worse of the two.
+    sched = parse(
+        {
+            "releases": {
+                "lecture-1": {"event_datetime": "2026-09-01T10:00", "type": "lecutre"}
+            }
+        }
+    )
+    assert sched.releases[0].type == ""
+    (drop,) = sched.dropped
+    assert drop.startswith("releases.lecture-1.type: unusable value")
+    assert "as if no type were declared" in drop
+
+
+def test_display_text_on_a_readings_entry_is_reported_rather_than_swallowed():
+    # `type: readings` claims no row of its own, so schedule_plan routes the entry to the
+    # silent pass, which merges its destinations and nothing else: `title:`/`details:`
+    # written here reach nothing at all. Kept-but-ignored, like an unknown key - not a
+    # dropped entry, because everything the entry DEPLOYS still ships exactly as written.
+    # docs/07 offers both fields on any `releases:` entry, so writing them is a reasonable
+    # mistake, and silence about it is indistinguishable from a rendering bug.
+    display = {"title": "Week 4 readings", "details": "Two papers on attention."}
+    sched = parse(
+        {
+            "releases": {
+                "readings-4": {
+                    "event_datetime": "2026-09-15T09:00",
+                    "type": "readings",
+                    **display,
+                }
+            }
+        }
+    )
+    assert {drop.split(":")[0] for drop in sched.dropped} == {
+        "releases.readings-4.title",
+        "releases.readings-4.details",
+    }
+    assert all("claims no row of its own" in drop for drop in sched.dropped)
+    # The entry itself survives, type and all - only the display text goes nowhere.
+    assert [(r.label, r.type) for r in sched.releases] == [("readings-4", "readings")]
+    # And the same two fields on an entry that DOES raise a row are silent, as they must
+    # be: this reports where the text has nowhere to go, not that it was written.
+    same = parse(
+        {"releases": {"lecture-4": {"event_datetime": "2026-09-15T09:00", **display}}}
+    )
+    assert same.dropped == []
+
+
+def test_the_archive_row_can_be_named_and_marked_provisional():
+    sched = parse(
+        {
+            "archive": {
+                "event_datetime": "2027-02-16",
+                "title": "Repositories frozen",
+                "tbc": True,
+            }
+        }
+    )
+    assert sched.archive.title == "Repositories frozen"
+    assert sched.archive.tbc is True
+    # Display only: the day the scheduler acts on is the one that was written.
+    assert sched.archive.when == date(2027, 2, 16)
+    assert sched.dropped == []
+
+
+def test_an_archive_block_with_no_title_carries_the_default_one():
+    assert parse({"archive": {}}).archive.title == schedule.ARCHIVE_TITLE
+    # And a cohort that wrote no block at all has no row to name.
+    assert parse({}).archive is None

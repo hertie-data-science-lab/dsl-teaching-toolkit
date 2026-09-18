@@ -305,7 +305,8 @@ def test_c6_says_when_the_whole_cohort_freezes(monkeypatch):
         schedule,
         "load",
         lambda org: schedule.Schedule(
-            semester_end=date(2026, 12, 18), archive_date=date(2027, 2, 16)
+            semester_end=date(2026, 12, 18),
+            archive=schedule.ArchiveRow(when=date(2027, 2, 16)),
         ),
     )
     assert (

@@ -2,7 +2,7 @@
 
 A Hertie syllabus lists, session by session, a title, its learning objectives and its
 readings. The cohort's `classroom-config/schedule.yml` already holds the first two
-(`title:` / `description:`) and each session's `readings/NN_.../` folder holds the third, so
+(`title:` / `details:`) and each session's `readings/NN_.../` folder holds the third, so
 that section can be written for the course team instead of by them.
 
 DELIBERATELY paste-ready output, not an edit of their document. The syllabus is a faculty
@@ -96,8 +96,8 @@ def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]
         row = rows[n]
         out.append(f"### Session {n}{f': {row.subtitle}' if row.subtitle else ''}")
         out.append("")
-        if row.description:
-            out.append(f"*Learning objectives.* {' '.join(row.description.split())}")
+        if row.details:
+            out.append(f"*Learning objectives.* {' '.join(row.details.split())}")
             out.append("")
         readings = _readings_for(course_org, source_repo, paths, n)
         if readings:

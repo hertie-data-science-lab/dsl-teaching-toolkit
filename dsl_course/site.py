@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
 from pathlib import Path
+from textwrap import indent
 from urllib.parse import quote
 
 import yaml
@@ -78,8 +79,9 @@ from .repos import (
 from .schedule_plan import (
     READINGS_SECTION,
     PlannedRow,
+    declared_dest_kinds,
+    dest_row_kind,
     planned_sessions,
-    row_kind,
 )
 from .site_repo import (
     PUBLISH_CONFIG,
@@ -848,18 +850,29 @@ def _dest_link(cohort_org: str, dest: str, live_repos: frozenset[str]) -> str:
     return f"[`{dest}`]({_gh_url(cohort_org, repo, branch, 'tree', here) if here else f'https://github.com/{cohort_org}/{repo}'})"
 
 
-def _describe(text: str) -> str:
-    """A row's `description:` front matter - the session's learning objectives.
+def _details(text: str) -> str:
+    """A row's `details:` front matter - the faculty prose that fills the schedule table's
+    Details column, and, on a session row, the learning objectives its tab page repeats.
+
+    ONE key, on every row type, feeding one column. It was `description:`, which meant the
+    session blurb on a lecture row and the row's NAME on an exam, a special event, a term
+    boundary and an assignment's due row - so the same word named two columns and the
+    theme had to know which kind of row it was reading to know which. `title` is now the
+    Title cell everywhere and this is the Details cell everywhere.
 
     A block scalar once it has a newline in it. The Hertie syllabus format writes these as
     a paragraph (sometimes two), and `q` folds every newline away, so a one-line scalar
     silently ran two paragraphs together. Empty stays absent rather than blank, so the
-    theme can test for it."""
+    theme can test for it.
+
+    Always at column zero. A caller nesting it under a parent key - the `due_event:`
+    sub-hash is the only one - shifts the whole thing with `textwrap.indent`, which is a
+    uniform shift and so keeps both the block indicator and the quoted scalar valid."""
     if not text.strip():
         return ""
     if "\n" in text.strip():
-        return block("description", text)
-    return f'description: "{q(text)}"\n'
+        return block("details", text)
+    return f'details: "{q(text)}"\n'
 
 
 def _lecture_entry(
@@ -888,9 +901,12 @@ def _lecture_entry(
     signature growing once per plan field.
 
     `title` stays the ordinal (`Session 3`) - what the theme has always assumed it is.
-    `subtitle` and `description` are the plan's `title:` / `description:`: the session's
-    name, and a sentence about it. Both are omitted when empty rather than written blank,
-    so the theme can test for them.
+    `subtitle` and `details` are the plan's `title:` / `details:`: the session's name, and
+    a sentence about it. Both are omitted when empty rather than written blank, so the
+    theme can test for them. `details` is the one key of the four that is shared with
+    every other row type, and it fills the same column on all of them: on this row it
+    renders ABOVE the materials links (or the not-released-yet sentence), and again under
+    the session's heading on the Lectures/Labs/Readings tabs.
 
     EMPTY `sources` is the not-yet-released row: the session is in the plan but its
     materials have not shipped, so the row carries no links, flags itself `unreleased:
@@ -905,7 +921,7 @@ def _lecture_entry(
     # `_row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - the same trim an assignment's README heading gets, because faculty
     # repeat the identifier just as readily in the plan as in a README.
-    subtitle, description = row_name(row.subtitle, title), row.description
+    subtitle, details = row_name(row.subtitle, title), row.details
     reading_list = ""
     if sources:
         flags = ""
@@ -925,8 +941,8 @@ def _lecture_entry(
         body = ""
     else:
         # A flag as well as the prose: the theme can badge or grey an unreleased row off
-        # this (as it already does for `tbc:`/`dateless:`), and until it does the sentence
-        # below carries the meaning on its own. Without it a placeholder is
+        # this (as it already does for the `tbc:` written below), and until it does the
+        # sentence below carries the meaning on its own. Without it a placeholder is
         # indistinguishable from a released folder that happens to hold no files.
         flags = "unreleased: true\n"
         links = links_block([])
@@ -940,10 +956,16 @@ def _lecture_entry(
             + (f" - they will appear in {where} when they are" if where else "")
             + "._"
         )
-        # `subtitle` and `description` are deliberately KEPT here. They describe what the
+        # `subtitle` and `details` are deliberately KEPT here. They describe what the
         # session is about, which is known the day the plan is written; the body next to
         # them describes whether its files have shipped. So the whole term reads as a
         # syllabus from day one, rather than as a list of empty rows that fills in weekly.
+    # The plan's own `tbc:`, written on both kinds of row and outside the released /
+    # unreleased branch above - the same display-only marker an assignment, an event and
+    # the archive row carry, saying the DATE is provisional. It reaches nothing but the
+    # cell: every deploy on this row still fires exactly when its entry says.
+    if row.tbc:
+        flags += "tbc: true\n"
     # The plan ships readings for this row but no readings section has landed, so the
     # Readings tab says so rather than leaving the session off the page entirely. Decided
     # here, beside the reading list it is about, rather than by the caller.
@@ -954,9 +976,9 @@ def _lecture_entry(
         f"---\n"
         f"type: {kind}\n"
         f"date: {iso_when(row.when)}\n"
-        f'title: "{title}"\n'
+        f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
-        + _describe(description)
+        + _details(details)
         + flags
         + (block("reading_list", reading_list) if reading_list else "")
         + f"{links}\n"
@@ -1061,6 +1083,17 @@ def _assignment_entry(
     # The plan's own declaration wins, and is the only one that can appear BEFORE hand-out:
     # the README it otherwise comes from is embargoed until then.
     subtitle = found[1].title if found else ""
+    # The plan's `details:`, filling the Details column of BOTH rows above what they
+    # already generate - the link to the brief on one, the submit address on the other.
+    # There is no README fallback for it: the brief is the page's body, and a sentence
+    # that appeared on the schedule only once the assignment shipped would be a different
+    # row's worth of information arriving at hand-out.
+    details = found[1].details if found else ""
+    # Display-only, and it reaches nothing but the two rows: `due` above is already
+    # resolved, and the freeze, the late window and the cutoff are `grades.cutoff_at`'s
+    # business off `due_datetime`. A deadline that says "(TBC)" still closes when it says.
+    tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
+    tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
     # Where the work goes. `submit_shape` is the SHAPE in one word (`course.submit_shape`:
     # `assignment-repo-private`, `assignment-repo-public`, `external`), written whatever
@@ -1191,18 +1224,25 @@ def _assignment_entry(
         else:
             coming = f"your {born} `{repo_name}` repo appears when it is"
         body = f"_**{title} is not yet released** - {coming}._"
-    title = q(title)
     # After the branch above, which is where a released entry learns its name from the
     # README. The due row is the same assignment, so it shows the same two halves -
     # identifier bold, name beneath - rather than one of them.
     sub_fm = f'subtitle: "{q(subtitle)}"\n' if subtitle else ""
     sub_due = f'    subtitle: "{q(subtitle)}"\n' if subtitle else ""
+    # Written at BOTH levels for the same reason `repo_lines` is: the due row is a
+    # sub-hash the theme reaches through `map: "due_event"`, so it cannot see its parent's
+    # `details`, and the row that tells a student when to hand in is as entitled to the
+    # sentence as the one that tells them it is out.
+    details_fm = _details(details)
+    details_due = indent(details_fm, "    ")
     return (
         f"---\n"
         f"type: assignment\n"
         f"date: {released}\n"
-        f'title: "{title}"\n'
+        f'title: "{q(title)}"\n'
         f"{sub_fm}"
+        f"{details_fm}"
+        f"{tbc_fm}"
         f"{flags}"
         f"{repo_fm}"
         f"{cutoff_fm}"
@@ -1212,40 +1252,13 @@ def _assignment_entry(
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
-        f'    description: "{title}"\n'
+        f'    title: "{q(title)}"\n'
         f"{sub_due}"
+        f"{details_due}"
+        f"{tbc_due}"
         f"{repo_due}"
         f"---\n"
         f"{body}\n"
-    )
-
-
-def _exam_entry(
-    title: str,
-    when: date | datetime,
-    tbc: bool = False,
-    dateless: bool = False,
-) -> str:
-    """A red exam row (the template's schedule_row_exam.html styles `type: exam`).
-
-    `when` is a datetime when schedule.yml gave the exam a real start time, or a bare date
-    (whole-day entry, or the synthesised mid/end-of-semester fallback) - which keeps the
-    09:00 placeholder.
-
-    TBC: an undated exam (`date: tbc`) still needs a sortable date for the theme, so the
-    caller passes end-of-term as `when` with `dateless=True` - the theme then prints
-    "TBC" instead; `tbc=True` with a real date adds the "(TBC)" marker."""
-    flags = ""
-    if tbc or dateless:
-        flags = "tbc: true\n" + ("dateless: true\n" if dateless else "")
-    return (
-        f"---\n"
-        f"type: exam\n"
-        f"date: {iso_when(when)}\n"
-        f"{flags}"
-        f'description: "{q(title)}"\n'
-        f"---\n"
-        f"Details to be confirmed.\n"
     )
 
 
@@ -1266,23 +1279,35 @@ def _pretty(label: str) -> str:
     return label.replace("-", " ").replace("_", " ").title()
 
 
-def _special_event_entry(
+def _event_row(
+    kind: str,
     title: str,
     when: date | datetime,
     tbc: bool = False,
     dateless: bool = False,
+    details: str = "",
 ) -> str:
-    """A generic schedule row (the theme's schedule_row_special_event.html) for a
-    display-only entry: a clinic, a guest lecture, a review session. Nothing is released;
-    the site simply shows it.
+    """A display-only schedule row - `kind='exam'` for the red exam row the theme styles
+    (schedule_row_exam.html), `kind='special_event'` for the generic one
+    (schedule_row_special_event.html): a clinic, a guest lecture, a review session.
+    Nothing is released; the site simply shows it. ONE renderer, because the two rows
+    differ in the word and in nothing else - the templates differ, the front matter does
+    not, and two copies of it is how a key added to one row type misses the other.
 
-    The name goes in `description`, which the theme renders in the schedule's TITLE
-    column - the same place a session's ordinal and an assignment's identifier sit. It
-    used to go in `name`, which the theme renders in the EVENT column, so a guest lecture
-    printed its whole name where "Lecture" / "Lab" / "Exam" print a row's KIND, and left
-    its title cell empty. One meaning per column: Event says what kind of row this is,
-    Title says which one it is. (`semester_start`/`_end` keep `name` - there the kind IS
-    the name, "Term starts", and there is nothing declared to put beside it.)
+    `when` is a datetime when schedule.yml gave the entry a real start time, or a bare
+    date (a whole-day entry, or the synthesised mid/end-of-semester exam) - which keeps
+    the 09:00 placeholder.
+
+    The name goes in `title` and the prose in `details`, which are the schedule's Title
+    and Details columns. Both used to go through `description`, which meant the row's NAME
+    here and a session's blurb on a lecture row - so one word named two columns and
+    whoever read it had to know which kind of row it was on to know which. One meaning per
+    column, and one word per meaning: Event says what kind of row this is, Title which one
+    it is, Details what there is to say about it. An exam's Details cell used to be the
+    fixed sentence "Details to be confirmed.", written into every exam of every cohort
+    whether or not anything was outstanding - a toolkit opinion about a room and a format
+    it knows nothing about, and one nobody could delete by editing their schedule. There
+    is no default now: a row says what its `details:` says, or nothing.
 
     TBC: an undated entry (`event_datetime: tbc`) still needs a sortable `date:` for the
     theme, so the caller passes end-of-term as `when` plus `dateless=True` - the theme
@@ -1293,98 +1318,116 @@ def _special_event_entry(
         flags = "tbc: true\n" + ("dateless: true\n" if dateless else "")
     return (
         f"---\n"
-        f"type: special_event\n"
+        f"type: {kind}\n"
         f"date: {iso_when(when)}\n"
         f"{flags}"
-        f'description: "{q(title)}"\n'
+        f'title: "{q(title)}"\n'
+        f"{_details(details)}"
         f"---\n"
     )
 
 
 def _event_entry(event: schedule.Event, fallback: date) -> str:
     """One `events:` row, rendered as the type it declared - an exam or a special event.
-    An event with no title of its own falls back to its prettified label, and an undated
-    one (`event_datetime: tbc`) sorts at `fallback` (end of term) as a dateless row."""
-    render = _exam_entry if event.type == "exam" else _special_event_entry
-    return render(
+    An event with no title of its own falls back to its prettified label, its `details:`
+    fills the row's Details cell, and an undated one (`event_datetime: tbc`) sorts at
+    `fallback` (end of term) as a dateless row.
+
+    `show_on_site: false` is the caller's business, not this function's: an event hidden
+    from the schedule is one this is never called for."""
+    return _event_row(
+        "exam" if event.type == "exam" else "special_event",
         event.title or _pretty(event.label),
         event.when if event.when is not None else fallback,
         event.tbc,
         event.when is None,
+        event.details,
     )
 
 
-def _archive_entry(when: date, today: date, description: str | None = None) -> str:
-    """The "Cohort archived" row: when this cohort is frozen read-only.
+def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
+    """The archive row: when this cohort is frozen read-only.
+
+    Takes the parsed block whole (`schedule.ArchiveRow`) rather than five of its fields,
+    for the same reason `_lecture_entry` takes its `PlannedRow`: the block's keys are the
+    row's keys, and re-declaring them here is a second place for the next one to be
+    added - and a second place for a default to be written. `archive.when` is a date by
+    the time this is called; the caller does not render a block nothing can date.
 
     A `special_event` rather than a type of its own, because it IS one - a dated thing
     that happens to the cohort and releases nothing - and the theme already colours that
     row. Inventing a fourth row type would mean shipping a theme change for one line.
 
-    `description` is `archive.description` from schedule.yml and is the WHOLE of what
-    either surface says - there is no default sentence, because the toolkit does not know
-    what a freeze means for a given cohort's students and a wrong reassurance is worse
-    than none. Without one the row still renders as its "Cohort archived" label and date,
-    and is not announced at all (below). The seeded skeleton carries a sentence ready to
-    uncomment.
+    `archive.title` ("Cohort archived" unless the cohort renames it) fills the row's
+    Title cell like every other row's.
 
-    That sentence naturally names the day, and a day typed into it twice goes stale the
-    moment `archive.date` moves or is left to its default - so `{date}` in it is filled
+    `archive.details` is the WHOLE of what either
+    surface says - there is no default sentence, because the toolkit does not know what a
+    freeze means for a given cohort's students and a wrong reassurance is worse than none.
+    Without one the row still renders as its title and date, and is not announced at all
+    (below). The seeded skeleton carries a sentence ready to uncomment.
+
+    It goes in `details:` like every other row's. It used to be written as the page BODY
+    instead, because the Updates box captured its bullet out of an entry's `content` - and
+    the cost was that this one sentence had to be folded onto a single line and fenced,
+    making it the only `details:` in the vocabulary that could not run to a paragraph.
+    `announcements.html` reads `details` first and falls back to `content`, so the box
+    keeps its bullet and the exception goes.
+
+    `archive.tbc` marks a provisional freeze date, exactly as it does on an event: the
+    date the scheduler acts on is `archive.when` either way.
+
+    The sentence naturally names the day, and a day typed into it twice goes stale the
+    moment `archive.when` moves or is left to its default - so `{date}` in it is filled
     in here with the date this row itself carries, spelled the way the row dates the
     freeze (`YYYY-MM-DD`; the front matter adds only the placeholder clock time that
     `hide_time` suppresses). A plain replacement rather than `str.format`, because this is
-    faculty prose: any other brace in it is left exactly as typed - and, being faculty
-    prose in a Jekyll body, fenced with `{% raw %}` so those braces cannot run as Liquid.
+    faculty prose: any other brace in it is left exactly as typed, and front matter is
+    data rather than a Liquid template, so no brace in it can run.
 
     `announce` opts the row into the home page's Updates box for the last
-    `schedule.ARCHIVE_NOTICE` before the date, and the body is the sentence that box
-    prints - so it is written only when there IS one, and only while the freeze is still
-    ahead. The box captures each bullet INSIDE its `limit: 7` loop and drops an empty one
-    afterwards (`templates/site/_includes/announcements.html`), so a row announced with
-    no body spent the newest of seven slots on nothing - and, sorting by its own future
-    date, the top one - for the whole fortnight. Past the date there is nothing to
-    announce either: the freeze has happened. It is a flag rather than a rendering
-    decision because the collection is cleared and rewritten on every sync, so once the
-    window closes the flag is simply not written again - there is nothing to take
-    back."""
-    dated = description.replace("{date}", when.isoformat()) if description else ""
-    # Folded onto one line, because a value reaching several lines could write a `---` of
-    # its own and split the front matter off the page - but FENCED, not `q`-quoted. `q`
-    # is for a one-line double-quoted YAML scalar and this is the document's BODY: it
-    # rewrote faculty's `"` to a `'` for a rule that does not apply here, and left a `{{`
-    # or a `{%` in the sentence to run as Liquid - where a malformed tag fails the whole
-    # site build and a well-formed one quietly prints something else.
-    folded = " ".join(dated.split())
-    said = f"{liquid_raw(folded)}\n" if folded else ""
-    soon = (
-        "announce: true\n"
-        if folded and today <= when and when - today <= schedule.ARCHIVE_NOTICE
-        else ""
+    `schedule.ARCHIVE_NOTICE` before the date, and the sentence is what that box prints -
+    so it is written only when there IS one, and only while the freeze is still ahead. The
+    box captures each bullet INSIDE its `limit: 7` loop and drops an empty one afterwards
+    (`templates/site/_includes/announcements.html`), so a row announced with nothing to
+    say spent the newest of seven slots on nothing - and, sorting by its own future date,
+    the top one - for the whole fortnight. Past the date there is nothing to announce
+    either: the freeze has happened. It is a flag rather than a rendering decision because
+    the collection is cleared and rewritten on every sync, so once the window closes the
+    flag is simply not written again - there is nothing to take back."""
+    when = archive.when
+    dated = (
+        archive.details.replace("{date}", when.isoformat()) if archive.details else ""
     )
+    flags = "hide_time: true\n" + ("tbc: true\n" if archive.tbc else "")
+    if dated and today <= when and when - today <= schedule.ARCHIVE_NOTICE:
+        flags += "announce: true\n"
     return (
         f"---\n"
         f"type: special_event\n"
         f"date: {iso_when(when)}\n"
-        f"hide_time: true\n"
-        f"{soon}"
-        f'description: "Cohort archived"\n'
+        f"{flags}"
+        f'title: "{q(archive.title)}"\n'
+        f"{_details(dated)}"
         f"---\n"
-        f"{said}"
     )
 
 
 def _term_date_entry(name: str, when: date) -> str:
-    """A semester-boundary row (the theme's schedule_row_term_date.html). `name` fills the
-    row's event column and is the only text it shows, so the description stays empty;
-    `hide_time` suppresses the placeholder clock time - a term boundary is a whole day,
-    not a 09:00 appointment."""
+    """A semester-boundary row (the theme's schedule_row_term_date.html).
+
+    `name` ("Term starts" / "Term ends") is the row's TITLE. It used to be written to
+    `name:`, which the theme prints in the Event column, beside a `description: ""` that
+    left the Title cell permanently blank - so the one row type on the schedule read its
+    name out of a different column from every other. The Event column now says "Term",
+    which is the kind, and this says which one. `hide_time` suppresses the placeholder
+    clock time - a term boundary is a whole day, not a 09:00 appointment."""
     return (
         f"---\n"
         f"type: term_date\n"
         f"date: {iso_when(when)}\n"
         f"hide_time: true\n"
-        f'name: "{q(name)}"\n'
-        f'description: ""\n'
+        f'title: "{q(name)}"\n'
         f"---\n"
     )
 
@@ -1403,13 +1446,6 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         cohort_repos = list_org_repos(cohort_org)
         content_repos = cohort_content_repos(cohort_repos)
         release_sources = discover_release_sources(cohort_org, content_repos)
-        # One row per (ordinal, kind): a week's lecture materials and its lab are separate
-        # rows on the schedule, so a lab released into `labs/` never folds into the
-        # lecture's row (and never shows up twice, on the schedule and the labs page).
-        sources_by_row: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
-        for repo, subpath, folder, n in release_sources:
-            key = (str(n), row_kind(_source_section(repo, subpath)))
-            sources_by_row.setdefault(key, []).append((repo, subpath, folder))
         assignments = discover_assignments(course_org)
         # A persistent course org holds per-year templates (assignment-*-fYYYY); a cohort
         # site should list only its own year's, matched on the cohort's fYYYY/sYYYY tag.
@@ -1458,7 +1494,48 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 schedule.cohort_name(plan_slug, plan_entry),
                 (plan_entry.course_source_repo, (plan_slug, plan_entry)),
             )
+        # EVERY assignment, hidden ones included - so that an assignment's ORDINAL is its
+        # position in the full list. Filtering the list itself renumbered every assignment
+        # after a hidden one: hide assignment 2 mid-term and assignment 3's published page
+        # moves from `03-...` to `02-...`, and the fortnightly fallback date of any
+        # assignment the plan has not dated jumps two weeks earlier. The hidden ones are
+        # skipped where the pages are built, keeping their ordinals unspent.
         cohort_assignments = sorted(by_name.items())
+
+        def shown(hit: tuple[str, schedule.AssignmentEntry] | None) -> bool:
+            """Does this assignment appear on the site at all?
+
+            `show_on_site: false` drops it from the SITE and from nothing else: it is
+            handed out, snapshotted and graded exactly as written. Both its schedule rows
+            go with it (the due row is a sub-hash of its page), as does its Assignments-tab
+            entry - the same all-or-nothing the site has for a silent release, because the
+            theme has no way to render one of an entry's rows and not the other.
+
+            One discovered from the course org but hidden in the plan is hidden: the plan
+            is where faculty say what the site shows. One the plan never mentions has
+            nowhere to say otherwise, so it shows."""
+            return hit is None or hit[1].show_on_site
+
+        # One row per (ordinal, kind): a week's lecture materials and its lab are separate
+        # rows on the schedule, so a lab released into `labs/` never folds into the
+        # lecture's row (and never shows up twice, on the schedule and the labs page).
+        #
+        # Through `dest_row_kind`, the same rule the plan places its own rows with, so a
+        # folder the plan declared `type: lab` for is a lab row on both sides. Placed here
+        # by path alone, it became a lecture row the day its files shipped - next to the
+        # plan's lab row, which then said "not yet released" for the rest of term.
+        declared = declared_dest_kinds(sched)
+        sources_by_row: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
+        for repo, subpath, folder, n in release_sources:
+            key = (
+                str(n),
+                dest_row_kind(
+                    f"{repo}/{_source_prefix(subpath, folder)}",
+                    _source_section(repo, subpath),
+                    declared,
+                ),
+            )
+            sources_by_row.setdefault(key, []).append((repo, subpath, folder))
 
         planned = planned_sessions(sched)
         rows = sorted(
@@ -1469,7 +1546,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         log_step(
             f"Syncing {cohort_org}/{pages_repo(cohort_org)}: {len(rows)} session row(s) "
             f"({len(rows) - len(sources_by_row)} not released yet), "
-            f"{len(cohort_assignments)} assignment(s)"
+            f"{sum(1 for _, (_, hit) in cohort_assignments if shown(hit))} assignment(s)"
         )
 
         # What a session row LINKS, out of everything it released - the default
@@ -1526,23 +1603,33 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # The display-only half of the schedule. `events:` rows render as what they
         # declared (exam or special event); an undated (TBC) one sorts at end-of-term.
         end = sched.semester_end or start + timedelta(weeks=15)
+        # Enumerated over EVERY event and filtered after, not before: the ordinal is the
+        # entry's position in the plan, so hiding one leaves the rest of the term's event
+        # pages at the filenames - and so the URLs - they already have.
         event_entries = {
             f"{i + 1:02d}-{slug(e.label)}.md": _event_entry(e, end)
             for i, e in enumerate(sched.events)
+            if e.show_on_site
         }
         # Every course has exams, so a schedule that names none still gets stub mid/end
         # dates of a ~15-week semester (bounded by semester_end when set) - a placeholder
         # faculty replace, rather than a schedule page with no exams on it at all.
+        #
+        # Counted over EVERY event, hidden ones included: a cohort that wrote its exams and
+        # then took them off the site has said what its exams are, and answering that with
+        # two invented ones would put back exactly what it asked to remove.
         if not any(e.type == "exam" for e in sched.events):
             event_entries |= {
-                "midterm.md": _exam_entry("MidTerm Exam", start + timedelta(weeks=8)),
-                "final.md": _exam_entry("Final Exam", end),
+                "midterm.md": _event_row(
+                    "exam", "MidTerm Exam", start + timedelta(weeks=8)
+                ),
+                "final.md": _event_row("exam", "Final Exam", end),
             }
-        # When the whole cohort is frozen read-only. Off the same `archive.date` the
-        # scheduler acts on, so what students are told and what happens are one date.
-        if sched.archive_date and sched.archive_show_on_site:
+        # When the whole cohort is frozen read-only. Off the same date the scheduler
+        # acts on, so what students are told and what happens are one date.
+        if sched.archive and sched.archive.when and sched.archive.show_on_site:
             event_entries["cohort-archived.md"] = _archive_entry(
-                sched.archive_date, date.today(), sched.archive_description
+                sched.archive, date.today()
             )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
@@ -1594,6 +1681,9 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 # Named by the cohort-side name, ordinal from the position in the full
                 # list, so every assignment keeps its URL for the whole term. A pending one
                 # is a placeholder rather than an absence - see `_assignment_entry`.
+                # A hidden one is SKIPPED, not renumbered around: its ordinal stays spent,
+                # so hiding one mid-term leaves every other assignment's URL - and every
+                # synthesised fallback date - exactly where it was.
                 "_assignments": {
                     f"{i + 1:02d}-{name}.md": _assignment_entry(
                         course_org,
@@ -1604,6 +1694,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                         handed_out=handed_out,
                     )
                     for i, (name, (repo, hit)) in enumerate(cohort_assignments)
+                    if shown(hit)
                 },
                 "_events": event_entries,
             },

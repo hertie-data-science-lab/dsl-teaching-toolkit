@@ -24,6 +24,7 @@ from dsl_course import (
 )
 from dsl_course import schedule as schedule_mod
 from dsl_course.schedule import (
+    ArchiveRow,
     AssignmentEntry,
     Deploy,
     Event,
@@ -125,13 +126,34 @@ def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
     )
 
 
+def test_a_provisional_session_date_is_marked_on_both_kinds_of_row(monkeypatch):
+    # `tbc:` was parsed on `releases:` and rendered nowhere: the plan carried it, the row
+    # never wrote it and the lecture template never read it, so a faculty member marking a
+    # class date provisional got a schedule that looked settled. Display-only, as it is on
+    # every other block - and on the released and unreleased row alike, since it says
+    # something about the DATE rather than about the materials.
+    monkeypatch.setattr(site, "_session_files", lambda *a: [])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    for kind, sources in (("lecture", RELEASED), ("lab", RELEASED), ("lecture", [])):
+        marked = site._lecture_entry(
+            "Cohort", "2", _row(date(2026, 9, 15), tbc=True), sources, kind, hosted={}
+        )
+        plain = site._lecture_entry(
+            "Cohort", "2", _row(date(2026, 9, 15)), sources, kind, hosted={}
+        )
+        assert "tbc: true" in marked
+        assert "tbc" not in plain
+        # Display only: the date the row shows - and the deploys fire on - is unchanged.
+        assert "date: 2026-09-15T09:00:00" in marked
+
+
 def test_event_entry_renders_a_display_only_schedule_row():
     e = Event("project-clinic", "", datetime(2026, 11, 17, 10, 0, tzinfo=BERLIN))
     out = site._event_entry(e, END_OF_TERM)
     assert "type: special_event" in out
-    # `description`, which the theme renders in the TITLE column - `name` is the EVENT
-    # column, where every other row type prints its KIND
-    assert 'description: "Project Clinic"' in out  # prettified from the label
+    # `title`, which the theme renders in the TITLE column - the EVENT column is where
+    # every row type prints its KIND, and this row's kind is "Event"
+    assert 'title: "Project Clinic"' in out  # prettified from the label
     assert "date: 2026-11-17T10:00:00" in out
     assert "name:" not in out
     titled = Event(
@@ -139,21 +161,24 @@ def test_event_entry_renders_a_display_only_schedule_row():
         "Bring your data",
         datetime(2026, 11, 17, 10, 0, tzinfo=BERLIN),
     )
-    assert 'description: "Bring your data"' in site._event_entry(titled, END_OF_TERM)
+    assert 'title: "Bring your data"' in site._event_entry(titled, END_OF_TERM)
 
 
 def test_event_entry_renders_an_exam_as_an_exam_row():
     e = Event("mid-term", "MidTerm Exam", date(2026, 11, 3), type="exam")
     out = site._event_entry(e, END_OF_TERM)
     assert "type: exam" in out
-    assert 'description: "MidTerm Exam"' in out
+    assert 'title: "MidTerm Exam"' in out
     assert "date: 2026-11-03T09:00:00" in out  # whole day -> the placeholder time
-    assert "name:" not in out  # the exam row reads `description`, not `name`
+    assert "name:" not in out  # the exam row reads `title`, not `name`
+    # And no invented body: the row used to carry "Details to be confirmed." whether or
+    # not anything was.
+    assert "to be confirmed" not in out
 
 
 def test_event_entry_title_falls_back_to_the_prettified_label():
     e = Event("resit_exam", "", date(2026, 12, 20), type="exam")
-    assert 'description: "Resit Exam"' in site._event_entry(e, END_OF_TERM)
+    assert 'title: "Resit Exam"' in site._event_entry(e, END_OF_TERM)
 
 
 def test_tbc_rows_render_with_theme_flags():
@@ -181,80 +206,86 @@ def test_tbc_rows_render_with_theme_flags():
     assert "tbc: true" in out and "dateless" not in out
 
 
-def _body(said: str) -> str:
-    """The archive row's body as the document holds it: the sentence, fenced. Spelled out
-    once, in test_the_cohorts_own_sentence_is_printed_verbatim, and shared from there."""
-    return f"---\n{{% raw %}}\n{said}\n{{% endraw %}}\n"
+def _archive_row(details: str | None = None, when: date = date(2027, 2, 16)):
+    """The parsed `archive:` block these renderer tests hand in - the row whole, which is
+    what the renderer takes."""
+    return ArchiveRow(when=when, details=details)
+
+
+def _said(out: str) -> object:
+    """The archive row's `details:` as YAML loads it - the sentence, in the same front
+    matter key every other row's prose goes into."""
+    _, _, rest = out.partition("---\n")
+    # rsplit, not partition: a `---` line INSIDE the block scalar is indented under its
+    # key, and only the last one is the front matter's own terminator.
+    return yaml.safe_load(rest.rsplit("---\n", 1)[0]).get("details")
 
 
 def test_the_archive_row_is_a_special_event_that_says_what_freezes():
     said = "Everything here goes read-only. You keep read access."
-    out = site._archive_entry(date(2027, 2, 16), date(2026, 12, 20), said)
+    out = site._archive_entry(_archive_row(said), date(2026, 12, 20))
     assert "type: special_event" in out
-    assert 'description: "Cohort archived"' in out
+    assert 'title: "Cohort archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
     assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
-    # What it SAYS is the cohort's own sentence and nothing else.
-    assert out.endswith(_body(said))
+    # What it SAYS is the cohort's own sentence, in the key every row says things in.
+    assert _said(out) == said
+    # And nothing else: no body, so nothing renders twice.
+    assert out.endswith("---\n")
 
 
-def test_the_cohorts_own_sentence_is_printed_verbatim():
-    # This is the sentence students read, and a cohort that bothered to write one did not
-    # write it to be paraphrased or padded - so it arrives fenced rather than quoted: the
-    # fence is what keeps a `{%` in it from running as Liquid, and `q`'s rewrite of every
-    # `"` to a `'` was a YAML rule that never applied to a document body.
-    said = 'We freeze on the 16th - your "repos" stay readable for ever.'
-    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
-    assert out.endswith(f"---\n{{% raw %}}\n{said}\n{{% endraw %}}\n")
-    # And the row itself is unchanged: the description is the BODY, not the row's title.
-    assert 'description: "Cohort archived"' in out
+def test_the_cohorts_own_sentence_is_the_rows_details_and_not_its_title():
+    # This is the sentence students read, and it goes where every other row's prose goes -
+    # the Details column - rather than into the page body, which is what forced it onto one
+    # line and made it the one `details:` that could not run to a paragraph.
+    said = "We freeze on the 16th - your repos stay readable for ever."
+    out = site._archive_entry(_archive_row(said), date(2027, 2, 1))
+    assert _said(out) == said
+    assert 'title: "Cohort archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
 
 
-def test_a_sentence_that_looks_like_liquid_cannot_run_as_liquid():
-    # Unfenced, a malformed tag fails the WHOLE site build and a well-formed one silently
-    # prints something else. Neither is a thing faculty typing a sentence into
-    # schedule.yml would have any reason to expect.
+def test_a_sentence_that_looks_like_liquid_is_not_liquid():
+    # Front matter is data, not a template, so the fence the body route needed is gone and
+    # the braces survive exactly as typed. Unrendered either way - which is the point: a
+    # malformed tag would otherwise fail the WHOLE site build.
     said = "Frozen {% raw-looking %} - ask {{ site.title }}."
-    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
-    assert out.endswith(_body(said))
+    out = site._archive_entry(_archive_row(said), date(2027, 2, 1))
+    assert _said(out) == said
+    assert "{% raw %}" not in out
 
 
 def test_the_sentence_can_ask_for_the_archive_date_by_name():
-    # A date typed into the sentence as a literal goes stale the moment `archive.date`
+    # A date typed into the sentence as a literal goes stale the moment `archive.when`
     # moves or is left to its default; `{date}` cannot. Every occurrence is filled.
     out = site._archive_entry(
-        date(2027, 2, 16),
-        date(2027, 2, 1),
-        "Archived on {date}. Read-only from {date}.",
+        _archive_row("Archived on {date}. Read-only from {date}."), date(2027, 2, 1)
     )
-    assert out.endswith(_body("Archived on 2027-02-16. Read-only from 2027-02-16."))
+    assert _said(out) == "Archived on 2027-02-16. Read-only from 2027-02-16."
 
 
 def test_a_sentence_without_the_token_is_left_alone():
     # Including its braces: this is faculty prose, not a format string, so anything but
     # the exact token survives verbatim.
     said = "We freeze in {other} words - nothing here is a placeholder."
-    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
-    assert out.endswith(_body(said))
+    out = site._archive_entry(_archive_row(said), date(2027, 2, 1))
+    assert _said(out) == said
 
 
-def test_a_multi_line_sentence_cannot_split_the_front_matter():
-    # It lands in the body of a Jekyll document, so a value carrying its own `---` would
-    # otherwise cut the page in half. Folded onto one line, inside the fence.
-    out = site._archive_entry(
-        date(2027, 2, 16), date(2027, 2, 1), "Frozen.\n---\nGone."
-    )
-    assert out.count("---\n") == 2
-    assert out.endswith(_body("Frozen. --- Gone."))
+def test_a_multi_paragraph_sentence_stays_multi_paragraph():
+    # The whole point of moving it into `details:`: it is a block scalar like every other
+    # row's, so a freeze notice may run to two paragraphs - and a line of its own that
+    # reads `---` is indented inside the block rather than cutting the page in half.
+    out = site._archive_entry(_archive_row("Frozen.\n\n---\n\nGone."), date(2027, 2, 1))
+    assert _said(out) == "Frozen.\n\n---\n\nGone.\n"
 
 
 def test_without_a_sentence_the_row_carries_none():
     # There is no default: the toolkit does not know what a freeze means for a given
     # cohort's students, and a wrong reassurance is worse than none. The row still
-    # renders - its label and its date - and the theme skips a bullet with an empty body.
-    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1))
-    assert out.endswith('description: "Cohort archived"\n---\n')
+    # renders - its title and its date - and the Updates box skips an empty bullet.
+    out = site._archive_entry(_archive_row(), date(2027, 2, 1))
+    assert out.endswith('title: "Cohort archived"\n---\n')
     assert "read-only" not in out
 
 
@@ -264,8 +295,10 @@ def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():
     when = date(2027, 2, 16)
     edge = when - schedule_mod.ARCHIVE_NOTICE
     said = "Everything here goes read-only on {date}."
-    assert "announce: true" in site._archive_entry(when, edge, said)
-    assert "announce" not in site._archive_entry(when, edge - timedelta(days=1), said)
+    assert "announce: true" in site._archive_entry(_archive_row(said, when), edge)
+    assert "announce" not in site._archive_entry(
+        _archive_row(said, when), edge - timedelta(days=1)
+    )
 
 
 def test_the_window_closes_once_the_freeze_has_happened():
@@ -274,19 +307,23 @@ def test_the_window_closes_once_the_freeze_has_happened():
     # would sit in the Updates box saying a freeze was coming that already came.
     when = date(2027, 2, 16)
     said = "Everything here goes read-only on {date}."
-    assert "announce: true" in site._archive_entry(when, when, said)
-    assert "announce" not in site._archive_entry(when, when + timedelta(days=1), said)
+    assert "announce: true" in site._archive_entry(_archive_row(said, when), when)
+    assert "announce" not in site._archive_entry(
+        _archive_row(said, when), when + timedelta(days=1)
+    )
 
 
 def test_a_row_with_nothing_to_say_is_not_announced():
     # The Updates box captures each bullet inside its `limit: 7` loop and drops an empty
-    # one afterwards, so an announced row with no body did not simply render as nothing:
-    # it spent a slot - the newest, this row sorting by its own future date - on nothing,
-    # for the whole fortnight.
+    # one afterwards, so an announced row with nothing to say did not simply render as
+    # nothing: it spent a slot - the newest, this row sorting by its own future date - on
+    # nothing, for the whole fortnight.
     when = date(2027, 2, 16)
     inside = when - timedelta(days=1)
-    assert "announce" not in site._archive_entry(when, inside)
-    assert "announce: true" in site._archive_entry(when, inside, "We freeze on {date}.")
+    assert "announce" not in site._archive_entry(_archive_row(when=when), inside)
+    assert "announce: true" in site._archive_entry(
+        _archive_row("We freeze on {date}.", when), inside
+    )
 
 
 def test_term_date_entry_hides_the_placeholder_time():
@@ -294,8 +331,11 @@ def test_term_date_entry_hides_the_placeholder_time():
     assert "type: term_date" in out
     assert "date: 2026-09-07T09:00:00" in out
     assert "hide_time: true" in out  # a term boundary is a whole day, not a 09:00 slot
-    assert 'name: "Term starts"' in out  # the name is the row's only text
-    assert 'description: ""' in out
+    # The name is the row's TITLE. It used to be `name:`, which the theme prints in the
+    # Event column, beside an always-empty Title cell - the one row that named itself in a
+    # different column from every other.
+    assert 'title: "Term starts"' in out
+    assert "name:" not in out and "description:" not in out
 
 
 def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
@@ -313,8 +353,9 @@ def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
     # the entry's own row is the "released!" row; the due row lives in due_event
     assert "date: 2026-09-22T09:00:00" in out.split("due_event:")[0]
     assert "    date: 2026-10-13T23:59:59" in out
-    # the theme's due row is already labelled "due", so the description just names it
-    assert '    description: "Assignment 1"' in out
+    # the theme's due row is already labelled "due", so its title just names the
+    # assignment - the same identifier the out-row above carries
+    assert '    title: "Assignment 1"' in out
 
 
 def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypatch):
@@ -1238,6 +1279,39 @@ def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_pat
     assert "not yet released" not in body
 
 
+def test_a_declared_lab_row_keeps_one_row_once_its_files_ship(monkeypatch, tmp_path):
+    # The case `type:` exists for: lab material that does not land under `labs/`. The plan
+    # placed it as a lab and discovery placed the same folder as a lecture, so the day the
+    # files shipped the schedule grew a SECOND row - a lab stuck on "not yet released" for
+    # the rest of term, beside a lecture row holding that lab's links. Both sides go
+    # through `dest_row_kind` now, so there is one row and it is the declared kind.
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        Schedule(
+            releases=[
+                Release(
+                    "clinic-3",
+                    datetime(2026, 9, 24, 14, 0, tzinfo=BERLIN),
+                    deploy=[Deploy("cm", "clinics/03_week-3", "materials", None)],
+                    type="lab",
+                )
+            ]
+        ),
+        sources=[("materials", "clinics", "03_week-3", 3)],
+        files=lambda org, repo, subpath, folder, hosted: [
+            Link("clinic.pdf", "https://x/clinic.pdf")
+        ],
+    )
+    lectures = plan.collections["_lectures"]
+    assert sorted(lectures) == ["lab-03.md"]
+    body = lectures["lab-03.md"]
+    assert "type: lab" in body
+    assert ("clinic", "clinic.pdf") in entry_links(body)
+    assert "unreleased: true" not in body
+    assert "not yet released" not in body
+
+
 def test_a_row_released_off_plan_survives_the_planned_rows(monkeypatch, tmp_path):
     # Discovery still leads: the manual Release button ships folders the plan never named,
     # and those rows must not be dropped just because they are absent from schedule.yml.
@@ -1330,8 +1404,8 @@ def test_synthesised_exams_appear_when_the_schedule_names_none(monkeypatch, tmp_
         ),
     )
     events = plan.collections["_events"]
-    assert 'description: "MidTerm Exam"' in events["midterm.md"]
-    assert 'description: "Final Exam"' in events["final.md"]
+    assert 'title: "MidTerm Exam"' in events["midterm.md"]
+    assert 'title: "Final Exam"' in events["final.md"]
     assert "type: special_event" in events["01-project-clinic.md"]
 
 
@@ -1339,11 +1413,13 @@ def test_the_archive_row_ships_with_the_rest_of_the_schedule(monkeypatch, tmp_pa
     plan = _plan(
         monkeypatch,
         tmp_path,
-        Schedule(semester_end=date(2026, 12, 18), archive_date=date(2027, 2, 16)),
+        Schedule(
+            semester_end=date(2026, 12, 18),
+            archive=ArchiveRow(when=date(2027, 2, 16)),
+        ),
     )
     assert (
-        'description: "Cohort archived"'
-        in plan.collections["_events"]["cohort-archived.md"]
+        'title: "Cohort archived"' in plan.collections["_events"]["cohort-archived.md"]
     )
 
 
@@ -1353,8 +1429,7 @@ def test_a_cohort_can_keep_its_archive_date_off_the_site(monkeypatch, tmp_path):
         tmp_path,
         Schedule(
             semester_end=date(2026, 12, 18),
-            archive_date=date(2027, 2, 16),
-            archive_show_on_site=False,
+            archive=ArchiveRow(when=date(2027, 2, 16), show_on_site=False),
         ),
     )
     assert "cohort-archived.md" not in plan.collections["_events"]
@@ -1372,9 +1447,9 @@ def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_
         Schedule(semester_start=date(2026, 9, 7), semester_end=date(2026, 12, 18)),
     )
     events = plan.collections["_events"]
-    assert 'name: "Term starts"' in events["term-start.md"]
+    assert 'title: "Term starts"' in events["term-start.md"]
     assert "date: 2026-09-07T09:00:00" in events["term-start.md"]
-    assert 'name: "Term ends"' in events["term-end.md"]
+    assert 'title: "Term ends"' in events["term-end.md"]
     assert "date: 2026-12-18T09:00:00" in events["term-end.md"]
 
     unbounded = _plan(monkeypatch, tmp_path, Schedule())
@@ -1807,7 +1882,7 @@ def test_display_only_rows_come_from_events_alone(monkeypatch, tmp_path):
 
 
 # ------------------------------------------------- a session's declared name + blurb
-def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
+def test_a_row_carries_the_title_and_details_the_plan_declared(monkeypatch):
     monkeypatch.setattr(
         site, "_session_files", lambda *a: [Link("s.pdf", "https://x/1")]
     )
@@ -1818,7 +1893,7 @@ def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
         _row(
             datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
             subtitle="Probability Theory",
-            description="Sample spaces and Bayes' rule.",
+            details="Sample spaces and Bayes' rule.",
         ),
         RELEASED,
         hosted={},
@@ -1827,7 +1902,7 @@ def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
     # declared name rides `subtitle` beside it.
     assert 'title: "Session 1"' in out
     assert 'subtitle: "Probability Theory"' in out
-    assert 'description: "Sample spaces and Bayes\' rule."' in out
+    assert 'details: "Sample spaces and Bayes\' rule."' in out
 
 
 def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
@@ -1844,7 +1919,7 @@ def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
         RELEASED,
         hosted={},
     )
-    assert "subtitle:" not in out and "description:" not in out
+    assert "subtitle:" not in out and "details:" not in out
 
 
 def test_an_unreleased_row_still_says_what_the_session_is_about():
@@ -1855,7 +1930,7 @@ def test_an_unreleased_row_still_says_what_the_session_is_about():
             datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
             dests={"materials/lectures/03_week-3": None},
             subtitle="Expectation",
-            description="Linearity of expectation.",
+            details="Linearity of expectation.",
         ),
         [],
         hosted={},
@@ -1864,7 +1939,7 @@ def test_an_unreleased_row_still_says_what_the_session_is_about():
     # then - the term reads as a syllabus from day one. Only the FILES wait for release,
     # which is what the body says.
     assert 'subtitle: "Expectation"' in out
-    assert 'description: "Linearity of expectation."' in out
+    assert 'details: "Linearity of expectation."' in out
     assert "will appear in `materials/lectures/03_week-3` when they are." in out
 
 
@@ -2343,3 +2418,240 @@ def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypa
     assert "the `assignment-3-submissions` drop box appears when it is." in out
     # And no address, because there is nothing at the other end of it yet.
     assert "repo_url" not in out
+
+
+# ------------------------------------- `details:`, the Details column on every row type
+# One key feeding one column, wherever it is written. Before this, `description` meant the
+# session blurb on a lecture row and the row's NAME on an exam, a special event, a term
+# boundary and an assignment's due row.
+
+
+def test_an_events_details_fill_its_row_and_its_title_stays_the_title():
+    e = Event(
+        "mid-term",
+        "MidTerm Exam",
+        date(2026, 11, 3),
+        type="exam",
+        details="Room A1. Two hours, open book.",
+    )
+    out = site._event_entry(e, END_OF_TERM)
+    assert 'title: "MidTerm Exam"' in out
+    assert 'details: "Room A1. Two hours, open book."' in out
+
+
+def test_a_special_events_details_fill_its_row():
+    e = Event(
+        "clinic",
+        "Project clinic",
+        date(2026, 11, 10),
+        details="Bring a laptop and whatever is not working.",
+    )
+    out = site._event_entry(e, END_OF_TERM)
+    assert 'title: "Project clinic"' in out
+    assert 'details: "Bring a laptop and whatever is not working."' in out
+
+
+def test_an_exam_with_nothing_to_say_says_nothing():
+    # It used to carry "Details to be confirmed." in its body - written into every exam of
+    # every cohort whether or not anything was outstanding, and undeletable from
+    # schedule.yml.
+    out = site._event_row("exam", "Final Exam", date(2026, 12, 15))
+    assert "to be confirmed" not in out.lower()
+    assert "details:" not in out
+    assert out.endswith('title: "Final Exam"\n---\n')
+
+
+def test_an_event_kept_off_the_site_gets_no_row(monkeypatch, tmp_path):
+    sched = Schedule(
+        semester_end=END_OF_TERM,
+        events=[
+            Event("clinic", "Project clinic", date(2026, 11, 10)),
+            Event("reserve", "Reserve slot", date(2026, 11, 17), show_on_site=False),
+        ],
+    )
+    events = _plan(monkeypatch, tmp_path, sched).collections["_events"]
+    rendered = "".join(events.values())
+    assert "Project clinic" in rendered
+    assert "Reserve slot" not in rendered
+
+
+def test_a_hidden_exam_still_answers_the_synthesised_exam_stubs(monkeypatch, tmp_path):
+    # A cohort that wrote its exams and then took them off the site HAS said what its
+    # exams are; answering that with two invented ones would put back what it removed.
+    sched = Schedule(
+        semester_end=END_OF_TERM,
+        events=[
+            Event(
+                "mid-term",
+                "MidTerm",
+                date(2026, 11, 3),
+                type="exam",
+                show_on_site=False,
+            )
+        ],
+    )
+    events = _plan(monkeypatch, tmp_path, sched).collections["_events"]
+    assert "midterm.md" not in events and "final.md" not in events
+    assert "MidTerm" not in "".join(events.values())
+
+
+def test_an_assignments_details_ride_both_of_its_rows(monkeypatch):
+    # The schedule reaches the due row through `map: "due_event"`, so the sub-hash cannot
+    # see its parent's copy and needs its own.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    entry = AssignmentEntry(
+        due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        course_source_repo="assignment-1-f2026",
+        details="Closed form first, then gradient descent.",
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        entry.due_datetime,
+        found=("assignment-1", entry),
+    )
+    page = yaml.safe_load(out.split("---\n")[1])
+    assert page["details"] == "Closed form first, then gradient descent."
+    assert page["due_event"]["details"] == "Closed form first, then gradient descent."
+
+
+def test_a_multi_paragraph_details_block_survives_the_due_rows_nesting(monkeypatch):
+    # A block scalar at column 0 would end the front matter or reparent the key; the due
+    # row's copy is indented under `due_event:` and must still be legal YAML.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    entry = AssignmentEntry(
+        due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        course_source_repo="assignment-1-f2026",
+        details="First paragraph.\n\nSecond paragraph.",
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        entry.due_datetime,
+        found=("assignment-1", entry),
+    )
+    page = yaml.safe_load(out.split("---\n")[1])
+    assert page["due_event"]["details"] == "First paragraph.\n\nSecond paragraph.\n"
+
+
+def test_a_tbc_assignment_marks_both_rows_and_moves_neither_date(monkeypatch):
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+
+    def rendered(tbc: bool) -> dict:
+        entry = AssignmentEntry(
+            due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+            course_source_repo="assignment-1-f2026",
+            grading_datetime=datetime(2026, 10, 15, 23, 59, 59, tzinfo=BERLIN),
+            tbc=tbc,
+        )
+        out = site._assignment_entry(
+            "Course",
+            "Cohort-f2026",
+            "assignment-1-f2026",
+            entry.due_datetime,
+            datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+            found=("assignment-1", entry),
+            now=datetime(2026, 9, 23, tzinfo=BERLIN),
+        )
+        return yaml.safe_load(out.split("---\n")[1])
+
+    marked, plain = rendered(True), rendered(False)
+    assert marked["tbc"] is True and marked["due_event"]["tbc"] is True
+    assert "tbc" not in plain and "tbc" not in plain["due_event"]
+    # Nothing but the mark differs: the deadline the theme prints is the deadline.
+    assert marked["date"] == plain["date"]
+    assert marked["due_event"]["date"] == plain["due_event"]["date"]
+
+
+def test_an_assignment_kept_off_the_site_gets_no_page_and_no_rows(
+    monkeypatch, tmp_path
+):
+    # The site is told nothing; everything else about the assignment runs as written. Its
+    # due row is a sub-hash of this page, so it goes with it - the theme has no way to
+    # render one of an entry's rows and not the other.
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="assignment-1-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+                show_on_site=False,
+            ),
+            "assignment-2": AssignmentEntry(
+                course_source_repo="assignment-2-f2026",
+                due_datetime=datetime(2026, 10, 27, 23, 59, 59, tzinfo=BERLIN),
+            ),
+        }
+    )
+    pages = _plan(
+        monkeypatch,
+        tmp_path,
+        sched,
+        assignments=["assignment-1-f2026", "assignment-2-f2026"],
+    ).collections["_assignments"]
+    # Hidden even though discovery found its template: the plan is where faculty say what
+    # the site shows. `02-`, not `01-`: the hidden one's ordinal stays spent (below).
+    assert list(pages) == ["02-assignment-2.md"]
+
+
+def test_hiding_one_assignment_leaves_the_others_where_they_were(monkeypatch, tmp_path):
+    # The ordinal is the position in the FULL list, so hiding one mid-term must not
+    # renumber the assignments after it: their pages are published URLs students have
+    # bookmarked and the gradebook links, and `03-...` becoming `02-...` breaks every one.
+    # The same ordinal also synthesises the fortnightly fallback due date, so renumbering
+    # pulls an undated assignment's placeholder deadline two weeks earlier as well.
+    def plan(hide_the_middle_one: bool):
+        sched = Schedule(
+            semester_start=date(2026, 9, 1),
+            assignments={
+                "assignment-1": AssignmentEntry(
+                    course_source_repo="assignment-1-f2026",
+                    due_datetime=datetime(2026, 10, 6, 23, 59, 59, tzinfo=BERLIN),
+                ),
+                "assignment-2": AssignmentEntry(
+                    course_source_repo="assignment-2-f2026",
+                    due_datetime=datetime(2026, 10, 20, 23, 59, 59, tzinfo=BERLIN),
+                    show_on_site=not hide_the_middle_one,
+                ),
+            },
+        )
+        # assignment-3 is DISCOVERED and unplanned, so its deadline is the synthesised
+        # fortnightly one - counted off the very ordinal this test is about.
+        return _plan(
+            monkeypatch,
+            tmp_path,
+            sched,
+            assignments=[
+                "assignment-1-f2026",
+                "assignment-2-f2026",
+                "assignment-3-f2026",
+            ],
+        ).collections["_assignments"]
+
+    shown, hidden = plan(False), plan(True)
+    assert list(shown) == [
+        "01-assignment-1.md",
+        "02-assignment-2.md",
+        "03-assignment-3.md",
+    ]
+    assert list(hidden) == ["01-assignment-1.md", "03-assignment-3.md"]
+    # Same page, byte for byte: the hidden neighbour changed nothing about it, including
+    # the fallback deadline its front matter carries.
+    assert hidden["03-assignment-3.md"] == shown["03-assignment-3.md"]
+
+
+def test_the_archive_row_can_be_renamed_and_marked_provisional():
+    out = site._archive_entry(
+        ArchiveRow(
+            when=date(2027, 2, 16),
+            title="Repositories frozen",
+            details="Read-only from {date}.",
+            tbc=True,
+        ),
+        date(2027, 2, 1),
+    )
+    assert 'title: "Repositories frozen"' in out
+    assert "tbc: true" in out
+    # Display only - the row still dates the freeze where the plan put it.
+    assert "date: 2027-02-16T09:00:00" in out

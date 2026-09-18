@@ -26,7 +26,7 @@ releases:
   lecture-1:
     event_datetime: 2026-09-01T10:00
     title: Perceptrons and gradient descent
-    description: >
+    details: >
       What a linear model can and cannot separate, and how gradient descent finds its
       weights.
     deploy:
@@ -38,6 +38,7 @@ releases:
   lab-1:
     event_datetime: 2026-09-03T14:00
     title: Your first classifier
+    details: Build, train and score it end to end.
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/01_week-1
@@ -122,6 +123,7 @@ releases:
 assignments:                    
   assignment-1:
     title: Linear regression              # NB optional: the name, beside the slug on the site
+    details: Closed form first, then by gradient descent.   # NB optional: the Details column of both its rows
     course_source_repo: assignment-1-f2026
     handout_datetime: 2026-09-15T14:00  
     due_datetime: 2026-10-13
@@ -152,15 +154,18 @@ events:
     event_datetime: 2026-12-15T14:00   
     tbc: true
   project-clinic:
-    title: Project clinic (drop-in room xyz)
+    title: Project clinic
+    details: Drop-in, room xyz. Bring a laptop and whatever is not working.
     event_datetime: 2026-11-10T10:00
   guest-lecture:
-    title: Guest lecture (industry speaker)
+    title: Guest lecture
+    details: An industry speaker - announced nearer the time.
     event_datetime: tbc
 
 # archive the org (freezes in place): removes all write permissions, retains all read permissions
 archive:
-  date: 2027-02-16            # optional (default: semester_end + 60 days)
+  event_datetime: 2027-02-16  # optional (default: semester_end + 60 days)
+  title: Cohort archived      # optional - the row's Title column
   show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, also sends a notice email 14 days out
-  description: >-             # optional, `{date}` is filled in automatically
+  details: >-                 # optional, `{date}` is filled in automatically
     This cohort is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.

@@ -1111,7 +1111,7 @@ def render_archive_cohort(cohort_orgs: list[str]) -> str:
     return f"""name: Archive cohort
 
 # End of term. The scheduler runs this by itself ONLY for a cohort whose schedule.yml
-# writes an `archive:` block (its `date:` defaults to semester_end + 60 days). Archiving is
+# writes an `archive:` block (its `event_datetime:` defaults to semester_end + 60 days). Archiving is
 # opt-in, so this button closes a cohort out early - and is the only way to close out one
 # that wrote no block. It offers the cohort's edits back to this org as a pull request
 # first, closes the toolkit's open notices, syncs the website one last time, then ARCHIVES

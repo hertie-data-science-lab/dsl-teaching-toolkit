@@ -15,6 +15,14 @@
 #   assignments:  each assignment's handout / due / grading lifecycle
 #   events:       display-only calendar rows - nothing deploys
 #
+# Every block takes the same four display fields, and each one fills one column of the
+# site's schedule table:
+#   type:            the Event column (what KIND of row this is)
+#   event_datetime:  the Date column
+#   title:           the Title column
+#   details:         the Details column
+# plus `show_on_site:` (default true) and `tbc:` (default false) everywhere.
+#
 # Changing a date later? Just commit the edit to this file on main; the push itself fires
 # the scheduler, so the change takes effect straight away.
 #
@@ -40,8 +48,9 @@
 #
 #   lecture-1:                      
 #     event_datetime:               # REQUIRED - what the site's schedule shows (no valid date = the whole entry is dropped)
+#     type:                         # OPTIONAL - default: worked out from where the deploy lands. lecture | lab | readings. Only needed when the destination path cannot say (e.g. lab material that does not land under labs/). Applies to this entry's own deploy destination, so point that at the session's folder, not a parent holding it
 #     title:                        # OPTIONAL - the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the Schedule, Lectures, Materials and Labs tabs. NO default: without it the row reads just "Session 1"
-#     description:                  # OPTIONAL - a sentence about it, displays on the deployed site's Lectures tab
+#     details:                      # OPTIONAL - a sentence about it. Shows in the Details column of the Schedule tab AND under the session heading on the Lectures tab
 #     tbc: false                    # OPTIONAL - default: false. true = site marks it "(TBC)" next to the event_datetime on the deployed site
 #     deploy:                       # OPTIONAL - omit it for a display-only row (a session with nothing to ship yet)
 #       - course_source_repo:       # REQUIRED
@@ -57,7 +66,7 @@
 #   lab-1:                          
 #     event_datetime:               # REQUIRED
 #     title:                        # OPTIONAL
-#     description:                  # OPTIONAL
+#     details:                      # OPTIONAL
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path: labs/01_session-1   # REQUIRED
@@ -83,6 +92,9 @@
 # assignments:                      
 #   assignment-1:
 #     title:                        # OPTIONAL - default: the template README's `# ` heading. The assignment's name, beside the slug on the deployed site (students SEE the slug, so keep it short and put the name here)
+#     details:                      # OPTIONAL - a sentence about it, in the Details column of BOTH its schedule rows (out and due), above the links they already carry
+#     show_on_site: true            # OPTIONAL - default: true. false = it hands out, grades and returns exactly as written, and the site says nothing about it at all
+#     tbc: false                    # OPTIONAL - default: false. true = site marks both rows "(TBC)". DISPLAY ONLY: the deadline, the late window and the grading snapshot still fire on the dates below
 #     course_source_repo:           # REQUIRED - the course-org repo it hands out from
 #     cohort_dest_repo:             # OPTIONAL - default: the slug above (here assignment-1)
 #     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
@@ -100,6 +112,8 @@
 #   midterm-exam:
 #     type: exam                    # OPTIONAL - default: special_event. exam | special_event; `exam` colours the row as an exam
 #     title: Midterm exam           # OPTIONAL - default: prettified label
+#     details:                      # OPTIONAL - what the row's Details column says (the room, the format, what to bring). NO default: with none it says nothing
+#     show_on_site: true            # OPTIONAL - default: true. false keeps the row in this file and off the site
 #     event_datetime:               # REQUIRED - bare date -> whole day;
 #                                   # `event_datetime: tbc` -> an undated TBC row
 #
@@ -113,7 +127,9 @@
 
 # archive the org (freezes in place): removes all write permissions, retains all read permissions
 archive:
-  date:                       # optional (default: semester_end + 60 days)
+  event_datetime:             # optional (default: semester_end + 60 days)
+  title: Cohort archived      # optional - the row's Title column
   show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, also sends a notice email 14 days out
-  description: >-             # optional, `{{date}}` is filled in automatically
+  tbc: false                  # optional - true marks the date "(TBC)". Display only: the freeze still happens on the date above
+  details: >-                 # optional, `{{date}}` is filled in automatically
     This cohort is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.

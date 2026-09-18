@@ -14,7 +14,7 @@ not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
-handed-out assignment, a pending one, one handed in off GitHub, one handed in off GitHub
+handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
 an All Materials index nested three directories deep, and - within the released session -
@@ -177,7 +177,7 @@ def _lectures(hosted: dict) -> dict[str, str]:
     released = schedule_plan.PlannedRow(
         when=datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
         subtitle="What a neural network is",
-        description="Perceptrons, activation functions and the chain rule.",
+        details="Perceptrons, activation functions and the chain rule.",
         readings_planned=True,
     )
     pending_readings = schedule_plan.PlannedRow(
@@ -189,7 +189,7 @@ def _lectures(hosted: dict) -> dict[str, str]:
         when=datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
         dests={f"{MATERIALS}/lectures/03_week-3": None},
         subtitle="Convolutions",
-        description="Why weight sharing works.\n\nAnd where it does not.",
+        details="Why weight sharing works.\n\nAnd where it does not.",
         readings_planned=True,
     )
     lab = schedule_plan.PlannedRow(when=datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN))
@@ -243,12 +243,23 @@ def _assignments() -> dict[str, str]:
     that handout creates no repos at all, so `handed_out` never carries their name and
     `site._assignment_entry`'s other half is what publishes the brief."""
     return {
+        # The only one the plan NAMES, so the only one that can carry a declared
+        # `details:` - which rides both its rows, the due row's copy nested a level in.
         "01-assignment-1.md": site._assignment_entry(
             COURSE_ORG,
             COHORT_ORG,
             "assignment-1-f2026",
             datetime(2026, 10, 20, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            found=(
+                "assignment-1",
+                schedule.AssignmentEntry(
+                    due_datetime=datetime(2026, 10, 20, 23, 59, tzinfo=BERLIN),
+                    course_source_repo="assignment-1-f2026",
+                    details="Closed form first, then by gradient descent.",
+                    tbc=True,
+                ),
+            ),
             handed_out=frozenset({"assignment-1"}),
             now=NOW,
         ),
@@ -317,25 +328,33 @@ def _events() -> dict[str, str]:
     end = date(2026, 12, 18)
     archived = end + schedule.ARCHIVE_GRACE
     return {
-        "01-midterm-exam.md": site._exam_entry(
-            "MidTerm Exam", datetime(2026, 11, 2, 9, 0, tzinfo=BERLIN)
+        "01-midterm-exam.md": site._event_row(
+            "exam",
+            "MidTerm Exam",
+            datetime(2026, 11, 2, 9, 0, tzinfo=BERLIN),
+            details="Room A1. Two hours, one double-sided sheet of notes.",
         ),
-        "02-guest-lecture.md": site._special_event_entry(
+        "02-guest-lecture.md": site._event_row(
+            "special_event",
             "Guest lecture: forecasting at scale",
             datetime(2026, 10, 12, 16, 0, tzinfo=BERLIN),
         ),
-        "03-resit-exam.md": site._exam_entry(
-            "Resit Exam", end, tbc=True, dateless=True
+        "03-resit-exam.md": site._event_row(
+            "exam", "Resit Exam", end, tbc=True, dateless=True
         ),
         "term-start.md": site._term_date_entry("Term starts", date(2026, 9, 7)),
         "term-end.md": site._term_date_entry("Term ends", end),
         # Inside its notice window and with a sentence, which is the only shape that
-        # carries `announce: true` - and the only one that puts faculty prose, fenced,
-        # into a document body for Jekyll to compile.
+        # carries `announce: true` - the one row the Updates box takes off the schedule.
         "cohort-archived.md": site._archive_entry(
-            archived,
+            schedule.ArchiveRow(
+                when=archived,
+                details=(
+                    "This cohort goes read-only on {date}. You keep read access to "
+                    "everything."
+                ),
+            ),
             archived - schedule.ARCHIVE_NOTICE,
-            "This cohort goes read-only on {date}. You keep read access to everything.",
         ),
     }
 

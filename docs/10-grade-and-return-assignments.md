@@ -279,7 +279,7 @@ it, and nobody has to be around for it.
 
 ```yaml
 archive:
-  date: 2027-02-16       # optional - default: semester_end + 60 days
+  event_datetime: 2027-02-16   # optional - default: semester_end + 60 days
   show_on_site: true     # optional - default: true. A "Cohort archived" row on the site
 ```
 

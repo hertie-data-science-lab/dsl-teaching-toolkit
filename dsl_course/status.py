@@ -351,8 +351,8 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     # When the whole cohort goes read-only - the one date in this file that acts on
     # every repo in the org, and the one nobody would otherwise think to check.
     archives = (
-        f"archives {sched.archive_date}"
-        if sched.archive_date
+        f"archives {sched.archive.when}"
+        if sched.archive and sched.archive.when
         else "archive not scheduled (write an archive: block)"
     )
     has_due_dates = bool(sched.semester_start or sched.assignments or sched.events)

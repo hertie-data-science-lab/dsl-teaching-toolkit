@@ -1,7 +1,7 @@
 """dsl-course teardown -- close a finished cohort out.
 
-Runs on the cohort's own `archive.date`, fired by the scheduler - and only for a cohort
-whose `schedule.yml` writes an `archive:` block (its `date:` defaults to `semester_end` +
+Runs on the cohort's own archive date, fired by the scheduler - and only for a cohort
+whose `schedule.yml` writes an `archive:` block (its `event_datetime:` defaults to `semester_end` +
 60 days). Archiving is opt-in, so the Archive cohort button is for closing one out early,
 and the only way to close out a cohort that wrote no block. Six steps, in this order, and
 the order is the whole design:
@@ -41,7 +41,7 @@ as it was.
 
 `--dry-run` is the default and prints counts only - always, whatever the date, because
 the counts are how somebody decides whether to ask for a close-out. Only a REAL run
-refuses until the cohort's `archive.date` has arrived; `--force` is a person saying it in
+refuses until the cohort's archive date has arrived; `--force` is a person saying it in
 as many words, which is what an early close-out - and a cohort that never asked to be
 archived - needs.
 
@@ -118,7 +118,7 @@ def archive_notice_title(when: date) -> str:
 
     Here rather than in the scheduler that OPENS it, because the two ends have to spell it
     identically - `issues` addresses an issue by its exact title - and teardown is the end
-    that can never be skipped. The date is in the title so that moving `archive.date` opens
+    that can never be skipped. The date is in the title so that moving the archive date opens
     a notice about the new one rather than silently editing the old one's body."""
     return f"{ARCHIVE_NOTICE_PREFIX}{when}"
 
@@ -160,7 +160,8 @@ def archive_due(sched: schedule.Schedule, today: date) -> bool:
     instead. Where the block is written, the sixty-day grace after `semester_end` is the
     whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to for
     weeks after its last class."""
-    return sched.archive_date is not None and sched.archive_date <= today
+    when = sched.archive.when if sched.archive else None
+    return when is not None and when <= today
 
 
 def _is_template(repo: dict) -> bool:
@@ -326,7 +327,7 @@ def _close_notices(cohort_org: str, dry_run: bool) -> int:
     is not a digest). A title missed here stands open inside a frozen repo for ever, since
     the sweep that would have closed it never runs on a closed-out cohort again.
 
-    The archive notice is the one whose title MOVES: it names a date, and `archive.date`
+    The archive notice is the one whose title MOVES: it names a date, and that date
     can be moved after one is open, which opens a second notice rather than editing the
     first (`archive_notice_title` says why). So every dated notice standing in the repo is
     closed, not just the one for today's date - the earlier one would otherwise be sealed
@@ -443,10 +444,11 @@ def close_out(
         return 0
 
     sched = schedule.load(cohort_org)
+    archives = sched.archive.when if sched.archive else None
     if not archive_due(sched, today or datetime.now(timezone.utc).date()) and not force:
         declared = (
-            f"archives on {sched.archive_date}"
-            if sched.archive_date
+            f"archives on {archives}"
+            if archives
             else "names no archive date - it has no `archive:` block, or none with a "
             "date anything can be derived from"
         )
@@ -490,7 +492,7 @@ def close_out(
         cohort_org,
         closed,
         sealed_on=datetime.now(timezone.utc).date(),
-        archive_date=sched.archive_date,
+        archive_date=archives,
         registrar=registrar,
         propagated=propagated,
     )
