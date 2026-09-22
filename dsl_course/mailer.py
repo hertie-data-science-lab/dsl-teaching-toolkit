@@ -418,12 +418,15 @@ def _send_via_graph(
     cfg: GraphConfig,
     messages: list[Message],
     html: bool = False,
-) -> list[str]:
-    """Send the whole batch on one token. Returns the recipients that actually went out.
+) -> list[int]:
+    """Send the whole batch on one token. Returns the INDEX of every message that went out.
 
-    Addresses, not a count: the caller records who was mailed so a re-run does not mail
-    them again, and a marker written off a count re-mails exactly the recipients that
-    succeeded.
+    Positions, not addresses: one batch may legitimately hold two messages to the SAME
+    address - a student who is unteamed in two open team-formation windows owns one message
+    per window - and a list of addresses cannot say which of the two went out. A caller that
+    records what it sent off such a list records both the moment either of them lands.
+    `send_bulk` maps these back to recipients for the senders whose addresses are unique by
+    construction; `send_indexed` hands them over as they are.
 
     A failed token request raises rather than returning empty: nothing was sent AND nothing
     could be, which is a transport failure, not an empty batch - the two must not read
@@ -433,7 +436,7 @@ def _send_via_graph(
         raise RuntimeError(
             "Microsoft Graph token request failed - check the GRAPH_* secrets. Nothing sent."
         )
-    sent: list[str] = []
+    sent: list[int] = []
     started = time.monotonic()
     for index, msg in enumerate(messages):
         if index:
@@ -450,7 +453,7 @@ def _send_via_graph(
         if _graph_send_one(cfg, token, msg, html):
             log_ok(f"sent -> {len(msg.recipients)} recipient(s)")
             log_person(f"    sent -> {_masked(msg.recipients)}")
-            sent.extend(msg.recipients)
+            sent.append(index)
     return sent
 
 
@@ -499,7 +502,11 @@ def send_bulk(
     `html` sends every body in the batch as HTML - per BATCH, because the two roster
     senders send plain text and the fault mails are all marked up. Recipients and Cc are
     per MESSAGE (see `Message`). Plain 3-tuples are accepted for the roster senders, whose
-    messages carry nobody on Cc. The caller owns the escaping."""
+    messages carry nobody on Cc. The caller owns the escaping.
+
+    ADDRESSES are what comes back, which only says what was sent when no address appears
+    twice in the batch. A caller whose batch can hold two messages to one address wants
+    `send_indexed`."""
     batch = [m if isinstance(m, Message) else Message(*m) for m in messages]
     if dry_run:
         for msg in batch:
@@ -514,7 +521,21 @@ def send_bulk(
         log_ok(f"DRY-RUN previewed {len(batch)} message(s) - nothing sent")
         preflight()
         return [a for msg in batch for a in msg.recipients]
+    return [a for i in send_indexed(batch, html) for a in batch[i].recipients]
 
+
+def send_indexed(messages: list[Message], html: bool = False) -> list[int]:
+    """Send a batch and say WHICH of its messages went out, by position.
+
+    `send_bulk` for a caller that cannot read its own record off addresses: a batch holding
+    two messages to one address (a student unteamed in two team-formation windows) gets one
+    address back however few of them landed, so a claim recorded off that list marks both
+    messages as sent the moment either is. Positions are exact, and the caller built the
+    batch, so it already knows what each one is.
+
+    No `dry_run` and no `sample`: nothing that previews needs to know which messages went
+    out, because none of them did."""
+    batch = [m if isinstance(m, Message) else Message(*m) for m in messages]
     graph = graph_config_from_env()
     if graph is None:
         log_err("No mail transport configured - set the GRAPH_* secrets. Nothing sent.")

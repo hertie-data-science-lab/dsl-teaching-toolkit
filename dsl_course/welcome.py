@@ -18,7 +18,7 @@ from functools import cache
 from pathlib import Path
 
 from .central import CENTRAL, pin_central_ref
-from .gh_contents import get_file_content, put_files
+from .gh_contents import get_file_content, put_file, put_files
 from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
 from .repos import ensure_label
@@ -230,6 +230,42 @@ def _open_formation_slugs(org: str) -> list[str]:
     return open_formation_slugs(text) if text else []
 
 
+JOIN_TEAM_FORM_PATH = ".github/ISSUE_TEMPLATE/02-join-team.yml"
+
+
+def refresh_join_team_form(org: str) -> int:
+    """Re-push JUST the Join-team form, so its Assignment dropdown offers what the cohort's
+    lock says is open RIGHT NOW. Returns the failure count.
+
+    The tick that moves the window calls this (`scheduler._team_formation_phase`), and it
+    has to: the Assignment field is `required`, so a student whose second group assignment
+    opened this quarter of an hour cannot file the issue for it AT ALL until the form
+    offers the slug. Left to the nightly refresh, that is up to 24 hours during which the
+    site shows a callout and the mail links a chooser that refuses them.
+
+    ONE file, deliberately, where `refresh_welcome_workflows` pushes six and ensures three
+    labels: nothing else here moves with the calendar, and this runs on a cohort's clock
+    rather than on a deploy. `put_file` compares blob shas, so a window whose options have
+    not actually changed is written nothing and commits nothing.
+
+    The full refresh keeps doing what it does - bootstrap and the nightly run converge the
+    whole set, this one keeps the dropdown honest between them."""
+    if put_file(
+        org,
+        "welcome",
+        JOIN_TEAM_FORM_PATH,
+        join_team_form(_open_formation_slugs(org)).encode(),
+        "ci: refresh the Join-team form's open assignments",
+    ):
+        return 0
+    log_err(
+        f"the Join-team form in {org} could not be written - it offers whatever it last "
+        f"offered, so a window that has just opened is not selectable until the nightly "
+        f"refresh"
+    )
+    return 1
+
+
 def refresh_welcome_workflows(org: str) -> int:
     """Re-push a cohort's welcome-repo machinery (onboarding workflows + the issue forms
     they parse) from the current templates, as ONE commit - and ensure the routing labels
@@ -242,11 +278,11 @@ def refresh_welcome_workflows(org: str) -> int:
     landed and the other hasn't is not one anybody should be able to check out.
 
     The Join-team form is the one file here that is not the template verbatim: its
-    Assignment field is rendered from the cohort's own lock (`join_team_form`), so the
-    refresh that moves an assignment's window is also what moves the form's options. That
-    makes this run WITH the calendar rather than only with a template change - which is why
-    `put_files` comparing blob shas matters: a cohort whose windows have not moved is
-    written nothing.
+    Assignment field is rendered from the cohort's own lock (`join_team_form`), so this runs
+    WITH the calendar rather than only with a template change - which is why `put_files`
+    comparing blob shas matters: a cohort whose windows have not moved is written nothing.
+    A window that turns BETWEEN these runs is not left to wait for the next one:
+    `refresh_join_team_form` pushes that one file on the tick that moved the lock.
 
     Returns the failure count, so a caller (seed.refresh) can go red rather than report an
     onboarding repo it never managed to converge."""
@@ -266,9 +302,7 @@ def refresh_welcome_workflows(org: str) -> int:
             ".github/workflows/team-formation.yml": welcome_workflow(
                 "welcome/team-formation.yml"
             ).encode(),
-            ".github/ISSUE_TEMPLATE/02-join-team.yml": join_team_form(
-                _open_formation_slugs(org)
-            ).encode(),
+            JOIN_TEAM_FORM_PATH: join_team_form(_open_formation_slugs(org)).encode(),
             ".github/ISSUE_TEMPLATE/config.yml": template(
                 "welcome/ISSUE_TEMPLATE/config.yml"
             ).encode(),

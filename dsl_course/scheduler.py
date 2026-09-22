@@ -92,6 +92,7 @@ from . import (
     team_formation,
     teams,
     teardown,
+    welcome,
 )
 from .assign import provision_all, solution_released
 from .central import CENTRAL, CENTRAL_REF
@@ -1247,6 +1248,29 @@ def _team_formation_phase(
 
     `lock_changed` is `sync_team_lock`'s own blob compare, handed back to `_release_phase`:
     the tick that moves the window is the tick that has to re-render the site showing it.
+    It is true on EXACTLY ONE tick per transition, and it is not a retry flag - by the next
+    tick the lock is current, so the compare is False whatever the render did with it. A
+    site sync that fails on that one tick is therefore not re-attempted on the scheduler's
+    clock; the daily **Sync site** cron is what converges it, which bounds the exposure
+    (students holding a mailed link to a callout the site is not yet showing) at ~24h. Both
+    ends of that are spelled out where it is consumed, in `_release_phase`.
+
+    The FORM moves with the lock, and on the same tick: the Join-team form's Assignment
+    field is a `required` dropdown rendered from the lock, so a window that opened this
+    quarter of an hour is one a student cannot file an issue for until the form offers its
+    slug. `refresh_welcome_workflows` would do it, but only at bootstrap and on the nightly
+    cron - up to a day during which the site shows the callout and the mail links a chooser
+    that refuses them. `refresh_join_team_form` pushes that one file, and only when the lock
+    actually moved.
+
+    THE MAIL CANNOT ABORT THE TICK. `notify_windows` re-raises whatever the transport
+    raised - `mailer` turns a failed Graph token request into a RuntimeError, which is what
+    an expired GRAPH_CLIENT_CERT, a revoked app or a tenant outage all look like - and
+    nothing between here and the cohort loop would have caught it: this phase runs BEFORE
+    `_run_releases`, so every scheduled hand-out, archive and autograde for the cohort would
+    stop until somebody rotated the certificate. Contained exactly as the site sync in
+    `_release_phase` is: logged, counted, and the tick carries on. The claim is released
+    before it reaches here (`notify_windows`), so nothing is recorded as told that was not.
 
     The mail goes out AFTER the lock, and that order matters: the lock is what the
     Join-team form reads, so a student who acts on the message within the minute must not
@@ -1273,9 +1297,15 @@ def _team_formation_phase(
         # `sync_team_lock` logs its own preview and its own failure (it is written from
         # four other places that each need the same line), so there is nothing to say here.
         errors, changed = (0 if write.ok else 1), write.changed
-    errors += team_formation.notify_windows(
-        course_org, cohort_org, sched, windows, now, dry_run=dry_run
-    )
+        if changed:
+            errors += welcome.refresh_join_team_form(cohort_org)
+    try:
+        errors += team_formation.notify_windows(
+            course_org, cohort_org, sched, windows, now, dry_run=dry_run
+        )
+    except Exception as exc:
+        log_err(f"team-formation mail failed in {cohort_org}: {exc}")
+        errors += 1
     return errors, changed
 
 
@@ -1414,6 +1444,14 @@ def _release_phase(
     # are rare - the lock's content moves on exactly two ticks per assignment, the one that
     # opens the window and the one that shuts it - so an unchanged cohort is never
     # re-rendered, and a tick with nothing due still shows a window that has just turned.
+    #
+    # ONE SHOT, and knowingly so. `lock_changed` is a blob compare, not a debt: by the next
+    # tick the lock is current, so it is False again whatever this sync did with it, and a
+    # failure below is never retried on the scheduler's clock. What that costs is bounded
+    # and small - the students were mailed a link to a callout the page is not yet showing,
+    # and the daily **Sync site** cron renders it within ~24h. Making the tick retry would
+    # mean carrying "the site owes a render" somewhere durable, which is a second piece of
+    # cohort state to write, read and get wrong for a page that is a day stale at worst.
     if release_changed or lock_changed:
         # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). This
         # cohort's site-sync failure must be logged and counted, not an unhandled traceback

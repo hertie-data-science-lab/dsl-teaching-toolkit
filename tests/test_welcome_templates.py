@@ -1106,3 +1106,50 @@ def test_a_cohort_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatch)
 
     monkeypatch.setattr(welcome, "get_file_content", boom)
     assert welcome._open_formation_slugs("Org") == []
+
+
+def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
+    # The tick that moves the lock calls this, and it must not turn into the whole seeding
+    # pass: `refresh_welcome_workflows` writes six files and ensures three labels, none of
+    # which moves with the calendar. One file, one commit, one blob compare.
+    from dsl_course import grades, welcome
+
+    lock = grades.team_lock_text({"a3": ("self_select", 4, "open", "2026-10-04")})
+    monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: lock)
+    monkeypatch.setattr(
+        welcome,
+        "put_files",
+        lambda *a, **k: pytest.fail("the whole welcome set was re-pushed"),
+    )
+    monkeypatch.setattr(
+        welcome, "ensure_label", lambda *a, **k: pytest.fail("labels were re-ensured")
+    )
+    written: list[tuple] = []
+    monkeypatch.setattr(
+        welcome,
+        "put_file",
+        lambda org, repo, path, content, msg, **kw: (
+            written.append((org, repo, path, content)) or True
+        ),
+    )
+    assert welcome.refresh_join_team_form("Org") == 0
+    (org, repo, path, content) = written[0]
+    assert (org, repo, path) == ("Org", "welcome", welcome.JOIN_TEAM_FORM_PATH)
+    assert len(written) == 1
+    # And it carries THIS cohort's open slug, which is the whole reason the tick calls it.
+    field = yaml.safe_load(content.decode())["body"]
+    (dropdown,) = [b for b in field if b.get("id") == "assignment"]
+    assert dropdown["type"] == "dropdown" and dropdown["attributes"]["options"] == [
+        "a3"
+    ]
+
+
+def test_a_form_that_could_not_be_written_is_reported(monkeypatch, capsys):
+    # The cohort keeps whatever the form last offered, so a window that just opened is one
+    # nobody can file an issue for - the tick has to go red rather than log-and-go.
+    from dsl_course import welcome
+
+    monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(welcome, "put_file", lambda *a, **k: False)
+    assert welcome.refresh_join_team_form("Org") == 1
+    assert "Join-team form" in capsys.readouterr().err

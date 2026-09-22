@@ -177,6 +177,19 @@ def team_lock_writes(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def join_form_writes(monkeypatch):
+    """The Join-team form's dropdown, re-pushed on the tick that MOVED the lock
+    (`scheduler._team_formation_phase`) - a lock read and a contents write, on a path most
+    of these tests are not about. The orgs it was asked for are what the tests that ARE
+    about it assert on. On the CONSUMER's imported name, per the repo rule."""
+    orgs: list[str] = []
+    monkeypatch.setattr(
+        scheduler.welcome, "refresh_join_team_form", lambda org: orgs.append(org) or 0
+    )
+    return orgs
+
+
+@pytest.fixture(autouse=True)
 def open_windows(monkeypatch):
     """Every tick asks who is still without a team (`team_formation.open_windows`), which
     is students.csv, teams.csv and a definition per assignment - real gh I/O on a path most
@@ -729,6 +742,83 @@ def test_the_lock_is_written_before_the_students_are_told(monkeypatch):
 
 def test_a_send_that_failed_reds_the_tick(monkeypatch):
     monkeypatch.setattr(scheduler.team_formation, "notify_windows", lambda *a, **k: 1)
+    errors, _changed = scheduler._team_formation_phase(
+        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+    )
+    assert errors == 1
+
+
+def test_a_send_that_RAISED_reds_the_tick_and_does_not_abort_it(monkeypatch, capsys):
+    # `notify_windows` re-raises whatever the transport raised - `mailer` turns a failed
+    # Graph token request into a RuntimeError, which is what an expired GRAPH_CLIENT_CERT,
+    # a revoked app and a tenant outage all look like. Uncontained it would leave this
+    # phase raising on EVERY tick, and this phase runs before `_run_releases`.
+    def boom(*a, **k):
+        raise RuntimeError("Microsoft Graph token request failed")
+
+    monkeypatch.setattr(scheduler.team_formation, "notify_windows", boom)
+    errors, changed = scheduler._team_formation_phase(
+        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+    )
+    assert errors == 1 and changed is False
+    assert "Graph token request failed" in capsys.readouterr().err
+
+
+def test_a_certificate_that_expired_does_not_stop_the_cohort_s_releases(monkeypatch):
+    # The whole cost of the missing try. Everything the tick does for this cohort after the
+    # mail - the releases, the archive sweep, the autograde - would stop until somebody
+    # rotated a certificate, and nothing between here and the cohort loop would have caught
+    # it. Red, and the hand-out still ships.
+    def boom(*a, **k):
+        raise RuntimeError("Microsoft Graph token request failed")
+
+    monkeypatch.setattr(scheduler.team_formation, "notify_windows", boom)
+    _formation_tick(monkeypatch, lambda *a, **k: LockWrite(True, False))
+    fired: list[str] = []
+    # After `_formation_tick`, which stubs the same name for its own purposes.
+    monkeypatch.setattr(
+        "dsl_course.scheduler.provision_all",
+        lambda *a, **kw: fired.append("handout") or (0, True),
+    )
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 1
+    assert fired, "the releases never fired behind the failed mail"
+
+
+def test_the_tick_that_moves_the_lock_moves_the_join_team_form_too(
+    monkeypatch, join_form_writes
+):
+    # The form's Assignment field is a REQUIRED dropdown rendered from the lock, so a window
+    # that opened this quarter of an hour is one a student cannot file the issue for at all
+    # until the form offers its slug. Left to the nightly refresh that is up to 24 hours,
+    # with the site showing the callout and the mail linking a chooser that refuses them.
+    monkeypatch.setattr(
+        scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, True)
+    )
+    scheduler._team_formation_phase(
+        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+    )
+    assert join_form_writes == ["Cohort-Org"]
+
+
+def test_a_tick_whose_lock_did_not_move_leaves_the_join_team_form_alone(
+    monkeypatch, join_form_writes, team_lock_writes
+):
+    # The other 190-odd ticks a day. `put_file` would compare blobs and write nothing, but
+    # the lock read to build the form is real I/O on a cohort where nothing turned.
+    scheduler._team_formation_phase(
+        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+    )
+    assert join_form_writes == []
+
+
+def test_a_join_team_form_that_could_not_be_written_reds_the_tick(
+    monkeypatch, join_form_writes
+):
+    monkeypatch.setattr(
+        scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, True)
+    )
+    monkeypatch.setattr(scheduler.welcome, "refresh_join_team_form", lambda org: 1)
     errors, _changed = scheduler._team_formation_phase(
         "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
     )

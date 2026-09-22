@@ -55,6 +55,7 @@ from .gh_contents import read_error
 from .gh_teams import acting_login
 from .grades import ensure_gradebooks, sync_team_lock
 from .log import log_err, log_ok
+from .welcome import refresh_join_team_form
 
 # What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
 # whose header nobody can read (`faults.Unusable`, raised by `gh_contents.read_csv`) and a
@@ -178,7 +179,15 @@ def sync(
             # what a push to `schedule.yml` wakes (classroom-config/dispatch-sync.yml) -
             # and a form answering off a stale mirror either refuses a real team or lets
             # one form for an assignment the template says is individual.
-            errors += 0 if sync_team_lock(course_org, org, dry_run=dry_run).ok else 1
+            lock = sync_team_lock(course_org, org, dry_run=dry_run)
+            errors += 0 if lock.ok else 1
+            # And the FORM with it, when the mirror actually moved. Its Assignment field is
+            # a REQUIRED dropdown rendered from that same mirror, so an assignment this push
+            # has just opened is one nobody can file a Join-team issue for at all until the
+            # dropdown offers the slug - which is the difference between "joinable within a
+            # minute of the push" and "joinable after tonight's refresh".
+            if lock.changed:
+                errors += refresh_join_team_form(org)
             # A private gradebook per onboarded student, from the moment they onboard
             # rather than from the first distribute: it is where every shape's marks and
             # feedback go, and the assignment brief points at it from the day it is

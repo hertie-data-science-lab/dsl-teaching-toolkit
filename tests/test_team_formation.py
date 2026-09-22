@@ -1,10 +1,11 @@
 """The other half of the team-formation window: who has NOT formed a team, and the fault
-that says so while the window is still open.
+that says so.
 
 A parked group handout was silent - `assign.provision_all` logs `[wait] no teams` and
 returns green - so the teaching team heard nothing until somebody asked. These pin the
-three things it has to get right: which assignments earn a window at all, that the
-fault climbs towards the moment formation SHUTS, and that nothing it says names a
+four things it has to get right: which assignments earn a window at all, that the fault
+climbs towards the moment formation SHUTS and STAYS once it has passed, that only a
+window a student can still act on is mailed about, and that nothing it says names a
 person.
 """
 
@@ -138,16 +139,46 @@ def test_a_template_with_no_definition_opens_no_window(cohort):
     assert team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE) == []
 
 
-@pytest.mark.parametrize(
-    "when", [OPENS - timedelta(minutes=1), SHUTS, SHUTS + timedelta(days=1)]
-)
-def test_a_window_that_is_not_open_at_now_is_not_reported(cohort, when):
+def test_a_window_that_has_not_opened_yet_is_not_reported(cohort):
     cohort()
+    when = OPENS - timedelta(minutes=1)
     assert team_formation.open_windows(COURSE, COHORT, _sched(), when) == []
 
 
-def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(cohort):
-    # No `handout_datetime` is no hour from which "form your team now" would be true.
+@pytest.mark.parametrize("when", [SHUTS, SHUTS + timedelta(days=30)])
+def test_a_shut_window_is_still_reported_while_somebody_is_unteamed(cohort, when):
+    # The door shutting is the moment the problem becomes PERMANENT - no team, so no repo,
+    # so nothing to hand in - and a window that disappeared here would be read by the
+    # digest as a fault that cleared. Marked `shut`, so nothing mails about it.
+    cohort()
+    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), when)
+    assert window.shut is True and len(window.waiting) == 4
+
+
+def test_a_shut_window_everybody_teamed_up_for_is_simply_over(cohort):
+    cohort(
+        teams_csv=_rows(
+            ("team-x", "anna-adams"),
+            ("team-x", "ben-baker"),
+            ("team-y", "carla-cohen"),
+            ("team-y", "dan-doyle"),
+        )
+    )
+    assert team_formation.open_windows(COURSE, COHORT, _sched(), SHUTS) == []
+
+
+def test_an_open_window_is_not_marked_shut(cohort):
+    cohort()
+    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+    assert window.shut is False
+
+
+@pytest.mark.parametrize("when", [INSIDE, SHUTS + timedelta(days=1)])
+def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(cohort, when):
+    # No `handout_datetime` is no hour from which "form your team now" would be true. Asked
+    # past the grading pin too: `formation_state` calls both a door that never opens and one
+    # that has shut `closed`, and only the second left anybody standing at it - read as the
+    # second, every hand-handed-out group assignment in the plan would carry a MISSED fault.
     cohort()
     sched = _sched(
         **{
@@ -156,7 +187,7 @@ def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(cohort)
             )
         }
     )
-    assert team_formation.open_windows(COURSE, COHORT, sched, INSIDE) == []
+    assert team_formation.open_windows(COURSE, COHORT, sched, when) == []
 
 
 # -------------------------------------------------------------------------- who waits
@@ -225,6 +256,24 @@ def test_a_teams_csv_that_could_not_be_read_reports_no_windows_at_all(
     assert windows is None
     assert "rate limit" in capsys.readouterr().err
     assert team_formation.window_faults(_sched(), windows) == []
+
+
+def test_a_cohort_with_no_self_select_assignment_reads_neither_csv(cohort, monkeypatch):
+    # `open_windows` runs on EVERY cohort on every tick, and most cohorts' `assignments:`
+    # block declares nothing a student forms a team for. Asking the memoised spec question
+    # first is free (the tick has read every template already); the two contents reads it
+    # would otherwise pay - students.csv and teams.csv, ~192 a day - could only ever
+    # produce an empty list.
+    cohort(spec=GradingSpec(type="individual"))
+
+    def refuse(org):
+        raise AssertionError(
+            "the cohort was read for a plan with no self-select window"
+        )
+
+    monkeypatch.setattr(team_formation.roster, "_roster_text", refuse)
+    monkeypatch.setattr(team_formation.teams, "_teams_text", refuse)
+    assert team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE) == []
 
 
 def test_an_absent_roster_reports_no_windows_rather_than_a_teamed_cohort(cohort):
@@ -373,6 +422,71 @@ def test_the_fault_climbs_the_rungs_towards_the_moment_formation_shuts(cohort):
     ]
 
 
+def test_the_fault_survives_the_close_and_reaches_MISSED(cohort):
+    # The rung above is unreachable unless the fault OUTLIVES the window: `fires` IS the
+    # moment formation shuts, so a fault that only existed while the window was open could
+    # never be read at a `now` past it. And `config_digest.transitions` reads a key that
+    # stops appearing as CLEARED - so a fault that vanished at the close would post the
+    # teaching team a *Cleared* comment at the exact minute five students stopped being
+    # able to form a team at all.
+    cohort(teams_csv=_rows(("team-x", "anna-adams"), ("team-x", "ben-baker")))
+    sched = _sched()
+    after = SHUTS + timedelta(days=3)
+    (fault,) = team_formation.window_faults(
+        sched, team_formation.open_windows(COURSE, COHORT, sched, after)
+    )
+    assert fault.severity(after) is Severity.MISSED
+    assert fault.what == (
+        "team formation has closed and 2 of 4 enrolled student(s) are still without a "
+        "team, across the 1 team(s) that formed"
+    )
+    # Same key as while it was open, so the digest sees one fault that ESCALATED and not a
+    # clear followed by a new appearance.
+    (open_fault,) = team_formation.window_faults(
+        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+    )
+    assert fault.key == open_fault.key
+
+
+def test_the_shut_window_s_fault_clears_when_the_missing_rows_are_written(cohort):
+    # What the fault is FOR: it goes away because somebody did the thing, never because the
+    # calendar moved past it. (The other two ways out are moving the date and taking the
+    # entry out of the plan, and both are edits to schedule.yml.)
+    cohort(
+        teams_csv=_rows(
+            ("team-x", "anna-adams"),
+            ("team-x", "ben-baker"),
+            ("team-y", "carla-cohen"),
+            ("team-y", "dan-doyle"),
+        )
+    )
+    sched = _sched()
+    windows = team_formation.open_windows(
+        COURSE, COHORT, sched, SHUTS + timedelta(days=3)
+    )
+    assert team_formation.window_faults(sched, windows) == []
+
+
+def test_nothing_the_shut_window_s_fault_says_names_a_student(cohort):
+    cohort(teams_csv=_rows(("wizards", "anna-adams")))
+    sched = _sched()
+    (fault,) = team_formation.window_faults(
+        sched,
+        team_formation.open_windows(COURSE, COHORT, sched, SHUTS + timedelta(days=3)),
+    )
+    text = f"{fault.what} {fault.where} {fault.field} {fault.fix()}".casefold()
+    for secret in (
+        "anna",
+        "adams",
+        "ben-baker",
+        "carla",
+        "dan-doyle",
+        "x.edu",
+        "wizards",
+    ):
+        assert secret not in text, f"{secret!r} reached a public surface"
+
+
 # ------------------------------------------------------------------ telling the cohort
 #
 # The first mail this toolkit sends off a CLOCK rather than off somebody's action, so
@@ -397,7 +511,12 @@ class Record:
     `refuse` is how many writes GitHub turns down, which is what another tick's commit
     looks like from here; `on_refuse` is that other tick's content landing. `refuse_from`
     is the write index after which every attempt is refused - a claim that lands and a
-    release that then cannot."""
+    release that then cannot. `race` is the other writer's commit landing BETWEEN the read
+    and the write, which is the case `expected_sha` exists for; it fires once.
+
+    `expected_sha` is honoured as GitHub honours it, because that is the whole protocol
+    under test: a sha that no longer matches is refused, `""` means the file must not exist
+    yet, and None means "look the sha up and overwrite whatever is there"."""
 
     def __init__(
         self,
@@ -405,27 +524,40 @@ class Record:
         refuse: int = 0,
         on_refuse=None,
         refuse_from: int | None = None,
+        race=None,
     ):
         self.text = text
         self.refuse = refuse
         self.on_refuse = on_refuse
         self.refuse_from = refuse_from
+        self.race = race
         self.attempts: list[str] = []
+        self.shas: list[str | None] = []
         self.version = 0
+
+    @property
+    def sha(self) -> str:
+        return f"sha{self.version}" if self.text is not None else ""
 
     def get(self, org, repo, path, ref=""):
         assert path == team_formation.MAILED_PATH
-        return None if self.text is None else (self.text, f"sha{self.version}")
+        return None if self.text is None else (self.text, self.sha)
 
     def put(self, org, repo, path, content, message, expected_sha=None, person=False):
         body = content.decode()
         self.attempts.append(body)
+        self.shas.append(expected_sha)
+        if self.race is not None:
+            self.race, race = None, self.race
+            race(self)
         if self.refuse_from is not None and len(self.attempts) > self.refuse_from:
             return False
         if self.refuse > 0:
             self.refuse -= 1
             if self.on_refuse is not None:
                 self.on_refuse(self)
+            return False
+        if expected_sha is not None and expected_sha != self.sha:
             return False
         self.text = body
         self.version += 1
@@ -442,9 +574,9 @@ class Record:
 class Post:
     """The mail transport, recording every batch it is handed.
 
-    `deliver` is how many of a batch actually go out - `mailer.send_bulk` stops at its own
-    time budget and reports what it managed, which is the routine case the release path
-    exists for."""
+    `deliver` is how many of a batch actually go out - the transport stops at its own time
+    budget and reports what it managed, which is the routine case the release path exists
+    for. It is a PREFIX, as the budget's own stop is."""
 
     def __init__(self, transport: bool = True, deliver: int | None = None, boom=False):
         self.transport = transport
@@ -465,16 +597,21 @@ class Post:
     def send_bulk(
         self, messages, dry_run: bool = False, sample: str | None = None, **kw
     ):
-        if dry_run:
-            # The real preview, so what it prints (and that it preflights) is under test;
-            # `preflight` above is the only part of it stubbed out.
-            self.previews.append(list(messages))
-            return _SEND_BULK(messages, dry_run=True, sample=sample, **kw)
+        # The dry run alone: a real send goes through `send_indexed`, because addresses
+        # cannot tell two messages to one address apart.
+        assert dry_run, (
+            "the real send must ask which MESSAGES went out, not which addresses"
+        )
+        # The real preview, so what it prints (and that it preflights) is under test;
+        # `preflight` above is the only part of it stubbed out.
+        self.previews.append(list(messages))
+        return _SEND_BULK(messages, dry_run=True, sample=sample, **kw)
+
+    def send_indexed(self, messages, html: bool = False):
         self.batches.append(list(messages))
         if self.boom:
             raise RuntimeError("Graph refused the credential")
-        went = messages if self.deliver is None else messages[: self.deliver]
-        return [a for m in went for a in m.recipients]
+        return list(range(len(messages) if self.deliver is None else self.deliver))
 
     @property
     def sent(self) -> list:
@@ -498,6 +635,7 @@ def post(monkeypatch):
             team_formation.mailer, "graph_config_from_env", sender.config
         )
         monkeypatch.setattr(team_formation.mailer, "send_bulk", sender.send_bulk)
+        monkeypatch.setattr(team_formation.mailer, "send_indexed", sender.send_indexed)
         monkeypatch.setattr(team_formation.mailer, "preflight", sender.preflight)
         monkeypatch.setattr(
             team_formation, "course_name_of", lambda org: "Deep Learning"
@@ -609,6 +747,34 @@ def test_a_window_everybody_has_teamed_up_for_does_not_even_read_the_record(
     monkeypatch.setattr(team_formation, "get_file_with_sha", refuse)
     assert _tick() == 0
     assert sender.batches == []
+
+
+def test_a_window_that_has_shut_is_never_mailed_about(cohort, post, monkeypatch):
+    # It is carried only for the teaching team's fault. The Join-team form would refuse the
+    # team this message asks for, so the mail would be asking a cohort for something it
+    # cannot do - and the record is not even read, since nothing could ever be owed off it.
+    cohort()
+
+    def refuse(*a, **k):
+        raise AssertionError("the record was read for a window that has already shut")
+
+    monkeypatch.setattr(team_formation, "get_file_with_sha", refuse)
+    _rec, sender = post()
+    assert _tick(now=SHUTS + timedelta(days=1)) == 0
+    assert sender.batches == [] and sender.previews == []
+
+
+def test_a_press_will_not_mail_a_window_that_has_shut_either(
+    cohort, post, plan, capsys
+):
+    # The button is a second way into the same pass, so the door is shut for it too - and
+    # the refusal reads as "nothing is open", which is exactly what is true.
+    cohort()
+    rec, sender = post()
+    plan()
+    assert _press(now=SHUTS + timedelta(days=1)) == 0
+    assert rec.attempts == [] and sender.batches == []
+    assert "no team-formation window is open" in capsys.readouterr().out
 
 
 def test_a_re_run_mails_nobody(cohort, post):
@@ -753,6 +919,34 @@ def test_a_record_nobody_can_parse_mails_nobody(cohort, post):
     assert sender.batches == [] and rec.attempts == []
 
 
+def test_the_first_claim_of_a_term_does_not_overwrite_a_racing_writer(cohort, post):
+    # `mailed.csv` does not exist until the first window of a cohort's term claims it, and
+    # that is exactly when a faculty press and a tick can both be holding the whole cohort.
+    # An absent file read as "no sha" must be sent to GitHub as NO SHA - which it refuses if
+    # the file has appeared since - and never as "fetch the sha yourself and overwrite",
+    # which is what `put_file` does with None and which would discard the other writer's
+    # rows and mail every unteamed student twice. `grades.sync_team_lock` passes "" for the
+    # same absence and for the same reason.
+    cohort()
+    mine = "2026-09-25T07:00"
+
+    def landed(rec: Record) -> None:
+        # The other writer got there first: the file now exists, holding its own claims.
+        rec.text = team_formation.dump_mailed(
+            dict.fromkeys((("assignment-2", a, "open") for a in ADDRESSES), mine)
+        )
+        rec.version += 1
+
+    rec, sender = post(record=Record(text=None, race=landed))
+    assert _tick() == 0
+    assert sender.batches == [], "every message was already another writer's to send"
+    assert rec.recipients("open") == set(ADDRESSES), "and their rows are still there"
+    assert set(rec.rows.values()) == {mine}, "nobody's claim was overwritten"
+    assert rec.shas[0] == "", (
+        "an absent record claims against no sha, never against None"
+    )
+
+
 def test_a_message_another_tick_claimed_first_is_not_sent_twice(cohort, post):
     # The claim reports what it INSERTED, not what it asked for: the other tick has
     # already taken responsibility for that student's message.
@@ -782,6 +976,41 @@ def test_a_partial_batch_releases_exactly_the_claims_it_did_not_spend(cohort, po
     _rec2, sender2 = post(record=rec)
     assert _tick() == 0
     assert sender2.to == set(ADDRESSES) - went
+
+
+def test_a_batch_that_stops_inside_the_second_window_releases_that_window_s_claims(
+    cohort, post
+):
+    # The one case a per-ADDRESS record cannot survive. Anna is unteamed in both windows, so
+    # she owns two messages to one address, and the batch is ordered window by window. If it
+    # stops after a-1, everybody mailed for a-1 has "gone out" against their address - so
+    # read that way, their a-2 nudge counts as sent, its claim is never released, and
+    # `mailed.csv` says for ever that they were told about an assignment they never heard
+    # of. The record is per MESSAGE, so what stands is exactly what went out.
+    cohort()
+    two = _sched(**{"a-1": _entry(), "a-2": _entry()})
+    rec, _sender = post(deliver=4)
+    assert _tick(sched=two) == 1, "the messages this tick could not send must red it"
+    assert {c[0] for c in rec.rows} == {"a-1"}, "a-2's claims are all given back"
+    assert rec.recipients() == set(ADDRESSES)
+    # And the next tick sends a-2 to everybody, rather than silently never sending it.
+    _rec2, sender2 = post(record=rec)
+    assert _tick(sched=two) == 0
+    assert len(sender2.sent) == 4
+    assert {m.to for m in sender2.sent} == set(ADDRESSES)
+    assert all("a-2" in m.subject for m in sender2.sent)
+
+
+def test_the_public_count_is_per_window_and_not_per_address(cohort, post, capsys):
+    # The same miscount, on the line faculty read: four messages went out, all of them
+    # a-1's, and a-2 is owed to everybody. Counted by address, a-2 would report four of
+    # four mailed - the log agreeing with a record that is wrong.
+    cohort()
+    post(deliver=4)
+    _tick(sched=_sched(**{"a-1": _entry(), "a-2": _entry()}))
+    out = capsys.readouterr().out
+    assert "mailed 4 of 4 student(s) about a-1" in out
+    assert "mailed 0 of 4 student(s) about a-2" in out
 
 
 def test_a_transport_that_raised_gives_every_claim_back(cohort, post):

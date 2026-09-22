@@ -101,13 +101,13 @@ def test_a_permanent_failure_is_not_retried(monkeypatch):
 
 def test_one_throttled_recipient_does_not_stop_the_batch(monkeypatch, capsys):
     # Three attempts for ada, then bo goes through: the batch carries on, and the return
-    # says WHO actually landed.
+    # says WHICH message actually landed.
     _replies(monkeypatch, [(429, {})] * 3 + [(202, {})])
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
     sent = mailer._send_via_graph(
         CFG, [ONE, mailer.Message("bo@x.edu", "Subj", "Body")]
     )
-    assert sent == ["bo@x.edu"]  # ada gave up after three attempts; bo still went out
+    assert sent == [1]  # ada gave up after three attempts; bo still went out
     captured = capsys.readouterr()
     assert "sent -> 1 recipient(s)" in captured.out
     assert "send to 1 recipient(s) failed (429)" in captured.err
@@ -239,7 +239,7 @@ def test_the_batch_is_paced_below_the_graph_rate_limit(monkeypatch, _no_sleeping
     _replies(monkeypatch, [(202, {})] * 3)
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
     messages = [mailer.Message(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
-    assert mailer._send_via_graph(CFG, messages) == [m.to for m in messages]
+    assert mailer._send_via_graph(CFG, messages) == list(range(len(messages)))
     assert _no_sleeping == [mailer._SEND_INTERVAL] * 2  # n-1: the first is not delayed
     assert mailer.time.monotonic() == 2 * mailer._SEND_INTERVAL
 
@@ -255,11 +255,36 @@ def test_a_batch_that_runs_out_of_budget_stops_and_says_re_run(
     # is checked), message three finds it spent.
     monkeypatch.setattr(mailer, "_BATCH_BUDGET", mailer._SEND_INTERVAL / 2)
     messages = [mailer.Message(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
-    assert mailer._send_via_graph(CFG, messages) == ["s0@x.edu", "s1@x.edu"]
+    assert mailer._send_via_graph(CFG, messages) == [0, 1]
     assert (
         "stopped after 2 of 3 message(s) - re-run to continue"
         in capsys.readouterr().err
     )
+
+
+def test_send_indexed_tells_two_messages_to_one_address_apart(
+    monkeypatch, _no_sleeping
+):
+    # The whole reason positions exist. A student unteamed in two open team-formation
+    # windows owns two messages to one address; a batch that stops between them hands back
+    # that address once, and a caller recording what it sent off addresses alone would mark
+    # BOTH messages as delivered - so the second window's claim is never given back and its
+    # record says for ever that they were told.
+    _graph_env(monkeypatch)
+    _replies(monkeypatch, [(202, {})] * 4)
+    monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
+    monkeypatch.setattr(mailer, "_BATCH_BUDGET", mailer._SEND_INTERVAL / 2)
+    batch = [mailer.Message("ada@x.edu", f"Window {i}", "Body") for i in range(3)]
+    assert mailer.send_indexed(batch) == [0, 1]
+    # And `send_bulk`'s addresses cannot say the same thing: one address, three times over.
+    assert set(mailer.send_bulk(batch)) == {"ada@x.edu"}
+
+
+def test_send_indexed_with_no_transport_sends_nothing_and_says_so(monkeypatch, capsys):
+    for key in mailer.GRAPH_ENV:
+        monkeypatch.delenv(key, raising=False)
+    assert mailer.send_indexed([ONE]) == []
+    assert "No mail transport configured" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------- the preflight

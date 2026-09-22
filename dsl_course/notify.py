@@ -797,10 +797,18 @@ def _immediate_intro(
     use" says nothing about whether anybody's term is affected - and the answer differs
     sharply per file (see `faults.CONSEQUENCE`).
 
-    A fault that carries its OWN consequence wins, but only when every fault in the letter
-    carries the same one (`_agreed`): the sentence is written for the whole list ("Until
-    they are fixed: ..."). A mixed letter falls back to the file's, which is true of every
-    fault in it by construction.
+    The consequence is RESOLVED per fault first - its own sentence, or the file's where it
+    carries none - and then only printed if every fault in the letter resolves to the same
+    one (`_agreed`), because it is written for the whole list ("Until they are fixed: ...").
+    A MIXED letter says nothing about consequence at all, which is `_counted`'s treatment of
+    the same case: falling back to the file's sentence there is not a safe default but the
+    false claim over again. One unstaged source and one team-formation window short of its
+    teams, in the same tick, would otherwise tell faculty that a group assignment which has
+    already fired "is not scheduled: nothing releases, hands out or grades from it" - the
+    very sentence `team_formation.CONSEQUENCE` exists because it is exactly false. Joining
+    the two would not help either: "Until they are fixed: A; and B" still reads as both
+    prices being paid for the whole list. So the letter counts the faults and leaves the
+    price to the per-fault blocks below, each of which says what is wrong and what fixes it.
 
     Whether the faults carry a MOMENT is read off them rather than passed in. An
     assignment's `grading_config.yml` is one file here that does - its faults are held back
@@ -815,8 +823,9 @@ def _immediate_intro(
         opening = f"{file} has {what} by the time it is read."
     else:
         opening = f"A recent edit to {file} left {what}."
-    shared = _agreed(f.consequence for f in faults_in)
-    consequence = shared or faults.CONSEQUENCE.get(spec.file, "")
+    consequence = _agreed(
+        f.consequence or faults.CONSEQUENCE.get(spec.file, "") for f in faults_in
+    )
     tail = f" Until they are fixed: {html.escape(consequence)}." if consequence else ""
     return f"<p>{opening}{tail}</p>"
 

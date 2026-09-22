@@ -883,10 +883,14 @@ def test_a_mixed_letter_claims_nothing_about_the_file(wired):
     assert "cannot use" not in sent.one["body"]
 
 
-def test_a_mixed_letter_falls_back_to_the_file_s_own_consequence(wired):
-    # The sentence is written for the WHOLE list ("Until they are fixed: ..."), so one
-    # that is true of half of them would be a claim about the other half. The file's is
-    # true of every fault in it by construction.
+def test_a_mixed_letter_says_nothing_at_all_about_the_consequence(wired):
+    # The sentence is written for the WHOLE list ("Until they are fixed: ..."), so one that
+    # is true of half of them is a claim about the other half. The file's is NOT the safe
+    # default it looks like: schedule.yml's says the entry "is not scheduled: nothing
+    # releases, hands out or grades from it", which is the exact false claim
+    # `team_formation.CONSEQUENCE` exists to replace - so a letter carrying both faults
+    # would tell faculty a group assignment that has already fired was never scheduled.
+    # `_counted` gets the same treatment one line above; this says only what is true.
     dropped = notify.ConfigFault(
         "assignments.assignment-9",
         "`due_datetime: 01/10/2026` is not a date the parser can read",
@@ -899,8 +903,29 @@ def test_a_mixed_letter_falls_back_to_the_file_s_own_consequence(wired):
     routing = notify.route(COHORT, COURSE, both, NOW)
     _mail_config(both, routing, spec=source_digest.SCHEDULE)
     body = sent.one["body"]
-    assert "Until they are fixed: that entry is not scheduled" in body
+    assert "Until they are fixed" not in body
+    assert "is not scheduled" not in body
     assert "no repos are provisioned" not in body
+
+
+def test_two_faults_with_no_consequence_of_their_own_still_get_the_file_s(wired):
+    # The mutation half of the test above: silence is what MIXING costs, not what the
+    # resolution does. Two ordinary schedule.yml faults both resolve to the file's own
+    # sentence, they agree, and the letter still leads with it.
+    faults_in = [
+        notify.ConfigFault(
+            f"assignments.assignment-{n}",
+            "`due_datetime: 01/10/2026` is not a date the parser can read",
+            file="schedule.yml",
+            field="due_datetime",
+            lineno=line,
+        )
+        for n, line in ((8, 12), (9, 30))
+    ]
+    sent = wired(blame={12: "JanG", 30: "JanG"})
+    routing = notify.route(COHORT, COURSE, faults_in, NOW)
+    _mail_config(faults_in, routing, spec=source_digest.SCHEDULE)
+    assert "Until they are fixed: that entry is not scheduled" in sent.one["body"]
 
 
 def test_two_faults_are_one_message_and_the_subject_counts_them(wired):
