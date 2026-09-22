@@ -1264,11 +1264,21 @@ def _team_formation_phase(
 
     `lock_changed` is `sync_team_lock`'s own blob compare, handed on to `_run_releases` as
     `site_stale`: the tick that moves the window is the tick that has to re-render the site
-    showing it."""
+    showing it.
+
+    The mail goes out AFTER the lock, and that order matters: the lock is what the
+    Join-team form reads, so a student who acts on the message within the minute must not
+    find the form still refusing them. It is also the only thing here that can be held -
+    `notify_windows` waits out the cohort's quiet hours - and the window opening on time is
+    not negotiable, while a message arriving at 07:00 rather than 02:00 is."""
     write = sync_team_lock(course_org, cohort_org, sched, now=now, dry_run=dry_run)
     # `sync_team_lock` logs its own preview and its own failure (it is written from four
     # other places that each need the same line), so there is nothing to say here.
-    return (0 if write.ok else 1), write.changed
+    errors = 0 if write.ok else 1
+    errors += team_formation.notify_windows(
+        course_org, cohort_org, sched, windows, now, dry_run=dry_run
+    )
+    return errors, write.changed
 
 
 def _release_phase(

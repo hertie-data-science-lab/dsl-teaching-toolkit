@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import ROSTER_HEADER
 
-from dsl_course import team_formation
+from dsl_course import discovery, team_formation
 from dsl_course.faults import Severity
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import AssignmentEntry, Schedule
@@ -76,6 +76,14 @@ def cohort(monkeypatch):
             team_formation.grades,
             "declared_grading_spec",
             lambda org, template: spec,
+        )
+        # The cap the window carries and the mail prints: `grades.team_cap` falls back to
+        # the COURSE org's assignment_defaults when the template names no size, and that
+        # is a live read of its dsl-course.yml.
+        monkeypatch.setattr(
+            team_formation.grades,
+            "course_assignment_defaults",
+            lambda org: {"max_team_size": 4},
         )
 
     return _wire
@@ -346,3 +354,490 @@ def test_the_fault_climbs_the_rungs_towards_the_moment_formation_shuts(cohort):
         Severity.CRITICAL,
         Severity.MISSED,
     ]
+
+
+# ------------------------------------------------------------------ telling the cohort
+#
+# The first mail this toolkit sends off a CLOCK rather than off somebody's action, so
+# every test below is about a way a whole cohort's inbox could be got wrong: mailed twice,
+# mailed at 2am, mailed after the door shut, mailed with somebody's address in a public
+# log, or recorded as mailed and never sent.
+
+ADDRESSES = ("anna@x.edu", "ben@x.edu", "carla@x.edu", "dan@x.edu")
+# Enrolled and not onboarded: no handle, so by construction no teams.csv row, and the
+# Join-team form would refuse her - she is exactly who the Join-course sentence is for.
+EVE = "eve@x.edu"
+# An auditor gets no assignment repo at all, so there is nothing for her to team up for.
+AUDITOR = "fred@x.edu"
+
+QUIET = datetime(2026, 9, 25, 2, 0, tzinfo=BERLIN)
+NEAR_CLOSE = SHUTS - timedelta(hours=10)
+
+
+class Record:
+    """The cohort's `team-formation/mailed.csv`, as a file that remembers its sha.
+
+    `refuse` is how many writes GitHub turns down, which is what another tick's commit
+    looks like from here; `on_refuse` is that other tick's content landing. `refuse_from`
+    is the write index after which every attempt is refused - a claim that lands and a
+    release that then cannot."""
+
+    def __init__(
+        self,
+        text: str | None = None,
+        refuse: int = 0,
+        on_refuse=None,
+        refuse_from: int | None = None,
+    ):
+        self.text = text
+        self.refuse = refuse
+        self.on_refuse = on_refuse
+        self.refuse_from = refuse_from
+        self.attempts: list[str] = []
+        self.version = 0
+
+    def get(self, org, repo, path, ref=""):
+        assert path == team_formation.MAILED_PATH
+        return None if self.text is None else (self.text, f"sha{self.version}")
+
+    def put(self, org, repo, path, content, message, expected_sha=None, person=False):
+        body = content.decode()
+        self.attempts.append(body)
+        if self.refuse_from is not None and len(self.attempts) > self.refuse_from:
+            return False
+        if self.refuse > 0:
+            self.refuse -= 1
+            if self.on_refuse is not None:
+                self.on_refuse(self)
+            return False
+        self.text = body
+        self.version += 1
+        return True
+
+    @property
+    def rows(self) -> dict:
+        return team_formation.parse_mailed(self.text) if self.text else {}
+
+    def recipients(self, phase: str = "") -> set[str]:
+        return {r for _a, r, p in self.rows if not phase or p == phase}
+
+
+class Post:
+    """The mail transport, recording every batch it is handed.
+
+    `deliver` is how many of a batch actually go out - `mailer.send_bulk` stops at its own
+    time budget and reports what it managed, which is the routine case the release path
+    exists for."""
+
+    def __init__(self, transport: bool = True, deliver: int | None = None, boom=False):
+        self.transport = transport
+        self.deliver = deliver
+        self.boom = boom
+        self.batches: list[list] = []
+
+    def config(self):
+        return object() if self.transport else None
+
+    def send_bulk(self, messages, *a, **kw):
+        self.batches.append(list(messages))
+        if self.boom:
+            raise RuntimeError("Graph refused the credential")
+        went = messages if self.deliver is None else messages[: self.deliver]
+        return [a for m in went for a in m.recipients]
+
+    @property
+    def sent(self) -> list:
+        return [m for batch in self.batches for m in batch]
+
+    @property
+    def to(self) -> set[str]:
+        return {m.to for m in self.sent}
+
+
+@pytest.fixture
+def post(monkeypatch):
+    """The record file and the transport, on the CONSUMER's imported names."""
+
+    def _wire(record: Record | None = None, **kw) -> tuple[Record, Post]:
+        rec = record if record is not None else Record()
+        sender = Post(**kw)
+        monkeypatch.setattr(team_formation, "get_file_with_sha", rec.get)
+        monkeypatch.setattr(team_formation, "put_file", rec.put)
+        monkeypatch.setattr(
+            team_formation.mailer, "graph_config_from_env", sender.config
+        )
+        monkeypatch.setattr(team_formation.mailer, "send_bulk", sender.send_bulk)
+        monkeypatch.setattr(
+            team_formation, "course_name_of", lambda org: "Deep Learning"
+        )
+        return rec, sender
+
+    return _wire
+
+
+def _tick(now=INSIDE, sched=None, dry_run=False) -> int:
+    """One scheduler tick's worth of this pass: read who is waiting, then mail them."""
+    sched = sched or _sched()
+    windows = team_formation.open_windows(COURSE, COHORT, sched, now)
+    return team_formation.notify_windows(
+        COURSE, COHORT, sched, windows, now, dry_run=dry_run
+    )
+
+
+def _already(*claims: tuple[str, str, str]) -> Record:
+    """A record that already carries these `(assignment, recipient, phase)` rows."""
+    return Record(team_formation.dump_mailed(dict.fromkeys(claims, "2026-09-25T07:00")))
+
+
+# ------------------------------------------------------------------- who gets the mail
+
+
+def test_the_mail_goes_to_every_enrolled_student_without_a_team_and_to_nobody_else(
+    cohort, post
+):
+    cohort()
+    _rec, sender = post()
+    assert _tick() == 0
+    assert sender.to == set(ADDRESSES), "the recipients are the window's, not the org's"
+    assert AUDITOR not in sender.to
+    assert len(sender.batches) == 1, "one batch a tick, whatever the windows"
+    assert len(sender.sent) == len(sender.to), "one message per student"
+
+
+def test_a_student_who_has_not_joined_github_is_not_asked_to_form_a_team(cohort, post):
+    # The only thing they could do about this mail is the Join course issue their
+    # enrolment code already asked them for, so a second message naming a step they cannot
+    # reach is noise. It also keeps this set and the fault's counts describing ONE
+    # population - otherwise the mail says five where the digest beside it says four.
+    cohort()
+    _rec, sender = post()
+    assert _tick() == 0
+    assert EVE not in sender.to
+
+
+def test_a_student_who_joins_mid_window_is_asked_on_the_very_next_tick(cohort, post):
+    # Which is why leaving them out costs nothing: the claim is per recipient, so nobody
+    # is skipped for good. They are asked at the moment they can act, not before it.
+    cohort()
+    rec, sender = post()
+    assert _tick() == 0
+    assert EVE not in sender.to
+
+    onboarded = ROSTER.replace(
+        "eve@x.edu,Eve Evans,enrolled,,,,", "eve@x.edu,Eve Evans,enrolled,eve-evans,5,,"
+    )
+    cohort(roster_csv=onboarded)
+    # The SAME record: this is the next tick, carrying what the last one claimed.
+    rec2, sender2 = post(record=rec)
+    assert _tick() == 0
+    assert sender2.to == {EVE}, (
+        "only the newcomer, and not a second copy for anybody else"
+    )
+    assert rec2.recipients(team_formation.PHASE_OPEN) == {*ADDRESSES, EVE}
+
+
+def test_a_student_already_in_a_team_is_not_asked_to_form_one(cohort, post):
+    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+    _rec, sender = post()
+    _tick()
+    assert "anna@x.edu" not in sender.to
+    assert sender.to == {"ben@x.edu", "carla@x.edu", "dan@x.edu"}
+
+
+def test_a_roster_row_somebody_duplicated_gets_one_message(cohort, post):
+    # Two rows, one address (a re-enrolment, a second GitHub account). Keyed on the
+    # handle, this cohort would get two copies of the same mail - and `enrol_codes`
+    # collapses a duplicated row exactly this way.
+    cohort(roster_csv=f"{ROSTER}\nanna@x.edu,Anna Adams,enrolled,anna-second,7,,")
+    _rec, sender = post()
+    _tick()
+    assert len([m for m in sender.sent if m.to == "anna@x.edu"]) == 1
+
+
+def test_a_re_run_mails_nobody(cohort, post):
+    cohort()
+    rec, sender = post()
+    assert _tick() == 0
+    assert _tick() == 0
+    assert len(sender.batches) == 1, "the record is what makes a tick idempotent"
+    assert len(rec.attempts) == 1
+
+
+def test_a_student_who_joined_a_team_since_the_last_tick_is_not_mailed_again(
+    cohort, post
+):
+    cohort()
+    _rec, sender = post()
+    _tick()
+    # She acted on it. The record already holds her `open` row, and she has dropped out of
+    # `waiting` - either alone would be enough, and the reminder below relies on both.
+    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+    assert _tick() == 0
+    assert len(sender.batches) == 1
+
+
+# ------------------------------------------------------------------------ the two phases
+
+
+def test_only_the_open_phase_goes_out_while_the_door_is_still_far_off(cohort, post):
+    cohort()
+    rec, _sender = post()
+    _tick()
+    assert rec.recipients(team_formation.PHASE_REMINDER) == set()
+    assert rec.recipients(team_formation.PHASE_OPEN) == set(ADDRESSES)
+
+
+def test_the_reminder_goes_out_inside_the_last_48_hours_to_whoever_is_still_unteamed(
+    cohort, post
+):
+    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+    rec, sender = post(
+        record=_already(*(("assignment-2", a, "open") for a in ADDRESSES))
+    )
+    assert _tick(now=NEAR_CLOSE) == 0
+    assert sender.to == {"ben@x.edu", "carla@x.edu", "dan@x.edu"}
+    assert rec.recipients(team_formation.PHASE_REMINDER) == sender.to
+    (subject, _body) = (sender.sent[0].subject, sender.sent[0].body)
+    assert subject.startswith("Team formation for assignment-2 closes on 4 Oct")
+
+
+def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phases(
+    cohort, post
+):
+    # Two mails a minute apart is what a reminder must never become. The message is the
+    # OPEN one: a "reminder" to somebody who was never told refers to a mail that does not
+    # exist.
+    cohort()
+    rec, sender = post()
+    short = _sched(
+        **{
+            "assignment-2": AssignmentEntry(
+                course_source_repo="a2-f2026",
+                due_datetime=INSIDE + timedelta(hours=6),
+                handout_datetime=INSIDE - timedelta(hours=1),
+                lines={"due_datetime": 12},
+            )
+        }
+    )
+    assert _tick(sched=short) == 0
+    assert len(sender.sent) == 4, "one message each, not one per phase"
+    assert sender.sent[0].subject.startswith("Form your team for assignment-2")
+    assert rec.recipients("open") == rec.recipients("reminder") == set(ADDRESSES)
+
+
+def test_two_open_windows_are_one_batch_of_one_message_each(cohort, post):
+    cohort()
+    _rec, sender = post()
+    assert _tick(sched=_sched(**{"a-1": _entry(), "a-2": _entry()})) == 0
+    assert len(sender.batches) == 1, (
+        "one send_bulk a tick - one token, one rate limiter"
+    )
+    assert len(sender.sent) == 8
+    assert len({(m.to, m.subject) for m in sender.sent}) == 8
+
+
+# ----------------------------------------------------------------- nothing claimed yet
+
+
+def test_an_org_with_no_mail_transport_claims_nothing_and_is_offered_it_again(
+    cohort, post, capsys
+):
+    # The property that makes this feature inert rather than destructive on a cohort whose
+    # GRAPH_* secrets were never set: asked BEFORE the claim, as enrol_codes asks it.
+    cohort()
+    rec, sender = post(transport=False)
+    assert _tick() == 0
+    assert rec.attempts == [] and sender.batches == []
+    assert "[skip]" in capsys.readouterr().out
+    # The next tick, after somebody wires the transport up, sends the same messages.
+    rec2, sender2 = post(record=rec)
+    assert _tick() == 0
+    assert sender2.to == set(ADDRESSES) and rec2.attempts
+
+
+def test_quiet_hours_hold_the_mail_and_claim_nothing(cohort, post, capsys):
+    # A handout_datetime of 00:00 would otherwise mail a whole cohort at 2am. The WINDOW
+    # is untouched - it opened at its own minute, upstream of this call.
+    cohort()
+    rec, sender = post()
+    assert _tick(now=QUIET) == 0
+    assert rec.attempts == [] and sender.batches == []
+    assert "held until 07:00" in capsys.readouterr().out
+    assert _tick(now=QUIET.replace(hour=9)) == 0
+    assert sender.to == set(ADDRESSES)
+
+
+def test_an_archived_cohort_mails_nobody(cohort, post, monkeypatch):
+    # Its classroom-config is frozen, so the claim could not land anyway - and nobody is
+    # forming a team in a term that is over.
+    cohort()
+    rec, sender = post()
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)
+    assert _tick() == 0
+    assert rec.attempts == [] and sender.batches == []
+
+
+def test_a_record_that_cannot_be_written_mails_nobody(cohort, post):
+    # Claim-then-send means a write GitHub refuses costs a tick, not a duplicate cohort
+    # mail. The next tick retries the lot.
+    cohort()
+    rec, sender = post(record=Record(refuse=team_formation.WRITE_ATTEMPTS))
+    assert _tick() == 1
+    assert sender.batches == []
+    assert len(rec.attempts) == team_formation.WRITE_ATTEMPTS
+
+
+def test_a_record_nobody_can_parse_mails_nobody(cohort, post):
+    # An Excel `;` export of the record read as EMPTY would be a second copy of every
+    # message to every student in the cohort.
+    cohort()
+    rec, sender = post(record=Record("assignment;recipient;phase;mailed_at"))
+    assert _tick() == 1
+    assert sender.batches == [] and rec.attempts == []
+
+
+def test_a_message_another_tick_claimed_first_is_not_sent_twice(cohort, post):
+    # The claim reports what it INSERTED, not what it asked for: the other tick has
+    # already taken responsibility for that student's message.
+    cohort()
+
+    def landed(rec: Record) -> None:
+        rec.text = team_formation.dump_mailed(
+            {("assignment-2", "anna@x.edu", "open"): "x"}
+        )
+
+    _rec, sender = post(record=Record(refuse=1, on_refuse=landed))
+    assert _tick() == 0
+    assert "anna@x.edu" not in sender.to
+    assert sender.to == {"ben@x.edu", "carla@x.edu", "dan@x.edu"}
+
+
+# --------------------------------------------------------------- what the send gave back
+
+
+def test_a_partial_batch_releases_exactly_the_claims_it_did_not_spend(cohort, post):
+    cohort()
+    rec, sender = post(deliver=2)
+    assert _tick() == 1, "students this tick could not reach must red it"
+    went = {m.to for m in sender.sent[:2]}
+    assert rec.recipients() == went, "only the spent claims are left standing"
+    # And the next tick retries those and only those.
+    _rec2, sender2 = post(record=rec)
+    assert _tick() == 0
+    assert sender2.to == set(ADDRESSES) - went
+
+
+def test_a_transport_that_raised_gives_every_claim_back(cohort, post):
+    # Nothing went out at all, and an unreleased claim is a whole cohort silently recorded
+    # as told.
+    cohort()
+    rec, _sender = post(boom=True)
+    with pytest.raises(RuntimeError):
+        _tick()
+    assert rec.rows == {}
+
+
+def test_a_release_that_also_failed_says_which_stamp_to_delete_by_hand(
+    cohort, post, capsys
+):
+    # The one failure that must never be swallowed: the record says these students were
+    # told and they were not, so nothing will ever retry them.
+    cohort()
+    rec, sender = post(record=Record(refuse_from=1), deliver=0)
+    assert _tick() == 1
+    assert len(sender.sent) == 4 and rec.rows, "the claim landed; the send did not"
+    err = capsys.readouterr().err
+    assert "mailed_at=" in err and "delete those rows by hand" in err
+
+
+# -------------------------------------------------------------------------- the wording
+
+
+def _body(cohort, post, **kw) -> tuple[str, str]:
+    cohort()
+    _rec, sender = post()
+    _tick(**kw)
+    return sender.sent[0].subject, sender.sent[0].body
+
+
+def test_the_message_carries_what_a_student_needs_in_order_to_act(cohort, post):
+    subject, body = _body(cohort, post)
+    assert subject == "Form your team for assignment-2 - Deep Learning"
+    assert "the Deep Learning course" in body
+    assert "up to 4 people" in body, "the cap the Join-team form enforces"
+    assert "closes on 4 Oct" in body, "the day, in the cohort's own zone"
+    assert f"https://github.com/{COHORT}/welcome/issues/new/choose" in body
+    assert "pinned 'Teams for assignment-2' issue" in body
+    # No Join-course line: every recipient is onboarded by construction, and a student
+    # who is not enters `waiting` on the tick after they join and is sent this then.
+    assert "Join course" not in body
+    assert len(body.splitlines()) < 20, "a student reads this once, on a phone"
+
+
+def test_the_message_says_nothing_about_working_alone(cohort, post):
+    # Whether a one-person team is allowed is the instructor's call, it is written down
+    # nowhere the toolkit can read, and a mail that guessed would overrule them in the
+    # students' inbox.
+    _subject, body = _body(cohort, post)
+    for word in ("alone", "solo", "yourself", "on your own", "at least", "minimum"):
+        assert word not in body.lower()
+
+
+def test_the_closing_day_is_told_in_the_cohorts_zone(cohort, post):
+    # A window shutting at 00:30 Berlin is the 3rd in UTC and the 4th to everybody reading
+    # the mail.
+    just_after_midnight = datetime(2026, 10, 5, 0, 30, tzinfo=BERLIN)
+    assert team_formation.spoken_date(just_after_midnight, "Europe/Berlin") == "5 Oct"
+    assert team_formation.spoken_date(just_after_midnight, "UTC") == "4 Oct"
+
+
+def test_the_sample_is_placeholders_and_the_same_template_as_the_send(cohort, post):
+    subject, body = team_formation.sample_message(COHORT, "Deep Learning")
+    assert "<assignment>" in subject and "<n>" in body and "<date>" in body
+    assert f"https://github.com/{COHORT}/welcome/issues/new/choose" in body
+
+
+def test_the_dry_run_prints_the_sample_claims_nothing_and_sends_nothing(
+    cohort, post, capsys
+):
+    cohort()
+    rec, sender = post()
+    assert _tick(dry_run=True) == 0
+    out = capsys.readouterr().out
+    assert rec.attempts == [] and sender.batches == []
+    assert "<assignment>" in out, "the sample, never a real body"
+    assert "would mail 4 of 4 enrolled student(s)" in out
+    for address in ADDRESSES:
+        assert address not in out
+
+
+# ------------------------------------------------------------------------ the public log
+
+
+def test_nothing_the_public_log_says_names_a_student(cohort, post, capsys, monkeypatch):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    cohort()
+    _rec, _sender = post(deliver=3)
+    _tick()
+    printed = capsys.readouterr()
+    public = printed.out + printed.err
+    # Not vacuous: the counts and the assignment ARE there, and they are all that is.
+    assert "mailed 3 of 4 student(s) about assignment-2" in public
+    for named in (*ADDRESSES, "Anna Adams", "anna-adams", "a***@x.edu"):
+        assert named not in public, f"{named} reached a world-readable log"
+
+
+def test_the_per_recipient_lines_are_masked_and_verbose_only(cohort, post, capsys):
+    # The mutation half of the test above: the lines DO exist, on the channel a faculty
+    # member opts into locally - so "no address in the public log" is a statement about
+    # where they go, not about a run that logged nothing.
+    cohort()
+    _rec, _sender = post(deliver=3)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DSL_VERBOSE", "1")
+        _tick()
+    verbose = capsys.readouterr().out
+    assert "a***@x.edu" in verbose and "d***@x.edu" in verbose
+    assert "NOT mailed" in verbose, "which of them to chase is per-person detail too"
+    for address in ADDRESSES:
+        assert address not in verbose

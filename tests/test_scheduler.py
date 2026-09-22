@@ -176,6 +176,22 @@ def open_windows(monkeypatch):
     return windows
 
 
+@pytest.fixture(autouse=True)
+def formation_mail(monkeypatch):
+    """The mail an open window sends its unteamed students
+    (`team_formation.notify_windows`): a record file in classroom-config and a Graph
+    batch, on a path most of these tests are not about. Answered "nothing owed", and the
+    calls are what the tests that ARE about the wiring assert on."""
+    calls: list[tuple] = []
+
+    def stub(course_org, cohort_org, sched, windows, now, *, dry_run=False):
+        calls.append((course_org, cohort_org, windows, now, dry_run))
+        return 0
+
+    monkeypatch.setattr(scheduler.team_formation, "notify_windows", stub)
+    return calls
+
+
 def _r(label: str, when: datetime, **kw) -> Release:
     return Release(label=label, when=when, **kw)
 
@@ -520,6 +536,7 @@ def _formation_window(waiting: int, teams: int = 0, enrolled: int = 4):
             for i in range(waiting)
         ),
         enrolled=enrolled,
+        cap=4,
     )
 
 
@@ -587,6 +604,68 @@ def test_a_cohort_still_without_teams_earns_a_fault_on_the_schedule_digest(monke
     assert fault.fires == WHEN + timedelta(hours=8)
     assert fault.severity(WHEN) is faults_mod.Severity.URGENT
     assert "no team has formed yet" in fault.what
+
+
+def test_the_students_are_mailed_about_the_window_the_tick_just_opened(
+    monkeypatch, team_lock_writes, formation_mail
+):
+    windows = [_formation_window(waiting=3)]
+    errors, changed = scheduler._team_formation_phase(
+        "Course-Org", "Cohort-Org", _assignments(), WHEN, False, windows
+    )
+    assert (errors, changed) == (0, False)
+    # The SAME list the fault was filed off, and this tick's own `now` - a mail rendered
+    # against a different moment would name a different closing day.
+    (call,) = formation_mail
+    assert call == ("Course-Org", "Cohort-Org", windows, WHEN, False)
+    assert call[2] is windows
+
+
+def test_the_lock_is_written_before_the_students_are_told(monkeypatch):
+    # A student who acts on the message within the minute must not find the Join-team form
+    # still refusing them: the form reads the lock.
+    order: list[str] = []
+    monkeypatch.setattr(
+        scheduler,
+        "sync_team_lock",
+        lambda *a, **k: order.append("lock") or LockWrite(True, False),
+    )
+    monkeypatch.setattr(
+        scheduler.team_formation,
+        "notify_windows",
+        lambda *a, **k: order.append("mail") or 0,
+    )
+    scheduler._team_formation_phase(
+        "Course-Org", "Cohort-Org", _assignments(), WHEN, False, [_formation_window(1)]
+    )
+    assert order == ["lock", "mail"]
+
+
+def test_a_send_that_failed_reds_the_tick(monkeypatch):
+    monkeypatch.setattr(scheduler.team_formation, "notify_windows", lambda *a, **k: 1)
+    errors, _changed = scheduler._team_formation_phase(
+        "Course-Org", "Cohort-Org", _assignments(), WHEN, False, [_formation_window(1)]
+    )
+    assert errors == 1
+
+
+def test_the_window_still_turns_overnight_and_only_the_mail_is_held(
+    monkeypatch, team_lock_writes, formation_mail
+):
+    # The hold is `notify_windows`' own, and nothing here gates it: the lock the form reads
+    # must move at the window's own minute whatever the hour, or a 00:00 handout leaves the
+    # Join-team form refusing everybody until 07:00.
+    small_hours = WHEN.replace(hour=2)
+    scheduler._team_formation_phase(
+        "Course-Org",
+        "Cohort-Org",
+        _assignments(),
+        small_hours,
+        False,
+        [_formation_window(1)],
+    )
+    assert [c[2] for c in team_lock_writes] == [small_hours]
+    assert formation_mail and formation_mail[0][3] == small_hours
 
 
 def test_the_tick_reads_who_is_waiting_once_and_hands_it_to_both_passes(monkeypatch):

@@ -1787,13 +1787,22 @@ def _window_blurb() -> str:
     )
 
 
+def in_zone(tz_name: str, when: datetime) -> datetime:
+    """The same instant, told in `tz_name` - falling back to DEFAULT_TZ for a name nothing
+    recognises, exactly as the plan's own parse does.
+
+    For a caller holding the zone but not the plan it came out of (`team_formation`'s mail
+    renders one window's closing day and is handed the name alone)."""
+    return when.astimezone(_tz(tz_name))
+
+
 def in_cohort_zone(sched: Schedule, when: datetime) -> datetime:
     """The same instant, told in the cohort's own zone.
 
     The scheduler ticks in UTC, but everything a notification says about time is local by
     definition: a deadline faculty wrote as 08:00 Berlin, and a quiet window where 02:00
     means somebody's actual night rather than 02:00 in a datacentre."""
-    return when.astimezone(_tz(sched.timezone))
+    return in_zone(sched.timezone, when)
 
 
 class _Wanted(NamedTuple):

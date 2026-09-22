@@ -76,6 +76,10 @@ SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs 
 
 It is rewritten by **Sync membership** (which a push to `schedule.yml` triggers), by every **Release assignment**, and by the nightly **Refresh actions** - which is also what moves the window as the term goes on. Change an assignment by editing its own `grading_config.yml` on the template's `solution` branch; this file catches up on the next sync. An assignment whose template does not exist yet is locked to `none`, so no team can be formed for it until the template says what it is.
 
+## `team-formation/mailed.csv` - who has already been emailed about forming a team (generated)
+
+SYSTEM-OWNED, and nobody edits it. One row per message the scheduler has sent (`assignment, recipient, phase, mailed_at`): it is what stops the hourly tick emailing the same student twice, and what lets a message that could not be sent be retried on the next one. Delete a row and that message goes out again.
+
 ## `schedule.yml` - the release plan + due dates + events (optional)
 
 This cohort's whole schedule in one file. Changing a date later is just committing the edit to this file on main (via the GitHub web UI, or a local clone/commit/push).
