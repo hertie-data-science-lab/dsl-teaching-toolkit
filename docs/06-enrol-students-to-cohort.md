@@ -76,7 +76,8 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
   template is created.
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.
 - The teams that exist, and how much room each has, are listed in a pinned **Teams for
-  `<assignment>`** issue in `welcome`; students still without a team are emailed while the
+  `<assignment>`** issue in `welcome` - opened when the window opens, linked from the form,
+  the mail and the assignment's page; students still without a team are emailed while the
   window is open. Both: [09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams).
 - The **Sync membership** workflow then creates a GitHub team per group.
 - A **Release assignment** run then grants each team its shared repo (the template declares `type: group`).

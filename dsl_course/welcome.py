@@ -13,7 +13,7 @@ or a nightly run would clobber a live roster.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from functools import cache
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
 from .repos import ensure_label
 from .roster import CONFIG_REPO
+from .team_formation import TEAM_LIST_LABEL, list_issue_url
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
@@ -138,7 +139,7 @@ WELCOME_LABELS = (
     # itself with "I can't find you on the enrolment roster" - in public, on the one issue
     # the whole cohort is pointed at.
     (
-        "team-list",
+        TEAM_LIST_LABEL,
         "c5def5",
         "Teams for <assignment> - the public team list, maintained by the Form team workflow",
     ),
@@ -175,7 +176,41 @@ def open_formation_slugs(lock_text: str) -> list[str]:
     )
 
 
-def join_team_form(open_slugs: Sequence[str]) -> str:
+# The form's own first sentence, as the reviewed template spells it. It names the team
+# list without being able to link it, because until a cohort's list issue exists there is
+# no URL - so it is the wording a cohort with none receives, and the anchor the real links
+# below are spliced over. Pinned against the template by a test: a rewording there with no
+# rewording here would silently stop the splice.
+TEAM_LIST_SENTENCE = (
+    r"The teams that already exist, and how much room each has left, are listed in the "
+    r"pinned **Teams for \<assignment\>** issue."
+)
+
+
+def _team_list_header(
+    open_slugs: Sequence[str], list_urls: Mapping[str, str] | None
+) -> str:
+    """The header sentence, naming the team list a student can actually open.
+
+    One open assignment is the ordinary case and gets one link inside the sentence; several
+    get a line each, because "listed in these two issues" with both links inline is a
+    sentence nobody reads to the end of. A slug whose list is not known is left out rather
+    than linked to nowhere, and a header that knows none of them is the template's own."""
+    links = [(s, (list_urls or {}).get(s, "")) for s in open_slugs]
+    links = [(s, u) for s, u in links if u]
+    if not links:
+        return TEAM_LIST_SENTENCE
+    lead = "The teams that already exist, and how much room each has left, are listed"
+    if len(links) == 1:
+        slug, url = links[0]
+        return f"{lead} in [Teams for {slug}]({url})."
+    listed = "\n".join(f"        - [Teams for {slug}]({url})" for slug, url in links)
+    return f"{lead} here:\n\n{listed}"
+
+
+def join_team_form(
+    open_slugs: Sequence[str], list_urls: Mapping[str, str] | None = None
+) -> str:
     """The Join-team issue form for a cohort whose open assignments are `open_slugs`.
 
     With any, the Assignment field becomes a dropdown of exactly those: a free-text slug is
@@ -185,8 +220,15 @@ def join_team_form(open_slugs: Sequence[str]) -> str:
     With none, the template's own free-text field is returned untouched. A GitHub dropdown
     needs at least one option - an empty `options:` list is a form GitHub refuses to
     render, which would take the Join-team route away from a cohort entirely rather than
-    merely leave it awkward."""
-    form = template(JOIN_TEAM_FORM)
+    merely leave it awkward.
+
+    `list_urls` links the public team list from the header, by schedule key. The form tells
+    a student to type a team's name "exactly as that issue spells it", so an issue they
+    cannot reach in one click is an instruction they cannot follow - and the list is in the
+    same repo the form is filed in, which is precisely why nobody notices it is missing."""
+    form = template(JOIN_TEAM_FORM).replace(
+        TEAM_LIST_SENTENCE, _team_list_header(open_slugs, list_urls)
+    )
     if not open_slugs:
         return form
     start = form.find(ASSIGNMENT_FIELD_START)
@@ -233,7 +275,21 @@ def _open_formation_slugs(org: str) -> list[str]:
 JOIN_TEAM_FORM_PATH = ".github/ISSUE_TEMPLATE/02-join-team.yml"
 
 
-def refresh_join_team_form(org: str) -> int:
+def _list_urls(org: str, open_slugs: Sequence[str]) -> dict[str, str]:
+    """Each open assignment's team list in this cohort's welcome repo, by schedule key.
+
+    One issue search per OPEN window, which is nearly always one and never many: only a
+    self-select group assignment inside its window is here at all. A caller that has just
+    opened those issues itself passes what it already knows instead (the scheduler's tick)."""
+    found = {}
+    for slug in open_slugs:
+        url = list_issue_url(org, slug)
+        if url:
+            found[slug] = url
+    return found
+
+
+def refresh_join_team_form(org: str, list_urls: Mapping[str, str] | None = None) -> int:
     """Re-push JUST the Join-team form, so its Assignment dropdown offers what the cohort's
     lock says is open RIGHT NOW. Returns the failure count.
 
@@ -249,12 +305,18 @@ def refresh_join_team_form(org: str) -> int:
     not actually changed is written nothing and commits nothing.
 
     The full refresh keeps doing what it does - bootstrap and the nightly run converge the
-    whole set, this one keeps the dropdown honest between them."""
+    whole set, this one keeps the dropdown honest between them.
+
+    `list_urls` is the header's links, handed in by a caller that has just ensured those
+    issues exist (`scheduler._team_formation_phase`) and looked up here otherwise."""
+    slugs = _open_formation_slugs(org)
     if put_file(
         org,
         "welcome",
         JOIN_TEAM_FORM_PATH,
-        join_team_form(_open_formation_slugs(org)).encode(),
+        join_team_form(
+            slugs, list_urls if list_urls is not None else _list_urls(org, slugs)
+        ).encode(),
         "ci: refresh the Join-team form's open assignments",
     ):
         return 0
@@ -302,7 +364,9 @@ def refresh_welcome_workflows(org: str) -> int:
             ".github/workflows/team-formation.yml": welcome_workflow(
                 "welcome/team-formation.yml"
             ).encode(),
-            JOIN_TEAM_FORM_PATH: join_team_form(_open_formation_slugs(org)).encode(),
+            JOIN_TEAM_FORM_PATH: join_team_form(
+                open_now := _open_formation_slugs(org), _list_urls(org, open_now)
+            ).encode(),
             ".github/ISSUE_TEMPLATE/config.yml": template(
                 "welcome/ISSUE_TEMPLATE/config.yml"
             ).encode(),

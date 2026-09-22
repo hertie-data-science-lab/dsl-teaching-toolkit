@@ -38,7 +38,7 @@ from urllib.parse import quote
 import yaml
 from pathspec import GitIgnoreSpec
 
-from . import schedule
+from . import schedule, teams
 from .course import (
     CUTOFF_SENTENCE,
     PUBLISH_FILE,
@@ -105,6 +105,7 @@ from .site_repo import (
     theme_pages,
     yaml_file,
 )
+from .team_formation import list_issue_url
 
 
 def _semester_start(cohort_org: str) -> date:
@@ -989,6 +990,25 @@ def _lecture_entry(
     )
 
 
+def _formed_teams(cohort_org: str, key: str) -> list[tuple[str, int]]:
+    """`(team, members)` for every team formed for `key` so far, by name.
+
+    The same reader `team_formation.open_windows` uses, on the same private file and keyed
+    on the same SCHEDULE key - so the table the site prints, the list issue in `welcome` and
+    the fault the teaching team gets all count one thing.
+
+    Never fatal, and that is the point of catching here: teams.csv is student-written, and a
+    row somebody broke must not take down the render of a cohort's whole website. The
+    callout above still goes out; only the table is missing, and the list issue it links
+    carries the same names."""
+    try:
+        groups = teams.teams_for(teams.load(cohort_org), key)
+    except RuntimeError as exc:
+        log_err(f"could not read {cohort_org}'s teams for {key}: {exc}")
+        return []
+    return sorted((team, len(members)) for team, members in groups.items())
+
+
 def _assignment_entry(
     course_org: str,
     cohort_org: str,
@@ -1234,13 +1254,30 @@ def _assignment_entry(
     # The day, not the moment: it is the same bare date the Join-team form's refusal
     # names (`grades.team_lock_entries`), and an hour would invite a student to read a
     # deadline off a page whose timezone it does not state.
+    #
+    # WHICH teams exist rides with them, off the cohort's private teams.csv: a student
+    # deciding whether to start a team or ask to join one needs to know what is already
+    # there, and the pinned list issue - which says exactly this - lives in a repo they have
+    # to go and find. NAMES AND COUNTS ONLY, never a handle: a team name is student-chosen
+    # and public by construction, and who is in it is not.
     team_fm = ""
     if forming and shuts is not None:
         welcome = welcome_issue_url(cohort_org)
+        cap = team_cap(course_org, spec)
+        listed = "".join(
+            f'  - name: "{q(name)}"\n    members: {members}\n    cap: {cap}\n'
+            for name, members in _formed_teams(cohort_org, found[0])
+        )
+        # The list issue as well as the table: it is where a name is spelt exactly as the
+        # Join-team form demands it be typed, and it is the copy that updates within
+        # seconds of a join rather than on the next site sync.
+        where = list_issue_url(cohort_org, found[0])
         team_fm = (
             f'team_join_url: "{welcome}"\n'
-            f'team_join_cap: "{team_cap(course_org, spec)}"\n'
+            f'team_join_cap: "{cap}"\n'
             f'team_join_closes: "{shuts.date().isoformat()}"\n'
+            + (f'team_list_url: "{where}"\n' if where else "")
+            + (f"teams:\n{listed}" if listed else "")
         )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a

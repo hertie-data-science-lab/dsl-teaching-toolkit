@@ -220,9 +220,36 @@ title: page.title
       You pick your own team for this assignment, of up to {{ page.team_join_cap }} people.
       Open a <strong>Join team</strong> issue in this cohort's <code>welcome</code> repo to start a team
       or join one - team formation closes on {{ page.team_join_closes | date: site.dateformat }}.
-      The pinned team list in that repo shows which teams still have room.
       {% if page.repo_name %}Your team's submission repo appears once the team does.{% endif %}
       </p>
+      {%- comment -%}
+      Which teams exist, so the decision the callout asks for - start one, or join one -
+      can be taken on this page rather than by going to find a repo. Names and counts
+      only: `teams` carries no handle, because this site is public.
+
+      `teams` is its own presence test, like `team_join_url` above: site.py writes it only
+      while the window is open and only when at least one team has formed, so the day the
+      window opens there is no empty table, just the line below pointing at the list.
+
+      The list issue stays beside it and is not replaced by it: it is rewritten within
+      seconds of a join, where this table is as fresh as the last site sync (a push to
+      teams.csv fires one, so minutes), and it spells each name exactly as the Join-team
+      form insists it be typed.
+      {%- endcomment -%}
+      {% if page.teams %}
+      <table>
+        <thead><tr><th>Team</th><th>Places left</th></tr></thead>
+        <tbody>
+        {% for team in page.teams %}
+          {% assign left = team.cap | minus: team.members %}
+          <tr><td>{{ team.name }}</td><td>{% if left > 0 %}{{ left }}{% else %}full{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if page.team_list_url %}
+      <p>The up-to-date list is in <a target="_blank" rel="noopener" href="{{ page.team_list_url }}">Teams for this assignment</a> - type a team's name exactly as it is spelt there.</p>
+      {% endif %}
     </div>
     {% endif %}
 

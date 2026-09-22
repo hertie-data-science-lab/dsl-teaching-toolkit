@@ -431,6 +431,13 @@ jobs:
               // - `dsl_course.issues.find_issue`'s idiom, and the reason the title is fixed:
               // it is the key, so every run finds the one list rather than opening a
               // second. The list is never closed, so the open listing always holds it.
+              //
+              // THE OTHER WRITER opens this issue when the window does, before any join has
+              // happened, so the mail and this form's own header have a URL to link on day
+              // one (`dsl_course.team_formation.ensure_list_issue` and `list_body`). It
+              // renders the same body from the same facts; this one rewrites it from the
+              // rows it just wrote, which is the only state that can be sure what the file
+              // now says. Reword either and they alternate between two wordings.
               const upsertTeamsIssue = async () => {
                 const title = `${TEAMS_ISSUE_PREFIX}${assignment}`;
                 const body = teamsIssueBody(written.rows, written.iAssign, written.iTeam);

@@ -559,15 +559,29 @@ FORMING = datetime(2026, 9, 30, 12, 0, tzinfo=BERLIN)
 SHUT = datetime(2026, 10, 21, 12, 0, tzinfo=BERLIN)
 
 
-def _team_entry(monkeypatch, config: str, *, now: datetime, **kw) -> str:
+def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) -> str:
     """One assignment's page, off the `grading_config.yml` text `config` and a plan that
     hands it out on 22 September and freezes it on 20 October - so `now` alone decides
-    which side of the team-formation window the page is rendered on."""
+    which side of the team-formation window the page is rendered on.
+
+    `teams_csv` is the cohort's private teams.csv, as text, so the table of teams the page
+    prints goes through the real parser the rest of the toolkit reads that file with - or a
+    reader of its own, for the page rendered against a file that could not be read."""
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
     monkeypatch.setattr(
         site, "load_grading_spec", lambda *a: grades.parse_grading_spec(config)
+    )
+    monkeypatch.setattr(
+        site.teams,
+        "_teams_text",
+        teams_csv if callable(teams_csv) else lambda org: teams_csv or None,
+    )
+    monkeypatch.setattr(
+        site,
+        "list_issue_url",
+        lambda org, key: f"https://github.com/{org}/welcome/issues/12",
     )
     sched = Schedule(
         assignments={
@@ -617,6 +631,61 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
     # the lock file gives that form's refusal to name.
     assert 'team_join_cap: "4"' in out
     assert 'team_join_closes: "2026-10-20"' in out
+
+
+def test_the_teams_that_exist_are_listed_beside_the_invitation(monkeypatch):
+    # The decision the callout asks for - start a team, or join one - cannot be taken
+    # without knowing what is already there, and teams.csv is private. Names and counts, so
+    # the page answers it without publishing who is in which team.
+    out = _team_entry(
+        monkeypatch,
+        SELF_SELECT_GROUP,
+        now=FORMING,
+        teams_csv=(
+            "assignment,team,github_handle\n"
+            "assignment-3,team-alpha,ada-l\n"
+            "assignment-3,team-alpha,bo-b\n"
+            "assignment-3,team-bravo,cy-c\n"
+        ),
+    )
+    assert "teams:\n" in out
+    assert '  - name: "team-alpha"\n    members: 2\n    cap: 4\n' in out
+    assert '  - name: "team-bravo"\n    members: 1\n    cap: 4\n' in out
+    # The list issue too: it is where each name is spelt exactly as the Join-team form
+    # insists it be typed, and it updates within seconds of a join.
+    assert 'team_list_url: "https://github.com/Cohort-f2026/welcome/issues/12"' in out
+
+
+def test_no_handle_from_teams_csv_reaches_the_public_page(monkeypatch):
+    # The cohort site is PUBLIC. A team name is student-chosen and public by construction;
+    # who is in it is not, and neither is the `<slug>-<handle>` repo it would name.
+    out = _team_entry(
+        monkeypatch,
+        SELF_SELECT_GROUP,
+        now=FORMING,
+        teams_csv="assignment,team,github_handle\nassignment-3,team-alpha,ada-l\n",
+    )
+    assert "ada-l" not in out
+
+
+def test_a_window_with_no_teams_yet_prints_no_table(monkeypatch):
+    # Day one, which is most of what this page is for: the invitation goes out and there is
+    # nothing to list. `teams:` is its own presence test, so the layout renders no empty
+    # table rather than a heading over nothing.
+    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING)
+    assert "team_join_url" in out and "teams:" not in out
+
+
+def test_a_teams_csv_that_cannot_be_read_still_renders_the_page(monkeypatch, capsys):
+    # teams.csv is student-written and lives behind an API. Neither a broken header nor a
+    # rate limit may take down the render of a cohort's whole website - the callout is the
+    # part that matters, and the list issue it links carries the same names.
+    def boom(org):
+        raise RuntimeError("API rate limit exceeded")
+
+    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING, teams_csv=boom)
+    assert "team_join_url" in out and "teams:" not in out
+    assert "rate limit" in capsys.readouterr().err
 
 
 def test_the_invitation_goes_when_the_window_does(monkeypatch):

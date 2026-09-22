@@ -453,6 +453,8 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "team_join_url",
         "team_join_cap",
         "team_join_closes",
+        "team_list_url",
+        "teams",
     ],
 )
 def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
@@ -1563,6 +1565,28 @@ def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
     # the rules it enforces, and a sentence here would be a second copy of them.
     for phrase in ("alone", "on your own", "solo", "at least", "minimum"):
         assert phrase not in flat.lower(), phrase
+
+
+def test_the_teams_that_exist_are_shown_under_the_invitation(generated):
+    # "Start a team or join one" is not a decision a student can take without knowing what
+    # is already there, and teams.csv is private to the teaching team. The table answers it
+    # in NAMES AND COUNTS - this site is public, and who is in a team is not.
+    page = _front_matter(generated["collections"]["_assignments"]["08-assignment-8.md"])
+    assert page["teams"] == [
+        {"name": "team-alpha", "members": 2, "cap": 4},
+        {"name": "team-bravo", "members": 4, "cap": 4},
+    ]
+    assert page["team_list_url"].endswith("/welcome/issues/12")
+    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
+    arm = layout.split("{% if page.team_join_url %}")[1].split("</div>")[0]
+    flat = " ".join(arm.split())
+    # One row per team, and the free seats computed rather than written - the sync writes
+    # the two counts, so the page cannot print a number that disagrees with the cap the
+    # Join-team form enforces.
+    assert "{% for team in page.teams %}" in flat
+    assert "{% assign left = team.cap | minus: team.members %}" in flat
+    assert "{{ team.name }}" in flat and "full" in flat
+    assert 'href="{{ page.team_list_url }}"' in flat
 
 
 def test_the_schedule_row_names_the_same_day_as_the_page(generated):

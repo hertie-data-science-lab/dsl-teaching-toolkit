@@ -1094,6 +1094,54 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
     ]
 
 
+def test_the_template_still_carries_the_sentence_the_links_are_spliced_over():
+    # The header names the team list; `join_team_form` rewrites that one sentence into a
+    # LINK to it. A rewording in the template with none here would silently stop the
+    # splice and leave every cohort with an issue nobody can click through to.
+    assert welcome.TEAM_LIST_SENTENCE in welcome.template(welcome.JOIN_TEAM_FORM)
+
+
+def test_the_header_links_the_team_list_of_the_one_open_assignment():
+    # "Type its name exactly as that issue spells it" is an instruction a student can only
+    # follow if they can reach the issue - which lives in the very repo they are filing in,
+    # which is exactly why nobody notices it is missing.
+    form = welcome.join_team_form(
+        ["assignment-2"], {"assignment-2": "https://github.com/Org/welcome/issues/12"}
+    )
+    header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
+    assert (
+        "listed in [Teams for assignment-2](https://github.com/Org/welcome/issues/12)."
+        in header
+    )
+    assert "pinned **Teams for" not in header
+
+
+def test_two_open_assignments_get_a_line_each():
+    form = welcome.join_team_form(
+        ["assignment-2", "assignment-3"],
+        {
+            "assignment-2": "https://github.com/Org/welcome/issues/12",
+            "assignment-3": "https://github.com/Org/welcome/issues/13",
+        },
+    )
+    header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
+    assert "listed here:" in header
+    assert (
+        "- [Teams for assignment-2](https://github.com/Org/welcome/issues/12)" in header
+    )
+    assert (
+        "- [Teams for assignment-3](https://github.com/Org/welcome/issues/13)" in header
+    )
+
+
+def test_a_slug_whose_list_is_not_known_is_left_unlinked_rather_than_linked_nowhere():
+    # A cohort seeded before the list existed, or one whose welcome repo could not be
+    # listed this run. The reviewed sentence still reads correctly on its own.
+    form = welcome.join_team_form(["assignment-2"], {})
+    header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
+    assert welcome.TEAM_LIST_SENTENCE in header
+
+
 def test_the_splice_replaces_the_field_and_leaves_the_rest_of_the_form_alone():
     form = welcome.join_team_form(["assignment-2"])
     assert welcome.ASSIGNMENT_FIELD_START in form
@@ -1149,6 +1197,7 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
 
     lock = grades.team_lock_text({"a3": ("self_select", 4, "open", "2026-10-04")})
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: lock)
+    monkeypatch.setattr(welcome, "list_issue_url", lambda org, slug: "")
     monkeypatch.setattr(
         welcome,
         "put_files",
