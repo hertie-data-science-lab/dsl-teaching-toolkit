@@ -755,20 +755,34 @@ def _plural(n: int) -> str:
     return "entry" if n == 1 else "entries"
 
 
+def _agreed(values: Iterable):
+    """The one value they all carry, or None when they do not agree on one.
+
+    The rule both the noun and the consequence below are written to: each is a phrase about
+    the WHOLE list, so one that is true of half of it would be a claim about the other
+    half. Spelled once, because two copies of it are two chances to get the disagreeing
+    case wrong."""
+    uniq = set(values)
+    return next(iter(uniq)) if len(uniq) == 1 else None
+
+
 def _counted(faults_in: list[SourceFault]) -> str:
     """`2 entries the toolkit cannot use`, or what the faults themselves say they are.
 
-    Same rule as the consequence beside it: a fault's own noun wins only when EVERY fault
-    in the letter carries the same one, because this phrase is written for the whole list.
-    A mixed letter falls back to the generic wording, which is true of all of them.
+    A fault's own noun wins only when EVERY fault in the letter carries the same one
+    (`_agreed`), because this phrase is written for the whole list.
 
-    It exists because that generic wording is a claim, not a label: a window short of its
+    It exists because the generic wording is a claim, not a label: a window short of its
     teams sits in an entry the toolkit reads perfectly well, and telling its owner the
     file cannot be used sends them looking for a syntax error instead of at the thing
-    that is actually missing."""
+    that is actually missing. A letter MIXING one of those with a real parse fault is the
+    case where neither wording is true of everything in it, so it gets a third one that
+    says only what they have in common - claiming the file cannot be used would put the
+    false claim back for exactly the fault `noun` was added for."""
     count = len(faults_in)
-    own = {f.noun for f in faults_in}
-    pair = next(iter(own)) if len(own) == 1 else ()
+    pair = _agreed(f.noun for f in faults_in)
+    if pair is None:
+        return f"{count} {'thing' if count == 1 else 'things'} to fix"
     if pair:
         return f"{count} {pair[0] if count == 1 else pair[1]}"
     return f"{count} {_plural(count)} the toolkit cannot use"
@@ -784,10 +798,9 @@ def _immediate_intro(
     sharply per file (see `faults.CONSEQUENCE`).
 
     A fault that carries its OWN consequence wins, but only when every fault in the letter
-    carries the same one: the sentence is written for the whole list ("Until they are
-    fixed: ..."), so one that is true of half of them would be a claim about the other
-    half. A mixed letter falls back to the file's, which is true of every fault in it by
-    construction.
+    carries the same one (`_agreed`): the sentence is written for the whole list ("Until
+    they are fixed: ..."). A mixed letter falls back to the file's, which is true of every
+    fault in it by construction.
 
     Whether the faults carry a MOMENT is read off them rather than passed in. An
     assignment's `grading_config.yml` is one file here that does - its faults are held back
@@ -802,8 +815,7 @@ def _immediate_intro(
         opening = f"{file} has {what} by the time it is read."
     else:
         opening = f"A recent edit to {file} left {what}."
-    own = {f.consequence for f in faults_in}
-    shared = next(iter(own)) if len(own) == 1 else ""
+    shared = _agreed(f.consequence for f in faults_in)
     consequence = shared or faults.CONSEQUENCE.get(spec.file, "")
     tail = f" Until they are fixed: {html.escape(consequence)}." if consequence else ""
     return f"<p>{opening}{tail}</p>"

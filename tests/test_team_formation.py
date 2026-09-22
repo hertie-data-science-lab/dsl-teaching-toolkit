@@ -19,6 +19,7 @@ from conftest import ROSTER_HEADER
 from dsl_course import discovery, team_formation
 from dsl_course.faults import Severity
 from dsl_course.grades import GradingSpec
+from dsl_course.mailer import send_bulk as _SEND_BULK
 from dsl_course.schedule import AssignmentEntry, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -96,10 +97,10 @@ def _rows(*pairs: tuple[str, str], key: str = "assignment-2") -> str:
 # ------------------------------------------------------------------ which windows open
 
 
-def test_an_open_self_select_group_window_is_reported_with_its_boundaries(cohort):
+def test_an_open_self_select_group_window_is_reported_with_when_it_shuts(cohort):
     cohort()
     (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
-    assert (window.key, window.opens, window.closes) == ("assignment-2", OPENS, SHUTS)
+    assert (window.key, window.closes) == ("assignment-2", SHUTS)
     assert (window.teams, window.enrolled) == (0, 4)
 
 
@@ -182,6 +183,22 @@ def test_a_handle_typed_in_another_casing_is_the_same_student(cohort):
     (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
     assert "Carla-Cohen" not in {s.github_handle for s in window.waiting}
     assert window.enrolled == 4 and len(window.waiting) == 3
+
+
+def test_an_auditor_sharing_a_handle_with_a_student_is_still_not_counted(cohort):
+    # The population is one filter over the ENROLLED rows, never a round trip through a
+    # set of handles: a set re-admits every row of the unfiltered roster that happens to
+    # carry the handle, and both numbers this window hands out - `enrolled` and the size
+    # of `waiting` - are printed into a public digest issue and mailed to the teaching
+    # team. Two rows for one person must not read as two people to chase.
+    shared = ROSTER.replace(
+        "fred@x.edu,Fred Frey,auditor,fred-frey,6,,",
+        "fred@x.edu,Fred Frey,auditor,anna-adams,6,,",
+    )
+    cohort(roster_csv=shared)
+    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+    assert window.enrolled == 4
+    assert [s.hertie_email for s in window.waiting].count("fred@x.edu") == 0
 
 
 def test_rows_for_another_assignment_do_not_team_anybody_up(cohort):
@@ -434,11 +451,25 @@ class Post:
         self.deliver = deliver
         self.boom = boom
         self.batches: list[list] = []
+        self.previews: list[list] = []
+        self.preflights = 0
 
     def config(self):
         return object() if self.transport else None
 
-    def send_bulk(self, messages, *a, **kw):
+    def preflight(self):
+        """What a dry run is FOR: `mailer.send_bulk` proves the credential inside its own
+        preview, and a rehearsal that never reaches here validates nothing."""
+        self.preflights += 1
+
+    def send_bulk(
+        self, messages, dry_run: bool = False, sample: str | None = None, **kw
+    ):
+        if dry_run:
+            # The real preview, so what it prints (and that it preflights) is under test;
+            # `preflight` above is the only part of it stubbed out.
+            self.previews.append(list(messages))
+            return _SEND_BULK(messages, dry_run=True, sample=sample, **kw)
         self.batches.append(list(messages))
         if self.boom:
             raise RuntimeError("Graph refused the credential")
@@ -467,6 +498,7 @@ def post(monkeypatch):
             team_formation.mailer, "graph_config_from_env", sender.config
         )
         monkeypatch.setattr(team_formation.mailer, "send_bulk", sender.send_bulk)
+        monkeypatch.setattr(team_formation.mailer, "preflight", sender.preflight)
         monkeypatch.setattr(
             team_formation, "course_name_of", lambda org: "Deep Learning"
         )
@@ -552,6 +584,31 @@ def test_a_roster_row_somebody_duplicated_gets_one_message(cohort, post):
     _rec, sender = post()
     _tick()
     assert len([m for m in sender.sent if m.to == "anna@x.edu"]) == 1
+
+
+def test_a_window_everybody_has_teamed_up_for_does_not_even_read_the_record(
+    cohort, post, monkeypatch
+):
+    # A window stands open for WEEKS, and once the cohort has teamed up there is nothing
+    # left to owe off it - so reading the record on every tick until the grading pin buys
+    # a contents read per cohort per quarter of an hour and nothing else. Exactly
+    # equivalent: `_nudges` iterates `waiting`, so an all-empty `waiting` owes nothing.
+    cohort(
+        teams_csv=_rows(
+            ("team-x", "anna-adams"),
+            ("team-x", "ben-baker"),
+            ("team-y", "carla-cohen"),
+            ("team-y", "dan-doyle"),
+        )
+    )
+    _rec, sender = post()
+
+    def refuse(*a, **k):
+        raise AssertionError("the record was read for a window nobody is waiting on")
+
+    monkeypatch.setattr(team_formation, "get_file_with_sha", refuse)
+    assert _tick() == 0
+    assert sender.batches == []
 
 
 def test_a_re_run_mails_nobody(cohort, post):
@@ -809,6 +866,20 @@ def test_the_dry_run_prints_the_sample_claims_nothing_and_sends_nothing(
     assert "would mail 4 of 4 enrolled student(s)" in out
     for address in ADDRESSES:
         assert address not in out
+
+
+def test_the_dry_run_previews_the_real_batch_and_proves_the_credential(cohort, post):
+    # `mailer.send_bulk`'s OWN preview, not a hand-rolled one: it runs `mailer.preflight`,
+    # which is the only thing that makes a rehearsal say anything about the GRAPH_* secrets
+    # - a preview that returns before the transport is chosen reads the same whether the
+    # certificate is right, wrong or absent. This is the toolkit's first clock-driven
+    # cohort-wide mail, so its rehearsal has to test something.
+    cohort()
+    _rec, sender = post()
+    assert _tick(dry_run=True) == 0
+    assert sender.preflights == 1
+    (previewed,) = sender.previews
+    assert {m.to for m in previewed} == set(ADDRESSES)
 
 
 # ------------------------------------------------------------------------ the public log

@@ -860,10 +860,12 @@ def test_a_window_short_of_teams_is_not_called_an_unusable_entry(wired):
     assert "cannot use" not in sent.one["body"]
 
 
-def test_a_mixed_letter_falls_back_to_the_generic_wording(wired):
-    # Same rule as the consequence beside it: the phrase counts the WHOLE list, so a noun
-    # true of one of them would mis-describe the other. The generic wording is true of
-    # both, because an entry short of teams is also one the plan cannot fire as written.
+def test_a_mixed_letter_claims_nothing_about_the_file(wired):
+    # The phrase counts the WHOLE list, so a noun true of one of them would mis-describe
+    # the other. The generic wording is not the way out: "the toolkit cannot use" is a
+    # CLAIM, and it is false of the window fault - which is the exact false claim `noun`
+    # was added to remove, so a letter mixing the two must not put it back. What is left
+    # is the one thing true of both.
     dropped = notify.ConfigFault(
         "assignments.assignment-9",
         "`due_datetime: 01/10/2026` is not a date the parser can read",
@@ -875,7 +877,10 @@ def test_a_mixed_letter_falls_back_to_the_generic_wording(wired):
     both = [_window_fault(), dropped]
     routing = notify.route(COHORT, COURSE, both, NOW)
     _mail_config(both, routing, spec=source_digest.SCHEDULE)
-    assert "2 entries the toolkit cannot use" in sent.one["subject"]
+    assert "2 things to fix" in sent.one["subject"]
+    assert "cannot use" not in sent.one["subject"]
+    assert "2 things to fix" in sent.one["body"]
+    assert "cannot use" not in sent.one["body"]
 
 
 def test_a_mixed_letter_falls_back_to_the_file_s_own_consequence(wired):

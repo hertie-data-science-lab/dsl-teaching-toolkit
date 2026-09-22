@@ -53,7 +53,7 @@ from .discovery import (
 from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login
-from .grades import ensure_gradebooks, write_team_lock
+from .grades import ensure_gradebooks, sync_team_lock
 from .log import log_err, log_ok
 
 # What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -178,7 +178,7 @@ def sync(
             # what a push to `schedule.yml` wakes (classroom-config/dispatch-sync.yml) -
             # and a form answering off a stale mirror either refuses a real team or lets
             # one form for an assignment the template says is individual.
-            errors += 0 if write_team_lock(course_org, org, dry_run=dry_run) else 1
+            errors += 0 if sync_team_lock(course_org, org, dry_run=dry_run).ok else 1
             # A private gradebook per onboarded student, from the moment they onboard
             # rather than from the first distribute: it is where every shape's marks and
             # feedback go, and the assignment brief points at it from the day it is

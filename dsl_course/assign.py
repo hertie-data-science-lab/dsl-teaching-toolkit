@@ -1861,9 +1861,7 @@ def provision_all(
     # an hour to write a file `put_file` then finds unchanged. Not counted into `failed`:
     # the repos are out, and Sync membership rewrites it on every schedule.yml push anyway.
     if changed:
-        grades.write_team_lock(
-            cohort_org=cohort_org, course_org=master_org, sched=sched
-        )
+        grades.sync_team_lock(cohort_org=cohort_org, course_org=master_org, sched=sched)
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
     # file that doesn't parse raises yaml.YAMLError - which is NOT a RuntimeError. The repos

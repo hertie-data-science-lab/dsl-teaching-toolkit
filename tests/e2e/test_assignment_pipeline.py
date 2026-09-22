@@ -614,7 +614,7 @@ def _lock_state() -> bytes | None:
     """`assignments.lock.yml` as it stands, or None if the cohort has none yet.
 
     Read BEFORE the walk, unlike everything in `_shared_state`: the handout is what moves
-    this file (`assign.provision_all` ends in `grades.write_team_lock`, and every schedule
+    this file (`assign.provision_all` ends in `grades.sync_team_lock`, and every schedule
     push dispatches the membership sync, which writes it too), so by the time distribute
     runs it already carries this run's assignments. Recording it at step 12 would hand back
     the drift instead of the file."""

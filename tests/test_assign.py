@@ -66,7 +66,9 @@ def feedback_issues(monkeypatch):
 def _team_lock_is_current(monkeypatch):
     """The Join-team form's mirror, refreshed beside `record_handout`. Its content has its
     own tests (tests/test_grades.py); a handout test only needs it not to reach the API."""
-    monkeypatch.setattr(assign.grades, "write_team_lock", lambda *a, **k: True)
+    monkeypatch.setattr(
+        assign.grades, "sync_team_lock", lambda *a, **k: grades.LockWrite(True, False)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -2050,9 +2052,10 @@ def test_the_handout_refreshes_the_team_formation_lock(tmp_path, monkeypatch):
     locked: list[tuple] = []
     monkeypatch.setattr(
         assign.grades,
-        "write_team_lock",
+        "sync_team_lock",
         lambda cohort_org, course_org, sched: (
-            locked.append((course_org, cohort_org, sched)) or True
+            locked.append((course_org, cohort_org, sched))
+            or grades.LockWrite(True, False)
         ),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
@@ -2078,8 +2081,8 @@ def test_a_tick_that_handed_nothing_out_does_not_rewrite_the_lock(
     locked: list[tuple] = []
     monkeypatch.setattr(
         assign.grades,
-        "write_team_lock",
-        lambda **kw: locked.append(kw) or True,
+        "sync_team_lock",
+        lambda **kw: locked.append(kw) or grades.LockWrite(True, False),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     monkeypatch.setattr(

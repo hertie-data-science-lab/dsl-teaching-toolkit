@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from dsl_course import faults, roster, sync_membership
+from dsl_course.grades import LockWrite
 
 
 def _stub_course_admins(monkeypatch, rv: int = 0):
@@ -26,7 +27,9 @@ def _team_lock_is_current(monkeypatch):
     tests that are about the sync's own orchestration; the ones that are about the lock
     file itself set their own."""
     monkeypatch.setattr(
-        sync_membership, "write_team_lock", lambda course, cohort, dry_run=False: True
+        sync_membership,
+        "sync_team_lock",
+        lambda course, cohort, dry_run=False: LockWrite(True, False),
     )
 
 
@@ -249,8 +252,10 @@ def test_every_cohorts_sync_refreshes_the_team_formation_lock(monkeypatch):
     locked: list[tuple[str, str]] = []
     monkeypatch.setattr(
         sync_membership,
-        "write_team_lock",
-        lambda course, cohort, dry_run=False: locked.append((course, cohort)) or True,
+        "sync_team_lock",
+        lambda course, cohort, dry_run=False: (
+            locked.append((course, cohort)) or LockWrite(True, False)
+        ),
     )
     monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A", "B"])
     monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
@@ -268,7 +273,9 @@ def test_every_cohorts_sync_refreshes_the_team_formation_lock(monkeypatch):
 
 def test_a_lock_file_that_did_not_land_is_counted(monkeypatch):
     monkeypatch.setattr(
-        sync_membership, "write_team_lock", lambda course, cohort, dry_run=False: False
+        sync_membership,
+        "sync_team_lock",
+        lambda course, cohort, dry_run=False: LockWrite(False, False),
     )
     monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A"])
     monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])

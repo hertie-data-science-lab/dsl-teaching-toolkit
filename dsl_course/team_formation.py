@@ -50,9 +50,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
-from . import config_digest, grades, mailer, roster, schedule, sync_teams, teams
+from . import config_digest, grades, mailer, roster, schedule, teams
 from .course import CONFIG_REPO, SELF_SELECT, course_phrase
-from .discovery import cohort_is_live, course_name_of
+from .discovery import cohort_is_live, course_name_of, welcome_issue_url
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
 from .log import log, log_err, log_ok, log_person, log_step
@@ -99,11 +99,18 @@ class Window:
 
     key: str
     name: str
-    opens: datetime
     closes: datetime
     # Distinct team names with at least one row for `key` in teams.csv.
     teams: int
-    # Enrolled, onboarded roster rows with no teams.csv row for `key`.
+    # Enrolled, onboarded roster rows with no teams.csv row for `key` - and the people the
+    # mail below is addressed to.
+    #
+    # ONBOARDED only, and a student who has not joined GitHub yet is deliberately not asked
+    # to form a team: the only thing they can do about such a mail is the Join course issue
+    # the enrolment code already asked them for, and a second mail naming a step they cannot
+    # reach is noise at best. Nobody is missed by that - the claim is per recipient, so a
+    # student who onboards on day five of a twelve-day window enters `waiting` on the next
+    # tick and is sent the OPEN message then, at the moment they can act on it.
     waiting: tuple[roster.Student, ...]
     # How many enrolled, onboarded rows there are in all - the population `waiting` is a
     # subset of, so a surface can say "3 of 42" without a second read of the roster.
@@ -124,12 +131,10 @@ def open_windows(
     not look" must not be reported as "there is nothing to report". A rate limit on
     teams.csv would otherwise say every student has a team.
 
-    A window is here only when the assignment's template RESOLVES (a template nobody has
-    written declares nothing, and the lock has already locked its form to `none`), the
-    assignment is a group one, its teams are self-selected, and `now` falls inside the
-    window. That last comparison is `schedule.formation_state`'s and is not re-derived
-    here: the lock the Join-team form refuses on, the cohort site's callout and this all
-    have to shut at the same moment.
+    A window is here only when the assignment's teams are SELF-SELECTED
+    (`self_select_keys`) and `now` falls inside the window. That last comparison is
+    `schedule.formation_state`'s and is not re-derived here: the lock the Join-team form
+    refuses on, the cohort site's callout and this all have to shut at the same moment.
     """
     try:
         students = roster.load(cohort_org)
@@ -145,23 +150,18 @@ def open_windows(
             f"({type(exc).__name__}): {exc}"
         )
         return None
-    # The same population every group handout provisions for, built the same way: ENROLLED
-    # is this caller's own filter (an auditor gets no assignment repo at all), and
-    # `sync_teams.known_handles` is the single home of the rest - the onboarded rows, which
-    # are the only accounts teams.csv may name.
-    enrolled_rows = roster.enrolled(students)
-    allowed = sync_teams.known_handles(enrolled_rows)
-    participants = [s for s in students if s.github_handle in allowed]
+    # The same population every group handout provisions for, built the same way and with
+    # the same idiom `assign` and `grades` use: ENROLLED because an auditor gets no
+    # assignment repo at all, ONBOARDED because those are the only accounts teams.csv may
+    # name. One filter over the roster rows, not a round trip through a handle set - that
+    # re-admits any row of the unfiltered list sharing a handle, so an auditor who shares
+    # one with an enrolled student would inflate the counts a public digest prints.
+    participants = [s for s in roster.enrolled(students) if s.onboarded]
     found: list[Window] = []
-    for key, entry in sched.assignments.items():
-        spec = grades.declared_grading_spec(course_org, entry.course_source_repo)
-        if spec is None or not spec.is_group:
-            continue
-        if spec.team_formation_resolved != SELF_SELECT:
-            continue
+    for key in self_select_keys(course_org, sched):
+        entry = sched.assignments[key]
         state, closes = schedule.formation_state(sched, key, now)
-        opens = entry.handout_datetime
-        if state != "open" or opens is None or closes is None:
+        if state != "open" or closes is None:
             continue
         # teams.csv is keyed on the SCHEDULE key, and parsed CASEFOLDED - GitHub logins are
         # case-insensitive, so the roster's own casing is folded to meet it rather than the
@@ -172,17 +172,40 @@ def open_windows(
             Window(
                 key=key,
                 name=schedule.cohort_name(key, entry),
-                opens=opens,
                 closes=closes,
                 teams=len(groups),
                 waiting=tuple(
                     s for s in participants if s.github_handle.casefold() not in teamed
                 ),
                 enrolled=len(participants),
-                cap=grades.team_cap(course_org, spec),
+                cap=grades.team_cap(
+                    course_org,
+                    grades.declared_grading_spec(course_org, entry.course_source_repo),
+                ),
             )
         )
     return found
+
+
+def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
+    """The cohort's assignments whose teams the STUDENTS form, in schedule order.
+
+    A template nobody has written declares nothing and is not one of them - the lock has
+    already locked its form to `none` - and `team_formation_resolved` answers `none` for
+    anything that is not a group assignment, so the shape question and the group question
+    are one test.
+
+    Free to ask: `declared_grading_spec` memoises the template's text per process, and by
+    the time the tick reaches this every one of them has been read already. That is what
+    makes it worth asking BEFORE the team-formation lock is written - a cohort with none
+    of these has a lock nothing on the tick's clock can move."""
+    return [
+        key
+        for key, entry in sched.assignments.items()
+        if (spec := grades.declared_grading_spec(course_org, entry.course_source_repo))
+        is not None
+        and spec.team_formation_resolved == SELF_SELECT
+    ]
 
 
 def window_faults(
@@ -279,33 +302,18 @@ WRITE_ATTEMPTS = 3
 # `(assignment key, casefolded address, phase)` - one row of MAILED_PATH.
 Claim = tuple[str, str, str]
 
-# The Join-team form's own spelling of a date (`spokenDate`, in
-# templates/welcome/team-formation.yml). Written out rather than left to `strftime`, which
-# answers in the runner's locale - and kept the same as the form's, so the mail, the pinned
-# team list and the refusal a late student gets all name one day one way.
-_MONTHS = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
-
 
 def spoken_date(when: datetime, tz_name: str) -> str:
     """`4 Oct`, in the cohort's own zone - what the Join-team form calls the same day.
 
+    The spelling is `grades.spoken_day`'s, which is also the gradebook's and the form's
+    (`spokenDate`, in templates/welcome/team-formation.yml): written out rather than left
+    to `strftime`, which answers in the runner's locale, and shared so the mail, the pinned
+    team list and the refusal a late student gets all name one day one way.
+
     The zone matters at both ends of it: a window shutting at 00:30 Berlin is the 3rd in
     UTC and the 4th to everybody who reads the mail."""
-    local = schedule.in_zone(tz_name, when)
-    return f"{local.day} {_MONTHS[local.month - 1]}"
+    return grades.spoken_day(schedule.in_zone(tz_name, when))
 
 
 def _render(
@@ -329,7 +337,7 @@ def _render(
     nowhere the toolkit can read, and a mail that guessed would be overruling them in the
     students' inbox."""
     course = course_phrase(course_name)
-    welcome = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
+    welcome = welcome_issue_url(cohort_org)
     if phase == PHASE_REMINDER:
         subject = f"Team formation for {assignment} closes on {day}"
         opening = (
@@ -401,22 +409,6 @@ def _phases(window: Window, now: datetime) -> tuple[str, ...]:
     return (PHASE_OPEN,)
 
 
-def _recipients(window: Window) -> list[roster.Student]:
-    """Every enrolled student this window is still waiting on - never the cohort.
-
-    ONBOARDED only, and a student who has not joined GitHub yet is deliberately not asked
-    to form a team: the only thing they can do about this mail is the Join course issue
-    the enrolment code already asked them for, and a second mail naming a step they
-    cannot reach is noise at best.
-
-    Nobody is missed by that. The claim is per recipient, so a student who onboards on day
-    five of a twelve-day window enters `waiting` on the next tick and is sent the OPEN
-    message then - at the moment they can act on it rather than before it. It also keeps
-    this set and the fault's counts talking about one population, instead of the mail
-    saying 45 while the digest beside it says 40."""
-    return list(window.waiting)
-
-
 class _Nudge(NamedTuple):
     """One message this tick owes: which window it is about, the address as the roster
     spells it, that address casefolded (the record's key), and the phases it discharges."""
@@ -452,7 +444,7 @@ def _nudges(
     out: list[_Nudge] = []
     for window in windows:
         seen: set[str] = set()
-        for student in _recipients(window):
+        for student in window.waiting:
             to = student.hertie_email.strip()
             fold = to.casefold()
             if not fold or fold in seen:
@@ -623,14 +615,40 @@ def _course_name(course_org: str) -> str:
         return ""
 
 
-def _preview(
-    cohort_org: str, course_org: str, windows: list[Window], nudges: list[_Nudge]
-) -> None:
-    """The dry run's report: counts a reader can check, and the wording, from placeholders.
+def _messages(
+    nudges: list[_Nudge], cohort_org: str, course_name: str, tz_name: str
+) -> list[mailer.Message]:
+    """The batch these nudges are, rendered once - so the dry run previews exactly the
+    messages a real run would send rather than a description of them."""
+    return [
+        mailer.Message(
+            n.to, *message(n.window, cohort_org, course_name, n.phase, tz_name)
+        )
+        for n in nudges
+    ]
 
-    No address and no name - this is the log of a workflow that runs in a PUBLIC repo. The
-    sample is `sample_message`'s and never one of the bodies about to go out, which is the
-    rule `grades._preview` follows."""
+
+def _preview(
+    cohort_org: str,
+    course_org: str,
+    windows: list[Window],
+    nudges: list[_Nudge],
+    tz_name: str,
+) -> None:
+    """The dry run's report: counts a reader can check, then `send_bulk`'s own preview of
+    the real batch.
+
+    Its own and not a hand-rolled one, which is the whole value of a rehearsal here:
+    `mailer.preflight` runs inside it and PROVES the GRAPH_* secrets, while a preview that
+    returns before the transport is chosen reads the same whether the certificate is right,
+    wrong or absent. This is the toolkit's first clock-driven cohort-wide mail, so its only
+    rehearsal surface has to test something.
+
+    No address and no name reaches the public log either way: `send_bulk` prints counts and
+    subjects, and puts the masked recipients on `log_person`. The sample is
+    `sample_message`'s placeholders and never one of the bodies about to go out, which is
+    the rule `grades._email_updates` follows."""
+    course_name = _course_name(course_org)
     for window in windows:
         owed = [n for n in nudges if n.window.key == window.key]
         phases = ", ".join(sorted({n.phase for n in owed})) or "nothing"
@@ -642,12 +660,12 @@ def _preview(
             f"  {window.name}: would mail {len(owed)} of {population} enrolled "
             f"student(s) ({phases})"
         )
-    subject, body = sample_message(cohort_org, _course_name(course_org))
-    log("  Sample email (placeholders, not a real student):")
-    log(f"    Subject: {subject}")
-    for line in body.splitlines():
-        log(f"    {line}")
-    log_ok("DRY-RUN - nothing claimed, nothing sent")
+    mailer.send_bulk(
+        _messages(nudges, cohort_org, course_name, tz_name),
+        dry_run=True,
+        sample=sample_message(cohort_org, course_name)[1],
+    )
+    log_ok("DRY-RUN - nothing claimed")
 
 
 def notify_windows(
@@ -665,7 +683,12 @@ def notify_windows(
     The order of the guards below IS the safety argument, and every one of them is a thing
     that must not be reachable from a claim:
 
-    1. no window, or a cohort this tick could not read - nothing at all, and no I/O;
+    1. no window, no window anybody is still waiting on, or a cohort this tick could not
+       read - nothing at all, and no I/O. A window stands open for WEEKS, so that second
+       case is most of them: once the cohort has teamed up, the record below would be read
+       on every tick until the grading pin with nothing ever owed off it. It is exactly
+       equivalent - `_nudges` iterates `window.waiting`, so an all-empty `waiting` can only
+       produce an empty list - and it is the same filter `window_faults` already applies;
     2. a record nobody can read - nothing, and the tick goes red. Read as empty it would
        be a second copy of every message to every student in the cohort;
     3. nothing owed - every phase is already recorded, which is what a re-run hits;
@@ -681,7 +704,7 @@ def notify_windows(
     7. the claim, then the send, then the release of whatever the send did not spend. A
        crash between the claim and the send loses a nudge; the other ordering duplicates
        one, to a whole cohort, and that asymmetry is deliberate."""
-    if not windows:
+    if not windows or not any(w.waiting for w in windows):
         return 0
     read = _read_mailed(cohort_org)
     if read is None:
@@ -701,7 +724,7 @@ def notify_windows(
     if not cohort_is_live(cohort_org):
         return 0
     if dry_run:
-        _preview(cohort_org, course_org, windows, nudges)
+        _preview(cohort_org, course_org, windows, nudges, sched.timezone)
         return 0
     if mailer.graph_config_from_env() is None:
         log(
@@ -730,13 +753,7 @@ def notify_windows(
     mine = [n for n in mine if n.phases]
     if not mine:
         return 0
-    course_name = _course_name(course_org)
-    messages = [
-        mailer.Message(
-            n.to, *message(n.window, cohort_org, course_name, n.phase, sched.timezone)
-        )
-        for n in mine
-    ]
+    messages = _messages(mine, cohort_org, _course_name(course_org), sched.timezone)
     try:
         sent = mailer.send_bulk(messages)
     except Exception:

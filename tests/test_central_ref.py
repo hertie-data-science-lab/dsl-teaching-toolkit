@@ -20,6 +20,7 @@ from dsl_course import (
     workflows_place,
 )
 from dsl_course.central import CENTRAL, CENTRAL_REF, CENTRAL_REF_PLACEHOLDER
+from dsl_course.grades import LockWrite
 
 SHA = "0" * 40
 
@@ -295,7 +296,9 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     )
     monkeypatch.setattr(seed, "refresh_classroom_samples", lambda org: 0)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", lambda org, course: 0)
-    monkeypatch.setattr(seed, "write_team_lock", lambda course, cohort: True)
+    monkeypatch.setattr(
+        seed, "sync_team_lock", lambda course, cohort: LockWrite(True, False)
+    )
     return seed.refresh("Course-Org"), rendered
 
 

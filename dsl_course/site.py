@@ -64,6 +64,7 @@ from .discovery import (
     handed_out_assignments,
     list_org_repos,
     live_cohorts,
+    welcome_issue_url,
 )
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
@@ -1235,7 +1236,7 @@ def _assignment_entry(
     # deadline off a page whose timezone it does not state.
     team_fm = ""
     if forming and shuts is not None:
-        welcome = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
+        welcome = welcome_issue_url(cohort_org)
         team_fm = (
             f'team_join_url: "{welcome}"\n'
             f'team_join_cap: "{team_cap(course_org, spec)}"\n'

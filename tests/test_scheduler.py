@@ -124,6 +124,20 @@ def _grading_spec_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _cohort_forms_its_own_teams(monkeypatch):
+    """Whether the cohort has a self-select group assignment at all - the question the tick
+    asks before it writes the team-formation lock. Answered off each template's
+    grading_config.yml, which is real gh I/O, so it is stubbed to the ordinary case: yes,
+    one. The tick only asks whether the list is empty, so the lock is written exactly as it
+    was before the gate; the tests that are ABOUT the gate stub it themselves."""
+    monkeypatch.setattr(
+        scheduler.team_formation,
+        "self_select_keys",
+        lambda course_org, sched: ["assignment-2"],
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_open_notices(monkeypatch):
     """Every tick asks the cohort's `classroom-config` which archive notices are open, so
     it can close one whose date has moved or been taken away
@@ -400,15 +414,33 @@ def test_a_tick_that_provisions_nothing_does_not_re_render_the_site(monkeypatch)
 def _formation_tick(monkeypatch, sync_team_lock):
     """One cohort with a single handed-out assignment, provisioning nothing, and the given
     `sync_team_lock` in place of the fixture's. Hands back the list the site sync records
-    itself in - which on such a tick is empty unless the LOCK moved."""
+    itself in - which on such a tick is empty unless the LOCK moved.
+
+    The plan carries the assignment under `assignments:` as well as a release for it: the
+    lock is written only for a cohort whose plan HAS assignments, and a cohort holding a
+    group assignment declares it there. A release alone was a shape no real schedule.yml
+    produces."""
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
         lambda *a, **kw: (0, False),  # every unit `skipped`, so did_assign stays False
     )
+    plan = Schedule(
+        releases=[_r("w1", WHEN, assignment="assignment-2-f2026")],
+        assignments={
+            "assignment-2": AssignmentEntry(
+                course_source_repo="assignment-2-f2026",
+                handout_datetime=WHEN,
+                # Far past every `now` these tests use: a deadline in the past would drag
+                # the snapshot pass in, which is not what any of them is about.
+                due_datetime=datetime(2027, 6, 1, tzinfo=timezone.utc),
+            )
+        },
+    )
+    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: plan)
+    # The plan names a template, so the handout synthesis resolves it; the tick under test
+    # is about the lock and the render, not about what is in the course org.
     monkeypatch.setattr(
-        scheduler.schedule,
-        "load",
-        lambda cohort: _sched_with([_r("w1", WHEN, assignment="assignment-2-f2026")]),
+        scheduler, "_assignment_template", lambda *a, **k: "assignment-2-f2026"
     )
     monkeypatch.setattr(scheduler, "sync_team_lock", sync_team_lock)
     synced: list[tuple[str, str]] = []
@@ -493,32 +525,81 @@ def test_the_site_render_sees_the_lock_this_tick_just_wrote(monkeypatch):
     assert order == ["lock", "site"]
 
 
-def test_a_windows_boundaries_always_fall_on_a_tick_with_something_due(monkeypatch):
-    # `site_stale` rides on `_run_releases`, which `_release_phase` skips outright when
-    # nothing is due - so the call to action appears on the site only because a window's
-    # two boundaries are guaranteed to be ticks where the synthesised handout is due.
-    # That guarantee is `due_releases` being CUMULATIVE, which is a property of another
-    # pass entirely. Make it once-only and the window would still open on time in the lock
-    # and in the Join-team form, while the site said nothing until the nightly sync -
-    # a silent, student-facing regression with nothing red to show for it.
-    opens = datetime(2026, 9, 22, 7, 0, tzinfo=BERLIN)
-    shuts = datetime(2026, 10, 4, 23, 59, 59, tzinfo=BERLIN)
-    sched = _assignments(
-        **{
-            "assignment-2": AssignmentEntry(
-                course_source_repo="a-f2026",
-                handout_datetime=opens,
-                due_datetime=shuts,
-            )
-        }
+def test_a_cohort_with_nothing_planned_is_not_charged_for_the_lock(monkeypatch):
+    # Most cohorts, for most of a term's planning, carry an empty `assignments:` block -
+    # and each was paying a repo probe and a contents read every quarter of an hour, ~192
+    # a day, to write `assignments:\n  {}` over itself.
+    calls: list[tuple] = []
+    _formation_tick(
+        monkeypatch, lambda *a, **k: calls.append(a) or LockWrite(True, True)
     )
-    monkeypatch.setattr(scheduler, "_assignment_template", lambda *a, **k: "a-f2026")
-    for label, when in (("opens", opens), ("shuts", shuts)):
-        releases = scheduler._handout_releases("Course-Org", "Cohort-Org", sched, when)
-        assert scheduler.due_releases(releases, when), (
-            f"nothing is due on the tick the window {label}, so the site is never "
-            f"re-rendered and the window's state never reaches a student"
-        )
+    monkeypatch.setattr(
+        scheduler.schedule, "load", lambda cohort: Schedule(assignments={})
+    )
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert calls == []
+
+
+def test_the_lock_is_written_for_a_plan_that_declares_no_self_select_assignment(
+    monkeypatch,
+):
+    # The gate is the PLAN, deliberately, and not the tighter "does this cohort have a
+    # self-select assignment". `team_formation` is declared in the COURSE org's
+    # grading_config.yml and no cohort-side dispatcher watches that file - so on the
+    # tighter gate, a course switching its only self-select assignment to `assigned` would
+    # leave the tick with nothing to write, the lock still saying `self_select`, and the
+    # Join-team form still accepting the self-selection faculty had just turned off, until
+    # the nightly refresh a day later.
+    calls: list[tuple] = []
+    _formation_tick(
+        monkeypatch, lambda *a, **k: calls.append(a) or LockWrite(True, True)
+    )
+    monkeypatch.setattr(
+        scheduler.team_formation, "self_select_keys", lambda course_org, sched: []
+    )
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert len(calls) == 1
+
+
+def test_a_lock_change_with_nothing_due_still_re_renders_the_site(monkeypatch):
+    # THE gap the one site sync used to sit inside `_run_releases` for: that pass is
+    # skipped outright on a tick with nothing due, so a window that opened or shut on such
+    # a tick moved the lock and the Join-team form while the site's call to action waited
+    # for the nightly sync - a silent, student-facing regression with nothing red to show
+    # for it. The sync is the phase's now, and reads the lock compare whatever is due.
+    monkeypatch.setattr(
+        "dsl_course.scheduler.provision_all", lambda *a, **kw: (0, False)
+    )
+    # A plan with an assignment in it, so the lock is written - but one that hands out
+    # next year, so `due_releases` is empty and `_run_releases` never runs.
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: Schedule(
+            assignments={
+                "assignment-2": AssignmentEntry(
+                    course_source_repo="assignment-2-f2026",
+                    handout_datetime=datetime(2027, 6, 1, tzinfo=timezone.utc),
+                    due_datetime=datetime(2027, 7, 1, tzinfo=timezone.utc),
+                )
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler, "_assignment_template", lambda *a, **k: "assignment-2-f2026"
+    )
+    monkeypatch.setattr(
+        scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, True)
+    )
+    synced: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site", lambda c, o: synced.append((c, o)) or 0
+    )
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert synced == [("Course-Org", "Cohort-Org")]
 
 
 # ------------------------------------------- the cohort that has not formed a team yet
@@ -528,7 +609,6 @@ def _formation_window(waiting: int, teams: int = 0, enrolled: int = 4):
     return scheduler.team_formation.Window(
         key="assignment-2",
         name="assignment-2",
-        opens=WHEN - timedelta(days=2),
         closes=WHEN + timedelta(hours=8),
         teams=teams,
         waiting=tuple(
@@ -549,9 +629,9 @@ def _formation_release_phase(monkeypatch, windows):
         "_refresh_sheets",
         "_reprivatise_student_repos",
         "_preflight_configs",
-        "_run_releases",
     ):
         monkeypatch.setattr(scheduler, name, lambda *a, **k: 0)
+    monkeypatch.setattr(scheduler, "_run_releases", lambda *a, **k: (0, False))
     monkeypatch.setattr(scheduler, "_assignment_template", lambda *a, **k: "a2-f2026")
     monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
     monkeypatch.setattr(
@@ -611,7 +691,7 @@ def test_the_students_are_mailed_about_the_window_the_tick_just_opened(
 ):
     windows = [_formation_window(waiting=3)]
     errors, changed = scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _assignments(), WHEN, False, windows
+        "Course-Org", "Cohort-Org", _planned(), WHEN, False, windows
     )
     assert (errors, changed) == (0, False)
     # The SAME list the fault was filed off, and this tick's own `now` - a mail rendered
@@ -619,6 +699,12 @@ def test_the_students_are_mailed_about_the_window_the_tick_just_opened(
     (call,) = formation_mail
     assert call == ("Course-Org", "Cohort-Org", windows, WHEN, False)
     assert call[2] is windows
+
+
+def _planned() -> Schedule:
+    """A plan with an assignment in it - the only shape a cohort with a team-formation
+    window ever has, and what the lock write is gated on."""
+    return _assignments(**{"assignment-2": _due(20)})
 
 
 def test_the_lock_is_written_before_the_students_are_told(monkeypatch):
@@ -636,7 +722,7 @@ def test_the_lock_is_written_before_the_students_are_told(monkeypatch):
         lambda *a, **k: order.append("mail") or 0,
     )
     scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _assignments(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
     assert order == ["lock", "mail"]
 
@@ -644,7 +730,7 @@ def test_the_lock_is_written_before_the_students_are_told(monkeypatch):
 def test_a_send_that_failed_reds_the_tick(monkeypatch):
     monkeypatch.setattr(scheduler.team_formation, "notify_windows", lambda *a, **k: 1)
     errors, _changed = scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _assignments(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
     assert errors == 1
 
@@ -659,7 +745,7 @@ def test_the_window_still_turns_overnight_and_only_the_mail_is_held(
     scheduler._team_formation_phase(
         "Course-Org",
         "Cohort-Org",
-        _assignments(),
+        _planned(),
         small_hours,
         False,
         [_formation_window(1)],
@@ -2292,10 +2378,10 @@ def test_dropped_entries_alone_stay_advisory(monkeypatch):
 # ---------------------------------------------- per-cohort isolation (--all-cohorts)
 
 
-def test_run_releases_counts_a_raised_site_sync(monkeypatch):
-    # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). _run_releases
-    # must catch it, count it, and return non-zero - not let the traceback abort the tick
-    # (and, under --all-cohorts, every cohort scheduled after it).
+def test_the_release_phase_counts_a_raised_site_sync(monkeypatch):
+    # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). The phase that
+    # calls it must catch it, count it, and return non-zero - not let the traceback abort
+    # the tick (and, under --all-cohorts, every cohort scheduled after it).
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
         lambda *a, **k: (0, True),  # something changed
@@ -2306,7 +2392,16 @@ def test_run_releases_counts_a_raised_site_sync(monkeypatch):
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
     due = [_r("wk1", WHEN, deploy=[Deploy("cm", "lectures/01", "materials", None)])]
-    assert scheduler._run_releases("Course-Org", "Cohort-Org", due, WHEN, None) == 1
+    # The pass itself is green and says the site moved; the sync beside it is what fails.
+    assert scheduler._run_releases("Course-Org", "Cohort-Org", due, WHEN, None) == (
+        0,
+        True,
+    )
+    monkeypatch.setattr(
+        scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, False)
+    )
+    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: _sched_with(due))
+    assert scheduler.run("Course-Org", "Cohort-Org", WHEN, autograde=False) == 1
 
 
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
@@ -2357,7 +2452,9 @@ def _phase_spies(monkeypatch, sched: Schedule):
     # silently rather than spied, so the sequence they assert stays the release sequence.
     monkeypatch.setattr(scheduler, "_preflight_configs", lambda *a: 0)
     monkeypatch.setattr(
-        scheduler, "_run_releases", lambda *a, **k: calls.append("release") or 0
+        scheduler,
+        "_run_releases",
+        lambda *a, **k: (calls.append("release"), (0, False))[1],
     )
     monkeypatch.setattr(
         scheduler,

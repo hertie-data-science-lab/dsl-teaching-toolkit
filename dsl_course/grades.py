@@ -1905,10 +1905,12 @@ def team_lock_text(entries: dict[str, tuple[str, int, str, str]]) -> str:
     """The lock file's whole text, from
     `{schedule key: (team_formation, cap, window, closes)}`.
 
-    Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: the
-    form's line scanner is the only reader, and it reads a two-space key with four-space
-    scalars under it. Keys sorted, so a re-sync of an unchanged cohort produces an
-    identical blob and `put_file` writes nothing.
+    Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: it is
+    read by a line scanner with no YAML library to hand (the Join-team form's JavaScript),
+    and that scanner reads a two-space key with four-space scalars under it. `parse_team_lock`
+    below is this file's Python reader, and the two are kept together on purpose. Keys
+    sorted, so a re-sync of an unchanged cohort produces an identical blob and `put_file`
+    writes nothing.
 
     `team_formation_closes` is written even when it is empty - the key with nothing after
     it. The scanner reads one shape, and a line that comes and goes is a second shape:
@@ -1927,6 +1929,38 @@ def team_lock_text(entries: dict[str, tuple[str, int, str, str]]) -> str:
             f"    team_formation_closes: {closes}".rstrip(),
         ]
     return "\n".join(lines) + "\n"
+
+
+# The shape `team_lock_text` writes, read back: a two-space key, four-space scalars under
+# it. Every scalar, in one scan, so a second Python caller wanting a different one of them
+# needs no second scanner 250 lines from the writer.
+_LOCK_KEY_RE = re.compile(r"^ {2}([\w.-]+):$")
+_LOCK_SCALAR_RE = re.compile(r"^ {4}([\w.-]+):\s*(.*)$")
+
+
+def parse_team_lock(text: str) -> dict[str, dict[str, str]]:
+    """`assignments.lock.yml` back into `{schedule key: {scalar: value}}`.
+
+    The file's own writer is directly above, which is the whole point of putting its reader
+    here: the format is hand-rolled for a line scanner, so a reader written anywhere else
+    is a second opinion about a shape only this module decides.
+
+    Forgiving in the same way the JavaScript is - a line it does not recognise is skipped,
+    and a comment is cut off the end - because this file is read to decide what a form may
+    OFFER, and a cohort whose lock is half-written is better served by the entries that did
+    parse than by an exception."""
+    entries: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        found = _LOCK_KEY_RE.match(line)
+        if found:
+            current = entries.setdefault(found.group(1), {})
+            continue
+        scalar = _LOCK_SCALAR_RE.match(line)
+        if current is not None and scalar:
+            current[scalar.group(1)] = scalar.group(2).strip()
+    return entries
 
 
 def team_lock_entries(
@@ -2072,17 +2106,6 @@ def sync_team_lock(
             f"it, so it answers from whatever the file last said"
         )
     return LockWrite(ok, changed and ok)
-
-
-def write_team_lock(
-    course_org: str,
-    cohort_org: str,
-    sched: schedule.Schedule | None = None,
-    *,
-    dry_run: bool = False,
-) -> bool:
-    """`sync_team_lock`'s `ok` alone, for the callers that only have to count a failure."""
-    return sync_team_lock(course_org, cohort_org, sched, dry_run=dry_run).ok
 
 
 def _display_moment(at: datetime | None) -> str:
@@ -2514,6 +2537,18 @@ _MONTHS = (
     "Dec",
 )
 
+
+def spoken_day(at: datetime) -> str:
+    """`4 Oct` - the toolkit's own spelling of a day, in whatever zone `at` is already in.
+
+    ONE spelling, because four surfaces name the same day and a student who is told one
+    date by the Join-team form and another by the mail beside it has been told two things.
+    The gradebook's Submitted column, the team-formation mail and the form's refusal all
+    come through here; the form's own JavaScript carries its copy because it cannot import
+    this one."""
+    return f"{at.day} {_MONTHS[at.month - 1]}"
+
+
 _PRIVACY_HEADER = (
     "This gradebook is private to you. It is regenerated each time grades are "
     "distributed; do not edit it."
@@ -2606,7 +2641,7 @@ def _submitted_display(value: object, external: bool = False) -> str:
         moment = datetime.fromisoformat(text)
     except ValueError:
         return text
-    day = f"{moment.day} {_MONTHS[moment.month - 1]}"
+    day = spoken_day(moment)
     return day if "T" not in text and " " not in text else f"{day} {moment:%H:%M}"
 
 

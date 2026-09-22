@@ -351,6 +351,9 @@ def test_the_form_reads_the_lock_file_and_nothing_else():
 
 
 _JSC = shutil.which("osascript")
+# Spelled once and applied as `@needs_js`: every test below that runs the shipped
+# JavaScript needs an engine, and a reason repeated per test is a reason to get wrong.
+needs_js = pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
 
 _LOCK_FILE = """\
 # SYSTEM-OWNED - do not edit.
@@ -401,7 +404,7 @@ def _lock_answers(lock_yml: str | None, slugs: list[str]) -> list[dict | None]:
     return json.loads(run.stdout)
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_the_scanner_reads_every_scalar_for_every_shape():
     # `_LOCK_FILE` predates the formation window, which is what a cohort last synced by an
     # older toolkit looks like: the two window scalars come back unset, and the workflow
@@ -414,7 +417,7 @@ def test_the_scanner_reads_every_scalar_for_every_shape():
     ]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_an_absent_lock_file_is_told_apart_from_an_unknown_slug():
     # Different messages: one is a maintainer's problem, the other a typo in the form.
     (answer,) = _lock_answers(None, ["project"])
@@ -422,7 +425,7 @@ def test_an_absent_lock_file_is_told_apart_from_an_unknown_slug():
     assert _lock_answers("assignments:\n  {}\n", ["project"]) == [None]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_the_scanner_is_not_confused_by_the_files_own_header():
     # Every line of the header is a comment, and the file always carries one.
     from dsl_course import grades
@@ -433,7 +436,7 @@ def test_the_scanner_is_not_confused_by_the_files_own_header():
     ]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_an_empty_close_date_is_still_a_line_the_scanner_reads():
     # The writer emits `team_formation_closes:` with nothing after it rather than dropping
     # the line, so the shape the scanner sees never changes; it has to come back as the
@@ -729,7 +732,7 @@ _TEAMS_CSV = _TEAMS_HEADER + (
 )
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_shut_window_refuses_and_says_which_day_it_shut():
     out = _run_form(
         _lock_for("closed"),
@@ -741,7 +744,7 @@ def test_a_shut_window_refuses_and_says_which_day_it_shut():
     assert "team formation for `assignment-2` closed on 4 Oct." in out["comments"][0]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_window_that_has_not_opened_yet_never_says_it_closed():
     # The close date is in the FUTURE while the window is pending, so the shut wording
     # would tell a student in September that the door closed in October. The two states
@@ -759,7 +762,7 @@ def test_a_window_that_has_not_opened_yet_never_says_it_closed():
     assert "runs until 4 Oct" in said
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_lock_written_before_the_window_existed_still_forms_teams():
     # THE fail-open case. A cohort whose last sync predates the window carries no
     # `team_formation_window:` scalar at all; reading that as closed would take team
@@ -774,7 +777,7 @@ def test_a_lock_written_before_the_window_existed_still_forms_teams():
     assert "assignment-2,team-alpha,stu" in out["writes"][0]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_creating_a_team_whose_name_is_taken_is_refused_not_joined():
     out = _run_form(
         _lock_for("open"),
@@ -788,7 +791,7 @@ def test_creating_a_team_whose_name_is_taken_is_refused_not_joined():
     assert "Join an existing team" in out["comments"][0]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_joining_a_mistyped_name_names_the_team_that_was_meant():
     # The bug this whole field exists for: `teamalpha` for `team-alpha` used to open a
     # second, half-empty team, and nobody found out until the release provisioned both.
@@ -802,7 +805,7 @@ def test_joining_a_mistyped_name_names_the_team_that_was_meant():
     assert "Did you mean **team-alpha** (2/4)?" in out["comments"][0]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     out = _run_form(
         _lock_for("open"),
@@ -815,7 +818,7 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     assert "Create a new team" in out["comments"][0]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 @pytest.mark.parametrize(
     "action,team",
     [("Join an existing team", "team-alpha"), ("Create a new team", "team-beta")],
@@ -829,7 +832,7 @@ def test_both_actions_still_end_in_a_row_in_teams_csv(action, team):
     assert out["writes"][0].endswith(f"assignment-2,{team},stu\n")
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_an_issue_from_a_form_with_no_action_field_is_answered_as_it_always_was():
     # A student's browser can hold a cached copy of the form from before the field. Such
     # an issue must not be refused for saying nothing: it falls back to the old implicit
@@ -858,7 +861,7 @@ def _teams_list(out: dict) -> str:
     return wrote[0]["body"]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_first_join_opens_the_public_team_list():
     out = _run_form(
         _lock_for("open"),
@@ -877,7 +880,7 @@ def test_a_first_join_opens_the_public_team_list():
     assert "- **team-alpha** - 3/4, room for 1" in made["body"]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_list_for_a_window_with_no_close_date_says_only_the_cap():
     out = _run_form(
         _lock_for("open", closes=""),
@@ -888,7 +891,7 @@ def test_a_list_for_a_window_with_no_close_date_says_only_the_cap():
     assert "closes" not in _teams_list(out)
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_second_join_rewrites_the_same_list_rather_than_opening_another():
     first = _run_form(
         _lock_for("open"),
@@ -912,7 +915,7 @@ def test_a_second_join_rewrites_the_same_list_rather_than_opening_another():
     assert "- **team-beta** - 2/4, room for 2" in edit["body"]
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_full_team_is_listed_as_full():
     out = _run_form(
         _lock_for("open", cap=3),
@@ -923,7 +926,7 @@ def test_a_full_team_is_listed_as_full():
     assert "room for" not in _teams_list(out)
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_the_list_is_rebuilt_from_the_rows_not_incremented():
     # THE property that makes a lost update harmless. The concurrency group is per ISSUE
     # on purpose, so two joins can reach the upsert at once and one edit can be lost. A
@@ -948,7 +951,7 @@ def test_the_list_is_rebuilt_from_the_rows_not_incremented():
     assert "1/4" not in edit["body"], "the stale count survived the rewrite"
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_the_list_carries_no_handle_from_the_roster():
     # THE regression guard. `welcome` is PUBLIC and this issue is the one thing in it the
     # whole cohort is pointed at. A team name is student-chosen and public by
@@ -973,7 +976,7 @@ def test_the_list_carries_no_handle_from_the_roster():
     assert "team-alpha" in written and "3/4" in written
 
 
-@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+@needs_js
 def test_a_team_list_that_cannot_be_written_still_reports_the_join_as_done():
     # The membership is already in teams.csv by the time the list is touched. A student
     # must never be told their join failed because a cosmetic list could not be updated -

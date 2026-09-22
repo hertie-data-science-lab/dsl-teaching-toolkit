@@ -122,7 +122,7 @@ Things whose *literal spelling* is depended on from outside Python:
 - **An ARCHIVED `classroom-config`** is a cohort's "finished" marker. `teardown` archives it
   last, after everything else it freezes; `discovery.cohort_is_live` is what every
   course-side sweep that WRITES asks (the scheduler, the faculty and membership syncs, the
-  enrolment codes, the site build), and `seed.refresh` and `grades.write_team_lock` read the
+  enrolment codes, the site build), and `seed.refresh` and `grades.sync_team_lock` read the
   same flag for themselves off listings they already hold. So archiving one closes a cohort whether the person doing it meant
   that or not, and anything that freezes a cohort must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
@@ -336,7 +336,7 @@ DERIVED - rendered per cohort from that cohort's `schedule.yml` and each named t
 repo path to a file under `templates/`. Adding a file like this is four places:
 
 1. the renderer and the writer, beside what owns the subject (`grades.team_lock_text` /
-   `grades.write_team_lock`), with the SYSTEM-OWNED stamp emitted by the writer itself;
+   `grades.sync_team_lock`), with the SYSTEM-OWNED stamp emitted by the writer itself;
 2. `seed.refresh`'s per-cohort loop - which is BOTH how it is seeded (a Bootstrap cohort
    run ends in `seed refresh`) and how it converges nightly. An archived cohort is skipped
    there, which is what keeps a finished semester frozen;

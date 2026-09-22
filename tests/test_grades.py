@@ -1893,9 +1893,9 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
     # put_file blob-compares, so writing it from the membership sync, the handout and the
     # nightly refresh costs a read apiece and no commit at all on an unchanged cohort.
     puts = _writes(monkeypatch, None)
-    assert grades.write_team_lock(
+    assert grades.sync_team_lock(
         "COURSE", "COHORT", _sched(project="assignment-4-project-f2026")
-    )
+    ).ok
     (put,) = puts
     assert (put["org"], put["path"]) == ("COHORT", "assignments.lock.yml")
     assert yaml.safe_load(put["content"])["assignments"]["project"] == {
@@ -1940,21 +1940,11 @@ def test_a_failed_write_is_never_reported_as_a_change(monkeypatch):
     assert len(puts) == 1
 
 
-def test_write_team_lock_still_answers_with_a_plain_bool(monkeypatch):
-    # Its four production callers count failures off it and must not start seeing a tuple,
-    # which is truthy however the write went.
-    _writes(monkeypatch, None)
-    answer = grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
-    assert answer is True
-    _writes(monkeypatch, None, ok=False)
-    assert grades.write_team_lock("COURSE", "COHORT", _sched(p="t")) is False
-
-
 def test_a_lock_file_that_could_not_be_written_says_what_that_costs(
     monkeypatch, capsys
 ):
     _writes(monkeypatch, None, ok=False)
-    assert not grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
+    assert not grades.sync_team_lock("COURSE", "COHORT", _sched(p="t")).ok
     assert "the Join-team form reads it" in capsys.readouterr().err
 
 
@@ -1968,7 +1958,7 @@ def test_a_closed_out_cohort_is_left_alone(monkeypatch, capsys):
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: True)
     monkeypatch.setattr(grades, "put_file", boom)
     monkeypatch.setattr(grades, "_grading_text", boom)
-    assert grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
+    assert grades.sync_team_lock("COURSE", "COHORT", _sched(p="t")).ok
     assert "cohort closed out" in capsys.readouterr().out
 
 

@@ -55,6 +55,16 @@ INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 COHORT_ONLY_REPOS = {"welcome", "classroom-config"}
 
 
+def welcome_issue_url(cohort_org: str) -> str:
+    """Where a student opens a Join course or a Join team issue.
+
+    ONE spelling, because four surfaces point at it - the org profile, the cohort site's
+    callout, the enrolment-code mail and the team-formation mail - and a cohort whose
+    welcome repo moved with one of them left behind is a cohort told to go somewhere that
+    is not there."""
+    return f"https://github.com/{cohort_org}/welcome/issues/new/choose"
+
+
 def org_tier(repos: list[dict]) -> str | None:
     """`"cohort"`, `"course"`, or None when the listing cannot say.
 

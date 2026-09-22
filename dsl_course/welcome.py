@@ -13,14 +13,13 @@ or a nightly run would clobber a live roster.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
 
 from .central import CENTRAL, pin_central_ref
 from .gh_contents import get_file_content, put_files
-from .grades import TEAM_LOCK_PATH
+from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
 from .repos import ensure_label
 from .roster import CONFIG_REPO
@@ -156,32 +155,24 @@ JOIN_TEAM_FORM = "welcome/ISSUE_TEMPLATE/02-join-team.yml"
 ASSIGNMENT_FIELD_START = "# dsl:assignment-field:start"
 ASSIGNMENT_FIELD_END = "# dsl:assignment-field:end"
 
-# The lock file is hand-rolled (`grades.team_lock_text`) precisely so a line scanner can
-# read it without a YAML library - the shipped JavaScript reads it exactly this way, and
-# this is the second reader of the same two-space key / four-space scalar shape.
-_LOCK_KEY_RE = re.compile(r"^ {2}([\w.-]+):$")
-_LOCK_WINDOW_RE = re.compile(r"^ {4}team_formation_window:\s*(\w+)$")
-
 
 def open_formation_slugs(lock_text: str) -> list[str]:
     """The assignments in a cohort's `assignments.lock.yml` whose team-formation window is
     OPEN, sorted.
 
+    A filter over `grades.parse_team_lock`, which lives beside the writer of that file: the
+    format is hand-rolled for a line scanner, and a second scanner here would be a second
+    opinion about a shape one module decides.
+
     `open` is written only for a self-select group assignment inside its window, so this
-    needs no second opinion about the shape: every other assignment is one the form would
-    refuse anyway, and offering it in the dropdown would be inviting a student to be
+    needs no second opinion about the shape either: every other assignment is one the form
+    would refuse anyway, and offering it in the dropdown would be inviting a student to be
     refused."""
-    slugs, key = [], None
-    for raw in lock_text.splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        found = _LOCK_KEY_RE.match(line)
-        if found:
-            key = found.group(1)
-            continue
-        window = _LOCK_WINDOW_RE.match(line)
-        if key is not None and window and window.group(1).lower() == "open":
-            slugs.append(key)
-    return sorted(slugs)
+    return sorted(
+        key
+        for key, entry in parse_team_lock(lock_text).items()
+        if entry.get("team_formation_window", "").lower() == "open"
+    )
 
 
 def join_team_form(open_slugs: Sequence[str]) -> str:

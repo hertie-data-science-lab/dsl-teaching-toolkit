@@ -53,6 +53,7 @@ from dsl_course import (
 )
 from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
+from dsl_course.grades import LockWrite
 from dsl_course.repos import Converged
 from tests.conftest import repo_row, stub_bootstrap
 
@@ -904,7 +905,7 @@ def _stub_refresh(
     sample_failures=lambda org: 0,
     system_failures=lambda org, ref: 0,
     pointer_failures=lambda org, course: 0,
-    lock_failures=lambda course, cohort: True,
+    lock_failures=lambda course, cohort: LockWrite(True, False),
     seed_failures=0,
     heartbeat_failures=0,
     prior_misses=(),
@@ -934,7 +935,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "refresh_classroom_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", pointer_failures)
-    monkeypatch.setattr(seed, "write_team_lock", lock_failures)
+    monkeypatch.setattr(seed, "sync_team_lock", lock_failures)
     # The per-cohort loop probes the cohort ORG once: gone = unregister + skip. A live org
     # then reads the archived flag off its own listing (empty above = nothing archived),
     # so org_exists True + an unarchived classroom-config = present and live, proceed.
@@ -1072,7 +1073,9 @@ def test_refresh_seeds_and_converges_every_cohorts_team_lock(monkeypatch):
     locked: list[tuple[str, str]] = []
     _stub_refresh(
         monkeypatch,
-        lock_failures=lambda course, cohort: locked.append((course, cohort)) or True,
+        lock_failures=lambda course, cohort: (
+            locked.append((course, cohort)) or LockWrite(True, False)
+        ),
     )
 
     assert seed.refresh("Course-Org") == 0
@@ -1085,7 +1088,9 @@ def test_refresh_seeds_and_converges_every_cohorts_team_lock(monkeypatch):
 def test_a_team_lock_that_did_not_land_reds_the_refresh(monkeypatch):
     # A stale lock either refuses a real team or lets one form for an assignment the
     # template calls individual, and nothing else in the night rewrites it.
-    _stub_refresh(monkeypatch, lock_failures=lambda course, cohort: False)
+    _stub_refresh(
+        monkeypatch, lock_failures=lambda course, cohort: LockWrite(False, False)
+    )
     assert seed.refresh("Course-Org") == 1
 
 

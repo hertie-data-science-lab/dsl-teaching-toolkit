@@ -42,6 +42,7 @@ from .discovery import (
     cohort_is_live,
     course_name_for_cohort,
     discover_cohorts,
+    welcome_issue_url,
 )
 from .faults import Unusable
 from .gh_contents import get_file_with_sha, put_file, read_csv
@@ -299,7 +300,7 @@ def run(cohort_org: str) -> Outcome:
         # is - so the in-memory code for that student is one nobody can enrol with.
         students = roster.parse(written)
 
-    welcome_url = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
+    welcome_url = welcome_issue_url(cohort_org)
     # One set, two jobs: `code_sent_at` keeps a re-run from re-mailing students who already
     # have their code, and adding each address as we go collapses a duplicated roster row,
     # which would otherwise get two emails carrying two different codes.
