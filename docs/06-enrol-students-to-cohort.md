@@ -69,7 +69,8 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
   - `team formation for assignment-1 is not open yet` / `closed on 15 Oct.`
   - `there is no team teamalpha for assignment-1. Did you mean team-alpha?` - they asked to
     **join** a name nothing carries, and the near miss is named when there is one;
-    `team-alpha already exists for assignment-1` - they asked to **create** a name that does.
+    `team-alpha already exists for assignment-1` - they asked to **create** a name that
+    does, or one that differs from it only in case, dashes and underscores.
   - `team-alpha already has 3 members (the cap for assignment-1 is 3).`
 - An assignment whose course template does not exist yet refuses every request until the
   template is created.

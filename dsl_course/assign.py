@@ -1674,6 +1674,24 @@ def provision_all(
             # The RAW declaration, not `team_formation_resolved`: a template that
             # declares nothing self-selects.
             self_select = gspec.team_formation != ASSIGNED
+            # THE HANDOUT MOMENT IS NOW, whatever the CSV says. The brief is what hands
+            # out; the repos follow each team as it forms, which is the whole point of the
+            # rolling provisioning below - so the moment belongs on record here and not
+            # only in the tail, which this branch returns long before reaching.
+            #
+            # Without it a HAND-FIRED release of a self-select assignment opened nothing at
+            # all: the team-formation window runs from `handout_datetime`, so a press on an
+            # entry that carries none left no lock scalar, no Assignment field for a
+            # student to pick, no site callout, no mail and no fault - while the error
+            # below points the teaching team at a form that would refuse every request.
+            # The one thing that would have started the cohort off was the thing the press
+            # could not do. Write-once, so the scheduled handout - which fired off the very
+            # datetime it would write - re-reads the file and changes nothing.
+            #
+            # Only where repos are the product: a shape that creates none takes its signal
+            # from the SHEET landing instead (see the tail), and this branch writes none.
+            if gspec.creates_repos:
+                schedule.record_handout(cohort_org, key)
             if scheduled:
                 # Teams appear days after the handout datetime either way - and the cron
                 # re-fires every hour until they do. Wait, exactly as an individual

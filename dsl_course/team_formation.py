@@ -257,10 +257,16 @@ def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
 
 def window_faults(
     sched: schedule.Schedule, windows: list[Window] | None
-) -> list[ConfigFault]:
+) -> list[ConfigFault] | None:
     """One fault per window that somebody is still waiting on - open or shut. Nothing for a
-    window every student has already teamed up for, and nothing at all when the cohort
-    could not be read (`windows is None`).
+    window every student has already teamed up for, and `None` - not an empty list - when
+    the cohort could not be read (`windows is None`).
+
+    That `None` travels all the way to `scheduler._preflight_sources`, which skips the
+    digest sync on it. An empty list is what CLOSES the schedule.yml issue, so answering
+    "nothing is wrong" for a tick that could not look would tell a cohort with thirty
+    unteamed students that its fault had been fixed, and file it again as new an hour
+    later.
 
     A SHUT one is where this matters most: its `fires` has passed, so it sits at MISSED,
     and it is the state nobody can put right by waiting. It clears when teams.csv, the
@@ -271,7 +277,9 @@ def window_faults(
     a reader would edit is in schedule.yml, and one issue per file is what makes that file
     fixable in one place.
     """
-    return [_fault(sched, w) for w in windows or () if w.waiting]
+    if windows is None:
+        return None
+    return [_fault(sched, w) for w in windows if w.waiting]
 
 
 def _fault(sched: schedule.Schedule, window: Window) -> ConfigFault:

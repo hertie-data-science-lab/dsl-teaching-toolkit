@@ -806,6 +806,39 @@ def test_joining_a_mistyped_name_names_the_team_that_was_meant():
 
 
 @needs_js
+@pytest.mark.parametrize(
+    "team", ["team_alpha", "TeamAlpha"], ids=["underscore", "run-on"]
+)
+def test_creating_a_near_miss_of_an_existing_name_is_refused_too(team):
+    # The exact-name refusal above only catches the name typed exactly. `team_alpha` and
+    # `teamalpha` are the SAME typo the Join path already answers by name, and left
+    # unchecked on this path they open the silent second team the Action field was added
+    # to stop - discovered only when the handout provisions two half teams.
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Create a new team", team),
+    )
+    assert out["writes"] == []
+    assert out["labels"] == ["needs-review"]
+    assert "**team-alpha** (2/4) already exists" in out["comments"][0]
+    assert "Join an existing team" in out["comments"][0]
+
+
+@needs_js
+def test_creating_a_name_nothing_resembles_still_opens_the_team():
+    # The refusal must not be so eager that it takes the second team away: `team-beta` is
+    # nothing like `team-alpha`, and a cohort forming its teams has to be able to say so.
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Create a new team", "team-beta"),
+    )
+    assert out["labels"] == ["team-recorded"]
+    assert out["writes"][0].endswith("assignment-2,team-beta,stu\n")
+
+
+@needs_js
 def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     out = _run_form(
         _lock_for("open"),

@@ -855,15 +855,25 @@ def test_the_tick_reads_who_is_waiting_once_and_hands_it_to_both_passes(monkeypa
     assert seen["handed"] == (windows,) and seen["handed"][0] is windows
 
 
-def test_a_cohort_that_could_not_be_read_files_no_team_formation_fault(monkeypatch):
-    # None, not []: `open_windows` says "we could not look", and a guess in either
-    # direction would be a fault about a cohort nobody read or a silence about one that is
-    # stuck.
-    _, seen, _asked = _formation_release_phase(monkeypatch, None)
-    assert [f for f in seen["faults"] if f.where.startswith("assignments.")] == []
+def test_a_cohort_that_could_not_be_read_leaves_the_schedule_digest_alone(
+    monkeypatch, capsys
+):
+    # None, not []: `open_windows` says "we could not look", and syncing the digest without
+    # an answer is the guess that hurts. An empty list CLOSES the issue, so a rate limit on
+    # teams.csv would post Cleared and mail a cohort whose thirty students are still
+    # unteamed, then file the very same fault as New an hour later. The digest is not
+    # touched at all, and the standing fault stays exactly as it was.
+    rc, seen, _asked = _formation_release_phase(monkeypatch, None)
+    assert rc == 0
+    assert "faults" not in seen, (
+        "the schedule digest was synced on a tick that could not look"
+    )
+    assert "[skip]" in capsys.readouterr().out
 
 
 def test_a_window_everyone_has_teamed_up_for_files_nothing(monkeypatch):
+    # The other half of the pair above: a tick that COULD look and found everybody teamed
+    # up syncs an empty list, which is what clears a standing fault.
     _, seen, _asked = _formation_release_phase(
         monkeypatch, [_formation_window(waiting=0, teams=2)]
     )

@@ -321,6 +321,19 @@ jobs:
                   'needs-review');
                 const size = rows.filter(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
+                // Near miss: the same name once case and separators are taken out of it.
+                // A mistyped Join and an accidental second team are ONE typo seen from two
+                // sides - `teamalpha` for `team-alpha` - so both paths are answered from
+                // the same compare, over the file we are about to write. Sorted, so the
+                // answer to a name that is close to two of them is always the same one.
+                const flat = (s) => s.toLowerCase().replace(/[-_]/g, '');
+                const named = [...new Set(rows
+                  .filter(r => cell(r, iAssign).toLowerCase() === assignment)
+                  .map(r => cell(r, iTeam).toLowerCase())
+                  .filter(Boolean))].sort();
+                const near = named.find(t => flat(t) === flat(team));
+                const sizeOf = (name) => rows.filter(r =>
+                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === name).length;
                 // Create vs join used to be IMPLICIT - a name that existed joined, a name
                 // that did not created - so `teamalpha` for `team-alpha` opened a silent
                 // second team, and nobody found out until the handout provisioned two half
@@ -330,26 +343,20 @@ jobs:
                   `Thanks @${handle} - **${team}** already exists for \`${assignment}\` (${size}/${cap}). ` +
                   `Choose **Join an existing team** instead, or pick a different name.`,
                   'needs-review');
-                if (action === 'join' && size === 0) {
-                  // Near miss: same name once case and separators are taken out of it,
-                  // which is what a mistyped join looks like. Sorted, so the answer to a
-                  // name that is close to two of them is always the same one.
-                  const flat = (s) => s.toLowerCase().replace(/[-_]/g, '');
-                  const named = [...new Set(rows
-                    .filter(r => cell(r, iAssign).toLowerCase() === assignment)
-                    .map(r => cell(r, iTeam).toLowerCase())
-                    .filter(Boolean))].sort();
-                  const near = named.find(t => flat(t) === flat(team));
-                  const nearSize = rows.filter(r =>
-                    cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === near).length;
-                  return fail(
-                    `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`. ` +
-                    (near
-                      ? `Did you mean **${near}** (${nearSize}/${cap})?`
-                      : `The teams that exist are listed in the pinned **Teams for \`${assignment}\`** issue - ` +
-                        `or choose **Create a new team** to start this one.`),
-                    'needs-review');
-                }
+                // The exact-name test above is not enough on its own: it is precisely the
+                // near miss that the implicit behaviour used to swallow, and declaring the
+                // intent only helps if Create refuses the same names Join suggests.
+                if (action === 'create' && near) return fail(
+                  `Thanks @${handle} - **${near}** (${sizeOf(near)}/${cap}) already exists for \`${assignment}\` - ` +
+                  `did you mean to **Join an existing team**? Otherwise pick a clearly different name.`,
+                  'needs-review');
+                if (action === 'join' && size === 0) return fail(
+                  `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`. ` +
+                  (near
+                    ? `Did you mean **${near}** (${sizeOf(near)}/${cap})?`
+                    : `The teams that exist are listed in the pinned **Teams for \`${assignment}\`** issue - ` +
+                      `or choose **Create a new team** to start this one.`),
+                  'needs-review');
                 if (size >= cap) return fail(
                   `Thanks @${handle} - **${team}** already has ${size} member${size === 1 ? '' : 's'} ` +
                   `(the cap for \`${assignment}\` is ${cap}). Pick another team name.`,

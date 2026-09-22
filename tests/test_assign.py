@@ -1518,6 +1518,7 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
         "load_grading_spec",
         lambda org, template: grades.GradingSpec(type="group"),
     )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
 
     def run(**kw):
@@ -1531,6 +1532,33 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
     assert run() == (1, False)
     err = capsys.readouterr().err
     assert "no teams for" in err and "students self-select" in err
+
+
+def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
+    tmp_path, monkeypatch
+):
+    # The window runs from `handout_datetime`, so a press on an entry that carries none
+    # used to open nothing at all - no lock scalar, no Assignment field, no site callout,
+    # no mail - while the refusal pointed the teaching team at the very form that had
+    # nothing to offer. The brief is out the moment the button is pressed; only the repos
+    # are waiting.
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(type="group"),
+    )
+    recorded: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda cohort_org, slug, stamp=None: recorded.append((cohort_org, slug)),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    assert assign.provision_all(
+        "COURSE", "project-f2026", "COHORT", roster_path=path, scheduled=True
+    ) == (0, False), "the wait itself must not change - no team, no repo"
+    assert recorded == [("COHORT", "project")]
 
 
 def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
@@ -1548,6 +1576,7 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
             type="group", team_formation="assigned"
         ),
     )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
 
     def run(**kw):

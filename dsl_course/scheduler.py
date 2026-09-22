@@ -516,7 +516,7 @@ def _preflight_sources(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    extra: list[ConfigFault] = (),
+    extra: list[ConfigFault] | None = (),
 ) -> int:
     """Check the plan's sources against the course org and keep the cohort's digest issue
     in step. Always returns 0.
@@ -528,6 +528,14 @@ def _preflight_sources(
     entry a reader would edit is in this file, and one digest per file is what keeps it
     fixable in one place.
 
+    `None` is this tick failing to work those out at all, and it SKIPS the sync entirely,
+    on the rule `_config_faults` states: absent from the map is not the same as no faults.
+    An empty list is what closes the issue, so syncing the digest without the windows would
+    tell a cohort whose teams.csv merely hit a rate limit that its standing team-formation
+    fault had been fixed - a Cleared comment and a mail on one tick, and the same fault
+    filed again as New on the next. Left exactly as it was instead, and the source faults
+    wait a tick with it: a missed one is picked up by the next.
+
     Nothing here fails the run, at any rung. A source nobody has staged is a CONTENT
     fault, and it is delivered where the people who can fix it are looking: the cohort's
     digest issue, which @mentions the instructors and links the line to edit, plus the
@@ -536,6 +544,12 @@ def _preflight_sources(
     every tick, up to eight red runs an hour mailing a bot account about a folder only
     faculty can write. The signature keeps its int so the caller's `errors +=` reads the
     same as every other phase."""
+    if extra is None:
+        log(
+            f"  [skip] {cohort_org}'s {schedule.SCHEDULE_PATH} digest - who is still "
+            "without a team could not be read this tick"
+        )
+        return 0
     try:
         sources = schedule.source_faults(sched, course_org)
     except Exception as exc:

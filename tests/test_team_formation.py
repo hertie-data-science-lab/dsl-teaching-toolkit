@@ -245,7 +245,8 @@ def test_a_teams_csv_that_could_not_be_read_reports_no_windows_at_all(
     cohort, monkeypatch, capsys
 ):
     # None, not []: "we could not look" reported as "everybody has a team" is the failure
-    # this whole pass exists to stop. The phase then raises no fault at all.
+    # this whole pass exists to stop. The None travels on through the fault builder, so the
+    # pre-flight can tell it from a cohort that really has nothing wrong with it.
     cohort()
 
     def boom(org):
@@ -255,7 +256,7 @@ def test_a_teams_csv_that_could_not_be_read_reports_no_windows_at_all(
     windows = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
     assert windows is None
     assert "rate limit" in capsys.readouterr().err
-    assert team_formation.window_faults(_sched(), windows) == []
+    assert team_formation.window_faults(_sched(), windows) is None
 
 
 def test_a_cohort_with_no_self_select_assignment_reads_neither_csv(cohort, monkeypatch):
