@@ -1942,16 +1942,16 @@ def team_lock_entries(
 
     The window is `none` for anything but a self-select assignment, because the form
     refuses those on the `team_formation` scalar alone - a window over an assignment whose
-    teams the teaching team writes says nothing anyone can act on. `closed` covers every
-    self-select case the window does not open: before the handout, after the grading pin,
-    and an entry carrying no dates to judge by.
+    teams the teaching team writes says nothing anyone can act on. `pending` is the window
+    that has not opened yet and `closed` the one that has shut - kept apart because the
+    close date is still in the FUTURE while a window is pending, so one sentence for both
+    would tell a September student the door closed in October. An entry carrying no dates
+    to judge by is `closed`: there is no hour from which it would be true.
 
     The close is a bare DATE, not the pin's full moment: the only reader is a refusal
     comment a student reads, and an hour in the workflow's timezone answers a question
     nobody asked. Empty whenever there is no window, or no pin to take one from - the
     refusal then says only that the window is shut."""
-    defaults = course_assignment_defaults(course_org)
-    fallback = defaults.get("max_team_size") or DEFAULT_MAX_TEAM_SIZE
     now = now if now is not None else datetime.now(UTC)
     entries: dict[str, tuple[str, int, str, str]] = {}
     for key, entry in sched.assignments.items():
@@ -1963,30 +1963,42 @@ def team_lock_entries(
                 f"locking it to `{NO_TEAMS}`, so no team can be formed for it until the "
                 f"template declares what the assignment is"
             )
-            entries[key] = (NO_TEAMS, fallback, "none", "")
+            entries[key] = (NO_TEAMS, team_cap(course_org, spec), "none", "")
             continue
         formation = spec.team_formation_resolved
         window, shuts = "none", ""
         if formation == SELF_SELECT:
-            opens, closes = schedule.formation_window(sched, key)
-            if opens is None or closes is None:
-                # Nothing to judge by: an assignment handed out by hand has no hour from
-                # which "form your team now" is true, so the door stays shut.
-                window = "closed"
-            elif now < opens:
-                window = "pending"
-            elif now < closes:
-                window = "open"
-            else:
-                window = "closed"
+            # The same call the cohort site's team-formation callout makes, so the page
+            # that invites a student in and the form that lets them in shut together.
+            window, closes = schedule.formation_state(sched, key, now)
             shuts = closes.date().isoformat() if closes is not None else ""
         entries[key] = (
             formation,
-            spec.max_team_size or fallback,
+            team_cap(course_org, spec),
             window,
             shuts,
         )
     return entries
+
+
+def team_cap(course_org: str, spec: GradingSpec | None) -> int:
+    """How many may be in one team: the assignment's own `max_team_size`, else the
+    course's `assignment_defaults`, else the toolkit's.
+
+    `New assignment` stamps the course default into the file it generates, so the first
+    answer is the usual one and the rest are for an assignment written by hand - or for
+    one whose template says nothing at all, which is what `spec=None` is.
+
+    One place, because the number is now both enforced and PRINTED: the lock file the
+    Join-team form refuses on, and the cohort site's callout inviting a student to form a
+    team of up to this many. A page naming five against a form that refuses the fifth
+    would be the page's fault."""
+    if spec is not None and spec.max_team_size:
+        return spec.max_team_size
+    return (
+        course_assignment_defaults(course_org).get("max_team_size")
+        or DEFAULT_MAX_TEAM_SIZE
+    )
 
 
 class LockWrite(NamedTuple):

@@ -1581,6 +1581,34 @@ def formation_window(
     return (entry.handout_datetime, grading_datetime_at(sched, slug))
 
 
+def formation_state(
+    sched: Schedule, slug: str, now: datetime
+) -> tuple[str, datetime | None]:
+    """Where `now` falls in this assignment's team-formation window, and the moment that
+    window shuts: `pending` (the handout is still to come), `open` or `closed`.
+
+    `closed` covers every case the window does not open, the two ends of it and the entry
+    with no dates to judge by alike - `formation_window` returning no boundary at all is
+    a door that never opens, not one that opens forever.
+
+    Whether the assignment HAS a window is the caller's question, not this one's: it hangs
+    on `team_formation`, which lives in the template's `grading_config.yml` and which this
+    module deliberately cannot read. Both callers already hold the spec.
+
+    One place, because two things now answer off it minutes apart - the lock file the
+    Join-team form refuses on, and the cohort site's team-formation callout - and a page
+    that invites a student through a door the form has already shut is worse than either
+    saying nothing."""
+    opens, closes = formation_window(sched, slug)
+    if opens is None or closes is None:
+        return "closed", closes
+    if now < opens:
+        return "pending", closes
+    if now < closes:
+        return "open", closes
+    return "closed", closes
+
+
 # ---------------------------------------------------------------------- gh/git wiring
 
 

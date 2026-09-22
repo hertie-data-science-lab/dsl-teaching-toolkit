@@ -15,7 +15,8 @@ not fetch - are vendored, under `base/`.
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
 handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
-that is not out yet, one whose repos are public, one handed into a shared drop box, a dated exam and a TBC
+that is not out yet, one whose repos are public, one handed into a shared drop box, one
+group assignment inside its team-formation window, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
 an All Materials index nested three directories deep, and - within the released session -
 a published file linked to the site's own hosted copy beside an unpublished one linked to
@@ -64,9 +65,31 @@ STUDENT_CHOICE = "assignment-6-f2026"
 # NOT be rewritten to one per reader - which is the one thing open_in.html does to every
 # other assignment page.
 SHARED = "assignment-7-f2026"
+# A group assignment whose teams the students pick themselves (`team_formation:
+# self_select`), rendered INSIDE its team-formation window: the brief is out, no repo
+# exists yet because no team does, and the page carries the invitation to form one in
+# place of the submission-repo button. Dated before the first lecture for the same reason
+# 06 and 07 are - see the note beside them.
+GROUP_FORMING = "assignment-8-f2026"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
 # by construction rather than by when CI happens to run.
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=BERLIN)
+# The plan `_assignment_entry` reads the team-formation window off. Only the group
+# assignment above needs one - every other fixture assignment is individual, and answers
+# `none` on the spec alone.
+FORMING_KEY = "assignment-8"
+FORMING_SCHEDULE = schedule.Schedule(
+    assignments={
+        FORMING_KEY: schedule.AssignmentEntry(
+            course_source_repo=GROUP_FORMING,
+            # Open at NOW: handed out a month ago, and the grading pin that shuts the
+            # window is still two months off.
+            handout_datetime=datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
+            due_datetime=datetime(2026, 11, 24, 23, 59, tzinfo=BERLIN),
+            grading_datetime=datetime(2026, 11, 26, 9, 0, tzinfo=BERLIN),
+        )
+    }
+)
 
 # The cohort's released tree, as `_repo_tree` would report it. Three directories deep
 # under `lectures/01_week-1/`, which is the nesting the All Materials index recurses over
@@ -159,6 +182,13 @@ def _grading_spec(_org: str, repo: str):
         return grades.parse_grading_spec("visibility: student_choice\n")
     if repo == SHARED:
         return grades.parse_grading_spec("submit_via: shared_dropbox_repo\n")
+    if repo == GROUP_FORMING:
+        # The cap is declared, which is what `New assignment` stamps into every file it
+        # writes - so the page prints it without the course-org read `grades.team_cap`
+        # falls back to.
+        return grades.parse_grading_spec(
+            "type: group\nteam_formation: self_select\nmax_team_size: 4\n"
+        )
     return grades.parse_grading_spec(
         "late_window_days: 7\nlate_penalty_per_day: 10%\nquestions:\n  Q1: 15\n  Q2: 10\n"
     )
@@ -317,6 +347,18 @@ def _assignments() -> dict[str, str]:
             handout=datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
             handed_out=frozenset({"assignment-7"}),
             now=NOW,
+        ),
+        # Out, and waiting for its teams: the brief is published, no `repo_url` is, and
+        # the three `team_join_*` keys say what to do about it instead.
+        "08-assignment-8.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            GROUP_FORMING,
+            datetime(2026, 11, 24, 23, 59, tzinfo=BERLIN),
+            handout=FORMING_SCHEDULE.assignments[FORMING_KEY].handout_datetime,
+            found=(FORMING_KEY, FORMING_SCHEDULE.assignments[FORMING_KEY]),
+            now=NOW,
+            sched=FORMING_SCHEDULE,
         ),
     }
 

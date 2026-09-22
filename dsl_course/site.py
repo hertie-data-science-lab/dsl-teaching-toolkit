@@ -29,7 +29,7 @@ import stat
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
 from textwrap import indent
@@ -42,6 +42,7 @@ from . import schedule
 from .course import (
     CUTOFF_SENTENCE,
     PUBLISH_FILE,
+    SELF_SELECT,
     assignment_slug,
     identifier,
     late_rule,
@@ -66,7 +67,7 @@ from .discovery import (
 )
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
-from .grades import load_grading_spec, total_points
+from .grades import load_grading_spec, team_cap, total_points
 from .log import log, log_err, log_step, log_withheld
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -996,6 +997,7 @@ def _assignment_entry(
     found: tuple[str, schedule.AssignmentEntry] | None = None,
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
+    sched: schedule.Schedule | None = None,
 ) -> str:
     """An assignment's page, plus the two schedule rows it drives: the entry's own
     `date:` is the "released!" row and its `due_event:` sub-block the due row.
@@ -1057,7 +1059,22 @@ def _assignment_entry(
       meant to be out by now, and a schedule that says so is not a secret worth keeping.
 
     `now` is the moment to judge the pin against (default: actual now, in the handout's own
-    cohort timezone - `_coerce_datetime` hands out nothing naive)."""
+    cohort timezone - `_coerce_datetime` hands out nothing naive).
+
+    A self-select GROUP assignment inside its team-formation window is the third state,
+    and it exists because the second bullet above is right about the brief and wrong about
+    everything else: that handout parks and provisions nothing until a team exists, so the
+    pin published the brief and, beside it, a `repo_url` into an empty repo list under the
+    "Open the submission repo on GitHub" button. The brief stays out - the assignment
+    really is - and the address is withheld until there is one, exactly as a pending
+    assignment's is, with `team_join_url` / `team_join_cap` / `team_join_closes` in its
+    place: the thing the student can actually do about it.
+
+    The WINDOW, off `sched` and never "has any team formed yet": the second is
+    cohort-wide, so the first team to form would take the invitation away from every
+    student still looking for one. `sched` is the plan the caller already parsed; without
+    it (a caller that has no plan to hand) there is no window and the page reads as it
+    always did."""
     slug = schedule.cohort_name(*found) if found else assignment_slug(repo)
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
@@ -1095,6 +1112,28 @@ def _assignment_entry(
     tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
     tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
+    # Is this assignment waiting on its teams RIGHT NOW? `schedule.formation_state` is the
+    # same call `grades.team_lock_entries` makes for the lock the Join-team form reads, so
+    # the page cannot invite a student through a door the form has already shut. The shape
+    # question is the spec's, like every other shape fact on this page: `assigned` teams
+    # are the teaching team's to write, and there is nothing for a student to open.
+    window, shuts = (
+        schedule.formation_state(sched, found[0], now or datetime.now(UTC))
+        if sched is not None and found is not None
+        else ("closed", None)
+    )
+    # Whether this page should ASK for a team. Keyed on the window, never on whether a
+    # team has formed: "has anybody formed one" is a cohort-wide answer, so the first team
+    # to form would take the call to action away from every student still without one.
+    #
+    # It does NOT suppress `repo_url`. Hiding the button for the whole window would punish
+    # exactly the students who acted first - a team that forms on day one would lose the
+    # link to its own repo until the window shut - and for a shared drop box, which exists
+    # from the hand-out whatever the teams do, it would hide a URL that was never empty.
+    # The two live side by side: the button works for a student whose team exists (GitHub
+    # filters the listing by what they can read), and the call to action beside it says
+    # what to do if it comes back empty.
+    forming = window == "open" and spec.team_formation_resolved == SELF_SELECT
     # Where the work goes. `submit_shape` is the SHAPE in one word (`course.submit_shape`:
     # `assignment-repo-private`, `assignment-repo-public`, `external`), written whatever
     # the handout state
@@ -1181,6 +1220,27 @@ def _assignment_entry(
     # sit above the line saying the assignment has not been handed out.
     note = shape_note(spec.submit_shape) if out else ""
     note_fm = f'shape_note: "{q(note)}"\n' if note else ""
+    # The one thing a student can act on while this assignment waits for its teams: the
+    # `welcome` repo's issue chooser, the cap on a team and the day the door shuts. Three
+    # keys and no fourth flag - their PRESENCE is the state, so a theme that has never
+    # heard of team formation renders nothing rather than an empty callout, and the layout
+    # and the schedule row read the same two facts rather than each wording its own.
+    #
+    # The first thing on either site to link `welcome` at all, so it is built from the
+    # COHORT org: the course org has no welcome repo, and the one this cohort's students
+    # are members of is the only one that would answer them.
+    #
+    # The day, not the moment: it is the same bare date the Join-team form's refusal
+    # names (`grades.team_lock_entries`), and an hour would invite a student to read a
+    # deadline off a page whose timezone it does not state.
+    team_fm = ""
+    if forming and shuts is not None:
+        welcome = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
+        team_fm = (
+            f'team_join_url: "{welcome}"\n'
+            f'team_join_cap: "{team_cap(course_org, spec)}"\n'
+            f'team_join_closes: "{shuts.date().isoformat()}"\n'
+        )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1249,6 +1309,7 @@ def _assignment_entry(
         f"{late_fm}"
         f"{points_fm}"
         f"{note_fm}"
+        f"{team_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
@@ -1692,6 +1753,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                         *_assignment_dates(hit, start + timedelta(days=(i + 1) * 14)),
                         found=hit,
                         handed_out=handed_out,
+                        sched=sched,
                     )
                     for i, (name, (repo, hit)) in enumerate(cohort_assignments)
                     if shown(hit)

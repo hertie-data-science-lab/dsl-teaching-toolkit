@@ -185,6 +185,48 @@ title: page.title
     {% endunless %}
 
     {%- comment -%}
+    The callout above answers "where does the work go?"; this one answers the question
+    that comes BEFORE it for a group assignment whose teams the students pick themselves.
+    Until a team exists the handout provisions nothing, so `repo_url` is withheld
+    (site.py) and the button above does not render at all - it used to, onto the org's
+    repo list filtered to an assignment that had created no repos, under "Open the
+    submission repo".
+
+    `team_join_url` is its own presence test, like `shape_note` below: site.py writes the
+    three keys only while the team-formation window is open, so there is no second state
+    here to keep in step and nothing at all to render once it shuts. The cap and the
+    closing date are site.py's too, off the assignment's own grading_config.yml and the
+    plan's grading pin - the same two facts the Join-team form enforces and the same date
+    its refusal names, so the invitation and the door cannot disagree.
+
+    It says the same thing to everyone, because a static public page cannot know who is
+    reading it and teams.csv is private - which is also why it points at the pinned team
+    list rather than naming the reader's own team. NOT gated on whether any team has
+    formed: that is one answer for the whole cohort, and the first team to form would take
+    the invitation away from everybody still looking for one.
+
+    `repo_name` gates the last sentence rather than `submit_shape`: an assignment handed
+    in off GitHub has no repo whose arrival could be promised, and that is exactly the
+    shape that writes no `repo_name`.
+
+    OUTSIDE the `handout_pending` gate, not inside it: a window cannot be open before the
+    hand-out that opens it, so the key is never written on a pending page anyway - and
+    keeping it out leaves the block above what it says it is, one arm per repo shape.
+    {%- endcomment -%}
+    {% if page.team_join_url %}
+    <div class="callout">
+      <p><a class="btn" target="_blank" rel="noopener" href="{{ page.team_join_url }}">Form your team</a></p>
+      <p>
+      You pick your own team for this assignment, of up to {{ page.team_join_cap }} people.
+      Open a <strong>Join team</strong> issue in this cohort's <code>welcome</code> repo to start a team
+      or join one - team formation closes on {{ page.team_join_closes | date: site.dateformat }}.
+      The pinned team list in that repo shows which teams still have room.
+      {% if page.repo_name %}Your team's submission repo appears once the team does.{% endif %}
+      </p>
+    </div>
+    {% endif %}
+
+    {%- comment -%}
     `pdf` / `attachment` / `solutions` are hand-authored front matter from the upstream
     template; the DSL sync writes none of them, so this printed a bold "Download" with
     nothing after it on every generated assignment page. Shown only when there is in fact

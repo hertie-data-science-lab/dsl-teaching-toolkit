@@ -450,6 +450,9 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "late_rule",
         "max_points",
         "shape_note",
+        "team_join_url",
+        "team_join_cap",
+        "team_join_closes",
     ],
 )
 def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
@@ -1529,6 +1532,54 @@ def test_the_callout_keeps_the_brief_last():
     assert "@extend %quiet-note;" not in cmd
     where = scss.split(".callout .open-in-where {")[1].split("}")[0]
     assert "@extend %quiet-note;" in where
+
+
+def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
+    # The pin publishes the brief of a self-select group assignment while its handout is
+    # still parked on "no teams", so the page carried a button onto the org's repo list
+    # filtered to an assignment that had provisioned nothing, and said nothing about the
+    # one thing a student could do about it. The invitation is what was missing.
+    page = _front_matter(generated["collections"]["_assignments"]["08-assignment-8.md"])
+    assert "handout_pending" not in page
+    # The address stays at both levels: a team that formed on day one owns its repo, and
+    # GitHub filters that listing by what the reader can see. The invitation beside it is
+    # what explains an empty one.
+    assert page["repo_url"] and page["due_event"]["repo_url"]
+    assert page["team_join_url"] == (
+        "https://github.com/hertie-dsl-fixture-f2026/welcome/issues/new/choose"
+    )
+    assert page["team_join_cap"] == "4"
+    assert page["team_join_closes"] == "2026-11-26"
+    # The layout renders the whole block off the key's presence - no second flag, and
+    # nothing to render for an assignment that has no window open.
+    layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
+    arm = layout.split("{% if page.team_join_url %}")[1].split("</div>")[0]
+    flat = " ".join(arm.split())
+    assert 'href="{{ page.team_join_url }}"' in flat
+    assert "{{ page.team_join_cap }}" in flat
+    assert "{{ page.team_join_closes | date: site.dateformat }}" in flat
+    # A team is the only thing being asked for. Whether anybody may hand in on their own,
+    # and how few a team may be, are not this page's to answer - the Join-team form holds
+    # the rules it enforces, and a sentence here would be a second copy of them.
+    for phrase in ("alone", "on your own", "solo", "at least", "minimum"):
+        assert phrase not in flat.lower(), phrase
+
+
+def test_the_schedule_row_names_the_same_day_as_the_page(generated):
+    # The Details cell is one line beside the brief's link, and it takes the date and the
+    # address from the same two keys the Assignments tab's callout does - so the schedule
+    # cannot come to name a different closing day from the page it links to.
+    row = _strip_comments(_liquid_templates()["_includes/schedule_row_assignment.html"])
+    assert "include.event.team_join_url" in row
+    # Off-site, so it leaves in a new tab like every other link on this site that does.
+    assert (
+        '<a target="_blank" rel="noopener" href="{{ include.event.team_join_url }}">'
+        in row
+    )
+    assert "{{ include.event.team_join_closes | date: site.dateformat }}" in row
+    # The brief is still linked: the assignment is out, and this is a line BESIDE that,
+    # not the stand-in a pending row renders.
+    assert "{{ include.event.content }}" in row
 
 
 def test_a_shared_page_names_the_drop_box_and_the_folder(generated):
