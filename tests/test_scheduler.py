@@ -25,6 +25,7 @@ from dsl_course import (
     ghcli,
     notify,
     repos,
+    roster,
     scheduler,
     seed,
     source_digest,
@@ -159,6 +160,20 @@ def team_lock_writes(monkeypatch):
 
     monkeypatch.setattr(scheduler, "sync_team_lock", stub)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def open_windows(monkeypatch):
+    """Every tick asks who is still without a team (`team_formation.open_windows`), which
+    is students.csv, teams.csv and a definition per assignment - real gh I/O on a path most
+    of these tests are not about. Answered "no window is open", the ordinary tick, and the
+    list it hands back is what the tests that ARE about it set and assert on. On the
+    CONSUMER's imported name, per the repo rule."""
+    windows: list = []
+    monkeypatch.setattr(
+        scheduler.team_formation, "open_windows", lambda *a, **k: windows
+    )
+    return windows
 
 
 def _r(label: str, when: datetime, **kw) -> Release:
@@ -488,6 +503,116 @@ def test_a_windows_boundaries_always_fall_on_a_tick_with_something_due(monkeypat
             f"nothing is due on the tick the window {label}, so the site is never "
             f"re-rendered and the window's state never reaches a student"
         )
+
+
+# ------------------------------------------- the cohort that has not formed a team yet
+
+
+def _formation_window(waiting: int, teams: int = 0, enrolled: int = 4):
+    return scheduler.team_formation.Window(
+        key="assignment-2",
+        name="assignment-2",
+        opens=WHEN - timedelta(days=2),
+        closes=WHEN + timedelta(hours=8),
+        teams=teams,
+        waiting=tuple(
+            roster.Student(f"s{i}@x.edu", f"S {i}", f"s{i}", str(i))
+            for i in range(waiting)
+        ),
+        enrolled=enrolled,
+    )
+
+
+def _formation_release_phase(monkeypatch, windows):
+    """`_release_phase` with every pass but the pre-flight stubbed out, capturing the fault
+    list the schedule digest is synced with and what `_team_formation_phase` was handed."""
+    seen: dict = {}
+    for name in (
+        "_snapshot_passed_deadlines",
+        "_refresh_sheets",
+        "_reprivatise_student_repos",
+        "_preflight_configs",
+        "_run_releases",
+    ):
+        monkeypatch.setattr(scheduler, name, lambda *a, **k: 0)
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda *a, **k: "a2-f2026")
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: notify.Unsent()
+    )
+    monkeypatch.setattr(
+        scheduler.notify, "notify_config_faults", lambda *a, **k: notify.Unsent()
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: seen.update(faults=a[2]) or source_digest.DigestResult(),
+    )
+    asked: list = []
+    monkeypatch.setattr(
+        scheduler.team_formation,
+        "open_windows",
+        lambda *a, **k: asked.append(a) or windows,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_team_formation_phase",
+        lambda *a, **k: seen.update(handed=a[5:]) or (0, False),
+    )
+    sched = _assignments(
+        **{
+            "assignment-2": AssignmentEntry(
+                course_source_repo="a2-f2026",
+                due_datetime=WHEN + timedelta(hours=8),
+                handout_datetime=WHEN - timedelta(days=2),
+                lines={"due_datetime": 12},
+            )
+        }
+    )
+    rc = scheduler._release_phase(
+        "Course-Org", "Cohort-Org", sched, WHEN, False, None, {}
+    )
+    return rc, seen, asked
+
+
+def test_a_cohort_still_without_teams_earns_a_fault_on_the_schedule_digest(monkeypatch):
+    # THE gap this closes. `assign.provision_all` logs `[wait] no teams` and returns 0, so
+    # a parked group handout was a green run with no fault, no issue and no mail - which is
+    # how Maths assignment-2 sat blocked until somebody asked on Slack.
+    rc, seen, _asked = _formation_release_phase(
+        monkeypatch, [_formation_window(waiting=4)]
+    )
+    assert rc == 0, "a cohort that has not teamed up yet must not red the tick"
+    (fault,) = [f for f in seen["faults"] if f.where == "assignments.assignment-2"]
+    assert fault.fires == WHEN + timedelta(hours=8)
+    assert fault.severity(WHEN) is faults_mod.Severity.URGENT
+    assert "no team has formed yet" in fault.what
+
+
+def test_the_tick_reads_who_is_waiting_once_and_hands_it_to_both_passes(monkeypatch):
+    # One read of students.csv, teams.csv and every assignment's definition per tick: the
+    # pre-flight files the fault off it and the lock pass is handed the same list.
+    windows = [_formation_window(waiting=1, teams=2)]
+    _, seen, asked = _formation_release_phase(monkeypatch, windows)
+    assert len(asked) == 1, "the roster and teams.csv were read more than once a tick"
+    assert asked[0][:2] == ("Course-Org", "Cohort-Org") and asked[0][3] == WHEN
+    # The SAME list, not an equal one: the lock pass gets it without paying for the read.
+    assert seen["handed"] == (windows,) and seen["handed"][0] is windows
+
+
+def test_a_cohort_that_could_not_be_read_files_no_team_formation_fault(monkeypatch):
+    # None, not []: `open_windows` says "we could not look", and a guess in either
+    # direction would be a fault about a cohort nobody read or a silence about one that is
+    # stuck.
+    _, seen, _asked = _formation_release_phase(monkeypatch, None)
+    assert [f for f in seen["faults"] if f.where.startswith("assignments.")] == []
+
+
+def test_a_window_everyone_has_teamed_up_for_files_nothing(monkeypatch):
+    _, seen, _asked = _formation_release_phase(
+        monkeypatch, [_formation_window(waiting=0, teams=2)]
+    )
+    assert [f for f in seen["faults"] if f.where.startswith("assignments.")] == []
 
 
 def test_a_dry_run_previews_the_team_lock_and_renders_nothing(monkeypatch):
@@ -2528,7 +2653,7 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
 ARCHIVES = date(2027, 2, 16)
 
 
-def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
+def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=()):
     """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
 
     Routing is stubbed too: it reads blame and people.yml over the API, and what these
@@ -2563,6 +2688,7 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
         Schedule(archive=ArchiveRow(when=ARCHIVES)),
         now,
         dry_run,
+        extra,
     )
     return rc, seen
 

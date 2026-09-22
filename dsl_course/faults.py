@@ -238,6 +238,19 @@ class ConfigFault:
     # This fault's own fix sentence, where the parser knows one better than the file's
     # (see FIX). Lower-case and unpunctuated at the front, so a caller can prefix `fix:`.
     fix_text: str = ""
+    # This fault's own CONSEQUENCE sentence, where the file's (see CONSEQUENCE) is not the
+    # price of THIS fault. One file can go wrong in ways that cost different things: a
+    # schedule.yml entry the parser dropped is not scheduled at all, while an entry whose
+    # team-formation window is running out is scheduled, has fired, and is short of the
+    # teams it fires into. Same voice as CONSEQUENCE - lower-case, no full stop - because
+    # the letter drops it into the same sentence. "" = take the file's.
+    consequence: str = ""
+    # What the LETTER calls these, where "N entries the toolkit cannot use" would be a
+    # false description. A window short of teams is the case it exists for: the entry is
+    # perfectly readable, so that wording sends a reader hunting for a syntax error that
+    # is not there. Singular and plural, because the subject line and the first line of
+    # the body count the same faults and must agree. () = take the generic wording.
+    noun: tuple[str, str] = ()
 
     @property
     def is_source(self) -> bool:

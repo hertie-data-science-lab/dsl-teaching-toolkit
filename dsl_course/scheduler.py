@@ -89,6 +89,7 @@ from . import (
     source_digest,
     sync_faculty,
     sync_teams,
+    team_formation,
     teams,
     teardown,
 )
@@ -531,9 +532,17 @@ def _preflight_sources(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    extra: list[ConfigFault] = (),
 ) -> int:
     """Check the plan's sources against the course org and keep the cohort's digest issue
     in step. Always returns 0.
+
+    `extra` is everything else about schedule.yml that this tick worked out for itself and
+    that the parse alone could not know - today, the assignments whose team-formation
+    window is running out with students still unteamed (`team_formation.window_faults`).
+    It goes into the SAME list, and therefore the same issue and the same letters: the
+    entry a reader would edit is in this file, and one digest per file is what keeps it
+    fixable in one place.
 
     Nothing here fails the run, at any rung. A source nobody has staged is a CONTENT
     fault, and it is delivered where the people who can fix it are looking: the cohort's
@@ -555,7 +564,7 @@ def _preflight_sources(
     # on its own clock (`ConfigFault.fires`).
     # NOT short-circuited when empty: an empty list is what CLOSES the issue, and the
     # tick after the last fault is fixed is the one that has to say so.
-    faults = sources + list(sched.faults) + _no_archive_date(sched)
+    faults = sources + list(sched.faults) + _no_archive_date(sched) + list(extra)
     if sources:
         log_step(
             f"{len(sources)} source(s) in {cohort_org}'s plan not staged in "
@@ -1239,8 +1248,13 @@ def _team_formation_phase(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    windows: list[team_formation.Window] | None = None,
 ) -> tuple[int, bool]:
     """Bring the team-formation lock up to this moment. Returns `(errors, lock_changed)`.
+
+    `windows` is this tick's roster x teams.csv diff, already read for the pre-flight's
+    fault (`_release_phase`) and handed on rather than read again - it costs students.csv,
+    teams.csv and a definition per assignment. None is a cohort this tick could not read.
 
     The window it carries is computed from datetimes, so nothing else in the cohort has to
     happen for one to open or shut - and until this ran on the tick, nothing did: the lock
@@ -1327,13 +1341,29 @@ def _release_phase(
     errors += _reprivatise_student_repos(
         course_org, cohort_org, sched, now, dry_run, listing
     )
+    # WHO is still waiting for a team, read ONCE for the whole tick and handed to both
+    # passes that want it. Above the pre-flight because the fault it produces belongs in
+    # the schedule.yml digest that pass already syncs - the entry a reader would edit is in
+    # that file, and the window's close is the moment the fault counts down to.
+    #
+    # A parked group handout is otherwise SILENT: `assign.provision_all` logs `[wait] no
+    # teams` and returns green, which is right for the tick and tells the teaching team
+    # nothing, while the cohort may not know it has anything to do.
+    windows = team_formation.open_windows(course_org, cohort_org, sched, now)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
     # schedule.yml, and a plan written in August and forgotten is exactly the case that
     # needs catching. Never fatal to the run, at any rung: the fault is faculty's to fix
     # and the digest issue is how they hear about it (see _preflight_sources).
-    errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
+    errors += _preflight_sources(
+        course_org,
+        cohort_org,
+        sched,
+        now,
+        dry_run,
+        team_formation.window_faults(sched, windows),
+    )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
     # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
@@ -1353,7 +1383,7 @@ def _release_phase(
     # site's call to action waited for the nightly sync - so
     # `test_a_windows_boundaries_always_fall_on_a_tick_with_something_due` pins it.
     lock_errors, lock_changed = _team_formation_phase(
-        course_org, cohort_org, sched, now, dry_run
+        course_org, cohort_org, sched, now, dry_run, windows
     )
     errors += lock_errors
 

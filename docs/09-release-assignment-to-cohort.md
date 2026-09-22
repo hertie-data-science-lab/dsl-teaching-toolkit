@@ -140,6 +140,8 @@ The form reads all of this out of `classroom-config/assignments.lock.yml`, which
 
 The cohort site says so where students already are: while the window is open, that assignment's page publishes the brief but shows **no submission-repo button** - the release provisions nothing until a team exists - and carries a **Form your team** callout instead, with the cap, the closing day and a link to the form. Its schedule row gets the same prompt in one line. Both go when the window shuts, and the repo button comes back.
 
+You hear about it too. While the window is open and anybody is still without a team, the cohort's *schedule.yml* [digest issue](07-schedule-releases.md#the-digest-issue) carries a line on that assignment - counts only, never a name - and it gets louder as the window runs out, exactly like a source nobody has staged. Fill the gaps in `teams.csv` yourself, or move the date to keep formation open for longer.
+
 The release then grants each team its one shared repo. Full flow:
 [Enrol students → groups](06-enrol-students-to-cohort.md#group-assignments-rolling-basis).
 
