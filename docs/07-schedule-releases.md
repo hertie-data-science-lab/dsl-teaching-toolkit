@@ -186,7 +186,7 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 
 **This file is timing only.** `type:` and `max_team_size:` used to be accepted here and are not any more: what an assignment IS - its shape, its team cap, how it is handed in, its question maxima, its late policy, whether it is autograded - lives in that assignment's own `grading_config.yml`, on the course template's `solution` branch (see [Add an assignment](03-add-assignment-to-course.md)). Written here they are flagged by **Validate schedule**, which names the file they moved to, and ignored.
 
-Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `classroom-config/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be. So a new group assignment is joinable within a minute or so of the push, provided its template already declares `team_formation: self_select`.
+Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `classroom-config/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be. So a new group assignment is joinable within a minute or so of the push, provided its template already declares `team_formation: self_select` and its team-formation window is open - it runs from `handout_datetime` to the grading pin ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
 
 ```yaml
 assignments:
@@ -350,7 +350,7 @@ So the sources are checked against the course org in two places: **Validate sche
 
 ### The digest issue
 
-One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler. It carries everything wrong with this file - a source nobody has staged, an entry the parser had to drop, a file that does not parse at all, a group assignment whose team-formation window is running out with students still unteamed:
+One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler. It carries everything wrong with this file - a source nobody has staged, an entry the parser had to drop, a file that does not parse at all, a group assignment whose teams have not all formed while team formation is open for it:
 
 - its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`), the one sentence that would fix it, and a link at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
 - it **comments** only when something crosses a rung - a fault appears at warning, escalates, or clears - and `cc`s the same people the email is addressed to.

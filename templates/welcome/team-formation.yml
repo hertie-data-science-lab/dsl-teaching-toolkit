@@ -54,7 +54,6 @@ jobs:
     # Routed by the FORM's label, not the title: the title is a fixed default the student
     # never edits (this workflow retitles the issue from the author + form fields).
     #
-    # The one exception is the team list this workflow OPENS ITSELF. It carries the same
     # The public team list this workflow maintains wears `team-list`, NOT the routing
     # label below - it is opened with DSL_BOT_TOKEN, a PAT, whose issues (unlike the
     # ambient token's) DO start workflow runs. Were it to carry `team-formation`, opening
@@ -421,8 +420,8 @@ jobs:
                   ...listed,
                 ].join('\n');
               };
-              // Found by its EXACT title among the issues carrying the routing label -
-              // `dsl_course.issues.find_issue`'s idiom, and the reason the title is fixed:
+              // Found by its EXACT title among the issues carrying the `team-list` label
+              // - `dsl_course.issues.find_issue`'s idiom, and the reason the title is fixed:
               // it is the key, so every run finds the one list rather than opening a
               // second. The list is never closed, so the open listing always holds it.
               const upsertTeamsIssue = async () => {

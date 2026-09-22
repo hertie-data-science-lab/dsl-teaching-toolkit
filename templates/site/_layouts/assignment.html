@@ -187,10 +187,10 @@ title: page.title
     {%- comment -%}
     The callout above answers "where does the work go?"; this one answers the question
     that comes BEFORE it for a group assignment whose teams the students pick themselves.
-    Until a team exists the handout provisions nothing, so `repo_url` is withheld
-    (site.py) and the button above does not render at all - it used to, onto the org's
-    repo list filtered to an assignment that had created no repos, under "Open the
-    submission repo".
+    Until a team exists the handout provisions nothing for that student, so the button
+    above led to a repo list with nothing in it and no explanation. The button STAYS (it
+    works the day the team's repo appears, and a shared drop box was never empty); this
+    sits beside it and says what an empty listing means.
 
     `team_join_url` is its own presence test, like `shape_note` below: site.py writes the
     three keys only while the team-formation window is open, so there is no second state

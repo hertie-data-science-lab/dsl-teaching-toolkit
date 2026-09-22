@@ -92,12 +92,15 @@ Things whose *literal spelling* is depended on from outside Python:
   `tests/test_welcome_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
 - **`Teams for <assignment>`** - the title of the public team list `team-formation.yml`
-  keeps in each cohort's `welcome` repo. It is the issue's only key: the workflow finds the
-  list again by exact title, and the job's `if:` excludes that same prefix so the list it
-  opens (with `DSL_BOT_TOKEN`, a PAT, whose issues *do* start runs) does not answer itself
-  in public with "I can't find you on the enrolment roster". The Join-team form's markdown
-  spells the title too. Three ends; change none of them alone. The body carries **team
-  names and counts only** - `welcome` is public, and who is in a team is not.
+  keeps in each cohort's `welcome` repo. The title is the issue's only key: the workflow
+  finds the list again by exact title, and the Join-team form's markdown, the form's own
+  refusals and `team_formation`'s email each spell it out to a student. Four ends; change
+  none of them alone. The list wears the `team-list` label and NOT the `team-formation`
+  one the job's `if:` routes on - it is opened with `DSL_BOT_TOKEN`, a PAT whose issues
+  *do* start runs, so one label would have the list answer itself in public with "I can't
+  find you on the course enrolment roster". Two labels rather than a title guard, which a
+  retitled issue would slip past. The body carries **team names and counts only** -
+  `welcome` is public, and who is in a team is not.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_COHORT_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the

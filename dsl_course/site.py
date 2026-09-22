@@ -1062,13 +1062,13 @@ def _assignment_entry(
     cohort timezone - `_coerce_datetime` hands out nothing naive).
 
     A self-select GROUP assignment inside its team-formation window is the third state,
-    and it exists because the second bullet above is right about the brief and wrong about
+    and it exists because the second bullet above is right about the brief and silent about
     everything else: that handout parks and provisions nothing until a team exists, so the
-    pin published the brief and, beside it, a `repo_url` into an empty repo list under the
-    "Open the submission repo on GitHub" button. The brief stays out - the assignment
-    really is - and the address is withheld until there is one, exactly as a pending
-    assignment's is, with `team_join_url` / `team_join_cap` / `team_join_closes` in its
-    place: the thing the student can actually do about it.
+    pin published the brief and, beside it, a `repo_url` into a repo list an unteamed
+    student sees nothing in. Both stay - the assignment really is out, and a team that
+    formed on day one owns its repo already - and `team_join_url` / `team_join_cap` /
+    `team_join_closes` are written ALONGSIDE them: the thing the student can actually do
+    about an empty listing.
 
     The WINDOW, off `sched` and never "has any team formed yet": the second is
     cohort-wide, so the first team to form would take the invitation away from every

@@ -255,10 +255,9 @@ MAILED_HEADER = (
     # the name, would read as an assignment nobody had been told about and re-mail the
     # whole cohort.
     "assignment",
-    # The student's `hertie_email`, CASEFOLDED. Not the handle: half the point of this
-    # mail is to reach the enrolled students who have not joined GitHub yet and so have no
-    # handle to be keyed on. It is also what collapses a roster row somebody duplicated
-    # onto one message, exactly as `enrol_codes.run` collapses it.
+    # The student's `hertie_email`, CASEFOLDED. Not the handle: the address is what the
+    # message is actually addressed to, and it is what collapses a roster row somebody
+    # duplicated onto one message, exactly as `enrol_codes.run` collapses it.
     "recipient",
     "phase",
     "mailed_at",
@@ -328,11 +327,7 @@ def _render(
     It says NOTHING about working alone, about a solo team or about a minimum size.
     Whether a one-person team is allowed is the instructor's call, it is written down
     nowhere the toolkit can read, and a mail that guessed would be overruling them in the
-    students' inbox.
-
-    The Join-course sentence is addressed to everybody, as the cohort site's callout is:
-    the recipients include enrolled students who have not joined GitHub yet, whose team the
-    form would refuse, and one body cannot ask who is reading it."""
+    students' inbox."""
     course = course_phrase(course_name)
     welcome = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
     if phase == PHASE_REMINDER:
