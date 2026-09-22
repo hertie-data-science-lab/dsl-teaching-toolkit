@@ -36,10 +36,16 @@ a whole cohort's inbox:
 COUNTS ONLY, everywhere. This runs in a public workflow, and a fault's text reaches a run
 log, a digest issue and an email. Who is waiting - and every address the mail goes to - is
 per-person detail and goes nowhere but `log.log_person`.
+
+Usage:
+    python3 -m dsl_course.team_formation --course-org Course-Org \\
+        --cohort-org hertie-dsl-demo-f2026 [--assignment assignment-2] [--no-dry-run]
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
@@ -49,7 +55,7 @@ from .course import CONFIG_REPO, SELF_SELECT, course_phrase
 from .discovery import cohort_is_live, course_name_of
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
-from .log import log, log_err, log_ok, log_person
+from .log import log, log_err, log_ok, log_person, log_step
 
 # What the cohort LOSES while somebody is still unteamed, and what would put it right -
 # this fault's own two sentences, in the voice of `faults.CONSEQUENCE` and `faults._FIX`.
@@ -767,3 +773,144 @@ def notify_windows(
         _release(cohort_org, {c for n in unsent for c in n.claims}, stamp)
         return 1
     return 0
+
+
+# --------------------------------------------------------------- the faculty button
+
+# `python3 -m dsl_course.team_formation`, which the seeded **Open team formation**
+# workflow invokes - so the module name is a frozen public contract from here on
+# (docs/reference/maintainers.md).
+#
+# It is a SECOND WAY IN to the pass above and not a second implementation of it: `run`
+# reads the same windows and calls the same `notify_windows`, so the claim record, the
+# transport-before-claim ordering, the per-recipient claim and the wording are the tick's
+# and cannot drift from it. Pressing twice mails nobody the second time for the one reason
+# a re-tick does - `mailed.csv` already holds every phase the second press would owe - and
+# that needed no code here at all.
+#
+# QUIET HOURS APPLY TO THE PRESS TOO, deliberately: the 23:00-07:00 hold is a rule about
+# the STUDENTS' night, and a cohort woken at 02:00 is woken just as hard by a human as by
+# a datetime. Nothing is lost to it either - a held message claims nothing, so the next
+# quarter-hourly tick after 07:00 sends exactly what the press asked for, and the run says
+# so in one line. The band is narrow enough that the case the button exists for (just told
+# them in class, send it now) falls outside it.
+
+
+def _narrow(
+    cohort_org: str, sched: schedule.Schedule, windows: list[Window], only: str
+) -> list[Window] | None:
+    """`windows` cut to the one `only` names. None - an ERROR - when it names none of them.
+
+    A key nobody recognises must not read as "nothing to do": a mistyped box that exits 0
+    is a faculty member who believes a cohort has been mailed and has not been. So the
+    refusal names what IS open, which is both the correction and the list they wanted.
+
+    Whether the key is in schedule.yml at all is worth saying as well, because the two
+    mistakes have different fixes: a typo in the box, or a window that is not open yet."""
+    chosen = [w for w in windows if w.key == only]
+    if chosen:
+        return chosen
+    listed = ", ".join(sorted(w.key for w in windows)) or "none"
+    unknown = (
+        ""
+        if only in sched.assignments
+        else f" (and no `{only}:` under `assignments:` in {schedule.SCHEDULE_PATH})"
+    )
+    log_err(
+        f"no team-formation window is open for {only} in {cohort_org}{unknown} - open "
+        f"right now: {listed}. Nothing mailed."
+    )
+    return None
+
+
+def run(
+    course_org: str,
+    cohort_org: str,
+    now: datetime,
+    *,
+    only: str = "",
+    dry_run: bool = True,
+) -> int:
+    """One press of **Open team formation**: mail whoever is still without a team, for
+    every open window or for the one `only` names. Returns the error count.
+
+    `only` is the SCHEDULE key, because that is what teams.csv, the Join-team form and the
+    record are keyed on - and it is free text on the button rather than a dropdown, since
+    the keys are per cohort and the workflow is rendered once for the whole course org.
+
+    A cohort this run could not READ is red here, where the tick treats the same None as
+    "nothing to report": somebody is standing at this run, and a press that reached nobody
+    must not look like a press that had nobody to reach."""
+    sched = schedule.load(cohort_org)
+    windows = open_windows(course_org, cohort_org, sched, now)
+    if windows is None:
+        log_err(
+            f"could not work out who is waiting for a team in {cohort_org} - nothing "
+            f"mailed. The line above says what could not be read."
+        )
+        return 1
+    if only:
+        narrowed = _narrow(cohort_org, sched, windows, only)
+        if narrowed is None:
+            return 1
+        windows = narrowed
+    if not windows:
+        log_ok(
+            f"no team-formation window is open in {cohort_org} right now - nothing to "
+            f"send."
+        )
+        return 0
+    log_step(
+        f"Team formation in {cohort_org}: {len(windows)} open window(s)"
+        + (f", asked about {only} alone" if only else "")
+    )
+    return notify_windows(course_org, cohort_org, sched, windows, now, dry_run=dry_run)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--course-org", required=True)
+    parser.add_argument("--cohort-org", required=True)
+    parser.add_argument(
+        "--assignment",
+        default="",
+        metavar="KEY",
+        help=(
+            "Only this schedule.yml `assignments:` key's window. Omitted: every window "
+            "open right now. A key with no open window is an error, not a quiet no-op."
+        ),
+    )
+    # Default ON, as Distribute grades' flag is and for its reason: the rendered workflow
+    # passes --dry-run / --no-dry-run explicitly, so a bare local invocation cannot mail a
+    # cohort by accident.
+    parser.add_argument(
+        "--dry-run",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Preview the messages; claim nothing, send nothing (default).",
+    )
+    args = parser.parse_args()
+    # A read helper (or the mail transport) that couldn't reach its API raises; in an
+    # Actions log a one-line error beats a traceback, and the run still goes red.
+    try:
+        # A closed-out cohort's classroom-config is frozen, so the claim this send depends
+        # on could not land - and nobody is forming a team in a term that is over. Green,
+        # as every other sweep treats one: a finished term is a state somebody chose.
+        # `notify_windows` asks the same question again as its own last guard before it
+        # writes; this one is here so an archived cohort is not read first.
+        if not cohort_is_live(args.cohort_org):
+            return 0
+        return run(
+            args.course_org,
+            args.cohort_org,
+            datetime.now(UTC),
+            only=args.assignment,
+            dry_run=args.dry_run,
+        )
+    except RuntimeError as exc:
+        log_err(str(exc))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

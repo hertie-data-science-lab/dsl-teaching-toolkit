@@ -142,6 +142,8 @@ The cohort site says so where students already are: while the window is open, th
 
 Students are emailed, too - the only mail this toolkit sends off a clock rather than off something you did. When the window opens, every enrolled student with no team for that assignment gets one plain message: the cap, the day formation closes, and the link to the form. Anyone still without a team 48 hours before it shuts gets one more. Nothing goes out overnight (it waits for 07:00 in the cohort's timezone), nothing is said twice (`team-formation/mailed.csv` in `classroom-config` is the record), and a cohort whose course org has no `GRAPH_*` mail secrets sends nothing at all. It does not say whether working alone is allowed - that is yours to tell them.
 
+You can send that message again yourself: **Open team formation** in the course org's Actions tab takes a cohort, optionally one `schedule.yml` assignment key, and mails whoever is still without a team - useful right after you announce the assignment in class, or once a cohort's `GRAPH_*` secrets are finally set. It is the same message on the same record, so a second press reaches only the students the first one could not, and the overnight hold applies to a press exactly as it does to the clock. Dry run first.
+
 You hear about it too. While the window is open and anybody is still without a team, the cohort's *schedule.yml* [digest issue](07-schedule-releases.md#the-digest-issue) carries a line on that assignment - counts only, never a name - and it gets louder as the window runs out, exactly like a source nobody has staged. Fill the gaps in `teams.csv` yourself, or move the date to keep formation open for longer.
 
 The release then grants each team its one shared repo. Full flow:

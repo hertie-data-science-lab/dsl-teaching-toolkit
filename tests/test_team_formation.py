@@ -841,3 +841,209 @@ def test_the_per_recipient_lines_are_masked_and_verbose_only(cohort, post, capsy
     assert "NOT mailed" in verbose, "which of them to chase is per-person detail too"
     for address in ADDRESSES:
         assert address not in verbose
+
+
+# ------------------------------------------------------- the faculty button, pressed
+
+# The button is a second WAY IN to the pass above, not a second implementation of it, so
+# what is asserted here is only what a press adds: which windows it acts on, what a
+# mistyped key does, and that the tick's safety properties still hold when a person is the
+# one who fired it. Everything else - the record, the claim ordering, the wording, quiet
+# hours - is the same code and is pinned above.
+
+
+@pytest.fixture
+def plan(monkeypatch):
+    """The cohort's schedule, as `run` reads it for itself (the tick is handed one)."""
+
+    def _wire(sched=None):
+        chosen = sched or _sched()
+        monkeypatch.setattr(team_formation.schedule, "load", lambda org: chosen)
+        return chosen
+
+    return _wire
+
+
+def _press(only: str = "", now=INSIDE, dry_run: bool = False) -> int:
+    return team_formation.run(COURSE, COHORT, now, only=only, dry_run=dry_run)
+
+
+def test_a_press_mails_every_student_still_waiting_for_a_team(cohort, post, plan):
+    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+    rec, sender = post()
+    plan()
+    assert _press() == 0
+    assert sender.to == {"ben@x.edu", "carla@x.edu", "dan@x.edu"}
+    assert rec.recipients(team_formation.PHASE_OPEN) == sender.to
+
+
+def test_a_second_press_mails_nobody(cohort, post, plan):
+    # The whole of the idempotence, and none of it is in the button: `mailed.csv` already
+    # holds every phase the second press would owe, exactly as it does for a re-tick.
+    cohort()
+    rec, sender = post()
+    plan()
+    assert _press() == 0
+    _rec2, sender2 = post(record=rec)
+    assert _press() == 0
+    assert sender2.batches == [], "the record is what makes a press idempotent"
+    assert len(rec.attempts) == 1, "the second press writes nothing either"
+    assert len(sender.batches) == 1
+
+
+def test_a_press_the_tick_already_covered_mails_nobody_either(cohort, post, plan):
+    # And the other way round: one record, so the button cannot re-send what the clock
+    # already sent. This is why the two must not be two implementations.
+    cohort()
+    rec, _sender = post()
+    plan()
+    assert _tick() == 0
+    _rec2, sender2 = post(record=rec)
+    assert _press() == 0
+    assert sender2.batches == []
+
+
+def test_an_assignment_key_narrows_the_press_and_leaves_the_others_alone(
+    cohort, post, plan
+):
+    cohort()
+    rec, sender = post()
+    plan(_sched(**{"a-1": _entry(), "a-2": _entry()}))
+    assert _press(only="a-1") == 0
+    assert {c[0] for c in rec.rows} == {"a-1"}, (
+        "a-2 is not claimed, so a tick still owes it"
+    )
+    assert len(sender.sent) == 4
+
+
+def test_a_key_with_no_open_window_is_an_error_and_mails_nobody(cohort, post, plan):
+    # A mistyped box that exited 0 is a faculty member who believes a cohort was mailed
+    # and was not. The refusal names what IS open, which is the list they wanted anyway.
+    cohort()
+    rec, sender = post()
+    plan(_sched(**{"a-1": _entry(), "a-2": _entry()}))
+    assert _press(only="a-3") == 1
+    assert rec.attempts == [] and sender.batches == []
+
+
+def test_a_key_the_schedule_does_not_have_at_all_says_so(cohort, post, plan, capsys):
+    # Two mistakes with two fixes: a typo in the box, or a window that is not open yet.
+    cohort()
+    post()
+    plan()
+    assert _press(only="assignment-9") == 1
+    said = capsys.readouterr()
+    err = said.out + said.err
+    assert "assignment-9" in err and "assignment-2" in err
+
+
+def test_a_press_with_nothing_open_is_green_and_says_so(cohort, post, plan, capsys):
+    cohort()
+    rec, sender = post()
+    plan()
+    # Before the handout: the window has not opened yet.
+    assert _press(now=OPENS - timedelta(days=1)) == 0
+    assert rec.attempts == [] and sender.batches == []
+    assert "no team-formation window is open" in capsys.readouterr().out
+
+
+def test_a_cohort_the_press_could_not_read_is_red(cohort, post, plan, monkeypatch):
+    # The tick treats the same "could not look" as nothing to report; a press must not,
+    # because somebody is standing at the run and a press that reached nobody would look
+    # exactly like a press that had nobody to reach.
+    cohort()
+    rec, sender = post()
+    plan()
+    monkeypatch.setattr(team_formation.roster, "load", lambda org: None)
+    assert _press() == 1
+    assert rec.attempts == [] and sender.batches == []
+
+
+def test_the_press_previews_by_default(cohort, post, plan, capsys):
+    # `run`'s own default, not the workflow's: a maintainer running the CLI by hand with
+    # no flag at all must not mail a cohort.
+    cohort()
+    rec, sender = post()
+    plan()
+    assert team_formation.run(COURSE, COHORT, INSIDE) == 0
+    assert rec.attempts == [] and sender.batches == []
+    assert "DRY-RUN" in capsys.readouterr().out
+
+
+def test_the_overnight_hold_applies_to_a_press_too(cohort, post, plan, capsys):
+    # The 23:00-07:00 rule is about the STUDENTS' night, and a cohort woken at 02:00 is
+    # woken just as hard by a person as by a datetime. Nothing is lost to it: the press
+    # claims nothing, so the next tick after 07:00 sends exactly what it asked for.
+    cohort()
+    rec, sender = post()
+    plan()
+    assert _press(now=QUIET) == 0
+    assert rec.attempts == [] and sender.batches == []
+    assert "held until 07:00" in capsys.readouterr().out
+    _rec2, sender2 = post(record=rec)
+    assert _tick(now=QUIET.replace(hour=9)) == 0
+    assert sender2.to == set(ADDRESSES)
+
+
+def _argv(monkeypatch, *args: str) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        ["team_formation", "--course-org", COURSE, "--cohort-org", COHORT, *args],
+    )
+
+
+@pytest.fixture
+def pressed(monkeypatch):
+    """What `main` asked `run` for. The clock is `main`'s own (`datetime.now`), so the
+    press itself is exercised against a fixed `now` above; what is asserted here is the
+    part that is only `main`'s - the flags it parses and the cohort it refuses."""
+    calls: list[dict] = []
+
+    def _run(course_org, cohort_org, now, *, only="", dry_run=True):
+        calls.append(
+            {"course": course_org, "cohort": cohort_org, "only": only, "dry": dry_run}
+        )
+        return 0
+
+    monkeypatch.setattr(team_formation, "run", _run)
+    return calls
+
+
+def test_the_cli_refuses_an_archived_cohort(pressed, monkeypatch):
+    # Its classroom-config is frozen, so the claim could not land - and nobody is forming
+    # a team in a term that is over. Green, as every other sweep treats one, and refused
+    # BEFORE the cohort is read.
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)
+    _argv(monkeypatch, "--no-dry-run")
+    assert team_formation.main() == 0
+    assert pressed == []
+
+
+def test_the_cli_previews_unless_it_is_told_not_to(pressed, monkeypatch):
+    # A bare invocation - the one a maintainer types by hand - must not mail a cohort.
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: False)
+    _argv(monkeypatch)
+    assert team_formation.main() == 0
+    assert pressed == [{"course": COURSE, "cohort": COHORT, "only": "", "dry": True}]
+
+
+def test_the_cli_sends_for_real_and_narrows_only_when_asked(pressed, monkeypatch):
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: False)
+    _argv(monkeypatch, "--assignment", "assignment-2", "--no-dry-run")
+    assert team_formation.main() == 0
+    assert pressed == [
+        {"course": COURSE, "cohort": COHORT, "only": "assignment-2", "dry": False}
+    ]
+
+
+def test_an_archived_cohort_mails_nobody_even_if_the_press_is_reached(
+    cohort, post, plan, monkeypatch
+):
+    # The backstop, on the pass that WRITES: `notify_windows` asks the same question again
+    # as its last guard, so a caller that skipped the CLI's check still claims nothing.
+    cohort()
+    rec, sender = post()
+    plan()
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)
+    assert _press() == 0
+    assert rec.attempts == [] and sender.batches == []

@@ -63,6 +63,9 @@ ALL_RENDERED = {
     "sync_membership": workflows_render.render_sync_membership(["Cohort-f2026"]),
     "send_codes": workflows_render.render_send_codes(),
     "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
+    "open_team_formation": workflows_render.render_open_team_formation(
+        ["Cohort-f2026"]
+    ),
     "propagate_cohort": workflows_render.render_propagate_cohort(["Cohort-f2026"]),
     "archive_cohort": workflows_render.render_archive_cohort(["Cohort-f2026"]),
     "bootstrap_cohort": workflows_render.render_bootstrap_cohort(),
@@ -179,6 +182,7 @@ DATED_RENDERED = {
     ),
     "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
     "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
+    "open_team_formation": workflows_render.render_open_team_formation(COHORTS_2),
     "propagate_cohort": workflows_render.render_propagate_cohort(COHORTS_2),
     "archive_cohort": workflows_render.render_archive_cohort(COHORTS_2),
     "sync_site": workflows_render.render_sync_site(COHORTS_2),
@@ -418,6 +422,34 @@ def test_propagate_cohort_previews_by_default():
     # Faculty read the header before they press it: it has to say there that a deletion
     # made in the cohort is not carried back.
     assert "DELETIONS ARE NOT PROPAGATED" in rendered
+
+
+def test_open_team_formation_asks_for_a_cohort_a_free_text_key_and_previews():
+    # The assignment box is FREE TEXT on purpose. Every other per-assignment button names
+    # a course-org template repo, which this org can discover; a team-formation window is
+    # keyed on a SCHEDULE key out of each cohort's own private schedule.yml, so a dropdown
+    # rendered once for the whole course org would offer one cohort's keys to another.
+    rendered = workflows_render.render_open_team_formation(["Cohort-f2026"])
+    inp = workflow_inputs(rendered)
+    assert list(inp) == ["cohort_org", "assignment", "dry_run"]
+    assert "options" not in inp["assignment"]
+    assert inp["assignment"]["required"] is False
+    assert inp["assignment"]["default"] == ""
+    # It mails a whole cohort, so it fails closed like Distribute grades: only an explicit
+    # `false` reaches the CLI as --no-dry-run.
+    assert inp["dry_run"]["default"] is True
+    assert workflows_render._DRY_RUN_GATE in rendered
+    assert 'args+=(--assignment "$ASSIGNMENT")' in rendered
+    assert "python3 -m dsl_course.team_formation" in rendered
+
+
+def test_the_press_says_in_the_file_what_a_second_press_will_do():
+    # Faculty read this header before pressing a button that emails a cohort, and the two
+    # questions they will have are "what happens if I press it twice" and "why did nothing
+    # go out at 23:30". Both are answered where they are asked, not in docs/09 alone.
+    rendered = workflows_render.render_open_team_formation(["Cohort-f2026"])
+    assert "mailed.csv" in rendered, "the header has to name what makes a re-press safe"
+    assert "23:00-07:00" in rendered
 
 
 def test_sync_membership_is_a_consolidated_reconcile():
@@ -710,8 +742,8 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     repo, files, deleted = commits[0]
     assert repo == ".github"
     assert (
-        len(files) == 19
-    )  # three grading buttons became two, plus the two end-of-term ones
+        len(files) == 20
+    )  # three grading buttons became two, the two end-of-term ones, and the team nudge
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",
@@ -1825,6 +1857,10 @@ SERIALISED_WRITERS = {
     "provision": "release-assignment",
     "collect_submissions": "collect-submissions",
     "distribute_grades": "distribute-grades",
+    # Two presses at once would read the record, both find a student unclaimed, and
+    # both claim-then-send them - the one duplicate the whole protocol exists to
+    # avoid, to a whole cohort.
+    "open_team_formation": "open-team-formation",
     # Two overlapping Send-codes runs generate two codes for the same blank cell: one is
     # written and the other is emailed, so that student's code enrols nobody. Scoped PER
     # COHORT, because that raced state is one cohort's students.csv: a roster push in one
@@ -2039,7 +2075,7 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
 
 # Everything that can put an email on the wire: the codes send, off a roster push, and
 # Distribute grades, the one button left that emails a whole cohort.
-MAIL_SENDERS = ("send_codes", "distribute_grades")
+MAIL_SENDERS = ("send_codes", "distribute_grades", "open_team_formation")
 
 # Everything whose job env must carry the transport secrets. Check cohort setup sends
 # nothing - it REPORTS whether a send could (status' mail-transport row reads the very
@@ -2057,16 +2093,22 @@ def _secret_ref(name: str) -> str:
     return f"${{{{ secrets.{name} }}}}"
 
 
-def test_the_one_mail_button_left_defaults_to_a_dry_run():
+# The mail senders that HAVE a button, i.e. the ones a preview is possible for at all.
+# Send enrolment codes is deliberately not among them: it has no button and no preview -
+# a push to a cohort's students.csv is what fires it, and it sends for real.
+MAIL_BUTTONS = ("distribute_grades", "open_team_formation")
+
+
+@pytest.mark.parametrize("name", MAIL_BUTTONS)
+def test_every_mail_button_defaults_to_a_dry_run(name):
     # The entire safety rail on a button that emails a whole cohort, and until now it was
-    # asserted nowhere: a renderer edit flipping it would have been green. Send enrolment
-    # codes has no button and no preview at all - a roster push is what fires it.
-    dry_run = workflow_inputs(ALL_RENDERED["distribute_grades"])["dry_run"]
+    # asserted nowhere: a renderer edit flipping it would have been green.
+    dry_run = workflow_inputs(ALL_RENDERED[name])["dry_run"]
     assert dry_run["type"] == "boolean"
     assert dry_run["default"] is True
 
 
-@pytest.mark.parametrize("name", ["distribute_grades"])
+@pytest.mark.parametrize("name", MAIL_BUTTONS)
 @pytest.mark.parametrize(
     "value", ["", "true", "True", "TRUE", "yes", "1", " false", "false"]
 )

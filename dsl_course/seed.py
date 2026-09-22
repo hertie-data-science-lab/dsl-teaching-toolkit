@@ -82,6 +82,7 @@ from .workflows_render import (
     render_generate_syllabus,
     render_new_assignment,
     render_new_materials,
+    render_open_team_formation,
     render_patch_assignment,
     render_propagate_cohort,
     render_provision,
@@ -279,6 +280,9 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/sync-membership.yml": render_sync_membership(cohorts),
         ".github/workflows/send-codes.yml": render_send_codes(),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(cohorts),
+        ".github/workflows/open-team-formation.yml": render_open_team_formation(
+            cohorts
+        ),
         ".github/workflows/propagate-cohort.yml": render_propagate_cohort(cohorts),
         ".github/workflows/archive-cohort.yml": render_archive_cohort(cohorts),
         ".github/workflows/bootstrap-cohort.yml": render_bootstrap_cohort(),
