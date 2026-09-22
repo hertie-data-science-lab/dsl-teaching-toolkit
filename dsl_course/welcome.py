@@ -133,6 +133,16 @@ def example_course_file(rel: str) -> str:
 WELCOME_LABELS = (
     ("onboarding", "0e8a16", "Join course issue - routes the Onboard student workflow"),
     ("team-formation", "1d76db", "Join team issue - routes the Form team workflow"),
+    # The public team list wears its OWN label, and that is a safety property, not
+    # bookkeeping: the workflow routes on `team-formation`, the list is opened with a PAT
+    # whose issues DO start runs, and a list carrying the routing label would answer
+    # itself with "I can't find you on the enrolment roster" - in public, on the one issue
+    # the whole cohort is pointed at.
+    (
+        "team-list",
+        "c5def5",
+        "Teams for <assignment> - the public team list, maintained by the Form team workflow",
+    ),
 )
 
 

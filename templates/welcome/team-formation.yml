@@ -17,8 +17,16 @@ name: Form team
 # reach it. An assignment the lock does not carry, or one it marks `assigned` or `none`,
 # is refused here.
 #
+# teams.csv is PRIVATE, so a student had no way to see which teams exist or which have
+# room: "type the name exactly" only ever worked for people who had already agreed a team
+# face to face. After every successful join this workflow rewrites ONE public issue per
+# assignment - `Teams for <assignment>` - in this repo. It carries team NAMES AND COUNTS
+# ONLY: a team name is student-chosen and public by construction, who is in it is not.
+#
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the cohort org: Contents R/W on
-# classroom-config, Issues R/W on welcome.
+# classroom-config, Issues R/W on welcome. PINNING that list is a GraphQL mutation and is
+# best-effort on top: a token that cannot pin still writes the list, and the run stays
+# green.
 
 on:
   issues:
@@ -45,6 +53,14 @@ jobs:
   form-team:
     # Routed by the FORM's label, not the title: the title is a fixed default the student
     # never edits (this workflow retitles the issue from the author + form fields).
+    #
+    # The one exception is the team list this workflow OPENS ITSELF. It carries the same
+    # The public team list this workflow maintains wears `team-list`, NOT the routing
+    # label below - it is opened with DSL_BOT_TOKEN, a PAT, whose issues (unlike the
+    # ambient token's) DO start workflow runs. Were it to carry `team-formation`, opening
+    # the list would answer it with "I can't find you on the enrolment roster", in public,
+    # on the one issue the whole cohort is pointed at. Two labels, so that cannot happen -
+    # rather than a title guard, which a retitled issue would slip past.
     if: contains(github.event.issue.labels.*.name, 'team-formation')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -275,6 +291,10 @@ jobs:
               const retryable = (e) => e.status === 409 || e.status === 422 ||
                 (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
               const ATTEMPTS = 8;
+              // The rows AS WRITTEN, kept for the public team list below: it is rendered
+              // from the file this run actually committed, never from a count carried
+              // forward.
+              let written = null;
               for (let attempt = 1; ; attempt++) {
                 const { sha, header, rows } = await readTeams();
                 const iAssign = header.indexOf('assignment');
@@ -347,6 +367,7 @@ jobs:
                     message: `teams: ${handle} -> ${team} (${assignment})`,
                     content: Buffer.from(body, 'utf8').toString('base64'),
                   });
+                  written = { rows, iAssign, iTeam };
                   break;
                 } catch (e) {
                   // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
@@ -360,6 +381,85 @@ jobs:
                   // the same schedule, so each waiter spreads itself across ~400ms of its own.
                   await new Promise(r => setTimeout(r, 500 * attempt + Math.random() * 400));
                 }
+              }
+
+              // The PUBLIC team list. teams.csv lives in the private classroom-config, so
+              // "type its name exactly as that issue spells it" needs an issue that
+              // spells them: a student who has nobody to team up with yet has, until this,
+              // had no way to find out who has room - which is the likeliest reason a
+              // cohort forms no teams at all.
+              //
+              // THE BODY IS STATE, NOT EVENTS - the same rule dsl_course.config_digest's
+              // issues keep. It is rendered from the rows THIS run wrote, so it is
+              // self-healing: the concurrency group above is per ISSUE by design (a
+              // deadline-eve burst must not cancel itself), so two joins can reach this
+              // point at once and one of them can lose its edit. A body rebuilt from the
+              // file is right again on the very next join; a count incremented by one
+              // would stay wrong for the rest of the term.
+              //
+              // NAMES AND COUNTS ONLY. This repo is PUBLIC and this issue is the one
+              // thing in it the whole cohort is pointed at. A team name is student-chosen
+              // and public by construction; who is in it is not - so no handle, no
+              // person's name, no email and no `<slug>-<handle>` repo name may appear
+              // here, ever.
+              const TEAMS_ISSUE_PREFIX = 'Teams for ';
+              const teamsIssueBody = (rows, iAssign, iTeam) => {
+                const counts = new Map();
+                for (const r of rows) {
+                  if (cell(r, iAssign).toLowerCase() !== assignment) continue;
+                  const name = cell(r, iTeam).toLowerCase();
+                  if (name) counts.set(name, (counts.get(name) || 0) + 1);
+                }
+                const listed = [...counts.keys()].sort().map((name) => {
+                  const taken = counts.get(name), free = cap - taken;
+                  return `- **${name}** - ${taken}/${cap}, ${free > 0 ? `room for ${free}` : 'full'}`;
+                });
+                return [
+                  `Up to ${cap} people per team.` +
+                    (lock.closes ? ` Team formation closes on ${spokenDate(lock.closes)}.` : ''),
+                  ``,
+                  ...listed,
+                ].join('\n');
+              };
+              // Found by its EXACT title among the issues carrying the routing label -
+              // `dsl_course.issues.find_issue`'s idiom, and the reason the title is fixed:
+              // it is the key, so every run finds the one list rather than opening a
+              // second. The list is never closed, so the open listing always holds it.
+              const upsertTeamsIssue = async () => {
+                const title = `${TEAMS_ISSUE_PREFIX}${assignment}`;
+                const body = teamsIssueBody(written.rows, written.iAssign, written.iTeam);
+                const open = (await github.paginate(github.rest.issues.listForRepo, {
+                  owner: org, repo: context.repo.repo, state: 'open',
+                  labels: 'team-list', per_page: 100,
+                })).find(i => !i.pull_request && i.title === title);
+                if (open) {
+                  await github.rest.issues.update({
+                    owner: org, repo: context.repo.repo, issue_number: open.number, body });
+                  return;
+                }
+                const made = await github.rest.issues.create({
+                  owner: org, repo: context.repo.repo, title, body, labels: ['team-list'] });
+                // Pinned, because the Join-team form calls it "the pinned Teams for
+                // <assignment> issue" and that sentence has to be true. REST cannot pin, so
+                // this is the one GraphQL call in the file. A repo holds at most three
+                // pinned issues, so a fourth group assignment's list is simply not pinned -
+                // a reason to carry on, never to fail.
+                try {
+                  await github.graphql(
+                    'mutation($id: ID!) { pinIssue(input: { issueId: $id }) { issue { number } } }',
+                    { id: made.data.node_id });
+                } catch (e) {
+                  core.warning(`could not pin the team list for ${assignment} (${e.status || e.name})`);
+                }
+              };
+              try {
+                await upsertTeamsIssue();
+              } catch (e) {
+                // The membership is ALREADY in teams.csv by now. A cosmetic list that could
+                // not be rewritten must never be reported to the student as a failed join,
+                // and must not raise `needs-review` either: there is nothing here for a
+                // human to fix that the next join will not fix by itself.
+                core.warning(`could not update the team list for ${assignment} (${e.status || e.name})`);
               }
 
               // Confirm.

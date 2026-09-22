@@ -136,6 +136,8 @@ Team formation **runs from the assignment's hand-out to its grading cutoff**. Ou
 
 The form reads all of this out of `classroom-config/assignments.lock.yml`, which the toolkit generates from each assignment's definition and the cohort's schedule, and nobody edits. Change the assignment's `grading_config.yml` or its dates and the mirror catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh actions**.
 
+`teams.csv` is private, so a student cannot see what to join. After every successful join the workflow rewrites a pinned **Teams for `<assignment>`** issue in the cohort's `welcome` repo, listing each team's name, its `n/cap` and whether it has room - **names and counts only**, because that repo is public. It is one issue per assignment, rebuilt from the file each time, so it needs no upkeep; leave it open.
+
 The release then grants each team its one shared repo. Full flow:
 [Enrol students → groups](06-enrol-students-to-cohort.md#group-assignments-rolling-basis).
 

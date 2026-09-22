@@ -536,7 +536,13 @@ def test_refresh_seeds_exactly_the_routing_labels_the_forms_declare(monkeypatch)
         declared.update(
             yaml.safe_load((WELCOME / "ISSUE_TEMPLATE" / rel).read_text())["labels"]
         )
-    assert {name for name, _, _ in welcome.WELCOME_LABELS} == declared
+    seeded = {name for name, _, _ in welcome.WELCOME_LABELS}
+    # Every label a form declares must be seeded, or that form's issues are skipped.
+    assert declared <= seeded
+    # `team-list` is seeded but declared by no form ON PURPOSE: it marks the list this
+    # workflow writes, and keeping it off the routing label is what stops the list
+    # triggering a run that answers it in public.
+    assert seeded - declared == {"team-list"}
 
     monkeypatch.setattr(welcome, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
@@ -625,9 +631,23 @@ def _form_body(assignment: str, action: str | None, team: str) -> str:
     return "\n".join(f"### {label}\n\n{value}\n" for label, value in fields if value)
 
 
-def _run_form(lock: str, teams_csv: str, body: str, handle: str = "stu") -> dict:
+def _run_form(
+    lock: str,
+    teams_csv: str,
+    body: str,
+    handle: str = "stu",
+    roster: tuple[str, ...] | None = None,
+    issues: list[dict] | None = None,
+    issues_break: bool = False,
+) -> dict:
     """Run the SHIPPED team-formation script over these files and this issue, and return
-    what it did: `comments`, `labels`, `writes` (each teams.csv it committed) and `states`.
+    what it did: `comments`, `labels`, `writes` (each teams.csv it committed), `states`,
+    `created` / `edited` (the public team list it opened or rewrote), `pinned` and
+    `issues` - the repo's open issues afterwards, to hand to the NEXT run.
+
+    `issues` seeds the welcome repo's open issues, so a second join meets the list the
+    first one left behind. `issues_break` makes every read of them fail, which is the
+    join that must still be reported as done.
 
     `await`/`async` are taken out so the stubs can answer synchronously - the same trick
     `_lock_answers` plays on one helper, over the whole script. Nothing else is rewritten,
@@ -640,21 +660,27 @@ def _run_form(lock: str, teams_csv: str, body: str, handle: str = "stu") -> dict
     files = {
         "assignments.lock.yml": lock,
         "teams.csv": teams_csv,
-        "students.csv": _roster_of("ann", "bob", handle),
+        "students.csv": _roster_of(*(roster or ("ann", "bob", handle))),
     }
     issue = {"number": 7, "user": {"login": handle}, "body": body}
     harness = (
         f"const FILES = {json.dumps(files)};\n"
         f"const ISSUE = {json.dumps(issue)};\n"
-        "const OUT = { comments: [], labels: [], writes: [], states: [] };\n"
+        f"const ISSUES = {json.dumps(issues or [])};\n"
+        f"const BREAK_ISSUES = {json.dumps(issues_break)};\n"
+        "const OUT = { comments: [], labels: [], writes: [], states: [],"
+        " created: [], edited: [], pinned: [], issues: ISSUES };\n"
         # base64 both ways is a no-op here, so the stubs hold plain text.
         "const Buffer = { from: (s, e) => ({ toString: () => s }) };\n"
         "const process = { env: { HAS_BOT: 'true' } };\n"
         "const setTimeout = (fn, ms) => fn();\n"
-        "const core = { setFailed: (m) => {} };\n"
+        "const core = { setFailed: (m) => {}, warning: (m) => {} };\n"
         "const context = { repo: { owner: 'cohort', repo: 'welcome' },"
         " payload: { issue: ISSUE } };\n"
-        "const github = { rest: {\n"
+        "const github = {\n"
+        "  paginate: (fn, a) => fn(a),\n"
+        "  graphql: (q, v) => { OUT.pinned.push(v.id); return {}; },\n"
+        "  rest: {\n"
         "  repos: {\n"
         "    getContent: (a) => { if (!(a.path in FILES)) {"
         " const e = new Error('absent'); e.status = 404; throw e; }\n"
@@ -665,7 +691,17 @@ def _run_form(lock: str, teams_csv: str, body: str, handle: str = "stu") -> dict
         "  issues: {\n"
         "    createComment: (a) => { OUT.comments.push(a.body); return {}; },\n"
         "    addLabels: (a) => { OUT.labels.push(a.labels[0]); return {}; },\n"
-        "    update: (a) => { OUT.states.push(a.state); return {}; },\n"
+        "    listForRepo: (a) => { if (BREAK_ISSUES) {"
+        " const e = new Error('no'); e.status = 403; throw e; }\n"
+        "      return ISSUES.filter(i => !a.labels || (i.labels || []).indexOf(a.labels) >= 0); },\n"
+        "    create: (a) => { const made = { number: 100 + ISSUES.length,"
+        " node_id: `N${100 + ISSUES.length}`, title: a.title, body: a.body,"
+        " labels: a.labels || [] };\n"
+        "      ISSUES.push(made); OUT.created.push(made); return { data: made }; },\n"
+        "    update: (a) => { const it = ISSUES.filter(i => i.number === a.issue_number)[0];\n"
+        "      if (a.body !== undefined) { if (it) it.body = a.body;"
+        " OUT.edited.push({ number: a.issue_number, body: a.body }); }\n"
+        "      if (a.state) OUT.states.push(a.state); return {}; },\n"
         "  },\n"
         "} };\n"
         "(function () {\n" + code + "\n})();\n"
@@ -806,6 +842,187 @@ def test_an_issue_from_a_form_with_no_action_field_is_answered_as_it_always_was(
         _lock_for("open"), _TEAMS_CSV, _form_body("assignment-2", None, "team-gamma")
     )
     assert started["writes"][0].endswith("assignment-2,team-gamma,stu\n")
+
+
+# --- The public team list ------------------------------------------------------------
+#
+# teams.csv is private, so the Join-team form's "type its name exactly" only ever worked
+# for people who had already agreed a team face to face. These run the shipped script and
+# read the issue it actually writes.
+
+
+def _teams_list(out: dict) -> str:
+    """The body of the `Teams for ...` issue this run opened or rewrote."""
+    wrote = out["created"] + out["edited"]
+    assert len(wrote) == 1, f"expected one team-list write, got {wrote}"
+    return wrote[0]["body"]
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_a_first_join_opens_the_public_team_list():
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+    )
+    (made,) = out["created"]
+    assert made["title"] == "Teams for assignment-2"
+    # Its OWN label, never the routing one: the next run finds it again in one listing,
+    # and a list wearing `team-formation` would trigger the very workflow that wrote it.
+    assert made["labels"] == ["team-list"]
+    assert out["pinned"] == [made["node_id"]], "the form calls it pinned; it must be"
+    assert made["body"].splitlines()[0] == (
+        "Up to 4 people per team. Team formation closes on 4 Oct."
+    )
+    assert "- **team-alpha** - 3/4, room for 1" in made["body"]
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_a_list_for_a_window_with_no_close_date_says_only_the_cap():
+    out = _run_form(
+        _lock_for("open", closes=""),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+    )
+    assert _teams_list(out).splitlines()[0] == "Up to 4 people per team."
+    assert "closes" not in _teams_list(out)
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_a_second_join_rewrites_the_same_list_rather_than_opening_another():
+    first = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Create a new team", "team-beta"),
+    )
+    # The file the first join left behind is what the second one reads.
+    second = _run_form(
+        _lock_for("open"),
+        first["writes"][-1],
+        _form_body("assignment-2", "Join an existing team", "team-beta"),
+        handle="cara",
+        roster=("ann", "bob", "stu", "cara"),
+        issues=first["issues"],
+    )
+    assert second["created"] == [], "a second list was opened for the same assignment"
+    (edit,) = second["edited"]
+    assert edit["number"] == first["created"][0]["number"]
+    assert second["pinned"] == [], "an issue that already exists is not pinned again"
+    assert "- **team-alpha** - 2/4, room for 2" in edit["body"]
+    assert "- **team-beta** - 2/4, room for 2" in edit["body"]
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_a_full_team_is_listed_as_full():
+    out = _run_form(
+        _lock_for("open", cap=3),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+    )
+    assert "- **team-alpha** - 3/3, full" in _teams_list(out)
+    assert "room for" not in _teams_list(out)
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_the_list_is_rebuilt_from_the_rows_not_incremented():
+    # THE property that makes a lost update harmless. The concurrency group is per ISSUE
+    # on purpose, so two joins can reach the upsert at once and one edit can be lost. A
+    # body rendered from the rows this run wrote is right again on the very next join;
+    # a count carried forward would stay wrong for the rest of the term. The list handed
+    # in here is deliberately WRONG, and the run must not build on it.
+    stale = {
+        "number": 42,
+        "title": "Teams for assignment-2",
+        "labels": ["team-list"],
+        "body": "Up to 4 people per team.\n\n- **team-alpha** - 1/4, room for 3",
+    }
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        issues=[stale],
+    )
+    (edit,) = out["edited"]
+    assert edit["number"] == 42
+    assert "- **team-alpha** - 3/4, room for 1" in edit["body"]
+    assert "1/4" not in edit["body"], "the stale count survived the rewrite"
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_the_list_carries_no_handle_from_the_roster():
+    # THE regression guard. `welcome` is PUBLIC and this issue is the one thing in it the
+    # whole cohort is pointed at. A team name is student-chosen and public by
+    # construction; who is in it is not - no handle, no name, no email, no
+    # `<slug>-<handle>` repo name, ever.
+    people = ("mariechen", "jbloggs", "hbaker")
+    csv = _TEAMS_HEADER + (
+        "assignment-2,team-alpha,mariechen\nassignment-2,team-alpha,jbloggs\n"
+    )
+    out = _run_form(
+        _lock_for("open"),
+        csv,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        handle="hbaker",
+        roster=people,
+    )
+    written = _teams_list(out).lower()
+    for who in people:
+        assert who not in written, f"the public team list names {who}"
+    assert f"assignment-2-{people[2]}" not in written
+    # ...and it does carry what it is for.
+    assert "team-alpha" in written and "3/4" in written
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_a_team_list_that_cannot_be_written_still_reports_the_join_as_done():
+    # The membership is already in teams.csv by the time the list is touched. A student
+    # must never be told their join failed because a cosmetic list could not be updated -
+    # and `needs-review` must not be raised for something the next join fixes by itself.
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        issues_break=True,
+    )
+    assert out["writes"][0].endswith("assignment-2,team-alpha,stu\n")
+    assert out["labels"] == ["team-recorded"] and out["states"] == ["closed"]
+    assert out["created"] == [] and out["edited"] == []
+    assert "you're in team **team-alpha**" in out["comments"][0]
+
+
+def test_the_workflow_does_not_answer_its_own_team_list():
+    # The list is opened with DSL_BOT_TOKEN, a PAT - whose issues, unlike the ambient
+    # token's, DO start workflow runs. Were it to carry the ROUTING label, opening it
+    # would answer it in public with "I can't find you on the course enrolment roster",
+    # on the one issue the whole cohort is pointed at. The two labels are what make that
+    # unreachable, so this pins them apart at both ends rather than trusting a title.
+    doc = yaml.safe_load((WELCOME / "team-formation.yml").read_text())
+    guard = doc["jobs"]["form-team"]["if"]
+    routes_on = yaml.safe_load(
+        (WELCOME / "ISSUE_TEMPLATE/02-join-team.yml").read_text()
+    )["labels"]
+    assert routes_on == ["team-formation"]
+    assert f"'{routes_on[0]}'" in guard
+
+    script = script_of("team-formation.yml", "form-team")
+    # The label the list is LOOKED UP by, and the one it is CREATED with, must be the same
+    # label - or a second list is opened on every join - and it must not be the routing
+    # one, or opening it starts a run against itself.
+    (listed,) = set(re.findall(r"labels: '([\w-]+)', per_page", script))
+    assert f"labels: ['{listed}']" in script, (
+        "the list is created and looked up under different labels"
+    )
+    assert listed != routes_on[0]
+
+
+def test_the_join_team_form_points_at_a_list_that_exists():
+    # The form promises a PINNED issue by that title; the workflow has to be the thing
+    # that makes both halves of that sentence true.
+    form = (WELCOME / "ISSUE_TEMPLATE/02-join-team.yml").read_text()
+    assert "pinned **Teams for \\<assignment\\>** issue" in form
+    script = script_of("team-formation.yml", "form-team")
+    assert "const TEAMS_ISSUE_PREFIX = 'Teams for '" in script
+    assert "pinIssue" in script
 
 
 # --- The generated Assignment field --------------------------------------------------
