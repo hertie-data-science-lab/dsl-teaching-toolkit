@@ -13,11 +13,14 @@ or a nightly run would clobber a live roster.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
 
 from .central import CENTRAL, pin_central_ref
-from .gh_contents import put_files
+from .gh_contents import get_file_content, put_files
+from .grades import TEAM_LOCK_PATH
 from .log import log_err, log_ok
 from .repos import ensure_label
 from .roster import CONFIG_REPO
@@ -133,6 +136,99 @@ WELCOME_LABELS = (
 )
 
 
+# The Join-team form's Assignment field is the one part of a seeded form that is not the
+# same in every cohort: the slugs it should offer are this cohort's, and which of them a
+# student may act on changes with the calendar. Everything outside these markers is the
+# form as reviewed; everything between them is regenerated per cohort, the same idiom (and
+# the same "an instructor who deleted the markers meant it" rule) as
+# `profile_readme.splice_repo_table`.
+JOIN_TEAM_FORM = "welcome/ISSUE_TEMPLATE/02-join-team.yml"
+ASSIGNMENT_FIELD_START = "# dsl:assignment-field:start"
+ASSIGNMENT_FIELD_END = "# dsl:assignment-field:end"
+
+# The lock file is hand-rolled (`grades.team_lock_text`) precisely so a line scanner can
+# read it without a YAML library - the shipped JavaScript reads it exactly this way, and
+# this is the second reader of the same two-space key / four-space scalar shape.
+_LOCK_KEY_RE = re.compile(r"^ {2}([\w.-]+):$")
+_LOCK_WINDOW_RE = re.compile(r"^ {4}team_formation_window:\s*(\w+)$")
+
+
+def open_formation_slugs(lock_text: str) -> list[str]:
+    """The assignments in a cohort's `assignments.lock.yml` whose team-formation window is
+    OPEN, sorted.
+
+    `open` is written only for a self-select group assignment inside its window, so this
+    needs no second opinion about the shape: every other assignment is one the form would
+    refuse anyway, and offering it in the dropdown would be inviting a student to be
+    refused."""
+    slugs, key = [], None
+    for raw in lock_text.splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        found = _LOCK_KEY_RE.match(line)
+        if found:
+            key = found.group(1)
+            continue
+        window = _LOCK_WINDOW_RE.match(line)
+        if key is not None and window and window.group(1).lower() == "open":
+            slugs.append(key)
+    return sorted(slugs)
+
+
+def join_team_form(open_slugs: Sequence[str]) -> str:
+    """The Join-team issue form for a cohort whose open assignments are `open_slugs`.
+
+    With any, the Assignment field becomes a dropdown of exactly those: a free-text slug is
+    a guess, and a guess that misses is answered by a workflow comment some minutes later,
+    which is the slowest possible way to learn you typed a dash wrong.
+
+    With none, the template's own free-text field is returned untouched. A GitHub dropdown
+    needs at least one option - an empty `options:` list is a form GitHub refuses to
+    render, which would take the Join-team route away from a cohort entirely rather than
+    merely leave it awkward."""
+    form = template(JOIN_TEAM_FORM)
+    if not open_slugs:
+        return form
+    start = form.find(ASSIGNMENT_FIELD_START)
+    end = form.find(ASSIGNMENT_FIELD_END)
+    if start == -1 or end == -1 or end < start:
+        return form
+    options = "\n".join(f"        - {slug}" for slug in open_slugs)
+    block = (
+        f"{ASSIGNMENT_FIELD_START} - AUTO-GENERATED from this cohort's\n"
+        "  # `classroom-config/assignments.lock.yml`: the assignments open for team\n"
+        "  # formation right now. Edits between these markers are overwritten.\n"
+        "  - type: dropdown\n"
+        "    id: assignment\n"
+        "    attributes:\n"
+        "      label: Assignment\n"
+        "      description: The group assignment you are forming a team for.\n"
+        "      options:\n"
+        f"{options}\n"
+        "    validations:\n"
+        "      required: true\n"
+        f"  {ASSIGNMENT_FIELD_END}"
+    )
+    return form[:start] + block + form[end + len(ASSIGNMENT_FIELD_END) :]
+
+
+def _open_formation_slugs(org: str) -> list[str]:
+    """`open_formation_slugs` for a live cohort, or none of them.
+
+    Every way of not reading the lock lands on the free-text fallback: a cohort seeded
+    before the file existed, one whose sync has not run yet, and a read that failed for a
+    reason nobody here can act on. The refresh's job is to leave a WORKING form behind, and
+    the free-text one has worked for every cohort so far."""
+    try:
+        text = get_file_content(org, CONFIG_REPO, TEAM_LOCK_PATH)
+    except RuntimeError as exc:
+        log_err(
+            f"could not read {TEAM_LOCK_PATH} in {org} ({exc}) - the Join-team form is "
+            f"seeded with a free-text Assignment field this run"
+        )
+        return []
+    return open_formation_slugs(text) if text else []
+
+
 def refresh_welcome_workflows(org: str) -> int:
     """Re-push a cohort's welcome-repo machinery (onboarding workflows + the issue forms
     they parse) from the current templates, as ONE commit - and ensure the routing labels
@@ -143,6 +239,13 @@ def refresh_welcome_workflows(org: str) -> int:
     A workflow and the form it parses must move together (field ids are a contract between
     them), so one commit is also the honest unit here: the intermediate state where one has
     landed and the other hasn't is not one anybody should be able to check out.
+
+    The Join-team form is the one file here that is not the template verbatim: its
+    Assignment field is rendered from the cohort's own lock (`join_team_form`), so the
+    refresh that moves an assignment's window is also what moves the form's options. That
+    makes this run WITH the calendar rather than only with a template change - which is why
+    `put_files` comparing blob shas matters: a cohort whose windows have not moved is
+    written nothing.
 
     Returns the failure count, so a caller (seed.refresh) can go red rather than report an
     onboarding repo it never managed to converge."""
@@ -162,8 +265,8 @@ def refresh_welcome_workflows(org: str) -> int:
             ".github/workflows/team-formation.yml": welcome_workflow(
                 "welcome/team-formation.yml"
             ).encode(),
-            ".github/ISSUE_TEMPLATE/02-join-team.yml": template(
-                "welcome/ISSUE_TEMPLATE/02-join-team.yml"
+            ".github/ISSUE_TEMPLATE/02-join-team.yml": join_team_form(
+                _open_formation_slugs(org)
             ).encode(),
             ".github/ISSUE_TEMPLATE/config.yml": template(
                 "welcome/ISSUE_TEMPLATE/config.yml"

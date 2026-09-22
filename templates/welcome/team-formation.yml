@@ -70,8 +70,12 @@ jobs:
                   'needs-review');
               }
 
-              // Parse the assignment slug + team name from the issue form.
+              // Parse the assignment slug, the action and the team name from the issue form.
+              // Same idiom for all three: the field's label, the newline(s) GitHub renders
+              // after it, then the value. The action's value is one of the dropdown's two
+              // options, and only its first word tells them apart.
               const aMatch = (issue.body || '').match(/Assignment\s*[\r\n]+\s*([A-Za-z0-9][\w.-]*)/i);
+              const cMatch = (issue.body || '').match(/Action\s*[\r\n]+\s*([A-Za-z]+)/i);
               const tMatch = (issue.body || '').match(/Team\s*[\r\n]+\s*([A-Za-z0-9][\w-]*)/i);
 
               // What this assignment allows, read from the machine-written mirror the
@@ -85,6 +89,11 @@ jobs:
               // dsl_course.grades.team_lock_text): two-space assignment keys, four-space
               // scalars under them. `undefined` = no lock file; `null` = a slug it does
               // not carry.
+              //
+              // `window` is null when the entry carries no `team_formation_window:` at
+              // all, which is what a cohort last synced by a toolkit older than the window
+              // looks like. That reads as OPEN below - the behaviour those cohorts have
+              // had since the form existed - never as closed.
               const LOCK = 'assignments.lock.yml';
               const lockEntry = async (slug) => {
                 let text;
@@ -95,7 +104,7 @@ jobs:
                   if (e.status !== 404) throw e;
                   return undefined;
                 }
-                let inSlug = false, formation = null, cap = null;
+                let inSlug = false, formation = null, cap = null, window = null, closes = '';
                 for (const raw of text.split(/\r?\n/)) {
                   const line = raw.replace(/#.*$/, '').trimEnd();
                   const key = line.match(/^ {2}([\w.-]+):$/);
@@ -105,8 +114,20 @@ jobs:
                   if (f) formation = f[1].toLowerCase();
                   const c = line.match(/^ {4}max_team_size:\s*(\d+)$/);
                   if (c) cap = parseInt(c[1], 10);
+                  const w = line.match(/^ {4}team_formation_window:\s*(\w+)$/);
+                  if (w) window = w[1].toLowerCase();
+                  const d = line.match(/^ {4}team_formation_closes:\s*(\S*)$/);
+                  if (d) closes = d[1];
                 }
-                return formation === null ? null : { formation, cap };
+                return formation === null ? null : { formation, cap, window, closes };
+              };
+              // The close date is written as a bare ISO day and read by a student, so it is
+              // spoken as one. Anything that is not one is printed as it stands rather than
+              // guessed at.
+              const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              const spokenDate = (iso) => {
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+                return m ? `${parseInt(m[3], 10)} ${MONTHS[parseInt(m[2], 10) - 1]}` : iso;
               };
 
               if (!aMatch || !tMatch) return fail(
@@ -118,6 +139,12 @@ jobs:
               // one-team-per-assignment rule below must see them that way too.
               const assignment = aMatch[1].toLowerCase();
               const team = tMatch[1].toLowerCase();
+              // `null` when the form carried no readable Action - an issue opened from a
+              // browser's cached copy of a form that predates the field. Neither `create`
+              // nor `join`, so neither check below fires and the request is taken exactly
+              // as it was before the field existed: joining the team if it is there,
+              // starting it if it is not.
+              const action = cMatch ? cMatch[1].toLowerCase() : null;
               // The GitHub team this row becomes is `<assignment>-<team>` (sync_teams.team_slug).
               // `course` + `admin` is `course-admin` - the faculty team with admin on every repo
               // in this org. Never let a form submission name a faculty team.
@@ -208,6 +235,26 @@ jobs:
                 `Thanks @${handle} - teams for \`${assignment}\` are assigned by the instructor. ` +
                 `The teaching team will add you to one; there is nothing for you to do here.`,
                 'needs-review');
+              // The formation WINDOW, which runs from the handout to the grading pin. Only
+              // an explicit `pending` or `closed` refuses: a lock written by a toolkit older
+              // than the window carries no such scalar at all (`window` is null), and that
+              // has to go on behaving exactly as it did - a cohort mid-semester must not
+              // lose team formation because its nightly sync has not run yet.
+              // `pending` and `closed` are the two sides of the window and they must not
+              // share a sentence: before the handout `closes` is still in the FUTURE, so
+              // the shut wording would tell a student in September that the door closed in
+              // October.
+              if (lock.window === 'pending') return fail(
+                `Thanks @${handle} - team formation for \`${assignment}\` is not open yet. ` +
+                `It opens when the assignment hands out` +
+                (lock.closes ? `, and runs until ${spokenDate(lock.closes)}.` : `.`) +
+                ` The course site carries the date.`,
+                'needs-review');
+              if (lock.window === 'closed') return fail(
+                `Thanks @${handle} - team formation for \`${assignment}\` ` +
+                (lock.closes ? `closed on ${spokenDate(lock.closes)}.` : `is closed.`) +
+                ` Contact the teaching team if you still need a team for it.`,
+                'needs-review');
               const cap = lock.cap;
               if (!(cap > 0)) return fail(
                 `Thanks @${handle} - \`${assignment}\` has no team-size cap recorded. ` +
@@ -255,6 +302,35 @@ jobs:
                   'needs-review');
                 const size = rows.filter(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
+                // Create vs join used to be IMPLICIT - a name that existed joined, a name
+                // that did not created - so `teamalpha` for `team-alpha` opened a silent
+                // second team, and nobody found out until the handout provisioned two half
+                // teams. The form now asks, and the two answers are checked against what
+                // the file we are about to write actually says, re-read on every attempt.
+                if (action === 'create' && size > 0) return fail(
+                  `Thanks @${handle} - **${team}** already exists for \`${assignment}\` (${size}/${cap}). ` +
+                  `Choose **Join an existing team** instead, or pick a different name.`,
+                  'needs-review');
+                if (action === 'join' && size === 0) {
+                  // Near miss: same name once case and separators are taken out of it,
+                  // which is what a mistyped join looks like. Sorted, so the answer to a
+                  // name that is close to two of them is always the same one.
+                  const flat = (s) => s.toLowerCase().replace(/[-_]/g, '');
+                  const named = [...new Set(rows
+                    .filter(r => cell(r, iAssign).toLowerCase() === assignment)
+                    .map(r => cell(r, iTeam).toLowerCase())
+                    .filter(Boolean))].sort();
+                  const near = named.find(t => flat(t) === flat(team));
+                  const nearSize = rows.filter(r =>
+                    cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === near).length;
+                  return fail(
+                    `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`. ` +
+                    (near
+                      ? `Did you mean **${near}** (${nearSize}/${cap})?`
+                      : `The teams that exist are listed in the pinned **Teams for \`${assignment}\`** issue - ` +
+                        `or choose **Create a new team** to start this one.`),
+                    'needs-review');
+                }
                 if (size >= cap) return fail(
                   `Thanks @${handle} - **${team}** already has ${size} member${size === 1 ? '' : 's'} ` +
                   `(the cap for \`${assignment}\` is ${cap}). Pick another team name.`,

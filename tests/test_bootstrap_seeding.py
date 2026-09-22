@@ -134,6 +134,10 @@ def fake(monkeypatch):
     # seed.refresh can re-push them without importing bootstrap_course), in one commit per
     # set - so its put_files has to be faked too.
     monkeypatch.setattr(welcome, "put_files", f.put_files)
+    # The Join-team form is rendered from the cohort's own assignment lock, so the seeding
+    # reads it too - off the same recorder, which for a fresh org has no such file and so
+    # gets the free-text Assignment field.
+    monkeypatch.setattr(welcome, "get_file_content", f.get_file_content)
     # ...and the routing labels it seeds beside them, recorded rather than created.
     monkeypatch.setattr(
         welcome,
@@ -1640,6 +1644,7 @@ def test_a_per_cohort_refresh_reds_on_a_failed_write_and_claims_nothing(
     # land, so there is no count to take.
     monkeypatch.setattr(welcome, "put_files", lambda *a, **k: False)
     monkeypatch.setattr(welcome, "ensure_label", lambda *a, **k: True)
+    monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
 
     assert getattr(welcome, job)("Cohort-f2026", *extra_args) == 1
     out = capsys.readouterr()

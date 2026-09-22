@@ -130,7 +130,11 @@ Which of the two an assignment uses is its own declaration - `team_formation` in
 - **`assigned`** - you edit `teams.csv` directly, one row per member. The **Join team** form refuses every request for this assignment and says so.
 - **`self_select`** - students open a **Join team** issue in the cohort's `welcome` repo. Team size is capped by that assignment's `max_team_size` (default: the course's `assignment_defaults`, else 5).
 
-The form reads both answers out of `classroom-config/assignments.lock.yml`, which the toolkit generates from each assignment's definition and nobody edits. Change the assignment's `grading_config.yml` and the mirror catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh actions**.
+The form asks for three things: which assignment, whether they are **joining an existing team** or **creating a new one**, and the team's name. The choice is explicit because it used to be implied by the name - a name that existed joined, a name that did not created - so one typo opened a second, half-empty team that nobody noticed until the release provisioned it. Now creating onto a name that is taken is refused, and joining a name that does not exist is refused with the nearest real team named.
+
+Team formation **runs from the assignment's hand-out to its grading cutoff**. Outside that window the form refuses and says when the window shut; while it is open, the form's assignment field is a drop-down of exactly the assignments a student may act on. The window is the schedule's, so moving `handout_datetime` or `grading_datetime` moves it.
+
+The form reads all of this out of `classroom-config/assignments.lock.yml`, which the toolkit generates from each assignment's definition and the cohort's schedule, and nobody edits. Change the assignment's `grading_config.yml` or its dates and the mirror catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh actions**.
 
 The release then grants each team its one shared repo. Full flow:
 [Enrol students → groups](06-enrol-students-to-cohort.md#group-assignments-rolling-basis).

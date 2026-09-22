@@ -67,14 +67,14 @@ it is what stops a re-run repeating itself and what lets a failed notification b
 ## `teams.csv` - group membership (optional, for group assignments)
 
 2 possible ways this is populated:
-1. Students self-select via the welcome "Join team" issue, which appends rows to this file - but only for an assignment whose `grading_config.yml` says `team_formation: self_select`, and only up to its `max_team_size`,
+1. Students self-select via the welcome "Join team" issue, which appends rows to this file - but only for an assignment whose `grading_config.yml` says `team_formation: self_select`, only up to its `max_team_size`, and only between its hand-out and its grading cutoff,
 2. Instructors edit directly - a push here also triggers **Sync membership**. This is the route for `team_formation: assigned`, where the form refuses every request.
 
 ## `assignments.lock.yml` - what the Join-team form is allowed to do (generated)
 
-SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `welcome` repo, under a token that cannot reach an assignment template, so it cannot read an assignment's `grading_config.yml`. This file mirrors the two answers it needs - `team_formation` and `max_team_size` - one entry per assignment in `schedule.yml`.
+SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `welcome` repo, under a token that cannot reach an assignment template, so it cannot read an assignment's `grading_config.yml`. This file mirrors the answers it needs - `team_formation`, `max_team_size`, and whether team formation is open for that assignment right now (`team_formation_window`, with the day it shuts in `team_formation_closes`) - one entry per assignment in `schedule.yml`.
 
-It is rewritten by **Sync membership** (which a push to `schedule.yml` triggers), by every **Release assignment**, and by the nightly **Refresh actions**. Change an assignment by editing its own `grading_config.yml` on the template's `solution` branch; this file catches up on the next sync. An assignment whose template does not exist yet is locked to `none`, so no team can be formed for it until the template says what it is.
+It is rewritten by **Sync membership** (which a push to `schedule.yml` triggers), by every **Release assignment**, and by the nightly **Refresh actions** - which is also what moves the window as the term goes on. Change an assignment by editing its own `grading_config.yml` on the template's `solution` branch; this file catches up on the next sync. An assignment whose template does not exist yet is locked to `none`, so no team can be formed for it until the template says what it is.
 
 ## `schedule.yml` - the release plan + due dates + events (optional)
 

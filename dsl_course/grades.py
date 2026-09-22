@@ -1889,41 +1889,52 @@ _TEAM_LOCK_HEADER = f"""\
 #   max_team_size:  the cap the form enforces (group assignments only)
 #   team_formation_window:
 #                   open      students may form teams for it now
-#                   closed    outside the window - not handed out yet, or already graded
+#                   pending   handed out later; the window has not opened yet
+#                   closed    the window has shut, or there is no date to open it on
 #                   none      not a self-select group assignment, so there is no window
+#   team_formation_closes:
+#                   the date that window shuts, bare ISO (`2026-10-04`), for the refusal
+#                   to name - empty when there is no window, or no date to give
 #
 # An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
 # until the template says what it is, nobody can mint a GitHub team for it.
 """
 
 
-def team_lock_text(entries: dict[str, tuple[str, int, str]]) -> str:
-    """The lock file's whole text, from `{schedule key: (team_formation, cap, window)}`.
+def team_lock_text(entries: dict[str, tuple[str, int, str, str]]) -> str:
+    """The lock file's whole text, from
+    `{schedule key: (team_formation, cap, window, closes)}`.
 
     Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: the
     form's line scanner is the only reader, and it reads a two-space key with four-space
     scalars under it. Keys sorted, so a re-sync of an unchanged cohort produces an
-    identical blob and `put_file` writes nothing."""
+    identical blob and `put_file` writes nothing.
+
+    `team_formation_closes` is written even when it is empty - the key with nothing after
+    it. The scanner reads one shape, and a line that comes and goes is a second shape:
+    the entry whose close date the schedule cannot give is exactly the entry a reader is
+    most likely to get wrong."""
     lines = [_TEAM_LOCK_HEADER, "assignments:"]
     if not entries:
         lines.append("  {}")
     for key in sorted(entries):
-        formation, cap, window = entries[key]
+        formation, cap, window, closes = entries[key]
         lines += [
             f"  {key}:",
             f"    team_formation: {formation}",
             f"    max_team_size: {cap}",
             f"    team_formation_window: {window}",
+            f"    team_formation_closes: {closes}".rstrip(),
         ]
     return "\n".join(lines) + "\n"
 
 
 def team_lock_entries(
     course_org: str, sched: schedule.Schedule, now: datetime | None = None
-) -> dict[str, tuple[str, int, str]]:
+) -> dict[str, tuple[str, int, str, str]]:
     """What each of this cohort's assignments allows, resolved off the ONE place that
     declares it - the template's `grading_config.yml` - plus where `now` falls in its
-    team-formation window.
+    team-formation window, and the day that window shuts.
 
     A template with no definition to read is locked to `none` and says so: the alternative
     is the toolkit guessing a shape for an assignment nobody has described, and the guess
@@ -1933,11 +1944,16 @@ def team_lock_entries(
     refuses those on the `team_formation` scalar alone - a window over an assignment whose
     teams the teaching team writes says nothing anyone can act on. `closed` covers every
     self-select case the window does not open: before the handout, after the grading pin,
-    and an entry carrying no dates to judge by."""
+    and an entry carrying no dates to judge by.
+
+    The close is a bare DATE, not the pin's full moment: the only reader is a refusal
+    comment a student reads, and an hour in the workflow's timezone answers a question
+    nobody asked. Empty whenever there is no window, or no pin to take one from - the
+    refusal then says only that the window is shut."""
     defaults = course_assignment_defaults(course_org)
     fallback = defaults.get("max_team_size") or DEFAULT_MAX_TEAM_SIZE
     now = now if now is not None else datetime.now(UTC)
-    entries: dict[str, tuple[str, int, str]] = {}
+    entries: dict[str, tuple[str, int, str, str]] = {}
     for key, entry in sched.assignments.items():
         spec = declared_grading_spec(course_org, entry.course_source_repo)
         if spec is None:
@@ -1947,20 +1963,28 @@ def team_lock_entries(
                 f"locking it to `{NO_TEAMS}`, so no team can be formed for it until the "
                 f"template declares what the assignment is"
             )
-            entries[key] = (NO_TEAMS, fallback, "none")
+            entries[key] = (NO_TEAMS, fallback, "none", "")
             continue
         formation = spec.team_formation_resolved
-        window = "none"
+        window, shuts = "none", ""
         if formation == SELF_SELECT:
             opens, closes = schedule.formation_window(sched, key)
-            open_now = (
-                opens is not None and closes is not None and opens <= now < closes
-            )
-            window = "open" if open_now else "closed"
+            if opens is None or closes is None:
+                # Nothing to judge by: an assignment handed out by hand has no hour from
+                # which "form your team now" is true, so the door stays shut.
+                window = "closed"
+            elif now < opens:
+                window = "pending"
+            elif now < closes:
+                window = "open"
+            else:
+                window = "closed"
+            shuts = closes.date().isoformat() if closes is not None else ""
         entries[key] = (
             formation,
             spec.max_team_size or fallback,
             window,
+            shuts,
         )
     return entries
 

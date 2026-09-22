@@ -80,12 +80,17 @@ Things whose *literal spelling* is depended on from outside Python:
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
 - **`grades.team_lock_text`'s LAYOUT.** `classroom-config/assignments.lock.yml` is parsed by
-  a line scanner in `templates/welcome/team-formation.yml` (github-script has no YAML
-  library), which matches a two-space assignment key and four-space `team_formation:` /
-  `max_team_size:` under it. Re-indenting the writer, or nesting the entries any deeper,
-  makes every Join-team request in every cohort read as "not an assignment here" - and the
-  form is the only place a student would find out. `tests/test_welcome_templates.py` runs
-  the SHIPPED scanner over the writer's real output; keep that pairing.
+  line scanners - one in `templates/welcome/team-formation.yml` (github-script has no YAML
+  library), one in `welcome.open_formation_slugs` - which match a two-space assignment key
+  and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
+  `team_formation_closes:` under it. Re-indenting the writer, or nesting the entries any
+  deeper, makes every Join-team request in every cohort read as "not an assignment here" -
+  and the form is the only place a student would find out. `team_formation_closes:` is
+  written even when its value is empty: the shape the scanners see is constant, and a line
+  that comes and goes is a second shape. A MISSING `team_formation_window:` reads as open,
+  never as closed, so a cohort whose lock predates the window keeps forming teams.
+  `tests/test_welcome_templates.py` runs the SHIPPED scanner over the writer's real output;
+  keep that pairing.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_COHORT_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the

@@ -1715,12 +1715,15 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 "team_formation": "none",
                 "max_team_size": 5,
                 "team_formation_window": "none",
+                # No window, so no day for a refusal about one to name.
+                "team_formation_closes": None,
             },
             "project": {
                 "team_formation": "self_select",
                 "max_team_size": 3,
                 # No handout_datetime on `_sched`, so the window never opens.
                 "team_formation_window": "closed",
+                "team_formation_closes": _DUE.date(),
             },
         }
     }
@@ -1767,7 +1770,7 @@ def test_a_cohort_with_no_assignments_still_gets_a_readable_lock_file(monkeypatc
     assert yaml.safe_load(text) == {"assignments": {}}
 
 
-def test_a_self_select_window_opens_at_the_handout_and_shuts_at_the_grading_pin(
+def test_a_self_select_window_is_pending_then_open_then_closed(
     monkeypatch,
 ):
     # The three answers off one schedule, so the boundaries are read from the same dates a
@@ -1781,7 +1784,10 @@ def test_a_self_select_window_opens_at_the_handout_and_shuts_at_the_grading_pin(
         )
         return yaml.safe_load(text)["assignments"]["project"]["team_formation_window"]
 
-    assert window(_HANDOUT - timedelta(seconds=1)) == "closed"
+    # `pending` and `closed` are kept apart because the form says different things about
+    # them: before the handout the close date is still in the FUTURE, so the shut wording
+    # would tell a September student the door closed in October.
+    assert window(_HANDOUT - timedelta(seconds=1)) == "pending"
     assert window(_HANDOUT) == "open"  # the handout instant itself is inside
     assert window(_DUE - timedelta(seconds=1)) == "open"
     assert window(_DUE) == "closed"  # the pin is not: the snapshot has frozen
@@ -1821,6 +1827,33 @@ def test_an_assignment_the_form_refuses_anyway_has_no_window(monkeypatch):
     windows = yaml.safe_load(text)["assignments"]
     assert windows["a1"]["team_formation_window"] == "none"
     assert windows["project"]["team_formation_window"] == "none"
+
+
+def test_the_close_date_is_the_pins_day_and_the_line_is_there_even_when_it_is_empty(
+    monkeypatch,
+):
+    # The only reader is a refusal a student reads ("closed on 4 Oct"), so the scalar is
+    # the pin's DAY, not its moment. The line is written whatever the value: the form and
+    # `welcome.open_formation_slugs` both line-scan this file, and a key that appears only
+    # sometimes is a second shape for them to get right.
+    text = _lock(
+        monkeypatch,
+        _sched(
+            a1="assignment-1-f2026",
+            project="assignment-4-project-f2026",
+            handout=_HANDOUT,
+        ),
+        {
+            "assignment-1-f2026": "type: individual\n",
+            "assignment-4-project-f2026": "type: group\n",
+        },
+        now=_HANDOUT,
+    )
+    assert "    team_formation_closes: 2026-10-04\n" in text
+    assert "    team_formation_closes:\n" in text  # the individual one, empty
+    entries = yaml.safe_load(text)["assignments"]
+    assert entries["project"]["team_formation_closes"] == _DUE.date()
+    assert entries["a1"]["team_formation_closes"] is None
 
 
 def test_a_template_with_no_spec_has_no_window_either(monkeypatch):
@@ -1869,6 +1902,7 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "team_formation": "self_select",
         "max_team_size": 5,
         "team_formation_window": "closed",
+        "team_formation_closes": _DUE.date(),
     }
 
 
