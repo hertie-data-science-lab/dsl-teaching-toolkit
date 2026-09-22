@@ -34,7 +34,7 @@ from dsl_course import faults as faults_mod
 from dsl_course import issues as issues_mod
 from dsl_course.collect import Target
 from dsl_course.faults import ConfigFault, Unusable
-from dsl_course.grades import GradingSpec
+from dsl_course.grades import GradingSpec, LockWrite
 from dsl_course.schedule import (
     ArchiveRow,
     AssignmentEntry,
@@ -141,6 +141,24 @@ def _no_source_preflight(monkeypatch):
     monkeypatch.setattr(
         scheduler.source_digest, "sync", lambda *a, **k: source_digest.DigestResult()
     )
+
+
+@pytest.fixture(autouse=True)
+def team_lock_writes(monkeypatch):
+    """Every tick now mirrors the team-formation window into the cohort's lock file
+    (`scheduler._team_formation_phase`), which is three API calls on a path most of these
+    tests are not about. Stubbed to "wrote it, nothing moved" - the ordinary tick - and the
+    list it hands back is what the tests that ARE about it assert on. Setting it on
+    `scheduler` rather than on `grades` is the repo rule: stub the CONSUMER's imported
+    name."""
+    calls: list[tuple] = []
+
+    def stub(course_org, cohort_org, sched=None, *, now=None, dry_run=False):
+        calls.append((course_org, cohort_org, now, dry_run))
+        return LockWrite(True, False)
+
+    monkeypatch.setattr(scheduler, "sync_team_lock", stub)
+    return calls
 
 
 def _r(label: str, when: datetime, **kw) -> Release:
@@ -343,6 +361,153 @@ def test_a_tick_that_provisions_nothing_does_not_re_render_the_site(monkeypatch)
     )
     assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
     assert synced == [("Course-Org", "Cohort-Org")]
+
+
+# ------------------------------------------------- the team-formation window on the tick
+
+
+def _formation_tick(monkeypatch, sync_team_lock):
+    """One cohort with a single handed-out assignment, provisioning nothing, and the given
+    `sync_team_lock` in place of the fixture's. Hands back the list the site sync records
+    itself in - which on such a tick is empty unless the LOCK moved."""
+    monkeypatch.setattr(
+        "dsl_course.scheduler.provision_all",
+        lambda *a, **kw: (0, False),  # every unit `skipped`, so did_assign stays False
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _sched_with([_r("w1", WHEN, assignment="assignment-2-f2026")]),
+    )
+    monkeypatch.setattr(scheduler, "sync_team_lock", sync_team_lock)
+    synced: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site", lambda c, o: synced.append((c, o)) or 0
+    )
+    return synced
+
+
+def test_the_tick_mirrors_the_team_formation_window_itself(monkeypatch):
+    # The window is pure datetime arithmetic, but the lock that carries it was written only
+    # by the membership sync, the nightly refresh, the bootstrap and a real handout - so a
+    # window opened whenever one of THOSE next fired, not at its own moment. The tick owns
+    # it now, and it is handed this tick's `now` so --now previews the window it asks about.
+    calls: list[tuple] = []
+
+    def lock(course_org, cohort_org, sched=None, *, now=None, dry_run=False):
+        calls.append((course_org, cohort_org, sched, now, dry_run))
+        return LockWrite(True, False)
+
+    _formation_tick(monkeypatch, lock)
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert len(calls) == 1
+    course_org, cohort_org, sched, asked_now, dry_run = calls[0]
+    assert (course_org, cohort_org, asked_now, dry_run) == (
+        "Course-Org",
+        "Cohort-Org",
+        now,
+        False,
+    )
+    # The plan the tick already parsed, not a second read of schedule.yml.
+    assert sched is not None and "assignment-2-f2026" in {
+        r.assignment for r in sched.releases
+    }
+
+
+def test_a_team_lock_that_could_not_be_written_reds_the_tick(monkeypatch):
+    # The Join-team form answers off this file: a cohort whose lock is stale opens or shuts
+    # nobody's window, and that has to show up in the run's exit code.
+    _formation_tick(monkeypatch, lambda *a, **k: LockWrite(False, False))
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 1
+
+
+def test_only_a_tick_whose_team_lock_MOVED_re_renders_the_site(monkeypatch):
+    # THE render budget. The tick fires every handed-out assignment every quarter of an
+    # hour for the rest of the term, and it now writes the lock on every one of them - so
+    # rendering off the WRITE rather than off the blob compare would re-render every
+    # cohort's whole website four times an hour until the term ended. The lock's content
+    # moves on exactly two ticks per assignment: the one that opens the window and the one
+    # that shuts it.
+    moved = False
+    synced = _formation_tick(monkeypatch, lambda *a, **k: LockWrite(True, moved))
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert synced == [], "a tick that changed nothing re-rendered the site"
+
+    # ... and the tick the window actually opens on renders it, exactly once.
+    moved = True
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert synced == [("Course-Org", "Cohort-Org")]
+
+
+def test_the_site_render_sees_the_lock_this_tick_just_wrote(monkeypatch):
+    # Order, not just occurrence: the page that shows the window is rendered from the file
+    # the window lives in, so writing the lock AFTER the render would show the old state
+    # for a whole tick - on the one tick a student is being told the door is open.
+    order: list[str] = []
+
+    def lock(*a, **k):
+        order.append("lock")
+        return LockWrite(True, True)
+
+    _formation_tick(monkeypatch, lock)
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site", lambda c, o: order.append("site") or 0
+    )
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert order == ["lock", "site"]
+
+
+def test_a_windows_boundaries_always_fall_on_a_tick_with_something_due(monkeypatch):
+    # `site_stale` rides on `_run_releases`, which `_release_phase` skips outright when
+    # nothing is due - so the call to action appears on the site only because a window's
+    # two boundaries are guaranteed to be ticks where the synthesised handout is due.
+    # That guarantee is `due_releases` being CUMULATIVE, which is a property of another
+    # pass entirely. Make it once-only and the window would still open on time in the lock
+    # and in the Join-team form, while the site said nothing until the nightly sync -
+    # a silent, student-facing regression with nothing red to show for it.
+    opens = datetime(2026, 9, 22, 7, 0, tzinfo=BERLIN)
+    shuts = datetime(2026, 10, 4, 23, 59, 59, tzinfo=BERLIN)
+    sched = _assignments(
+        **{
+            "assignment-2": AssignmentEntry(
+                course_source_repo="a-f2026",
+                handout_datetime=opens,
+                due_datetime=shuts,
+            )
+        }
+    )
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda *a, **k: "a-f2026")
+    for label, when in (("opens", opens), ("shuts", shuts)):
+        releases = scheduler._handout_releases("Course-Org", "Cohort-Org", sched, when)
+        assert scheduler.due_releases(releases, when), (
+            f"nothing is due on the tick the window {label}, so the site is never "
+            f"re-rendered and the window's state never reaches a student"
+        )
+
+
+def test_a_dry_run_previews_the_team_lock_and_renders_nothing(monkeypatch):
+    # A preview writes nothing - and `sync_team_lock` is what decides that, so it is called
+    # with dry_run rather than skipped: the preview line is the only place a faculty member
+    # sees what the window would be told to say.
+    calls: list[bool] = []
+
+    def lock(course_org, cohort_org, sched=None, *, now=None, dry_run=False):
+        calls.append(dry_run)
+        return LockWrite(True, False)
+
+    synced = _formation_tick(monkeypatch, lock)
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert (
+        scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True, autograde=False)
+        == 0
+    )
+    assert calls == [True]
+    assert synced == []
 
 
 def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
@@ -1988,7 +2153,7 @@ def _phase_spies(monkeypatch, sched: Schedule):
     # silently rather than spied, so the sequence they assert stays the release sequence.
     monkeypatch.setattr(scheduler, "_preflight_configs", lambda *a: 0)
     monkeypatch.setattr(
-        scheduler, "_run_releases", lambda *a: calls.append("release") or 0
+        scheduler, "_run_releases", lambda *a, **k: calls.append("release") or 0
     )
     monkeypatch.setattr(
         scheduler,

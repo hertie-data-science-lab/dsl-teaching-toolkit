@@ -112,6 +112,7 @@ from .grades import (
     grading_config_faults,
     load_grading_spec,
     sheet_path,
+    sync_team_lock,
 )
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import listed_is_private, set_visibility
@@ -406,11 +407,17 @@ def _run_releases(
     due: list[Release],
     now: datetime,
     listing: dict[str, dict] | None,
+    *,
+    site_stale: bool = False,
 ) -> int:
     """Fire every due release's due actions, then sync the site once. Returns the error
     count. `now` gates each action individually: a deploy with its own deploy_datetime
     fires on its own clock, an entry's handout at its event_datetime - an entry can be
-    due for one and not (yet) the other."""
+    due for one and not (yet) the other.
+
+    `site_stale` is "something EARLIER in this tick already moved what the site shows" -
+    see `_team_formation_phase`. It rides on this call rather than syncing for itself so
+    that a tick which both opens a window and fires a release still renders once."""
     errors = 0
     # Batch EVERY due release's due deploys through one deploy_many: each unique source
     # and dest repo is cloned once for the whole run, not once per copy.
@@ -438,11 +445,14 @@ def _run_releases(
             # `due_releases` is cumulative - every handed-out assignment is due again on
             # every tick - so setting this unconditionally re-rendered the whole cohort
             # website once an hour, for the rest of the term, off a pass that had skipped
-            # every repo.
+            # every repo. The same budget is what `site_stale` is held to: the lock is the
+            # team-formation window's own state, so its CONTENT moves on exactly two ticks
+            # per assignment - the one that opens the window and the one that shuts it -
+            # and those are the two renders the window is worth.
             did_assign = did_assign or handout_changed
 
     # One website sync at the end, only if something actually changed.
-    if changed or did_assign:
+    if changed or did_assign or site_stale:
         # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). This
         # cohort's site-sync failure must be logged and counted, not an unhandled traceback
         # that aborts the run - and, under --all-cohorts, every cohort scheduled after it.
@@ -1223,6 +1233,30 @@ def _reprivatise_student_repos(
     return errors
 
 
+def _team_formation_phase(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+) -> tuple[int, bool]:
+    """Bring the team-formation lock up to this moment. Returns `(errors, lock_changed)`.
+
+    The window it carries is computed from datetimes, so nothing else in the cohort has to
+    happen for one to open or shut - and until this ran on the tick, nothing did: the lock
+    was written only by the membership sync, the nightly refresh, the bootstrap and a real
+    handout, so a window opened whenever one of those next happened to fire rather than at
+    its own moment.
+
+    `lock_changed` is `sync_team_lock`'s own blob compare, handed on to `_run_releases` as
+    `site_stale`: the tick that moves the window is the tick that has to re-render the site
+    showing it."""
+    write = sync_team_lock(course_org, cohort_org, sched, now=now, dry_run=dry_run)
+    # `sync_team_lock` logs its own preview and its own failure (it is written from four
+    # other places that each need the same line), so there is nothing to say here.
+    return (0 if write.ok else 1), write.changed
+
+
 def _release_phase(
     course_org: str,
     cohort_org: str,
@@ -1305,6 +1339,23 @@ def _release_phase(
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
     errors += _preflight_configs(course_org, cohort_org, sched, now, dry_run, listing)
+    # Last before the releases, and ABOVE the dry-run return so a preview says what it
+    # would write: the team-formation window is pure datetime arithmetic, so this is the
+    # pass that makes one open and shut on its own clock rather than whenever something
+    # else in the cohort happened to sync. Before `_run_releases` because that is where the
+    # one site sync lives - a tick that opens a window writes the lock here and renders the
+    # site showing it at the end of the same tick.
+    #
+    # That last part RESTS on `due_releases` being cumulative: `_run_releases` only runs
+    # when something is due, and both of a window's boundaries are covered only because
+    # the synthesised handout stays due from its datetime onwards. Make that pass
+    # once-only and a window would still open on time in the lock and the form, while the
+    # site's call to action waited for the nightly sync - so
+    # `test_a_windows_boundaries_always_fall_on_a_tick_with_something_due` pins it.
+    lock_errors, lock_changed = _team_formation_phase(
+        course_org, cohort_org, sched, now, dry_run
+    )
+    errors += lock_errors
 
     if dry_run:
         for release in due:
@@ -1321,7 +1372,9 @@ def _release_phase(
     elif not due:
         log_ok("nothing due.")
     else:
-        errors += _run_releases(course_org, cohort_org, due, now, listing)
+        errors += _run_releases(
+            course_org, cohort_org, due, now, listing, site_stale=lock_changed
+        )
     return errors
 
 
