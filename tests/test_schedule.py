@@ -1261,6 +1261,40 @@ def test_an_unparseable_grading_datetime_is_flagged_not_silently_the_due_date():
     assert "falls back to the end of the late window" in line
 
 
+def test_the_formation_window_runs_from_the_handout_to_the_grading_pin():
+    sched = parse(
+        {
+            "assignments": {
+                "a1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "handout_datetime": "2026-09-22T09:00",
+                }
+            }
+        }
+    )
+    assert schedule.formation_window(sched, "a1") == (
+        sched.assignments["a1"].handout_datetime,
+        schedule.grading_datetime_at(sched, "a1"),
+    )
+    # A slug this schedule does not carry gets no window at all, rather than half of one.
+    assert schedule.formation_window(sched, "nope") == (None, None)
+
+
+def test_an_assignment_handed_out_by_hand_has_a_window_that_never_opens():
+    # No handout_datetime = a moment nobody wrote down, so there is no hour from which
+    # "form your team now" would be true.
+    sched = parse(
+        {
+            "assignments": {
+                "a1": {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13"}
+            }
+        }
+    )
+    opens, closes = schedule.formation_window(sched, "a1")
+    assert opens is None and closes == sched.assignments["a1"].due_datetime
+
+
 def test_an_unparseable_deploy_datetime_is_flagged():
     sched = parse(
         {

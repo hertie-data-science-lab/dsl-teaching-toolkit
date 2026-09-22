@@ -1555,6 +1555,32 @@ def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
     return at.isoformat() if at is not None else None
 
 
+def formation_window(
+    sched: Schedule, slug: str
+) -> tuple[datetime | None, datetime | None]:
+    """When a self-selected team may be formed: `(handout, grading pin)`, or `(None, None)`
+    if the slug is not in the schedule at all.
+
+    A window with no `opens` NEVER opens. An assignment with no `handout_datetime` is
+    handed out by hand at a moment nobody has written down, so there is no hour from which
+    telling a student "form your team now" would be true - and an invitation sent before
+    the brief exists asks them to team up over an assignment they cannot read.
+
+    It closes at the grading pin because that is when the snapshot freezes: a team minted
+    after it has nothing left to hand in, and would be provisioned a repo against work
+    already collected.
+
+    Deliberately no spec read and no I/O - this answers off the parsed schedule alone, so
+    `grades` (which imports this module) can ask without the import turning back on
+    itself. The cost is `grading_datetime_at`'s spec-less pin, which ignores the template's
+    late window; erring EARLY is the safe direction for a door that should be shut by the
+    time anything is graded."""
+    entry = sched.assignments.get(slug)
+    if entry is None:
+        return (None, None)
+    return (entry.handout_datetime, grading_datetime_at(sched, slug))
+
+
 # ---------------------------------------------------------------------- gh/git wiring
 
 

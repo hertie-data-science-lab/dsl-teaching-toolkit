@@ -424,7 +424,7 @@ def test_the_scanner_is_not_confused_by_the_files_own_header():
     # Every line of the header is a comment, and the file always carries one.
     from dsl_course import grades
 
-    real = grades.team_lock_text({"project": ("self_select", 3)})
+    real = grades.team_lock_text({"project": ("self_select", 3, "open")})
     assert _lock_answers(real, ["project"]) == [{"formation": "self_select", "cap": 3}]
 
 

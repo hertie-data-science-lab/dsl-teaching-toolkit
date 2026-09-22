@@ -34,7 +34,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
-from typing import Self
+from typing import NamedTuple, Self
 from urllib.parse import urlsplit
 
 import yaml
@@ -55,6 +55,7 @@ from .course import (
     RECEIPTS_ISSUE_LABEL,
     RECEIPTS_ISSUE_MARKS,
     RECEIPTS_ISSUE_TITLE,
+    SELF_SELECT,
     SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
@@ -89,6 +90,7 @@ from .gh_contents import (
     blob_sha,
     dump_csv,
     get_file_content,
+    get_file_with_sha,
     put_file,
     put_files,
     read_csv,
@@ -1871,7 +1873,7 @@ def _undeclared_faults(
 # used to scrape `type:` and `max_team_size:` out of the cohort's own `schedule.yml`
 # instead, which is why a slug with neither let any student mint a real GitHub team.
 #
-# Two flat scalars per schedule key, and no vocabulary the form has to interpret twice.
+# Flat scalars per schedule key, and no vocabulary the form has to interpret twice.
 TEAM_LOCK_PATH = "assignments.lock.yml"
 _TEAM_LOCK_HEADER = f"""\
 # SYSTEM-OWNED - do not edit, edits here are overwritten. Written by the DSL teaching
@@ -1885,44 +1887,57 @@ _TEAM_LOCK_HEADER = f"""\
 #                   assigned      the teaching team writes teams.csv; the form refuses
 #                   none          an individual assignment; the form refuses
 #   max_team_size:  the cap the form enforces (group assignments only)
+#   team_formation_window:
+#                   open      students may form teams for it now
+#                   closed    outside the window - not handed out yet, or already graded
+#                   none      not a self-select group assignment, so there is no window
 #
 # An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
 # until the template says what it is, nobody can mint a GitHub team for it.
 """
 
 
-def team_lock_text(entries: dict[str, tuple[str, int]]) -> str:
-    """The lock file's whole text, from `{schedule key: (team_formation, cap)}`.
+def team_lock_text(entries: dict[str, tuple[str, int, str]]) -> str:
+    """The lock file's whole text, from `{schedule key: (team_formation, cap, window)}`.
 
     Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: the
-    form's line scanner is the only reader, and it reads a two-space key with two
-    four-space scalars under it. Keys sorted, so a re-sync of an unchanged cohort produces
-    an identical blob and `put_file` writes nothing."""
+    form's line scanner is the only reader, and it reads a two-space key with four-space
+    scalars under it. Keys sorted, so a re-sync of an unchanged cohort produces an
+    identical blob and `put_file` writes nothing."""
     lines = [_TEAM_LOCK_HEADER, "assignments:"]
     if not entries:
         lines.append("  {}")
     for key in sorted(entries):
-        formation, cap = entries[key]
+        formation, cap, window = entries[key]
         lines += [
             f"  {key}:",
             f"    team_formation: {formation}",
             f"    max_team_size: {cap}",
+            f"    team_formation_window: {window}",
         ]
     return "\n".join(lines) + "\n"
 
 
 def team_lock_entries(
-    course_org: str, sched: schedule.Schedule
-) -> dict[str, tuple[str, int]]:
+    course_org: str, sched: schedule.Schedule, now: datetime | None = None
+) -> dict[str, tuple[str, int, str]]:
     """What each of this cohort's assignments allows, resolved off the ONE place that
-    declares it - the template's `grading_config.yml`.
+    declares it - the template's `grading_config.yml` - plus where `now` falls in its
+    team-formation window.
 
     A template with no definition to read is locked to `none` and says so: the alternative
     is the toolkit guessing a shape for an assignment nobody has described, and the guess
-    that costs least is the one where a team cannot be formed yet."""
+    that costs least is the one where a team cannot be formed yet.
+
+    The window is `none` for anything but a self-select assignment, because the form
+    refuses those on the `team_formation` scalar alone - a window over an assignment whose
+    teams the teaching team writes says nothing anyone can act on. `closed` covers every
+    self-select case the window does not open: before the handout, after the grading pin,
+    and an entry carrying no dates to judge by."""
     defaults = course_assignment_defaults(course_org)
     fallback = defaults.get("max_team_size") or DEFAULT_MAX_TEAM_SIZE
-    entries: dict[str, tuple[str, int]] = {}
+    now = now if now is not None else datetime.now(UTC)
+    entries: dict[str, tuple[str, int, str]] = {}
     for key, entry in sched.assignments.items():
         spec = declared_grading_spec(course_org, entry.course_source_repo)
         if spec is None:
@@ -1932,13 +1947,95 @@ def team_lock_entries(
                 f"locking it to `{NO_TEAMS}`, so no team can be formed for it until the "
                 f"template declares what the assignment is"
             )
-            entries[key] = (NO_TEAMS, fallback)
+            entries[key] = (NO_TEAMS, fallback, "none")
             continue
+        formation = spec.team_formation_resolved
+        window = "none"
+        if formation == SELF_SELECT:
+            opens, closes = schedule.formation_window(sched, key)
+            open_now = (
+                opens is not None and closes is not None and opens <= now < closes
+            )
+            window = "open" if open_now else "closed"
         entries[key] = (
-            spec.team_formation_resolved,
+            formation,
             spec.max_team_size or fallback,
+            window,
         )
     return entries
+
+
+class LockWrite(NamedTuple):
+    """`ok` = the file is now current. `changed` = its CONTENT moved in this call."""
+
+    ok: bool
+    changed: bool
+
+
+def sync_team_lock(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule | None = None,
+    *,
+    now: datetime | None = None,
+    dry_run: bool = False,
+) -> LockWrite:
+    """Mirror every assignment's team rules into `classroom-config/assignments.lock.yml`,
+    and say whether that changed anything.
+
+    Written from everything that could have moved one of its inputs: the membership
+    sync (whose dispatcher fires on a push to `schedule.yml`), the handout, and the nightly
+    refresh - which is also what seeds it, since a cohort's bootstrap ends in one. The blob
+    compare makes every one of those a no-op when nothing changed, so the cost of writing
+    it from four places is four reads a day.
+
+    `changed` is that same compare, handed BACK: a caller that renders something off this
+    file needs to know when to re-render, and it would otherwise pay a second read to find
+    out what this call already knows.
+
+    A CLOSED-OUT cohort is skipped: `teardown` archives `classroom-config` last, an
+    archived repo is read-only, and the membership sync reaches such a cohort every day -
+    the registry it fans out over is not what teardown seals. The check lives here rather
+    than at one call site because it is the same answer for all of them: a finished term
+    forms no teams, so there is nothing for the mirror to say."""
+    if repo_is_archived(cohort_org, CONFIG_REPO):
+        log(f"  [skip] {TEAM_LOCK_PATH} in {cohort_org} (cohort closed out)")
+        return LockWrite(True, False)
+    sched = sched if sched is not None else schedule.load(cohort_org)
+    if dry_run:
+        # Above the render, not below it: resolving the entries reads every template's
+        # `grading_config.yml`, and a preview that never writes has nothing to do with them.
+        log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
+        return LockWrite(True, False)
+    content = team_lock_text(team_lock_entries(course_org, sched, now)).encode()
+    try:
+        existing = get_file_with_sha(cohort_org, CONFIG_REPO, TEAM_LOCK_PATH)
+    except RuntimeError:
+        # A read that failed for anything but a 404. `changed` is only a render HINT, so
+        # the safe answer is the pessimistic one: one spurious re-render costs far less
+        # than a missed one, and `put_file` fetches its own sha when we pass none.
+        sha: str | None = None
+        changed = True
+    else:
+        sha = existing[1] if existing else ""
+        changed = sha != blob_sha(content)
+    # The sha the content was READ at: both the safe read-modify-write (GitHub refuses the
+    # write if the file moved since) and the no-op short circuit, since `put_file` returns
+    # True without writing when `expected_sha` already matches what we would write.
+    ok = put_file(
+        cohort_org,
+        CONFIG_REPO,
+        TEAM_LOCK_PATH,
+        content,
+        "ci: refresh the team-formation lock from each assignment's definition",
+        expected_sha=sha,
+    )
+    if not ok:
+        log_err(
+            f"could not write {TEAM_LOCK_PATH} in {cohort_org} - the Join-team form reads "
+            f"it, so it answers from whatever the file last said"
+        )
+    return LockWrite(ok, changed and ok)
 
 
 def write_team_lock(
@@ -1948,44 +2045,8 @@ def write_team_lock(
     *,
     dry_run: bool = False,
 ) -> bool:
-    """Mirror every assignment's team rules into `classroom-config/assignments.lock.yml`.
-
-    Written from everything that could have moved one of its two inputs: the membership
-    sync (whose dispatcher fires on a push to `schedule.yml`), the handout, and the nightly
-    refresh - which is also what seeds it, since a cohort's bootstrap ends in one. The blob
-    compare inside `put_file` makes every one of those a no-op when nothing changed, so the
-    cost of writing it from four places is four reads a day.
-
-    Returns whether the file is now current; a failed write is the caller's to count.
-
-    A CLOSED-OUT cohort is skipped: `teardown` archives `classroom-config` last, an
-    archived repo is read-only, and the membership sync reaches such a cohort every day -
-    the registry it fans out over is not what teardown seals. The check lives here rather
-    than at one call site because it is the same answer for all of them: a finished term
-    forms no teams, so there is nothing for the mirror to say."""
-    if repo_is_archived(cohort_org, CONFIG_REPO):
-        log(f"  [skip] {TEAM_LOCK_PATH} in {cohort_org} (cohort closed out)")
-        return True
-    sched = sched if sched is not None else schedule.load(cohort_org)
-    if dry_run:
-        # Above the render, not below it: resolving the entries reads every template's
-        # `grading_config.yml`, and a preview that never writes has nothing to do with them.
-        log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
-        return True
-    content = team_lock_text(team_lock_entries(course_org, sched)).encode()
-    if put_file(
-        cohort_org,
-        CONFIG_REPO,
-        TEAM_LOCK_PATH,
-        content,
-        "ci: refresh the team-formation lock from each assignment's definition",
-    ):
-        return True
-    log_err(
-        f"could not write {TEAM_LOCK_PATH} in {cohort_org} - the Join-team form reads it, "
-        f"so it answers from whatever the file last said"
-    )
-    return False
+    """`sync_team_lock`'s `ok` alone, for the callers that only have to count a failure."""
+    return sync_team_lock(course_org, cohort_org, sched, dry_run=dry_run).ok
 
 
 def _display_moment(at: datetime | None) -> str:
