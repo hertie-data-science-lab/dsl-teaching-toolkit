@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import stat
 import sys
@@ -989,8 +990,18 @@ def _lecture_entry(
     )
 
 
-def _formed_teams(cohort_org: str, key: str) -> list[tuple[str, int]]:
-    """`(team, members)` for every team formed for `key` so far, by name.
+def member_digest(cohort_org: str, handle: str) -> str:
+    """A team member as the public cohort site carries them: SHA-256 of
+    `<cohort org>:<handle, lower-cased>`, hex. Never the handle itself - the page's script
+    hashes its reader's saved handle the same way (_layouts/assignment.html, `memberKey`)
+    to recognise their team, and nothing else can read one back. Salted with the org so one
+    student's digest differs from cohort to cohort. `.lower()`, not `.casefold()`, because
+    the browser side is `toLowerCase` and GitHub handles are ASCII."""
+    return hashlib.sha256(f"{cohort_org}:{handle.lower()}".encode()).hexdigest()
+
+
+def _formed_teams(cohort_org: str, key: str) -> list[tuple[str, list[str]]]:
+    """`(team, member handles)` for every team formed for `key` so far, by name.
 
     The same reader `team_formation.open_windows` uses, on the same private file and keyed
     on the same SCHEDULE key - so the table the site prints and the fault the teaching team
@@ -1004,7 +1015,7 @@ def _formed_teams(cohort_org: str, key: str) -> list[tuple[str, int]]:
     except RuntimeError as exc:
         log_err(f"could not read {cohort_org}'s teams for {key}: {exc}")
         return []
-    return sorted((team, len(members)) for team, members in groups.items())
+    return sorted((team, sorted(members)) for team, members in groups.items())
 
 
 def _assignment_entry(
@@ -1256,22 +1267,47 @@ def _assignment_entry(
     #
     # WHICH teams exist rides with them, off the cohort's private teams.csv: a student
     # deciding whether to start a team or ask to join one needs to know what is already
-    # there, and this page is the one list of them - a push to teams.csv re-syncs it. NAMES
-    # AND COUNTS ONLY, never a handle: a team name is student-chosen and public by
-    # construction, and who is in it is not.
+    # there, and this page is the one list of them - a push to teams.csv re-syncs it.
+    #
+    # NAMES AND COUNTS, and no readable handle: each team's members ride as salted SHA-256
+    # digests (`member_digest`), for the page's script to recognise its own reader's team
+    # and nothing else.
+    #
+    # And each team's own repo URL, precomputed here off the same `submission_repo` the
+    # handout provisions with, so the page's script links a recognised reader straight to
+    # it without a second spelling of the name. A shared drop box is one repo for every
+    # team, so its URL is the drop box's; an external assignment has no repo to link.
     team_fm = ""
     if forming and shuts is not None:
         welcome = welcome_issue_url(cohort_org)
         cap = team_cap(course_org, spec)
+
+        def team_entry(name: str, handles: list[str]) -> str:
+            if external:
+                url = ""
+            elif spec.submit_shared:
+                url = f"https://github.com/{cohort_org}/{q(shared_repo(slug))}"
+            else:
+                url = (
+                    f"https://github.com/{cohort_org}/{q(submission_repo(slug, name))}"
+                )
+            digests = ", ".join(f'"{member_digest(cohort_org, h)}"' for h in handles)
+            return (
+                f'  - name: "{q(name)}"\n    members: {len(handles)}\n    cap: {cap}\n'
+                f"    members_sha256: [{digests}]\n"
+                + (f'    repo_url: "{url}"\n' if url else "")
+            )
+
         listed = "".join(
-            f'  - name: "{q(name)}"\n    members: {members}\n    cap: {cap}\n'
-            for name, members in _formed_teams(cohort_org, found[0])
+            team_entry(name, handles)
+            for name, handles in _formed_teams(cohort_org, found[0])
         )
         closes = spoken_day(schedule.in_cohort_zone(sched, shuts))
         team_fm = (
             f'team_join_url: "{welcome}"\n'
             f'team_join_cap: "{cap}"\n'
-            f'team_join_closes: "{closes}"\n' + (f"teams:\n{listed}" if listed else "")
+            f'team_join_closes: "{closes}"\n'
+            f'team_salt: "{q(cohort_org)}"\n' + (f"teams:\n{listed}" if listed else "")
         )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a

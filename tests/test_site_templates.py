@@ -453,6 +453,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "team_join_url",
         "team_join_cap",
         "team_join_closes",
+        "team_salt",
         "teams",
     ],
 )
@@ -1225,12 +1226,13 @@ def test_only_one_file_knows_where_the_settings_are_stored():
 
 
 # --- H
-@pytest.mark.parametrize("cls", ["callout", "btn"])
+@pytest.mark.parametrize("cls", ["callout-submit", "btn"])
 def test_a_class_the_control_hooks_onto_is_one_a_shipped_layout_renders(cls):
-    # `.callout a.btn` is how the script finds an assignment's repo button. The THEME
-    # styles both, so no rule in _sass/_course.scss would notice the assignment layout
-    # spelling them differently - the control would just never appear there again.
-    assert ".callout a.btn" in _open_in()
+    # `.callout-submit a.btn` is how the script finds an assignment's repo button - not
+    # `.callout a.btn`, which on a page inside a team-formation window is step 1's "Join
+    # team" button. No rule in _sass/_course.scss styles `callout-submit`, so nothing else
+    # would notice the layout spelling it differently.
+    assert ".callout-submit a.btn" in _open_in()
     assert cls in _classes(_templates()["_layouts/assignment.html"]), cls
 
 
@@ -1556,7 +1558,7 @@ def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
     # The layout renders the whole block off the key's presence - no second flag, and
     # nothing to render for an assignment that has no window open.
     layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    arm = layout.split("{% if page.team_join_url %}")[1].split("</div>")[0]
+    arm = layout.split("{% if page.team_join_url %}")[1].split("</section>")[0]
     flat = " ".join(arm.split())
     assert 'href="{{ page.team_join_url }}"' in flat
     assert "{{ page.team_join_cap }}" in flat
@@ -1573,12 +1575,25 @@ def test_the_teams_that_exist_are_shown_under_the_invitation(generated):
     # is already there, and teams.csv is private to the teaching team. The table answers it
     # in NAMES AND COUNTS - this site is public, and who is in a team is not.
     page = _front_matter(generated["collections"]["_assignments"]["08-assignment-8.md"])
-    assert page["teams"] == [
-        {"name": "team-alpha", "members": 2, "cap": 4},
-        {"name": "team-bravo", "members": 4, "cap": 4},
+    teams = {t["name"]: t for t in page["teams"]}
+    assert [(t["name"], t["members"], t["cap"]) for t in page["teams"]] == [
+        ("team-alpha", 2, 4),
+        ("team-bravo", 4, 4),
     ]
+    # No readable handle, only the salted digests the page's script recognises its reader
+    # by - and each team's own repo, named as the handout names it.
+    org = "hertie-dsl-fixture-f2026"
+    assert page["team_salt"] == org
+    assert teams["team-alpha"]["members_sha256"] == [
+        site.member_digest(org, "ada-l"),
+        site.member_digest(org, "bo-b"),
+    ]
+    assert "ada-l" not in generated["collections"]["_assignments"]["08-assignment-8.md"]
+    assert teams["team-alpha"]["repo_url"] == (
+        f"https://github.com/{org}/assignment-8-team-alpha"
+    )
     layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
-    arm = layout.split("{% if page.team_join_url %}")[1].split("</div>")[0]
+    arm = layout.split("{% if page.team_join_url %}")[1].split("</section>")[0]
     flat = " ".join(arm.split())
     # One row per team, and the free seats computed rather than written - the sync writes
     # the two counts, so the page cannot print a number that disagrees with the cap the
@@ -1662,7 +1677,7 @@ def test_a_shared_page_s_edit_buttons_open_the_readers_own_folder(generated):
     # On the drop box's callout and nowhere else. Gated on `submit_path`, that shape's key
     # and no other's, so the key's presence is the test rather than a second `case` to keep
     # in step with the first.
-    div = [ln for ln in marked.splitlines() if 'class="callout"' in ln]
+    div = [ln for ln in marked.splitlines() if 'class="callout callout-submit"' in ln]
     assert len(div) == 1, div
     assert "{% if page.submit_path %}" in div[0]
     # Both halves on the one element, or the strip reads a name off a page that wrote no
@@ -1817,3 +1832,27 @@ def test_the_term_date_row_names_its_kind_and_not_its_entry():
     _, _, rest = body.partition('data-label="Event">')
     cell, _, _ = rest.partition("</div>")
     assert cell.strip() == "Term"
+
+
+def test_the_team_steps_come_first_and_number_the_submission_box(generated):
+    # Forming a team comes BEFORE opening its repo, so the page numbers them in that order,
+    # in Your Profile's visual language - and only while a window is open.
+    layout = _strip_comments(_templates()["_layouts/assignment.html"])
+    assert layout.index('id="dsl-team-steps"') < layout.index(
+        "Open the submission repo"
+    )
+    assert layout.count('<span class="profile-step-num">1</span> Form your team') == 1
+    assert '<span class="profile-step-num">2</span> Open your submission repo' in layout
+    # Step 2's heading reaches both submission arms through one capture, set only inside
+    # the window's `if` - so a page with no window renders the box as it always did.
+    assert layout.count("{{ step_two }}") == 2
+    forming = generated["collections"]["_assignments"]
+    assert "team_join_url" in forming["08-assignment-8.md"]
+    assert "team_join_url" not in forming["07-assignment-7.md"]
+    # The one membership seam, reading the handle through open_in.html's accessor.
+    assert "function inTeam(key, row)" in layout
+    assert 'profile.stored("handle")' in layout
+    assert 'crypto.subtle.digest("SHA-256"' in layout
+    scss = _templates()["_sass/_course.scss"]
+    # Shared with Your Profile rather than copied: top level, not under `.profile-steps`.
+    assert "\n.profile-step-num {" in scss

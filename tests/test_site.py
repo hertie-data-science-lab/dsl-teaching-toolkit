@@ -2841,3 +2841,14 @@ def test_the_archive_row_can_be_renamed_and_marked_provisional():
     assert "tbc: true" in out
     # Display only - the row still dates the freeze where the plan put it.
     assert "date: 2027-02-16T09:00:00" in out
+
+
+def test_a_team_member_is_published_as_a_salted_digest_of_their_handle():
+    # The page's script hashes its reader's saved handle the same way to recognise their
+    # team, so this vector is the contract between the two sides: sha256 of
+    # `<cohort org>:<handle, lower-cased>`, hex.
+    vector = "49565f39eed5ad0a289c5291fa1b3540c44ccd9205c0c78550ca21ab1d328dc8"
+    assert site.member_digest("Cohort-f2026", "ada-l") == vector
+    assert site.member_digest("Cohort-f2026", "Ada-L") == vector
+    # Salted with the org: the same student is a different digest in another cohort.
+    assert site.member_digest("Cohort-s2027", "ada-l") != vector

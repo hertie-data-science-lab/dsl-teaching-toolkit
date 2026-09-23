@@ -159,10 +159,13 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
 
 
-def _formed_teams(_org: str, _key: str) -> list[tuple[str, int]]:
+def _formed_teams(_org: str, _key: str) -> list[tuple[str, list[str]]]:
     """Two teams for the assignment inside its team-formation window - one with room and
     one full, so the built page carries both halves of the Places-left column."""
-    return [("team-alpha", 2), ("team-bravo", 4)]
+    return [
+        ("team-alpha", ["ada-l", "bo-b"]),
+        ("team-bravo", ["cy-c", "di-d", "ed-e", "flo-f"]),
+    ]
 
 
 def _grading_spec(_org: str, repo: str):
