@@ -232,8 +232,6 @@ def in_quiet_hours(when) -> bool:
     return when.hour >= QUIET_FROM or when.hour < QUIET_UNTIL
 
 
-# The heading each rung is listed under. The hours are formatted from the windows, so
-# moving a rung cannot leave a heading claiming the old deadline.
 def _age_heading(oldest: datetime | None, now: datetime) -> str:
     """What an IMMEDIATE fault is filed under: how long the file has been unusable.
 
@@ -244,11 +242,16 @@ def _age_heading(oldest: datetime | None, now: datetime) -> str:
     return f"unfixed for {days} days" if days else "needs fixing"
 
 
+# The heading each rung is listed under. The hours are formatted from the windows, so
+# moving a rung cannot leave a heading claiming the old deadline. WARNING carries none: it
+# is the one rung a fault can reach without the countdown (`ConfigFault.warn_from` - a
+# team-formation window open a week with students still waiting, whose close may be weeks
+# off), and every line under it prints its own moment anyway.
 _RUNG_HEADING = {
     Severity.MISSED: "MISSED",
     Severity.CRITICAL: f"CRITICAL ({hours(SOURCE_CRITICAL_WINDOW)}h)",
     Severity.URGENT: f"URGENT ({hours(SOURCE_URGENT_WINDOW)}h)",
-    Severity.WARNING: f"WARNING ({hours(SOURCE_WARN_WINDOW)}h)",
+    Severity.WARNING: "WARNING",
     Severity.ADVISORY: "advisory",
 }
 
@@ -581,10 +584,10 @@ def _sections(
     then the advisories.
 
     Two clocks under one set of headings. The immediate faults sit at WARNING by severity
-    and would otherwise be filed under `WARNING (24h)` - a heading that promises a
-    deadline they do not have - so they get their own section, in the place the appendix
-    puts it: below the rungs that are counting down, above the term nobody has written
-    yet. One heading for all of them, because there is one clock per issue."""
+    but are counting down to nothing, so they get their own section, filed by how long
+    they have stood, in the place the appendix puts it: below the rungs that are counting
+    down, above the term nobody has written yet. One heading for all of them, because
+    there is one clock per issue."""
     by_rung: dict[Severity, list[SourceFault]] = {}
     immediate: list[SourceFault] = []
     for f in faults:

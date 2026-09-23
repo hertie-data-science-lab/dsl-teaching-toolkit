@@ -16,6 +16,7 @@ from conftest import CREATED_ISSUE_URL, issue_row, source_fault
 from dsl_course import config_digest as engine
 from dsl_course import schedule
 from dsl_course import source_digest as sd
+from dsl_course.faults import ConfigFault, Severity
 
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=BERLIN)
@@ -131,7 +132,7 @@ def test_every_rung_heading_carries_its_own_deadline():
     assert "### MISSED\n" in body
     assert "### CRITICAL (6h)\n" in body
     assert "### URGENT (12h)\n" in body
-    assert "### WARNING (24h)\n" in body
+    assert "### WARNING\n" in body
     assert "### advisory\n" in body
     # The hours are the DEADLINE, not a count of the rows under the heading - those are
     # right there, and a number that has to agree with them can disagree with them.
@@ -862,9 +863,26 @@ def _dropped(where="releases.lecture_09", field="event_datetime", lineno=52):
     )
 
 
+def test_a_fault_floored_at_warning_is_not_filed_under_a_24h_deadline():
+    # A team-formation window open a week with students waiting is WARNING (`warn_from`)
+    # while its close is still weeks off - so the heading must not promise 24 hours.
+    floored = ConfigFault(
+        "assignments.assignment-2",
+        "team formation is open and no team has formed yet",
+        fires=NOW + timedelta(days=20),
+        warn_from=NOW - timedelta(days=1),
+        field="due_datetime",
+        file=schedule.SCHEDULE_PATH,
+    )
+    assert floored.severity(NOW) is Severity.WARNING
+    body = sd.render_body(sd.SCHEDULE, [floored], NOW, COHORT)
+    assert "### WARNING\n" in body
+    assert "24h" not in body
+
+
 def test_the_two_clocks_are_filed_under_their_own_headings():
-    # An immediate fault sits at WARNING by severity and would otherwise be filed under
-    # `WARNING (24h)` - a heading that promises a deadline it does not have.
+    # An immediate fault sits at WARNING by severity but counts down to nothing, so it is
+    # filed by how long it has stood rather than under a countdown rung.
     faults = [_f("releases.a", timedelta(hours=3), lineno=31), _dropped()]
     seen = {faults[1].key: (NOW - timedelta(days=2)).isoformat()}
     body = sd.render_body(sd.SCHEDULE, faults, NOW, COHORT, since=seen)

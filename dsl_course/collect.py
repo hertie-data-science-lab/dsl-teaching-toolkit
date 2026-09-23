@@ -1634,10 +1634,12 @@ def _status_line(
 ) -> str:
     """The one line of the header that changes hour to hour. It says what a grader wants
     to know before opening the file: is it worth marking yet, and can it still move?"""
+    if not spec.collects_commits:
+        # Before the freeze check: the cutoff seals nothing here (there is no `info:`), and
+        # a FROZEN header would tell a grader the sheet had closed on something.
+        return "submitted outside GitHub - nothing to collect; run Distribute grades any time"
     if phase is not SheetPhase.OPEN:
         return f"FROZEN {spec.cutoff_display}".strip()
-    if not spec.collects_commits:
-        return "OPEN - submitted outside GitHub"
     # Named, because "3 of 5" reads differently for teams than for students and a grader
     # scanning this line wants to know which they are looking at without counting rows.
     unit = "teams" if spec.is_group else "students"
