@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "columns": [
+    "hertie_email",
+    "name",
+    "role",
+    "github_handle",
+    "github_id",
+    "enrol_code",
+    "code_sent_at"
+  ],
+  "items": {
+    "additionalProperties": false,
+    "properties": {
+      "code_sent_at": {
+        "type": "string"
+      },
+      "enrol_code": {
+        "type": "string"
+      },
+      "github_handle": {
+        "type": "string"
+      },
+      "github_id": {
+        "type": "string"
+      },
+      "hertie_email": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "",
+          "enrolled",
+          "auditor"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "hertie_email",
+      "github_handle"
+    ],
+    "type": "object"
+  },
+  "title": "classroom-config/students.csv",
+  "type": "array"
+}

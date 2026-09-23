@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "people": {
+      "additionalProperties": false,
+      "properties": {
+        "instructors": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "github_handle": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photo": {
+                "type": "string"
+              },
+              "show_email": {
+                "type": "boolean"
+              },
+              "start": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "github_handle",
+              "email"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "teaching_assistants": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "github_handle": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photo": {
+                "type": "string"
+              },
+              "show_email": {
+                "type": "boolean"
+              },
+              "start": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "github_handle",
+              "email"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "classroom-config/people.yml",
+  "type": "object"
+}

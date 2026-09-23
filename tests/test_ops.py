@@ -1,0 +1,513 @@
+"""The Instructor Console's operations: the registry, the request parser, the public
+outcome, and `console.main` end to end against stubbed target CLIs."""
+
+from __future__ import annotations
+
+import importlib
+import json
+import re
+import sys
+
+import pytest
+from conftest import workflow_inputs, workflow_jobs
+
+from dsl_course import console, deploy, grades, scheduler, status, workflows_render
+from dsl_course.ops import outcome as outcome_mod
+from dsl_course.ops import request as request_mod
+from dsl_course.ops.outcome import Outcome, annotation
+from dsl_course.ops.registry import (
+    REGISTRY,
+    Request,
+    command,
+)
+from dsl_course.ops.registry import (
+    workflow_inputs as op_inputs,
+)
+from dsl_course.ops.request import RequestError, parse_request
+from dsl_course.schedule import Deploy, Release, Schedule
+
+COURSE = "hertie-dsl-demo-course-e1234"
+COHORT = "hertie-dsl-demo-f2026"
+
+# contracts.md section 1, verbatim but for the actor placeholder.
+CONTRACT_REQUEST = {
+    "schema": "dsl.request/1",
+    "op": "release.now",
+    "actor": "prof",
+    "course_org": COURSE,
+    "cohort_org": COHORT,
+    "args": {"entry": "s5"},
+    "preview": True,
+    "client": "console/0.1",
+}
+
+CONTRACT_OPS = {
+    "cohort.check",
+    "cohort.preview_automation",
+    "release.now",
+    "release.early",
+    "release.rerun",
+    "release.adhoc",
+    "release.propagate_back",
+    "assignment.handout_now",
+    "assignment.update_copies",
+    "assignment.collect_now",
+    "grades.return",
+    "roster.send_codes",
+    "site.update",
+    "access.check",
+    "cohort.archive",
+    "course.publish_website",
+    "assignment.derive_starter",
+    "assignment.generate_syllabus",
+    "materials.create",
+    "assignment.create",
+    "cohort.bootstrap",
+}
+
+
+def _request(**over) -> dict:
+    return {**CONTRACT_REQUEST, **over}
+
+
+# ------------------------------------------------------------------ registry
+
+
+def test_the_registry_is_every_dispatch_op_the_contract_lists():
+    assert set(REGISTRY) == CONTRACT_OPS
+
+
+@pytest.mark.parametrize("name", sorted(CONTRACT_OPS))
+def test_every_op_targets_a_cli_with_a_main(name):
+    op = REGISTRY[name]
+    assert op.runs_as == "dispatch"
+    assert op.scope in ("course", "cohort")
+    assert callable(importlib.import_module(f"dsl_course.{op.module}").main)
+
+
+def _run_flags(rendered: str, module: str) -> set[str]:
+    """Every `--flag` the manual job's step spells around `python3 -m dsl_course.<module>`."""
+    for job in workflow_jobs(rendered).values():
+        for step in job.get("steps", []):
+            run = step.get("run", "")
+            if f"-m dsl_course.{module}" in run:
+                return set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", run))
+    raise AssertionError(f"no step runs dsl_course.{module}")
+
+
+def _all_flags(name: str, args: dict, cohort: str | None = COHORT) -> set[str]:
+    """The flags the registry can spell for an op: every optional arg on, both gates."""
+    op = REGISTRY[name]
+    flags = set()
+    for preview in (True, False):
+        req = Request(name, "prof", COURSE, cohort, args, preview)
+        flags |= {t for t in command(op, req) if t.startswith("--")}
+    return flags
+
+
+@pytest.mark.parametrize(
+    ("name", "rendered", "args"),
+    [
+        (
+            "cohort.archive",
+            workflows_render.render_archive_cohort([COHORT]),
+            {"force": True},
+        ),
+        (
+            "assignment.update_copies",
+            workflows_render.render_patch_assignment([COHORT], ["assignment-1-f2026"]),
+            {
+                "course_source_repo": "assignment-1-f2026",
+                "path": "a.ipynb",
+                "slug": "a1",
+                "overwrite": True,
+            },
+        ),
+        (
+            "assignment.collect_now",
+            workflows_render.render_collect_submissions(
+                [COHORT], ["assignment-1-f2026"]
+            ),
+            {"course_source_repo": "assignment-1-f2026", "slug": "a1"},
+        ),
+    ],
+)
+def test_argv_spells_the_flags_the_seeded_workflow_spells(name, rendered, args):
+    op = REGISTRY[name]
+    assert _all_flags(name, args) == _run_flags(rendered, op.module)
+
+
+def test_a_workflow_op_dispatches_inputs_its_workflow_declares():
+    op = REGISTRY["assignment.collect_now"]
+    declared = workflow_inputs(workflows_render.render_collect_submissions([COHORT]))
+    assert set(op.inputs) <= set(declared)
+    req = Request(
+        op.name,
+        "prof",
+        COURSE,
+        COHORT,
+        {"course_source_repo": "assignment-1-f2026"},
+        True,
+    )
+    assert op_inputs(op, command(op, req)) == {
+        "cohort_org": COHORT,
+        "course_source_repo": "assignment-1-f2026",
+        "dry_run": "true",
+    }
+
+
+def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
+    op = REGISTRY["grades.return"]
+    real = command(op, Request(op.name, "prof", COURSE, COHORT, {}, False))
+    assert real[-1] == "--no-dry-run" and "--dry-run" not in real
+
+
+# ------------------------------------------------------------------ request
+
+
+def test_the_contract_example_parses():
+    req = parse_request(json.dumps(CONTRACT_REQUEST))
+    assert (req.op, req.cohort_org, req.args, req.preview) == (
+        "release.now",
+        COHORT,
+        {"entry": "s5"},
+        True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "code"),
+    [
+        (
+            _request(
+                op="course.publish_website",
+                cohort_org=None,
+                args={"source_repo": "m", "readings_mode": "all"},
+            ),
+            "BAD_ARGS",
+        ),
+        ({k: v for k, v in CONTRACT_REQUEST.items() if k != "actor"}, "BAD_REQUEST"),
+        (_request(op="site.update", args={}), "NO_PREVIEW"),
+        (_request(op="release.later"), "UNKNOWN_OP"),
+        (_request(args={"entry": "s5", "surprise": 1}), "BAD_ARGS"),
+        (_request(args={"entry": "--no-dry-run"}), "BAD_ARGS"),
+        (_request(cohort_org=None), "BAD_REQUEST"),
+    ],
+)
+def test_a_bad_request_is_refused_with_its_code(raw, code):
+    raw = {k: v for k, v in raw.items() if v is not None}
+    with pytest.raises(RequestError) as exc:
+        parse_request(json.dumps(raw))
+    assert exc.value.code == code
+
+
+def test_not_json_is_refused():
+    with pytest.raises(RequestError) as exc:
+        parse_request("{nope")
+    assert exc.value.code == "BAD_REQUEST"
+
+
+def _teams(members: dict[tuple[str, str], set[str]]):
+    return lambda org, team: members.get((org, team), set())
+
+
+@pytest.fixture(autouse=True)
+def _cohort_is_registered(monkeypatch):
+    monkeypatch.setattr(request_mod, "discover_cohorts", lambda org: [COHORT])
+
+
+def test_a_cohort_of_another_course_is_refused(monkeypatch):
+    req = parse_request(json.dumps(_request()))
+    monkeypatch.setattr(request_mod, "discover_cohorts", lambda org: ["other-f2026"])
+    monkeypatch.setattr(
+        request_mod, "get_team_members", _teams({(COURSE, "course-admin"): {"prof"}})
+    )
+    assert "not a cohort of" in request_mod.check_access(req)
+
+
+def test_access_needs_the_cohort_instructors_team_or_course_admin(monkeypatch):
+    req = parse_request(json.dumps(_request()))
+    monkeypatch.setattr(
+        request_mod, "get_team_members", _teams({(COHORT, "instructors"): {"Prof"}})
+    )
+    assert request_mod.check_access(req) is None
+    monkeypatch.setattr(request_mod, "get_team_members", _teams({}))
+    assert "instructors" in request_mod.check_access(req)
+    monkeypatch.setattr(
+        request_mod, "get_team_members", _teams({(COURSE, "course-admin"): {"prof"}})
+    )
+    assert request_mod.check_access(req) is None
+
+
+def test_a_course_op_accepts_any_term_instructors_team(monkeypatch):
+    raw = _request(
+        op="assignment.derive_starter",
+        preview=False,
+        args={"course_source_repo": "assignment-1-f2026"},
+    )
+    del raw["cohort_org"]
+    req = parse_request(json.dumps(raw))
+    monkeypatch.setattr(
+        request_mod,
+        "list_teams",
+        lambda org: {"instructors-f2026": "", "course-admin": ""},
+    )
+    monkeypatch.setattr(
+        request_mod,
+        "get_team_members",
+        _teams({(COURSE, "instructors-f2026"): {"prof"}}),
+    )
+    assert request_mod.check_access(req) is None
+
+
+def test_bootstrap_needs_course_admin(monkeypatch):
+    req = parse_request(
+        json.dumps(_request(op="cohort.bootstrap", preview=False, args={}))
+    )
+    monkeypatch.setattr(
+        request_mod, "get_team_members", _teams({(COHORT, "instructors"): {"prof"}})
+    )
+    assert "course-admin" in request_mod.check_access(req)
+
+
+# ------------------------------------------------------------------ outcome
+
+
+def test_the_annotation_names_nobody():
+    out = Outcome(
+        op="assignment.update_copies",
+        actor="prof",
+        preview=False,
+        conclusion="done",
+        summary="Patched assignment-3-octocat and grades-octocat; octocat pulled. 10% late.",
+        reasons=[
+            {
+                "code": "SKIPPED",
+                "text": "assignment-3-octocat kept its own file",
+                "fix": {"repo": f"{COHORT}/assignment-3-octocat"},
+            }
+        ],
+        people=[{"handle": "octocat", "text": "No repo: not joined yet."}],
+    )
+    line = annotation(out)
+    assert line.startswith("::notice title=dsl-outcome::")
+    assert "octocat" not in line.lower()
+    assert "10%25 late" in line
+    body = json.loads(line.split("::", 2)[2].replace("%25", "%"))
+    assert "people" not in body
+    assert body["actor"] == "prof"
+    assert (
+        "assignment-3-<handle>" in body["summary"]
+        and "grades-<handle>" in body["summary"]
+    )
+
+
+def test_redaction_keeps_templates_and_the_shared_drop_box():
+    text = "assignment-3-f2026 and assignment-3-submissions"
+    assert outcome_mod.redact(text) == text
+
+
+# ------------------------------------------------------------------ console.main end to end
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    """A console whose world is stubbed at the names it imports: the bot login, the team
+    listings, the private write. Returns what was written."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(console, "acting_login", lambda: "prof")
+    monkeypatch.setattr(
+        request_mod, "get_team_members", _teams({(COURSE, "course-admin"): {"prof"}})
+    )
+    monkeypatch.setattr(status, "write_after_op", lambda request: None, raising=False)
+    writes = []
+    monkeypatch.setattr(
+        outcome_mod, "put_file", lambda *a, **k: writes.append((a, k)) or True
+    )
+    return writes
+
+
+def _main(monkeypatch, capsys, raw: dict) -> tuple[int, dict | None, str]:
+    monkeypatch.setattr(
+        sys, "argv", ["dsl_course.console", "--request", json.dumps(raw)]
+    )
+    rc = console.main()
+    out = capsys.readouterr().out
+    notes = [
+        line
+        for line in out.splitlines()
+        if line.startswith("::notice title=dsl-outcome::")
+    ]
+    body = (
+        json.loads(notes[-1].split("::", 2)[2].replace("%0A", "\n").replace("%25", "%"))
+        if notes
+        else None
+    )
+    return rc, body, out
+
+
+def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
+    seen = {}
+
+    def fake_main():
+        seen["argv"] = sys.argv[1:]
+        print('  [ok] Done - {"gradebooks": 3, "emails": 3}')
+        return 0
+
+    monkeypatch.setattr(grades, "main", fake_main)
+    rc, body, _ = _main(
+        monkeypatch,
+        capsys,
+        _request(op="grades.return", args={"notify": False}, preview=False),
+    )
+    assert rc == 0
+    assert seen["argv"] == [
+        "distribute",
+        "--cohort-org",
+        COHORT,
+        "--no-notify",
+        "--no-dry-run",
+    ]
+    assert body["conclusion"] == "done"
+    assert body["summary"] == 'Done - {"gradebooks": 3, "emails": 3}'
+    assert body["counts"] == {"gradebooks": 3, "emails": 3}
+    (org, repo, path, content, _msg), _ = engine[0]
+    assert (org, repo, path) == (
+        COHORT,
+        "classroom-config",
+        ".dsl/outcomes/grades.return.json",
+    )
+    assert json.loads(content)["schema"] == "dsl.outcome/1"
+
+
+def test_a_failed_target_is_a_conclusion_not_a_red_run(monkeypatch, capsys, engine):
+    monkeypatch.setattr(grades, "main", lambda: sys.exit(2))
+    rc, body, _ = _main(
+        monkeypatch, capsys, _request(op="grades.return", args={}, preview=True)
+    )
+    assert rc == 0 and body["conclusion"] == "failed"
+
+
+def test_a_crashed_target_breaks_the_run_without_a_traceback(
+    monkeypatch, capsys, engine
+):
+    def boom():
+        raise KeyError("grades-octocat")
+
+    monkeypatch.setattr(grades, "main", boom)
+    rc, body, out = _main(
+        monkeypatch, capsys, _request(op="grades.return", args={}, preview=True)
+    )
+    assert rc == 1 and body["conclusion"] == "failed"
+    assert "Traceback" not in out and "octocat" not in out
+
+
+def test_a_preview_on_an_op_without_one_is_refused_and_green(
+    monkeypatch, capsys, engine
+):
+    rc, body, _ = _main(monkeypatch, capsys, _request(op="site.update", args={}))
+    assert rc == 0
+    assert body["reasons"][0]["code"] == "NO_PREVIEW"
+    assert engine == []
+
+
+def test_inside_actions_the_request_must_speak_for_the_actor(
+    monkeypatch, capsys, engine
+):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_ACTOR", "someone-else")
+    monkeypatch.setenv("GITHUB_REPOSITORY_OWNER", COURSE)
+    rc, body, _ = _main(monkeypatch, capsys, _request(op="grades.return", args={}))
+    assert rc == 0
+    assert body["reasons"][0]["code"] == "ACTOR_MISMATCH"
+    assert engine == []
+
+
+def test_no_token_breaks_the_run(monkeypatch, capsys, engine):
+    monkeypatch.setattr(console, "acting_login", lambda: None)
+    rc, body, _ = _main(monkeypatch, capsys, _request(op="grades.return", args={}))
+    assert rc == 1 and body is None
+
+
+def test_a_named_entry_is_released_from_its_schedule_row(monkeypatch, capsys, engine):
+    sched = Schedule(
+        releases=[
+            Release(
+                label="s5",
+                when=None,
+                deploy=[
+                    Deploy("course-materials-f2026", "lectures/05"),
+                    Deploy(
+                        "course-materials-f2026", "labs/05", cohort_dest_path="labs/5"
+                    ),
+                ],
+            )
+        ]
+    )
+    monkeypatch.setattr(console.schedule, "load", lambda org: sched)
+    seen = []
+
+    def fake_main():
+        seen.append(sys.argv[1:])
+        return 0
+
+    monkeypatch.setattr(deploy, "main", fake_main)
+    rc, body, _ = _main(monkeypatch, capsys, CONTRACT_REQUEST)
+    assert rc == 0 and body["conclusion"] == "previewed"
+    argv = seen[0]
+    assert argv[argv.index("--course-source-path") + 1] == "lectures/05,labs/05"
+    assert argv[argv.index("--cohort-dest-path") + 1] == "lectures/05,labs/5"
+    assert argv[-1] == "--dry-run"
+
+
+def test_an_unknown_entry_is_a_reason(monkeypatch, capsys, engine):
+    monkeypatch.setattr(console.schedule, "load", lambda org: Schedule())
+    rc, body, _ = _main(monkeypatch, capsys, CONTRACT_REQUEST)
+    assert rc == 0 and body["reasons"][0]["code"] == "ENTRY_NOT_FOUND"
+
+
+def test_scheduler_decisions_become_reasons(monkeypatch, capsys, engine):
+    def fake_main():
+        print(
+            "Decision: s5 not released: SOURCE_MISSING Folder lectures/05 was not found."
+        )
+        return 0
+
+    monkeypatch.setattr(scheduler, "main", fake_main)
+    rc, body, _ = _main(
+        monkeypatch, capsys, _request(op="cohort.preview_automation", args={})
+    )
+    assert rc == 0 and body["conclusion"] == "previewed"
+    assert body["reasons"] == [
+        {
+            "code": "SOURCE_MISSING",
+            "text": "s5 not released: Folder lectures/05 was not found.",
+        }
+    ]
+
+
+def test_collect_now_starts_its_own_workflow(monkeypatch, capsys, engine):
+    calls = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append(args)
+        return 0, json.dumps(
+            {"workflow_run_id": 7, "html_url": "https://github.com/x/runs/7"}
+        )
+
+    monkeypatch.setattr(console, "gh", fake_gh)
+    raw = _request(
+        op="assignment.collect_now",
+        args={"course_source_repo": "assignment-1-f2026"},
+        preview=False,
+    )
+    rc, body, _ = _main(monkeypatch, capsys, raw)
+    assert rc == 0 and body["conclusion"] == "done"
+    assert "https://github.com/x/runs/7" in body["summary"]
+    (args,) = calls
+    assert (
+        f"repos/{COURSE}/.github/actions/workflows/collect-submissions.yml/dispatches"
+        in args
+    )
+    assert f"inputs[cohort_org]={COHORT}" in args
+    assert not any("dry_run" in a for a in args)
