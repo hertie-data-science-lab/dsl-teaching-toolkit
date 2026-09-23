@@ -103,7 +103,7 @@ jobs:
 
               // Parse the assignment slug, the action and the team name from the issue form.
               // Same idiom for all three: the field's label, the newline(s) GitHub renders
-              // after it, then the value. The action's value is one of the dropdown's three
+              // after it, then the value. The action's value is one of the dropdown's two
               // options, and only its first word tells them apart. The Team is taken as the
               // WHOLE line and validated below, so `team x` is refused rather than quietly
               // read as `team`.
@@ -187,11 +187,16 @@ jobs:
               const assignment = aMatch[1].toLowerCase();
               const team = typed.toLowerCase();
               // `null` when the form carried no readable Action - an issue opened from a
-              // browser's cached copy of a form that predates the field. Neither `create`,
-              // `join` nor `switch`, so none of the checks below fires and the request is
-              // taken exactly as it was before the field existed: joining the team if it is
-              // there, starting it if it is not.
+              // browser's cached copy of a form that predates the field. Neither `create`
+              // nor `join`, so the request is taken exactly as it was before the field
+              // existed: joining the team if it is there, starting it if it is not.
               const action = cMatch ? cMatch[1].toLowerCase() : null;
+              // An Action this workflow does not know - the retired `Switch to another
+              // team`, from a form a browser cached - is the student's to redo, not a crash.
+              if (action !== null && action !== 'join' && action !== 'create') return refuse(
+                `Thanks @${handle} - I don't recognise that Action. [Open a new Join team issue](${newIssue(team)}) ` +
+                `and choose *Join an existing team* or *Create a new team* - either moves you out of a team ` +
+                `you are already in.`);
               // The GitHub team this row becomes is `<assignment>-<team>` (sync_teams.team_slug).
               // `course` + `admin` is `course-admin` - the faculty team with admin on every repo
               // in this org. Never let a form submission name a faculty team.
@@ -318,7 +323,7 @@ jobs:
               const retryable = (e) => e.status === 409 || e.status === 422 ||
                 (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
               const ATTEMPTS = 8;
-              // What the write that landed did: the team left (a switch) and the new count.
+              // What the write that landed did: the team left (a move) and the new count.
               let outcome = null;
               for (let attempt = 1; ; attempt++) {
                 const { sha, header, rows } = await readTeams();
@@ -334,16 +339,8 @@ jobs:
                 const mine = rows.find(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
                 const current = mine ? cell(mine, iTeam).toLowerCase() : '';
-                if (current === team && action !== 'switch') {
-                  await github.rest.issues.createComment({
-                    owner: org, repo: context.repo.repo, issue_number: issue.number,
-                    body: `You're already in **${team}** for \`${assignment}\` @${handle} - nothing to do.` });
-                  await github.rest.issues.addLabels({
-                    owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['team-recorded'] });
-                  await github.rest.issues.update({
-                    owner: org, repo: context.repo.repo, issue_number: issue.number, state: 'closed' });
-                  return;
-                }
+                if (current === team) return refuse(
+                  `Thanks @${handle} - **${team}** is already your team for \`${assignment}\` - nothing to do.`);
                 const size = rows.filter(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
                 // Near miss: the same name once case and separators are taken out of it.
@@ -360,8 +357,7 @@ jobs:
                 const sizeOf = (name) => rows.filter(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === name).length;
                 const page = lock.page ? `[the assignment page](${lock.page})` : 'the assignment page on the course site';
-                // Joining (or switching into) a team that is not there, or is full: the two
-                // answers Join and Switch share.
+                // Joining a team that is not there, or is full.
                 const missing = () =>
                   `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`.` +
                   (near ? ` Did you mean **${near}** (${sizeOf(near)}/${cap})?` : '') +
@@ -376,25 +372,12 @@ jobs:
                 // second team, and nobody found out until the handout provisioned two half
                 // teams. The form now asks, and every answer is checked against what the
                 // file we are about to write actually says, re-read on every attempt.
-                if (action === 'switch') {
-                  // Self-service, inside the window the checks above have already gated on:
-                  // the row MOVES, in this same sha-guarded write, so a student is never in
-                  // two teams nor in none. Sync membership then prunes them from the old
-                  // team (sync_teams.emptied_teams covers a team this empties).
-                  if (!mine) return refuse(
-                    `Thanks @${handle} - you're not in a team for \`${assignment}\` yet, so there is nothing to ` +
-                    `switch from. [Open a new Join team issue](${newIssue(team)}) and choose ` +
-                    `*Join an existing team* or *Create a new team*.`);
-                  if (current === team) return refuse(
-                    `Thanks @${handle} - you're already in **${team}** for \`${assignment}\` - nothing to switch.`);
-                  if (size === 0) return refuse(missing());
-                  if (size >= cap) return refuse(full());
-                } else if (mine) {
-                  return refuse(
-                    `Thanks @${handle} - you're already in **${current}** for \`${assignment}\`, and a student is in ` +
-                    `one team per assignment. To move, [open a new Join team issue](${newIssue(team)}) and choose ` +
-                    `*Switch to another team*.`);
-                } else if (action === 'create' && (size > 0 || near)) {
+                // Already in a team: Join and Create MOVE you, after exactly the checks a
+                // fresh one gets - the row goes from the old team to the new in the one
+                // sha-guarded write below, so a student is never in two teams nor in none.
+                // Sync membership then prunes them from the old GitHub team
+                // (sync_teams.emptied_teams covers a team this leaves empty).
+                if (action === 'create' && (size > 0 || near)) {
                   // The exact name, and equally its near miss: declaring the intent only
                   // helps if Create refuses the same names Join suggests.
                   const taken = size > 0 ? team : near;
@@ -402,28 +385,26 @@ jobs:
                     `Thanks @${handle} - **${taken}** already exists for \`${assignment}\` (${sizeOf(taken)}/${cap}). ` +
                     `To join it, [open a new Join team issue](${newIssue(taken)}) and choose *Join an existing team*. ` +
                     `Or pick a clearly different name.`);
-                } else if (action === 'join' && size === 0) {
-                  return refuse(missing());
-                } else if (size >= cap) {
-                  return refuse(full());
                 }
+                if (action === 'join' && size === 0) return refuse(missing());
+                if (size >= cap) return refuse(full());
 
-                // Append + write back (in the existing header's column order). A switch
-                // drops the old row in the same write.
+                // Append + write back (in the existing header's column order). A move drops
+                // the old row in the same write.
                 const fresh = header.map(() => '');
                 fresh[iAssign] = assignment; fresh[iTeam] = team; fresh[iHandle] = handle;
-                const kept = action === 'switch' ? rows.filter(r => r !== mine) : rows;
+                const kept = mine ? rows.filter(r => r !== mine) : rows;
                 kept.push(fresh);
                 const body = serialiseCsv([header, ...kept]);
                 try {
                   await github.rest.repos.createOrUpdateFileContents({
                     owner: org, repo: CONFIG, path: TEAMS, ...(sha ? { sha } : {}),
-                    message: action === 'switch'
+                    message: mine
                       ? `teams: ${handle} ${current} -> ${team} (${assignment})`
                       : `teams: ${handle} -> ${team} (${assignment})`,
                     content: Buffer.from(body, 'utf8').toString('base64'),
                   });
-                  outcome = { left: action === 'switch' ? current : '', count: size + 1 };
+                  outcome = { left: current, count: size + 1 };
                   break;
                 } catch (e) {
                   // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
@@ -446,7 +427,7 @@ jobs:
               const page = lock.page ? `[the assignment page](${lock.page})` : 'the assignment page on the course site';
               const lines = outcome.left
                 ? [
-                  `Done @${handle} - you've left **${outcome.left}** and joined **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`,
+                  `Done @${handle} - you've left **${outcome.left}** and ${outcome.count === 1 ? 'started' : 'joined'} **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`,
                   `You lose access to ${outcome.left}'s repo; anything you pushed there stays with ${outcome.left}.`,
                 ]
                 : [`Done @${handle} - you're in team **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`];

@@ -12,7 +12,7 @@ on the group's repo (so post-sync membership edits propagate to access automatic
 With --prune, members no longer in the CSV are removed from their team (off-boarding) - never
 an org Owner or the acting login (see gh_teams.reconcile_team_members); off by default here so a
 standalone/manual run never silently revokes access. A project team whose LAST row has gone
-(its last member switched to another team) is reconciled to empty as well - see
+(its last member moved to another team) is reconciled to empty as well - see
 `emptied_teams` - and left in place, with its repo: nothing here deletes or archives. The seeded **Sync membership** workflow (dsl_course.sync_membership) always calls this
 with prune=True - config is meant to be the live truth there; this module's own off-by-default
 is only for ad-hoc/CLI use outside that workflow.
@@ -68,7 +68,7 @@ def emptied_teams(
     """Project teams that exist on GitHub but no longer have a row in teams.csv.
 
     The hole this closes: the reconcile below walks the teams the CSV names, so a team
-    whose last member SWITCHED out (the Join-team form's *Switch to another team*) was never
+    whose last member MOVED out (a Join or Create from someone already in a team) was never
     visited again, and its GitHub team - and the push access to its repo - kept the leaver.
 
     A team qualifies only if ALL of these hold, because emptying the wrong one evicts

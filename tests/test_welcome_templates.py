@@ -953,38 +953,17 @@ def test_a_recorded_create_tells_the_student_how_teammates_join():
     assert "choose *Join an existing team* and type **team-beta** exactly" in said
 
 
-@needs_js
-def test_joining_while_in_a_team_points_at_switch_rather_than_staff():
-    out = _run_form(
-        _lock_for("open"),
-        _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-        handle="bob",
-    )
-    assert out["writes"] == [], "bob is in team-alpha already - nothing to write"
-    solo = _TEAMS_CSV + "assignment-2,team-beta,stu\n"
-    out = _run_form(
-        _lock_for("open"),
-        solo,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-    )
-    said = out["comments"][0]
-    assert out["writes"] == []
-    assert "you're already in **team-beta**" in said
-    assert "choose *Switch to another team*" in said
-    assert out["labels"] == ["team-refused"]
-    assert out["states"] == ["closed:not_planned"]
+_IN_BETA = _TEAMS_CSV + "assignment-2,team-beta,stu\n"
 
 
 @needs_js
-def test_a_switch_moves_the_row_in_one_write():
-    # stu leaves team-beta (where she was alone) for team-alpha: one commit that drops the
-    # old row and adds the new, so she is never in two teams nor in none.
-    solo = _TEAMS_CSV + "assignment-2,team-beta,stu\n"
+def test_joining_while_in_a_team_moves_you_in_one_write():
+    # stu leaves team-beta (where she was alone) for team-alpha: one commit drops the old
+    # row and adds the new, so she is never in two teams nor in none.
     out = _run_form(
         _lock_for("open"),
-        solo,
-        _form_body("assignment-2", "Switch to another team", "team-alpha"),
+        _IN_BETA,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
     )
     (written,) = out["writes"]
     assert "assignment-2,team-beta,stu" not in written
@@ -996,42 +975,45 @@ def test_a_switch_moves_the_row_in_one_write():
     )
     assert "You lose access to team-beta's repo" in said
     assert "step 2 on [the assignment page]" in said
+    assert "Tell your teammates" not in said
     assert out["labels"] == ["team-recorded"]
 
 
 @needs_js
-@pytest.mark.parametrize(
-    "csv,team,expect",
-    [
-        (_TEAMS_CSV, "team-alpha", "you're not in a team for `assignment-2` yet"),
-        (
-            _TEAMS_CSV + "assignment-2,team-beta,stu\n",
-            "team-beta",
-            "you're already in **team-beta**",
-        ),
-        (
-            _TEAMS_CSV + "assignment-2,team-beta,stu\n",
-            "teamalpha",
-            "Did you mean **team-alpha** (2/4)?",
-        ),
-        (
-            _TEAMS_CSV
-            + "assignment-2,team-alpha,cy\nassignment-2,team-alpha,di\n"
-            + "assignment-2,team-beta,stu\n",
-            "team-alpha",
-            "**team-alpha** is full",
-        ),
-    ],
-    ids=["not-in-a-team", "same-team", "near-miss", "full"],
-)
-def test_a_switch_the_student_can_put_right_is_closed_with_the_reason(
-    csv, team, expect
-):
+def test_creating_while_in_a_team_moves_you_to_the_new_one():
+    # The dead end this replaces: in team A and wanting to START a team, Create said
+    # "already in a team" and there was nowhere to go.
     out = _run_form(
         _lock_for("open"),
-        csv,
-        _form_body("assignment-2", "Switch to another team", team),
-        roster=("ann", "bob", "cy", "di", "stu"),
+        _IN_BETA,
+        _form_body("assignment-2", "Create a new team", "team-gamma"),
+    )
+    (written,) = out["writes"]
+    assert "assignment-2,team-beta,stu" not in written
+    assert written.endswith("assignment-2,team-gamma,stu\n")
+    said = out["comments"][0]
+    assert (
+        "you've left **team-beta** and started **team-gamma** for `assignment-2` (1/4)"
+        in said
+    )
+    assert "You lose access to team-beta's repo" in said
+    assert "type **team-gamma** exactly" in said
+
+
+@needs_js
+@pytest.mark.parametrize(
+    "action,team,expect",
+    [
+        ("Join an existing team", "team-beta", "**team-beta** is already your team"),
+        ("Create a new team", "team-beta", "**team-beta** is already your team"),
+        ("Join an existing team", "teamalpha", "Did you mean **team-alpha** (2/4)?"),
+        ("Create a new team", "team_alpha", "**team-alpha** already exists"),
+    ],
+    ids=["join-own", "create-own", "join-miss", "create-taken"],
+)
+def test_a_move_gets_exactly_the_checks_a_fresh_request_does(action, team, expect):
+    out = _run_form(
+        _lock_for("open"), _IN_BETA, _form_body("assignment-2", action, team)
     )
     assert out["writes"] == []
     assert expect in out["comments"][0]
@@ -1040,14 +1022,44 @@ def test_a_switch_the_student_can_put_right_is_closed_with_the_reason(
 
 
 @needs_js
-def test_a_switch_after_the_window_shuts_is_the_window_refusal():
+def test_moving_into_a_full_team_is_refused():
+    full = _IN_BETA + "assignment-2,team-alpha,cy\nassignment-2,team-alpha,di\n"
+    out = _run_form(
+        _lock_for("open"),
+        full,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        roster=("ann", "bob", "cy", "di", "stu"),
+    )
+    assert out["writes"] == []
+    assert "**team-alpha** is full" in out["comments"][0]
+
+
+@needs_js
+def test_a_move_after_the_window_shuts_is_the_window_refusal():
     out = _run_form(
         _lock_for("closed"),
-        _TEAMS_CSV + "assignment-2,team-beta,stu\n",
-        _form_body("assignment-2", "Switch to another team", "team-alpha"),
+        _IN_BETA,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
     )
     assert out["writes"] == []
     assert "closed on 4th Oct" in out["comments"][0]
+
+
+@needs_js
+def test_an_action_the_workflow_does_not_know_is_refused_not_crashed():
+    # A browser can hold a cached copy of the form with the retired "Switch to another
+    # team" option; such an issue is the student's to redo.
+    out = _run_form(
+        _lock_for("open"),
+        _IN_BETA,
+        _form_body("assignment-2", "Switch to another team", "team-alpha"),
+    )
+    assert out["writes"] == []
+    said = out["comments"][0]
+    assert "I don't recognise that Action" in said
+    assert "*Join an existing team* or *Create a new team*" in said
+    assert out["labels"] == ["team-refused"]
+    assert out["states"] == ["closed:not_planned"]
 
 
 @needs_js
@@ -1128,7 +1140,6 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
     assert fields["action"]["attributes"]["options"] == [
         "Join an existing team",
         "Create a new team",
-        "Switch to another team",
     ]
 
 

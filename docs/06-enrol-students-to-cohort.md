@@ -69,15 +69,16 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
   - `team-refused` (closed as not planned): the **student** can fix it, and the comment
     says how, with a link to a new Join team issue with the Team box filled in. Covers:
     an individual or instructor-assigned assignment; the window not open yet or closed;
-    Join or Switch to a team that doesn't exist (the nearest real team is named) or is
-    full; Create onto a name that exists, or differs from one only in case, dashes and
-    underscores; Join or Create while already in a team (they're pointed at Switch); an
-    unreadable form or a name that isn't letters, digits and dashes.
+    Join a team that doesn't exist (the nearest real team is named) or is full; Create
+    onto a name that exists, or differs from one only in case, dashes and underscores;
+    Join or Create of the team they're already in; an unreadable form, an unknown Action,
+    or a name that isn't letters, digits and dashes.
   - `needs-review` (open): **you** must act - not on the roster or not onboarded, an
     auditor, a missing lock or team cap, a teams.csv header problem, or a write that failed.
-- **Switch to another team** moves a student while the window is open, in one write to
-  `teams.csv`. Sync membership then takes them out of the old GitHub team, including a
-  team they leave empty. The old team's repo is kept, with what they pushed.
+- A student already in a team who **joins** or **creates** another is moved while the
+  window is open, in one write to `teams.csv`. Sync membership then takes them out of the
+  old GitHub team, including a team they leave empty. The old team's repo is kept, with
+  what they pushed.
 - An assignment whose course template does not exist yet refuses every request until the
   template is created.
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.

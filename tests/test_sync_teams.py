@@ -288,8 +288,8 @@ def _emptied_world(monkeypatch, stub_team, csv, existing):
 PROJECT = sync_teams.PROJECT_TEAM_DESCRIPTION
 
 
-def test_switching_out_of_a_one_person_team_revokes_its_access(stub_team, monkeypatch):
-    # zoe-zed was alone in `wizards` and switched to `team-x`: teams.csv no longer names
+def test_moving_out_of_a_one_person_team_revokes_its_access(stub_team, monkeypatch):
+    # zoe-zed was alone in `wizards` and moved to `team-x`: teams.csv no longer names
     # `wizards` at all, so the reconcile over the CSV never visited it and she kept push
     # on its repo. The emptied team is reconciled to nobody - but never the org owner or
     # the bot, which `reconcile_team_members` keeps whatever it is asked.
