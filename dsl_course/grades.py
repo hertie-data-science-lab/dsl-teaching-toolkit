@@ -1331,7 +1331,34 @@ def parse_assignment_defaults(raw: object) -> dict:
     if not isinstance(raw, dict):
         log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
         return {}
-    values = _read_settings(raw, COURSE_DEFAULT_KEYS, _DEFAULTS_WHERE, dropped)
+    # `format` here answers New assignment's box, which takes a comma-separated list of
+    # starters; an assignment's own `format:` is one value. Read as the box reads it, and
+    # dropped when unusable, so the toolkit's own answer applies rather than `none`.
+    starters = raw.get("format")
+    values = _read_settings(
+        {k: v for k, v in raw.items() if k != "format"},
+        COURSE_DEFAULT_KEYS,
+        _DEFAULTS_WHERE,
+        dropped,
+    )
+    if starters is not None:
+        named = [t.strip().lower() for t in str(starters).split(",") if t.strip()]
+        if (
+            named
+            and all(t in FORMATS for t in named)
+            and (NO_STARTER not in named or len(named) == 1)
+        ):
+            values["format"] = ",".join(dict.fromkeys(named))
+        else:
+            dropped.append(
+                Dropped(
+                    _DEFAULTS_WHERE,
+                    "format",
+                    f"`format: {starters}` is not a comma-separated list of "
+                    f"{'/'.join(FORMATS)} - using the toolkit's default",
+                    FORMATS,
+                )
+            )
     for line in dropped:
         log_err(line)
     return values
