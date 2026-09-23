@@ -511,14 +511,38 @@ def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():
         "marking",
     )
     sheet["submissions"]["bob"]["score_individual"] = 5
-    doc = _render(
-        cohort=_cohort(
-            sheets={"assignment-2": sheet}, returned_to={"assignment-2": {"ada", "bob"}}
-        ),
-        now=later,
+    marked = datetime(2026, 10, 10, 9, 0, tzinfo=UTC)
+    back = {"ada": later, "bob": later}
+
+    def state(returned_at, changed=marked):
+        doc = _render(
+            cohort=_cohort(
+                sheets={"assignment-2": sheet},
+                returned_at=returned_at,
+                sheet_changed={"assignment-2": changed},
+            ),
+            now=later,
+        )
+        row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+        return row["returned"], row["state"]
+
+    assert state(back) == (True, "returned")
+    # Bob's gradebook was never written: not every unit has its marks back.
+    assert state({"ada": later}) == (False, "marking")
+    # A mark changed on the sheet after the return is not returned yet.
+    assert state(back, changed=later + timedelta(hours=1)) == (False, "marking")
+
+
+def test_returned_is_read_off_the_gradebook_rows_distribute_writes(monkeypatch):
+    text = (
+        "target,assignment,channel,content_hash,distributed_at,issue\n"
+        "Ada,,gradebook,abc,2026-10-12T09:00:00+00:00,\n"
+        "bob,,email,m:1,2026-10-12T09:00:00+00:00,\n"
     )
-    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
-    assert (row["returned"], row["state"]) == (True, "returned")
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: text)
+    assert status_json._returned_at(COHORT) == {
+        "ada": datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+    }
 
 
 def test_a_staff_entry_without_an_email_is_a_counted_problem():

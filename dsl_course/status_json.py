@@ -182,8 +182,11 @@ class CohortFacts:
         default_factory=dict
     )  # by schedule key
     sheets: dict[str, dict] = field(default_factory=dict)  # by cohort-side name
-    # `{cohort-side name: handles its gradebook was written for}`, from distributed.csv.
-    returned_to: dict[str, set[str]] = field(default_factory=dict)
+    # `{handle, casefolded: when its gradebook was last written}`, off distributed.csv.
+    # A gradebook holds every assignment, so its record names none.
+    returned_at: dict[str, datetime] = field(default_factory=dict)
+    # `{cohort-side name: when its grading sheet last changed}`; None = not known.
+    sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
     site_home: str | None = None
     site_last_update: datetime | None = None
@@ -808,6 +811,35 @@ def assignment_state(
     return "declared"
 
 
+def marks_returned(
+    sheet: dict | None,
+    spec: grades.SheetSpec | None,
+    returned_at: dict[str, datetime],
+    changed: datetime | None,
+) -> bool:
+    """Whether every unit on the sheet has had its marks returned: each member's
+    gradebook was written no earlier than the sheet last changed (at all, when that
+    moment is not known). A sheet edited after the return is not returned yet."""
+    if not sheet or spec is None:
+        return False
+    container = sheet.get(spec.container_key)
+    if not isinstance(container, dict) or not container:
+        return False
+    for unit, block in container.items():
+        members = (
+            (block.get("members") or {})
+            if spec.is_group and isinstance(block, dict)
+            else [unit]
+        )
+        if not members:
+            return False
+        for handle in members:
+            at = returned_at.get(str(handle).casefold())
+            if at is None or (changed is not None and at < changed):
+                return False
+    return True
+
+
 def _problem_entries(problems: list[dict]) -> set[str]:
     return {p["fix"].get("entry") for p in problems if p["fix"].get("entry")}
 
@@ -837,7 +869,16 @@ def render_assignments(
             facts.sheets.get(name), sheet_specs.get(name)
         )
         total = on_sheet or units
-        returned = bool(facts.returned_to.get(name)) and total > 0 and filled == total
+        returned = (
+            total > 0
+            and filled == total
+            and marks_returned(
+                facts.sheets.get(name),
+                sheet_specs.get(name),
+                facts.returned_at,
+                facts.sheet_changed.get(name),
+            )
+        )
         solution = entry.solution_datetime
         rows.append(
             {
@@ -1249,7 +1290,7 @@ def _outcomes(cohort_org: str, paths: dict[str, str]) -> list[dict]:
     return out
 
 
-def _returned_to(cohort_org: str) -> dict[str, set[str]]:
+def _returned_at(cohort_org: str) -> dict[str, datetime]:
     text = get_file_content(cohort_org, schedule.CONFIG_REPO, grades.DISTRIBUTED_PATH)
     if not text:
         return {}
@@ -1257,10 +1298,15 @@ def _returned_to(cohort_org: str) -> dict[str, set[str]]:
         records = grades.parse_distributed(text)
     except Unusable:
         return {}
-    out: dict[str, set[str]] = {}
-    for target, assignment, channel in records:
-        if channel == grades.CHANNEL_GRADEBOOK and assignment:
-            out.setdefault(assignment, set()).add(target)
+    out: dict[str, datetime] = {}
+    for (target, assignment, channel), (_digest, when, _issue) in records.items():
+        if channel != grades.CHANNEL_GRADEBOOK or assignment:
+            continue
+        try:
+            at = datetime.fromisoformat(when)
+        except ValueError:
+            continue
+        out[target.casefold()] = at if at.tzinfo else at.replace(tzinfo=UTC)
     return out
 
 
@@ -1308,7 +1354,10 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
                 facts.sheets[name] = grades.parse_sheet(text)
             except grades.SheetUnreadable:
                 pass  # its fault is in sheet_faults
-    facts.returned_to = _returned_to(cohort_org)
+            facts.sheet_changed[name] = _last_commit_at(
+                cohort_org, schedule.CONFIG_REPO, grades.sheet_path(name)
+            )
+    facts.returned_at = _returned_at(cohort_org)
     for repo in sorted({d.cohort_dest_repo for r in sched.releases for d in r.deploy}):
         if repo in facts.listing:
             facts.dest_paths[repo] = set(
