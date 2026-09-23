@@ -2695,7 +2695,7 @@ _NOT_SUBMITTED = "not submitted"
 _REGISTRAR_FIELDS = ("hertie_email", "name", "github_handle")
 
 
-def _blank(value: object) -> bool:
+def is_blank(value: object) -> bool:
     """Whether a cell holds nothing. `0` is a value, not a blank - a student who was 0
     days late must see that, and dropping it would read as "we never looked"."""
     if value is None:
@@ -2703,7 +2703,7 @@ def _blank(value: object) -> bool:
     if isinstance(value, str):
         return not value.strip()
     if isinstance(value, dict):
-        return all(_blank(inner) for inner in value.values())
+        return all(is_blank(inner) for inner in value.values())
     return False
 
 
@@ -2714,7 +2714,7 @@ def _marked(score: object) -> dict:
     reads as a mark of nothing rather than as no mark at all."""
     if not isinstance(score, dict):
         return {}
-    return {name: value for name, value in score.items() if not _blank(value)}
+    return {name: value for name, value in score.items() if not is_blank(value)}
 
 
 def _verbatim(score: object) -> str:
@@ -2722,7 +2722,7 @@ def _verbatim(score: object) -> str:
 
     Only a flat cell has one: a per-question map with a word in it has no single value to
     pass through, and the map itself is already in the view."""
-    return "" if isinstance(score, dict) or _blank(score) else str(score).strip()
+    return "" if isinstance(score, dict) or is_blank(score) else str(score).strip()
 
 
 def total_points(spec: SheetSpec | GradingSpec) -> str:
@@ -2765,7 +2765,7 @@ def _submitted_display(value: object, external: bool = False) -> str:
     cohort beat this module's guess at what they meant."""
     if external:
         return _EXTERNAL
-    if _blank(value):
+    if is_blank(value):
         return ""
     text = value.isoformat() if isinstance(value, datetime) else str(value).strip()
     try:
@@ -2782,7 +2782,7 @@ def _allowlisted(fields: dict) -> dict:
     return {
         key: fields[key]
         for key in STUDENT_VIEW_KEYS
-        if key in fields and not _blank(fields[key])
+        if key in fields and not is_blank(fields[key])
     }
 
 
@@ -2861,7 +2861,7 @@ def _is_typo(value: object) -> bool:
     arithmetic ask this. `−3` with a Unicode minus, which is what a word processor
     produces, is exactly the case: it read as no adjustment at all while the grader
     believed a penalty had been waived."""
-    return not _blank(value) and _decimal(value) is None
+    return not is_blank(value) and _decimal(value) is None
 
 
 def _score_fault(spec: SheetSpec, score: object) -> str:
@@ -3244,14 +3244,14 @@ def _on_the_roster(
 def _cell(value: object) -> str:
     """One value as a Markdown table cell: no `|` to close the column early, no newline to
     end the row. A grader's feedback is free text and can reach a table either way."""
-    text = "" if _blank(value) else " ".join(str(value).split())
+    text = "" if is_blank(value) else " ".join(str(value).split())
     return text.replace("|", "\\|")
 
 
 def _over_max(value: object, max_points: object) -> str:
     """`40 / 50` where the assignment declares a total, `40` where it does not."""
-    text = "" if _blank(value) else str(value).strip()
-    return f"{text} / {max_points}" if text and not _blank(max_points) else text
+    text = "" if is_blank(value) else str(value).strip()
+    return f"{text} / {max_points}" if text and not is_blank(max_points) else text
 
 
 def _late_display(days_late: object) -> str:
@@ -3319,9 +3319,9 @@ def _readme_section(title: str, view: dict) -> str:
     else has read it."""
     grade = _over_max(view.get("final_grade", ""), view.get("max_points"))
     parts = [f"## {title}" + (f"\n{_readme_grade_line(view, grade)}" if grade else "")]
-    if not _blank(view.get("feedback")):
+    if not is_blank(view.get("feedback")):
         parts.append(str(view["feedback"]).strip())
-    if not _blank(view.get("team_feedback")):
+    if not is_blank(view.get("team_feedback")):
         label = f"**Team feedback (shared with {view.get('team', 'your team')}):**"
         lines = str(view["team_feedback"]).strip().split("\n")
         quoted = [f"> {label} {lines[0]}".rstrip()]
@@ -3799,13 +3799,13 @@ def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:
             continue
         score = block.get(spec.score_key)
         if isinstance(score, dict) and spec.questions:
-            blank = [k for k in spec.questions if _blank(score.get(k))]
+            blank = [k for k in spec.questions if is_blank(score.get(k))]
             if len(blank) == len(spec.questions):
                 out[str(unit)] = []
             elif blank:
                 out[str(unit)] = blank
-        elif _blank(score) or (
-            isinstance(score, dict) and all(_blank(v) for v in score.values())
+        elif is_blank(score) or (
+            isinstance(score, dict) and all(is_blank(v) for v in score.values())
         ):
             out[str(unit)] = []
     return out
@@ -3823,7 +3823,7 @@ def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
             1
             for person in people.values()
             if isinstance(person, dict)
-            and not _blank(person.get("adjustment_individual"))
+            and not is_blank(person.get("adjustment_individual"))
         )
     return total
 
@@ -4121,7 +4121,7 @@ def feedback_text(book: dict[str, dict], titles: dict[str, str]) -> str:
         said = [
             str(view[key]).strip()
             for key in ("feedback", "team_feedback")
-            if not _blank(view.get(key))
+            if not is_blank(view.get(key))
         ]
         if said:
             parts.append(f"{titles.get(slug) or slug}:\n" + "\n\n".join(said))
@@ -4627,7 +4627,7 @@ def _preview_body(
         shown = " · ".join(
             f"{slug} {view['final_grade']}"
             for slug, view in sorted(books.get(handle, {}).items())
-            if not _blank(view.get("final_grade"))
+            if not is_blank(view.get("final_grade"))
         )
         mails.append(
             f"- {who(handle)} - {why}.\n"
