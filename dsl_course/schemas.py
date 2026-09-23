@@ -292,7 +292,8 @@ def status_schema() -> dict:
             "show_on_site": {"type": "boolean"},
             "tbc": {"type": "boolean"},
         },
-        ("id", "state"),
+        # `when` always present (null while TBC): the console derives `late` from it.
+        ("id", "state", "when"),
     )
     assignment = _obj(
         {
@@ -313,7 +314,9 @@ def status_schema() -> dict:
             "returned": {"type": "boolean"},
             "problem": {"type": "boolean"},
         },
-        ("slug", "state"),
+        # The four moments are always present (null when unset), so the console can move
+        # an assignment from open to late window to marking on its own clock.
+        ("slug", "state", "handout", "due", "late_until", "solution_shown"),
     )
     count = {"type": "integer"}
     return _doc(

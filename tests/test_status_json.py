@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1037,3 +1037,60 @@ def test_the_course_file_carries_its_whys_too():
     assert public["course"]["stage_why"] == {
         "C6": "There is no public website; it is optional."
     }
+
+
+# ------------------------------------------------------------------ dates for the console's clock
+
+
+def _client_state(row: dict, now: datetime) -> str:
+    """What the console derives from an assignment row it already holds, with no
+    rewrite of status.json: open -> late window -> marking on the row's own dates."""
+    if row["state"] not in ("open", "late_window", "marking"):
+        return row["state"]
+    due = datetime.fromisoformat(row["due"])
+    late_until = datetime.fromisoformat(row["late_until"])
+    if now >= late_until:
+        return "marking"
+    return "late_window" if now >= due else "open"
+
+
+def test_every_assignment_and_release_carries_the_moments_the_console_needs():
+    doc = _render(*_contract_scenario())
+    for row in doc["assignments"]:
+        for key in ("handout", "due", "late_until", "solution_shown"):
+            assert key in row, (row["slug"], key)
+        for key in ("handout", "due", "late_until"):
+            if row[key] is not None:
+                assert datetime.fromisoformat(row[key]).tzinfo is not None
+    assert all("when" in r for r in doc["releases"])
+    assert validate(doc, schemas.status_schema()) == []
+    # The exported schema holds the writer to it: a row without them does not validate.
+    bare = json.loads(json.dumps(doc))
+    del bare["assignments"][0]["late_until"]
+    del bare["releases"][0]["when"]
+    assert len(validate(bare, schemas.status_schema())) == 2
+
+
+def test_the_console_can_move_open_to_late_window_without_a_rewrite():
+    # Rendered on Wednesday 23 Sep: assignment-2 is open, due Sunday 27 Sep.
+    course, cohort = _contract_scenario()
+    cohort.listing |= {
+        "assignment-2-ada": repo_row("assignment-2-ada"),
+        "assignment-2": repo_row(
+            "assignment-2", isTemplate=True, topics=["assignment-template"]
+        ),
+    }
+    written = next(
+        a for a in _render(course, cohort)["assignments"] if a["slug"] == "assignment-2"
+    )
+    assert written["state"] == "open"
+    due = datetime.fromisoformat(written["due"])
+    late_until = datetime.fromisoformat(written["late_until"])
+    assert due < late_until
+    for later in (due - timedelta(minutes=1), due, late_until):
+        engine = next(
+            a
+            for a in _render(course, cohort, now=later)["assignments"]
+            if a["slug"] == "assignment-2"
+        )
+        assert _client_state(written, later) == engine["state"]

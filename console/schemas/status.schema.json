@@ -90,7 +90,11 @@
         },
         "required": [
           "slug",
-          "state"
+          "state",
+          "handout",
+          "due",
+          "late_until",
+          "solution_shown"
         ],
         "type": "object"
       },
@@ -466,7 +470,8 @@
         },
         "required": [
           "id",
-          "state"
+          "state",
+          "when"
         ],
         "type": "object"
       },
