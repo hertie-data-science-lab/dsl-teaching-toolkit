@@ -572,7 +572,9 @@ which asks for write on the repo the button lives in. The Console runs the same 
 first STEP of its one job, so the run it follows has a single job. The scheduler, refresh and
 Send enrolment codes are **ungated**: neither a cron nor a `repository_dispatch` has an actor to
 check, and each only re-calls idempotent work. Send enrolment codes has no `workflow_dispatch` at all - a push to
-a cohort's `students.csv` is its only trigger, and therefore the only way codes are sent.
+a cohort's `students.csv` is its only trigger, and therefore the only way codes are sent
+automatically. The other way is `enrol_codes --resend-unjoined` (the console's "send new
+codes"), which replaces every unjoined row's code and has a `--dry-run`.
 
 `seed refresh` is serialised against itself (`concurrency: seed-refresh`) and **deliberately not
 shared** with the click workflows that end in a refresh. Actions concurrency has no queue - a group

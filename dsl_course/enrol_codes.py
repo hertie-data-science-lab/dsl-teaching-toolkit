@@ -13,14 +13,19 @@ Excel -> Power Automate -> Outlook mail-merge. Reuses dsl_course.mailer.
 Every roster row gets a code, auditors included - the code is how anyone onboards at all;
 their `role` column is what routes them to the read-only `auditors` team on the way in.
 
-One caller, and it is not a person: a push to a cohort's own students.csv, which its
+The ordinary caller is not a person: a push to a cohort's own students.csv, which its
 classroom-config dispatcher turns into a `send-codes` repository_dispatch at the course
 org. That path passes `--dispatched-by`, because its cohort name is untrusted input (see
-`refuse_unregistered`). Every send is therefore unattended and for real - there is no
-preview mode, and re-sending means pushing the roster again with `code_sent_at` cleared.
+`refuse_unregistered`), and it is unattended and for real - there is no preview mode.
+
+The other caller is the console's "send new codes": `--resend-unjoined` mints a NEW code
+for every roster row without a `github_handle`, so the old codes stop working, and emails
+them. It previews with `--dry-run`, which counts and changes nothing (`resend_unjoined`).
 
 Usage:
     python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026
+    python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026 \\
+        --resend-unjoined [--dry-run]
     python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026 \\
         --dispatched-by hertie-dsl-demo-course-e1234
 """
@@ -31,6 +36,8 @@ import argparse
 import csv
 import enum
 import io
+import json
+import re
 import secrets
 import sys
 from datetime import UTC, datetime
@@ -57,7 +64,7 @@ def make_code() -> str:
 
 
 def fill_column_in_csv(
-    text: str, column: str, values_by_row: dict[int, str], replacing: str = ""
+    text: str, column: str, values_by_row: dict[int, str], replacing: str | None = ""
 ) -> str:
     """Surgically write one column into the RAW students.csv, preserving everything else.
 
@@ -74,8 +81,9 @@ def fill_column_in_csv(
     caller idempotent: the default (blank) means a code already issued is never rotated and
     a row already marked as emailed is never re-stamped. The one caller that passes
     anything else is the release of a claim that could not be spent (`_release_unsent`),
-    which blanks the cells still holding ITS OWN stamp and nobody else's. The column is
-    appended if the roster predates it, so a deployed cohort needs no migration."""
+    which blanks the cells still holding ITS OWN stamp and nobody else's. `None` writes
+    whatever the cell holds - `resend_unjoined`, which replaces codes on purpose. The column
+    is appended if the roster predates it, so a deployed cohort needs no migration."""
     # read_csv, not a bare DictReader: this path bypasses `roster.parse`, and a
     # `;`-delimited Excel export was written straight back with a code column bolted on -
     # exit 0, roster destroyed.
@@ -85,7 +93,9 @@ def fill_column_in_csv(
         fieldnames.append(column)
     rows = list(reader)
     for i, row in enumerate(rows):
-        if i in values_by_row and (row.get(column) or "").strip() == replacing:
+        if i in values_by_row and (
+            replacing is None or (row.get(column) or "").strip() == replacing
+        ):
             row[column] = values_by_row[i]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=fieldnames)
@@ -134,7 +144,7 @@ def write_column(
     column: str,
     items: list[tuple[int, str, str]],
     message: str,
-    replacing: str = "",
+    replacing: str | None = "",
 ) -> str | None:
     """Commit one column into students.csv without clobbering a concurrent edit.
     Returns the roster text AS COMMITTED, or None if no attempt was accepted.
@@ -191,7 +201,10 @@ def assign_codes(students: list[roster.Student], gen=make_code) -> int:
 
 
 def code_message(
-    student: roster.Student, welcome_url: str, course_name: str = ""
+    student: roster.Student,
+    welcome_url: str,
+    course_name: str = "",
+    replaces: bool = False,
 ) -> mailer.Message:
     """The enrolment-code email for one student: (to, subject, body).
 
@@ -216,6 +229,8 @@ def code_message(
         f"Whichever GitHub account opens the issue is linked to your Hertie email "
         f"address automatically.\n"
     )
+    if replaces:
+        body += "\nThis code replaces any code you were sent before, which no longer works.\n"
     return (student.hertie_email, subject, body)
 
 
@@ -371,7 +386,120 @@ def run(cohort_org: str) -> Outcome:
     return Outcome.SENT
 
 
-def _claim_sent(cohort_org: str, recipients: list[str], stamp: str) -> bool:
+# Enough to tell an address from a typo before a code is minted for it: something before
+# an `@`, a dotted domain after it, no whitespace. Graph is the real test.
+_ADDRESS = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def resend_unjoined(cohort_org: str, dry_run: bool = True) -> Outcome:
+    """Send a NEW code to every roster row without a `github_handle`, replacing the old
+    one - which then stops working - and email it. The console's "send new codes".
+
+    A row whose email is not an address, or repeats one already taken, is skipped and
+    counted, never named: the `Done` line lands in a public log. `dry_run` counts and
+    changes nothing. Otherwise it follows `run`'s order: the transport is asked first,
+    the codes are committed, `code_sent_at` is claimed, then the batch is sent and any
+    claim it did not spend is released, so a later roster push retries it."""
+    read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+    if read is None:
+        log_err(
+            f"Could not find {roster.ROSTER_PATH} in {cohort_org}/{roster.CONFIG_REPO}."
+        )
+        return Outcome.NO_ROSTER
+    raw, raw_sha = read
+    try:
+        students = roster.parse(raw)
+    except Unusable as exc:
+        log_err(f"{exc} No codes generated or sent.")
+        return Outcome.UNUSABLE_ROSTER
+    seen: set[str] = set()
+    targets: list[tuple[int, roster.Student]] = []
+    skipped = 0
+    for i, s in enumerate(students):
+        if s.onboarded:
+            continue
+        email = s.hertie_email.strip()
+        if not _ADDRESS.fullmatch(email) or email.casefold() in seen:
+            skipped += 1
+            continue
+        seen.add(email.casefold())
+        targets.append((i, s))
+    counts = {"students": len(targets), "skipped": skipped, "sent": 0}
+    if dry_run or not targets:
+        log_ok(
+            f"Done - {json.dumps(counts)}"
+            + (" (preview: no code changed, nothing sent)" if dry_run else "")
+        )
+        return Outcome.NOTHING_TO_SEND
+    if mailer.graph_config_from_env() is None:
+        log_err(f"no mail transport for {cohort_org} - no code changed, nothing sent.")
+        return Outcome.NO_TRANSPORT
+    taken = {s.enrol_code for s in students if s.enrol_code}
+    fresh: list[tuple[int, str, str]] = []
+    for i, s in targets:
+        code = make_code()
+        while code in taken:
+            code = make_code()
+        taken.add(code)
+        fresh.append((i, s.hertie_email.strip(), code))
+    written = write_column(
+        cohort_org,
+        raw,
+        raw_sha,
+        "enrol_code",
+        fresh,
+        f"roster: replace {len(fresh)} enrolment code(s)",
+        replacing=None,
+    )
+    if written is None:
+        log_err(
+            f"could not write the new codes to {roster.ROSTER_PATH} in {cohort_org} - "
+            f"the old codes still work and nothing was emailed."
+        )
+        return Outcome.FAILED
+    minted = {email: code for _i, email, code in fresh}
+    # Email what the ROSTER holds, and only rows still unjoined that carry this run's code:
+    # a Join that landed in between is somebody who needs no new code.
+    to_mail = [
+        s
+        for s in roster.parse(written)
+        if not s.onboarded and minted.get(s.hertie_email.strip()) == s.enrol_code
+    ]
+    try:
+        course_name = course_name_for_cohort(cohort_org)
+    except Exception as exc:  # a name is never worth losing the codes email over
+        log_err(f"could not read the course name ({exc}) - mailing without it")
+        course_name = ""
+    welcome_url = welcome_issue_url(cohort_org)
+    recipients = [s.hertie_email for s in to_mail]
+    stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    if not _claim_sent(cohort_org, recipients, stamp, replacing=None):
+        log_err(
+            f"could not stamp code_sent_at in {roster.ROSTER_PATH} for {cohort_org} - "
+            f"the new codes are in the roster and nothing was emailed; the next roster "
+            f"push will not send them either, so run this again."
+        )
+        return Outcome.FAILED
+    try:
+        sent = mailer.send_bulk(
+            [code_message(s, welcome_url, course_name, replaces=True) for s in to_mail]
+        )
+    except Exception:
+        _release_unsent(cohort_org, recipients, stamp)
+        raise
+    went_out = set(sent)
+    unsent = [to for to in recipients if to not in went_out]
+    counts["sent"] = len(sent)
+    log_ok(f"Done - {json.dumps(counts)}")
+    if unsent:
+        _release_unsent(cohort_org, unsent, stamp)
+        return Outcome.FAILED
+    return Outcome.SENT
+
+
+def _claim_sent(
+    cohort_org: str, recipients: list[str], stamp: str, replacing: str | None = ""
+) -> bool:
     """Stamp `code_sent_at` on the rows about to be emailed. True if it was committed.
 
     Re-reads first: the code write above moved the sha, and a Join issue can land between
@@ -398,6 +526,7 @@ def _claim_sent(cohort_org: str, recipients: list[str], stamp: str) -> bool:
             "code_sent_at",
             marks,
             f"roster: claim {len(marks)} enrolment code email(s)",
+            replacing=replacing,
         )
     )
 
@@ -524,7 +653,20 @@ def main() -> int:
             "only by a maintainer running the CLI by hand."
         ),
     )
+    parser.add_argument(
+        "--resend-unjoined",
+        action="store_true",
+        help="Send a NEW code to every row without a github_handle; the old codes stop "
+        "working. See resend_unjoined.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --resend-unjoined: count who would get a new code, change nothing.",
+    )
     args = parser.parse_args()
+    if args.dry_run and not args.resend_unjoined:
+        parser.error("--dry-run previews --resend-unjoined only")
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
     # Actions log a one-line error beats a traceback, and the run still goes red.
     try:
@@ -537,10 +679,14 @@ def main() -> int:
         # term that is over anyway.
         if not cohort_is_live(args.cohort_org):
             return 0
-        rc = int(reds_the_run(run(args.cohort_org)))
+        if args.resend_unjoined:
+            outcome = resend_unjoined(args.cohort_org, dry_run=args.dry_run)
+        else:
+            outcome = run(args.cohort_org)
+        rc = int(reds_the_run(outcome))
         # Dispatched by a roster push: the codes just sent change the cohort's status.
         # The course org is known only on that path, and the write is not counted.
-        if args.dispatched_by:
+        if args.dispatched_by and not args.dry_run:
             status.refresh(args.dispatched_by, args.cohort_org)
         return rc
     except RuntimeError as exc:
