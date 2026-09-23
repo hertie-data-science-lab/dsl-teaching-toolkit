@@ -383,9 +383,9 @@ Claim = tuple[str, str, str]
 def spoken_date(when: datetime, tz_name: str) -> str:
     """`4th Oct`, in the cohort's own zone - what the Join-team form calls the same day.
 
-    The spelling is `grades.spoken_day`'s, which is also the gradebook's, the cohort site's
-    and the form's (`spokenDate`, in templates/welcome/team-formation.yml): written out
-    rather than left to `strftime`, which answers in the runner's locale, and shared so the
+    The spelling is `grades.spoken_day`'s, which is also the cohort site's and the form's
+    (`spokenDate`, in templates/welcome/team-formation.yml): written out rather than left
+    to `strftime`, which answers in the runner's locale, and shared so the
     mail, the site and the refusal a late student gets all name one day one way.
 
     The zone matters at both ends of it: a window shutting at 00:30 Berlin is the 3rd in

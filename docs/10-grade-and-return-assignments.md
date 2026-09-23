@@ -5,7 +5,7 @@ One file to fill in, one button to send it. Everything else is the toolkit's.
 ## The shape of it
 
 ```
-HANDOUT ─────► DUE ─────► late window ─────► CUTOFF ─────► DISTRIBUTE
+HANDOUT ─────► DUE ─────► late window ─────► CUTOFF ─────► DISTRIBUTE GRADES
 (cron)         (cron)     (cron refreshes)   (cron)        (button)
    │             │              │               │              │
 sheet created  sheet        sheet refreshed   sheet         gradebook + CSV
@@ -101,7 +101,8 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 `submitted` can move at the freeze - the last derivation there will ever be.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
-no repo is created for it, so there is no commit to time.
+no repo is created for it, so there is no commit to time and nothing waits on the cutoff: mark it
+and run **Distribute grades** whenever you like.
 
 For `submit_via: shared_dropbox_repo` the timing is per FOLDER of the one drop box: `submitted` is the
 last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **and was made
@@ -133,14 +134,16 @@ repo's, so it would accuse the entire cohort of one student's late push), and
    rows for students who have left. Delete a key and it stays deleted.
 5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
-6. **Distribute grades** (button), `dry_run` first. The dry run reads everything, writes
-   nothing, and prints the counts - including how many marks are **held** for a hand
-   decision and how many units still have unmarked questions. There is no assignment to
-   pick: every gradebook and the registrar's export are rebuilt from every sheet in the
-   cohort on every run, so a student's gradebook always shows everything they have been
-   marked on. A half-typed sheet is therefore a reason to wait.
+6. **Distribute grades** (button), `dry_run` first. The dry run writes no grades and sends
+   no mail. It prints the counts, and posts who gets what - each changed grade, who is
+   emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
+   grades preview* issue in `classroom-config`. Each dry run rewrites that issue; the real
+   run closes it. There is no assignment to pick: every gradebook and the registrar's
+   export are rebuilt from every sheet in the cohort on every run, so a student's
+   gradebook always shows everything they have been marked on. A half-typed sheet is
+   therefore a reason to wait.
 
-## What Distribute sends
+## What Distribute grades sends
 
 Three channels, and a submission repo is not one of them. Nothing a grader typed is ever
 posted into a repo: a student has one address for a mark, and a repo whose `visibility:`
@@ -158,11 +161,13 @@ after one correction reaches one student. `silent` skips the email.
 
 The gradebook and the email are decided separately, on purpose. The **commit** is made
 whenever anything in the repo would change, so an improvement to the page's own wording
-reaches every student. The **email** is sent only when `grades.yml` changes - when a MARK
-moves - so nobody is told to go and read a page that says the same as it did. The first run
-after the toolkit changes that wording carries each student's record over and says how many
-it carried; a mark that first appears in that same run is inside that window, so tell those
-students yourself if you have one.
+reaches every student. The **email** is sent only when a MARK moves - a grade, a score or
+feedback - so a new submission time, a new maximum or a respelt date rewrites the page and
+mails nobody. A student with no mark or feedback anywhere yet is not emailed at all; the run
+that brings their first one does. The first run after the toolkit changes what the email is
+keyed on carries each student's record over and says how many it carried; a mark that
+first appears in that same run can be inside that window, so tell those students yourself
+if you have one.
 
 ## Autograding (optional)
 
