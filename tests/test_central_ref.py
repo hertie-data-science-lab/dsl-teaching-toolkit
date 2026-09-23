@@ -299,6 +299,7 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     monkeypatch.setattr(
         seed, "sync_team_lock", lambda course, cohort: LockWrite(True, False)
     )
+    monkeypatch.setattr(seed, "refresh_status", lambda course, cohort=None: 0)
     return seed.refresh("Course-Org"), rendered
 
 

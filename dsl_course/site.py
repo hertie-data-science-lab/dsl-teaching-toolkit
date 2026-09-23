@@ -39,7 +39,7 @@ from urllib.parse import quote
 import yaml
 from pathspec import GitIgnoreSpec
 
-from . import schedule, teams
+from . import schedule, status, teams
 from .course import (
     CUTOFF_SENTENCE,
     PUBLISH_FILE,
@@ -1903,7 +1903,10 @@ def main() -> int:
         # and its last sync was the one teardown ran before freezing it.
         if not cohort_is_live(args.cohort_org):
             return 0
-        return sync_site(args.course_org, args.cohort_org)
+        rc = sync_site(args.course_org, args.cohort_org)
+        # The site's last update is part of the cohort's status. Not counted.
+        status.refresh(args.course_org, args.cohort_org)
+        return rc
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(str(exc))
         return 1

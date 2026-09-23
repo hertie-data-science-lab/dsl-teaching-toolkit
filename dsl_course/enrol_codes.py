@@ -35,7 +35,7 @@ import secrets
 import sys
 from datetime import UTC, datetime
 
-from . import mailer, roster
+from . import mailer, roster, status
 from .course import course_phrase
 from .discovery import (
     COHORTS_PATH,
@@ -537,7 +537,12 @@ def main() -> int:
         # term that is over anyway.
         if not cohort_is_live(args.cohort_org):
             return 0
-        return int(reds_the_run(run(args.cohort_org)))
+        rc = int(reds_the_run(run(args.cohort_org)))
+        # Dispatched by a roster push: the codes just sent change the cohort's status.
+        # The course org is known only on that path, and the write is not counted.
+        if args.dispatched_by:
+            status.refresh(args.dispatched_by, args.cohort_org)
+        return rc
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
