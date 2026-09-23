@@ -4387,11 +4387,11 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
     assert "info" not in grades.parse_sheet(text)["submissions"]["ada-l"]
 
 
-def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_never_froze(
+def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
     tmp_path, monkeypatch
 ):
-    # An in-class paper quiz: handed out after its due date, marks typed in later. The
-    # sheet is never frozen - there is nothing to collect - and nothing waits for it to be.
+    # An in-class paper quiz: handed out after its due date, marks typed in later. Nothing
+    # is collected, so nothing waits on the freeze - Distribute sends from an open sheet.
     from tests.test_grades import _EXTERNAL_GRADING, ROSTER_ADA, _distribute
 
     written = _sheet_env(monkeypatch, targets=SOLO_TARGETS, grading=_EXTERNAL_GRADING)
