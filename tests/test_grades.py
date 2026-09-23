@@ -1107,6 +1107,40 @@ def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypa
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
+@pytest.mark.parametrize(
+    "grading",
+    [_GRADING_YML, _GRADING_YML + "submit_via: external\n"],
+    ids=["assignment_repo", "external"],
+)
+def test_a_student_is_emailed_on_the_run_that_brings_their_first_mark(
+    tmp_path, monkeypatch, grading
+):
+    # A row with nothing typed in it still renders a gradebook - the points available, a
+    # submission time - but "your grades have been updated" would send a student to read
+    # nothing. So no mail, and no record of one: the run that brings the mark tells them.
+    unmarked = _SHEET.replace("score_individual: 43", "score_individual:").replace(
+        "feedback_individual: |\n      Clean derivation.\n", "feedback_individual:\n"
+    )
+    first = _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": unmarked}, grading=grading
+    )
+    assert first["rc"] == 0
+    assert [repo for repo, _files, _d in first["gradebooks"]] == ["grades-ada-l"]
+    assert first["outbox"] == []
+    ((_cfg, cfg_files, _d),) = first["config"]
+    record = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
+    assert ("ada-l", "", grades.CHANNEL_EMAIL) not in record
+
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": _SHEET},
+        grading=grading,
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
 def test_a_reworded_gradebook_page_is_committed_and_nobody_is_emailed(
     tmp_path, monkeypatch
 ):

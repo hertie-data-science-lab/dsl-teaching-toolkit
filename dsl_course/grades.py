@@ -3824,6 +3824,17 @@ def _hold_undecided(
     return held
 
 
+# The view keys a GRADER writes. The rest - `max_points`, `submitted`, `days_late` - are
+# the toolkit's facts about the assignment and fill in on their own, so a book carrying
+# only those has changed without there being anything for a student to read.
+_GRADER_KEYS = ("final_grade", "score", "feedback", "team_feedback")
+
+
+def _has_mark(book: dict[str, dict]) -> bool:
+    """Whether any assignment in this book carries a mark or a word of feedback."""
+    return any(key in view for view in book.values() for key in _GRADER_KEYS)
+
+
 # The data file of a gradebook, named here because two things key on it: the commit, which
 # is over the whole book, and the EMAIL, which is over this file alone (see `distribute`).
 GRADES_DATA = "grades.yml"
@@ -4028,6 +4039,11 @@ def distribute(
             # wording mails a whole live cohort about nothing.
             record[(handle, "", CHANNEL_EMAIL)] = (marks, now, "")
             carried += 1
+            continue
+        if not _has_mark(books[handle]):
+            # Nothing a grader wrote yet: the book moved on the toolkit's facts alone (a
+            # submission time, the points available). Not recorded either, so the run
+            # that brings the first mark is the one that tells them.
             continue
         pending.append(handle)
     if carried:

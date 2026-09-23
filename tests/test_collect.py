@@ -4446,13 +4446,13 @@ def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
         },
         grading=_EXTERNAL_GRADING,
         roster_rows=ROSTER_ADA + "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-abd\n",
-        sent=2,
     )
     assert out["rc"] == 0
     books = {repo: files for repo, files, _delete in out["gradebooks"]}
     assert "| 17 |" in books["grades-ada-l"]["README.md"]
     assert "| 17 |" not in books["grades-ben-k"]["README.md"]
-    assert "ada@uni.edu" in [m[0] for batch in out["outbox"] for m in batch]
+    # Ben's book was written, but it holds no mark - so there is nothing to tell him.
+    assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
 def test_the_freeze_reads_the_written_snapshot_and_seals_the_sheet(monkeypatch):
