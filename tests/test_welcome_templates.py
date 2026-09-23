@@ -1116,12 +1116,13 @@ def test_nothing_opens_or_names_a_team_list_issue_any_more():
 def test_a_cohort_with_nothing_open_keeps_the_free_text_assignment_field():
     # A dropdown needs at least one option, and a form GitHub refuses to render is worse
     # than an awkward one: it takes the Join-team route away from the cohort entirely.
-    assert welcome.join_team_form([]) == welcome.template(welcome.JOIN_TEAM_FORM)
-    assert welcome.join_team_form([]) == welcome.join_team_form(())
+    assert welcome.join_team_form({}) == welcome.template(welcome.JOIN_TEAM_FORM)
 
 
 def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
-    form = welcome.join_team_form(["assignment-2", "assignment-4-project"])
+    form = welcome.join_team_form(
+        dict.fromkeys(["assignment-2", "assignment-4-project"], "")
+    )
     doc = yaml.safe_load(form)
     fields = {b["id"]: b for b in doc["body"] if "id" in b}
     assert [b.get("id", b["type"]) for b in doc["body"]] == [
@@ -1153,7 +1154,7 @@ def test_the_template_still_carries_the_sentence_the_links_are_spliced_over():
 def test_the_header_links_the_page_of_the_one_open_assignment():
     # "Type its name exactly as that page spells it" is an instruction a student can only
     # follow if they can reach the page.
-    form = welcome.join_team_form(["assignment-2"], {"assignment-2": _PAGE})
+    form = welcome.join_team_form({"assignment-2": _PAGE})
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
     assert f"listed on [the assignment's page]({_PAGE})." in header
     assert welcome.TEAM_LIST_SENTENCE not in header
@@ -1161,10 +1162,7 @@ def test_the_header_links_the_page_of_the_one_open_assignment():
 
 def test_two_open_assignments_get_a_line_each():
     third = "https://cohort.github.io/assignments/03-assignment-3.html"
-    form = welcome.join_team_form(
-        ["assignment-2", "assignment-3"],
-        {"assignment-2": _PAGE, "assignment-3": third},
-    )
+    form = welcome.join_team_form({"assignment-2": _PAGE, "assignment-3": third})
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
     assert "listed on each assignment's page:" in header
     assert f"- [assignment-2]({_PAGE})" in header
@@ -1174,13 +1172,13 @@ def test_two_open_assignments_get_a_line_each():
 def test_a_slug_whose_page_is_not_known_is_left_unlinked_rather_than_linked_nowhere():
     # A lock written before the page was carried, or one whose course listing failed. The
     # reviewed sentence still reads correctly on its own.
-    form = welcome.join_team_form(["assignment-2"], {})
+    form = welcome.join_team_form({"assignment-2": ""})
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
     assert welcome.TEAM_LIST_SENTENCE in header
 
 
 def test_the_splice_replaces_the_field_and_leaves_the_rest_of_the_form_alone():
-    form = welcome.join_team_form(["assignment-2"])
+    form = welcome.join_team_form({"assignment-2": ""})
     assert welcome.ASSIGNMENT_FIELD_START in form
     assert welcome.ASSIGNMENT_FIELD_END in form
     assert "type: input\n    id: assignment" not in form  # the fallback is gone
