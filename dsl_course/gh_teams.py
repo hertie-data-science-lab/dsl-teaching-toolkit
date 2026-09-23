@@ -26,6 +26,12 @@ def is_valid_github_username(handle: str) -> bool:
     return bool(_GITHUB_USERNAME_RE.match(handle))
 
 
+# What `create_team_outcome` found: it made the team (201), or one of that name was already
+# there (the duplicate-name 422).
+CREATED = "created"
+EXISTED = "existed"
+
+
 def create_team(
     org: str, name: str, description: str = "", privacy: str | None = None
 ) -> bool:
@@ -35,6 +41,18 @@ def create_team(
     `privacy` is what the team must have; None asks only that it exist, and leaves an
     existing team's privacy as it is.
     """
+    return create_team_outcome(org, name, description, privacy) is not None
+
+
+def create_team_outcome(
+    org: str, name: str, description: str = "", privacy: str | None = None
+) -> str | None:
+    """`create_team`, saying which way it succeeded: CREATED when this call made the team,
+    EXISTED when it was already there, None when neither.
+
+    The difference matters to a caller about to reconcile the team: GitHub's REST reads
+    can 404 a team for minutes after it is made, and a team this call made has a known
+    membership anyway - see `reconcile_team_members(just_created=True)`."""
     code, out = gh(
         "api",
         "--method",
@@ -49,12 +67,12 @@ def create_team(
     )
     if code == 0:
         log_ok(f"team created: {name}")
-        return True
+        return CREATED
     if is_already_exists(out):
         _converge_team_privacy(org, name, privacy)
-        return True
+        return EXISTED
     log_err(f"failed to create team {name}: {out[:200]}")
-    return False
+    return None
 
 
 def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
@@ -312,14 +330,19 @@ def add_team_member(org: str, team_slug: str, login: str, role: str = "member") 
 
 
 # GitHub's REST reads can answer 404 for a team for several minutes after it was created,
-# while GraphQL already sees it: a team created at 10:16 could not have its members listed
-# by Sync membership at 10:21, so the reconcile aborted and the second joiner waited for a
-# manual re-run. The creating run and the reading run are different processes,
-# so "created by us" cannot pick out the reads worth waiting for; a PER-PROCESS budget bounds
-# it instead. Once one ladder's worth of waiting is spent, every later 404 in the same run
-# answers at once - so a sync over many teams, or one that meets a team that really is gone,
-# adds at most `_LAG_BUDGET` seconds in total, never that much per team.
-_LAG_DELAYS = (10, 20, 40, 60)
+# while GraphQL already sees it - measured at 11s to about 5 minutes. A team created at 10:16
+# could not have its members listed by Sync membership at 10:21, so the reconcile aborted
+# and the second joiner waited for a manual re-run.
+#
+# The run that CREATES a team never reads it (see `reconcile_team_members(just_created=)`).
+# The waiting is for the run that finds it already there - a later run, or the other of two
+# workflows fired by the same teams.csv push - and is bounded by a PER-PROCESS budget. Once
+# one ladder's worth of waiting is spent, every later 404 in the same run answers at once -
+# so a sync over many teams, or one that meets a team that really is gone, adds at most
+# `_LAG_BUDGET` seconds in total, never that much per team. Five minutes sits well inside the
+# 30 and 60 minute ceilings of the jobs that reconcile teams (Sync membership, Scheduled
+# release).
+_LAG_DELAYS = (15, 30, 60, 90, 105)
 _LAG_BUDGET = sum(_LAG_DELAYS)
 _lag_spent = 0
 # At module level so a test can spend the budget without spending the time.
@@ -333,10 +356,11 @@ def _gh_riding_team_lag(*args: str) -> tuple[int, str]:
     and comes straight back. If every attempt 404s the last answer is returned unchanged,
     so the caller's "could not be read" path is exactly what it was.
 
-    Reads only. A membership PUT is not routed here: it runs only after the listing has
-    succeeded (the team is visible by then), and a 404 on it is also GitHub's answer for a
-    login that no longer exists - a renamed student, every night - which would spend the
-    budget on something no wait can fix."""
+    Reads only. A membership PUT is not routed here: GitHub accepted one straight after
+    creating the team in the incident above (the first joiner was added by the creating
+    run), and a 404 on it is also GitHub's answer for a login that no longer exists - a
+    renamed student, every night - which would spend the budget on something no wait can
+    fix."""
     global _lag_spent
     code, out = gh(*args)
     for delay in _LAG_DELAYS:
@@ -448,6 +472,7 @@ def reconcile_team_members(
     prune: bool = True,
     dry_run: bool = False,
     keep_ids: set[str] = frozenset(),
+    just_created: bool = False,
 ) -> int:
     """Full add(+remove) reconcile of one team's membership to exactly `wanted`.
 
@@ -476,8 +501,18 @@ def reconcile_team_members(
     night, until someone hand-edits the CSV. The ids cost one extra listing, paid only when
     a caller supplies some AND there is something to prune; if they cannot be read the
     prune is skipped whole, on the same rule as the owner list above.
+
+    `just_created` says the caller's own `create_team_outcome` made this team a moment ago.
+    Its membership is then known without asking - at most the acting login, which GitHub
+    auto-adds as the creator - and asking would be worse than useless: GitHub's REST reads
+    404 a new team for up to minutes, which would abort the reconcile. Adds go ahead from
+    there; the acting login is never pruned, so the prune has nothing it could remove.
     """
-    current = get_team_members(org, team)
+    if just_created:
+        acting = acting_login()
+        current: set[str] | None = {acting} if acting else set()
+    else:
+        current = get_team_members(org, team)
     if current is None:
         log_err(
             f"reconcile aborted for {org}/{team}: the team's current membership could "

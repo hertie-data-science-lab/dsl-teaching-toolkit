@@ -218,6 +218,17 @@ def test_create_team_only_treats_an_already_exists_422_as_success(monkeypatch):
     assert gh_teams.create_team("Org", "x" * 200) is False
 
 
+def test_create_team_outcome_tells_a_new_team_from_one_already_there(monkeypatch):
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, ""))
+    assert gh_teams.create_team_outcome("Org", "t") == gh_teams.CREATED
+    monkeypatch.setattr(
+        gh_teams, "gh", lambda *a, **k: (1, "HTTP 422: name already_exists")
+    )
+    assert gh_teams.create_team_outcome("Org", "t") == gh_teams.EXISTED
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (1, "HTTP 422: too long"))
+    assert gh_teams.create_team_outcome("Org", "t") is None
+
+
 def test_is_valid_github_username_charset_and_hyphen_rules():
     assert gh_teams.is_valid_github_username("anna-adams")
     assert gh_teams.is_valid_github_username("Anna-Adams")
@@ -448,16 +459,16 @@ def test_a_just_created_team_that_404s_then_appears_is_read(monkeypatch):
     calls, slept = _answers(monkeypatch, _NOT_FOUND, _NOT_FOUND, _MEMBERS_OK)
     assert gh_teams.get_team_members("org", "assignment-2-team-x") == {"alice"}
     assert len(calls) == 3
-    assert slept == [10, 20]
+    assert slept == [15, 30]
 
 
 def test_a_team_that_404s_throughout_still_aborts_the_reconcile(monkeypatch):
-    calls, slept = _answers(monkeypatch, *[_NOT_FOUND] * 5)
+    calls, slept = _answers(monkeypatch, *[_NOT_FOUND] * 6)
     monkeypatch.setattr(
         gh_teams, "add_team_member", lambda *a, **k: pytest.fail("added blind")
     )
     assert gh_teams.reconcile_team_members("org", "team-x", {"alice"}) == 1
-    assert len(calls) == 5
+    assert len(calls) == 6
     assert sum(slept) == gh_teams._LAG_BUDGET
 
 
@@ -474,13 +485,51 @@ def test_the_lag_wait_is_bounded_per_run_not_per_team(monkeypatch):
     calls, slept = _answers(monkeypatch, *[_NOT_FOUND] * 40)
     for n in range(8):
         assert gh_teams.get_team_members("org", f"team-{n}") is None
-    assert sum(slept) == gh_teams._LAG_BUDGET <= 130
+    assert sum(slept) == gh_teams._LAG_BUDGET <= 300
     assert len(calls) == len(gh_teams._LAG_DELAYS) + 8
 
 
 def test_a_partly_spent_budget_never_overshoots(monkeypatch):
-    monkeypatch.setattr(gh_teams, "_lag_spent", gh_teams._LAG_BUDGET - 25)
-    _, slept = _answers(monkeypatch, *[_NOT_FOUND] * 5)
+    monkeypatch.setattr(gh_teams, "_lag_spent", gh_teams._LAG_BUDGET - 50)
+    _, slept = _answers(monkeypatch, *[_NOT_FOUND] * 6)
     assert gh_teams.get_team_members("org", "team-x") is None
-    assert slept == [10]
+    assert slept == [15, 30]
     assert gh_teams._lag_spent <= gh_teams._LAG_BUDGET
+
+
+def test_a_team_already_there_rides_out_the_lag_in_a_reconcile(monkeypatch):
+    # The OTHER of two workflows fired by one teams.csv push gets the duplicate-name 422
+    # and reads a team the first made seconds ago: that read waits out the 404.
+    _, slept = _answers(monkeypatch, _NOT_FOUND, _NOT_FOUND, _NOT_FOUND, _MEMBERS_OK)
+    added = []
+    monkeypatch.setattr(
+        gh_teams,
+        "add_team_member",
+        lambda org, team, h, role="member": added.append(h) or True,
+    )
+    monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
+    assert gh_teams.reconcile_team_members("org", "team-x", {"alice", "bob"}) == 0
+    assert added == ["bob"]
+    assert slept == [15, 30, 60]
+
+
+def test_a_just_created_team_is_reconciled_without_reading_it(monkeypatch):
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: pytest.fail(f"live read: {a}"))
+    added, removed = [], []
+    monkeypatch.setattr(
+        gh_teams,
+        "add_team_member",
+        lambda org, team, h, role="member": added.append(h) or True,
+    )
+    monkeypatch.setattr(
+        gh_teams, "remove_team_member", lambda org, team, h: removed.append(h) or True
+    )
+    monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: "the-bot")
+    errors = gh_teams.reconcile_team_members(
+        "org", "team-x", {"alice", "bob"}, just_created=True
+    )
+    assert errors == 0
+    assert added == ["alice", "bob"]
+    assert removed == []  # the creator GitHub auto-added is never pruned
