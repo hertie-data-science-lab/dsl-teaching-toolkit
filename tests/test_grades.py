@@ -6,6 +6,7 @@ deliberately not mocked, per the testing strategy. No network here.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -14,7 +15,7 @@ from shutil import copytree
 import pytest
 import yaml
 
-from dsl_course import course, gh_contents, ghcli, grades, repos, roster
+from dsl_course import course, gh_contents, ghcli, grades, issues, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 
@@ -608,6 +609,45 @@ class _ListedPrivate(dict):
 _ANY_PRIVATE = _ListedPrivate()
 
 
+def _fake_issues(monkeypatch, store: list[dict]) -> None:
+    """`issues`' two `gh` calls answered from `store`, one dict per issue, so a lookup by
+    title, a create, an edit and a close all act on the same list."""
+
+    def listing(*args):
+        state = args[args.index("--state") + 1]
+        return [
+            {k: i[k] for k in ("number", "body", "title", "state")}
+            for i in store
+            if state == "all" or i["state"] == state.upper()
+        ]
+
+    def write(*args):
+        verb, flags = args[1], dict(zip(args[2::2], args[3::2], strict=False))
+        if verb == "create":
+            number = len(store) + 1
+            store.append(
+                {
+                    "number": number,
+                    "title": flags["--title"],
+                    "body": flags["--body"],
+                    "state": "OPEN",
+                    "comments": [],
+                }
+            )
+            return 0, f"https://github.com/COHORT/classroom-config/issues/{number}"
+        issue = next(i for i in store if str(i["number"]) == args[2])
+        rest = dict(zip(args[3::2], args[4::2], strict=False))
+        if verb == "edit":
+            issue["body"] = rest["--body"]
+        elif verb == "close":
+            issue["state"] = "CLOSED"
+            issue["comments"].append(rest.get("--comment"))
+        return 0, ""
+
+    monkeypatch.setattr(issues, "gh_json", listing)
+    monkeypatch.setattr(issues, "gh", write)
+
+
 def _distribute(
     monkeypatch,
     tmp_path,
@@ -627,6 +667,8 @@ def _distribute(
     course_name=lambda org: "",
     listed: dict[str, dict] | None = _ANY_PRIVATE,
     due: datetime = _DUE_PASSED,
+    exported: str | None = None,
+    preview_issues: list[dict] | None = None,
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
@@ -635,7 +677,11 @@ def _distribute(
     plus `comments` and `issues`, which are TRIPWIRES. Nothing is posted into a submission
     repo any more, so those two stay empty in every test here; `issue` and `found_issue`
     are what a lookup WOULD answer, so a run that went near a thread would show up rather
-    than pass for want of a stub."""
+    than pass for want of a stub.
+
+    `preview` is classroom-config's issue list as GitHub would hold it after the run - pass
+    `preview_issues` to start from one, or to share it between two runs. `exported` is the
+    registrar export the last real run left behind."""
     cfg = tmp_path / "cfg"
     (cfg / grades.SHEETS_DIR).mkdir(parents=True)
     sheets = {"assignment-1": _SHEET} if sheets is None else sheets
@@ -650,6 +696,10 @@ def _distribute(
     for name in stale_gradebooks:
         (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / grades.GRADEBOOK_DIR / name).write_text("student: someone\n")
+    if exported is not None:
+        (cfg / grades.COHORT_CSV_NAME).write_text(exported)
+    store = [] if preview_issues is None else preview_issues
+    _fake_issues(monkeypatch, store)
 
     def fake_gh(*args, **kwargs):
         if args[:2] == ("repo", "clone"):
@@ -664,6 +714,7 @@ def _distribute(
         "outbox": [],
         "issues": [],
         "gradebook_calls": [],
+        "preview": store,
     }
     monkeypatch.setattr(grades, "gh", fake_gh)
     monkeypatch.setattr(ghcli, "gh", fake_gh)
@@ -975,37 +1026,324 @@ def test_holding_one_mark_leaves_the_students_other_marks_alone(tmp_path, monkey
     assert "assignment-2" not in files["grades.yml"]
 
 
-def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(
-    tmp_path, monkeypatch, capsys
-):
+def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(tmp_path, monkeypatch):
     # The subject is the half a student reads first, and the course name is what tells one
     # of these apart from another - so a preview that showed neither was reviewing text
     # nobody would ever receive.
-    _distribute(
+    out = _distribute(
         monkeypatch,
         tmp_path,
         dry_run=True,
         course_name=lambda org: "Deep Learning",
     )
-    printed = capsys.readouterr().out
-    assert "    Subject: Your grades for Deep Learning have been updated" in printed
+    ((issue),) = out["preview"]
+    assert "Subject: Your grades for Deep Learning have been updated" in issue["body"]
     assert (
         "Your grades for the Deep Learning course have been updated. View them"
-        in printed
+        in issue["body"]
     )
-    assert "grades-<handle>" in printed  # a placeholder, never a student
+    assert "grades-<handle>" in issue["body"]  # a placeholder, never a student
 
 
-def test_an_unreadable_course_name_still_previews_the_email(
-    tmp_path, monkeypatch, capsys
-):
+def test_an_unreadable_course_name_still_previews_the_email(tmp_path, monkeypatch):
     # Same fallback the send has: the name is a nicety, the notification is not.
     def boom(org):
         raise RuntimeError("no dsl-course.yml")
 
     out = _distribute(monkeypatch, tmp_path, dry_run=True, course_name=boom)
     assert out["rc"] == 0
-    assert "    Subject: Your grades have been updated" in capsys.readouterr().out
+    assert "Subject: Your grades have been updated" in out["preview"][0]["body"]
+
+
+def test_the_dry_run_says_who_gets_what_in_a_private_issue_and_logs_none_of_it(
+    tmp_path, monkeypatch, capsys
+):
+    # The log is a PUBLIC repo's; the issue is in the private classroom-config. So the
+    # names and marks go to the one, and only counts and the issue's address to the other.
+    monkeypatch.setenv("DSL_VERBOSE", "")
+    rows = ROSTER_ADA + "bob@uni.edu,Bob Byte,enrolled,bob-b,43,dsl-def\n"
+    sheet = _SHEET + _SHEET.split("submissions:\n", 1)[1].replace("ada-l", "bob-b")
+    sheet = sheet.replace("score_individual: 43", "score_individual: 38", 1)
+    held = _HELD_SHEET.replace("ada-l", "bob-b")
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet, "assignment-2": held},
+        roster_rows=rows,
+        exported="hertie_email,name,github_handle,assignment-1\n"
+        "ada@uni.edu,Ada,ada-l,36\nbob@uni.edu,Bob Byte,bob-b,43\n",
+        dry_run=True,
+    )
+    assert out["rc"] == 0
+    assert (out["gradebooks"], out["config"], out["outbox"]) == ([], [], [])
+    ((issue),) = out["preview"]
+    assert issue["title"] == grades.PREVIEW_TITLE and issue["state"] == "OPEN"
+    body = issue["body"]
+    # ada's grade changed; bob's did not (he has never been told it, so he is still
+    # emailed), and his other mark is held
+    assert (
+        "### ⚠️ Fix these first - held back, not sent (1)\n"
+        "- **assignment-2** · `bob-b` (Bob Byte) was late, and their mark is not a "
+        "number a late penalty can come off. Fix it in "
+        "`grading_sheets/assignment-2.yml`.\n" in body
+    )
+    assert (
+        "### Grades that would change (1)\n"
+        "- **assignment-1** · `ada-l` (Ada) · 38 (was 36)\n" in body
+    )
+    assert (
+        "### Students who would be emailed (2)\n"
+        "- `ada-l` (Ada) - their first grades email.\n"
+        "  Their gradebook shows: assignment-1 38\n"
+        "- `bob-b` (Bob Byte) - their first grades email.\n"
+        "  Their gradebook shows: assignment-1 43\n" in body
+    )
+    printed = "".join(capsys.readouterr())
+    assert (
+        "Who gets what: https://github.com/COHORT/classroom-config/issues/1" in printed
+    )
+    for private in ("ada-l", "bob-b", "Ada", "Bob", "38", "36"):
+        assert private not in printed
+
+
+def test_a_second_dry_run_rewrites_the_preview_rather_than_opening_another(
+    tmp_path, monkeypatch
+):
+    store: list[dict] = []
+    _distribute(monkeypatch, tmp_path, dry_run=True, preview_issues=store)
+    corrected = _SHEET.replace("score_individual: 43", "score_individual: 45")
+    _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": corrected},
+        dry_run=True,
+        preview_issues=store,
+    )
+    ((issue),) = store
+    assert "- **assignment-1** · `ada-l` (Ada) · 45 (new)" in issue["body"]
+    assert "43" not in issue["body"]
+
+
+def test_the_preview_counts_unmarked_questions_per_student(tmp_path, monkeypatch):
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 15\n      Q2:"
+    )
+    grading = _GRADING_YML + "questions:\n  Q1: 15\n  Q2: 10\n"
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=grading,
+        dry_run=True,
+    )
+    assert (
+        "### Not marked yet (1)\n- **assignment-1** · 1 student: `ada-l` (Q2 blank)\n"
+        in out["preview"][0]["body"]
+    )
+
+
+def test_a_student_with_no_mark_is_not_in_the_preview_as_emailed(tmp_path, monkeypatch):
+    # The send skips a book with nothing a grader wrote, and the preview says what the
+    # send would do.
+    sheet = _SHEET.replace("score_individual: 43", "score_individual:").replace(
+        "    feedback_individual: |\n      Clean derivation.\n", ""
+    )
+    out = _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": sheet}, dry_run=True
+    )
+    body = out["preview"][0]["body"]
+    assert "- **assignment-1** · 1 student: `ada-l` (no mark yet)" in body
+    assert (
+        "### Students who would be emailed (0)\n"
+        "Nothing - nobody has a new mark to be told about." in body
+    )
+    assert "Subject:" not in body
+
+
+def test_a_preview_too_long_for_one_issue_says_how_many_it_left_out(
+    tmp_path, monkeypatch
+):
+    # GitHub refuses a body over its cap, and a refused body is no preview at all.
+    monkeypatch.setattr(grades, "_ISSUE_BODY_CAP", 2_000)
+    handles = [f"s{n:03d}" for n in range(60)]
+    rows = (
+        "".join(
+            f"\n{h}@uni.edu,Student {h},enrolled,{h},{n},c{n}"
+            for n, h in enumerate(handles)
+        )
+        + "\n"
+    )
+    block = _SHEET.split("submissions:\n", 1)[1]
+    sheet = "submissions:\n" + "".join(block.replace("ada-l", h) for h in handles)
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        roster_rows=rows,
+        dry_run=True,
+    )
+    body = out["preview"][0]["body"]
+    assert len(body) <= 2_000
+    shown = body.count("- **assignment-1** · `s")
+    assert 0 < shown < 60
+    more = "more not shown - the list is longer than one issue can hold._"
+    assert f"_{60 - shown} {more}" in body
+    # every heading survives the cut, the emailed ones are all counted, and the email
+    # itself is still there to review
+    assert "### Students who would be emailed (60)\n_60 " + more in body
+    assert body.endswith("</details>")
+
+
+def _after_one_real_run(monkeypatch, tmp_path, sheet: str, **kwargs) -> dict:
+    """A dry run over `sheet` in a cohort whose last real run sent `_SHEET`: the record
+    and the registrar export are the ones that run left behind."""
+    first = _distribute(monkeypatch, tmp_path / "real")
+    ((_cfg, cfg_files, _e),) = first["config"]
+    return _distribute(
+        monkeypatch,
+        tmp_path / "dry",
+        sheets={"assignment-1": sheet},
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        exported=cfg_files[grades.COHORT_CSV_NAME],
+        dry_run=True,
+        **kwargs,
+    )
+
+
+def test_the_preview_opens_by_saying_nothing_was_sent_and_when(tmp_path, monkeypatch):
+    body = _distribute(monkeypatch, tmp_path, dry_run=True)["preview"][0]["body"]
+    first, second, third = body.splitlines()[:3]
+    assert re.fullmatch(
+        r"\*\*Nothing has been sent\.\*\* Dry run: \d{1,2} [A-Z][a-z]{2} \d\d:\d\d UTC\.",
+        first,
+    )
+    assert second == (
+        "This is what running Distribute grades for real (with `dry_run` unticked) "
+        "would do now."
+    )
+    assert third == "Each dry run replaces this text; the real run closes this issue."
+
+
+def test_a_preview_with_nothing_to_report_keeps_every_heading(tmp_path, monkeypatch):
+    body = _after_one_real_run(monkeypatch, tmp_path, _SHEET)["preview"][0]["body"]
+    for heading, nothing in (
+        (
+            "### ⚠️ Fix these first - held back, not sent (0)",
+            "Nothing - no mark is held back.",
+        ),
+        ("### Not marked yet (0)", "Nothing - every row in every sheet has a mark."),
+        (
+            "### Grades that would change (0)",
+            "Nothing new or changed since grades were last sent.",
+        ),
+        (
+            "### Students who would be emailed (0)",
+            "Nothing - nobody has a new mark to be told about.",
+        ),
+    ):
+        assert f"{heading}\n{nothing}" in body
+    assert "<details>" not in body
+
+
+def test_a_silent_preview_says_why_nobody_is_emailed(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path, dry_run=True, notify=False)
+    assert (
+        "### Students who would be emailed (0)\n"
+        "Nothing - `silent` is ticked, so nobody is emailed."
+    ) in out["preview"][0]["body"]
+
+
+@pytest.mark.parametrize(
+    ("sheet", "why"),
+    [
+        (
+            _SHEET.replace("score_individual: 43", "score_individual: 45"),
+            "a grade changed",
+        ),
+        (_SHEET.replace("Clean derivation.", "Clean; see Q3."), "feedback changed"),
+    ],
+    ids=["grade", "feedback"],
+)
+def test_the_preview_says_why_each_student_would_be_emailed(
+    tmp_path, monkeypatch, sheet, why
+):
+    body = _after_one_real_run(monkeypatch, tmp_path, sheet)["preview"][0]["body"]
+    grade = "45" if why == "a grade changed" else "43"
+    assert (
+        f"### Students who would be emailed (1)\n- `ada-l` (Ada) - {why}.\n"
+        f"  Their gradebook shows: assignment-1 {grade}\n" in body
+    )
+    changes = "(1)\n- **assignment-1** · `ada-l` (Ada) · 45 (was 43)"
+    assert (changes in body) == (why == "a grade changed")
+    assert "<summary>The email they would get</summary>" in body
+
+
+def test_a_handle_in_two_teams_is_a_fix_the_preview_names(tmp_path, monkeypatch):
+    sheet = _TEAM_SHEET + (
+        "  beta:\n"
+        "    score_group: 20\n"
+        "    members:\n"
+        "      ada-l:\n"
+        "        adjustment_individual:\n"
+    )
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=_GRADING_YML + "type: group\n",
+        dry_run=True,
+    )
+    assert (
+        "- **assignment-1** · `ada-l` (Ada) is in more than one team. Fix it in "
+        "`grading_sheets/assignment-1.yml`." in out["preview"][0]["body"]
+    )
+
+
+def test_the_preview_reads_as_plain_english(tmp_path, monkeypatch):
+    # Faculty read this, not the pipeline: no "(s)", and none of the toolkit's own words.
+    rows = ROSTER_ADA + "bob@uni.edu,Bob Byte,enrolled,bob-b,43,dsl-def\n"
+    sheet = _SHEET + _SHEET.split("submissions:\n", 1)[1].replace("ada-l", "bob-b")
+    half = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 15\n      Q2:"
+    )
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={
+            "assignment-1": sheet,
+            "assignment-2": _HELD_SHEET.replace("ada-l", "bob-b"),
+            "assignment-3": half,
+        },
+        grading=_GRADING_YML,
+        roster_rows=rows,
+        dry_run=True,
+    )
+    body = out["preview"][0]["body"]
+    for word in ("(s)", "unit", "derived", "digest", "@ada-l", "@bob-b"):
+        assert word not in body
+
+
+def test_the_dry_run_only_says_a_column_is_new_when_it_is(
+    tmp_path, monkeypatch, capsys
+):
+    _after_one_real_run(monkeypatch, tmp_path, _SHEET)
+    assert "would gain column" not in capsys.readouterr().out
+
+
+def test_a_real_run_closes_the_preview_with_a_line_saying_so(tmp_path, monkeypatch):
+    store: list[dict] = []
+    _distribute(monkeypatch, tmp_path, dry_run=True, preview_issues=store)
+    out = _distribute(monkeypatch, tmp_path / "real", preview_issues=store)
+    assert out["rc"] == 0
+    ((issue),) = store
+    assert issue["state"] == "CLOSED"
+    assert issue["comments"] == [grades.PREVIEW_SENT]
+
+
+def test_a_real_run_with_no_preview_open_is_fine(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path)
+    assert out["rc"] == 0
+    assert out["preview"] == []
 
 
 def test_the_dry_run_counts_what_it_would_hold(tmp_path, monkeypatch, capsys):
@@ -1035,7 +1373,6 @@ def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     assert "0 held for a hand decision" in printed
     assert f"{grades.COHORT_CSV_NAME}: would gain column assignment-1" in printed
     assert "would update 1 gradebook(s) and email 1 student(s)" in printed
-    assert "<handle>" in printed  # the sample email, from placeholders
 
 
 def test_a_sheet_that_does_not_parse_sends_nothing_at_all(tmp_path, monkeypatch):
@@ -1107,13 +1444,47 @@ def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypa
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
+@pytest.mark.parametrize(
+    "grading",
+    [_GRADING_YML, _GRADING_YML + "submit_via: external\n"],
+    ids=["assignment_repo", "external"],
+)
+def test_a_student_is_emailed_on_the_run_that_brings_their_first_mark(
+    tmp_path, monkeypatch, grading
+):
+    # A row with nothing typed in it still renders a gradebook - the points available, a
+    # submission time - but "your grades have been updated" would send a student to read
+    # nothing. So no mail, and no record of one: the run that brings the mark tells them.
+    unmarked = _SHEET.replace("score_individual: 43", "score_individual:").replace(
+        "feedback_individual: |\n      Clean derivation.\n", "feedback_individual:\n"
+    )
+    first = _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": unmarked}, grading=grading
+    )
+    assert first["rc"] == 0
+    assert [repo for repo, _files, _d in first["gradebooks"]] == ["grades-ada-l"]
+    assert first["outbox"] == []
+    ((_cfg, cfg_files, _d),) = first["config"]
+    record = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
+    assert ("ada-l", "", grades.CHANNEL_EMAIL) not in record
+
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": _SHEET},
+        grading=grading,
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
 def test_a_reworded_gradebook_page_is_committed_and_nobody_is_emailed(
     tmp_path, monkeypatch
 ):
     # The two channels are keyed on different things on purpose. The COMMIT is keyed on
     # the whole book, so a change the toolkit makes to the page's own standing text lands
-    # in every gradebook; the EMAIL is keyed on `grades.yml`, so "there is something new to
-    # read" still means a mark moved. On one hash, adding a sentence to the README re-mailed
+    # in every gradebook; the EMAIL is keyed on what a grader wrote, so "there is something
+    # new to read" still means a mark moved. On one hash, adding a sentence to the README re-mailed
     # every student in every live cohort to tell them nothing.
     first = _distribute(monkeypatch, tmp_path)
     ((_cfg, cfg_files, _d),) = first["config"]
@@ -1158,13 +1529,166 @@ def test_a_record_written_before_the_split_is_carried_over_not_re_mailed(
     )
     assert again["outbox"] == []
     assert "already knew what their gradebook said" in capsys.readouterr().out
-    ((_repo, book, _delete),) = again["gradebooks"]
     ((_cfg2, files, _d2),) = again["config"]
     carried = grades.parse_distributed(files[grades.DISTRIBUTED_PATH])
     # ...and the row now keys on the marks alone, so the next real mark does mail.
-    assert carried[("ada-l", "", grades.CHANNEL_EMAIL)][0] == grades.content_hash(
-        book["grades.yml"]
+    email = ("ada-l", "", grades.CHANNEL_EMAIL)
+    assert (
+        carried[email][0]
+        == grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])[email][0]
     )
+
+
+_EMAIL = ("ada-l", "", grades.CHANNEL_EMAIL)
+
+
+def _first_run(monkeypatch, tmp_path, **kwargs) -> tuple[str, str, str]:
+    """`(the record, the versioned email digest in it, its grades.yml's LEGACY digest)`
+    after one real run - what a cohort holds once Ada has been told."""
+    first = _distribute(monkeypatch, tmp_path, **kwargs)
+    ((_repo, book, _d),) = first["gradebooks"]
+    ((_cfg, cfg_files, _e),) = first["config"]
+    record = cfg_files[grades.DISTRIBUTED_PATH]
+    told = grades.parse_distributed(record)[_EMAIL][0]
+    return record, told, grades.content_hash(book["grades.yml"])
+
+
+def _told_as(record: str, digest: str) -> str:
+    """`record` with Ada's email row holding `digest` - the row an older run wrote."""
+    rows = grades.parse_distributed(record)
+    rows[_EMAIL] = (digest, "2026-09-01T00:00:00", "")
+    return grades.dump_distributed(rows)
+
+
+def test_a_legacy_email_row_for_this_very_grades_yml_is_upgraded_not_re_mailed(
+    tmp_path, monkeypatch, capsys
+):
+    # Every live cohort's email rows are hashes of the whole grades.yml. One that still
+    # matches it is a student who was told exactly this: carried over to the versioned
+    # digest in the run's own record commit, and nobody is mailed for the change of scheme.
+    record, told, legacy = _first_run(monkeypatch, tmp_path)
+    assert told.startswith(grades.MARKS_DIGEST_PREFIX)
+    assert not legacy.startswith(grades.MARKS_DIGEST_PREFIX)
+    capsys.readouterr()
+    again = _distribute(
+        monkeypatch, tmp_path / "again", distributed=_told_as(record, legacy)
+    )
+    assert again["outbox"] == []
+    assert again["gradebooks"] == []
+    printed = capsys.readouterr().out
+    assert "1 student(s) already knew what their gradebook said" in printed
+    assert "ada-l" not in printed
+    ((_cfg, files, _d),) = again["config"]
+    assert grades.parse_distributed(files[grades.DISTRIBUTED_PATH])[_EMAIL][0] == told
+
+    # ...and the run after that has nothing left to do: no mail, no row moved.
+    third = _distribute(
+        monkeypatch, tmp_path / "third", distributed=files[grades.DISTRIBUTED_PATH]
+    )
+    assert (third["outbox"], third["gradebooks"]) == ([], [])
+    ((_cfg3, files3, _d3),) = third["config"]
+    assert files3[grades.DISTRIBUTED_PATH] == files[grades.DISTRIBUTED_PATH]
+    assert "already knew" not in capsys.readouterr().out
+
+
+def test_a_legacy_email_row_under_a_changed_mark_mails_once(tmp_path, monkeypatch):
+    # A legacy row that no longer describes the book is what the old code would have
+    # mailed about, so it is mailed about - once, and recorded under the new digest.
+    record, _told, legacy = _first_run(monkeypatch, tmp_path)
+    corrected = {
+        "assignment-1": _SHEET.replace("score_individual: 43", "score_individual: 45")
+    }
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets=corrected,
+        distributed=_told_as(record, legacy),
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+    ((_cfg, files, _d),) = again["config"]
+    now = grades.parse_distributed(files[grades.DISTRIBUTED_PATH])[_EMAIL][0]
+    assert now.startswith(grades.MARKS_DIGEST_PREFIX)
+    third = _distribute(
+        monkeypatch,
+        tmp_path / "third",
+        sheets=corrected,
+        distributed=files[grades.DISTRIBUTED_PATH],
+    )
+    assert third["outbox"] == []
+
+
+def _respelt(monkeypatch) -> None:
+    # What PR #289 did to the Submitted column: the same moment, spelt `3rd Oct`.
+    shown = grades._submitted_display
+    monkeypatch.setattr(
+        grades,
+        "_submitted_display",
+        lambda *a, **k: shown(*a, **k).replace("3 Oct", "3rd Oct"),
+    )
+
+
+def _new_facts(monkeypatch) -> dict[str, str]:
+    # A later push: a new submission time and a day late, under a course with no late
+    # penalty, so the mark itself does not move.
+    return {
+        "assignment-1": _SHEET.replace("2026-10-03T22:14", "2026-10-05T09:00").replace(
+            "days_late: 0", "days_late: 1"
+        )
+    }
+
+
+@pytest.mark.parametrize("change", [_new_facts, _respelt], ids=["facts", "respelt"])
+def test_a_changed_fact_rewrites_the_gradebook_and_mails_nobody(
+    tmp_path, monkeypatch, change
+):
+    grading = "title: Neural networks\nlate_penalty_per_day: 0%\n"
+    record, _told, _legacy = _first_run(monkeypatch, tmp_path, grading=grading)
+    sheets = change(monkeypatch)
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets=sheets,
+        grading=grading,
+        distributed=record,
+    )
+    ((_repo, book, _d),) = again["gradebooks"]  # the page does move...
+    assert ("5 Oct" if sheets else "3rd Oct") in book["README.md"]
+    assert again["outbox"] == []  # ...and nobody is told to go and read it
+
+
+def test_changed_feedback_under_a_versioned_row_mails(tmp_path, monkeypatch):
+    record, _told, _legacy = _first_run(monkeypatch, tmp_path)
+    reworded = _SHEET.replace("Clean derivation.", "Clean derivation; see Q3.")
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": reworded},
+        distributed=record,
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+@pytest.mark.parametrize("case", ["legacy", "facts"])
+def test_the_dry_run_says_what_the_real_run_would_send(
+    tmp_path, monkeypatch, capsys, case
+):
+    # The preview's "emailed" is the same decision the send takes, so a carried-over row
+    # and a moved fact both preview as nobody mailed - and a dry run records nothing.
+    grading = "title: Neural networks\nlate_penalty_per_day: 0%\n"
+    record, _told, legacy = _first_run(monkeypatch, tmp_path, grading=grading)
+    out = _distribute(
+        monkeypatch,
+        tmp_path / "dry",
+        sheets=_new_facts(monkeypatch) if case == "facts" else None,
+        grading=grading,
+        distributed=_told_as(record, legacy) if case == "legacy" else record,
+        dry_run=True,
+    )
+    assert out["config"] == [] and out["outbox"] == []
+    body = out["preview"][0]["body"]
+    assert "### Students who would be emailed (0)" in body and "Subject:" not in body
+    printed = capsys.readouterr().out
+    assert f"would update {1 if case == 'facts' else 0} gradebook(s)" in printed
 
 
 def test_the_registrar_export_is_written_only_on_a_real_run(tmp_path, monkeypatch):
@@ -1333,7 +1857,7 @@ def test_a_mark_sent_before_the_due_date_is_counted_and_said_out_loud(
     )
     printed = capsys.readouterr().out
     assert (
-        "WARNING: 1 mark(s) distributed before the due date - the submission facts "
+        "WARNING: 1 mark(s) sent before the due date - the submission facts "
         "are not derived yet" in printed
     )
     assert out["rc"] == 0  # counted, not blocked
@@ -2065,6 +2589,6 @@ def test_half_a_late_rule_is_never_completed_from_the_default(config, window, pe
     ],
 )
 def test_a_day_is_spoken_with_its_ordinal(day, spoken):
-    # ONE spelling for the gradebook, the mail, the site and the form's JavaScript copy -
+    # ONE spelling for the mail, the site and the form's JavaScript copy -
     # and 11th-13th are the three a `day % 10` rule alone gets wrong.
     assert grades.spoken_day(datetime(2026, 10, day)) == f"{spoken} Oct"

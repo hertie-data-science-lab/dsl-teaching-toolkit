@@ -66,7 +66,7 @@ from .discovery import (
     list_org_repos,
 )
 from .gh_contents import get_file_content, put_file, read_csv
-from .grades import COHORT_CSV_NAME
+from .grades import COHORT_CSV_NAME, PREVIEW_TITLE
 from .issues import close_issues_titled, open_titles
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import archive_repo
@@ -209,7 +209,7 @@ def registrar_summary(cohort_org: str) -> str:
     log of a course org's `.github` is world-readable."""
     text = get_file_content(cohort_org, CONFIG_REPO, COHORT_CSV_NAME)
     if text is None:
-        return f"{COHORT_CSV_NAME} is NOT here - no grade was ever distributed"
+        return f"{COHORT_CSV_NAME} is NOT here - no grade was ever sent"
     rows = len(list(read_csv(text, (), COHORT_CSV_NAME)))
     return f"{COHORT_CSV_NAME}, {rows} student row(s)"
 
@@ -322,9 +322,8 @@ def _close_notices(cohort_org: str, dry_run: bool) -> int:
     them silently would read as "fixed".
 
     EVERY title the toolkit can leave open in this repo, which is the six hand-edited-file
-    digests, the schedule's own source digest, the cadence alarm and the archive notice -
-    those, and nothing else, are what write here (`cadence.report_cohort` is the one that
-    is not a digest). A title missed here stands open inside a frozen repo for ever, since
+    digests, the schedule's own source digest, the cadence alarm, Distribute's dry-run
+    preview and the archive notice - those, and nothing else, are what write here. A title missed here stands open inside a frozen repo for ever, since
     the sweep that would have closed it never runs on a closed-out cohort again.
 
     The archive notice is the one whose title MOVES: it names a date, and that date
@@ -336,6 +335,7 @@ def _close_notices(cohort_org: str, dry_run: bool) -> int:
     titles = [d.title for d in config_digest.COHORT_DIGESTS] + [
         source_digest.TITLE,
         cadence.LATE_TITLE,
+        PREVIEW_TITLE,
     ]
     if dry_run:
         log(
