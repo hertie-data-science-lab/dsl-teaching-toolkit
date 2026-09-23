@@ -99,6 +99,7 @@ from .gh_contents import (
     yaml_problem,
 )
 from .ghcli import bot_login, clone, gh, is_missing_resource
+from .issues import close_issues_titled, upsert_issue
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
@@ -3609,6 +3610,26 @@ def _retired_gradebook_files(wd: Path) -> list[str]:
     return sorted(f"{GRADEBOOK_DIR}/{p.name}" for p in folder.glob("*.yml"))
 
 
+def _told_grades(wd: Path) -> dict[str, dict[str, str]]:
+    """`{handle (casefolded): {slug: final grade}}` as the last real run exported them, so
+    the preview can say which grades a run would CHANGE. Empty when there is no export yet
+    or it cannot be read, and every grade is then new."""
+    path = wd / COHORT_CSV_NAME
+    if not path.is_file():
+        return {}
+    try:
+        rows = read_csv(path.read_text(), ("github_handle",), COHORT_CSV_NAME)
+        return {
+            row["github_handle"].strip().casefold(): {
+                k: v for k, v in row.items() if k and v and k not in _REGISTRAR_FIELDS
+            }
+            for row in rows
+            if (row.get("github_handle") or "").strip()
+        }
+    except RuntimeError:
+        return {}
+
+
 def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
     """A minimal spec for a sheet whose assignment the schedule no longer declares - a
     term whose entry has been deleted, or a hand-written sheet. Its shape is read off the
@@ -3647,26 +3668,27 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
     return specs
 
 
-def _part_marked_count(spec: SheetSpec, sheet: dict) -> int:
-    """How many units have SOME question marked and some not.
+def _unmarked_questions(spec: SheetSpec, sheet: dict) -> dict[str, int]:
+    """`{unit: how many questions are still blank}` for every unit that has SOME question
+    marked and some not.
 
     A partly filled map totals to what has been typed so far, and a real run sends that
     total: which is right (a grader who wants to release Q1 early may) and is also exactly
-    how half a mark reaches a student unnoticed. So the dry run says how many there are,
-    and the decision stays the grader's."""
+    how half a mark reaches a student unnoticed. So the dry run says where they are, and
+    the decision stays the grader's."""
     if not spec.questions:
-        return 0
-    total = 0
-    for block in ((sheet or {}).get(spec.container_key) or {}).values():
+        return {}
+    out = {}
+    for unit, block in ((sheet or {}).get(spec.container_key) or {}).items():
         if not isinstance(block, dict):
             continue
         score = block.get(spec.score_key)
         if not isinstance(score, dict):
             continue
-        filled = [k for k in spec.questions if not _blank(score.get(k))]
-        if filled and len(filled) < len(spec.questions):
-            total += 1
-    return total
+        blank = [k for k in spec.questions if _blank(score.get(k))]
+        if blank and len(blank) < len(spec.questions):
+            out[str(unit)] = len(blank)
+    return out
 
 
 def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
@@ -3904,8 +3926,9 @@ def distribute(
     sheet is what silently deleted every other assignment from every gradebook it touched.
     The registrar's export is the same file for the same reason.
 
-    Dry run - the default - reads everything, writes nothing, sends nothing, and prints the
-    counts a grader checks before pressing it for real."""
+    Dry run - the default - writes no grades and sends nothing: it prints the counts a
+    grader checks before pressing it for real, and posts the per-student detail as an
+    issue in the private classroom-config (`_preview`)."""
     # ONE listing of the cohort for the whole run: it answers "does this student already
     # have a gradebook?". A dry run writes nothing and needs none.
     listed = None if dry_run else listing_by_name(cohort_org)
@@ -3945,6 +3968,7 @@ def distribute(
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
+        told_grades = _told_grades(wd) if dry_run else {}
 
     held = _hold_undecided(
         books,
@@ -4056,7 +4080,17 @@ def distribute(
         )
 
     if dry_run:
-        _preview(cohort_org, sheets, specs, books, counts, pending, notify, held)
+        previewed = _preview(
+            cohort_org,
+            sheets,
+            specs,
+            books,
+            counts,
+            pending if notify else [],
+            held,
+            students or [],
+            told_grades,
+        )
         # `not students` on both exits - no rows AND no file, for the same reason:
         # `ensure_gradebooks` passes over either rather than redden the nightly sync it now
         # also runs on, so saying so is this run's own job. Distribute is about to write a
@@ -4064,7 +4098,7 @@ def distribute(
         # in by the time marks exist: `_on_the_roster` keeps only the books belonging to
         # somebody the roster knows, so an empty roster drops EVERY mark in the run as
         # `unknown`. This exit is the only signal that happened.
-        return 1 if provisioning_failed or not students else 0
+        return 1 if provisioning_failed or not students or not previewed else 0
 
     failed_mail, told = (
         _email_updates(cohort_org, pending, dry_run=False)
@@ -4103,6 +4137,9 @@ def distribute(
             f"grades were distributed but {DISTRIBUTED_PATH} could not be written - the "
             f"next run re-posts and re-emails what it cannot see was already sent"
         )
+    # The dry run's preview is out of date once anything has gone out. Not a reason to red
+    # the run: a preview left open is closed by the next real one.
+    close_issues_titled(f"{cohort_org}/{CONFIG_REPO}", PREVIEW_TITLE, PREVIEW_SENT)
     # Counts only: this workflow's log is world-readable and every target here is a
     # student. The per-target lines above went through log_person.
     log_ok(f"Done - {json.dumps(counts)}")
@@ -4117,20 +4154,33 @@ def distribute(
     )
 
 
+# The dry run's per-student detail: an issue in the PRIVATE classroom-config, found by
+# this exact title, rewritten by every dry run and closed by the real one.
+PREVIEW_TITLE = "Distribute grades preview"
+PREVIEW_SENT = (
+    "Grades sent by a real run of Distribute grades - this preview is out of date."
+)
+# GitHub refuses an issue body longer than this.
+_ISSUE_BODY_CAP = 65_536
+
+
 def _preview(
     cohort_org: str,
     sheets: dict[str, dict],
     specs: dict[str, SheetSpec],
     books: dict[str, dict[str, dict]],
     counts: dict[str, int],
-    pending: list[str],
-    notify: bool,
+    emailed: list[str],
     held: dict[str, dict[str, tuple[str, str]]],
-) -> None:
-    """The dry run's report: what a real run would do, in counts a grader can check.
+    students: list[roster.Student],
+    told: dict[str, dict[str, str]],
+) -> bool:
+    """The dry run's report: counts a grader can check in the log, and the detail behind
+    them in the preview issue. False when the issue could not be written.
 
-    No names, and no marks: this is the log of a workflow that runs in a PUBLIC repo. The
-    sample email is rendered from placeholders, never from a student."""
+    No names, and no marks, in the log: this is the log of a workflow that runs in a
+    PUBLIC repo. Who would get what goes into the issue, in the private classroom-config."""
+    unmarked = {slug: _unmarked_questions(specs[slug], sheets[slug]) for slug in sheets}
     for slug in sorted(sheets):
         spec = specs[slug]
         units = (sheets[slug] or {}).get(spec.container_key) or {}
@@ -4153,28 +4203,123 @@ def _preview(
         tally = Counter(reason for _unit, reason in held.get(slug, {}).values())
         for reason, count in sorted(tally.items()):
             log(f"    {count} with {HOLD_REASONS[reason]}")
-        part = _part_marked_count(spec, sheets[slug])
-        if part:
-            log(f"    {part} unit(s) have unmarked questions")
+        if unmarked[slug]:
+            log(f"    {len(unmarked[slug])} unit(s) have unmarked questions")
         log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
     if counts["unknown"]:
         # Counted, not named: a handle nobody enrolled is still somebody's.
         log(f"  {counts['unknown']} mark(s) for handles not on the roster - ignored")
     log(
         f"  would update {counts['gradebooks']} gradebook(s) and email "
-        f"{len(pending) if notify else 0} student(s)"
+        f"{len(emailed)} student(s)"
     )
-    if notify and pending:
+    repo = f"{cohort_org}/{CONFIG_REPO}"
+    wrote = upsert_issue(
+        repo,
+        PREVIEW_TITLE,
+        _preview_body(
+            cohort_org, books, counts, emailed, held, students, told, unmarked
+        ),
+    )
+    if not wrote.errors:
+        log(f"  Who gets what: {wrote.url or f'{PREVIEW_TITLE} in {repo}'}")
+    log_ok("DRY-RUN - no grades written, no mail sent")
+    return not wrote.errors
+
+
+def _preview_body(
+    cohort_org: str,
+    books: dict[str, dict[str, dict]],
+    counts: dict[str, int],
+    emailed: list[str],
+    held: dict[str, dict[str, tuple[str, str]]],
+    students: list[roster.Student],
+    told: dict[str, dict[str, str]],
+    unmarked: dict[str, dict[str, int]],
+) -> str:
+    """The preview issue: the email once, then one row per student with something to
+    report. A grade is listed only where it differs from the registrar's export, which is
+    what the last real run sent; a student with nothing new, held or unmarked is left out,
+    so a large cohort still fits in one issue - and if it does not, the rest are counted."""
+    names = {s.github_handle.casefold(): s.name for s in students if s.github_handle}
+    out = [
+        (
+            f"What the last dry run of **Distribute grades** would do "
+            f"({datetime.now(UTC):%Y-%m-%d %H:%M} UTC). Nothing has been written or "
+            f"sent. Every dry run rewrites this issue; the real run closes it."
+        ),
+        "",
+        (
+            f"{counts['gradebooks']} gradebook(s) would be updated, {len(emailed)} "
+            f"student(s) emailed, {counts['held']} mark(s) held."
+        ),
+        "",
+    ]
+    if emailed:
         # Rendered exactly as the send renders it, course name and all: a preview that
         # showed the generic wording while the real mail named the course was reviewing
-        # text nobody would ever receive - and the subject line, which is the half a
-        # student reads first, was not shown at all.
+        # text nobody would ever receive.
         subject, body = sample_message(cohort_org, _course_name(cohort_org))
-        log("  Sample email (placeholders, not a real student):")
-        log(f"    Subject: {subject}")
-        for line in body.splitlines():
-            log(f"    {line}")
-    log_ok("DRY-RUN - nothing written, nothing posted, nothing sent")
+        out += [
+            "The email:",
+            "",
+            "```",
+            f"Subject: {subject}",
+            "",
+            body.rstrip(),
+            "```",
+            "",
+        ]
+    rows = []
+    for handle in sorted({*books, *(h for whose in held.values() for h in whose)}):
+        book = books.get(handle, {})
+        was = told.get(handle.casefold(), {})
+        changed = []
+        for slug, view in sorted(book.items()):
+            grade = str(view.get("final_grade", ""))
+            if grade and grade != was.get(slug):
+                changed.append(
+                    f"{slug} {grade}"
+                    + (f" (was {was[slug]})" if slug in was else " (new)")
+                )
+        holds = [
+            f"{slug}: {HOLD_REASONS[whose[handle][1]]}"
+            for slug, whose in sorted(held.items())
+            if handle in whose
+        ]
+        unit = {slug: view.get("team") or handle for slug, view in book.items()}
+        unit |= {s: w[handle][0] for s, w in held.items() if handle in w}
+        blank = [
+            f"{slug}: {unmarked[slug][u]}"
+            for slug, u in sorted(unit.items())
+            if u in unmarked.get(slug, {})
+        ]
+        mailed = handle in emailed
+        if changed or mailed or holds or blank:
+            rows.append(
+                f"| `{handle}` | {_cell(names.get(handle.casefold(), ''))} | "
+                f"{_cell('; '.join(changed))} | {'yes' if mailed else 'no'} | "
+                f"{_cell('; '.join(holds))} | {_cell('; '.join(blank))} |"
+            )
+    if not rows:
+        return "\n".join([*out, "No student has anything new, held or unmarked."])
+    out += [
+        (
+            "| Student | Name | Grades (new or changed) | Emailed | Held | "
+            "Unmarked questions |"
+        ),
+        "|---|---|---|---|---|---|",
+    ]
+    text = "\n".join(out)
+    for i, row in enumerate(rows):
+        # Room kept for the line that says how many were left out.
+        if len(text) + len(row) + 200 > _ISSUE_BODY_CAP:
+            return (
+                f"{text}\n\n_{len(rows) - i} more student(s) not shown - the list is "
+                f"longer than one issue can hold._"
+            )
+        text += "\n" + row
+    return text
 
 
 def update_message(
@@ -4311,7 +4456,8 @@ def main() -> int:
         "--dry-run",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Preview the grade emails; push nothing, send nothing (default).",
+        help="Post who gets what as an issue in classroom-config; push no grades, "
+        "send nothing (default).",
     )
     args = parser.parse_args()
 

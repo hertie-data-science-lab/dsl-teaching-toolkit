@@ -14,7 +14,7 @@ from shutil import copytree
 import pytest
 import yaml
 
-from dsl_course import course, gh_contents, ghcli, grades, repos, roster
+from dsl_course import course, gh_contents, ghcli, grades, issues, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER, repo_row
 
@@ -608,6 +608,45 @@ class _ListedPrivate(dict):
 _ANY_PRIVATE = _ListedPrivate()
 
 
+def _fake_issues(monkeypatch, store: list[dict]) -> None:
+    """`issues`' two `gh` calls answered from `store`, one dict per issue, so a lookup by
+    title, a create, an edit and a close all act on the same list."""
+
+    def listing(*args):
+        state = args[args.index("--state") + 1]
+        return [
+            {k: i[k] for k in ("number", "body", "title", "state")}
+            for i in store
+            if state == "all" or i["state"] == state.upper()
+        ]
+
+    def write(*args):
+        verb, flags = args[1], dict(zip(args[2::2], args[3::2], strict=False))
+        if verb == "create":
+            number = len(store) + 1
+            store.append(
+                {
+                    "number": number,
+                    "title": flags["--title"],
+                    "body": flags["--body"],
+                    "state": "OPEN",
+                    "comments": [],
+                }
+            )
+            return 0, f"https://github.com/COHORT/classroom-config/issues/{number}"
+        issue = next(i for i in store if str(i["number"]) == args[2])
+        rest = dict(zip(args[3::2], args[4::2], strict=False))
+        if verb == "edit":
+            issue["body"] = rest["--body"]
+        elif verb == "close":
+            issue["state"] = "CLOSED"
+            issue["comments"].append(rest.get("--comment"))
+        return 0, ""
+
+    monkeypatch.setattr(issues, "gh_json", listing)
+    monkeypatch.setattr(issues, "gh", write)
+
+
 def _distribute(
     monkeypatch,
     tmp_path,
@@ -627,6 +666,8 @@ def _distribute(
     course_name=lambda org: "",
     listed: dict[str, dict] | None = _ANY_PRIVATE,
     due: datetime = _DUE_PASSED,
+    exported: str | None = None,
+    preview_issues: list[dict] | None = None,
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
@@ -635,7 +676,11 @@ def _distribute(
     plus `comments` and `issues`, which are TRIPWIRES. Nothing is posted into a submission
     repo any more, so those two stay empty in every test here; `issue` and `found_issue`
     are what a lookup WOULD answer, so a run that went near a thread would show up rather
-    than pass for want of a stub."""
+    than pass for want of a stub.
+
+    `preview` is classroom-config's issue list as GitHub would hold it after the run - pass
+    `preview_issues` to start from one, or to share it between two runs. `exported` is the
+    registrar export the last real run left behind."""
     cfg = tmp_path / "cfg"
     (cfg / grades.SHEETS_DIR).mkdir(parents=True)
     sheets = {"assignment-1": _SHEET} if sheets is None else sheets
@@ -650,6 +695,10 @@ def _distribute(
     for name in stale_gradebooks:
         (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / grades.GRADEBOOK_DIR / name).write_text("student: someone\n")
+    if exported is not None:
+        (cfg / grades.COHORT_CSV_NAME).write_text(exported)
+    store = [] if preview_issues is None else preview_issues
+    _fake_issues(monkeypatch, store)
 
     def fake_gh(*args, **kwargs):
         if args[:2] == ("repo", "clone"):
@@ -664,6 +713,7 @@ def _distribute(
         "outbox": [],
         "issues": [],
         "gradebook_calls": [],
+        "preview": store,
     }
     monkeypatch.setattr(grades, "gh", fake_gh)
     monkeypatch.setattr(ghcli, "gh", fake_gh)
@@ -975,37 +1025,167 @@ def test_holding_one_mark_leaves_the_students_other_marks_alone(tmp_path, monkey
     assert "assignment-2" not in files["grades.yml"]
 
 
-def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(
-    tmp_path, monkeypatch, capsys
-):
+def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(tmp_path, monkeypatch):
     # The subject is the half a student reads first, and the course name is what tells one
     # of these apart from another - so a preview that showed neither was reviewing text
     # nobody would ever receive.
-    _distribute(
+    out = _distribute(
         monkeypatch,
         tmp_path,
         dry_run=True,
         course_name=lambda org: "Deep Learning",
     )
-    printed = capsys.readouterr().out
-    assert "    Subject: Your grades for Deep Learning have been updated" in printed
+    ((issue),) = out["preview"]
+    assert "Subject: Your grades for Deep Learning have been updated" in issue["body"]
     assert (
         "Your grades for the Deep Learning course have been updated. View them"
-        in printed
+        in issue["body"]
     )
-    assert "grades-<handle>" in printed  # a placeholder, never a student
+    assert "grades-<handle>" in issue["body"]  # a placeholder, never a student
 
 
-def test_an_unreadable_course_name_still_previews_the_email(
-    tmp_path, monkeypatch, capsys
-):
+def test_an_unreadable_course_name_still_previews_the_email(tmp_path, monkeypatch):
     # Same fallback the send has: the name is a nicety, the notification is not.
     def boom(org):
         raise RuntimeError("no dsl-course.yml")
 
     out = _distribute(monkeypatch, tmp_path, dry_run=True, course_name=boom)
     assert out["rc"] == 0
-    assert "    Subject: Your grades have been updated" in capsys.readouterr().out
+    assert "Subject: Your grades have been updated" in out["preview"][0]["body"]
+
+
+def test_the_dry_run_says_who_gets_what_in_a_private_issue_and_logs_none_of_it(
+    tmp_path, monkeypatch, capsys
+):
+    # The log is a PUBLIC repo's; the issue is in the private classroom-config. So the
+    # names and marks go to the one, and only counts and the issue's address to the other.
+    monkeypatch.setenv("DSL_VERBOSE", "")
+    rows = ROSTER_ADA + "bob@uni.edu,Bob Byte,enrolled,bob-b,43,dsl-def\n"
+    sheet = _SHEET + _SHEET.split("submissions:\n", 1)[1].replace("ada-l", "bob-b")
+    sheet = sheet.replace("score_individual: 43", "score_individual: 38", 1)
+    held = _HELD_SHEET.replace("ada-l", "bob-b")
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet, "assignment-2": held},
+        roster_rows=rows,
+        exported="hertie_email,name,github_handle,assignment-1\n"
+        "ada@uni.edu,Ada,ada-l,36\nbob@uni.edu,Bob Byte,bob-b,43\n",
+        dry_run=True,
+    )
+    assert out["rc"] == 0
+    assert (out["gradebooks"], out["config"], out["outbox"]) == ([], [], [])
+    ((issue),) = out["preview"]
+    assert issue["title"] == grades.PREVIEW_TITLE and issue["state"] == "OPEN"
+    body = issue["body"]
+    # ada's grade changed; bob's did not (he has never been told it, so he is still
+    # emailed), and his other mark is held
+    assert "| `ada-l` | Ada | assignment-1 38 (was 36) | yes |  |  |" in body
+    assert (
+        "| `bob-b` | Bob Byte |  | yes | assignment-2: a mark no late penalty can be "
+        "applied to |  |" in body
+    )
+    printed = "".join(capsys.readouterr())
+    assert (
+        "Who gets what: https://github.com/COHORT/classroom-config/issues/1" in printed
+    )
+    for private in ("ada-l", "bob-b", "Ada", "Bob", "38", "36"):
+        assert private not in printed
+
+
+def test_a_second_dry_run_rewrites_the_preview_rather_than_opening_another(
+    tmp_path, monkeypatch
+):
+    store: list[dict] = []
+    _distribute(monkeypatch, tmp_path, dry_run=True, preview_issues=store)
+    corrected = _SHEET.replace("score_individual: 43", "score_individual: 45")
+    _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": corrected},
+        dry_run=True,
+        preview_issues=store,
+    )
+    ((issue),) = store
+    assert "assignment-1 45 (new)" in issue["body"]
+    assert "43" not in issue["body"]
+
+
+def test_the_preview_counts_unmarked_questions_per_student(tmp_path, monkeypatch):
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 15\n      Q2:"
+    )
+    grading = _GRADING_YML + "questions:\n  Q1: 15\n  Q2: 10\n"
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=grading,
+        dry_run=True,
+    )
+    assert "| yes |  | assignment-1: 1 |" in out["preview"][0]["body"]
+
+
+def test_a_student_with_no_mark_is_not_in_the_preview_as_emailed(tmp_path, monkeypatch):
+    # The send skips a book with nothing a grader wrote, and the preview says what the
+    # send would do.
+    sheet = _SHEET.replace("score_individual: 43", "score_individual:").replace(
+        "    feedback_individual: |\n      Clean derivation.\n", ""
+    )
+    out = _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": sheet}, dry_run=True
+    )
+    body = out["preview"][0]["body"]
+    assert "ada-l" not in body
+    assert "0 student(s) emailed" in body and "Subject:" not in body
+
+
+def test_a_preview_too_long_for_one_issue_says_how_many_it_left_out(
+    tmp_path, monkeypatch
+):
+    # GitHub refuses a body over its cap, and a refused body is no preview at all.
+    monkeypatch.setattr(grades, "_ISSUE_BODY_CAP", 2_000)
+    handles = [f"s{n:03d}" for n in range(60)]
+    rows = (
+        "".join(
+            f"\n{h}@uni.edu,Student {h},enrolled,{h},{n},c{n}"
+            for n, h in enumerate(handles)
+        )
+        + "\n"
+    )
+    block = _SHEET.split("submissions:\n", 1)[1]
+    sheet = "submissions:\n" + "".join(block.replace("ada-l", h) for h in handles)
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        roster_rows=rows,
+        dry_run=True,
+    )
+    body = out["preview"][0]["body"]
+    assert len(body) <= 2_000
+    shown = body.count("| `s")
+    assert 0 < shown < 60
+    assert body.endswith(
+        f"_{60 - shown} more student(s) not shown - the list is longer than one "
+        f"issue can hold._"
+    )
+
+
+def test_a_real_run_closes_the_preview_with_a_line_saying_so(tmp_path, monkeypatch):
+    store: list[dict] = []
+    _distribute(monkeypatch, tmp_path, dry_run=True, preview_issues=store)
+    out = _distribute(monkeypatch, tmp_path / "real", preview_issues=store)
+    assert out["rc"] == 0
+    ((issue),) = store
+    assert issue["state"] == "CLOSED"
+    assert issue["comments"] == [grades.PREVIEW_SENT]
+
+
+def test_a_real_run_with_no_preview_open_is_fine(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path)
+    assert out["rc"] == 0
+    assert out["preview"] == []
 
 
 def test_the_dry_run_counts_what_it_would_hold(tmp_path, monkeypatch, capsys):
@@ -1035,7 +1215,6 @@ def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     assert "0 held for a hand decision" in printed
     assert f"{grades.COHORT_CSV_NAME}: would gain column assignment-1" in printed
     assert "would update 1 gradebook(s) and email 1 student(s)" in printed
-    assert "<handle>" in printed  # the sample email, from placeholders
 
 
 def test_a_sheet_that_does_not_parse_sends_nothing_at_all(tmp_path, monkeypatch):

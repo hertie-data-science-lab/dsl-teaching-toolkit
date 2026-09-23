@@ -134,12 +134,14 @@ repo's, so it would accuse the entire cohort of one student's late push), and
    rows for students who have left. Delete a key and it stays deleted.
 5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
-6. **Distribute grades** (button), `dry_run` first. The dry run reads everything, writes
-   nothing, and prints the counts - including how many marks are **held** for a hand
-   decision and how many units still have unmarked questions. There is no assignment to
-   pick: every gradebook and the registrar's export are rebuilt from every sheet in the
-   cohort on every run, so a student's gradebook always shows everything they have been
-   marked on. A half-typed sheet is therefore a reason to wait.
+6. **Distribute grades** (button), `dry_run` first. The dry run writes no grades and sends
+   no mail. It prints the counts, and posts who gets what - each changed grade, who is
+   emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
+   grades preview* issue in `classroom-config`. Each dry run rewrites that issue; the real
+   run closes it. There is no assignment to pick: every gradebook and the registrar's
+   export are rebuilt from every sheet in the cohort on every run, so a student's
+   gradebook always shows everything they have been marked on. A half-typed sheet is
+   therefore a reason to wait.
 
 ## What Distribute sends
 
