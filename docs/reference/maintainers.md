@@ -349,6 +349,14 @@ repo path to a file under `templates/`. Adding a file like this is four places:
 It carries no `.sample` twin and is absent from `example-course/cohort-org/`: nobody edits
 it, so there is nothing in it for a person to copy.
 
+`.dsl/status.json` (`dsl.status/1`, built by `status_json`, written by `status.write`) is
+the same kind of file twice: in each cohort's private `classroom-config`, and - counts only,
+never a handle or an email - in the course org's public `.github`. It is rewritten by
+`seed.refresh`, by the single-cohort run of each of the four classroom-config dispatch
+targets (scheduler, Sync membership, Send enrolment codes, Sync site), and by the Console
+run's `status.write_after_op`. It records the blob shas it was computed from, never a
+timestamp of its own, so an unchanged render makes no commit.
+
 A course website is wholly the toolkit's: `scaffold_site` creates `<org>.github.io` EMPTY and
 seeds only its Pages build, then every sync writes `templates/site/` (SYSTEM-OWNED) and seeds
 `templates/site-seed/` into any path the site lacks (INSTRUCTOR-OWNED). There is no

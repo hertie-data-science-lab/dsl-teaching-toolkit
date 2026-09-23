@@ -41,7 +41,7 @@ import sys
 
 import yaml
 
-from . import sync_faculty, sync_roster, sync_teams
+from . import status, sync_faculty, sync_roster, sync_teams
 from .discovery import (
     COHORTS_PATH,
     cohort_is_live,
@@ -259,6 +259,12 @@ def main() -> int:
         all_cohorts=args.all_cohorts,
         dry_run=args.dry_run,
     )
+    # A push to one cohort's roster, teams or people.yml dispatches exactly this: the
+    # cohort's status.json follows the membership it just reconciled. Not counted - the
+    # sync's exit code is the sync's - and `status.write` refuses a cohort the course's
+    # registry does not list, whatever the payload named.
+    if args.cohort_org and not args.all_cohorts and not args.dry_run:
+        status.refresh(args.course_org, args.cohort_org)
     if errors:
         log_err(f"{errors} errors during sync")
         return 1

@@ -87,6 +87,7 @@ from . import (
     schedule,
     site,
     source_digest,
+    status,
     sync_faculty,
     sync_teams,
     team_formation,
@@ -1794,7 +1795,7 @@ def main() -> int:
     cohorts, rc = _one_cohort(args.course_org, args.cohort_org)
     if not cohorts:
         return rc
-    return run(
+    rc = run(
         args.course_org,
         cohorts[0],
         now,
@@ -1802,6 +1803,13 @@ def main() -> int:
         defer_site_sync=args.defer_site_sync,
         **phases,
     )
+    # The scoped run is what a classroom-config push fires, and its release pass is where
+    # every digest was just brought in line with the files - so the cohort's status.json
+    # follows here, after it. Never on a dry run (a preview writes nothing), and never
+    # counted: the release's exit code is the release's.
+    if phases["release"] and not args.dry_run:
+        status.refresh(args.course_org, cohorts[0])
+    return rc
 
 
 if __name__ == "__main__":

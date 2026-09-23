@@ -1939,12 +1939,16 @@ def test_main_matches_a_registered_cohort_case_insensitively(monkeypatch):
     monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-F2026"])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
+    refreshed: list = []
+    monkeypatch.setattr(site.status, "refresh", lambda *a: refreshed.append(a) or 1)
     monkeypatch.setattr(
         "sys.argv",
         ["site", "sync", "--course-org", "Course", "--cohort-org", "cohort-f2026"],
     )
     assert site.main() == 0
     assert synced == [("Course", "cohort-f2026")]
+    # The site's last update is in status.json; a write that failed does not red the sync.
+    assert refreshed == [("Course", "cohort-f2026")]
 
 
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):

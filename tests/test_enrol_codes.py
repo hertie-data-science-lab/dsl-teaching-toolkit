@@ -711,11 +711,24 @@ def _dispatched(monkeypatch, cohort, registered, course="Course-Org"):
     monkeypatch.setattr(
         enrol_codes, "run", lambda org: ran.append(org) or enrol_codes.Outcome.SENT
     )
+    monkeypatch.setattr(enrol_codes.status, "refresh", lambda course, cohort=None: 0)
     monkeypatch.setattr(
         "sys.argv",
         ["enrol_codes", "--cohort-org", cohort, "--dispatched-by", course],
     )
     return enrol_codes.main(), ran
+
+
+def test_a_dispatched_send_refreshes_the_cohorts_status(monkeypatch):
+    # The codes just sent are the roster's `codes_sent` count in status.json.
+    refreshed: list = []
+    _dispatched(monkeypatch, "Cohort-f2026", ["Cohort-f2026"])
+    monkeypatch.setattr(
+        enrol_codes.status, "refresh", lambda *a: refreshed.append(a) or 1
+    )
+    # A status that could not be written does not red the send.
+    assert enrol_codes.main() == 0
+    assert refreshed == [("Course-Org", "Cohort-f2026")]
 
 
 def test_a_dispatched_send_refuses_a_cohort_this_course_org_does_not_own(

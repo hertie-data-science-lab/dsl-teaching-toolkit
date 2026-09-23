@@ -511,3 +511,30 @@ def test_a_dispatch_from_a_closed_out_cohort_reconciles_nothing(monkeypatch):
 
     monkeypatch.setattr(sync_membership.sync_roster, "sync", boom)
     assert sync_membership.sync("Course", cohort_org="A") == 0
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        (["--cohort-org", "Cohort-f2026"], [("Course", "Cohort-f2026")]),
+        (["--cohort-org", "Cohort-f2026", "--dry-run"], []),
+        (["--all-cohorts"], []),
+    ],
+)
+def test_a_dispatched_cohort_sync_refreshes_that_cohorts_status(
+    monkeypatch, extra, expected
+):
+    # A push to one cohort's roster, teams or people.yml dispatches this with its name:
+    # the status follows. A preview writes nothing, and the nightly sweep leaves status
+    # to the nightly refresh.
+    monkeypatch.setattr(sync_membership, "acting_login", lambda: "bot")
+    monkeypatch.setattr(sync_membership, "sync", lambda *a, **k: 0)
+    refreshed: list = []
+    monkeypatch.setattr(
+        sync_membership.status, "refresh", lambda *a: refreshed.append(a) or 1
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["sync_membership", "--course-org", "Course", *extra]
+    )
+    assert sync_membership.main() == 0
+    assert refreshed == expected

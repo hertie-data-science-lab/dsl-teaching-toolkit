@@ -2795,6 +2795,7 @@ def test_a_single_cohort_invocation_never_touches_the_cadence(
     monkeypatch.setattr(
         scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
     )
+    monkeypatch.setattr(scheduler.status, "refresh", lambda course, cohort=None: 0)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -3927,9 +3928,16 @@ def test_a_dispatched_cohort_runs_under_the_registry_spelling(monkeypatch):
         "run",
         lambda course, cohort, now, **k: seen.append((cohort, k)) or 0,
     )
+    refreshed: list = []
+    monkeypatch.setattr(
+        scheduler.status, "refresh", lambda *a: refreshed.append(a) or 1
+    )
     _one_cohort_argv(monkeypatch, "cohort-a", "--skip-autograde", "--defer-site-sync")
     assert scheduler.main() == 0
     assert [c for c, _ in seen] == ["Cohort-A"]
+    # A config push's run ends by refreshing that cohort's status.json, under the
+    # registry's spelling - and a write that failed does not red the release.
+    assert refreshed == [("Course-Org", "Cohort-A")]
     assert seen[0][1]["defer_site_sync"] is True
     assert seen[0][1]["autograde"] is False
 

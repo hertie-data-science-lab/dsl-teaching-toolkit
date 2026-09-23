@@ -60,6 +60,7 @@ from .grades import sync_team_lock
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .repos import converge_descriptions, org_exists
+from .status import refresh as refresh_status
 from .welcome import (
     refresh_classroom_samples,
     refresh_classroom_system_files,
@@ -592,6 +593,9 @@ def refresh(course_org: str) -> int:
         # Bootstrap cohort run ends in this refresh - and what converges it every night.
         failures += 0 if sync_team_lock(course_org, cohort).ok else 1
         failures += _converge_org(cohort, central_ref, listing, is_cohort=True)
+        # Last, so it describes the cohort this refresh has just converged.
+        failures += refresh_status(course_org, cohort)
+    failures += refresh_status(course_org)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1

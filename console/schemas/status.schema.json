@@ -96,30 +96,15 @@
       },
       "type": "array"
     },
-    "automation": {
-      "additionalProperties": false,
-      "properties": {
-        "driver": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "last_tick": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "late": {
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "cohort": {
       "additionalProperties": false,
       "properties": {
+        "app_installed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "archive_date": {
           "type": [
             "string",
@@ -145,10 +130,16 @@
           "type": "object"
         },
         "term": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "term_label": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "timezone": {
           "type": "string"
@@ -176,6 +167,12 @@
     "course": {
       "additionalProperties": false,
       "properties": {
+        "app_installed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "code": {
           "type": "string"
         },
@@ -259,7 +256,10 @@
     },
     "inputs": {
       "additionalProperties": {
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "type": "object"
     },
@@ -309,21 +309,37 @@
             "additionalProperties": false,
             "properties": {
               "entry": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "line": {
-                "type": "integer"
+                "type": [
+                  "integer",
+                  "null"
+                ]
               },
               "path": {
+                "type": "string"
+              },
+              "ref": {
                 "type": "string"
               },
               "repo": {
                 "type": "string"
               },
               "screen": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
+            "required": [
+              "repo",
+              "path"
+            ],
             "type": "object"
           },
           "id": {
@@ -337,7 +353,10 @@
             "type": "string"
           },
           "stage": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "stops": {
             "type": "string"
@@ -360,6 +379,9 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "copies": {
+            "type": "integer"
+          },
           "dest": {
             "additionalProperties": false,
             "properties": {
@@ -373,7 +395,10 @@
             "required": [
               "repo"
             ],
-            "type": "object"
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -394,7 +419,10 @@
             "required": [
               "repo"
             ],
-            "type": "object"
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "state": {
             "enum": [
@@ -412,7 +440,10 @@
             "type": "string"
           },
           "type": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "when": {
             "type": [
@@ -460,7 +491,10 @@
           "type": "integer"
         },
         "synced": {
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "tas": {
           "type": "integer"
