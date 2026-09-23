@@ -203,6 +203,7 @@ def status_schema() -> dict:
     unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
     # A status problem's pointer: the line, screen and entry are what the fault knows,
     # and `ref` names the branch when it is not the default (a template's `solution`).
+    # `url` is a fix that is a GitHub settings page rather than a file (its `path` is "").
     fix = _obj(
         {
             "repo": _str(),
@@ -211,6 +212,7 @@ def status_schema() -> dict:
             "screen": nullable,
             "entry": nullable,
             "ref": _str(),
+            "url": _str(),
         },
         ("repo", "path"),
     )

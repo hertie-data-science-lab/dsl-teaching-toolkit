@@ -1533,6 +1533,8 @@ def _spec_fault(
     fix: str = "",
     file: str = GRADING_FILE,
     plain: str = "",
+    consequence: str = "",
+    per_cohort: bool = False,
 ) -> ConfigFault:
     """One value in one assignment's definition that will not grade as written.
 
@@ -1553,6 +1555,8 @@ def _spec_fault(
         ref=SOLUTION_BRANCH,
         fix_text=fix,
         plain=plain,
+        consequence=consequence,
+        per_cohort=per_cohort,
     )
 
 
@@ -1647,6 +1651,11 @@ def grading_spec_faults(
                 "template's `solution` branch, which is where the teaching team reads "
                 "it - or give this assignment a private repo per unit here "
                 "(`submit_via: assignment_repo`, `visibility: private`)",
+                plain=f"{slug} has a solution shown date in this cohort's schedule, "
+                f"but its settings give it no private repo to put the solution in.",
+                consequence="the solution shown date passes and no solution is "
+                "released",
+                per_cohort=True,
             )
         )
     return faults, spec
@@ -1781,6 +1790,11 @@ def _visibility_faults(
             fix=f"set `visibility:` back to what those repos are, or make each of them "
             f"{spec.visibility} by hand from its GitHub Settings - the toolkit never "
             f"re-opens a repo it has already created",
+            plain=f"{slug}'s settings say its repos are {spec.visibility}, but "
+            f"{len(wrong)} of {len(rows)} handed out in this cohort are not.",
+            consequence="those repos stay as they are, and the pages the toolkit "
+            "writes describe them wrongly",
+            per_cohort=True,
         )
     ]
 
@@ -1790,6 +1804,10 @@ def _visibility_faults(
 # assignments under one plan are three readings of one problem, and three keys would mail
 # about it three times and clear it three times.
 ORG_SETTINGS = "org settings"
+# The page both switches are on. Web-only: the API can read them and cannot set them.
+MEMBER_PRIVILEGES_URL = (
+    "https://github.com/organizations/{org}/settings/member_privileges"
+)
 
 
 def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
@@ -1810,16 +1828,19 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
     if settings is None:
         return []  # we could not look; `org_settings` has already said why
     wrong: list[str] = []
+    costs: list[str] = []
     if settings.get(gh_teams.MEMBERS_CAN_DELETE) is True:
         wrong.append(
             "**Allow members to delete or transfer repositories** is ON, so a student "
             "can delete or move their own submission"
         )
+        costs.append("a student can delete or move their own submission")
     if settings.get(gh_teams.MEMBERS_CAN_PUBLISH) is False:
         wrong.append(
             "**Allow members to change repository visibilities** is OFF, so no student "
             "can publish their work and the shape does nothing for them"
         )
+        costs.append("no student can publish their work")
     if not wrong:
         return []
     return [
@@ -1829,13 +1850,17 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
             f"`visibility: student_choice`, which makes each student an admin of their "
             f"own repo - and {' and '.join(wrong)}",
             file=GRADING_FILE,
+            in_org=cohort_org,
+            plain="This cohort's GitHub member privileges do not suit an assignment "
+            "that lets students choose their repo's visibility.",
+            consequence=" and ".join(costs),
+            per_cohort=True,
             # Both switches named whichever one is wrong: the fix is one visit to one
             # page, and a sentence that named only the offender would send somebody back
             # there a second time for the other.
             fix_text=(
                 f"on the cohort org's Member privileges page "
-                f"(https://github.com/organizations/{cohort_org}/settings/"
-                f"member_privileges) set **Allow members to change repository "
+                f"({MEMBER_PRIVILEGES_URL.format(org=cohort_org)}) set **Allow members to change repository "
                 f"visibilities** ON and **Allow members to delete or transfer "
                 f"repositories** OFF. Both are web-only org settings - the toolkit reads "
                 f"them and cannot set them - and they are the one-time cohort-org step "

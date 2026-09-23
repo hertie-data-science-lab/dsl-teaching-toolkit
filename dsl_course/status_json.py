@@ -291,6 +291,15 @@ MARKING = "marking"
 _SHEET = _Where("sheet", "cohort", MARKING, "marks", "GRADING_SHEETS")
 # Any other classroom-config file: the cohort's own setup.
 _OTHER = _Where("config", "cohort", "K2", "", "CONFIG")
+# A template fault only one cohort pays for (`ConfigFault.per_cohort`): the repos it
+# handed out, or its schedule entry. The cohort's, in the phase after hand out.
+HANDED_OUT = "open"
+_COHORT_TEMPLATE = _Where(
+    "template", "cohort", HANDED_OUT, "template", "GRADING_CONFIG"
+)
+# The cohort org's own member privileges: part of setting the cohort up, fixed on a
+# GitHub settings page rather than in a file.
+_ORG = _Where("org", "cohort", "K2", "", "ORG_SETTINGS")
 
 _SOURCE_CODES = {
     FaultKind.MISSING_PATH: "SOURCE_MISSING",
@@ -394,6 +403,10 @@ def plain_text(fault: ConfigFault, filed: _Where, entry: str) -> str:
 
 
 def _where_filed(fault: ConfigFault) -> _Where:
+    if fault.where == grades.ORG_SETTINGS:
+        return _ORG
+    if fault.per_cohort:
+        return _COHORT_TEMPLATE
     if fault.file.startswith(f"{grades.SHEETS_DIR}/"):
         return _SHEET
     return _FILES.get(fault.file, _OTHER)
@@ -468,7 +481,18 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         "screen": filed.screen or None,
         "entry": entry if filed.kind in ("schedule", "template", "sheet") else None,
     }
-    if fault.ref and fault.ref != "main":
+    if filed is _ORG:
+        # A settings page, not a file: `url` is where the console sends the fix.
+        owner = fault.in_org or org
+        fix = {
+            "repo": f"{owner}/{fault.in_repo}",
+            "path": "",
+            "line": None,
+            "screen": None,
+            "entry": None,
+            "url": grades.MEMBER_PRIVILEGES_URL.format(org=owner),
+        }
+    elif fault.ref and fault.ref != "main":
         fix["ref"] = fault.ref
     return {
         "id": f"{filed.kind}:{_slugify(entry)}:{code}",

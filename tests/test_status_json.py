@@ -882,3 +882,93 @@ def test_the_vocabulary_pass_keeps_the_file_names_a_fix_edits():
         == "the grading_config.yml marking value is not read by the preview"
     )
     assert status_json.plain_words("an onboarded handle") == "a joined handle"
+
+
+# ------------------------------------------------------------------ cohort-only template faults
+
+
+def _visibility_mismatch() -> ConfigFault:
+    """What `grades.grading_spec_faults` files for a private assignment whose repos
+    this cohort handed out public."""
+    rows = [
+        repo_row("assignment-1-ada", visibility="public"),
+        repo_row("assignment-1-bob", visibility="private"),
+    ]
+    faults, _ = grades.grading_spec_faults(
+        "assignment-1",
+        "assignment-1-f2026",
+        COURSE,
+        "visibility: private\n",
+        None,
+        handed_out=rows,
+    )
+    (fault,) = faults
+    return fault
+
+
+def test_a_visibility_mismatch_is_the_cohorts_problem_not_the_courses():
+    fault = _visibility_mismatch()
+    assert fault.per_cohort
+    doc = _render(cohort=_cohort(template_faults=[fault]))
+    (problem,) = doc["problems"]
+    assert (problem["scope"], problem["stage"]) == ("cohort", "open")
+    assert problem["id"] == "template:assignment-1:GRADING_CONFIG"
+    assert problem["text"] == (
+        "assignment-1's settings say its repos are private, but 1 of 2 handed out in "
+        "this cohort are not."
+    )
+    assert problem["stops"] == (
+        "Those repos stay as they are, and the pages the toolkit writes describe them "
+        "wrongly."
+    )
+    # The fix is still the template's line; the course's own stage does not move.
+    assert problem["fix"]["repo"] == f"{COURSE}/assignment-1-f2026"
+    assert doc["course"]["stages"]["C5"] == "done"
+    assert all(t["state"] == "ready" for t in doc["course"]["templates"])
+    assert "problem" not in doc["cohort"]["stages"].values()
+
+
+def test_the_course_file_never_lists_a_cohort_only_problem():
+    # The course's own gather reads each template with nothing handed out to compare
+    # it against, so the fault does not arise there at all.
+    faults, _ = grades.grading_spec_faults(
+        "assignment-1", "assignment-1-f2026", COURSE, "visibility: private\n", None
+    )
+    assert faults == []
+    course = status_json.render_course_file(_course(), NOW)
+    assert course["problems"] == [] and course["course"]["stages"]["C5"] == "done"
+
+
+def test_the_org_settings_problem_is_the_cohorts_setup(monkeypatch):
+    monkeypatch.setattr(
+        grades.gh_teams,
+        "org_settings",
+        lambda org: {grades.gh_teams.MEMBERS_CAN_DELETE: True},
+    )
+    (fault,) = grades._org_settings_faults(COHORT)
+    doc = _render(cohort=_cohort(template_faults=[fault]))
+    (problem,) = doc["problems"]
+    assert (problem["scope"], problem["stage"]) == ("cohort", "K2")
+    assert problem["id"] == "org:org-settings:ORG_SETTINGS"
+    assert problem["stops"] == "A student can delete or move their own submission."
+    assert problem["fix"]["url"] == (
+        f"https://github.com/organizations/{COHORT}/settings/member_privileges"
+    )
+    assert problem["fix"]["repo"] == f"{COHORT}/classroom-config"
+    assert doc["cohort"]["stages"]["K2"] == "problem"
+    assert doc["course"]["stages"]["C5"] == "done"
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_template_that_does_not_parse_stays_the_courses():
+    faults, _ = grades.grading_spec_faults(
+        "assignment-3", "assignment-3-f2026", COURSE, "a: [\n", None
+    )
+    course = _course()
+    course.templates[1].faults = faults
+    doc = _render(course, _cohort(template_faults=faults))
+    (problem,) = doc["problems"]
+    assert (problem["scope"], problem["stage"]) == ("course", "C5")
+    assert doc["course"]["stages"]["C5"] == "problem"
+    public = status_json.render_course_file(course, NOW)
+    assert [p["id"] for p in public["problems"]] == [problem["id"]]

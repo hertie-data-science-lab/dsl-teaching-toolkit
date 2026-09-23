@@ -334,6 +334,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "url": {
+                "type": "string"
               }
             },
             "required": [
