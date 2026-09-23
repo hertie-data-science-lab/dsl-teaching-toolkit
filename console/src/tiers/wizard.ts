@@ -83,9 +83,6 @@ export function assignmentMarking(d: CourseDefaults): Tiers {
   };
 }
 
-/** The Advanced keys of step 3, whose values the wizard writes into grading_config.yml after creation. */
-export const MARKING_EXTRAS = ['tests', 'completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'];
-
 // ------------------------------------------------------------------ New materials
 
 export const PUBLIC_DIRS = ['lectures', 'everything except readings', 'everything'];

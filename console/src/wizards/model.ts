@@ -98,8 +98,6 @@ export function signature(v: Values, keys: string[]): string {
 
 // ------------------------------------------------------------------ New assignment
 
-export const FORMAT_KEYS = ['ipynb', 'py', 'rmd', 'qmd', 'latex', 'none'];
-
 /**
  * Why `f` cannot be added to `formats` now, or null when it can: "none" stands alone, R
  * Markdown and Quarto never go together (C1), a notebook and Python files never go together
