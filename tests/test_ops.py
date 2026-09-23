@@ -548,3 +548,12 @@ def test_a_previewed_collect_says_previewed(monkeypatch, capsys, engine):
     )
     rc, body, _ = _main(monkeypatch, capsys, raw)
     assert rc == 0 and body["conclusion"] == "previewed"
+
+
+def test_a_trailing_newline_does_not_pass_a_pattern():
+    with pytest.raises(RequestError) as exc:
+        parse_request(json.dumps(_request(actor="prof\n")))
+    assert exc.value.code == "BAD_REQUEST"
+    with pytest.raises(RequestError) as exc:
+        parse_request(json.dumps(_request(args={"entry": "s5\n"})))
+    assert exc.value.code == "BAD_ARGS"
