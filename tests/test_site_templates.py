@@ -1584,6 +1584,10 @@ def test_the_teams_that_exist_are_shown_under_the_invitation(generated):
     # the two counts, so the page cannot print a number that disagrees with the cap the
     # Join-team form enforces.
     assert "{% for team in page.teams %}" in flat
+    # Styled by its own class: the theme styles no bare table, and its header lays itself
+    # out with one, so a rule for `table` would reach the header too.
+    assert '<table class="team-table">' in flat
+    assert ".team-table {" in _templates()["_sass/_course.scss"]
     assert "{% assign left = team.cap | minus: team.members %}" in flat
     assert "{{ team.name }}" in flat and "full" in flat
     # This page is the one list: it says how to type a name, and what an empty one means.

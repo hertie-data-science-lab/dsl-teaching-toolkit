@@ -335,6 +335,34 @@
     }
 }
 
+/* The teams that exist, in the "Form your team" callout (_layouts/assignment.html).
+   Scoped to its class, never to a bare `table`: the theme's header lays itself out with
+   one, and it styles no table itself, so an unclassed one rendered as a run of words.
+   Rules rather than boxes, and only as wide as its two columns. */
+.team-table {
+    width: auto;
+    min-width: 16em;
+    margin: 0.4em 0 0.8em 0;
+    border-collapse: collapse;
+    font-size: 0.92em;
+
+    th,
+    td {
+        padding: 0.35em 1.2em 0.35em 0;
+        text-align: left;
+        border-bottom: 1px solid #e3e3e3;
+    }
+
+    th {
+        border-bottom: 2px solid rgba($brand-color, 0.55);
+        font-weight: 600;
+    }
+
+    tr:last-child td {
+        border-bottom: none;
+    }
+}
+
 /* The one line a student sees before they have a profile: what the buttons would do, and
    where to switch them on. An offer, not an instruction, above pages whose subject is the
    material rather than this. */
