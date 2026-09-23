@@ -137,6 +137,12 @@ describe('the gate', () => {
     expect(s.canRun(s.current.value!)).toBe(true);
     expect(s.isPreviewed(defs.sendCodes({ ...scope, cohortOrg: 'hertie-dsl-demo-s2027' }, 7))).toBe(false);
     expect(s.runs.value[0]).toMatchObject({ run_id: 77, op: 'roster.send_codes', conclusion: 'previewed' });
+    // The page's verb after the panel's preview keeps the preview and runs for real.
+    s.open(def, 'run');
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    const posts = e.gh.seen.filter((x) => x.method === 'POST').map((x) => JSON.parse((x.body as { inputs: { request: string } }).inputs.request).preview);
+    expect(posts).toEqual([true, false]);
   });
 
   it('does not unlock on a failed preview', async () => {
