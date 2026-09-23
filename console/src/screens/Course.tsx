@@ -10,7 +10,7 @@ import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { assignmentIdent } from '../model/format';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { fromConfig, settingsTiers, toConfig } from '../tiers/grading';
+import { fromConfig, settingsTiers, toConfig, type CourseDefaults } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
@@ -37,7 +37,7 @@ function problemsOf(p: CourseProps, cohortOrg: string): number | null {
 export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
   return (
     <div class="actions">
-      <Soon label="New cohort" cls={ready ? 'btn' : 'btn quiet'} title="The New cohort wizard comes with the wizards." />
+      <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-cohort-1`}>New cohort</a>
       <a class="btn outline" href="#website">Publish website</a>
       {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Check now" title="Check now runs on a cohort; this course has none yet." />}
       <a class="btn quiet" href={`https://github.com/${course.org}`} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
@@ -45,9 +45,14 @@ export function CourseHeaderActions({ course, ready }: { course: CourseProps['co
   );
 }
 
-function dflt(meta: Record<string, unknown> | null, key: string): string {
+export function dflt(meta: Record<string, unknown> | null, key: string): string {
   const d = (meta?.assignment_defaults ?? {}) as Record<string, unknown>;
   return d[key] == null ? '' : String(d[key]);
+}
+
+/** The course's late policy and team size, as the template forms show them. */
+export function courseDefaults(meta: Record<string, unknown> | null): CourseDefaults {
+  return { lateDays: dflt(meta, 'late_window_days') || '10', latePct: dflt(meta, 'late_penalty_per_day') || '10%', teamSize: dflt(meta, 'max_team_size') || '5' };
 }
 
 export function CourseScreen(p: CourseProps) {
@@ -89,7 +94,7 @@ export function CourseScreen(p: CourseProps) {
         ) : null}
         <div class="grid-2">
           <section class="panel section" id="sec-templates">
-            <div class="section-head"><h2>Templates</h2><Soon label="New assignment" cls="btn small outline" /></div>
+            <div class="section-head"><h2>Templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
             {v.course?.templates?.length ? (
               <ul class="rows">
                 {v.course.templates.map((t) => {
@@ -106,7 +111,7 @@ export function CourseScreen(p: CourseProps) {
             ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Templates appear once the course has been checked.'}</p>}
           </section>
           <section class="panel section" id="sec-materials">
-            <div class="section-head"><h2>Materials</h2><Soon label="New materials" cls="btn small outline" /></div>
+            <div class="section-head"><h2>Materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New materials</a></div>
             {v.course?.materials?.length ? (
               <ul class="rows">
                 {v.course.materials.map((m) => (
@@ -216,9 +221,7 @@ export function TemplateScreen(p: CourseProps) {
     if (y.errors.length) parseError = y.errors[0];
     else cfg = (y.toJS() ?? {}) as Record<string, unknown>;
   }
-  const defaults = {
-    lateDays: dflt(course.meta, 'late_window_days') || '10', latePct: dflt(course.meta, 'late_penalty_per_day') || '10%', teamSize: dflt(course.meta, 'max_team_size') || '5',
-  };
+  const defaults = courseDefaults(course.meta);
   const tiers = settingsTiers(defaults);
   const base = fromConfig(cfg);
   const cur = values ?? base;
