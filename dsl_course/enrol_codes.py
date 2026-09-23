@@ -470,6 +470,11 @@ def resend_unjoined(
         for s in roster.parse(written)
         if not s.onboarded and minted.get(s.hertie_email.strip()) == s.enrol_code
     ]
+    if not to_mail:
+        # Every one of them joined while the codes were being written: nobody to mail.
+        counts["students"] = 0
+        log_ok(f"Done - {json.dumps(counts)}")
+        return Outcome.NOTHING_TO_SEND, counts
     try:
         course_name = course_name_for_cohort(cohort_org)
     except Exception as exc:  # a name is never worth losing the codes email over
