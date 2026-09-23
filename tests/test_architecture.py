@@ -18,7 +18,32 @@ import pytest
 import dsl_course
 
 PACKAGE = Path(dsl_course.__file__).parent
-MODULES = sorted(m.name for m in pkgutil.iter_modules([str(PACKAGE)]))
+# Dotted names below the package: `console`, and `ops.registry` for a module of the `ops`
+# subpackage (its `__init__` is `ops`).
+MODULES = sorted(
+    m.name.removeprefix("dsl_course.")
+    for m in pkgutil.walk_packages([str(PACKAGE)], prefix="dsl_course.")
+)
+
+
+def _source(name: str) -> Path:
+    base = PACKAGE.joinpath(*name.split("."))
+    return base / "__init__.py" if base.is_dir() else base.with_suffix(".py")
+
+
+def _package_of(name: str) -> list[str]:
+    """The package a module's relative imports are resolved against."""
+    parts = name.split(".")
+    return parts if _source(name).name == "__init__.py" else parts[:-1]
+
+
+def _relative_targets(name: str, node: ast.ImportFrom) -> set[str]:
+    """The package modules a relative `from ... import` names, as dotted names."""
+    base = _package_of(name)
+    base = base[: len(base) - (node.level - 1)] if node.level > 1 else base
+    if node.module is None:
+        return {".".join([*base, a.name]) for a in node.names}
+    return {".".join([*base, *node.module.split(".")])}
 
 
 @pytest.mark.parametrize("name", MODULES)
@@ -50,23 +75,19 @@ def _function_local_imports(tree: ast.AST) -> list[str]:
 
 @pytest.mark.parametrize("name", MODULES)
 def test_no_imports_inside_a_function_body(name):
-    tree = ast.parse((PACKAGE / f"{name}.py").read_text())
+    tree = ast.parse(_source(name).read_text())
     assert _function_local_imports(tree) == []
 
 
 def _import_graph() -> dict[str, set[str]]:
     graph = {}
     for name in MODULES:
-        tree = ast.parse((PACKAGE / f"{name}.py").read_text())
+        tree = ast.parse(_source(name).read_text())
         edges = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.level:
                 # `from . import a, b` names the modules; `from .a import x` names one.
-                edges |= (
-                    {a.name for a in node.names}
-                    if node.module is None
-                    else {node.module}
-                )
+                edges |= _relative_targets(name, node)
         graph[name] = {e for e in edges if e in set(MODULES)}
     return graph
 
@@ -90,18 +111,23 @@ def test_the_import_graph_is_acyclic():
         visit(node, [node])
 
 
-def _sibling_module_names(tree: ast.AST) -> set[str]:
+def _sibling_module_names(name: str, tree: ast.AST) -> dict[str, str]:
     """Names this module binds to another module OF THE PACKAGE - `from . import x`,
-    `from dsl_course import x`. A name bound to anything else has no module whose
-    attributes we could check."""
-    bound = set()
+    `from .. import x`, `from dsl_course import x` - mapped to that module's dotted name.
+    A name bound to anything else has no module whose attributes we could check."""
+    bound = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
             continue
-        if (node.level == 1 and node.module is None) or (
-            node.level == 0 and node.module == "dsl_course"
-        ):
-            bound |= {a.asname or a.name for a in node.names if a.name in set(MODULES)}
+        if node.level and node.module is None:
+            targets = sorted(_relative_targets(name, node))
+        elif node.level == 0 and node.module == "dsl_course":
+            targets = [a.name for a in node.names]
+        else:
+            continue
+        for alias, target in zip(node.names, targets):
+            if target in set(MODULES):
+                bound[alias.asname or alias.name] = target
     return bound
 
 
@@ -126,15 +152,18 @@ def test_every_sibling_module_attribute_exists(name):
     moved to `course`: a name that survives the move only in the *referencing* module
     stays invisible until someone runs the line. Nothing but the module itself knows
     what it exports, so ask it."""
-    tree = ast.parse((PACKAGE / f"{name}.py").read_text())
-    siblings = _sibling_module_names(tree) - _rebound_names(tree)
+    tree = ast.parse(_source(name).read_text())
+    rebound = _rebound_names(tree)
+    siblings = {
+        k: v for k, v in _sibling_module_names(name, tree).items() if k not in rebound
+    }
     missing = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute) or not isinstance(node.value, ast.Name):
             continue
         if node.value.id not in siblings or not isinstance(node.ctx, ast.Load):
             continue
-        module = importlib.import_module(f"dsl_course.{node.value.id}")
+        module = importlib.import_module(f"dsl_course.{siblings[node.value.id]}")
         if not hasattr(module, node.attr):
             missing.append(f"{name}.py:{node.lineno} {node.value.id}.{node.attr}")
     assert missing == []
