@@ -324,6 +324,24 @@ export class GitHubClient {
     return { sha: r!.content.sha, commit: r!.commit.sha };
   }
 
+  /** Delete a file as the signed-in user, sha-conditionally. */
+  async deleteContents(args: { owner: string; repo: string; path: string; sha: string; message: string; author: Author; branch?: string }): Promise<{ commit: string }> {
+    const body: Record<string, unknown> = { message: args.message, sha: args.sha, author: args.author, committer: args.author };
+    if (args.branch) body.branch = args.branch;
+    const r = await this.send<{ commit: { sha: string } }>('DELETE', `/repos/${args.owner}/${args.repo}/contents/${enc(args.path)}`, body);
+    return { commit: r!.commit.sha };
+  }
+
+  /** Whether a GitHub account exists (false on 404). */
+  async userExists(login: string): Promise<boolean> {
+    return (await this.getOrNull<GhUser>(`/users/${encodeURIComponent(login)}`)) !== null;
+  }
+
+  /** Ask GitHub to stop a run. */
+  async cancelRun(owner: string, repo: string, runId: number): Promise<void> {
+    await this.send('POST', `/repos/${owner}/${repo}/actions/runs/${runId}/cancel`);
+  }
+
   /** One tree read: a ref's root tree (or a subtree by sha), optionally recursive. */
   listTree(owner: string, repo: string, ref: string, recursive = false): Promise<Tree | null> {
     return this.getOrNull<Tree>(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}${recursive ? '?recursive=1' : ''}`);

@@ -1,6 +1,7 @@
 // The console's root: sign-in, discovery, the route, and which screen renders.
 
 import { signal } from '@preact/signals';
+import { EnvCtx, type Env } from './env';
 import { useEffect } from 'preact/hooks';
 import { PatAuth } from './auth/pat';
 import type { Auth } from './auth/types';
@@ -9,11 +10,17 @@ import { discoverCourses, type Course } from './model/discovery';
 import { LiveFiles } from './model/files';
 import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
 import { StatusStore, type Loaded } from './model/status';
+import { DispatchAdapter } from './ops/adapter';
+import { OpPanel } from './ops/Panel';
+import { OpsSession } from './ops/session';
+import { ArchiveScreen } from './screens/Archive';
+import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
+import { MarksScreen, TeamsScreen } from './screens/Marking';
 import { COHORT_SCREENS, COURSE_SCREENS, landing, parseHash, parseSearch, resolveContext } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
-import { HomeScreen, LaterScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
+import { HomeScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { StaffScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
@@ -31,13 +38,6 @@ export function createDeps(): AppDeps {
   const client = new GitHubClient({ token: () => auth.token() });
   return { auth, client };
 }
-
-const LATER: Record<string, string> = {
-  teams: 'Teams per group assignment: the window, teams with their members, and students without a team.',
-  archive: 'What archiving does, the scheduled date from the schedule, and a preview listing every repo.',
-  details: 'The course’s name, code, description, admins and defaults as an editable page. The current values are on the course overview.',
-  website: 'The public website’s state, source, readings and lectures, with Preview and Publish.',
-};
 
 export function App({ state: s }: { state: AppState }) {
   const auth = s.auth;
@@ -123,16 +123,16 @@ export function App({ state: s }: { state: AppState }) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
   } else if (screen in COURSE_SCREENS || !ctx.cohort) {
     const cp: CourseProps = { course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
-    const crumbs = [{ t: ctx.course.name, href: '#course' }, { t: screen === 'details' ? 'Course details' : 'Public website' }];
     body = screen === 'template' ? <TemplateScreen {...cp} />
-      : screen === 'details' || screen === 'website' ? <LaterScreen title={crumbs[1].t} crumbs={crumbs} what={LATER[screen]} />
+      : screen === 'details' ? <DetailsScreen {...cp} />
+      : screen === 'website' ? <WebsiteScreen {...cp} />
+      : screen === 'materials' && route.entry ? <MaterialsScreen {...cp} />
       : <CourseScreen {...cp} />;
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry,
       heartbeat: s.heartbeat(ctx.course.org),
     };
-    const later = (t: string) => <LaterScreen title={t} crumbs={[{ t: `${ctx.course!.name}, ${ctx.cohort!.termLabel}`, href: '#cohort' }, { t }]} what={LATER[screen]} />;
     const screens: Record<string, () => preact.JSX.Element> = {
       cohort: () => <CohortScreen {...cp} />,
       schedule: () => <ScheduleScreen {...cp} />,
@@ -144,14 +144,15 @@ export function App({ state: s }: { state: AppState }) {
       staff: () => <StaffScreen {...cp} />,
       site: () => <SiteScreen {...cp} />,
       operations: () => <OperationsScreen {...cp} />,
-      teams: () => later('Teams'),
-      archive: () => later(`Archive ${ctx.cohort!.termLabel}`),
+      teams: () => <TeamsScreen {...cp} />,
+      marks: () => <MarksScreen {...cp} />,
+      archive: () => <ArchiveScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.cohort)();
   }
 
   return (
-    <>
+    <EnvCtx.Provider value={s.env(user)}>
       <Topbar user={user} course={ctx.course} cohort={ctx.cohort} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
       <div class="shell">
         <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
@@ -160,7 +161,8 @@ export function App({ state: s }: { state: AppState }) {
         <main id="view" tabindex={-1}>{body}</main>
       </div>
       <Footer course={ctx.course} cohort={ctx.cohort} />
-    </>
+      <OpPanel />
+    </EnvCtx.Provider>
   );
 }
 
@@ -172,6 +174,16 @@ export function createState({ auth, client }: AppDeps) {
   const statuses = new StatusStore(client);
   const files = new LiveFiles(client);
   const beats = new Map<string, ReturnType<typeof signal<Heartbeat | null | undefined>>>();
+  let env: Env | null = null;
+  const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
+    onFinished: (def) => {
+      if (def.cohortOrg) {
+        void statuses.reload(def.cohortOrg, 'classroom-config');
+        files.refresh(def.cohortOrg, 'classroom-config', `.dsl/outcomes/${def.op}.json`);
+      }
+      void statuses.reload(def.courseOrg, '.github');
+    },
+  });
   const st = {
     auth,
     user: signal<GhUser | null>(null),
@@ -184,6 +196,12 @@ export function createState({ auth, client }: AppDeps) {
     navOpen: signal(false),
     statuses,
     files,
+    ops,
+    /** What screens need to change anything, for the signed-in user. */
+    env(user: GhUser): Env {
+      if (!env || env.user !== user) env = { client, user, ops, statuses, files };
+      return env;
+    },
     heartbeat(org: string): Heartbeat | null | undefined {
       let b = beats.get(org);
       if (!b) {
@@ -208,6 +226,8 @@ export function createState({ auth, client }: AppDeps) {
       files.forget();
       statuses.forget();
       beats.clear();
+      ops.current.value = null;
+      env = null;
       st.user.value = null;
       st.courses.value = null;
       st.restoring.value = false;

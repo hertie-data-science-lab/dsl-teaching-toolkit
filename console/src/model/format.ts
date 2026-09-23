@@ -148,6 +148,7 @@ export const OP_LABEL: Record<string, string> = {
   'materials.create': 'New materials',
   'assignment.create': 'New assignment',
   'cohort.bootstrap': 'New cohort',
+  'teams.open_window': 'Email students without a team',
 };
 
 export function opLabel(op: string): string {

@@ -1,5 +1,5 @@
-// S1 Home (every course and cohort, ordered by what needs you), S0 Sign in, the read-only
-// view, and the placeholder for pages another work package builds.
+// S1 Home (every course and cohort, ordered by what needs you), S0 Sign in, and the
+// read-only view.
 
 import { useState } from 'preact/hooks';
 import type { Auth } from '../auth/types';
@@ -180,19 +180,6 @@ export function ReadonlyScreen({ course, cohort }: { course: Course; cohort?: Co
           <dt>Course on GitHub</dt><dd><a href={`https://github.com/${course.org}`} target="_blank" rel="noopener">{course.org}</a></dd>
           {cohort ? <><dt>Cohort on GitHub</dt><dd><a href={`https://github.com/${cohort.org}`} target="_blank" rel="noopener">{cohort.org}</a></dd></> : null}
         </dl>
-      </section>
-    </>
-  );
-}
-
-export function LaterScreen({ title, crumbs, what }: { title: string; crumbs: { t: string; href?: string }[]; what: string }) {
-  return (
-    <>
-      <Crumbs items={crumbs} />
-      <div class="page-head"><div><h1>{title}</h1></div></div>
-      <section class="panel section stub">
-        <p class="note"><b>Coming in this build.</b></p>
-        <p>{what}</p>
       </section>
     </>
   );

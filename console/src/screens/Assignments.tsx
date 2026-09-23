@@ -3,9 +3,11 @@
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, AssignmentState, Status } from '../model/types';
 import { Check } from '../ui/icons';
+import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops/defs';
+import { OpButtons, OpOpen } from '../ops/Panel';
 import { Crumbs, Help, ProblemCards, Soon } from '../ui/bits';
 import { asgSummary, todayOf, tzOf, yearOf } from './Cohort';
-import { WithStatus, cohortCrumbs, cohortName } from './common';
+import { WithStatus, cohortCrumbs, cohortName, cohortScope } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 function nextDate(a: Assignment, tz: string, year: number): string {
@@ -38,7 +40,7 @@ function Index(p: ReadyProps) {
             {list.length === 1 ? 'One' : list.length} this term.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
         </div>
-        <div class="actions"><Soon label="New assignment" /></div>
+        <div class="actions"><Soon label="New assignment" title="The New assignment wizard is on the course page." /></div>
       </div>
       <Help title="How assignments move" doc="09-release-assignment-to-cohort.md">
         <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; settings live on the template.</p>
@@ -113,9 +115,10 @@ function Detail(p: ReadyProps & { a: Assignment }) {
     : a.handout ? `Declared. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.` : 'Declared. You hand it out from this page.';
   const big = cur === 4 || cur === 5 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : a.submissions;
   const bigOf = cur === 4 || cur === 5 ? a.marks.total : a.units;
-  const gated = (label: string) => (
-    <><Soon label="Preview" cls="btn small" /><Soon label={label} cls="btn small outline" title="Coming in this build. Preview first." /><span class="gate-hint">Preview first</span></>
-  );
+  const scope = cohortScope(p);
+  const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand' };
+  const tree = p.files.tree(p.course.org, a.template);
+  const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
   return (
     <>
       <Crumbs items={cohortCrumbs(p, assignmentIdent(a.slug), [{ t: 'Assignments', href: '#assignments' }])} />
@@ -179,25 +182,31 @@ function Detail(p: ReadyProps & { a: Assignment }) {
           <div class="section-head"><h2>What you can do, by state</h2><span class="meta">Preview never changes anything students see</span></div>
           <ul class="state-actions">
             {row(cur <= 1 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
-              handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span>{gated(`Hand out to ${a.units} ${group ? 'teams' : 'students'}`)}</div>)}
-            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href="#teams">Open teams</a></div>) : null}
+              handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
+            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={`#teams-${a.slug}`}>Open teams</a></div>) : null}
             {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
               cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.late_until, tz, year)}.` : 'Update every copy pushes a template file to every student and posts a note on each receipts thread. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (
                 <>
-                  <div class="sa-op"><span class="opname">Update every copy</span>{gated(`Update ${a.units} copies`)}</div>
-                  <div class="sa-op"><span class="opname">Collect now</span><Soon label="Collect now" cls="btn small" /></div>
+                  <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
+                  <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
                 </>
               ) : null)}
             {row(cur === 4 ? 'now' : cur > 4 ? 'past' : 'later', 'Marking',
               cur < 4 ? `Opens after late work closes${a.late_until ? `, ${fmtDay(a.late_until, tz, year)}` : ''}.` : 'Marks and feedback go to students; your private notes do not.',
               cur === 4 ? (
                 <>
-                  <div class="sa-op"><span class="opname">Marks</span><Soon label="Open marks" cls="btn small quiet" /></div>
-                  <div class="sa-op"><span class="opname">Return marks</span>{gated(`Return marks to ${a.marks.filled} students`)}</div>
+                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={`#marks-${a.slug}`}>Open marks</a></div>
+                  <div class="sa-op"><span class="opname">Return marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled)} small /></div>
                 </>
               ) : null)}
-            {row(cur === 5 ? 'now' : 'later', 'Returned', 'Opens after marks are returned. Changed marks can then be returned again.')}
+            {row(cur === 5 ? 'now' : 'later', 'Returned', cur === 5 ? 'Marks are with students. Changed marks can be returned again.' : 'Opens after marks are returned. Changed marks can then be returned again.',
+              cur === 5 ? (
+                <>
+                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={`#marks-${a.slug}`}>Open marks</a></div>
+                  <div class="sa-op"><span class="opname">Return changed marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled)} small label="Return changed marks" /></div>
+                </>
+              ) : null)}
           </ul>
         </section>
       </div>

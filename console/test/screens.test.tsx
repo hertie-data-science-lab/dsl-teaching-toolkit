@@ -61,6 +61,8 @@ const PEOPLE = 'people:\n  instructors:\n    - github_handle: a-example\n      e
 const GRADING = 'title: Group project\ntype: group\nteam_formation: self_select\nmax_team_size: 4\nsubmit_via: assignment_repo\nvisibility: private\nformat: ipynb\nautograde: sometimes\ncompletion_check: true\ngrader_pdf: false\nquestions:\n  proposal: 20\n  analysis: 30\n';
 const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.now', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
 
+const TREE = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/05_trees_and_ensembles/slides.html', 'lectures/05_trees_and_ensembles/notes.pdf', 'lectures/03_regularisation/slides.html'] };
+
 const files = new StaticFiles(
   {
     [`${COHORT_ORG}/classroom-config/schedule.yml`]: SCHEDULE,
@@ -71,6 +73,7 @@ const files = new StaticFiles(
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING,
   },
   { [`${COHORT_ORG}/${COHORT_ORG}.github.io/_announcements`]: ['2026-09-21-scikit.md'] },
+  TREE,
 );
 
 const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files, now: NOW, heartbeat: { lastTick: '2026-09-23T07:48:00Z', late: false }, ...over });
@@ -123,9 +126,11 @@ describe('S4 cohort overview', () => {
     expect(t).toMatch(/Checked \d+ min ago/);
     expect(t).toContain('Released Session 3: 7 files to materials.');
   });
-  it('has Check now and More in the header, disabled until the operation panel lands', () => {
-    expect(out).toMatch(/<button class="btn" type="button" disabled[^>]*>Check now/);
+  it('has Check now and More in the header, with the More items live', () => {
+    expect(out).toMatch(/<button class="btn" type="button">Check now<\/button>/);
     expect(t).toContain('Preview the next automatic run');
+    expect(t).toContain('Keep cohort edits for future terms');
+    expect(out).not.toMatch(/role="menuitem" disabled/);
     expect(t).toContain('What happens here');
   });
   it('flags a stale status', () => {
@@ -134,7 +139,7 @@ describe('S4 cohort overview', () => {
   it('shows Status not computed yet when the file is absent', () => {
     const a = html(<CohortScreen {...props({ loaded: { kind: 'absent' } })} />);
     expect(a).toContain('Status not computed yet');
-    expect(a).toMatch(/disabled[^>]*>Check now/);
+    expect(a).toMatch(/<button class="btn" type="button">Check now/);
   });
 });
 
@@ -174,7 +179,12 @@ describe('S6 schedule and S11 release', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(out).toContain('trow lec fault current');
     expect(out).toContain('class="entry"');
-    expect(out).toContain('course-materials-f2026/lectures/05_trees');
+    expect(out).toMatch(/<option value="course-materials-f2026" selected>/);
+    expect(out).toContain('id="e-d0-folder" list="folders-0" value="lectures/05_trees"');
+    expect(out).toContain('Not found. The release will be skipped until the folder exists.');
+    expect(out).toContain('Use the one that exists: <button');
+    expect(out).toContain('lectures/05_trees_and_ensembles');
+    expect(out).toContain('schedule.yml#L5');
   });
   it('renders a release with its source, destination and problem', () => {
     const t = text(<ReleaseScreen {...props({ entry: 's5' })} />);
@@ -239,13 +249,14 @@ describe('S2 course and S17 template', () => {
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
     const out = html(<TemplateScreen {...cp} entry="assignment-3" />);
-    expect(out).toContain('Group project');
-    expect(out).toContain('In teams');
-    expect(out).toContain('sometimes');
-    expect(out).toContain('var(--bad-soft)');
-    expect(out).toContain('<td>proposal</td>');
+    expect(out).toContain('value="Group project"');
+    expect(out).toMatch(/value="group" checked/);
+    expect(out).toContain('The file says “sometimes”. Choose on or off.');
+    expect(out).toContain('value="proposal"');
     expect(out).toContain('<td>50</td>');
+    expect(out).toContain('Advanced <span class="cnt changed">(1 changed)</span>');
     expect(out).toContain('/edit/solution/grading_config.yml');
+    expect(out).toContain('Derive student version');
   });
 });
 

@@ -6,8 +6,11 @@ import {
 } from '../model/format';
 import { parseSchedule, scheduleRows, type Row, type Schedule } from '../model/schedule';
 import type { Assignment, Status } from '../model/types';
-import { Crumbs, Help, Legend, OpsList, ProblemCards, Probs, Rail, Soon, fixHref } from '../ui/bits';
-import { CheckNow, MoreMenu, WithStatus, cohortName } from './common';
+import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
+import { OpButtons, OpOpen } from '../ops/Panel';
+import type { Release } from '../model/types';
+import { Crumbs, Help, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
+import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, useOperations } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 export const tzOf = (s: Status) => s.cohort?.timezone ?? 'Europe/Berlin';
@@ -106,7 +109,12 @@ export function TermStrip({ status, rows, start, now }: { status: Status; rows: 
   );
 }
 
-function WeekItems({ status }: { status: Status }) {
+/** A release as an operation names it. */
+export function releaseRef(r: Release, all: Release[], tz: string, year: number): ReleaseRef {
+  return { id: r.id, ident: releaseIdent(r, all), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source };
+}
+
+function WeekItems({ status, p }: { status: Status; p: CohortProps }) {
   const tz = tzOf(status), releases = status.releases ?? [];
   const items = status.this_week ?? [];
   if (!items.length) return <p class="footnote">Nothing scheduled for the rest of this week.</p>;
@@ -123,8 +131,7 @@ function WeekItems({ status }: { status: Status }) {
           detail = rel?.state === 'will_be_skipped' ? 'Will be skipped: its folder was not found.' : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
           buttons = (
             <>
-              <Soon label="Preview" cls="btn small" />
-              <Soon label={`Release ${ident} early`} cls="btn small outline" />
+              {rel && rel.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), releaseRef(rel, releases, tz, zoned(it.when, tz).y))} small label={`Release ${ident} early`} /> : null}
               <a class="textlink" href={`#release-${it.ref}`}>Details</a>
             </>
           );
@@ -195,6 +202,7 @@ function Overview(p: ReadyProps) {
   const sunday = addDays(today, (7 - zoned(today).dow) % 7);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
   const s = status.students;
+  const ops = useOperations(status.operations, p.cohort.org);
   const fixOf = (stage: string) => {
     const pr = problems.find((x) => x.stage === stage);
     const h = pr && fixHref(pr);
@@ -213,7 +221,7 @@ function Overview(p: ReadyProps) {
             <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button>
           </p>
         </div>
-        <div class="actions"><Probs n={problems.length} /><CheckNow /><MoreMenu /></div>
+        <div class="actions"><Probs n={problems.length} /><CheckNow p={p} /><MoreMenu p={p} /></div>
       </div>
       <Help title="What happens here" doc="07-schedule-releases.md">
         <p>This week lists what will happen without you. Problems lists what will not happen until you fix it; each Fix opens the editor at the entry at fault.</p>
@@ -240,7 +248,7 @@ function Overview(p: ReadyProps) {
         <div class="grid-2">
           <section class="panel section">
             <div class="section-head"><h2>This week</h2><span class="meta">{fmtDay(today, tz).replace(/ \w+$/, '')} to {fmtDay(sunday, tz, year)}</span></div>
-            <WeekItems status={status} />
+            <WeekItems status={status} p={p} />
             <p class="overdue">{late.length ? `${late.length} release${late.length > 1 ? 's are' : ' is'} late: ${late.map((r) => releaseIdent(r, status.releases ?? [])).join(', ')}.` : 'Nothing overdue.'}</p>
           </section>
           <section class="panel section">
@@ -262,10 +270,10 @@ function Overview(p: ReadyProps) {
           <section class="panel section">
             <div class="section-head">
               <h2>Automation</h2>
-              <span class="actions"><Soon label="Check staff access" cls="btn small quiet" /><a class="btn small quiet" href="#operations">All operations</a></span>
+              <span class="actions"><OpOpen def={checkAccess(cohortScope(p))} cls="btn small quiet" label="Check staff access" /><a class="btn small quiet" href="#operations">All operations</a></span>
             </div>
             <AutomationHead heartbeat={p.heartbeat} now={now} />
-            <OpsList list={(status.operations ?? []).slice(0, 3)} now={now} runRepo={`${p.course.org}/.github`} />
+            <OpsList list={ops.slice(0, 3)} now={now} runRepo={`${p.course.org}/.github`} />
           </section>
         </div>
       </div>

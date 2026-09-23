@@ -113,13 +113,14 @@ export interface Status {
 export interface Outcome {
   schema: 'dsl.outcome/1';
   op: string;
-  run_id: number;
+  run_id: number | null;
   actor: string;
   preview: boolean;
   conclusion: Conclusion;
   summary: string;
   counts?: Record<string, number>;
   reasons?: { code: string; text: string; fix?: Fix }[];
+  people?: { handle: string; text: string }[]; // private file only
   started?: string;
   finished?: string;
 }
