@@ -3611,24 +3611,27 @@ def _retired_gradebook_files(wd: Path) -> list[str]:
     return sorted(f"{GRADEBOOK_DIR}/{p.name}" for p in folder.glob("*.yml"))
 
 
-def _told_grades(wd: Path) -> dict[str, dict[str, str]]:
-    """`{handle (casefolded): {slug: final grade}}` as the last real run exported them, so
-    the preview can say which grades a run would CHANGE. Empty when there is no export yet
-    or it cannot be read, and every grade is then new."""
+def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
+    """`({handle (casefolded): {slug: final grade}}, the export's columns)` as the last
+    real run exported them, so the preview can say which grades a run would CHANGE and
+    which columns it would ADD. Empty when there is no export yet or it cannot be read,
+    and every grade and column is then new."""
     path = wd / COHORT_CSV_NAME
     if not path.is_file():
-        return {}
+        return {}, set()
     try:
-        rows = read_csv(path.read_text(), ("github_handle",), COHORT_CSV_NAME)
-        return {
-            row["github_handle"].strip().casefold(): {
-                k: v for k, v in row.items() if k and v and k not in _REGISTRAR_FIELDS
-            }
-            for row in rows
-            if (row.get("github_handle") or "").strip()
-        }
+        reader = read_csv(path.read_text(), ("github_handle",), COHORT_CSV_NAME)
+        rows = list(reader)
     except RuntimeError:
-        return {}
+        return {}, set()
+    told = {
+        row["github_handle"].strip().casefold(): {
+            k: v for k, v in row.items() if k and v and k not in _REGISTRAR_FIELDS
+        }
+        for row in rows
+        if (row.get("github_handle") or "").strip()
+    }
+    return told, set(reader.fieldnames or ())
 
 
 def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
@@ -3669,26 +3672,29 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
     return specs
 
 
-def _unmarked_questions(spec: SheetSpec, sheet: dict) -> dict[str, int]:
-    """`{unit: how many questions are still blank}` for every unit that has SOME question
-    marked and some not.
+def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:
+    """`{unit: the questions still blank}` for every unit with SOME question marked and
+    some not, and `{unit: []}` for every unit with no mark at all.
 
     A partly filled map totals to what has been typed so far, and a real run sends that
     total: which is right (a grader who wants to release Q1 early may) and is also exactly
     how half a mark reaches a student unnoticed. So the dry run says where they are, and
     the decision stays the grader's."""
-    if not spec.questions:
-        return {}
     out = {}
     for unit, block in ((sheet or {}).get(spec.container_key) or {}).items():
         if not isinstance(block, dict):
             continue
         score = block.get(spec.score_key)
-        if not isinstance(score, dict):
-            continue
-        blank = [k for k in spec.questions if _blank(score.get(k))]
-        if blank and len(blank) < len(spec.questions):
-            out[str(unit)] = len(blank)
+        if isinstance(score, dict) and spec.questions:
+            blank = [k for k in spec.questions if _blank(score.get(k))]
+            if len(blank) == len(spec.questions):
+                out[str(unit)] = []
+            elif blank:
+                out[str(unit)] = blank
+        elif _blank(score) or (
+            isinstance(score, dict) and all(_blank(v) for v in score.values())
+        ):
+            out[str(unit)] = []
     return out
 
 
@@ -4001,7 +4007,7 @@ def distribute(
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
-        told_grades = _told_grades(wd) if dry_run else {}
+        export = _told_grades(wd) if dry_run else ({}, set())
 
     held = _hold_undecided(
         books,
@@ -4129,7 +4135,12 @@ def distribute(
             pending if notify else [],
             held,
             students or [],
-            told_grades,
+            export,
+            first_email={
+                h for h in pending if not record.get((h, "", CHANNEL_EMAIL), ("",))[0]
+            },
+            moment=moment,
+            notify=notify,
         )
         # `not students` on both exits - no rows AND no file, for the same reason:
         # `ensure_gradebooks` passes over either rather than redden the nightly sync it now
@@ -4213,14 +4224,20 @@ def _preview(
     emailed: list[str],
     held: dict[str, dict[str, tuple[str, str]]],
     students: list[roster.Student],
-    told: dict[str, dict[str, str]],
+    told: tuple[dict[str, dict[str, str]], set[str]],
+    *,
+    first_email: set[str],
+    moment: datetime,
+    notify: bool,
 ) -> bool:
     """The dry run's report: counts a grader can check in the log, and the detail behind
     them in the preview issue. False when the issue could not be written.
 
     No names, and no marks, in the log: this is the log of a workflow that runs in a
     PUBLIC repo. Who would get what goes into the issue, in the private classroom-config."""
-    unmarked = {slug: _unmarked_questions(specs[slug], sheets[slug]) for slug in sheets}
+    told_grades, columns = told
+    not_marked = {slug: _not_marked(specs[slug], sheets[slug]) for slug in sheets}
+    exported = {slug for book in books.values() for slug in book}
     for slug in sorted(sheets):
         spec = specs[slug]
         units = (sheets[slug] or {}).get(spec.container_key) or {}
@@ -4243,9 +4260,11 @@ def _preview(
         tally = Counter(reason for _unit, reason in held.get(slug, {}).values())
         for reason, count in sorted(tally.items()):
             log(f"    {count} with {HOLD_REASONS[reason]}")
-        if unmarked[slug]:
-            log(f"    {len(unmarked[slug])} unit(s) have unmarked questions")
-        log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
+        partly = sum(1 for blank in not_marked[slug].values() if blank)
+        if partly:
+            log(f"    {partly} unit(s) have unmarked questions")
+        if slug in exported and slug not in columns:
+            log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
     if counts["unknown"]:
         # Counted, not named: a handle nobody enrolled is still somebody's.
         log(f"  {counts['unknown']} mark(s) for handles not on the roster - ignored")
@@ -4258,7 +4277,17 @@ def _preview(
         repo,
         PREVIEW_TITLE,
         _preview_body(
-            cohort_org, books, counts, emailed, held, students, told, unmarked
+            cohort_org,
+            specs,
+            books,
+            emailed,
+            held,
+            students,
+            told_grades,
+            not_marked,
+            first_email=first_email,
+            moment=moment,
+            notify=notify,
         ),
     )
     if not wrote.errors:
@@ -4267,41 +4296,143 @@ def _preview(
     return not wrote.errors
 
 
+# Each hold reason as the preview says it of one student, after their handle and name.
+# `HOLD_REASONS` is the log's noun phrase; this is the sentence a grader reads in the
+# issue, in their own words for the sheet rather than the pipeline's.
+_HOLD_PREVIEW = {
+    "penalty": "was late, and their mark is not a number a late penalty can come off",
+    "score": "has a question mark that is not a number",
+    "adjustment": "has an adjustment that is not a number",
+    "question": "has a mark for a question the assignment does not have",
+    "duplicate": "is in more than one team",
+}
+
+
+def _counted(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
 def _preview_body(
     cohort_org: str,
+    specs: dict[str, SheetSpec],
     books: dict[str, dict[str, dict]],
-    counts: dict[str, int],
     emailed: list[str],
     held: dict[str, dict[str, tuple[str, str]]],
     students: list[roster.Student],
     told: dict[str, dict[str, str]],
-    unmarked: dict[str, dict[str, int]],
+    not_marked: dict[str, dict[str, list[str]]],
+    *,
+    first_email: set[str],
+    moment: datetime,
+    notify: bool,
 ) -> str:
-    """The preview issue: the email once, then one row per student with something to
-    report. A grade is listed only where it differs from the registrar's export, which is
-    what the last real run sent; a student with nothing new, held or unmarked is left out,
-    so a large cohort still fits in one issue - and if it does not, the rest are counted."""
+    """The preview issue, laid out by what a grader has to do: what to fix, what is not
+    marked yet, which grades would change, and who would be emailed and why. A grade is
+    listed only where it differs from the registrar's export, which is what the last real
+    run sent. If it does not fit in one issue, what is left out is counted."""
     names = {s.github_handle.casefold(): s.name for s in students if s.github_handle}
-    out = [
-        (
-            f"What the last dry run of **Distribute grades** would do "
-            f"({datetime.now(UTC):%Y-%m-%d %H:%M} UTC). Nothing has been written or "
-            f"sent. Every dry run rewrites this issue; the real run closes it."
-        ),
-        "",
-        (
-            f"{counts['gradebooks']} gradebook(s) would be updated, {len(emailed)} "
-            f"student(s) emailed, {counts['held']} mark(s) held."
-        ),
-        "",
+
+    def who(handle: str) -> str:
+        name = names.get(handle.casefold(), "")
+        return f"`{handle}` ({name})" if name else f"`{handle}`"
+
+    fixes = [
+        f"- **{slug}** · {who(handle)} {_HOLD_PREVIEW[reason]}. Fix it in "
+        f"`{SHEETS_DIR}/{slug}.yml`."
+        for slug, whose in sorted(held.items())
+        for handle, (_unit, reason) in sorted(whose.items())
     ]
+
+    unmarked = []
+    for slug, units in sorted(not_marked.items()):
+        noun = ("team", "teams") if specs[slug].is_group else ("student", "students")
+        by_blank: dict[tuple[str, ...], list[str]] = {}
+        for unit, blank in sorted(units.items()):
+            by_blank.setdefault(tuple(blank), []).append(unit)
+        # The rows with no mark at all first: they are the bigger job.
+        for blank, whose in sorted(by_blank.items(), key=lambda kv: (bool(kv[0]), kv)):
+            what = f"{', '.join(blank)} blank" if blank else "no mark yet"
+            unmarked.append(
+                f"- **{slug}** · {_counted(len(whose), *noun)}: "
+                f"{', '.join(f'`{u}`' for u in whose)} ({what})"
+            )
+
+    changes = []
+    changed: set[str] = set()
+    for handle, book in sorted(books.items()):
+        was = told.get(handle.casefold(), {})
+        for slug, view in sorted(book.items()):
+            grade = str(view.get("final_grade", ""))
+            if grade and grade != was.get(slug):
+                changed.add(handle)
+                changes.append(
+                    (
+                        slug,
+                        handle,
+                        f"- **{slug}** · {who(handle)} · {grade} "
+                        + (f"(was {was[slug]})" if slug in was else "(new)"),
+                    )
+                )
+
+    mails = []
+    for handle in sorted(emailed):
+        if handle in first_email:
+            why = "their first grades email"
+        elif handle in changed:
+            why = "a grade changed"
+        else:
+            why = "feedback changed"
+        shown = " · ".join(
+            f"{slug} {view['final_grade']}"
+            for slug, view in sorted(books.get(handle, {}).items())
+            if not _blank(view.get("final_grade"))
+        )
+        mails.append(
+            f"- {who(handle)} - {why}.\n"
+            f"  Their gradebook shows: {shown or 'feedback only, no grade yet'}"
+        )
+
+    sections = [
+        (
+            f"### ⚠️ Fix these first - held back, not sent ({len(fixes)})",
+            fixes,
+            "Nothing - no mark is held back.",
+        ),
+        (
+            f"### Not marked yet ({sum(len(u) for u in not_marked.values())})",
+            unmarked,
+            "Nothing - every row in every sheet has a mark.",
+        ),
+        (
+            f"### Grades that would change ({len(changes)})",
+            [line for _slug, _handle, line in sorted(changes)],
+            "Nothing new or changed since grades were last sent.",
+        ),
+        (
+            f"### Students who would be emailed ({len(mails)})",
+            mails,
+            "Nothing - `silent` is ticked, so nobody is emailed."
+            if not notify
+            else "Nothing - nobody has a new mark to be told about.",
+        ),
+    ]
+    head = [
+        f"**Nothing has been sent.** Dry run: {moment.day} {moment:%b %H:%M} UTC.",
+        (
+            "This is what running Distribute grades for real (with `dry_run` "
+            "unticked) would do now."
+        ),
+        "Each dry run replaces this text; the real run closes this issue.",
+    ]
+    tail = []
     if emailed:
         # Rendered exactly as the send renders it, course name and all: a preview that
         # showed the generic wording while the real mail named the course was reviewing
         # text nobody would ever receive.
         subject, body = sample_message(cohort_org, _course_name(cohort_org))
-        out += [
-            "The email:",
+        tail = [
+            "",
+            "<details><summary>The email they would get</summary>",
             "",
             "```",
             f"Subject: {subject}",
@@ -4309,57 +4440,36 @@ def _preview_body(
             body.rstrip(),
             "```",
             "",
+            "</details>",
         ]
-    rows = []
-    for handle in sorted({*books, *(h for whose in held.values() for h in whose)}):
-        book = books.get(handle, {})
-        was = told.get(handle.casefold(), {})
-        changed = []
-        for slug, view in sorted(book.items()):
-            grade = str(view.get("final_grade", ""))
-            if grade and grade != was.get(slug):
-                changed.append(
-                    f"{slug} {grade}"
-                    + (f" (was {was[slug]})" if slug in was else " (new)")
+
+    def render(shown: list[int]) -> str:
+        out = list(head)
+        for (heading, items, nothing), n in zip(sections, shown, strict=True):
+            out += ["", heading]
+            if not items:
+                out.append(nothing)
+                continue
+            out += items[:n]
+            if n < len(items):
+                out.append(
+                    f"_{len(items) - n} more not shown - the list is longer than one "
+                    f"issue can hold._"
                 )
-        holds = [
-            f"{slug}: {HOLD_REASONS[whose[handle][1]]}"
-            for slug, whose in sorted(held.items())
-            if handle in whose
-        ]
-        unit = {slug: view.get("team") or handle for slug, view in book.items()}
-        unit |= {s: w[handle][0] for s, w in held.items() if handle in w}
-        blank = [
-            f"{slug}: {unmarked[slug][u]}"
-            for slug, u in sorted(unit.items())
-            if u in unmarked.get(slug, {})
-        ]
-        mailed = handle in emailed
-        if changed or mailed or holds or blank:
-            rows.append(
-                f"| `{handle}` | {_cell(names.get(handle.casefold(), ''))} | "
-                f"{_cell('; '.join(changed))} | {'yes' if mailed else 'no'} | "
-                f"{_cell('; '.join(holds))} | {_cell('; '.join(blank))} |"
-            )
-    if not rows:
-        return "\n".join([*out, "No student has anything new, held or unmarked."])
-    out += [
-        (
-            "| Student | Name | Grades (new or changed) | Emailed | Held | "
-            "Unmarked questions |"
-        ),
-        "|---|---|---|---|---|---|",
-    ]
-    text = "\n".join(out)
-    for i, row in enumerate(rows):
-        # Room kept for the line that says how many were left out.
-        if len(text) + len(row) + 200 > _ISSUE_BODY_CAP:
-            return (
-                f"{text}\n\n_{len(rows) - i} more student(s) not shown - the list is "
-                f"longer than one issue can hold._"
-            )
-        text += "\n" + row
-    return text
+        return "\n".join(out + tail)
+
+    # Every heading, its empty line or its count of what was left out, and the email
+    # always fit; the bullets fill what is left, in order, and stop at the first that
+    # does not.
+    shown = [0] * len(sections)
+    room = _ISSUE_BODY_CAP - len(render(shown))
+    for i, (_heading, items, _nothing) in enumerate(sections):
+        for item in items:
+            if len(item) + 1 > room:
+                return render(shown)
+            room -= len(item) + 1
+            shown[i] += 1
+    return render(shown)
 
 
 def update_message(
