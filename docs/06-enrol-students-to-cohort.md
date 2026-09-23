@@ -63,15 +63,21 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
   and **whose team-formation window is open**. It enforces that assignment's
   `max_team_size` (default: the course's `assignment_defaults`, else 5). Every answer
   reaches the form through the generated mirror `classroom-config/assignments.lock.yml`.
-  The refusals a student can meet, all labelled `needs-review`:
-  - `assignment-1 is an individual assignment - no teams.`
-  - `teams for assignment-1 are assigned by the instructor.` (write `teams.csv` yourself)
-  - `team formation for assignment-1 is not open yet` / `closed on 15 Oct.`
-  - `there is no team teamalpha for assignment-1. Did you mean team-alpha?` - they asked to
-    **join** a name nothing carries, and the near miss is named when there is one;
-    `team-alpha already exists for assignment-1` - they asked to **create** a name that
-    does, or one that differs from it only in case, dashes and underscores.
-  - `team-alpha already has 3 members (the cap for assignment-1 is 3).`
+  Three outcomes, by label:
+  - `team-recorded` (closed): the row is in `teams.csv`. The comment points to step 2 on
+    the assignment page, where the team's repo appears within minutes.
+  - `team-refused` (closed as not planned): the **student** can fix it, and the comment
+    says how, with a link to a new Join team issue with the Team box filled in. Covers:
+    an individual or instructor-assigned assignment; the window not open yet or closed;
+    Join or Switch to a team that doesn't exist (the nearest real team is named) or is
+    full; Create onto a name that exists, or differs from one only in case, dashes and
+    underscores; Join or Create while already in a team (they're pointed at Switch); an
+    unreadable form or a name that isn't letters, digits and dashes.
+  - `needs-review` (open): **you** must act - not on the roster or not onboarded, an
+    auditor, a missing lock or team cap, a teams.csv header problem, or a write that failed.
+- **Switch to another team** moves a student while the window is open, in one write to
+  `teams.csv`. Sync membership then takes them out of the old GitHub team, including a
+  team they leave empty. The old team's repo is kept, with what they pushed.
 - An assignment whose course template does not exist yet refuses every request until the
   template is created.
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.

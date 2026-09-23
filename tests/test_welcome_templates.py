@@ -208,9 +208,9 @@ def test_a_refused_team_name_gives_no_reason():
     # Reserved names and handle collisions share one reason-free refusal.
     code = code_of(script_of("team-formation.yml", "form-team"))
     assert "named after a GitHub handle" not in code
-    assert "handles.has(team)) return fail(NAME_TAKEN" in code
+    assert "handles.has(team)) return refuse(NAME_TAKEN" in code
     # ... the same words the reserved-name refusal uses, so the two are indistinguishable.
-    assert len(re.findall(r"fail\(\s*NAME_TAKEN", code)) == 2
+    assert len(re.findall(r"refuse\(\s*NAME_TAKEN", code)) == 2
 
 
 def test_team_formation_treats_a_missing_role_column_as_enrolled():
@@ -501,9 +501,9 @@ def test_only_self_selection_may_form_a_team():
 
 def test_each_refusal_says_which_kind_of_assignment_it_is():
     script = script_of("team-formation.yml", "form-team")
-    assert "is an individual assignment - no teams." in script
+    assert "is an individual assignment, so there are no teams" in script
     assert "are assigned by the instructor." in script
-    assert "(the cap for \\`${assignment}\\` is ${cap})" in script
+    assert "is full for \\`${assignment}\\` (${size}/${cap})" in script
 
 
 def test_every_code_in_the_body_is_redacted_not_only_the_one_that_binds():
@@ -569,8 +569,11 @@ def test_refresh_seeds_exactly_the_routing_labels_the_forms_declare(monkeypatch)
             yaml.safe_load((WELCOME / "ISSUE_TEMPLATE" / rel).read_text())["labels"]
         )
     seeded = {name for name, _, _ in welcome.WELCOME_LABELS}
-    # Every label a form declares must be seeded, or that form's issues are skipped.
-    assert seeded == declared
+    # Every label a form declares must be seeded, or that form's issues are skipped - and
+    # `team-refused`, which no form declares, is seeded so a refusal the student can fix
+    # reads as that rather than as a staff queue.
+    assert declared <= seeded
+    assert seeded - declared == {"team-refused"}
 
     monkeypatch.setattr(welcome, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
@@ -707,7 +710,8 @@ def _run_form(
         "  issues: {\n"
         "    createComment: (a) => { OUT.comments.push(a.body); return {}; },\n"
         "    addLabels: (a) => { OUT.labels.push(a.labels[0]); return {}; },\n"
-        "    update: (a) => { if (a.state) OUT.states.push(a.state); return {}; },\n"
+        "    update: (a) => { if (a.state) OUT.states.push(a.state +"
+        " (a.state_reason ? ':' + a.state_reason : '')); return {}; },\n"
         "  },\n"
         "} };\n"
         "(function () {\n" + code + "\n})();\n"
@@ -751,7 +755,8 @@ def test_a_shut_window_refuses_and_says_which_day_it_shut():
         _form_body("assignment-2", "Join an existing team", "team-alpha"),
     )
     assert out["writes"] == [], "a request outside the window was recorded anyway"
-    assert out["labels"] == ["needs-review"]
+    assert out["labels"] == ["team-refused"]
+    assert out["states"] == ["closed:not_planned"]
     assert "team formation for `assignment-2` closed on 4th Oct." in out["comments"][0]
 
 
@@ -766,7 +771,7 @@ def test_a_window_that_has_not_opened_yet_never_says_it_closed():
         _form_body("assignment-2", "Join an existing team", "team-alpha"),
     )
     assert out["writes"] == [], "a request before the window opened was recorded anyway"
-    assert out["labels"] == ["needs-review"]
+    assert out["labels"] == ["team-refused"]
     said = out["comments"][0]
     assert "is not open yet" in said
     assert "closed on" not in said, "a pending window must not claim it has shut"
@@ -831,9 +836,12 @@ def test_creating_a_near_miss_of_an_existing_name_is_refused_too(team):
         _form_body("assignment-2", "Create a new team", team),
     )
     assert out["writes"] == []
-    assert out["labels"] == ["needs-review"]
-    assert "**team-alpha** (2/4) already exists" in out["comments"][0]
+    assert out["labels"] == ["team-refused"]
+    assert (
+        "**team-alpha** already exists for `assignment-2` (2/4)" in out["comments"][0]
+    )
     assert "Join an existing team" in out["comments"][0]
+    assert "team=team-alpha" in out["comments"][0], "the new issue is prefilled"
 
 
 @needs_js
@@ -861,8 +869,16 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     assert "Did you mean" not in out["comments"][0]
     assert "Create a new team" in out["comments"][0]
     # Somewhere to look is the assignment's page on the cohort site - the one list of
-    # teams - carried in the lock because this script cannot work its URL out.
-    assert f"listed on [the assignment's page]({_PAGE})" in out["comments"][0]
+    # teams - carried in the lock because this script cannot work its URL out; and a new
+    # issue one click away, its Team box prefilled.
+    said = out["comments"][0]
+    assert f"spelt exactly as on [the assignment page]({_PAGE})" in said
+    assert (
+        "(https://github.com/cohort/welcome/issues/new?template=02-join-team.yml"
+        "&team=team-zeta)" in said
+    )
+    assert out["labels"] == ["team-refused"]
+    assert out["states"] == ["closed:not_planned"]
 
 
 @needs_js
@@ -875,8 +891,8 @@ def test_a_lock_with_no_page_still_says_where_the_teams_are_listed():
         _form_body("assignment-2", "Join an existing team", "team-zeta"),
     )
     said = out["comments"][0]
-    assert "listed on the assignment's page on the cohort site" in said
-    assert "](" not in said
+    assert "spelt exactly as on the assignment page on the course site" in said
+    assert "github.io" not in said
 
 
 @needs_js
@@ -906,6 +922,169 @@ def test_an_issue_from_a_form_with_no_action_field_is_answered_as_it_always_was(
         _lock_for("open"), _TEAMS_CSV, _form_body("assignment-2", None, "team-gamma")
     )
     assert started["writes"][0].endswith("assignment-2,team-gamma,stu\n")
+
+
+@needs_js
+def test_a_recorded_join_points_at_the_next_step():
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+    )
+    said = out["comments"][0]
+    assert "you're in team **team-alpha** for `assignment-2` (3/4)" in said
+    assert (
+        f"step 2 on [the assignment page]({_PAGE}). It appears within a few minutes"
+        in said
+    )
+    assert "Tell your teammates" not in said, "that line is for whoever CREATED it"
+    assert out["labels"] == ["team-recorded"] and out["states"] == ["closed"]
+
+
+@needs_js
+def test_a_recorded_create_tells_the_student_how_teammates_join():
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Create a new team", "team-beta"),
+    )
+    said = out["comments"][0]
+    assert "you're in team **team-beta** for `assignment-2` (1/4)" in said
+    assert "choose *Join an existing team* and type **team-beta** exactly" in said
+
+
+@needs_js
+def test_joining_while_in_a_team_points_at_switch_rather_than_staff():
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        handle="bob",
+    )
+    assert out["writes"] == [], "bob is in team-alpha already - nothing to write"
+    solo = _TEAMS_CSV + "assignment-2,team-beta,stu\n"
+    out = _run_form(
+        _lock_for("open"),
+        solo,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+    )
+    said = out["comments"][0]
+    assert out["writes"] == []
+    assert "you're already in **team-beta**" in said
+    assert "choose *Switch to another team*" in said
+    assert out["labels"] == ["team-refused"]
+    assert out["states"] == ["closed:not_planned"]
+
+
+@needs_js
+def test_a_switch_moves_the_row_in_one_write():
+    # stu leaves team-beta (where she was alone) for team-alpha: one commit that drops the
+    # old row and adds the new, so she is never in two teams nor in none.
+    solo = _TEAMS_CSV + "assignment-2,team-beta,stu\n"
+    out = _run_form(
+        _lock_for("open"),
+        solo,
+        _form_body("assignment-2", "Switch to another team", "team-alpha"),
+    )
+    (written,) = out["writes"]
+    assert "assignment-2,team-beta,stu" not in written
+    assert written.endswith("assignment-2,team-alpha,stu\n")
+    said = out["comments"][0]
+    assert (
+        "you've left **team-beta** and joined **team-alpha** for `assignment-2` (3/4)"
+        in said
+    )
+    assert "You lose access to team-beta's repo" in said
+    assert "step 2 on [the assignment page]" in said
+    assert out["labels"] == ["team-recorded"]
+
+
+@needs_js
+@pytest.mark.parametrize(
+    "csv,team,expect",
+    [
+        (_TEAMS_CSV, "team-alpha", "you're not in a team for `assignment-2` yet"),
+        (
+            _TEAMS_CSV + "assignment-2,team-beta,stu\n",
+            "team-beta",
+            "you're already in **team-beta**",
+        ),
+        (
+            _TEAMS_CSV + "assignment-2,team-beta,stu\n",
+            "teamalpha",
+            "Did you mean **team-alpha** (2/4)?",
+        ),
+        (
+            _TEAMS_CSV
+            + "assignment-2,team-alpha,cy\nassignment-2,team-alpha,di\n"
+            + "assignment-2,team-beta,stu\n",
+            "team-alpha",
+            "**team-alpha** is full",
+        ),
+    ],
+    ids=["not-in-a-team", "same-team", "near-miss", "full"],
+)
+def test_a_switch_the_student_can_put_right_is_closed_with_the_reason(
+    csv, team, expect
+):
+    out = _run_form(
+        _lock_for("open"),
+        csv,
+        _form_body("assignment-2", "Switch to another team", team),
+        roster=("ann", "bob", "cy", "di", "stu"),
+    )
+    assert out["writes"] == []
+    assert expect in out["comments"][0]
+    assert out["labels"] == ["team-refused"]
+    assert out["states"] == ["closed:not_planned"]
+
+
+@needs_js
+def test_a_switch_after_the_window_shuts_is_the_window_refusal():
+    out = _run_form(
+        _lock_for("closed"),
+        _TEAMS_CSV + "assignment-2,team-beta,stu\n",
+        _form_body("assignment-2", "Switch to another team", "team-alpha"),
+    )
+    assert out["writes"] == []
+    assert "closed on 4th Oct" in out["comments"][0]
+
+
+@needs_js
+def test_a_hostile_team_name_is_refused_and_can_inject_nothing():
+    name = "evil ](http://x.test) & #1 *bold*"
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Create a new team", name),
+    )
+    said = out["comments"][0]
+    assert out["writes"] == []
+    assert out["labels"] == ["team-refused"]
+    # Every markdown character escaped: no link, no bold, no heading can come of it.
+    assert "(http://x.test)" not in said
+    assert "\\]\\(http://x\\.test\\)" in said
+    assert "\\*bold\\*" in said and "\\#1" in said and "\\&" in said
+
+
+@needs_js
+def test_a_name_that_needs_encoding_is_encoded_in_the_prefilled_link():
+    # A valid name never needs it, but the link is built the same way for every name, and
+    # the encoding is what keeps a student's text from rewriting the URL.
+    code = code_of(script_of("team-formation.yml", "form-team"))
+    assert "`&team=${encodeURIComponent(name)}`" in code
+
+
+@needs_js
+def test_a_student_not_on_the_roster_stays_open_for_staff():
+    out = _run_form(
+        _lock_for("open"),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        handle="stranger",
+        roster=("ann", "bob"),
+    )
+    assert out["labels"] == ["needs-review"] and out["states"] == []
 
 
 def test_nothing_opens_or_names_a_team_list_issue_any_more():
@@ -949,6 +1128,7 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
     assert fields["action"]["attributes"]["options"] == [
         "Join an existing team",
         "Create a new team",
+        "Switch to another team",
     ]
 
 

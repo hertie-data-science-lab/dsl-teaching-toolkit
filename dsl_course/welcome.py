@@ -132,6 +132,15 @@ def example_course_file(rel: str) -> str:
 WELCOME_LABELS = (
     ("onboarding", "0e8a16", "Join course issue - routes the Onboard student workflow"),
     ("team-formation", "1d76db", "Join team issue - routes the Form team workflow"),
+    # Not a routing label: what the Form team workflow closes a Join team issue with when
+    # the STUDENT can put it right (a team that does not exist, a name taken, a window
+    # shut). Seeded so it reads as that rather than as a staff queue - `needs-review` is
+    # kept for what somebody on the teaching team has to act on.
+    (
+        "team-refused",
+        "e4e669",
+        "Join team request refused - the comment says how to fix it",
+    ),
 )
 
 

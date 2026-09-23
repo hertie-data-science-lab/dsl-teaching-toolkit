@@ -11,7 +11,9 @@ on the group's repo (so post-sync membership edits propagate to access automatic
 
 With --prune, members no longer in the CSV are removed from their team (off-boarding) - never
 an org Owner or the acting login (see gh_teams.reconcile_team_members); off by default here so a
-standalone/manual run never silently revokes access. Emptied teams are left in place. The seeded **Sync membership** workflow (dsl_course.sync_membership) always calls this
+standalone/manual run never silently revokes access. A project team whose LAST row has gone
+(its last member switched to another team) is reconciled to empty as well - see
+`emptied_teams` - and left in place, with its repo: nothing here deletes or archives. The seeded **Sync membership** workflow (dsl_course.sync_membership) always calls this
 with prune=True - config is meant to be the live truth there; this module's own off-by-default
 is only for ad-hoc/CLI use outside that workflow.
 
@@ -25,8 +27,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import roster, teams
-from .gh_teams import create_team, reconcile_team_members
+from . import roster, schedule, teams
+from .gh_teams import create_team, list_teams, reconcile_team_members
 from .log import log_err, log_ok, log_person, log_step
 
 # The naming rules live with the file's parser, which is the only thing that can refuse a
@@ -55,6 +57,40 @@ def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
     return wanted
 
 
+# What `ensure_team` stamps on every team it creates - and so the mark of a team this module
+# owns. `emptied_teams` touches nothing without it.
+PROJECT_TEAM_DESCRIPTION = "Project team (auto-managed from teams.csv)"
+
+
+def emptied_teams(
+    existing: dict[str, str], wanted: dict[str, set[str]], keys: list[str]
+) -> list[str]:
+    """Project teams that exist on GitHub but no longer have a row in teams.csv.
+
+    The hole this closes: the reconcile below walks the teams the CSV names, so a team
+    whose last member SWITCHED out (the Join-team form's *Switch to another team*) was never
+    visited again, and its GitHub team - and the push access to its repo - kept the leaver.
+
+    A team qualifies only if ALL of these hold, because emptying the wrong one evicts
+    people from something this module does not own:
+    - it carries `PROJECT_TEAM_DESCRIPTION`, the mark `ensure_team` stamps on creation;
+    - its slug is `<assignment>-...` for an assignment key in the cohort's schedule;
+    - it is not a role team (`teams.is_reserved_slug`: instructors, students, auditors,
+      course-admin, instructors-*), whatever else is true of it;
+    - teams.csv names no member for it."""
+    prefixes = tuple(f"{k.lower()}-" for k in keys)
+    if not prefixes:
+        return []
+    return sorted(
+        slug
+        for slug, description in existing.items()
+        if description == PROJECT_TEAM_DESCRIPTION
+        and slug.startswith(prefixes)
+        and not is_reserved_slug(slug)
+        and slug not in wanted
+    )
+
+
 def ensure_team(org: str, slug: str, members: set[str], prune: bool) -> bool:
     """Create the team (idempotent) and reconcile its membership to `members`.
 
@@ -62,9 +98,7 @@ def ensure_team(org: str, slug: str, members: set[str], prune: bool) -> bool:
     guard: an org Owner - or the acting login, which GitHub auto-adds as a member of
     whatever team it creates - is never removed. Without it, a maintainer or the bot
     sitting in a project team would be evicted on the next pruning sync."""
-    ok = create_team(
-        org, slug, description="Project team (auto-managed from teams.csv)"
-    )
+    ok = create_team(org, slug, description=PROJECT_TEAM_DESCRIPTION)
     if not ok:
         return False
     return reconcile_team_members(org, slug, members, prune=prune) == 0
@@ -120,11 +154,33 @@ def vet_groups(
     ]
 
 
+def _empty_the_emptied(
+    cohort_org: str, wanted: dict[str, set[str]], dry_run: bool
+) -> int:
+    """Reconcile every `emptied_teams` team to no members. Returns the error count.
+
+    Through `reconcile_team_members`, so its guard holds here too: an org Owner and the
+    acting login are never removed, and an unreadable owner list skips the prune whole.
+    A team listing that could not be read empties nothing - absence has to be a real
+    answer before anybody loses access on the strength of it."""
+    existing = list_teams(cohort_org)
+    if existing is None:
+        return 1
+    keys = list(schedule.load(cohort_org).assignments)
+    errors = 0
+    for slug in emptied_teams(existing, wanted, keys):
+        if dry_run:
+            log_person(f"    DRY-RUN team {slug}: now empty - would remove its members")
+            continue
+        errors += reconcile_team_members(cohort_org, slug, set(), prune=True)
+    return errors
+
+
 def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     wanted = desired_teams(teams.load(cohort_org))
     if not wanted:
         log_ok("no project teams defined yet - nothing to sync.")
-        return 0
+        return _empty_the_emptied(cohort_org, wanted, dry_run) if prune else 0
     students = roster.load(cohort_org)
     if students is None:
         # The roster is ABSENT - distinct from a present-but-empty one. Building the
@@ -171,6 +227,8 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
             )
         elif not ensure_team(cohort_org, slug, members, prune):
             errors += 1
+    if prune:
+        errors += _empty_the_emptied(cohort_org, wanted, dry_run)
     return errors
 
 

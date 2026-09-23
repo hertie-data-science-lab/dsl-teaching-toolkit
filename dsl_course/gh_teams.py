@@ -347,6 +347,21 @@ def get_team_member_ids(org: str, team_slug: str) -> dict[str, str] | None:
     return None if rows is None else {log.casefold(): gid for log, gid in rows.items()}
 
 
+def list_teams(org: str) -> dict[str, str] | None:
+    """`{slug: description}` for every team in `org`, or None if it could not be READ -
+    never an empty dict, which would read as "no teams" to a caller deciding what to
+    reconcile."""
+    code, out = gh("api", f"orgs/{org}/teams?per_page=100", "--paginate")
+    if code != 0:
+        log_err(f"could not list the teams of {org}: {out[:200]}")
+        return None
+    try:
+        return {t["slug"]: t.get("description") or "" for t in json.loads(out)}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        log_err(f"unparseable team listing for {org}: {out[:200]}")
+        return None
+
+
 def remove_team_member(org: str, team_slug: str, login: str) -> bool:
     code, _ = gh(
         "api", "--method", "DELETE", f"orgs/{org}/teams/{team_slug}/memberships/{login}"

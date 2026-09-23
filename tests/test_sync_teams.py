@@ -7,6 +7,8 @@ plus ensure_team's prune guard (the membership primitives stubbed, no live calls
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from dsl_course import gh_teams, roster, sync_teams, teams
@@ -254,3 +256,100 @@ def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_ver
     monkeypatch.setenv("DSL_VERBOSE", "1")
     assert sync_teams.sync("org", prune=False) == 0
     assert "m-stranger" in capsys.readouterr().out
+
+
+def _emptied_world(monkeypatch, stub_team, csv, existing):
+    """teams.csv, the org's teams and the schedule's keys, on the CONSUMER's names; the
+    team whose members `stub_team` reports is recorded per call."""
+    monkeypatch.setattr(sync_teams.teams, "load", lambda org: csv)
+    monkeypatch.setattr(
+        roster,
+        "load",
+        lambda org: _students(
+            "ada@uni.edu,Ada,,ada-l,1,", "ben@uni.edu,Ben,,ben-baker,2,"
+        ),
+    )
+    monkeypatch.setattr(sync_teams, "list_teams", lambda org: existing)
+    monkeypatch.setattr(
+        sync_teams.schedule,
+        "load",
+        lambda org: SimpleNamespace(assignments={"assignment-4-project": object()}),
+    )
+    touched: list[str] = []
+    real = gh_teams.get_team_members
+    monkeypatch.setattr(
+        gh_teams,
+        "get_team_members",
+        lambda org, team: touched.append(team) or real(org, team),
+    )
+    return touched
+
+
+PROJECT = sync_teams.PROJECT_TEAM_DESCRIPTION
+
+
+def test_switching_out_of_a_one_person_team_revokes_its_access(stub_team, monkeypatch):
+    # zoe-zed was alone in `wizards` and switched to `team-x`: teams.csv no longer names
+    # `wizards` at all, so the reconcile over the CSV never visited it and she kept push
+    # on its repo. The emptied team is reconciled to nobody - but never the org owner or
+    # the bot, which `reconcile_team_members` keeps whatever it is asked.
+    touched = _emptied_world(
+        monkeypatch,
+        stub_team,
+        {"assignment-4-project": {"team-x": ["ada-l"]}},
+        {
+            "assignment-4-project-team-x": PROJECT,
+            "assignment-4-project-wizards": PROJECT,
+        },
+    )
+    assert sync_teams.sync("org", prune=True) == 0
+    assert "assignment-4-project-wizards" in touched
+    assert "zoe-zed" in stub_team["removed"]
+    assert "henrycgbaker" not in stub_team["removed"]
+    assert "hertie-dsl-bot" not in stub_team["removed"]
+
+
+def test_role_teams_and_teams_it_did_not_make_are_never_emptied(stub_team, monkeypatch):
+    # Only a team this module made (its description) for a planned assignment's prefix,
+    # and never a role team - even one that happens to carry the project description.
+    touched = _emptied_world(
+        monkeypatch,
+        stub_team,
+        {},
+        {
+            "instructors": PROJECT,
+            "students": PROJECT,
+            "course-admin": PROJECT,
+            "instructors-f2026": PROJECT,
+            "assignment-4-project-markers": "Hand-made by the teaching team",
+            "assignment-9-other-wizards": PROJECT,
+        },
+    )
+    assert sync_teams.sync("org", prune=True) == 0
+    assert touched == [] and stub_team["removed"] == []
+
+
+def test_an_unpruned_sync_empties_nothing(stub_team, monkeypatch):
+    # The ad-hoc CLI never revokes access on its own; neither does this.
+    _emptied_world(
+        monkeypatch,
+        stub_team,
+        {"assignment-4-project": {"team-x": ["ada-l"]}},
+        {"assignment-4-project-wizards": PROJECT},
+    )
+    monkeypatch.setattr(
+        sync_teams, "list_teams", lambda org: pytest.fail("listed on an unpruned sync")
+    )
+    assert sync_teams.sync("org", prune=False) == 0
+    assert stub_team["removed"] == []
+
+
+def test_a_team_listing_that_cannot_be_read_empties_nothing_and_reds(
+    stub_team, monkeypatch
+):
+    _emptied_world(
+        monkeypatch, stub_team, {"assignment-4-project": {"team-x": ["ada-l"]}}, None
+    )
+    assert sync_teams.sync("org", prune=True) == 1
+    assert "zoe-zed" in stub_team["removed"]  # team-x's own prune still ran
+    assert stub_team["removed"].count("zoe-zed") == 1  # and nothing was emptied

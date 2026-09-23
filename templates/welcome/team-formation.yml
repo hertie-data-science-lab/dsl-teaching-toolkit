@@ -66,6 +66,33 @@ jobs:
 
             // {shared_script}
 
+            // THREE outcomes, and the label says which, so the issue list reads at a glance:
+            //   team-recorded  closed - the row is in teams.csv
+            //   team-refused   closed as not planned - the STUDENT can fix it, and the
+            //                  comment says how (a new issue, usually one click away)
+            //   needs-review   OPEN - somebody on the teaching team has to act (`fail`)
+            // Every comment is one skeleton: what happened, why, what to do next, a link.
+            const refuse = async (msg) => {
+              await github.rest.issues.createComment({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, body: msg });
+              await github.rest.issues.addLabels({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['team-refused'] });
+              await github.rest.issues.update({
+                owner: org, repo: context.repo.repo, issue_number: issue.number,
+                state: 'closed', state_reason: 'not_planned' });
+            };
+            // A name a student typed, made safe to print inside **...**: every character
+            // markdown could read as syntax is backslash-escaped, so no name can close the
+            // bold, open a link or start a heading. Valid names are letters, digits, `-` and
+            // `_`; this is for the one that is refused for being none of those.
+            const md = (s) => String(s).replace(/[\\`*_{}\[\]()#+\-.!|<>&~]/g, (c) => '\\' + c);
+            // A new Join team issue with the Team box already filled. GitHub prefills an
+            // issue FORM's text inputs from query parameters named by field id, but not its
+            // dropdowns - so the comment beside each link names the Action to pick.
+            const newIssue = (name) =>
+              `https://github.com/${org}/${context.repo.repo}/issues/new?template=02-join-team.yml` +
+              (name ? `&team=${encodeURIComponent(name)}` : '');
+
             try {
               if (!process.env.HAS_BOT) {
                 return fail(
@@ -76,11 +103,13 @@ jobs:
 
               // Parse the assignment slug, the action and the team name from the issue form.
               // Same idiom for all three: the field's label, the newline(s) GitHub renders
-              // after it, then the value. The action's value is one of the dropdown's two
-              // options, and only its first word tells them apart.
+              // after it, then the value. The action's value is one of the dropdown's three
+              // options, and only its first word tells them apart. The Team is taken as the
+              // WHOLE line and validated below, so `team x` is refused rather than quietly
+              // read as `team`.
               const aMatch = (issue.body || '').match(/Assignment\s*[\r\n]+\s*([A-Za-z0-9][\w.-]*)/i);
               const cMatch = (issue.body || '').match(/Action\s*[\r\n]+\s*([A-Za-z]+)/i);
-              const tMatch = (issue.body || '').match(/Team\s*[\r\n]+\s*([A-Za-z0-9][\w-]*)/i);
+              const tMatch = (issue.body || '').match(/###\s*Team\s*[\r\n]+\s*([^\r\n]+)/i);
 
               // What this assignment allows, read from the machine-written mirror the
               // toolkit keeps at classroom-config/assignments.lock.yml - THIS FILE AND
@@ -145,20 +174,23 @@ jobs:
                 return `${day}${suffix} ${MONTHS[parseInt(m[2], 10) - 1]}`;
               };
 
-              if (!aMatch || !tMatch) return fail(
+              if (!aMatch || !tMatch) return refuse(
                 `Thanks @${handle} - I couldn't read both an **Assignment** and a **Team** from the form. ` +
-                `Team names use letters, numbers and dashes only. Please open a new issue.`,
-                'needs-review');
+                `[Open a new Join team issue](${newIssue('')}) and fill in all three fields.`);
+              const typed = tMatch[1].trim();
+              if (!/^[A-Za-z0-9][\w-]*$/.test(typed)) return refuse(
+                `Thanks @${handle} - **${md(typed)}** can't be a team name: team names use letters, ` +
+                `numbers and dashes only. [Open a new Join team issue](${newIssue('')}) with a name like \`team-x\`.`);
               // Compared and stored lower-case: dsl_course.sync_teams lower-cases the slug it
               // materialises, so `Team-X` and `team-x` ARE the same team - the size cap and the
               // one-team-per-assignment rule below must see them that way too.
               const assignment = aMatch[1].toLowerCase();
-              const team = tMatch[1].toLowerCase();
+              const team = typed.toLowerCase();
               // `null` when the form carried no readable Action - an issue opened from a
-              // browser's cached copy of a form that predates the field. Neither `create`
-              // nor `join`, so neither check below fires and the request is taken exactly
-              // as it was before the field existed: joining the team if it is there,
-              // starting it if it is not.
+              // browser's cached copy of a form that predates the field. Neither `create`,
+              // `join` nor `switch`, so none of the checks below fires and the request is
+              // taken exactly as it was before the field existed: joining the team if it is
+              // there, starting it if it is not.
               const action = cMatch ? cMatch[1].toLowerCase() : null;
               // The GitHub team this row becomes is `<assignment>-<team>` (sync_teams.team_slug).
               // `course` + `admin` is `course-admin` - the faculty team with admin on every repo
@@ -169,9 +201,9 @@ jobs:
               // message that said WHY ("a team can't be named after a GitHub handle") answered,
               // for any name anyone cared to try, whether that person is in this cohort.
               const NAME_TAKEN =
-                `Thanks @${handle} - that assignment + team combination isn't available. Pick another team name.`;
-              if (RESERVED.has(slug) || slug.startsWith('instructors-')) return fail(
-                NAME_TAKEN, 'needs-review');
+                `Thanks @${handle} - that assignment + team combination isn't available. ` +
+                `[Open a new Join team issue](${newIssue('')}) with another team name.`;
+              if (RESERVED.has(slug) || slug.startsWith('instructors-')) return refuse(NAME_TAKEN);
 
               // Verify the author is an onboarded student (handle recorded in the roster).
               // Columns (dsl_course.roster.FIELDS) are addressed BY NAME, never by position.
@@ -211,7 +243,7 @@ jobs:
               // classmate would be granted that classmate's repo if the assignment were ever
               // provisioned as a group.
               const handles = new Set(rosterTable.slice(1).map(r => (r[iRosterHandle] || '').trim().toLowerCase()).filter(Boolean));
-              if (handles.has(team)) return fail(NAME_TAKEN, 'needs-review');
+              if (handles.has(team)) return refuse(NAME_TAKEN);
 
               // Read teams.csv (create it on first use). Columns: dsl_course.teams.FIELDS.
               const FIELDS = ['assignment', 'team', 'github_handle'];
@@ -236,20 +268,18 @@ jobs:
                 `Thanks @${handle} - I can't read this cohort's assignment list ` +
                 `(\`classroom-config/${LOCK}\` isn't there). A maintainer will action this.`,
                 'needs-review');
-              if (lock === null) return fail(
-                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort yet. ` +
-                `Check the slug with the teaching team.`,
-                'needs-review');
-              if (lock.formation === 'none') return fail(
-                `Thanks @${handle} - \`${assignment}\` is an individual assignment - no teams.`,
-                'needs-review');
+              if (lock === null) return refuse(
+                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort. ` +
+                `Check the slug on the course site, then [open a new Join team issue](${newIssue(team)}).`);
+              if (lock.formation === 'none') return refuse(
+                `Thanks @${handle} - \`${assignment}\` is an individual assignment, so there are no teams ` +
+                `to form. Nothing to do: your own repo arrives when it is handed out.`);
               // Anything that is not self-selection is the teaching team's to allocate -
               // `assigned`, and equally a value written by a newer toolkit than this
               // workflow. Both mean the same thing to a student: wait to be added.
-              if (lock.formation !== 'self_select') return fail(
+              if (lock.formation !== 'self_select') return refuse(
                 `Thanks @${handle} - teams for \`${assignment}\` are assigned by the instructor. ` +
-                `The teaching team will add you to one; there is nothing for you to do here.`,
-                'needs-review');
+                `The teaching team will add you to one; there is nothing for you to do here.`);
               // The formation WINDOW, which runs from the handout to the grading pin. Only
               // an explicit `pending` or `closed` refuses: a lock written by a toolkit older
               // than the window carries no such scalar at all (`window` is null), and that
@@ -259,17 +289,15 @@ jobs:
               // share a sentence: before the handout `closes` is still in the FUTURE, so
               // the shut wording would tell a student in September that the door closed in
               // October.
-              if (lock.window === 'pending') return fail(
+              if (lock.window === 'pending') return refuse(
                 `Thanks @${handle} - team formation for \`${assignment}\` is not open yet. ` +
                 `It opens when the assignment hands out` +
                 (lock.closes ? `, and runs until ${spokenDate(lock.closes)}.` : `.`) +
-                ` The course site carries the date.`,
-                'needs-review');
-              if (lock.window === 'closed') return fail(
+                ` The course site carries the date - open a new Join team issue then.`);
+              if (lock.window === 'closed') return refuse(
                 `Thanks @${handle} - team formation for \`${assignment}\` ` +
                 (lock.closes ? `closed on ${spokenDate(lock.closes)}.` : `is closed.`) +
-                ` Contact the teaching team if you still need a team for it.`,
-                'needs-review');
+                ` Contact the teaching team if you still need a team for it.`);
               const cap = lock.cap;
               if (!(cap > 0)) return fail(
                 `Thanks @${handle} - \`${assignment}\` has no team-size cap recorded. ` +
@@ -290,6 +318,8 @@ jobs:
               const retryable = (e) => e.status === 409 || e.status === 422 ||
                 (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
               const ATTEMPTS = 8;
+              // What the write that landed did: the team left (a switch) and the new count.
+              let outcome = null;
               for (let attempt = 1; ; attempt++) {
                 const { sha, header, rows } = await readTeams();
                 const iAssign = header.indexOf('assignment');
@@ -303,73 +333,97 @@ jobs:
                 // One team per student per assignment; respect the size cap; idempotent re-open.
                 const mine = rows.find(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
-                if (mine && cell(mine, iTeam).toLowerCase() === team) {
+                const current = mine ? cell(mine, iTeam).toLowerCase() : '';
+                if (current === team && action !== 'switch') {
                   await github.rest.issues.createComment({
                     owner: org, repo: context.repo.repo, issue_number: issue.number,
                     body: `You're already in **${team}** for \`${assignment}\` @${handle} - nothing to do.` });
+                  await github.rest.issues.addLabels({
+                    owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['team-recorded'] });
                   await github.rest.issues.update({
                     owner: org, repo: context.repo.repo, issue_number: issue.number, state: 'closed' });
                   return;
                 }
-                if (mine) return fail(
-                  `You're already in team **${cell(mine, iTeam)}** for \`${assignment}\` @${handle}. ` +
-                  `Contact the teaching team to switch teams.`,
-                  'needs-review');
                 const size = rows.filter(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
                 // Near miss: the same name once case and separators are taken out of it.
                 // A mistyped Join and an accidental second team are ONE typo seen from two
-                // sides - `teamalpha` for `team-alpha` - so both paths are answered from
-                // the same compare, over the file we are about to write. Sorted, so the
-                // answer to a name that is close to two of them is always the same one.
+                // sides - `teamalpha` for `team-alpha` - so every path is answered from the
+                // same compare, over the file we are about to write. Sorted, so the answer
+                // to a name that is close to two of them is always the same one.
                 const flat = (s) => s.toLowerCase().replace(/[-_]/g, '');
                 const named = [...new Set(rows
                   .filter(r => cell(r, iAssign).toLowerCase() === assignment)
                   .map(r => cell(r, iTeam).toLowerCase())
                   .filter(Boolean))].sort();
-                const near = named.find(t => flat(t) === flat(team));
+                const near = named.find(t => t !== team && flat(t) === flat(team));
                 const sizeOf = (name) => rows.filter(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === name).length;
+                const page = lock.page ? `[the assignment page](${lock.page})` : 'the assignment page on the course site';
+                // Joining (or switching into) a team that is not there, or is full: the two
+                // answers Join and Switch share.
+                const missing = () =>
+                  `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`.` +
+                  (near ? ` Did you mean **${near}** (${sizeOf(near)}/${cap})?` : '') +
+                  ` [Open a new Join team issue](${newIssue(near || team)}) with the name spelt exactly as on ` +
+                  `${page} - or choose *Create a new team* to start it.`;
+                const full = () =>
+                  `Thanks @${handle} - **${team}** is full for \`${assignment}\` (${size}/${cap}). ` +
+                  `Teams with room are listed on ${page}: [open a new Join team issue](${newIssue('')}) to join ` +
+                  `one of them, or choose *Create a new team*.`;
                 // Create vs join used to be IMPLICIT - a name that existed joined, a name
                 // that did not created - so `teamalpha` for `team-alpha` opened a silent
                 // second team, and nobody found out until the handout provisioned two half
-                // teams. The form now asks, and the two answers are checked against what
-                // the file we are about to write actually says, re-read on every attempt.
-                if (action === 'create' && size > 0) return fail(
-                  `Thanks @${handle} - **${team}** already exists for \`${assignment}\` (${size}/${cap}). ` +
-                  `Choose **Join an existing team** instead, or pick a different name.`,
-                  'needs-review');
-                // The exact-name test above is not enough on its own: it is precisely the
-                // near miss that the implicit behaviour used to swallow, and declaring the
-                // intent only helps if Create refuses the same names Join suggests.
-                if (action === 'create' && near) return fail(
-                  `Thanks @${handle} - **${near}** (${sizeOf(near)}/${cap}) already exists for \`${assignment}\` - ` +
-                  `did you mean to **Join an existing team**? Otherwise pick a clearly different name.`,
-                  'needs-review');
-                if (action === 'join' && size === 0) return fail(
-                  `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`. ` +
-                  (near
-                    ? `Did you mean **${near}** (${sizeOf(near)}/${cap})?`
-                    : `The teams that exist are listed on ` +
-                      (lock.page ? `[the assignment's page](${lock.page})` : `the assignment's page on the cohort site`) +
-                      ` - or choose **Create a new team** to start this one.`),
-                  'needs-review');
-                if (size >= cap) return fail(
-                  `Thanks @${handle} - **${team}** already has ${size} member${size === 1 ? '' : 's'} ` +
-                  `(the cap for \`${assignment}\` is ${cap}). Pick another team name.`,
-                  'needs-review');
+                // teams. The form now asks, and every answer is checked against what the
+                // file we are about to write actually says, re-read on every attempt.
+                if (action === 'switch') {
+                  // Self-service, inside the window the checks above have already gated on:
+                  // the row MOVES, in this same sha-guarded write, so a student is never in
+                  // two teams nor in none. Sync membership then prunes them from the old
+                  // team (sync_teams.emptied_teams covers a team this empties).
+                  if (!mine) return refuse(
+                    `Thanks @${handle} - you're not in a team for \`${assignment}\` yet, so there is nothing to ` +
+                    `switch from. [Open a new Join team issue](${newIssue(team)}) and choose ` +
+                    `*Join an existing team* or *Create a new team*.`);
+                  if (current === team) return refuse(
+                    `Thanks @${handle} - you're already in **${team}** for \`${assignment}\` - nothing to switch.`);
+                  if (size === 0) return refuse(missing());
+                  if (size >= cap) return refuse(full());
+                } else if (mine) {
+                  return refuse(
+                    `Thanks @${handle} - you're already in **${current}** for \`${assignment}\`, and a student is in ` +
+                    `one team per assignment. To move, [open a new Join team issue](${newIssue(team)}) and choose ` +
+                    `*Switch to another team*.`);
+                } else if (action === 'create' && (size > 0 || near)) {
+                  // The exact name, and equally its near miss: declaring the intent only
+                  // helps if Create refuses the same names Join suggests.
+                  const taken = size > 0 ? team : near;
+                  return refuse(
+                    `Thanks @${handle} - **${taken}** already exists for \`${assignment}\` (${sizeOf(taken)}/${cap}). ` +
+                    `To join it, [open a new Join team issue](${newIssue(taken)}) and choose *Join an existing team*. ` +
+                    `Or pick a clearly different name.`);
+                } else if (action === 'join' && size === 0) {
+                  return refuse(missing());
+                } else if (size >= cap) {
+                  return refuse(full());
+                }
 
-                // Append + write back (in the existing header's column order).
+                // Append + write back (in the existing header's column order). A switch
+                // drops the old row in the same write.
                 const fresh = header.map(() => '');
                 fresh[iAssign] = assignment; fresh[iTeam] = team; fresh[iHandle] = handle;
-                rows.push(fresh);
-                const body = serialiseCsv([header, ...rows]);
+                const kept = action === 'switch' ? rows.filter(r => r !== mine) : rows;
+                kept.push(fresh);
+                const body = serialiseCsv([header, ...kept]);
                 try {
                   await github.rest.repos.createOrUpdateFileContents({
                     owner: org, repo: CONFIG, path: TEAMS, ...(sha ? { sha } : {}),
-                    message: `teams: ${handle} -> ${team} (${assignment})`,
+                    message: action === 'switch'
+                      ? `teams: ${handle} ${current} -> ${team} (${assignment})`
+                      : `teams: ${handle} -> ${team} (${assignment})`,
                     content: Buffer.from(body, 'utf8').toString('base64'),
                   });
+                  outcome = { left: action === 'switch' ? current : '', count: size + 1 };
                   break;
                 } catch (e) {
                   // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
@@ -385,14 +439,23 @@ jobs:
                 }
               }
 
-              // Confirm.
+              // Confirm, and point at the next step. The repo appears within minutes: the
+              // window only opens once the assignment has handed out, the handout re-fires
+              // on every Scheduled release run, and this commit to teams.csv dispatches one
+              // (dispatch-scheduled-release.yml), which provisions this team's repo.
+              const page = lock.page ? `[the assignment page](${lock.page})` : 'the assignment page on the course site';
+              const lines = outcome.left
+                ? [
+                  `Done @${handle} - you've left **${outcome.left}** and joined **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`,
+                  `You lose access to ${outcome.left}'s repo; anything you pushed there stays with ${outcome.left}.`,
+                ]
+                : [`Done @${handle} - you're in team **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`];
+              lines.push(``, `Next: open your team's submission repo - step 2 on ${page}. It appears within a few minutes.`);
+              if (action === 'create') {
+                lines.push(``, `Tell your teammates to choose *Join an existing team* and type **${team}** exactly.`);
+              }
               await github.rest.issues.createComment({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
-                  `Done **@${handle}** - you're in team **${team}** for \`${assignment}\`.`,
-                  ``,
-                  `- Membership is recorded; your team's repo appears once the teaching team provisions this assignment.`,
-                  `- Need to change teams? Contact the teaching team.`,
-                ].join('\n') });
+                owner: org, repo: context.repo.repo, issue_number: issue.number, body: lines.join('\n') });
               await github.rest.issues.addLabels({
                 owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['team-recorded'] });
               // Title is auto-derived - the form's fixed default plus author + form fields.
