@@ -52,9 +52,9 @@ from .discovery import (
 )
 from .faults import Unusable
 from .gh_contents import read_error
-from .gh_teams import acting_login
+from .gh_teams import acting_login, membership_changes, reset_membership_changes
 from .grades import ensure_gradebooks, sync_team_lock
-from .log import log_err, log_ok
+from .log import Summary, log_err, log_ok, plural
 from .welcome import refresh_join_team_form
 
 # What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -253,6 +253,7 @@ def main() -> int:
         )
         return 1
 
+    reset_membership_changes()
     errors = sync(
         args.course_org,
         cohort_org=args.cohort_org,
@@ -269,7 +270,18 @@ def main() -> int:
         log_err(f"{errors} errors during sync")
         return 1
     log_ok("Sync complete")
-    return 0
+    return access_summary(membership_changes(), args.dry_run)
+
+
+def access_summary(changes: dict[str, int], dry_run: bool) -> Summary:
+    """Check staff access's sentence: how many team memberships moved (or would)."""
+    n = sum(changes.values())
+    if not n:
+        return Summary("Staff access checked: nothing needed changing.", changes)
+    verb = "would change" if dry_run else "changed"
+    return Summary(
+        f"Staff access checked: {plural(n, 'team membership')} {verb}.", changes
+    )
 
 
 if __name__ == "__main__":

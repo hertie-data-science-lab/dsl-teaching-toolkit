@@ -73,6 +73,9 @@ Things whose *literal spelling* is depended on from outside Python:
   `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
   `sync_teams`, `team_formation`, `teardown`, `console`, `schemas`.
   `console` runs one Instructor Console request (the Console workflow's only engine step).
+  It runs the op's CLI in-process, and a `main` that returns a `log.Summary` (an `int`
+  exit code carrying one public sentence, counts and reasons) is what its outcome says;
+  nothing is parsed out of stdout.
   `schemas` exports the console's JSON Schemas into `console/schemas/`, and
   `tests/test_schemas.py` holds the committed copy to a fresh export.
   A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
@@ -566,7 +569,7 @@ laptop with a `repo`-scoped token: `GH_TOKEN=<token> python3 -m dsl_course.sched
 --course-org <org> --all-cohorts`. Add `--dry-run` first - it prints what would fire and writes
 nothing, then one `Decision: <ref> not released: <CODE> <sentence>` line per due item it
 will not release (`SOURCE_MISSING`, `SOURCE_UNWRITTEN`, `WITHHELD`, `COHORT_ARCHIVED`,
-`TEAMS_INCOMPLETE`, `ALREADY_DONE`), which the console reads as reasons. It is the code path the workflow runs, and the one-shot markers are what make repeating
+`TEAMS_INCOMPLETE`, `ALREADY_DONE`), which reach the console as reasons. It is the code path the workflow runs, and the one-shot markers are what make repeating
 it safe.
 
 Every `workflow_dispatch` job sits behind the `check-team` gate (`workflows_render._CHECK_TEAM`),

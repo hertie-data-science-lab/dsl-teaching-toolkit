@@ -25,7 +25,7 @@ from .discovery import course_org_for_cohort, list_org_repos
 from .gh_contents import load_yaml_config
 from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
-from .log import log, log_err, log_ok, log_step
+from .log import Summary, log, log_err, log_ok, log_step, plural
 from .repos import repo_exists, repo_is_archived
 
 # The settings of the last manual publish, committed into the site repo so the daily cron
@@ -803,6 +803,8 @@ class SitePlan:
     retire: tuple[str, ...] = ()
     label: str = "site"
     done: str = "synced + redeploying"
+    # What the outcome's sentence calls this site ("Student site updated: ...").
+    title: str = "Site"
 
 
 def _git_identity(key: str) -> str:
@@ -1173,12 +1175,18 @@ def sync_site_repo(
             )
 
         git("-C", str(wd), *GIT_ENV, "add", "-A")
+        code, names = git("-C", str(wd), "diff", "--cached", "--name-only")
+        pages = len([n for n in names.splitlines() if n.strip()]) if code == 0 else 0
         code, _ = git(
             "-C", str(wd), *GIT_ENV, "commit", "-q", "--no-verify", "-m", plan.commit
         )
         if code != 0:
             log_ok(f"{plan.label} already up to date")
-            return 0
+            return Summary(
+                f"{plan.title} already up to date.",
+                {"pages": 0},
+                conclusion="nothing_to_do",
+            )
         code, out = git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")
         if code != 0:
             log_err(f"{plan.label} push failed:\n{_git_failure_tail(out)}")
@@ -1197,4 +1205,6 @@ def sync_site_repo(
                 f"({type(exc).__name__}): {exc}"
             )
     log_ok(f"{plan.label} {plan.done} -> https://{site}/")
-    return 0
+    return Summary(
+        f"{plan.title} updated: {plural(pages, 'page')} changed.", {"pages": pages}
+    )

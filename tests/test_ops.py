@@ -351,8 +351,9 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
 
     def fake_main():
         seen["argv"] = sys.argv[1:]
-        print('  [ok] Done - {"gradebooks": 3, "emails": 3}')
-        return 0
+        return grades.return_summary(
+            {"gradebooks": 3, "emails": 3, "held": 0}, 3, dry_run=False
+        )
 
     monkeypatch.setattr(grades, "main", fake_main)
     rc, body, _ = _main(
@@ -369,8 +370,8 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
         "--no-dry-run",
     ]
     assert body["conclusion"] == "done"
-    assert body["summary"] == 'Done - {"gradebooks": 3, "emails": 3}'
-    assert body["counts"] == {"gradebooks": 3, "emails": 3}
+    assert body["summary"] == "Marks returned: 3 marks repos updated, 3 emails sent."
+    assert body["counts"] == {"gradebooks": 3, "emails": 3, "held": 0}
     (org, repo, path, content, _msg), _ = engine[0]
     assert (org, repo, path) == (
         COHORT,
@@ -468,10 +469,10 @@ def test_an_unknown_entry_is_a_reason(monkeypatch, capsys, engine):
 
 def test_scheduler_decisions_become_reasons(monkeypatch, capsys, engine):
     def fake_main():
-        print(
-            "Decision: s5 not released: SOURCE_MISSING Folder lectures/05 was not found."
+        decision = scheduler.Decision(
+            "s5", "SOURCE_MISSING", "Folder lectures/05 was not found."
         )
-        return 0
+        return scheduler.preview_summary([], [decision])
 
     monkeypatch.setattr(scheduler, "main", fake_main)
     rc, body, _ = _main(

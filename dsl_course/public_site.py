@@ -361,6 +361,7 @@ def sync_public_site(
             },
             commit=f"site: publish public course site from {source_repo}",
             label="public site",
+            title="Public website",
             done="published",
         )
 

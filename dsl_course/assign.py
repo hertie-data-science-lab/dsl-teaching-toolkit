@@ -107,6 +107,7 @@ from .gh_contents import (
 )
 from .ghcli import GIT_ENV, bot_login, clone, gh, git
 from .log import (
+    Summary,
     log,
     log_err,
     log_err_person,
@@ -114,6 +115,7 @@ from .log import (
     log_person,
     log_skip,
     log_step,
+    plural,
 )
 from .releaseignore import RELEASEIGNORE, deny_for, excluded_in_tree
 from .repos import (
@@ -766,7 +768,11 @@ def patch_released(
             f"submission repo(s) and into {cohort_slug}; overwrite is "
             f"{'ON' if overwrite else 'OFF'}"
         )
-        return 0
+        return Summary(
+            f"Preview: {plural(len(corrected), 'file')} would update "
+            f"{plural(len(targets), 'copy', 'copies')} of {cohort_slug}.",
+            {"files": len(corrected), "copies": len(targets)},
+        )
 
     on = datetime.now(timezone.utc).date()
     digests = corrected_digests(corrected)
@@ -808,7 +814,11 @@ def patch_released(
         f"{cohort_slug}: {tally.get(PATCHED, 0)} repo(s) patched, {notes} note(s) posted, "
         f"{tally.get(PATCH_KEPT, 0)} left as the student wrote them"
     )
-    return 0
+    patched, kept = tally.get(PATCHED, 0), tally.get(PATCH_KEPT, 0)
+    text = f"Updated {plural(patched, 'copy', 'copies')} of {cohort_slug}"
+    if kept:
+        text += f"; {kept} kept the student's own version"
+    return Summary(f"{text}.", {"updated": patched, "kept": kept, "notes": notes})
 
 
 def provision_one(
@@ -1807,7 +1817,12 @@ def provision_all(
             listing=listing,
         )
     if released is None:
-        return 0, False  # a dry run: it has said what it would create, and created none
+        # A dry run: it has said what it would create, and created none.
+        units_phrase = plural(len(sheet_units), "team" if group else "student")
+        return Summary(
+            f"Preview: {slug} would be handed out to {units_phrase}.",
+            {"units": len(sheet_units)},
+        ), False
     results, changed, units, solution_unavailable = released
 
     # ---------------------------------------- what a handout owes the cohort, either shape
@@ -1938,7 +1953,38 @@ def provision_all(
             f"re-clones every submission repo to push a solution they already have"
         )
         failed = True
-    return (1 if failed or solution_unavailable else 0), changed
+    code = 1 if failed or solution_unavailable else 0
+    return handout_summary(slug, results, changed, gspec.creates_repos, code), changed
+
+
+def handout_summary(
+    slug: str, results: dict[str, int], changed: bool, creates_repos: bool, code: int
+) -> Summary:
+    """Hand out's sentence, off `provision_one`'s per-unit statuses. Counts only: this
+    runs in the course org's public `.github`."""
+    if not creates_repos:
+        return Summary(
+            f"Handed out {slug}: students hand it in off GitHub; its marking sheet is "
+            f"ready.",
+            code=code,
+        )
+    new = results.get("ok", 0)
+    already = results.get("skipped", 0)
+    failed = sum(n for k, n in results.items() if k.startswith("failed"))
+    if not changed and not failed:
+        return Summary(
+            f"{slug} was already handed out: {plural(already, 'copy', 'copies')} "
+            f"in place, nothing new to create.",
+            results,
+            code=code,
+            conclusion="nothing_to_do",
+        )
+    parts = [plural(new, "new copy", "new copies")]
+    if already:
+        parts.append(f"{already} already out")
+    if failed:
+        parts.append(f"{failed} could not be handed out")
+    return Summary(f"Handed out {slug}: {', '.join(parts)}.", results, code=code)
 
 
 if __name__ == "__main__":

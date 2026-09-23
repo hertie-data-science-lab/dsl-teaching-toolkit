@@ -57,7 +57,7 @@ from .course import PROPOSAL_BRANCH_PREFIX, UPSTREAM_BRANCH, is_repo_root
 from .deploy import _copy_ignore, _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
-from .log import log, log_err, log_ok, log_step
+from .log import Summary, log, log_err, log_ok, log_step, plural
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
@@ -99,6 +99,8 @@ class Propagated(NamedTuple):
     errors: int = 0
     urls: tuple[str, ...] = ()
     behind: tuple[str, ...] = ()
+    # How many released paths were looked at - what a preview reports.
+    checked: int = 0
 
 
 def due_deploys(cohort_org: str, now: datetime) -> list[Deploy]:
@@ -360,7 +362,7 @@ def propagate(
                 f"{_rel(deploy_dest(d)) or '(repo root)'} -> {course_org}/"
                 f"{d.course_source_repo}/{_rel(d.course_source_path) or '(repo root)'}"
             )
-        return Propagated()
+        return Propagated(checked=len(deploys))
 
     branch = branch_for(cohort_org)
     errors = 0
@@ -463,7 +465,30 @@ def propagate(
             opened = _open_pr(course_org, repo, cohort_org, source, branch)
             errors += opened.errors
             urls += list(opened.urls)
-    return Propagated(errors, tuple(urls), tuple(sorted(behind)))
+    return Propagated(errors, tuple(urls), tuple(sorted(behind)), len(deploys))
+
+
+def propagate_summary(done: Propagated, dry_run: bool) -> Summary:
+    """Keep for future terms' sentence. Repo counts only; a source repo is a materials
+    repo, never a student's."""
+    if dry_run:
+        return Summary(
+            f"Preview: {plural(done.checked, 'released item')} would be checked for "
+            f"edits to keep for future terms.",
+            {"checked": done.checked},
+        )
+    counts = {"pull_requests": len(done.urls), "checked": done.checked}
+    if not done.urls:
+        return Summary(
+            "No cohort edits to keep for future terms.",
+            counts,
+            conclusion="nothing_to_do",
+        )
+    return Summary(
+        f"Kept for future terms: {plural(len(done.urls), 'pull request')} opened on "
+        f"the course's materials.",
+        counts,
+    )
 
 
 def main() -> int:
@@ -487,7 +512,9 @@ def main() -> int:
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
-    return 1 if done.errors else 0
+    if done.errors:
+        return 1
+    return propagate_summary(done, args.dry_run)
 
 
 if __name__ == "__main__":

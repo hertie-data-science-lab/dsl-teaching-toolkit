@@ -49,7 +49,7 @@ from .course import (
 from .fs import copy_tree, union_deny
 from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
-from .log import log, log_err, log_ok, log_step, log_withheld
+from .log import Summary, log, log_err, log_ok, log_step, log_withheld, plural
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
 from .repos import (
     allow_forking,
@@ -804,7 +804,13 @@ def main() -> int:
                 f"  DRY-RUN  {args.course_source_repo}/{src} -> "
                 f"{dest_repo}/{landing or '(repo root)'}"
             )
-        return 1 if unsafe else 0
+        if unsafe:
+            return 1
+        return Summary(
+            f"Preview: {plural(len(pairs), 'item')} from {args.course_source_repo} "
+            f"would be released to {dest_repo}.",
+            {"items": len(pairs)},
+        )
 
     log_step(
         f"Releasing {len(pairs)} path(s) from {args.source_org}/{args.course_source_repo} -> "
@@ -813,7 +819,7 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        errors, _ = deploy_many(
+        errors, changed = deploy_many(
             args.source_org,
             args.cohort_org,
             [
@@ -827,7 +833,18 @@ def main() -> int:
     if errors:
         return 1
     log("done")
-    return 0
+    what = plural(len(pairs), "item")
+    if not changed:
+        return Summary(
+            f"Nothing new to release: {what} from {args.course_source_repo} "
+            f"{'is' if len(pairs) == 1 else 'are'} already in {dest_repo}.",
+            {"items": len(pairs)},
+            conclusion="nothing_to_do",
+        )
+    return Summary(
+        f"Released {what} from {args.course_source_repo} to {dest_repo}.",
+        {"items": len(pairs)},
+    )
 
 
 if __name__ == "__main__":

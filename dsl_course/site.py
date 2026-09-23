@@ -1802,6 +1802,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "_events": event_entries,
             },
             commit="site: sync from org structure",
+            title="Student site",
         )
 
     # `--all-cohorts` loops this in one process, and the index reads EVERY release

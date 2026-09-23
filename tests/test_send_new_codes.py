@@ -50,7 +50,7 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
         return out if sends is None else out[:sends]
 
     monkeypatch.setattr(enrol_codes.mailer, "send_bulk", send_bulk)
-    outcome = enrol_codes.resend_unjoined("COHORT", dry_run=dry_run)
+    outcome, _counts = enrol_codes.resend_unjoined("COHORT", dry_run=dry_run)
     return outcome, sent, written
 
 

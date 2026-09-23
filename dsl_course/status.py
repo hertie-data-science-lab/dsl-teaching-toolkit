@@ -48,7 +48,7 @@ from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
 from .gh_contents import put_file
 from .issues import open_titles
-from .log import log_err, log_ok, log_step
+from .log import Summary, log_err, log_ok, log_step, plural
 from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
@@ -461,7 +461,7 @@ def _document(course_org: str, cohort_org: str | None) -> dict:
 def write(course_org: str, cohort_org: str | None = None) -> int:
     """Write `status.json`: the cohort's into its private `classroom-config`, or - with no
     cohort - the course's into its PUBLIC `.github` (counts only; see `status_json`).
-    Returns the error count.
+    Returns the error count - a `log.Summary` of what it wrote when that is 0.
 
     `put_file` blob-compares, so a render identical to the file makes no commit. It is
     tried twice: the four dispatchers a config push fires all end here within the same
@@ -481,15 +481,34 @@ def write(course_org: str, cohort_org: str | None = None) -> int:
         return 1
     if cohort_org and not doc["cohort"]["live"]:
         log_step(f"  [skip] {cohort_org} status.json (archived cohort - left frozen)")
-        return 0
+        return Summary(
+            "Status left as it was: this cohort is archived.", conclusion="skipped"
+        )
     content = status_json.dumps(doc)
     message = "ci: refresh status.json"
     if put_file(org, repo, status_json.STATUS_PATH, content, message) or put_file(
         org, repo, status_json.STATUS_PATH, content, message
     ):
         log_ok(f"status.json current in {org}/{repo}")
-        return 0
+        return refreshed(doc)
     return 1
+
+
+def refreshed(doc: dict) -> Summary:
+    """What a status write says it did: the counts the console's home screen leads
+    with. Counts only - the course file is public, and so is the run log."""
+    problems = len(doc.get("problems") or [])
+    if "cohort" not in doc:
+        return Summary(
+            f"Course status refreshed: {plural(problems, 'problem')}.",
+            {"problems": problems},
+        )
+    week = len(doc.get("this_week") or [])
+    return Summary(
+        f"Status refreshed: {plural(problems, 'problem')}, "
+        f"{plural(week, 'item')} this week.",
+        {"problems": problems, "this_week": week},
+    )
 
 
 def refresh(course_org: str, cohort_org: str | None = None) -> int:

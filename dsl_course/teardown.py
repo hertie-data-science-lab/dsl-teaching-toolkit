@@ -68,7 +68,7 @@ from .discovery import (
 from .gh_contents import get_file_content, put_file, read_csv
 from .grades import COHORT_CSV_NAME, PREVIEW_TITLE
 from .issues import close_issues_titled, open_titles
-from .log import log, log_err, log_ok, log_person, log_step
+from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
 from .repos import archive_repo
 
 # The record itself, in the private repo it describes. Its own directory rather than a root
@@ -441,7 +441,7 @@ def close_out(
         return 1
     if config.get("archived"):
         log_ok(f"{cohort_org} is already closed out ({CONFIG_REPO} is archived)")
-        return 0
+        return Summary("This cohort is already archived.", conclusion="nothing_to_do")
 
     sched = schedule.load(cohort_org)
     archives = sched.archive.when if sched.archive else None
@@ -486,7 +486,13 @@ def close_out(
             f"dry run: {len(closed.frozen)} repo(s) would be frozen "
             f"({len(closed.already)} already are), then {CONFIG_REPO} sealed"
         )
-        return 1 if errors else 0
+        if errors:
+            return 1
+        return Summary(
+            f"Preview: {plural(len(closed.frozen), 'repo')} would be made read-only "
+            f"({len(closed.already)} already are), then the cohort is archived.",
+            {"repos": len(closed.frozen), "already": len(closed.already)},
+        )
 
     record = render_record(
         cohort_org,
@@ -518,7 +524,13 @@ def close_out(
         f"{cohort_org} closed out: {len(closed.frozen) + len(closed.already)} repo(s) "
         f"frozen, {CONFIG_REPO} sealed"
     )
-    return 1 if errors else 0
+    if errors:
+        return 1
+    total = len(closed.frozen) + len(closed.already)
+    return Summary(
+        f"Cohort archived: {plural(total, 'repo')} read-only, nothing deleted.",
+        {"repos": total},
+    )
 
 
 def main() -> int:

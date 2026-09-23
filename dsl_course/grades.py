@@ -103,7 +103,7 @@ from .gh_contents import (
 )
 from .ghcli import bot_login, clone, gh, is_missing_resource
 from .issues import close_issues_titled, upsert_issue
-from .log import log, log_err, log_ok, log_person, log_step
+from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
 from .repos import (
     add_collaborator,
     create_repo,
@@ -4258,7 +4258,9 @@ def distribute(
         # in by the time marks exist: `_on_the_roster` keeps only the books belonging to
         # somebody the roster knows, so an empty roster drops EVERY mark in the run as
         # `unknown`. This exit is the only signal that happened.
-        return 1 if provisioning_failed or not students or not previewed else 0
+        if provisioning_failed or not students or not previewed:
+            return 1
+        return return_summary(counts, len(pending) if notify else 0, dry_run=True)
 
     failed_mail, told = (
         _email_updates(
@@ -4316,7 +4318,7 @@ def distribute(
     # Counts only: this workflow's log is world-readable and every target here is a
     # student. The per-target lines above went through log_person.
     log_ok(f"Done - {json.dumps(counts)}")
-    return (
+    code = (
         1
         if provisioning_failed
         or counts["failed"]
@@ -4325,6 +4327,31 @@ def distribute(
         or not students
         else 0
     )
+    return return_summary(counts, counts["emails"], dry_run=False, code=code)
+
+
+def return_summary(
+    counts: dict[str, int], emails: int, dry_run: bool, code: int = 0
+) -> Summary:
+    """Return marks' sentence, off distribute's counts. Counts only - every target is a
+    student, and this lands in a public annotation."""
+    books = plural(counts["gradebooks"], "marks repo")
+    mails = plural(emails, "email")
+    if dry_run:
+        text = f"Preview: {books} would be updated and {mails} sent"
+    elif not counts["gradebooks"] and not emails:
+        text = "No new marks to return"
+    else:
+        text = f"Marks returned: {books} updated, {mails} sent"
+    if counts.get("held"):
+        text += f"; {plural(counts['held'], 'mark')} held until the sheet is fixed"
+    out = {k: v for k, v in counts.items() if isinstance(v, int)}
+    conclusion = (
+        "nothing_to_do"
+        if not dry_run and not code and not counts["gradebooks"] and not emails
+        else None
+    )
+    return Summary(f"{text}.", out, code=code, conclusion=conclusion)
 
 
 # The dry run's per-student detail: an issue in the PRIVATE classroom-config, found by
