@@ -1325,7 +1325,17 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
         facts.teams = teams.load(cohort_org, facts.teams_faults, known)
     except Unusable:
         facts.teams = {}
-    grades.cohort_sheet_faults(course_org, cohort_org, sched, facts.sheet_faults)
+    # `grades.cohort_sheet_faults`, with each sheet read once for the faults and the marks.
+    sheet_specs = grades.sheet_specs(course_org, sched)
+    sheet_texts = {
+        name: get_file_content(
+            cohort_org, schedule.CONFIG_REPO, grades.sheet_path(name)
+        )
+        for name in sorted(sheet_specs)
+    }
+    for name, text in sheet_texts.items():
+        if text is not None:
+            facts.sheet_faults += grades.sheet_faults(name, text, sheet_specs[name])
     grades.grading_config_faults(
         course_org, cohort_org, sched, facts.template_faults, facts.listing
     )
@@ -1334,9 +1344,7 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
             course_org, entry.course_source_repo
         )
         name = schedule.cohort_name(slug, entry)
-        text = get_file_content(
-            cohort_org, schedule.CONFIG_REPO, grades.sheet_path(name)
-        )
+        text = sheet_texts[name]
         if text:
             try:
                 facts.sheets[name] = grades.parse_sheet(text)
