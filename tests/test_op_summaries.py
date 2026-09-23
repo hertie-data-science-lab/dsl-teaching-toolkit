@@ -335,21 +335,19 @@ def test_the_access_check_sentence():
 
 def test_the_new_codes_sentence_counts_and_never_names():
     sent = enrol_codes.new_codes_summary(
-        enrol_codes.Outcome.SENT, {"students": 3, "skipped": 1, "sent": 3}, False, 0
+        {"students": 3, "skipped": 1, "sent": 3}, False, 0
     )
     assert sent.text == (
         "New codes sent to 3 students who have not joined; their old codes no longer "
         "work. 1 row skipped for an unusable email address."
     )
     preview = enrol_codes.new_codes_summary(
-        enrol_codes.Outcome.NOTHING_TO_SEND,
         {"students": 2, "skipped": 0, "sent": 0},
         True,
         0,
     )
     assert preview.text == "2 students who have not joined would get new codes."
     none = enrol_codes.new_codes_summary(
-        enrol_codes.Outcome.NOTHING_TO_SEND,
         {"students": 0, "skipped": 0, "sent": 0},
         False,
         0,
@@ -358,7 +356,6 @@ def test_the_new_codes_sentence_counts_and_never_names():
     # A failed send keeps its bare exit code: the failure fallback speaks for it.
     assert not isinstance(
         enrol_codes.new_codes_summary(
-            enrol_codes.Outcome.FAILED,
             {"students": 2, "skipped": 0, "sent": 1},
             False,
             1,

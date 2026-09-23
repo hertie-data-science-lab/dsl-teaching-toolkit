@@ -619,9 +619,7 @@ def reds_the_run(outcome: Outcome) -> bool:
     return outcome not in _GREEN
 
 
-def new_codes_summary(
-    outcome: Outcome, counts: dict[str, int], dry_run: bool, rc: int
-) -> Summary | int:
+def new_codes_summary(counts: dict[str, int], dry_run: bool, rc: int) -> Summary | int:
     """Send new codes' sentence, off `resend_unjoined`'s counts. Counts only: the run
     log and the annotation are public, and every row here is a student."""
     if not counts or rc:
@@ -726,7 +724,7 @@ def main() -> int:
             outcome = run(args.cohort_org)
         rc = int(reds_the_run(outcome))
         if counts is not None:
-            rc = new_codes_summary(outcome, counts, args.dry_run, rc)
+            rc = new_codes_summary(counts, args.dry_run, rc)
         # Dispatched by a roster push: the codes just sent change the cohort's status.
         # The course org is known only on that path, and the write is not counted.
         if args.dispatched_by and not args.dry_run:

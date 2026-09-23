@@ -321,7 +321,7 @@ def engine(monkeypatch):
     monkeypatch.setattr(
         request_mod, "get_team_members", _teams({(COURSE, "course-admin"): {"prof"}})
     )
-    monkeypatch.setattr(status, "write_after_op", lambda request: None, raising=False)
+    monkeypatch.setattr(status, "write_after_op", lambda request: None)
     writes = []
     monkeypatch.setattr(
         outcome_mod, "put_file", lambda *a, **k: writes.append((a, k)) or True
