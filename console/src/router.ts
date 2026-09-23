@@ -10,7 +10,7 @@ export interface Route {
   entry?: string;
 }
 
-const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template'];
+const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
 
 export function parseHash(hash: string): Route {
   const r = decodeURIComponent(hash.replace(/^#/, ''));
@@ -32,7 +32,7 @@ export function parseSearch(search: string): Selection {
 /** Screens that need a cohort, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
   cohort: 'week', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
-  students: 'students', roster: 'students', teams: 'teams', staff: 'staff', site: 'site', operations: 'operations', archive: 'archive',
+  students: 'students', roster: 'students', teams: 'teams', marks: 'assignments', staff: 'staff', site: 'site', operations: 'operations', archive: 'archive',
 };
 /** Screens about the course. */
 export const COURSE_SCREENS: Record<string, string> = {

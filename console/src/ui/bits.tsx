@@ -56,9 +56,9 @@ export function Soon({ label, cls = 'btn', title = SOON }: { label: ComponentChi
 
 export const Prop = () => <span class="prop" title="Not in the engine today">proposed</span>;
 
-export function EditFile({ org, repo, path, branch = 'main' }: { org: string; repo: string; path: string; branch?: string }) {
+export function EditFile({ org, repo, path, branch = 'main', line }: { org: string; repo: string; path: string; branch?: string; line?: number }) {
   return (
-    <a class="edit-file" href={`https://github.com/${org}/${repo}/edit/${branch}/${path}`} target="_blank" rel="noopener">
+    <a class="edit-file" href={`https://github.com/${org}/${repo}/edit/${branch}/${path}${line ? `#L${line}` : ''}`} target="_blank" rel="noopener">
       Edit the file <Ext />
     </a>
   );
@@ -123,7 +123,7 @@ export function ProblemCards({ list, cohort }: { list: Problem[]; cohort?: boole
             <p class="p-effect">{p.stops}</p>
             <div class="p-fix">
               {href ? <a class="btn small" href={href}>Fix</a> : null}
-              {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} /> : null}
+              {p.fix && org && repo ? <EditFile org={org} repo={repo} path={p.fix.path} branch={p.fix.ref ?? (p.fix.screen === 'template' ? 'solution' : 'main')} line={p.fix.line} /> : null}
             </div>
           </li>
         );

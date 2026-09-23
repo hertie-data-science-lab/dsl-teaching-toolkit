@@ -1,27 +1,71 @@
 import type { ComponentChildren, VNode } from 'preact';
 import { useState } from 'preact/hooks';
-import { CheckLine, Crumbs, Loading, Prop, Soon } from '../ui/bits';
+import { useEnv } from '../env';
+import type { Operation } from '../model/types';
+import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
+import { OpButtons } from '../ops/Panel';
+import { mergeOperations, type OpDef } from '../ops/session';
+import { CheckLine, Crumbs, Loading, Soon } from '../ui/bits';
+import { Ext } from '../ui/icons';
 import type { CohortProps, ReadyProps } from './types';
 
 export const cohortName = (p: Pick<CohortProps, 'course' | 'cohort'>) => `${p.course.name}, ${p.cohort.termLabel}`;
 
-export const CHECK_NOW_SOON = 'Coming in this build: Check now refreshes the status and re-runs every check.';
+export const CHECK_NOW_SOON = 'Sign in to check now.';
 
-export function CheckNow({ small }: { small?: boolean }) {
-  return <Soon label="Check now" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />;
+/** Who an operation on this cohort acts for. */
+export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
+  return { courseOrg: p.course.org, cohortOrg: p.cohort.org, where: p.cohort.termLabel };
 }
 
-/** The cohort header's overflow menu (revision brief section 9). Its items arrive with the operation panel. */
-export function MoreMenu() {
+/** Check now: refresh the status and re-run every check (cohort.check). */
+export function CheckNow({ small, p, label }: { small?: boolean; p?: Pick<CohortProps, 'course' | 'cohort'>; label?: string }) {
+  if (!p) return <Soon label="Check now" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />;
+  return <OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />;
+}
+
+/** The operations of this cohort: the status file's record plus this session's runs. */
+export function useOperations(fromStatus: Operation[] | undefined, cohortOrg: string): Operation[] {
+  const env = useEnv();
+  const mine = (env?.ops.runs.value ?? []).filter((r) => r.cohort === cohortOrg);
+  return mergeOperations(fromStatus ?? [], mine);
+}
+
+function ExportInfo({ org }: { org: string }) {
+  const f = (path: string) => `https://github.com/${org}/classroom-config/${path.includes('.') ? 'blob' : 'tree'}/main/${path}`;
+  const row = (t: string, sub: string, path: string) => (
+    <li><span class="r-title">{t}</span><span class="r-sub">{sub}</span><span class="r-side"><a class="btn small quiet" href={f(path)} target="_blank" rel="noopener">Open <Ext /></a></span></li>
+  );
+  return (
+    <>
+      <ul class="rows">
+        {row('Roster', 'students.csv', 'students.csv')}
+        {row('Marks for the registrar', 'Written each time marks are returned', 'registrar')}
+        {row('Schedule', 'schedule.yml', 'schedule.yml')}
+      </ul>
+      <p class="footnote">Each opens on GitHub, where you can download it.</p>
+    </>
+  );
+}
+
+/** The cohort header's overflow menu (revision brief section 9). */
+export function MoreMenu({ p }: { p?: Pick<CohortProps, 'course' | 'cohort'> }) {
   const [open, setOpen] = useState(false);
+  const env = useEnv();
+  const scope = p ? cohortScope(p) : null;
+  const go = (def: OpDef | null) => {
+    setOpen(false);
+    if (def) env?.ops.open(def);
+  };
+  const exportDef = scope && p ? { ...checkNow(scope), key: 'export', name: 'Export', title: 'Download a copy', intro: '', info: <ExportInfo org={p.cohort.org} /> } : null;
   return (
     <div class="menu-wrap">
       <button class="btn outline" type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(!open)}>More</button>
       <div class="popmenu" hidden={!open} role="menu">
-        <button type="button" role="menuitem" disabled title="Coming in this build">Preview the next automatic run <Prop /></button>
-        <button type="button" role="menuitem" disabled title="Coming in this build">Keep cohort edits for future terms</button>
-        <button type="button" role="menuitem" disabled title="Coming in this build">Export <span class="pm-sub">roster, marks, schedule</span></button>
-        <a href="#archive" role="menuitem">Archive this cohort</a>
+        <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && previewNext(scope))}>Preview the next automatic run</button>
+        <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && keepFuture(scope))}>Keep cohort edits for future terms</button>
+        <button type="button" role="menuitem" disabled={!scope} onClick={() => go(exportDef)}>Export <span class="pm-sub">roster, marks, schedule</span></button>
+        <a href="#archive" role="menuitem" onClick={() => setOpen(false)}>Archive this cohort</a>
       </div>
     </div>
   );
@@ -39,7 +83,7 @@ export function StaleNote({ stale }: { stale: string[] }) {
 }
 
 /** The page every cohort screen shows before an org has been refreshed on the new engine. */
-export function NotComputed({ title, crumbs }: { title: string; crumbs: { t: string; href?: string }[] }) {
+export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: string; href?: string }[]; p?: Pick<CohortProps, 'course' | 'cohort'> }) {
   return (
     <>
       <Crumbs items={crumbs} />
@@ -48,7 +92,7 @@ export function NotComputed({ title, crumbs }: { title: string; crumbs: { t: str
           <h1>{title}</h1>
           <p class="lede">Status not computed yet.</p>
         </div>
-        <div class="actions"><CheckNow /></div>
+        <div class="actions"><CheckNow p={p} /></div>
       </div>
       <section class="panel section stub">
         <h2>Status not computed yet</h2>
@@ -76,12 +120,12 @@ export function WithStatus({
 }) {
   const l = props.loaded;
   if (l.kind === 'loading') return <Loading what="Reading the cohort's status" />;
-  if (l.kind === 'absent') return <NotComputed title={title} crumbs={crumbs} />;
+  if (l.kind === 'absent') return <NotComputed title={title} crumbs={crumbs} p={props} />;
   if (l.kind === 'invalid' || l.kind === 'error')
     return (
       <>
         <Crumbs items={crumbs} />
-        <div class="page-head"><div><h1>{title}</h1></div><div class="actions"><CheckNow /></div></div>
+        <div class="page-head"><div><h1>{title}</h1></div><div class="actions"><CheckNow p={props} /></div></div>
         <section class="panel section">
           <CheckLine cls="bad">
             {l.kind === 'invalid' ? `The cohort's status file does not match the expected shape: ${l.errors.slice(0, 3).join('; ')}.` : `Could not read the cohort's status: ${l.message}`}
