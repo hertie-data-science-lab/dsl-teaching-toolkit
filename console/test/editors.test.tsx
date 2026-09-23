@@ -12,7 +12,7 @@ import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
 import { finalGrade, penaltyRate, readSheet, scoreTotal } from '../src/model/marks';
-import { blankDraft, draftErrors, freshId, readDraft, writeDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { blankDraft, draftErrors, freshId, readDraft, writeDraft, type ArchiveDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -139,6 +139,27 @@ describe('the schedule entry sheet model', () => {
     expect(e.due).toBe('Due must come after the hand out.');
     expect(e.solution).toBe('Must be after the hand out.');
     expect(e.cohortRepo).toContain('give each its own repo name');
+  });
+
+  it('edits the archive grace days, writing the key only once it differs from 60', () => {
+    const y = new YamlText(SEEDED);
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = readDraft(doc, 'archive') as ArchiveDraft;
+    expect(d.graceDays).toBe(60);
+    writeDraft(y, { ...d, title: 'Frozen' }, doc);
+    expect(parse(y.text).archive).not.toHaveProperty('grace_days');
+    writeDraft(y, { ...d, graceDays: 90 }, doc);
+    expect(parse(y.text).archive.grace_days).toBe(90);
+    expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
+    const y2 = new YamlText(y.text);
+    const doc2 = y2.toJS() as Record<string, unknown>;
+    const d2 = readDraft(doc2, 'archive') as ArchiveDraft;
+    expect(d2.graceDays).toBe(90);
+    writeDraft(y2, { ...d2, graceDays: '' }, doc2);
+    expect(parse(y2.text).archive).not.toHaveProperty('grace_days');
+    expect(draftErrors({ ...d, graceDays: -1 }, { templateUsers: () => 0 }).graceDays).toBe('A whole number of days, 0 or more.');
+    expect(draftErrors({ ...d, graceDays: 1.5 }, { templateUsers: () => 0 }).graceDays).toBeDefined();
+    expect(draftErrors({ ...d, graceDays: 0 }, { templateUsers: () => 0 })).toEqual({});
   });
 });
 
