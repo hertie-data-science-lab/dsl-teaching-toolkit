@@ -2549,6 +2549,7 @@ def test_the_console_gate_refuses_a_caller_without_write(tmp_path):
         },
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run.returncode == 1
     assert "@someone lacks write on Course-Org/.github" in run.stdout
