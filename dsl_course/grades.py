@@ -1194,17 +1194,20 @@ _READERS = {
     "grader_pdf": lambda v, w, d: _boolean(v, "grader_pdf", w, d),
 }
 SPEC_KEYS = tuple(_READERS)
-# What a COURSE may set once for every assignment under it, in `dsl-course.yml`: exactly
-# the settings `New assignment` does NOT ask for, and stamps from here instead. The
-# per-assignment keys - the title, the shape, the question maxima - are deliberately not
-# among them: they are what makes one assignment different from the next. Nor are
-# `submit_via` and `autograde`, which the button DOES ask for and always answers - a
-# course default the form can never lose to would be a setting that reads as policy and
-# changes nothing.
+# What a COURSE may set once for every assignment under it, in `dsl-course.yml`. The
+# first three are settings `New assignment` does NOT ask for and stamps from here; the
+# other four ARE boxes on the form, and apply when the box is left at
+# `course.COURSE_DEFAULT_CHOICE` (see `scaffold.resolve_answers`). The per-assignment
+# keys - the title, the type, the question maxima - are deliberately not among them: they
+# are what makes one assignment different from the next.
 COURSE_DEFAULT_KEYS = (
     "max_team_size",
     "late_window_days",
     "late_penalty_per_day",
+    "format",
+    "submit_via",
+    "team_formation",
+    "visibility",
 )
 # Where the course-wide block lives, for the warnings it produces.
 ASSIGNMENT_DEFAULTS_KEY = "assignment_defaults"

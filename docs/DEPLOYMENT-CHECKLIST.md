@@ -74,6 +74,17 @@ An admin's `email` is optional. When any admin has one, a fault in this file is 
 those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret. This
 file is public, so an address written here is public too.
 
+`assignment_defaults:` is what **New assignment** stamps into each new assignment's
+`grading_config.yml`: `max_team_size`, `late_window_days` and `late_penalty_per_day`, plus
+`format`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
+of the same name when they are left at `(course default)`.
+
+`cohort_defaults:` is what **Bootstrap cohort** writes into a new cohort's `schedule.yml`:
+`timezone:`, and `archive: {auto, grace_days}` - `auto: false` seeds no `archive:` block,
+so that cohort is never archived automatically; `grace_days` sets how long after
+`semester_end` it is. Unset, a new cohort gets today's skeleton. Neither block changes a
+cohort or an assignment that already exists.
+
 `course_name` / `course_code` / `course_description` are the fields that reach every
 cohort website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
 

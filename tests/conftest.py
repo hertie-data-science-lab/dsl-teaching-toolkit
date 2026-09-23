@@ -196,6 +196,7 @@ def stub_bootstrap(monkeypatch) -> None:
     # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
     # about what the run does, not which ref it seeds at.
     monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
+    monkeypatch.setattr(bc, "course_cohort_defaults", lambda course: {})
 
 
 # What the `gh issue create` in `GhFake` prints.

@@ -160,6 +160,11 @@ NO_STARTER = "none"
 # commented example turning into a live one otherwise costs a cohort.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
+# The answer New assignment's format, team_formation, submit_via and visibility boxes
+# arrive with when nobody touches them: "use the course's `assignment_defaults:`, else the
+# toolkit's own". Here because two layers spell it: the rendered form offers it and the
+# scaffold's CLI resolves it.
+COURSE_DEFAULT_CHOICE = "(course default)"
 # The starters an instructor may actually name, `none` being the answer that means none of
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.
 STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)

@@ -1320,12 +1320,84 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
 KNOWN_ARCHIVE = frozenset(
     {
         "event_datetime",
+        "grace_days",
         "title",
         "details",
         "show_on_site",
         "tbc",
     }
 )
+
+
+def _whole_days(value: object) -> int | None:
+    """A non-negative whole number of days, or None when `value` cannot be one."""
+    if isinstance(value, bool):
+        return None
+    try:
+        days = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return days if days >= 0 else None
+
+
+def _grace(raw: object, drops: Drops) -> timedelta:
+    """`archive.grace_days` as the time after `semester_end` the default date falls,
+    else `ARCHIVE_GRACE`. An unusable value is flagged and the sixty days stand."""
+    if not isinstance(raw, dict) or raw.get("grace_days") is None:
+        return ARCHIVE_GRACE
+    days = _whole_days(raw["grace_days"])
+    if days is None:
+        _flag_bad_value(
+            drops,
+            "archive",
+            "grace_days",
+            raw["grace_days"],
+            f"the default date counts {ARCHIVE_GRACE.days} days from semester_end instead",
+        )
+        return ARCHIVE_GRACE
+    return timedelta(days=days)
+
+
+def parse_cohort_defaults(raw: object) -> dict:
+    """The course's `cohort_defaults:` block in `dsl-course.yml`: what Bootstrap cohort
+    seeds into a new cohort's `schedule.yml`. Returns only what it could use -
+    `timezone` (a known zone name) and `archive` (`{"auto": bool, "grace_days": int |
+    None}`); anything else is logged and dropped, and `{}` means seed today's skeleton."""
+    if raw is None:
+        return {}
+    where = "dsl-course.yml cohort_defaults"
+    if not isinstance(raw, dict):
+        log_err(f"  ! {where}: must be a block of settings - ignored")
+        return {}
+    out: dict = {}
+    for key in raw:
+        if key not in ("timezone", "archive"):
+            log_err(
+                f"  ! {where}: `{key}:` is not a setting the toolkit reads - ignored"
+            )
+    tz = raw.get("timezone")
+    if tz is not None:
+        name = str(tz).strip()
+        if name and str(_tz(name)) == name:
+            out["timezone"] = name
+        else:
+            log_err(f"  ! {where}: `timezone: {tz}` is not a known zone - ignored")
+    archive = raw.get("archive")
+    if archive is not None:
+        if not isinstance(archive, dict) or not isinstance(archive.get("auto"), bool):
+            log_err(
+                f"  ! {where}: `archive:` needs `auto: true` or `auto: false` - ignored"
+            )
+        else:
+            grace = archive.get("grace_days")
+            days = _whole_days(grace) if grace is not None else None
+            if grace is not None and days is None:
+                log_err(
+                    f"  ! {where}: `archive.grace_days: {grace}` is not a whole number "
+                    f"of days - ignored"
+                )
+            out["archive"] = {"auto": archive["auto"], "grace_days": days}
+    return out
 
 
 def _parse_archive(
@@ -1356,7 +1428,8 @@ def _parse_archive(
     if "archive" not in meta:
         return None
     raw = meta["archive"]
-    default = semester_end + ARCHIVE_GRACE if semester_end else None
+    grace = _grace(raw, drops)
+    default = semester_end + grace if semester_end else None
     cost = (
         f"this cohort freezes at its default date instead ({default})"
         if default

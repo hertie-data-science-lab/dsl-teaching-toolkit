@@ -31,6 +31,7 @@ from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
+    COURSE_DEFAULT_CHOICE,
     DEFAULT_LATE_PENALTY_PER_DAY,
     DEFAULT_LATE_WINDOW_DAYS,
     DEFAULT_MAX_TEAM_SIZE,
@@ -1278,6 +1279,31 @@ def _collision(named: list[str], autograde: bool) -> str:
     return ""
 
 
+# What each box New assignment can leave at `COURSE_DEFAULT_CHOICE` falls back to when the
+# course's `assignment_defaults:` does not say either. `ipynb` for the starter because that
+# is what the button pre-filled before the course could choose.
+_TOOLKIT_ANSWERS = {
+    "format": "ipynb",
+    "team_formation": "self_select",
+    "submit_via": "assignment_repo",
+    "visibility": "private",
+}
+
+
+def resolve_answers(answers: dict[str, str], defaults: dict) -> dict[str, str]:
+    """The New assignment answers with every box left at `COURSE_DEFAULT_CHOICE` replaced:
+    by the course's `assignment_defaults:` value when it declares one, else by the
+    toolkit's own. An answer somebody chose is kept as given."""
+    return {
+        key: (
+            str(defaults.get(key) or _TOOLKIT_ANSWERS[key])
+            if value == COURSE_DEFAULT_CHOICE
+            else value
+        )
+        for key, value in answers.items()
+    }
+
+
 def _not_a_format(problem: str) -> ValueError:
     """Every refusal of a `--format` answer, in the one line that names what may be
     typed - the box takes free text, so the answer to a bad one is the vocabulary."""
@@ -1729,13 +1755,16 @@ def main() -> int:
         help="The assignment's name, e.g. 'Neural networks from scratch' (default: "
         "'Assignment <number>'). Goes into grading_config.yml as `title:`.",
     )
+    # Four boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
+    # answers them, else the toolkit does (`resolve_answers`).
     pa.add_argument(
         "--format",
         dest="formats",
-        default="py",
+        default=COURSE_DEFAULT_CHOICE,
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "
         f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all "
-        "(grading reads whatever is in the repo either way)",
+        "(grading reads whatever is in the repo either way). Default: the course's "
+        "`assignment_defaults: format`, else ipynb",
     )
     pa.add_argument(
         "--type",
@@ -1747,8 +1776,8 @@ def main() -> int:
     pa.add_argument(
         "--team-formation",
         dest="team_formation",
-        choices=list(TEAM_FORMATIONS),
-        default="self_select",
+        choices=[*TEAM_FORMATIONS, COURSE_DEFAULT_CHOICE],
+        default=COURSE_DEFAULT_CHOICE,
         help="Group assignments only: self_select = students use the welcome repo's "
         "'Join team' form; assigned = you write classroom-config/teams.csv",
     )
@@ -1758,15 +1787,15 @@ def main() -> int:
         # `github` stays an accepted choice - not a documented one - for an org whose
         # rendered New assignment workflow has not refreshed yet and so still sends the
         # legacy word; `canonical_submit_via` below normalises it before use.
-        choices=[*SUBMIT_VIA, "github"],
-        default="assignment_repo",
+        choices=[*SUBMIT_VIA, "github", COURSE_DEFAULT_CHOICE],
+        default=COURSE_DEFAULT_CHOICE,
         help="external = handed in off GitHub (Moodle, Kaggle, in class): no repo is "
         "created, and nothing is ever collected",
     )
     pa.add_argument(
         "--visibility",
-        choices=list(VISIBILITIES),
-        default="private",
+        choices=[*VISIBILITIES, COURSE_DEFAULT_CHOICE],
+        default=COURSE_DEFAULT_CHOICE,
         help="public = every student's repo is world-readable from hand-out (portfolio "
         "work); there is then no receipts issue. Read when the repo is created - editing "
         "it later changes nothing",
@@ -1789,6 +1818,21 @@ def main() -> int:
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
+    if args.cmd == "assignment" and not args.copy_from:
+        # A copy ignores these boxes, so it pays for no read of the course's defaults.
+        answers = resolve_answers(
+            {
+                "format": args.formats,
+                "team_formation": args.team_formation,
+                "submit_via": args.submit_via,
+                "visibility": args.visibility,
+            },
+            course_assignment_defaults(args.org),
+        )
+        args.formats = answers["format"]
+        args.team_formation = answers["team_formation"]
+        args.submit_via = answers["submit_via"]
+        args.visibility = answers["visibility"]
     if args.cmd == "assignment":
         # Normalised once, here, so an un-refreshed org's workflow sending the legacy
         # `github` still scaffolds an `assignment_repo` shape and never re-writes the old

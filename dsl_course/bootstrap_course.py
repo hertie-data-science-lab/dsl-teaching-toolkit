@@ -25,7 +25,7 @@ import argparse
 import os
 import sys
 
-from . import mailer, scaffold, seed, site, sync_faculty
+from . import mailer, scaffold, schedule, seed, site, sync_faculty
 from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
 from .central import pin_central_ref, resolve_central_ref
 from .course import (
@@ -36,7 +36,7 @@ from .course import (
     FACULTY_TEAMS,
     term_tag,
 )
-from .discovery import COHORTS_PATH, central_ref_for, register_cohort
+from .discovery import COHORTS_PATH, central_ref_for, org_meta, register_cohort
 from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
@@ -504,7 +504,84 @@ def validate_secret_presence(org: str, secret_name: str) -> bool:
     return exists
 
 
-def setup_cohort_extras(org: str, central_ref: str) -> int:
+# The two lines of the seeded schedule.yml a course's `cohort_defaults:` rewrites. Matched
+# as text, not re-emitted as YAML: the file is a commented skeleton faculty read.
+_TZ_LINE = "# timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin\n"
+_ARCHIVE_HEAD = "# archive the org (freezes in place)"
+
+
+def _scaffold_text(
+    path: str,
+    rel: str,
+    central_ref: str,
+    tag: str,
+    year: int,
+    cohort_defaults: dict | None,
+) -> bytes:
+    """One classroom-config scaffold, rendered for this cohort. Pinned first, formatted
+    second: the scaffolds link the runbooks, and an org must be sent to the docs for the
+    engine it actually runs."""
+    text = pin_central_ref(template(rel), central_ref).format(
+        tag=tag, year=year, year_next=year + 1
+    )
+    if path == schedule.SCHEDULE_PATH:
+        text = seed_schedule(text, cohort_defaults or {})
+    return text.encode()
+
+
+def seed_schedule(text: str, defaults: dict) -> str:
+    """The seeded `schedule.yml` with the course's `cohort_defaults:` applied
+    (`schedule.parse_cohort_defaults`). No defaults, no change - today's skeleton.
+
+    `timezone` becomes a live line. `archive.auto: false` comments the live `archive:`
+    block out, since the block's presence is what archives a cohort; `auto: true` keeps it
+    and writes `grace_days:` into it when the course gives one."""
+    tz = defaults.get("timezone")
+    if tz:
+        text = text.replace(
+            _TZ_LINE,
+            f"timezone: {tz}                    # from the course's cohort_defaults\n",
+        )
+    archive = defaults.get("archive")
+    head = text.find(_ARCHIVE_HEAD)
+    if archive and head >= 0:
+        block = text[head:]
+        if not archive["auto"]:
+            block = "".join(
+                line if line.startswith("#") else f"# {line}"
+                for line in block.splitlines(keepends=True)
+            )
+            block = (
+                "# The course's cohort_defaults turn automatic archiving OFF: uncomment the "
+                "block below to archive this cohort.\n" + block
+            )
+        elif archive.get("grace_days") is not None:
+            block = block.replace(
+                "archive:\n",
+                f"archive:\n  grace_days: {archive['grace_days']}"
+                f"                # default date = semester_end + this many days\n",
+                1,
+            )
+        text = text[:head] + block
+    return text
+
+
+def course_cohort_defaults(course_org: str) -> dict:
+    """The course's `cohort_defaults:`, or `{}` when there is none or it cannot be read -
+    a new cohort then gets today's skeleton, never a failed bootstrap."""
+    if not course_org:
+        return {}
+    try:
+        meta = org_meta(course_org)
+    except Exception as exc:
+        log_err(f"  ! could not read {course_org}'s cohort_defaults ({exc})")
+        return {}
+    return schedule.parse_cohort_defaults(meta.get("cohort_defaults"))
+
+
+def setup_cohort_extras(
+    org: str, central_ref: str, cohort_defaults: dict | None = None
+) -> int:
     """Cohort-only: seed the student-facing repos.
 
     Layered on top of the common bootstrap when --cohort is passed (the safe-by-default
@@ -604,11 +681,7 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
             org,
             "classroom-config",
             {
-                # Pinned first, formatted second: the scaffolds link the runbooks,
-                # and an org must be sent to the docs for the engine it actually runs.
-                path: pin_central_ref(template(rel), central_ref)
-                .format(tag=tag, year=year, year_next=year + 1)
-                .encode()
+                path: _scaffold_text(path, rel, central_ref, tag, year, cohort_defaults)
                 for path, rel in CLASSROOM_SCAFFOLDS.items()
             },
             "init: classroom-config scaffolds (roster, teams, schedule, people)",
@@ -875,7 +948,9 @@ def _run(args: argparse.Namespace) -> int:
     workflow_failures = 0
     if args.cohort:
         # Cohort: student-facing welcome + roster + tightened perms.
-        workflow_failures = setup_cohort_extras(args.org, central_ref)
+        workflow_failures = setup_cohort_extras(
+            args.org, central_ref, course_cohort_defaults(args.course)
+        )
         if args.course:
             # Pointer back to the course org, in this cohort's .github/dsl-course.yml -
             # the classroom-config dispatchers read its `course:` line to know where to

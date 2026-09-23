@@ -1598,7 +1598,7 @@ def test_cohort_bootstrap_reds_when_faculty_sync_reports_errors(monkeypatch, cap
 def test_cohort_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, capsys):
     # setup_cohort_extras returns the count of welcome/config-sample writes that failed.
     stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "setup_cohort_extras", lambda org, ref: 4)
+    monkeypatch.setattr(bc, "setup_cohort_extras", lambda org, ref, defaults: 4)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
     monkeypatch.setattr("sys.argv", _cohort_argv())
 
