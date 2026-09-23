@@ -46,8 +46,10 @@ under Actions congestion would read a 15 min cadence as 21 and stall both close 
 Two things neither alarm can see. Lateness is measured from the last run that EXECUTED,
 success or failure, so a streak of red runs that finally ships a moment is not reported
 here; the `<workflow> is failing` issue covers that case from the first red run. And any
-`repository_dispatch` run counts as the dispatcher, a push to a cohort's `schedule.yml`
-included, because the runs listing does not carry `client_payload.driver`.
+`repository_dispatch` run counts as the dispatcher, because the runs listing does not carry
+`client_payload.driver` - except a run a cohort's classroom-config push SCOPED to that one
+cohort, which says so in its title (`SCOPED_RUN_TITLE`) and is read as no tick at all: it
+released into one cohort, so it can neither date the dispatcher nor close a gap for the rest.
 
 Every line either module publishes carries workflow names, timestamps, minutes, schedule
 labels and counts - never a handle, a student repo, or a `describe()` line (which names
@@ -63,6 +65,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
 
+from .course import SCOPED_RUN_TITLE
 from .ghcli import gh_json
 from .issues import close_issues_titled, find_issue, upsert_issue
 from .log import log, log_err, log_step, log_withheld
@@ -95,12 +98,13 @@ HEALTHY_GAP = timedelta(minutes=20)
 # every course org's `.github`. Renaming it there and not here leaves a course whose cadence
 # check reads a 404 - loudly (the read raises), but only in the logs.
 WORKFLOW_FILE = "scheduled-release.yml"
-# ~5 hours of quarter-hourly ticks: enough history for HEALTHY_GAPS and for the dead-man
-# threshold, in ONE request. EVERYTHING this module says is bounded by this window - which
-# is why there is no "no cron fire in 24h" rule (a 24h-old run cannot be in a 5h window, so
-# such a rule could only ever read as false) and why the bodies say "in the last 20 runs"
-# rather than implying knowledge of anything older.
-RUNS_PAGE = 20
+# The API's largest page - up to ~25 hours of quarter-hourly ticks - in ONE request. It has
+# to be that large because the runs a classroom-config push SCOPED to one cohort are skipped
+# (`SCOPED_RUN_TITLE`) but still take rows: at 20, one busy evening of pushes filled the
+# window and disarmed both alarms. EVERYTHING this module says is bounded by this window,
+# which is why the bodies say "in the last N runs" rather than implying knowledge of
+# anything older.
+RUNS_PAGE = 100
 
 # The two drivers, as GitHub names them in a run's `event`.
 DISPATCH_EVENT = "repository_dispatch"
@@ -259,6 +263,8 @@ def evaluate(now: datetime, runs: list[dict], own_run_id: str | None) -> Verdict
     for run in runs:
         if str(run.get("id")) == str(own_run_id):
             own_started = _moment(run.get("created_at")) or own_started
+            continue
+        if str(run.get("display_title") or "").startswith(SCOPED_RUN_TITLE):
             continue
         at = _moment(run.get("created_at"))
         if at is None:

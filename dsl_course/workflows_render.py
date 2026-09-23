@@ -36,6 +36,7 @@ from .course import (
     PUBLIC_HTML_PDF,
     PUBLIC_TYPES,
     SANDBOX_USER,
+    SCOPED_RUN_TITLE,
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -239,6 +240,37 @@ _SANDBOX_STEP = f"""      - name: Create the account graded code runs as
 """
 
 
+# What a job installs. The core is every job's; the autograder's runtime (pytest, nbconvert,
+# ipykernel - most of the install's time) only the jobs that grade, which are exactly the
+# ones that create the sandbox account.
+#
+# The pip cache is for the core jobs ONLY. setup-python saves ~/.cache/pip in a post step,
+# after everything else in the job - in a grading job, after the students' code has run -
+# and pip installs from that cache without checking a hash. A cache a grading job could
+# write would be restored into jobs holding the org-owner PAT, where a planted `.pth` runs
+# on every `python3`. So a grading job never names a cache, and pays the full install on a
+# budget of two hours. The key path is relative to $GITHUB_WORKSPACE, where the central
+# repo is checked out.
+_CORE_REQUIREMENTS = "requirements.txt"
+_AUTOGRADE_REQUIREMENTS = "requirements-autograde.txt"
+
+
+def _install_steps(sandbox: bool) -> str:
+    if sandbox:
+        return f"""      - uses: {_SETUP_PYTHON}
+        with:
+          python-version: "3.12"
+      - run: pip install -r {_AUTOGRADE_REQUIREMENTS}
+"""
+    return f"""      - uses: {_SETUP_PYTHON}
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: {_CORE_REQUIREMENTS}
+      - run: pip install -r {_CORE_REQUIREMENTS}
+"""
+
+
 def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> str:
     return f"""    runs-on: ubuntu-latest
     timeout-minutes: {minutes}
@@ -253,11 +285,7 @@ def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False)
           # repo - so the persisted header buys nothing, and the grading jobs run the
           # student's own code with this directory on disk.
           persist-credentials: false
-      - uses: {_SETUP_PYTHON}
-        with:
-          python-version: "3.12"
-      - run: pip install -r requirements.txt
-{_SANDBOX_STEP if sandbox else ""}"""
+{_install_steps(sandbox)}{_SANDBOX_STEP if sandbox else ""}"""
 
 
 def _run_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> str:
@@ -523,6 +551,16 @@ def _fill(
 # The unscoped pair, for the workflows with a single unattended job.
 _CRON_NOTICE = _fill(_CRON_NOTICE_TEMPLATE)
 _CRON_CLOSE = _fill(_CRON_CLOSE_TEMPLATE)
+
+# The scheduler's release job, whose issue is about the WHOLE course: a run a cohort's push
+# scoped to that one cohort (job-level `SCOPED`, see render_scheduler) neither files nor
+# closes it. Otherwise a green push in cohort A closes the issue cohort B's fault holds open,
+# and the next full tick re-files it - cc course-admin and a maintainer mail - once per push.
+_RELEASE_NOTICE = _fill(
+    _CRON_NOTICE_TEMPLATE,
+    failed="(failure() || cancelled()) && env.SCOPED == ''",
+    succeeded="success() && env.SCOPED == ''",
+)
 
 # The scheduler's grading legs report PER COHORT: they run in parallel, so on a shared
 # title a green cohort would close a red cohort's open issue. A cohort org name is not
@@ -943,7 +981,8 @@ def render_sync_membership(cohort_orgs: list[str]) -> str:
       implied - but still applied to every cohort's own course-admin team)
     - repository_dispatch (from a cohort's classroom-config dispatcher on push to its
       students.csv/teams.csv/people.yml) -> course_admins + that one cohort's
-      instructors/TAs
+      instructors/TAs; one whose payload says `all_cohorts: true` and names no cohort
+      (the ds01 timer's hourly dispatch) -> EVERY registered cohort, like the cron
     - daily cron -> course_admins + EVERY registered cohort (roster/teams/instructors,
       catching any start/end date rotation with no edit that day, and any drift
       generally)
@@ -991,6 +1030,8 @@ on:
           COURSE: ${{{{ github.repository_owner }}}}
           EVENT: ${{{{ github.event_name }}}}
           DISPATCH_COHORT: ${{{{ github.event.client_payload.cohort_org }}}}
+          # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
+          DISPATCH_ALL: ${{{{ toJSON(github.event.client_payload.all_cohorts) == 'true' }}}}
 # A fault in the course org's own config is emailed to its admins from this step (see
 # dsl_course.notify.route_course), so the automatic job carries the transport and the
 # address list alongside the token. The manual button does not: somebody is standing at
@@ -1005,7 +1046,13 @@ on:
           args=(--course-org "$COURSE")
           case "$EVENT" in
             schedule) args+=(--all-cohorts) ;;
-            repository_dispatch) [ -n "$DISPATCH_COHORT" ] && args+=(--cohort-org "$DISPATCH_COHORT") ;;
+            repository_dispatch)
+              # A named cohort wins over all_cohorts.
+              if [ -n "$DISPATCH_COHORT" ]; then
+                args+=(--cohort-org "$DISPATCH_COHORT")
+              elif [ "$DISPATCH_ALL" = "true" ]; then
+                args+=(--all-cohorts)
+              fi ;;
           esac
           python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
@@ -1332,6 +1379,21 @@ on:
 """
 
 
+# The cohort a run is SCOPED to, or ''. Only a classroom-config dispatcher's push names one
+# (`templates/classroom-config/dispatch-scheduled-release.yml` sends driver=classroom-config
+# and its own org as cohort_org). The run releases into the one cohort that changed and
+# hands any site render to Sync site's queue - which a schedule.yml / people.yml / teams.csv
+# push has usually just started as well - rather than racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
+# (driver=ds01, no cohort), the button - walks every cohort as before. The payload is
+# written by whoever holds a cohort's bot token, so the scheduler checks the name against
+# the course's own registry before it touches anything.
+_SCOPED_COHORT = (
+    "(github.event_name == 'repository_dispatch' "
+    "&& github.event.client_payload.driver == 'classroom-config' "
+    "&& github.event.client_payload.cohort_org || '')"
+)
+
+
 def render_scheduler() -> str:
     """Quarter-hourly cron - and an external dispatch - that releases whatever each cohort's
     schedule says is now due and grades each passed deadline, across every registered cohort.
@@ -1356,6 +1418,11 @@ def render_scheduler() -> str:
 # times a day, not 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is
 # negligible.
 #
+# ONE COHORT, when a cohort's classroom-config push fired this run (driver=classroom-config):
+# this run releases into that cohort alone and asks Sync site - by dispatch, into its own
+# queue, which the same push may already have started - for any render its releases need,
+# instead of pushing the site repo alongside it. The cron and the ds01 timer still walk every cohort.
+#
 # THREE JOBS. `release` walks every cohort (fast: dated copies and repo provisioning) and is
 # separate because a grading pass can run for two hours and must not hold up a release due
 # meanwhile. `autograde` is one matrix leg per cohort, each queued only against itself, and
@@ -1363,6 +1430,10 @@ def render_scheduler() -> str:
 # `autograde-report` files/closes the grading legs' failure issues from a runner of its own,
 # because `autograde` executes the STUDENTS' code and a step after that one holding the bot
 # token would run whatever they left in $GITHUB_ENV, as the org owner.
+
+# A one-cohort run says so in its title: the runs listing is all `cadence` can see, and a run
+# that released into one cohort is not a tick of the whole course.
+run-name: ${{{{ {_SCOPED_COHORT} && format('{SCOPED_RUN_TITLE} {{0}}', github.event.client_payload.cohort_org) || 'Scheduled release' }}}}
 
 on:
   schedule:
@@ -1379,6 +1450,10 @@ on:
 {_PERMISSIONS_JOBS}  release:
 {_RELEASE_CONCURRENCY}    outputs:
       cohorts: ${{{{ steps.cohorts.outputs.cohorts }}}}
+    # JOB-level, because the failure-issue steps' `if:` must see it and a step's `if:`
+    # reads only job- and workflow-level env.
+    env:
+      SCOPED: ${{{{ {_SCOPED_COHORT} }}}}
 {_ungated_preamble(_TIMEOUT_MANY_REPOS)}      - name: List the cohorts to grade
         id: cohorts
         env:
@@ -1390,9 +1465,11 @@ on:
           # cancel grading in the others. Assigned, not echoed inline: under `bash -e` a
           # failed substitution inside an echo would write an empty output on a GREEN step,
           # and grading would then be skipped for the whole course, silently.
-          cohorts=$(python3 -m dsl_course.scheduler --course-org "$COURSE" --list-cohorts)
+          args=(--course-org "$COURSE" --list-cohorts)
+          [ -n "$SCOPED" ] && args+=(--cohort-org "$SCOPED")
+          cohorts=$(python3 -m dsl_course.scheduler "${{args[@]}}")
           echo "cohorts=$cohorts" >> "$GITHUB_OUTPUT"
-      - name: Release what is due, in every cohort
+      - name: Release what is due
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
@@ -1413,10 +1490,14 @@ on:
           # and it is what says whether both drivers are alive (a dispatch names its
           # sender in client_payload.driver; the cron has nobody to name).
           echo "delivered by event=$EVENT driver=${{DRIVER:-none}}"
-          args=(--course-org "$COURSE" --all-cohorts --skip-autograde)
+          if [ -n "$SCOPED" ]; then
+            args=(--course-org "$COURSE" --cohort-org "$SCOPED" --skip-autograde --defer-site-sync)
+          else
+            args=(--course-org "$COURSE" --all-cohorts --skip-autograde)
+          fi
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
-{_CRON_NOTICE}  autograde:
+{_RELEASE_NOTICE}  autograde:
     # Named, because `autograde-report` below looks its legs up by name through the jobs
     # API - a string this file declares rather than one GitHub composes from the matrix.
     name: autograde ${{{{ matrix.cohort }}}}

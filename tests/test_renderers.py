@@ -1489,8 +1489,12 @@ def _runs_student_code(step: dict) -> bool:
 # its reporting moved to a job of its own and has to ASK the jobs API instead. `skipped`
 # there means "no leg ran at all", which is neither a failure to file nor a recovery to
 # close; every other non-success conclusion, `cancelled` included, is the fault to report.
+#
+# The third is the first with the scheduler release job's scope: a run a cohort's push
+# scoped to one cohort neither files nor closes the course-wide issue.
 FAILURE_GATES = {
     "(failure() || cancelled())": "success()",
+    "(failure() || cancelled()) && env.SCOPED == ''": "success() && env.SCOPED == ''",
     (
         "steps.graded.outputs.result != 'success' "
         "&& steps.graded.outputs.result != 'skipped'"
@@ -1746,7 +1750,7 @@ def test_every_unattended_run_files_and_closes_its_own_failure_issue(name):
             f"{name}: the notice rides {job_name}, which is skipped on the cron"
         )
         _assert_reports_a_failure(opener)
-        detached = _failure_gate(opener) != "(failure() || cancelled())"
+        detached = _failure_gate(opener).startswith("steps.graded")
         _assert_emails_the_maintainer(mailers[0], detached)
         if not detached:
             _assert_the_reported_step_writes_its_log(job, f"{name}.{job_name}")
@@ -1997,8 +2001,8 @@ def test_scheduler_accepts_an_external_dispatch():
 
 
 def test_the_scheduler_installs_the_autograder_it_runs():
-    # The scheduler autogrades at every passed deadline through the SAME preamble as
-    # every other workflow, which installs requirements.txt and nothing else. When pytest
+    # The scheduler autogrades at every passed deadline through the grading preamble,
+    # which installs requirements-autograde.txt and nothing else. When pytest
     # lived only in the manual grading step, `python -m pytest` was "No module
     # named pytest" on the cron: silent zeros for the whole cohort, no sentinel, and the
     # same red run every hour for the rest of the term.
@@ -2014,6 +2018,180 @@ def test_the_scheduler_installs_the_autograder_it_runs():
         assert re.search(r"^nbconvert==", pinned, re.MULTILINE), (
             f"{req.name} does not pin nbconvert - a notebook submission cannot be graded"
         )
+
+
+def _jobs_of(rendered: str) -> dict:
+    return yaml.safe_load(rendered)["jobs"]
+
+
+def _grades(job: dict) -> bool:
+    return any(
+        "useradd" in str(step.get("run", ""))
+        and workflows_render.SANDBOX_USER in str(step.get("run", ""))
+        for step in job.get("steps", [])
+    )
+
+
+def test_only_the_jobs_that_grade_install_the_autograder():
+    # pytest, nbconvert and ipykernel were most of every job's 9-15s install, and only the
+    # jobs that run students' code use them - the ones that create the sandbox account.
+    grading, core = 0, 0
+    for name, rendered in ALL_RENDERED.items():
+        for job_name, job in _jobs_of(rendered).items():
+            installs = [
+                s["run"].strip()
+                for s in job.get("steps", [])
+                if "pip install" in str(s.get("run"))
+            ]
+            if not installs:
+                continue
+            setup = next(
+                s for s in job["steps"] if "setup-python" in str(s.get("uses", ""))
+            )
+            if _grades(job):
+                grading += 1
+                assert installs == ["pip install -r requirements-autograde.txt"], (
+                    name,
+                    job_name,
+                )
+                # A grading job saves its cache AFTER the students' code has run, and pip
+                # installs from a cache without a hash check - so it never names one.
+                assert "cache" not in setup["with"], (name, job_name)
+            else:
+                core += 1
+                assert installs == ["pip install -r requirements.txt"], (name, job_name)
+                assert setup["with"]["cache"] == "pip"
+                # Relative to $GITHUB_WORKSPACE, where the central repo is checked out.
+                assert setup["with"]["cache-dependency-path"] == "requirements.txt"
+    assert grading == 2  # Collect submissions, and the scheduler's autograde legs
+    assert core > grading
+
+
+def test_the_core_requirements_carry_no_autograder():
+    core = (ROOT / "requirements.txt").read_text()
+    for pkg in ("pytest", "nbconvert", "ipykernel"):
+        assert not re.search(rf"^{pkg}==", core, re.MULTILINE), pkg
+    extra = (ROOT / "requirements-autograde.txt").read_text()
+    assert re.search(r"^-r requirements\.txt$", extra, re.MULTILINE)
+    assert re.search(r"^ipykernel==", extra, re.MULTILINE)
+    # The tests exercise the grader too.
+    dev = (ROOT / "requirements-dev.txt").read_text()
+    assert re.search(r"^-r requirements-autograde\.txt$", dev, re.MULTILINE)
+
+
+_SCOPED = (
+    "(github.event_name == 'repository_dispatch' "
+    "&& github.event.client_payload.driver == 'classroom-config' "
+    "&& github.event.client_payload.cohort_org || '')"
+)
+
+
+def _block(run: str, first: str, last: str) -> str:
+    lines = run.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip().startswith(first))
+    end = next(i for i in range(start, len(lines)) if lines[i].strip() == last)
+    return "\n".join(lines[start : end + 1])
+
+
+def _args_under_bash(script: str, env: dict) -> list[str]:
+    out = subprocess.run(
+        # `bash -e`, which is how GitHub runs a `run:` block.
+        ["bash", "-e", "-c", f'{script}\nprintf "%s\\n" "${{args[@]}}"'],
+        env={"PATH": os.environ["PATH"], **env},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return out.split()
+
+
+def test_a_config_push_run_releases_into_its_own_cohort_only():
+    # A classroom-config push (driver=classroom-config, cohort_org=<its org>) also fires
+    # Sync site, so its run takes that one cohort and leaves the site to Sync site's queue.
+    # The GitHub cron and the ds01 timer (no cohort) still walk every cohort.
+    release = _jobs_of(ALL_RENDERED["scheduler"])["release"]
+    listing, step = (
+        next(s for s in release["steps"] if s.get("id") == "cohorts"),
+        next(s for s in release["steps"] if "DRIVER" in (s.get("env") or {})),
+    )
+    # Job-level, so the failure-issue steps' `if:` can read it.
+    assert release["env"]["SCOPED"] == "${{ " + _SCOPED + " }}"
+    for s in (listing, step):
+        assert "SCOPED" not in (s.get("env") or {})
+    choose = _block(step["run"], 'if [ -n "$SCOPED" ]', "fi")
+    base = {"COURSE": "Course-Org"}
+    assert _args_under_bash(choose, base | {"SCOPED": "Cohort-A"}) == [
+        "--course-org", "Course-Org", "--cohort-org", "Cohort-A",
+        "--skip-autograde", "--defer-site-sync",
+    ]  # fmt: skip
+    assert _args_under_bash(choose, base | {"SCOPED": ""}) == [
+        "--course-org", "Course-Org", "--all-cohorts", "--skip-autograde",
+    ]  # fmt: skip
+    lines = listing["run"].splitlines()
+    pick = "\n".join(line for line in lines if line.strip().startswith(("args", "[")))
+    assert _args_under_bash(pick, base | {"SCOPED": "Cohort-A"})[-2:] == [
+        "--cohort-org",
+        "Cohort-A",
+    ]
+    assert "--cohort-org" not in _args_under_bash(pick, base | {"SCOPED": ""})
+    # The title is what cadence reads to tell the two apart; the fire-once queue is the
+    # same one whichever arrival it is.
+    assert yaml.safe_load(ALL_RENDERED["scheduler"])["run-name"] == (
+        "${{ " + _SCOPED + " && format('" + course.SCOPED_RUN_TITLE
+        + " {0}', github.event.client_payload.cohort_org) || 'Scheduled release' }}"
+    )  # fmt: skip
+    assert release["concurrency"]["group"] == (
+        "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}"
+    )
+
+
+def test_a_scoped_run_neither_files_nor_closes_the_course_failure_issue():
+    # A green push in cohort A closing the issue cohort B's fault holds open, and the next
+    # full tick re-filing it with a cc and a mail, is one fault mentioned once per push.
+    steps = _jobs_of(ALL_RENDERED["scheduler"])["release"]["steps"]
+    by_name = {s.get("name"): s for s in steps}
+    for name in (
+        "Report an unattended failure as an issue",
+        "Close the failure issue once a run succeeds",
+    ):
+        assert "&& env.SCOPED == ''" in by_name[name]["if"], name
+    # The mail rides on the notice step's own output, so it is gated with it.
+    mail = by_name["Email the maintainer the failed step's log"]
+    assert "steps.notice.outputs.report == 'true'" in mail["if"]
+    # Every other workflow's reporting is untouched.
+    assert "env.SCOPED" not in ALL_RENDERED["sync_site"]
+
+
+@pytest.mark.parametrize(
+    "cohort, everyone, expected",
+    [
+        ("", "true", ["--all-cohorts"]),
+        ("", "false", []),
+        ("Cohort-A", "true", ["--cohort-org", "Cohort-A"]),
+        ("Cohort-A", "false", ["--cohort-org", "Cohort-A"]),
+    ],
+)
+def test_the_ds01_membership_dispatch_can_ask_for_every_cohort(
+    cohort, everyone, expected
+):
+    # ds01's hourly `sync-membership` dispatch sends {"driver": "ds01", "all_cohorts":
+    # true}; a cohort's own dispatch names its cohort, which wins over all_cohorts.
+    step = next(
+        s
+        for s in _jobs_of(ALL_RENDERED["sync_membership"])["sync-auto"]["steps"]
+        if "DISPATCH_ALL" in (s.get("env") or {})
+    )
+    # The JSON boolean and nothing else: a string "true" or a 1 is absent.
+    assert step["env"]["DISPATCH_ALL"] == (
+        "${{ toJSON(github.event.client_payload.all_cohorts) == 'true' }}"
+    )
+    script = "args=()\n" + _block(step["run"], 'case "$EVENT" in', "esac")
+    env = {
+        "EVENT": "repository_dispatch",
+        "DISPATCH_COHORT": cohort,
+        "DISPATCH_ALL": everyone,
+    }
+    assert _args_under_bash(script, env) == expected
 
 
 def test_update_profile_readme_raises_clearly_on_a_malformed_config(

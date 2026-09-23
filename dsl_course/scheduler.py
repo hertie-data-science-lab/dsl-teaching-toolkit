@@ -108,6 +108,7 @@ from .collect import (
 from .course import COURSE_ADMIN_TEAM
 from .deploy import deploy_many
 from .faults import ConfigFault, Severity, Unusable
+from .ghcli import gh
 from .grades import (
     cohort_sheet_faults,
     cutoff_at,
@@ -1327,6 +1328,7 @@ def _release_phase(
     dry_run: bool,
     verdict: cadence.Verdict | None,
     listing: dict[str, dict] | None,
+    defer_site_sync: bool = False,
 ) -> int:
     """Snapshot every passed deadline, refresh every open grading sheet, pre-flight the
     plan's sources, and fire everything now due. Returns the error count. No grading: see
@@ -1462,7 +1464,13 @@ def _release_phase(
     # and the daily **Sync site** cron renders it within ~24h. Making the tick retry would
     # mean carrying "the site owes a render" somewhere durable, which is a second piece of
     # cohort state to write, read and get wrong for a page that is a day stale at worst.
-    if release_changed or lock_changed:
+    if (release_changed or lock_changed) and defer_site_sync:
+        # A run fired by a classroom-config push, which (for schedule.yml, people.yml or
+        # teams.csv) started Sync site too: rendering here as well pushed the site repo
+        # alongside it and lost the race. Queued behind Sync site's own concurrency group
+        # instead, so the render lands after this release.
+        errors += _request_site_sync(course_org, cohort_org)
+    elif release_changed or lock_changed:
         # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). This
         # cohort's site-sync failure must be logged and counted, not an unhandled traceback
         # that aborts the run - and, under --all-cohorts, every cohort scheduled after it.
@@ -1476,6 +1484,26 @@ def _release_phase(
     return errors
 
 
+def _request_site_sync(course_org: str, cohort_org: str) -> int:
+    """Ask the course org's Sync site to render `cohort_org`, by the same `sync-site`
+    dispatch the cohort's classroom-config sends. Returns the error count."""
+    code, out = gh(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{course_org}/.github/dispatches",
+        "-f",
+        "event_type=sync-site",
+        "-f",
+        f"client_payload[cohort_org]={cohort_org}",
+    )
+    if code != 0:
+        log_err(f"could not ask Sync site to render {cohort_org}: {out[:200]}")
+        return 1
+    log_ok(f"asked Sync site to render {cohort_org}")
+    return 0
+
+
 def run(
     course_org: str,
     cohort_org: str,
@@ -1485,6 +1513,7 @@ def run(
     release: bool = True,
     autograde: bool = True,
     verdict: cadence.Verdict | None = None,
+    defer_site_sync: bool = False,
 ) -> int:
     """One cohort, one or both phases. The workflow's two jobs each ask for one phase
     (`--skip-autograde` / `--autograde-only`); a local run asks for both.
@@ -1521,7 +1550,14 @@ def run(
         # Not taken for the autograde phase, which asks the org nothing.
         listing = discovery.listing_by_name(cohort_org)
         errors += _release_phase(
-            course_org, cohort_org, sched, now, dry_run, verdict, listing
+            course_org,
+            cohort_org,
+            sched,
+            now,
+            dry_run,
+            verdict,
+            listing,
+            defer_site_sync,
         )
         # Last of the release pass: the cohort's own end. A release due today ships
         # first, and then - on the day - the whole org is frozen behind it.
@@ -1577,6 +1613,33 @@ def _registered_cohorts(course_org: str) -> list[str] | None:
         return None
 
 
+def _one_cohort(course_org: str, cohort_org: str) -> tuple[list[str], int]:
+    """The one-cohort path's gate: `([cohort], 0)` to run it, spelt as the registry spells
+    it; `([], 0)` for a registered cohort that has been closed out (frozen - running it
+    would only spend a tick on 403s, the loop's answer too); `([], 1)` for a name the
+    registry does not list, or a registry that could not be read.
+
+    The name can arrive in a `repository_dispatch` payload, which whoever holds a cohort's
+    bot token writes, so the course's own registry decides - the check Sync site and Sync
+    membership make before they touch a dispatched cohort."""
+    try:
+        registered = discovery.discover_cohorts(course_org)
+    except Exception as exc:
+        log_err(f"could not list cohorts for {course_org}: {exc}")
+        return [], 1
+    match = [c for c in registered if c.casefold() == cohort_org.casefold()]
+    if not match:
+        listed = ", ".join(sorted(registered)) or "nothing"
+        log_err(
+            f"{cohort_org} is not registered under {course_org} ({listed}) - "
+            f"refusing to run it."
+        )
+        return [], 1
+    if not discovery.cohort_is_live(match[0]):
+        return [], 0
+    return match[:1], 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1613,6 +1676,13 @@ def main() -> int:
         "either file - the fast path under this cron's own hourly floor.",
     )
     parser.add_argument(
+        "--defer-site-sync",
+        action="store_true",
+        help="Hand the site render to the Sync site workflow (a sync-site dispatch) "
+        "instead of pushing it from here - for a run fired by a classroom-config push, "
+        "which may have started Sync site too.",
+    )
+    parser.add_argument(
         "--now", default=None, help="Override 'now' (ISO date/datetime) - for testing."
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -1639,7 +1709,11 @@ def main() -> int:
         # step is skipped. So one transient 403 would cost a whole release tick. Every log
         # line the read makes goes to stderr for the duration; only the answer is printed.
         with contextlib.redirect_stdout(sys.stderr):
-            cohorts = _registered_cohorts(args.course_org)
+            if args.cohort_org:
+                cohorts, rc = _one_cohort(args.course_org, args.cohort_org)
+                cohorts = None if rc else cohorts
+            else:
+                cohorts = _registered_cohorts(args.course_org)
         if cohorts is None:
             return 1
         print(json.dumps(cohorts))
@@ -1714,11 +1788,20 @@ def main() -> int:
     if not args.cohort_org:
         log_err("pass --cohort-org or --all-cohorts.")
         return 1
-    # The break-glass path takes the same answer as the loop above: a cohort that has been
-    # closed out is frozen, and running it by hand would only spend a tick on 403s.
-    if not discovery.cohort_is_live(args.cohort_org):
-        return 0
-    return run(args.course_org, args.cohort_org, now, dry_run=args.dry_run, **phases)
+    # One cohort: a classroom-config push's run, or a laptop. The registry authorises it,
+    # and takes the same answer as the loop above - a cohort that has been closed out is
+    # frozen, and running it would only spend a tick on 403s.
+    cohorts, rc = _one_cohort(args.course_org, args.cohort_org)
+    if not cohorts:
+        return rc
+    return run(
+        args.course_org,
+        cohorts[0],
+        now,
+        dry_run=args.dry_run,
+        defer_site_sync=args.defer_site_sync,
+        **phases,
+    )
 
 
 if __name__ == "__main__":

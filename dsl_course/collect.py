@@ -2113,8 +2113,8 @@ def _grader_dep_missing(module: str) -> bool:
         return False
     log_err(
         f"  ! `{module}` is not installed in the grading environment - NOTHING can be "
-        f"graded until the workflow installs it (it is pinned in requirements.txt, "
-        f"which every seeded workflow's preamble installs)"
+        f"graded until the workflow installs it (it is pinned in "
+        f"requirements-autograde.txt, which every grading job's preamble installs)"
     )
     return True
 
@@ -2424,7 +2424,7 @@ COMPLETION_DID_NOT_RUN = "did-not-run"
 # through `nbclient`, and the kernel itself is `ipykernel` - a separate distribution that
 # nbconvert does not pull in, so a runner with only nbconvert fails every notebook with
 # "no such kernel" and would report a cohort of `did-not-run`. Both are pinned in
-# requirements.txt, which every seeded workflow's preamble installs.
+# requirements-autograde.txt, which every grading job's preamble installs.
 COMPLETION_DEPS = ("nbconvert", "ipykernel")
 COMPLETION_DEP_SKIP = (
     "the completion check needs " + " and ".join(COMPLETION_DEPS) + " in the grading "

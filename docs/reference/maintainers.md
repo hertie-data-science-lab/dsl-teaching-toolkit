@@ -186,7 +186,7 @@ and left alone.
   `timed-out` / `did-not-run` into `info.completion`, archiving the executed copy at
   `autograde/<slug>/<key>.ipynb` under a 5 MiB cap. It needs **`ipykernel`** as well as
   `nbconvert` (nbconvert converts without a kernel and cannot execute without one) - both
-  pinned in `requirements.txt`, which every seeded workflow installs; a runner without them
+  pinned in `requirements-autograde.txt`, which every grading job installs; a runner without them
   records the decision once and stays green rather than reporting a cohort of failures.
   `not-attempted` is byte identity (`gh_contents.blob_sha`) against the notebooks still on
   the template's default branch, and needs EVERY notebook in the checkout to match one; the
@@ -520,8 +520,15 @@ gaps of 13 hours, so its cron is the **backstop** and not the clock. The primary
 systemd timer on the lab server ds01 - `dsl-scheduled-release.timer` running
 `scripts/maintenance/dsl-scheduled-release.sh`, both in `hertie-data-science-lab/ds01-infra` - which
 POSTs `repository_dispatch: scheduled-release` to the `.github` repo of every `dsl-course-hub`
-org at :00/:15/:30/:45. A push to a cohort's `schedule.yml` dispatches the same event. Each
-driver guards the other, and the workflow is one run per arrival whichever it came from.
+org at :00/:15/:30/:45. A push to a cohort's `schedule.yml`, `people.yml`, `students.csv` or
+`teams.csv` dispatches the same event with `driver: classroom-config`, and that run releases
+into **that cohort only** (checked against the registry) and asks Sync site for any render
+instead of pushing the site itself. Each driver guards the other; the cron and ds01 runs
+always walk every cohort. All of them share the one `scheduled-release` group, which holds a
+single pending run, so a scoped arrival can displace a pending full one: the other cohorts
+then wait for the next full arrival (15 min or less with ds01, longer on GitHub's cron
+alone). Nothing is lost - every action is marker-gated. A scoped run neither files nor
+closes the *Scheduled release is failing* issue.
 
 Those four minutes are not a breach of the rule above: that rule is about **GitHub's** cron
 scheduler dropping the contended ones. A REST POST is served like any other API call, and the
@@ -536,7 +543,7 @@ org's `.github`; the last GitHub cron fire is printed there as information and n
 
 The check only runs inside a run, so driver health is decided at the first run more than 2h after
 the last dispatch-driven one - with ds01 down, the next GitHub-delivered cron run, which can take
-hours. Everything either alarm says is bounded by the **20** runs the check fetches, and both are
+hours. Everything either alarm says is bounded by the **100** runs the check fetches, and both are
 armed only while a dispatch-driven run sits inside that window: a freshly bootstrapped or newly
 promoted org never alarms on its way in, and an org whose dispatcher died long enough ago to
 scroll out of the window re-disarms unless its driver-health issue is already open.

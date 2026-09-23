@@ -18,9 +18,10 @@ name: Dispatch scheduled release
 # Why a push trigger at all: the scheduler's own `schedule:` cron is delivered
 # best-effort by GitHub - a few per cent of fires arrive, and observed gaps run to
 # hours - so "a schedule edit takes effect within ~15 minutes" is only true if the edit
-# itself starts a run. Firing is always safe: Scheduled release runs for every cohort in
-# the course org and is idempotent (one-shot work is guarded by its own markers,
-# cumulative work re-converges), so an extra run does no more than the cron would.
+# itself starts a run. Firing is always safe: Scheduled release is idempotent (one-shot
+# work is guarded by its own markers, cumulative work re-converges), so an extra run does
+# no more than the cron would. `driver: classroom-config` plus `cohort_org` scopes the run
+# to THIS cohort, and hands any website render to Sync site's queue by dispatch.
 #
 # Reads the course org from THIS cohort's own .github/dsl-course.yml `course:` pointer
 # (single source of truth). Fires a repository_dispatch (not workflow_dispatch) so the

@@ -526,6 +526,51 @@ def test_the_site_render_sees_the_lock_this_tick_just_wrote(monkeypatch):
     assert order == ["lock", "site"]
 
 
+def test_a_config_push_run_queues_its_site_render_behind_sync_site(monkeypatch):
+    # The classroom-config push that fires this run fires Sync site too. Pushing the site
+    # repo from here as well raced it ("site push failed"); asking Sync site by dispatch
+    # queues the render behind that run instead, so it still lands after this release.
+    _formation_tick(monkeypatch, lambda *a, **k: LockWrite(True, True))
+
+    def boom(*a, **k):
+        raise AssertionError("a deferred run must not push the site itself")
+
+    monkeypatch.setattr("dsl_course.site.sync_site", boom)
+    sent: list[tuple] = []
+    monkeypatch.setattr(scheduler, "gh", lambda *a, **k: sent.append(a) or (0, ""))
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert (
+        scheduler.run(
+            "Course-Org", "Cohort-Org", now, autograde=False, defer_site_sync=True
+        )
+        == 0
+    )
+    assert sent == [
+        (
+            "api",
+            "--method",
+            "POST",
+            "repos/Course-Org/.github/dispatches",
+            "-f",
+            "event_type=sync-site",
+            "-f",
+            "client_payload[cohort_org]=Cohort-Org",
+        )
+    ]
+
+
+def test_a_site_render_nobody_could_ask_for_is_a_failed_action(monkeypatch):
+    _formation_tick(monkeypatch, lambda *a, **k: LockWrite(True, True))
+    monkeypatch.setattr(scheduler, "gh", lambda *a, **k: (1, "HTTP 403"))
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert (
+        scheduler.run(
+            "Course-Org", "Cohort-Org", now, autograde=False, defer_site_sync=True
+        )
+        == 1
+    )
+
+
 def test_a_cohort_with_nothing_planned_is_not_charged_for_the_lock(monkeypatch):
     # Most cohorts, for most of a term's planning, carry an empty `assignments:` block -
     # and each was paying a repo probe and a contents read every quarter of an hour, ~192
@@ -2587,6 +2632,9 @@ def test_autograde_only_grades_without_releasing_anything(monkeypatch):
     # (the freeze is deadline-pinned in the release job) and must release nothing.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
+    monkeypatch.setattr(
         sys,
         "argv",
         [
@@ -2613,6 +2661,9 @@ def test_autograde_only_waits_for_the_snapshot_file(monkeypatch):
         scheduler.schedule,
         "load",
         lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+    )
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
     )
     monkeypatch.setattr(
         sys,
@@ -2714,6 +2765,9 @@ def test_the_autograde_job_never_touches_the_cadence(monkeypatch, cadence_calls)
     # and would measure the gap against the run it is itself part of.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
+    monkeypatch.setattr(
         sys,
         "argv",
         [
@@ -2738,6 +2792,9 @@ def test_a_single_cohort_invocation_never_touches_the_cadence(
     # A laptop, or a break-glass run during an Actions outage. It knows nothing about the
     # other cohorts and must not report on the drivers' behalf.
     _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -3827,10 +3884,70 @@ def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch
 
     monkeypatch.setattr(scheduler, "run", boom)
     monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
+    monkeypatch.setattr(
         "sys.argv",
         ["scheduler", "--course-org", "Course-Org", "--cohort-org", "Cohort-A"],
     )
     assert scheduler.main() == 0
+
+
+def _one_cohort_argv(monkeypatch, cohort, *extra):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["scheduler", "--course-org", "Course-Org", "--cohort-org", cohort, *extra],
+    )
+
+
+def test_a_cohort_the_registry_does_not_list_is_never_run(monkeypatch, capsys):
+    # A config push's run names its cohort in a repository_dispatch payload, which anyone
+    # holding a cohort's bot token writes - so the course's own registry decides.
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("an unregistered cohort must not be run")
+
+    monkeypatch.setattr(scheduler, "run", boom)
+    _one_cohort_argv(monkeypatch, "Someone-Else", "--skip-autograde")
+    assert scheduler.main() == 1
+    assert "Someone-Else is not registered under Course-Org" in capsys.readouterr().err
+
+
+def test_a_dispatched_cohort_runs_under_the_registry_spelling(monkeypatch):
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
+    monkeypatch.setattr(scheduler.discovery, "cohort_is_live", lambda org: True)
+    seen: list[tuple] = []
+    monkeypatch.setattr(
+        scheduler,
+        "run",
+        lambda course, cohort, now, **k: seen.append((cohort, k)) or 0,
+    )
+    _one_cohort_argv(monkeypatch, "cohort-a", "--skip-autograde", "--defer-site-sync")
+    assert scheduler.main() == 0
+    assert [c for c, _ in seen] == ["Cohort-A"]
+    assert seen[0][1]["defer_site_sync"] is True
+    assert seen[0][1]["autograde"] is False
+
+
+def test_listing_one_cohort_prints_only_a_registered_one(monkeypatch, capsys):
+    # The grading matrix of a config push's run: that cohort alone, and only if the
+    # registry lists it - an unregistered name fails the listing, which skips the release
+    # step behind it as well.
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
+    monkeypatch.setattr(scheduler.discovery, "cohort_is_live", lambda org: True)
+    _one_cohort_argv(monkeypatch, "Cohort-B", "--list-cohorts")
+    assert scheduler.main() == 0
+    assert capsys.readouterr().out == '["Cohort-B"]\n'
+    _one_cohort_argv(monkeypatch, "Cohort-Z", "--list-cohorts")
+    assert scheduler.main() == 1
+    assert capsys.readouterr().out == ""
 
 
 # --------------------------------------------------------------- the archive phase

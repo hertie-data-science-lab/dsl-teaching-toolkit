@@ -1,3 +1,4 @@
-# pytest is pinned in requirements.txt (the seeded workflows' autograder needs it at run
-# time), so this file no longer floors it - two declarations could only ever disagree.
--r requirements.txt
+# Tests need the autograder's runtime as well as the core: pytest is pinned there (the
+# grading jobs need it at run time), so this file does not floor it - two declarations
+# could only ever disagree.
+-r requirements-autograde.txt
