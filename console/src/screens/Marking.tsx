@@ -1,7 +1,6 @@
 // S12 Marks (the grading sheet as a grid) and S9 Teams (teams.csv for a group assignment).
 
 import { useState } from 'preact/hooks';
-import { parse } from 'yaml';
 import { useEnv } from '../env';
 import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
@@ -17,20 +16,8 @@ import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Check, Ext, Lock } from '../ui/icons';
 import { NotFound } from './Assignments';
-import { todayOf, tzOf, yearOf } from './Cohort';
-import { WithStatus, cohortCrumbs, cohortScope } from './common';
+import { WithStatus, cohortCrumbs, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-
-function gradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
-  const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
-  if (f.kind !== 'ready') return {};
-  try {
-    const d = parse(f.text);
-    return d && typeof d === 'object' ? (d as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
 
 function courseDefault(p: ReadyProps, key: string): unknown {
   return ((p.course.meta?.assignment_defaults ?? {}) as Record<string, unknown>)[key];

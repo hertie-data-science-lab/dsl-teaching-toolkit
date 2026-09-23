@@ -15,8 +15,7 @@ import { OpButtons } from '../ops/Panel';
 import { CheckLine, Crumbs, Help, Lives, Loading, OpsList } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Ext } from '../ui/icons';
-import { todayOf, tzOf, yearOf } from './Cohort';
-import { WithStatus, cohortCrumbs, cohortScope, useOperations } from './common';
+import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 const FRONT = /^---\n([\s\S]*?)\n---\n?/;

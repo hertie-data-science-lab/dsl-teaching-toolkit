@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'preact/hooks';
 import type { GhUser } from '../github/client';
-import type { Course, CohortRef } from '../model/discovery';
+import { cohortName, type Course, type CohortRef } from '../model/discovery';
 import type { Loaded } from '../model/status';
+import { ghUrl } from './bits';
 import { Bldg, Ext, Gh, Pin } from './icons';
 
 function initials(u: GhUser): string {
@@ -40,8 +41,8 @@ export function HeaderLinks({ course, cohort }: { course?: Course; cohort?: Coho
     <>
       {!course.write ? <span class="ro-chip">read only</span> : null}
       {cohort ? <a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Student site <Ext /></a> : null}
-      {cohort ? <a href={`https://github.com/${cohort.org}`} target="_blank" rel="noopener">Cohort on GitHub <Ext /></a> : null}
-      <a href={`https://github.com/${course.org}`} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
+      {cohort ? <a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Cohort on GitHub <Ext /></a> : null}
+      <a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </>
   );
 }
@@ -119,7 +120,7 @@ function Switcher({ courses, course, cohort, cohortStates }: {
       document.removeEventListener('keydown', esc);
     };
   }, [open]);
-  const label = course ? (cohort ? `${course.name}, ${cohort.termLabel}` : course.name) : 'All courses';
+  const label = course ? (cohort ? cohortName({ course, cohort }) : course.name) : 'All courses';
   const sw = (l: Loaded | undefined, c: Course): string => {
     if (!c.write) return 'read only';
     if (!l || l.kind !== 'ready') return l?.kind === 'absent' ? 'not computed yet' : '';
@@ -216,8 +217,8 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
           <hr />
           <ul>
             {cohort ? <li><a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Student site <Ext /></a></li> : null}
-            {cohort ? <li><a href={`https://github.com/${cohort.org}`} target="_blank" rel="noopener">Cohort on GitHub <Ext /></a></li> : null}
-            <li><a href={`https://github.com/${course.org}`} target="_blank" rel="noopener">Course on GitHub <Ext /></a></li>
+            {cohort ? <li><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Cohort on GitHub <Ext /></a></li> : null}
+            <li><a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a></li>
           </ul>
         </div>
       ) : null}

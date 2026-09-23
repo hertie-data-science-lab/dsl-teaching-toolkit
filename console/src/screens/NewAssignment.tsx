@@ -14,7 +14,7 @@ import { createAssignment } from '../ops/defs';
 import { FORMATS, VISIBILITY, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
-import { Crumbs, Help } from '../ui/bits';
+import { Crumbs, Help, editUrl } from '../ui/bits';
 import { SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { useDraft } from '../wizards/drafts';
@@ -229,7 +229,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <>
             <Verified>Created. Nothing reaches students until you add it to a schedule.</Verified>
             <div class="actions">
-              <a class="btn" href={`https://github.com/${course.org}/${repo}/edit/main/README.md`} target="_blank" rel="noopener">Write the brief <Ext /></a>
+              <a class="btn" href={editUrl(course.org, repo, 'README.md')} target="_blank" rel="noopener">Write the brief <Ext /></a>
               {cohort ? <a class="btn outline" href={`?cohort=${cohort.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to {cohort.termLabel} schedule</a> : <a class="btn outline" href={`?course=${course.org}#new-cohort-1`}>Add to {termLabel(term)} schedule: set up the cohort first</a>}
             </div>
             <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>

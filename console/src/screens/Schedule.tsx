@@ -2,7 +2,6 @@
 
 import Ajv2020 from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
-import { parse } from 'yaml';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { matches } from '../edit/glob';
@@ -23,9 +22,9 @@ import { TIMEZONES } from '../tiers/course';
 import { Crumbs, EditFile, Help, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { Check } from '../ui/icons';
-import { releaseRef, tzOf, yearOf } from './Cohort';
+import { releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
-import { CheckNow, WithStatus, cohortCrumbs, cohortScope } from './common';
+import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
@@ -175,14 +174,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
 }
 
 function templateVisibility(p: ReadyProps, template: string): string {
-  if (!template) return 'private';
-  const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
-  if (f.kind !== 'ready') return 'private';
-  try {
-    return String((parse(f.text) as Record<string, unknown>)?.visibility ?? 'private');
-  } catch {
-    return 'private';
-  }
+  return template ? String(gradingConfig(p, template).visibility ?? 'private') : 'private';
 }
 
 function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; lateDays: string }) {

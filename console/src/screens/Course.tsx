@@ -14,7 +14,7 @@ import { fromConfig, settingsTiers, toConfig, type CourseDefaults } from '../tie
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
-import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon } from '../ui/bits';
+import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { courseScope, newestScope } from './CourseEdit';
 import type { CourseProps } from './types';
@@ -40,7 +40,7 @@ export function CourseHeaderActions({ course, ready }: { course: CourseProps['co
       <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-cohort-1`}>New cohort</a>
       <a class="btn outline" href="#website">Publish website</a>
       {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Check now" title="Check now runs on a cohort; this course has none yet." />}
-      <a class="btn quiet" href={`https://github.com/${course.org}`} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
+      <a class="btn quiet" href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </div>
   );
 }

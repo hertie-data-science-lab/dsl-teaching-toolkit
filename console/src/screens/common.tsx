@@ -1,7 +1,10 @@
 import type { ComponentChildren, VNode } from 'preact';
 import { useState } from 'preact/hooks';
+import { parse } from 'yaml';
 import { useEnv } from '../env';
-import type { Operation } from '../model/types';
+import { cohortName } from '../model/discovery';
+import { dayKey, zoned } from '../model/format';
+import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { mergeOperations, type OpDef } from '../ops/session';
@@ -9,9 +12,25 @@ import { CheckLine, Crumbs, Loading, Soon } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import type { CohortProps, ReadyProps } from './types';
 
-export const cohortName = (p: Pick<CohortProps, 'course' | 'cohort'>) => `${p.course.name}, ${p.cohort.termLabel}`;
+export { cohortName };
 
 export const CHECK_NOW_SOON = 'Sign in to check now.';
+
+export const tzOf = (s: Status) => s.cohort?.timezone ?? 'Europe/Berlin';
+export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
+export const todayOf = (now: number, tz: string) => dayKey(new Date(now).toISOString(), tz);
+
+/** A template's grading_config.yml as parsed, or {} while it is missing or unreadable. */
+export function gradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
+  const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
+  if (f.kind !== 'ready') return {};
+  try {
+    const d = parse(f.text);
+    return d && typeof d === 'object' ? (d as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
 /** Who an operation on this cohort acts for. */
 export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {

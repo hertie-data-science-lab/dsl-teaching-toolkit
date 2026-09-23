@@ -27,6 +27,9 @@ export interface Course {
   meta: Record<string, unknown> | null; // dsl-course.yml as parsed, for Course details
 }
 
+/** "Course name, Fall 2026". */
+export const cohortName = (p: { course: Pick<Course, 'name'>; cohort: Pick<CohortRef, 'termLabel'> }) => `${p.course.name}, ${p.cohort.termLabel}`;
+
 const SEASON: Record<string, string> = { f: 'Fall', s: 'Spring', w: 'Winter', u: 'Summer' };
 
 /** "hertie-dsl-demo-f2026" -> { term: "f2026", label: "Fall 2026" }. */

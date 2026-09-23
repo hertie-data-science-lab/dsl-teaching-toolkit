@@ -5,8 +5,7 @@ import { archive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { Crumbs, Help } from '../ui/bits';
 import { Check } from '../ui/icons';
-import { todayOf, tzOf, yearOf } from './Cohort';
-import { WithStatus, cohortCrumbs, cohortScope } from './common';
+import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 function Archive(p: ReadyProps) {

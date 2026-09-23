@@ -7,7 +7,7 @@ import { useEnv } from '../env';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import type { Outcome } from '../model/types';
 import { Check, Eye, Fail, Skip } from '../ui/icons';
-import { Prop } from '../ui/bits';
+import { Prop, runUrl } from '../ui/bits';
 import type { Result } from './adapter';
 import { modeOf, opSpec } from './registry';
 import type { Current, OpDef, OpsSession } from './session';
@@ -20,7 +20,7 @@ function Mark({ tone }: { tone: string }) {
 
 function runLink(def: OpDef, runId: number | null | undefined, url?: string) {
   if (!runId) return null;
-  const href = url || `https://github.com/${def.courseOrg}/.github/actions/runs/${runId}`;
+  const href = url || runUrl(`${def.courseOrg}/.github`, runId);
   return <p class="footnote">Ran in {def.courseOrg}/.github as run #{runId}. <a href={href} target="_blank" rel="noopener">Open run</a></p>;
 }
 

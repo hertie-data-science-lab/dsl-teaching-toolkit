@@ -5,10 +5,10 @@ import { useState } from 'preact/hooks';
 import type { Auth } from '../auth/types';
 import { NEW_TOKEN_URL } from '../auth/pat';
 import type { GhUser } from '../github/client';
-import type { Course, CohortRef } from '../model/discovery';
+import { cohortName, type Course, type CohortRef } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import type { Loaded } from '../model/status';
-import { Crumbs, Help, Probs } from '../ui/bits';
+import { Crumbs, Help, Probs, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import type { HomeProps } from './types';
 
@@ -26,7 +26,7 @@ interface Card {
 }
 
 function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, user: GhUser): Card {
-  const name = `${course.name}, ${c.termLabel}`;
+  const name = cohortName({ course, cohort: c });
   const base = { key: c.org, name, href: `?cohort=${c.org}#cohort` };
   const who = course.admins.includes(user.login) ? 'you are a course admin' : 'you are staff';
   const sub = `${course.code ? `${course.code}; ` : ''}${course.write ? who : 'read only'}`;
@@ -159,7 +159,7 @@ export function SignInScreen({ auth, onSignedIn }: { auth: Auth; onSignedIn: (u:
 // --------------------------------------------------------------------------- read-only and placeholders
 
 export function ReadonlyScreen({ course, cohort }: { course: Course; cohort?: CohortRef }) {
-  const title = cohort ? `${course.name}, ${cohort.termLabel}` : course.name;
+  const title = cohort ? cohortName({ course, cohort }) : course.name;
   return (
     <>
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: title }]} />
@@ -177,8 +177,8 @@ export function ReadonlyScreen({ course, cohort }: { course: Course; cohort?: Co
         <dl class="kv">
           <dt>Code</dt><dd>{course.code || 'not set'}</dd>
           {course.description ? <><dt>About</dt><dd>{course.description}</dd></> : null}
-          <dt>Course on GitHub</dt><dd><a href={`https://github.com/${course.org}`} target="_blank" rel="noopener">{course.org}</a></dd>
-          {cohort ? <><dt>Cohort on GitHub</dt><dd><a href={`https://github.com/${cohort.org}`} target="_blank" rel="noopener">{cohort.org}</a></dd></> : null}
+          <dt>Course on GitHub</dt><dd><a href={ghUrl(course.org)} target="_blank" rel="noopener">{course.org}</a></dd>
+          {cohort ? <><dt>Cohort on GitHub</dt><dd><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">{cohort.org}</a></dd></> : null}
         </dl>
       </section>
     </>
