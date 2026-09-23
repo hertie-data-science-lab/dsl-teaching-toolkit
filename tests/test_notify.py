@@ -20,7 +20,7 @@ import pytest
 import yaml
 from conftest import source_fault
 
-from dsl_course import config_digest, mailer, notify, source_digest
+from dsl_course import config_digest, mailer, notify, source_digest, team_formation
 from dsl_course.schedule import Severity, SourceFault
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -812,6 +812,120 @@ def test_a_dated_fault_is_not_introduced_as_a_recent_edit(wired):
     assert "A recent edit" not in body
     assert "<code>grading_config.yml</code> has 1 entry the toolkit cannot use" in body
     assert "grading fires" in body  # the row that does say when
+
+
+def _window_fault(consequence: str = team_formation.CONSEQUENCE) -> notify.ConfigFault:
+    """The team-formation fault: a schedule.yml entry that IS scheduled and HAS fired,
+    and whose window is running out with students still unteamed."""
+    return notify.ConfigFault(
+        "assignments.assignment-2",
+        "team formation is open and no team has formed yet - all 4 enrolled student(s) "
+        "are still without one",
+        fires=NOW + timedelta(hours=6),
+        field="due_datetime",
+        lineno=12,
+        file="schedule.yml",
+        fix_text=team_formation.FIX,
+        consequence=consequence,
+        noun=team_formation.NOUN,
+    )
+
+
+def test_a_fault_that_carries_its_own_consequence_says_that_one(wired):
+    # schedule.yml's own sentence - "that entry is not scheduled: nothing releases, hands
+    # out or grades from it" - is exactly false for this fault, whose entry is scheduled
+    # and has fired. A letter that led with it would tell a reader to go and look for a
+    # release that already happened.
+    sent = wired(blame={12: "JanG"})
+    routing = notify.route(COHORT, COURSE, [_window_fault()], NOW)
+    _mail_config([_window_fault()], routing, spec=source_digest.SCHEDULE)
+    body = sent.one["body"]
+    assert "Until they are fixed: no repos are provisioned for that assignment" in body
+    assert "is not scheduled" not in body
+
+
+def test_a_window_short_of_teams_is_not_called_an_unusable_entry(wired):
+    # The generic wording is a CLAIM, not a label. This entry is read perfectly well - it
+    # is short of the teams it fires into - so a subject line saying schedule.yml has an
+    # entry the toolkit cannot use sends its owner hunting for a syntax error that is not
+    # there, which is the opposite of the one thing they should go and do.
+    sent = wired(blame={12: "JanG"})
+    routing = notify.route(COHORT, COURSE, [_window_fault()], NOW)
+    _mail_config([_window_fault()], routing, spec=source_digest.SCHEDULE)
+    assert sent.one["subject"].endswith(
+        "schedule.yml has 1 assignment whose teams have not formed"
+    )
+    assert "cannot use" not in sent.one["subject"]
+    assert "1 assignment whose teams have not formed" in sent.one["body"]
+    assert "cannot use" not in sent.one["body"]
+
+
+def test_a_mixed_letter_claims_nothing_about_the_file(wired):
+    # The phrase counts the WHOLE list, so a noun true of one of them would mis-describe
+    # the other. The generic wording is not the way out: "the toolkit cannot use" is a
+    # CLAIM, and it is false of the window fault - which is the exact false claim `noun`
+    # was added to remove, so a letter mixing the two must not put it back. What is left
+    # is the one thing true of both.
+    dropped = notify.ConfigFault(
+        "assignments.assignment-9",
+        "`due_datetime: 01/10/2026` is not a date the parser can read",
+        file="schedule.yml",
+        field="due_datetime",
+        lineno=30,
+    )
+    sent = wired(blame={12: "JanG", 30: "JanG"})
+    both = [_window_fault(), dropped]
+    routing = notify.route(COHORT, COURSE, both, NOW)
+    _mail_config(both, routing, spec=source_digest.SCHEDULE)
+    assert "2 things to fix" in sent.one["subject"]
+    assert "cannot use" not in sent.one["subject"]
+    assert "2 things to fix" in sent.one["body"]
+    assert "cannot use" not in sent.one["body"]
+
+
+def test_a_mixed_letter_says_nothing_at_all_about_the_consequence(wired):
+    # The sentence is written for the WHOLE list ("Until they are fixed: ..."), so one that
+    # is true of half of them is a claim about the other half. The file's is NOT the safe
+    # default it looks like: schedule.yml's says the entry "is not scheduled: nothing
+    # releases, hands out or grades from it", which is the exact false claim
+    # `team_formation.CONSEQUENCE` exists to replace - so a letter carrying both faults
+    # would tell faculty a group assignment that has already fired was never scheduled.
+    # `_counted` gets the same treatment one line above; this says only what is true.
+    dropped = notify.ConfigFault(
+        "assignments.assignment-9",
+        "`due_datetime: 01/10/2026` is not a date the parser can read",
+        file="schedule.yml",
+        field="due_datetime",
+        lineno=30,
+    )
+    sent = wired(blame={12: "JanG", 30: "JanG"})
+    both = [_window_fault(), dropped]
+    routing = notify.route(COHORT, COURSE, both, NOW)
+    _mail_config(both, routing, spec=source_digest.SCHEDULE)
+    body = sent.one["body"]
+    assert "Until they are fixed" not in body
+    assert "is not scheduled" not in body
+    assert "no repos are provisioned" not in body
+
+
+def test_two_faults_with_no_consequence_of_their_own_still_get_the_file_s(wired):
+    # The mutation half of the test above: silence is what MIXING costs, not what the
+    # resolution does. Two ordinary schedule.yml faults both resolve to the file's own
+    # sentence, they agree, and the letter still leads with it.
+    faults_in = [
+        notify.ConfigFault(
+            f"assignments.assignment-{n}",
+            "`due_datetime: 01/10/2026` is not a date the parser can read",
+            file="schedule.yml",
+            field="due_datetime",
+            lineno=line,
+        )
+        for n, line in ((8, 12), (9, 30))
+    ]
+    sent = wired(blame={12: "JanG", 30: "JanG"})
+    routing = notify.route(COHORT, COURSE, faults_in, NOW)
+    _mail_config(faults_in, routing, spec=source_digest.SCHEDULE)
+    assert "Until they are fixed: that entry is not scheduled" in sent.one["body"]
 
 
 def test_two_faults_are_one_message_and_the_subject_counts_them(wired):

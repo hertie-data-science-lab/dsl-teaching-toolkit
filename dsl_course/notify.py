@@ -755,8 +755,41 @@ def _plural(n: int) -> str:
     return "entry" if n == 1 else "entries"
 
 
+def _agreed(values: Iterable):
+    """The one value they all carry, or None when they do not agree on one.
+
+    The rule both the noun and the consequence below are written to: each is a phrase about
+    the WHOLE list, so one that is true of half of it would be a claim about the other
+    half. Spelled once, because two copies of it are two chances to get the disagreeing
+    case wrong."""
+    uniq = set(values)
+    return next(iter(uniq)) if len(uniq) == 1 else None
+
+
+def _counted(faults_in: list[SourceFault]) -> str:
+    """`2 entries the toolkit cannot use`, or what the faults themselves say they are.
+
+    A fault's own noun wins only when EVERY fault in the letter carries the same one
+    (`_agreed`), because this phrase is written for the whole list.
+
+    It exists because the generic wording is a claim, not a label: a window short of its
+    teams sits in an entry the toolkit reads perfectly well, and telling its owner the
+    file cannot be used sends them looking for a syntax error instead of at the thing
+    that is actually missing. A letter MIXING one of those with a real parse fault is the
+    case where neither wording is true of everything in it, so it gets a third one that
+    says only what they have in common - claiming the file cannot be used would put the
+    false claim back for exactly the fault `noun` was added for."""
+    count = len(faults_in)
+    pair = _agreed(f.noun for f in faults_in)
+    if pair is None:
+        return f"{count} {'thing' if count == 1 else 'things'} to fix"
+    if pair:
+        return f"{count} {pair[0] if count == 1 else pair[1]}"
+    return f"{count} {_plural(count)} the toolkit cannot use"
+
+
 def _immediate_intro(
-    spec: Digest, count: int, reminder: str | None, dated: bool = False
+    spec: Digest, faults_in: list[SourceFault], reminder: str | None
 ) -> str:
     """The first line, which is the only part a reminder changes.
 
@@ -764,20 +797,35 @@ def _immediate_intro(
     use" says nothing about whether anybody's term is affected - and the answer differs
     sharply per file (see `faults.CONSEQUENCE`).
 
-    `dated` is whether these faults carry a MOMENT. An assignment's `grading_config.yml`
-    is the one file here that does: its faults are held back until the grading pass that
-    reads them is close, so the letter typically goes out months after the line was
-    written and "a recent edit" names the wrong week - under a table whose own row says
-    when it bites."""
-    what = f"{count} {_plural(count)} the toolkit cannot use"
+    The consequence is RESOLVED per fault first - its own sentence, or the file's where it
+    carries none - and then only printed if every fault in the letter resolves to the same
+    one (`_agreed`), because it is written for the whole list ("Until they are fixed: ...").
+    A MIXED letter says nothing about consequence at all, which is `_counted`'s treatment of
+    the same case: falling back to the file's sentence there is not a safe default but the
+    false claim over again. One unstaged source and one team-formation window short of its
+    teams, in the same tick, would otherwise tell faculty that a group assignment which has
+    already fired "is not scheduled: nothing releases, hands out or grades from it" - the
+    very sentence `team_formation.CONSEQUENCE` exists because it is exactly false. Joining
+    the two would not help either: "Until they are fixed: A; and B" still reads as both
+    prices being paid for the whole list. So the letter counts the faults and leaves the
+    price to the per-fault blocks below, each of which says what is wrong and what fixes it.
+
+    Whether the faults carry a MOMENT is read off them rather than passed in. An
+    assignment's `grading_config.yml` is one file here that does - its faults are held back
+    until the grading pass that reads them is close, so the letter typically goes out
+    months after the line was written and "a recent edit" names the wrong week, under a
+    table whose own row says when it bites."""
+    what = _counted(faults_in)
     file = f"<code>{html.escape(spec.file)}</code>"
     if reminder:
         opening = f"Still unfixed after {reminder}: {file} has {what}."
-    elif dated:
+    elif any(f.fires for f in faults_in):
         opening = f"{file} has {what} by the time it is read."
     else:
         opening = f"A recent edit to {file} left {what}."
-    consequence = faults.CONSEQUENCE.get(spec.file, "")
+    consequence = _agreed(
+        f.consequence or faults.CONSEQUENCE.get(spec.file, "") for f in faults_in
+    )
     tail = f" Until they are fixed: {html.escape(consequence)}." if consequence else ""
     return f"<p>{opening}{tail}</p>"
 
@@ -815,21 +863,13 @@ def notify_config_faults(
             faults_in = [digest.faults_by_key[k] for k in keys]
             parts = [
                 f"<p>This is an automated email sent on behalf of {sender}.</p>",
-                _immediate_intro(
-                    spec,
-                    len(faults_in),
-                    digest.reminder,
-                    any(f.fires for f in faults_in),
-                ),
+                _immediate_intro(spec, faults_in, digest.reminder),
             ]
             parts += [
                 _block(cohort_org, course_org, f, digest.mail[k], digest.issue_url, now)
                 for k, f in zip(keys, faults_in, strict=True)
             ]
-            subject = (
-                f"[{label}] {spec.file} has {len(faults_in)} "
-                f"{_plural(len(faults_in))} the toolkit cannot use"
-            )
+            subject = f"[{label}] {spec.file} has {_counted(faults_in)}"
             return subject, "\n".join(parts) + "\n"
 
         return _deliver(

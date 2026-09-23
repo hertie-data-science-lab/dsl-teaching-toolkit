@@ -551,6 +551,192 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     assert 'repo_name: "assignment-3-<your-team>"' in out
 
 
+# A group assignment whose teams the students pick themselves - the one shape whose
+# handout provisions nothing at all until a team exists.
+SELF_SELECT_GROUP = "type: group\nteam_formation: self_select\nmax_team_size: 4\n"
+# Inside the plan below's window (handout 22 Sep, grading pin 20 Oct), and outside it.
+FORMING = datetime(2026, 9, 30, 12, 0, tzinfo=BERLIN)
+SHUT = datetime(2026, 10, 21, 12, 0, tzinfo=BERLIN)
+
+
+def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) -> str:
+    """One assignment's page, off the `grading_config.yml` text `config` and a plan that
+    hands it out on 22 September and freezes it on 20 October - so `now` alone decides
+    which side of the team-formation window the page is rendered on.
+
+    `teams_csv` is the cohort's private teams.csv, as text, so the table of teams the page
+    prints goes through the real parser the rest of the toolkit reads that file with - or a
+    reader of its own, for the page rendered against a file that could not be read."""
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
+    )
+    monkeypatch.setattr(
+        site, "load_grading_spec", lambda *a: grades.parse_grading_spec(config)
+    )
+    monkeypatch.setattr(
+        site.teams,
+        "_teams_text",
+        teams_csv if callable(teams_csv) else lambda org: teams_csv or None,
+    )
+    sched = Schedule(
+        assignments={
+            "assignment-3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+                grading_datetime=datetime(2026, 10, 20, 9, 0, tzinfo=BERLIN),
+            )
+        }
+    )
+    entry = sched.assignments["assignment-3"]
+    return site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        entry.due_datetime,
+        handout=entry.handout_datetime,
+        found=("assignment-3", entry),
+        now=now,
+        sched=sched,
+        **kw,
+    )
+
+
+def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
+    # The handout of a self-select group assignment parks until a team exists, so the pin
+    # published the brief - correctly, the assignment IS out - and beside it a `repo_url`
+    # into the org's repo list filtered to an assignment that had created no repos. A
+    # student pressed "Open the submission repo", got an empty list, and the page said
+    # nothing at all about the one thing they could do about it.
+    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING)
+    # The brief stays out. It is what a team would be formed OVER.
+    assert "The brief." in out
+    assert "handout_pending" not in out
+    # The address STAYS, at both levels. Hiding it for the length of the window would
+    # punish the students who acted first: a team formed on day one owns its repo, and
+    # GitHub filters that listing by what the reader can actually see - so it is right for
+    # them and merely empty for everyone else, which is what the invitation explains.
+    assert out.count("repo_url:") == 2
+    assert out.count('repo_name: "assignment-3-<your-team>"') == 2
+    assert (
+        'team_join_url: "https://github.com/Cohort-f2026/welcome/issues/new/choose"'
+        in out
+    )
+    # The cap the Join-team form enforces, and the day it stops accepting - the same date
+    # the lock file gives that form's refusal to name, SPOKEN as the mail and the refusal
+    # speak it (`grades.spoken_day`).
+    assert 'team_join_cap: "4"' in out
+    assert 'team_join_closes: "20th Oct"' in out
+
+
+def test_the_teams_that_exist_are_listed_beside_the_invitation(monkeypatch):
+    # The decision the callout asks for - start a team, or join one - cannot be taken
+    # without knowing what is already there, and teams.csv is private. Names and counts, so
+    # the page answers it without publishing who is in which team.
+    out = _team_entry(
+        monkeypatch,
+        SELF_SELECT_GROUP,
+        now=FORMING,
+        teams_csv=(
+            "assignment,team,github_handle\n"
+            "assignment-3,team-alpha,ada-l\n"
+            "assignment-3,team-alpha,bo-b\n"
+            "assignment-3,team-bravo,cy-c\n"
+        ),
+    )
+    assert "teams:\n" in out
+    assert '  - name: "team-alpha"\n    members: 2\n    cap: 4\n' in out
+    assert '  - name: "team-bravo"\n    members: 1\n    cap: 4\n' in out
+
+
+def test_no_handle_from_teams_csv_reaches_the_public_page(monkeypatch):
+    # The cohort site is PUBLIC. A team name is student-chosen and public by construction;
+    # who is in it is not, and neither is the `<slug>-<handle>` repo it would name.
+    out = _team_entry(
+        monkeypatch,
+        SELF_SELECT_GROUP,
+        now=FORMING,
+        teams_csv="assignment,team,github_handle\nassignment-3,team-alpha,ada-l\n",
+    )
+    assert "ada-l" not in out
+
+
+def test_a_window_with_no_teams_yet_prints_no_table(monkeypatch):
+    # Day one, which is most of what this page is for: the invitation goes out and there is
+    # nothing to list. `teams:` is its own presence test, so the layout renders no empty
+    # table rather than a heading over nothing.
+    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING)
+    assert "team_join_url" in out and "teams:" not in out
+
+
+def test_a_teams_csv_that_cannot_be_read_still_renders_the_page(monkeypatch, capsys):
+    # teams.csv is student-written and lives behind an API. Neither a broken header nor a
+    # rate limit may take down the render of a cohort's whole website - the callout is the
+    # part that matters.
+    def boom(org):
+        raise RuntimeError("API rate limit exceeded")
+
+    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING, teams_csv=boom)
+    assert "team_join_url" in out and "teams:" not in out
+    assert "rate limit" in capsys.readouterr().err
+
+
+def test_the_invitation_goes_when_the_window_does(monkeypatch):
+    # Past the grading pin there is nothing left to form a team for - the snapshot has
+    # frozen - so the page is exactly the page it always was.
+    out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=SHUT)
+    assert "team_join" not in out
+    assert out.count("Cohort-f2026/repositories?q=assignment-3-") == 2
+
+
+def test_a_group_assignment_not_yet_handed_out_is_still_only_pending(monkeypatch):
+    # Before the hand-out the window has not opened, and the student could not act on an
+    # invitation if it were there: the brief they would be teaming up over is embargoed.
+    # So the page keeps the one sentence it has always shown.
+    out = _team_entry(
+        monkeypatch, SELF_SELECT_GROUP, now=datetime(2026, 9, 21, tzinfo=BERLIN)
+    )
+    assert "handout_pending: true" in out
+    assert "team_join" not in out
+    assert "The brief." not in out
+
+
+def test_an_individual_assignment_is_never_asked_to_form_a_team(monkeypatch):
+    # The window is a fact about the schedule alone, so every assignment in the plan has
+    # one. What decides whether it MEANS anything is the shape, off the template's own
+    # grading_config.yml - and an individual assignment has no teams to form.
+    out = _team_entry(monkeypatch, "type: individual\n", now=FORMING)
+    assert "team_join" not in out
+    assert out.count("Cohort-f2026/repositories?q=assignment-3-") == 2
+
+
+def test_an_allocated_group_assignment_asks_nobody_to_form_a_team(monkeypatch):
+    # `team_formation: assigned` means the teaching team writes teams.csv and the
+    # Join-team form refuses every request. Pointing a cohort at a form that will refuse
+    # them is worse than the missing button this replaces.
+    out = _team_entry(
+        monkeypatch, "type: group\nteam_formation: assigned\n", now=FORMING
+    )
+    assert "team_join" not in out
+    assert out.count("Cohort-f2026/repositories?q=assignment-3-") == 2
+
+
+def test_the_invitation_does_not_wait_for_the_first_team(monkeypatch):
+    # Whether a team exists is ONE answer for the whole cohort - `handed_out` carries this
+    # assignment's name only once the handout has actually provisioned, which for a group
+    # assignment means a team formed. Keying the invitation on that would take it away
+    # from every student still looking for a team the moment the first one was agreed.
+    alone = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=FORMING)
+    formed = _team_entry(
+        monkeypatch,
+        SELF_SELECT_GROUP,
+        now=FORMING,
+        handed_out=frozenset({"assignment-3"}),
+    )
+    assert alone == formed
+    assert "team_join_url" in formed
+
+
 def _entry_for(monkeypatch, config: str, **kw) -> str:
     """One assignment's page, off the `grading_config.yml` text `config` and a README the
     read never leaves the process for."""
@@ -2655,3 +2841,14 @@ def test_the_archive_row_can_be_renamed_and_marked_provisional():
     assert "tbc: true" in out
     # Display only - the row still dates the freeze where the plan put it.
     assert "date: 2027-02-16T09:00:00" in out
+
+
+def test_a_team_member_is_published_as_a_salted_digest_of_their_handle():
+    # The page's script hashes its reader's saved handle the same way to recognise their
+    # team, so this vector is the contract between the two sides: sha256 of
+    # `<cohort org>:<handle, lower-cased>`, hex.
+    vector = "49565f39eed5ad0a289c5291fa1b3540c44ccd9205c0c78550ca21ab1d328dc8"
+    assert site.member_digest("Cohort-f2026", "ada-l") == vector
+    assert site.member_digest("Cohort-f2026", "Ada-L") == vector
+    # Salted with the org: the same student is a different digest in another cohort.
+    assert site.member_digest("Cohort-s2027", "ada-l") != vector

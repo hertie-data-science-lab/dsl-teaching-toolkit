@@ -89,8 +89,10 @@ from . import (
     source_digest,
     sync_faculty,
     sync_teams,
+    team_formation,
     teams,
     teardown,
+    welcome,
 )
 from .assign import provision_all, solution_released
 from .central import CENTRAL, CENTRAL_REF
@@ -112,6 +114,7 @@ from .grades import (
     grading_config_faults,
     load_grading_spec,
     sheet_path,
+    sync_team_lock,
 )
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import listed_is_private, set_visibility
@@ -406,11 +409,15 @@ def _run_releases(
     due: list[Release],
     now: datetime,
     listing: dict[str, dict] | None,
-) -> int:
-    """Fire every due release's due actions, then sync the site once. Returns the error
-    count. `now` gates each action individually: a deploy with its own deploy_datetime
-    fires on its own clock, an entry's handout at its event_datetime - an entry can be
-    due for one and not (yet) the other."""
+) -> tuple[int, bool]:
+    """Fire every due release's due actions. Returns `(errors, site_changed)`. `now` gates
+    each action individually: a deploy with its own deploy_datetime fires on its own clock,
+    an entry's handout at its event_datetime - an entry can be due for one and not (yet)
+    the other.
+
+    `site_changed` is "this pass moved something the cohort website shows". The sync itself
+    is `_release_phase`'s, so a tick that opens a team-formation window and fires a release
+    still renders once - and a tick that moves only the window renders at all."""
     errors = 0
     # Batch EVERY due release's due deploys through one deploy_many: each unique source
     # and dest repo is cloned once for the whole run, not once per copy.
@@ -441,19 +448,7 @@ def _run_releases(
             # every repo.
             did_assign = did_assign or handout_changed
 
-    # One website sync at the end, only if something actually changed.
-    if changed or did_assign:
-        # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). This
-        # cohort's site-sync failure must be logged and counted, not an unhandled traceback
-        # that aborts the run - and, under --all-cohorts, every cohort scheduled after it.
-        try:
-            if site.sync_site(course_org, cohort_org) != 0:
-                log_err("site sync incomplete after scheduled release")
-                errors += 1
-        except Exception as exc:
-            log_err(f"site sync failed after scheduled release: {exc}")
-            errors += 1
-    return errors
+    return errors, changed or did_assign
 
 
 def _solution_due(
@@ -521,9 +516,25 @@ def _preflight_sources(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    extra: list[ConfigFault] | None = (),
 ) -> int:
     """Check the plan's sources against the course org and keep the cohort's digest issue
     in step. Always returns 0.
+
+    `extra` is everything else about schedule.yml that this tick worked out for itself and
+    that the parse alone could not know - today, the assignments whose team-formation
+    window is running out with students still unteamed (`team_formation.window_faults`).
+    It goes into the SAME list, and therefore the same issue and the same letters: the
+    entry a reader would edit is in this file, and one digest per file is what keeps it
+    fixable in one place.
+
+    `None` is this tick failing to work those out at all, and it SKIPS the sync entirely,
+    on the rule `_config_faults` states: absent from the map is not the same as no faults.
+    An empty list is what closes the issue, so syncing the digest without the windows would
+    tell a cohort whose teams.csv merely hit a rate limit that its standing team-formation
+    fault had been fixed - a Cleared comment and a mail on one tick, and the same fault
+    filed again as New on the next. Left exactly as it was instead, and the source faults
+    wait a tick with it: a missed one is picked up by the next.
 
     Nothing here fails the run, at any rung. A source nobody has staged is a CONTENT
     fault, and it is delivered where the people who can fix it are looking: the cohort's
@@ -533,6 +544,12 @@ def _preflight_sources(
     every tick, up to eight red runs an hour mailing a bot account about a folder only
     faculty can write. The signature keeps its int so the caller's `errors +=` reads the
     same as every other phase."""
+    if extra is None:
+        log(
+            f"  [skip] {cohort_org}'s {schedule.SCHEDULE_PATH} digest - who is still "
+            "without a team could not be read this tick"
+        )
+        return 0
     try:
         sources = schedule.source_faults(sched, course_org)
     except Exception as exc:
@@ -545,7 +562,7 @@ def _preflight_sources(
     # on its own clock (`ConfigFault.fires`).
     # NOT short-circuited when empty: an empty list is what CLOSES the issue, and the
     # tick after the last fault is fixed is the one that has to say so.
-    faults = sources + list(sched.faults) + _no_archive_date(sched)
+    faults = sources + list(sched.faults) + _no_archive_date(sched) + list(extra)
     if sources:
         log_step(
             f"{len(sources)} source(s) in {cohort_org}'s plan not staged in "
@@ -1223,6 +1240,89 @@ def _reprivatise_student_repos(
     return errors
 
 
+def _team_formation_phase(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+    windows: list[team_formation.Window] | None = None,
+) -> tuple[int, bool]:
+    """Bring the team-formation lock up to this moment. Returns `(errors, lock_changed)`.
+
+    `windows` is this tick's roster x teams.csv diff, already read for the pre-flight's
+    fault (`_release_phase`) and handed on rather than read again - it costs students.csv,
+    teams.csv and a definition per assignment. None is a cohort this tick could not read.
+
+    The window it carries is computed from datetimes, so nothing else in the cohort has to
+    happen for one to open or shut - and until this ran on the tick, nothing did: the lock
+    was written only by the membership sync, the nightly refresh, the bootstrap and a real
+    handout, so a window opened whenever one of those next happened to fire rather than at
+    its own moment.
+
+    `lock_changed` is `sync_team_lock`'s own blob compare, handed back to `_release_phase`:
+    the tick that moves the window is the tick that has to re-render the site showing it.
+    It is true on EXACTLY ONE tick per transition, and it is not a retry flag - by the next
+    tick the lock is current, so the compare is False whatever the render did with it. A
+    site sync that fails on that one tick is therefore not re-attempted on the scheduler's
+    clock; the daily **Sync site** cron is what converges it, which bounds the exposure
+    (students holding a mailed link to a callout the site is not yet showing) at ~24h. Both
+    ends of that are spelled out where it is consumed, in `_release_phase`.
+
+    The FORM moves with the lock, and on the same tick: the Join-team form's Assignment
+    field is a `required` dropdown rendered from the lock, so a window that opened this
+    quarter of an hour is one a student cannot file an issue for until the form offers its
+    slug. `refresh_welcome_workflows` would do it, but only at bootstrap and on the nightly
+    cron - up to a day during which the site shows the callout and the mail links a chooser
+    that refuses them. `refresh_join_team_form` pushes that one file, and only when the lock
+    actually moved.
+
+    THE MAIL CANNOT ABORT THE TICK. `notify_windows` re-raises whatever the transport
+    raised - `mailer` turns a failed Graph token request into a RuntimeError, which is what
+    an expired GRAPH_CLIENT_CERT, a revoked app or a tenant outage all look like - and
+    nothing between here and the cohort loop would have caught it: this phase runs BEFORE
+    `_run_releases`, so every scheduled hand-out, archive and autograde for the cohort would
+    stop until somebody rotated the certificate. Contained exactly as the site sync in
+    `_release_phase` is: logged, counted, and the tick carries on. The claim is released
+    before it reaches here (`notify_windows`), so nothing is recorded as told that was not.
+
+    The mail goes out AFTER the lock, and that order matters: the lock is what the
+    Join-team form reads, so a student who acts on the message within the minute must not
+    find the form still refusing them. It is also the only thing here that can be held -
+    `notify_windows` waits out the cohort's quiet hours - and the window opening on time is
+    not negotiable, while a message arriving at 07:00 rather than 02:00 is.
+
+    THE TICK ONLY WRITES THE LOCK FOR A COHORT WHOSE PLAN HAS ASSIGNMENTS IN IT. A cohort
+    whose `assignments:` block is empty - most of them, for most of a term's planning - was
+    paying a repo probe and a contents read every quarter of an hour, ~192 a day, to write
+    `assignments:\n  {}` over itself.
+
+    Gated on the PLAN and not on "does this cohort have a self-select assignment", which is
+    the tighter question and the wrong one. `team_formation` is declared in the COURSE
+    org's `grading_config.yml`, and no cohort-side dispatcher watches that file - so a
+    course that switches its only self-select assignment to `assigned` would leave the tick
+    with nothing to write, the lock still saying `self_select`, and the Join-team form
+    still accepting the self-selection faculty had just turned off, until the nightly
+    refresh. Removing an assignment from the plan cannot strand the lock the same way,
+    because that edit IS a push to schedule.yml and the membership sync fires on it."""
+    errors, changed = 0, False
+    if sched.assignments:
+        write = sync_team_lock(course_org, cohort_org, sched, now=now, dry_run=dry_run)
+        # `sync_team_lock` logs its own preview and its own failure (it is written from
+        # four other places that each need the same line), so there is nothing to say here.
+        errors, changed = (0 if write.ok else 1), write.changed
+        if changed:
+            errors += welcome.refresh_join_team_form(cohort_org)
+    try:
+        errors += team_formation.notify_windows(
+            course_org, cohort_org, sched, windows, now, dry_run=dry_run
+        )
+    except Exception as exc:
+        log_err(f"team-formation mail failed in {cohort_org}: {exc}")
+        errors += 1
+    return errors, changed
+
+
 def _release_phase(
     course_org: str,
     cohort_org: str,
@@ -1293,18 +1393,44 @@ def _release_phase(
     errors += _reprivatise_student_repos(
         course_org, cohort_org, sched, now, dry_run, listing
     )
+    # WHO is still waiting for a team, read ONCE for the whole tick and handed to both
+    # passes that want it. Above the pre-flight because the fault it produces belongs in
+    # the schedule.yml digest that pass already syncs - the entry a reader would edit is in
+    # that file, and the window's close is the moment the fault counts down to.
+    #
+    # A parked group handout is otherwise SILENT: `assign.provision_all` logs `[wait] no
+    # teams` and returns green, which is right for the tick and tells the teaching team
+    # nothing, while the cohort may not know it has anything to do.
+    windows = team_formation.open_windows(course_org, cohort_org, sched, now)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
     # schedule.yml, and a plan written in August and forgotten is exactly the case that
     # needs catching. Never fatal to the run, at any rung: the fault is faculty's to fix
     # and the digest issue is how they hear about it (see _preflight_sources).
-    errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
+    errors += _preflight_sources(
+        course_org,
+        cohort_org,
+        sched,
+        now,
+        dry_run,
+        team_formation.window_faults(sched, windows),
+    )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
     # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
     errors += _preflight_configs(course_org, cohort_org, sched, now, dry_run, listing)
+    # Last before the releases, and ABOVE the dry-run return so a preview says what it
+    # would write: the team-formation window is pure datetime arithmetic, so this is the
+    # pass that makes one open and shut on its own clock rather than whenever something
+    # else in the cohort happened to sync. Before the releases because the site sync at the
+    # end of this phase renders off the lock - a tick that opens a window writes it here
+    # and renders the site showing it at the end of the same tick.
+    lock_errors, lock_changed = _team_formation_phase(
+        course_org, cohort_org, sched, now, dry_run, windows
+    )
+    errors += lock_errors
 
     if dry_run:
         for release in due:
@@ -1312,6 +1438,7 @@ def _release_phase(
                 log(f"    DRY-RUN  [{release.label}] {line}")
         return errors
 
+    release_changed = False
     if not releases:
         log(
             f"  (no releases or assignment handouts in {cohort_org}/"
@@ -1321,7 +1448,35 @@ def _release_phase(
     elif not due:
         log_ok("nothing due.")
     else:
-        errors += _run_releases(course_org, cohort_org, due, now, listing)
+        release_errors, release_changed = _run_releases(
+            course_org, cohort_org, due, now, listing
+        )
+        errors += release_errors
+
+    # THE one website sync of the tick, and the only place it is decided: a release that
+    # provisioned something, or a team-formation window that moved, and nothing else. Both
+    # are rare - the lock's content moves on exactly two ticks per assignment, the one that
+    # opens the window and the one that shuts it - so an unchanged cohort is never
+    # re-rendered, and a tick with nothing due still shows a window that has just turned.
+    #
+    # ONE SHOT, and knowingly so. `lock_changed` is a blob compare, not a debt: by the next
+    # tick the lock is current, so it is False again whatever this sync did with it, and a
+    # failure below is never retried on the scheduler's clock. What that costs is bounded
+    # and small - the students were mailed a link to a callout the page is not yet showing,
+    # and the daily **Sync site** cron renders it within ~24h. Making the tick retry would
+    # mean carrying "the site owes a render" somewhere durable, which is a second piece of
+    # cohort state to write, read and get wrong for a page that is a day stale at worst.
+    if release_changed or lock_changed:
+        # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). This
+        # cohort's site-sync failure must be logged and counted, not an unhandled traceback
+        # that aborts the run - and, under --all-cohorts, every cohort scheduled after it.
+        try:
+            if site.sync_site(course_org, cohort_org) != 0:
+                log_err("site sync incomplete after scheduled release")
+                errors += 1
+        except Exception as exc:
+            log_err(f"site sync failed after scheduled release: {exc}")
+            errors += 1
     return errors
 
 

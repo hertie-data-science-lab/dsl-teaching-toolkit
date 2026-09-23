@@ -56,7 +56,7 @@ from .discovery import (
 from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
-from .grades import write_team_lock
+from .grades import sync_team_lock
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .repos import converge_descriptions, org_exists
@@ -82,6 +82,7 @@ from .workflows_render import (
     render_generate_syllabus,
     render_new_assignment,
     render_new_materials,
+    render_open_team_formation,
     render_patch_assignment,
     render_propagate_cohort,
     render_provision,
@@ -279,6 +280,9 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/sync-membership.yml": render_sync_membership(cohorts),
         ".github/workflows/send-codes.yml": render_send_codes(),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(cohorts),
+        ".github/workflows/open-team-formation.yml": render_open_team_formation(
+            cohorts
+        ),
         ".github/workflows/propagate-cohort.yml": render_propagate_cohort(cohorts),
         ".github/workflows/archive-cohort.yml": render_archive_cohort(cohorts),
         ".github/workflows/bootstrap-cohort.yml": render_bootstrap_cohort(),
@@ -584,7 +588,7 @@ def refresh(course_org: str) -> int:
         # welcome.CLASSROOM_SYSTEM_FILES: it is rendered per cohort from that cohort's
         # schedule and each template's grading_config.yml. Here is what seeds it - a
         # Bootstrap cohort run ends in this refresh - and what converges it every night.
-        failures += 0 if write_team_lock(course_org, cohort) else 1
+        failures += 0 if sync_team_lock(course_org, cohort).ok else 1
         failures += _converge_org(cohort, central_ref, listing, is_cohort=True)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")

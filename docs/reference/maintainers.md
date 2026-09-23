@@ -71,7 +71,7 @@ Things whose *literal spelling* is depended on from outside Python:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `derive`, `enrol_codes`, `grades`,
   `list_orgs`, `notify`, `propagate`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`,
   `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
-  `sync_teams`, `teardown`.
+  `sync_teams`, `team_formation`, `teardown`.
   A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
   parser rather than a subcommand, for the same reason: `--patch-path` switches it from
   handing an assignment out to patching one that is already out, and every org's Release
@@ -80,12 +80,23 @@ Things whose *literal spelling* is depended on from outside Python:
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
 - **`grades.team_lock_text`'s LAYOUT.** `classroom-config/assignments.lock.yml` is parsed by
-  a line scanner in `templates/welcome/team-formation.yml` (github-script has no YAML
-  library), which matches a two-space assignment key and four-space `team_formation:` /
-  `max_team_size:` under it. Re-indenting the writer, or nesting the entries any deeper,
-  makes every Join-team request in every cohort read as "not an assignment here" - and the
-  form is the only place a student would find out. `tests/test_welcome_templates.py` runs
-  the SHIPPED scanner over the writer's real output; keep that pairing.
+  line scanners - one in `templates/welcome/team-formation.yml` (github-script has no YAML
+  library), one in `welcome.open_formations` - which match a two-space assignment key
+  and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
+  `team_formation_closes:` / `team_formation_page:` under it. Re-indenting the writer, or
+  nesting the entries any deeper, makes every Join-team request in every cohort read as
+  "not an assignment here" - and the form is the only place a student would find out.
+  `team_formation_closes:` and `team_formation_page:` are written even when empty: the
+  shape the scanners see is constant, and a line that comes and goes is a second shape. A
+  MISSING `team_formation_window:` reads as open, never as closed, so a cohort whose lock
+  predates the window keeps forming teams.
+  `tests/test_welcome_templates.py` runs the SHIPPED scanner over the writer's real output;
+  keep that pairing.
+- **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<cohort name>`, ordinal
+  from `schedule.assignment_pages`) names the site's `_assignments/` file AND every link to
+  it: the team-formation mail, the lock's `team_formation_page:` (which the Join-team form's
+  header and refusals link) and the site itself. That page is the one list of a window's
+  teams - names and counts only. Never build the URL anywhere else.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_COHORT_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the
@@ -107,7 +118,7 @@ Things whose *literal spelling* is depended on from outside Python:
 - **An ARCHIVED `classroom-config`** is a cohort's "finished" marker. `teardown` archives it
   last, after everything else it freezes; `discovery.cohort_is_live` is what every
   course-side sweep that WRITES asks (the scheduler, the faculty and membership syncs, the
-  enrolment codes, the site build), and `seed.refresh` and `grades.write_team_lock` read the
+  enrolment codes, the site build), and `seed.refresh` and `grades.sync_team_lock` read the
   same flag for themselves off listings they already hold. So archiving one closes a cohort whether the person doing it meant
   that or not, and anything that freezes a cohort must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
@@ -321,7 +332,7 @@ DERIVED - rendered per cohort from that cohort's `schedule.yml` and each named t
 repo path to a file under `templates/`. Adding a file like this is four places:
 
 1. the renderer and the writer, beside what owns the subject (`grades.team_lock_text` /
-   `grades.write_team_lock`), with the SYSTEM-OWNED stamp emitted by the writer itself;
+   `grades.sync_team_lock`), with the SYSTEM-OWNED stamp emitted by the writer itself;
 2. `seed.refresh`'s per-cohort loop - which is BOTH how it is seeded (a Bootstrap cohort
    run ends in `seed refresh`) and how it converges nightly. An archived cohort is skipped
    there, which is what keeps a finished semester frozen;

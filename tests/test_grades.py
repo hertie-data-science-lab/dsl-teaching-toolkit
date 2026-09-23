@@ -6,7 +6,7 @@ deliberately not mocked, per the testing strategy. No network here.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from shutil import copytree
@@ -1657,14 +1657,20 @@ def test_a_dry_run_reds_on_a_header_only_roster_too(tmp_path, monkeypatch):
 # ------------------------------------------------- the team-formation lock file
 
 
-def _sched(**assignments) -> Schedule:
-    """A schedule of assignments whose only interesting field is which template they hand
-    out from - the lock file reads nothing else off it."""
+_DUE = datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc)
+_HANDOUT = datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc)
+
+
+def _sched(*, handout: datetime | None = None, **assignments) -> Schedule:
+    """A schedule of assignments whose only interesting fields are which template they
+    hand out from and, for the formation window, when. `handout=None` is the manual
+    hand-out every test that is not about the window wants."""
     return Schedule(
         assignments={
             key: AssignmentEntry(
-                due_datetime=datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc),
+                due_datetime=_DUE,
                 course_source_repo=template,
+                handout_datetime=handout,
             )
             for key, template in assignments.items()
         }
@@ -1672,7 +1678,11 @@ def _sched(**assignments) -> Schedule:
 
 
 def _lock(
-    monkeypatch, sched, configs: dict[str, str | None], defaults: str = ""
+    monkeypatch,
+    sched,
+    configs: dict[str, str | None],
+    defaults: str = "",
+    now: datetime | None = None,
 ) -> str:
     """Render the lock file for `sched`, with each template's `grading_config.yml` given
     as text (None = the template has none) and the course's own defaults block as YAML."""
@@ -1682,10 +1692,10 @@ def _lock(
     monkeypatch.setattr(
         grades, "org_meta", lambda org: yaml.safe_load(defaults or "{}") or {}
     )
-    return grades.team_lock_text(grades.team_lock_entries("COURSE", sched))
+    return grades.team_lock_text(grades.team_lock_entries("COURSE", sched, now))
 
 
-def test_the_lock_file_carries_two_scalars_per_schedule_assignment(monkeypatch):
+def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatch):
     # The Join-team form runs in a PUBLIC repo under a token deliberately scoped away from
     # the course org's templates, so it cannot read grading_config.yml. This file is the
     # mirror it reads instead, and it must answer for every assignment in the schedule.
@@ -1701,8 +1711,23 @@ def test_the_lock_file_carries_two_scalars_per_schedule_assignment(monkeypatch):
     )
     assert yaml.safe_load(text) == {
         "assignments": {
-            "a1": {"team_formation": "none", "max_team_size": 5},
-            "project": {"team_formation": "self_select", "max_team_size": 3},
+            "a1": {
+                "team_formation": "none",
+                "max_team_size": 5,
+                "team_formation_window": "none",
+                # No window, so no day for a refusal about one to name.
+                "team_formation_closes": None,
+                "team_formation_page": None,
+            },
+            "project": {
+                "team_formation": "self_select",
+                "max_team_size": 3,
+                # No handout_datetime on `_sched`, so the window never opens.
+                "team_formation_window": "closed",
+                "team_formation_closes": _DUE.date(),
+                # No `pages` handed in, so none to link - the key is still written.
+                "team_formation_page": None,
+            },
         }
     }
     # SYSTEM-OWNED, stamped at the write site - it is rewritten on every sync.
@@ -1748,39 +1773,206 @@ def test_a_cohort_with_no_assignments_still_gets_a_readable_lock_file(monkeypatc
     assert yaml.safe_load(text) == {"assignments": {}}
 
 
-def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypatch):
-    # put_file blob-compares, so writing it from the membership sync, the handout and the
-    # nightly refresh costs a read apiece and no commit at all on an unchanged cohort.
-    written: list[tuple[str, str, bytes]] = []
+def test_a_self_select_window_is_pending_then_open_then_closed(
+    monkeypatch,
+):
+    # The three answers off one schedule, so the boundaries are read from the same dates a
+    # cohort really carries: handout 20 Sep, due (and so the pin) 4 Oct.
+    def window(now: datetime) -> str:
+        text = _lock(
+            monkeypatch,
+            _sched(project="assignment-4-project-f2026", handout=_HANDOUT),
+            {"assignment-4-project-f2026": "type: group\n"},
+            now=now,
+        )
+        return yaml.safe_load(text)["assignments"]["project"]["team_formation_window"]
+
+    # `pending` and `closed` are kept apart because the form says different things about
+    # them: before the handout the close date is still in the FUTURE, so the shut wording
+    # would tell a September student the door closed in October.
+    assert window(_HANDOUT - timedelta(seconds=1)) == "pending"
+    assert window(_HANDOUT) == "open"  # the handout instant itself is inside
+    assert window(_DUE - timedelta(seconds=1)) == "open"
+    assert window(_DUE) == "closed"  # the pin is not: the snapshot has frozen
+
+
+def test_a_self_select_assignment_nobody_has_dated_never_opens(monkeypatch):
+    # `handout_datetime` unset = handed out by hand at a moment nobody wrote down, so
+    # there is no hour from which "form your team now" would be true.
+    text = _lock(
+        monkeypatch,
+        _sched(project="assignment-4-project-f2026"),
+        {"assignment-4-project-f2026": "type: group\n"},
+        now=_HANDOUT,
+    )
+    assert (
+        yaml.safe_load(text)["assignments"]["project"]["team_formation_window"]
+        == "closed"
+    )
+
+
+def test_an_assignment_the_form_refuses_anyway_has_no_window(monkeypatch):
+    # `assigned` and `individual` are refused on the team_formation scalar alone, so the
+    # window says nothing - whatever the dates would make of it.
+    text = _lock(
+        monkeypatch,
+        _sched(
+            a1="assignment-1-f2026",
+            project="assignment-4-project-f2026",
+            handout=_HANDOUT,
+        ),
+        {
+            "assignment-1-f2026": "type: individual\n",
+            "assignment-4-project-f2026": "type: group\nteam_formation: assigned\n",
+        },
+        now=_HANDOUT,
+    )
+    windows = yaml.safe_load(text)["assignments"]
+    assert windows["a1"]["team_formation_window"] == "none"
+    assert windows["project"]["team_formation_window"] == "none"
+
+
+def test_the_close_date_is_the_pins_day_and_the_line_is_there_even_when_it_is_empty(
+    monkeypatch,
+):
+    # The only reader is a refusal a student reads ("closed on 4 Oct"), so the scalar is
+    # the pin's DAY, not its moment. The line is written whatever the value: the form and
+    # `welcome.open_formation_slugs` both line-scan this file, and a key that appears only
+    # sometimes is a second shape for them to get right.
+    text = _lock(
+        monkeypatch,
+        _sched(
+            a1="assignment-1-f2026",
+            project="assignment-4-project-f2026",
+            handout=_HANDOUT,
+        ),
+        {
+            "assignment-1-f2026": "type: individual\n",
+            "assignment-4-project-f2026": "type: group\n",
+        },
+        now=_HANDOUT,
+    )
+    assert "    team_formation_closes: 2026-10-04\n" in text
+    assert "    team_formation_closes:\n" in text  # the individual one, empty
+    entries = yaml.safe_load(text)["assignments"]
+    assert entries["project"]["team_formation_closes"] == _DUE.date()
+    assert entries["a1"]["team_formation_closes"] is None
+
+
+def test_a_template_with_no_spec_has_no_window_either(monkeypatch):
+    text = _lock(
+        monkeypatch,
+        _sched(a2="assignment-2-f2026", handout=_HANDOUT),
+        {"assignment-2-f2026": None},
+        now=_HANDOUT,
+    )
+    assert yaml.safe_load(text)["assignments"]["a2"]["team_formation_window"] == "none"
+
+
+def _writes(monkeypatch, existing, ok: bool = True) -> list[dict]:
+    """Stub everything the lock write touches and collect what it puts. `existing` is what
+    `get_file_with_sha` answers: `(text, sha)`, None for a 404, or an exception to raise."""
     monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
     monkeypatch.setattr(grades, "org_meta", lambda org: {})
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
+    # The course org's templates, which number the assignment pages the lock links.
     monkeypatch.setattr(
-        grades,
-        "put_file",
-        lambda org, repo, path, content, msg: (
-            written.append((org, path, content)) or True
-        ),
+        grades.schedule,
+        "discover_assignments",
+        lambda org: ["assignment-4-project-f2026"],
     )
-    assert grades.write_team_lock(
+
+    def read(org, repo, path):
+        if isinstance(existing, Exception):
+            raise existing
+        return existing
+
+    monkeypatch.setattr(grades, "get_file_with_sha", read)
+    puts: list[dict] = []
+
+    def put(org, repo, path, content, msg, expected_sha=None):
+        puts.append({"org": org, "path": path, "content": content, "sha": expected_sha})
+        return ok
+
+    monkeypatch.setattr(grades, "put_file", put)
+    return puts
+
+
+def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypatch):
+    # put_file blob-compares, so writing it from the membership sync, the handout and the
+    # nightly refresh costs a read apiece and no commit at all on an unchanged cohort.
+    puts = _writes(monkeypatch, None)
+    assert grades.sync_team_lock(
         "COURSE", "COHORT", _sched(project="assignment-4-project-f2026")
-    )
-    ((org, path, content),) = written
-    assert (org, path) == ("COHORT", "assignments.lock.yml")
-    assert yaml.safe_load(content)["assignments"]["project"] == {
+    ).ok
+    (put,) = puts
+    assert (put["org"], put["path"]) == ("COHORT", "assignments.lock.yml")
+    assert yaml.safe_load(put["content"])["assignments"]["project"] == {
         "team_formation": "self_select",
         "max_team_size": 5,
+        "team_formation_window": "closed",
+        "team_formation_closes": _DUE.date(),
+        # The assignment's page on the cohort site, which lists the teams - numbered and
+        # named exactly as the site names it, so the refusal that links it cannot drift.
+        "team_formation_page": "https://cohort.github.io/assignments/01-project.html",
     }
+
+
+def test_the_lock_links_no_page_for_an_individual_assignment_and_lists_nothing(
+    monkeypatch,
+):
+    # The page is for the refusal of a Join, which only a self-select assignment gets - and
+    # a plan with none of those does not pay a listing of the course org for it.
+    puts = _writes(monkeypatch, None)
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: individual\n")
+
+    def boom(org):
+        raise AssertionError("no self-select assignment, so no listing")
+
+    monkeypatch.setattr(grades.schedule, "discover_assignments", boom)
+    assert grades.sync_team_lock("COURSE", "COHORT", _sched(a1="assignment-1")).ok
+    assert "    team_formation_page:\n" in puts[0]["content"].decode()
+
+
+def test_the_lock_write_says_whether_the_file_actually_moved(monkeypatch):
+    # `changed` is the blob compare handed back, so a caller that renders off this file
+    # knows when to re-render without paying a second read to find out.
+    puts = _writes(monkeypatch, None)
+    sched = _sched(project="assignment-4-project-f2026")
+    assert grades.sync_team_lock("COURSE", "COHORT", sched) == (True, True)
+    live = puts[0]["content"]
+
+    puts = _writes(monkeypatch, ("text does not matter", gh_contents.blob_sha(live)))
+    assert grades.sync_team_lock("COURSE", "COHORT", sched) == (True, False)
+    # The sha the content was read at goes to put_file - both the safe read-modify-write
+    # and, when it already matches, the no-op short circuit.
+    assert puts[0]["sha"] == gh_contents.blob_sha(live)
+
+    puts = _writes(monkeypatch, ("something else", "0" * 40))
+    assert grades.sync_team_lock("COURSE", "COHORT", sched) == (True, True)
+
+
+def test_a_read_that_failed_still_writes_and_reports_a_change(monkeypatch):
+    # Not a 404 - the file may well be there and unreadable. `changed` is a render HINT,
+    # so one spurious re-render beats a missed one, and the write goes ahead with no sha.
+    puts = _writes(monkeypatch, RuntimeError("could not read"))
+    assert grades.sync_team_lock(
+        "COURSE", "COHORT", _sched(project="assignment-4-project-f2026")
+    ) == (True, True)
+    assert puts[0]["sha"] is None
+
+
+def test_a_failed_write_is_never_reported_as_a_change(monkeypatch):
+    puts = _writes(monkeypatch, None, ok=False)
+    assert grades.sync_team_lock("COURSE", "COHORT", _sched(p="t")) == (False, False)
+    assert len(puts) == 1
 
 
 def test_a_lock_file_that_could_not_be_written_says_what_that_costs(
     monkeypatch, capsys
 ):
-    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
-    monkeypatch.setattr(grades, "org_meta", lambda org: {})
-    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
-    monkeypatch.setattr(grades, "put_file", lambda *a, **k: False)
-    assert not grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
+    _writes(monkeypatch, None, ok=False)
+    assert not grades.sync_team_lock("COURSE", "COHORT", _sched(p="t")).ok
     assert "the Join-team form reads it" in capsys.readouterr().err
 
 
@@ -1794,7 +1986,7 @@ def test_a_closed_out_cohort_is_left_alone(monkeypatch, capsys):
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: True)
     monkeypatch.setattr(grades, "put_file", boom)
     monkeypatch.setattr(grades, "_grading_text", boom)
-    assert grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
+    assert grades.sync_team_lock("COURSE", "COHORT", _sched(p="t")).ok
     assert "cohort closed out" in capsys.readouterr().out
 
 
@@ -1854,3 +2046,25 @@ def test_half_a_late_rule_is_never_completed_from_the_default(config, window, pe
     # sentence out of the syllabus would grade a cohort by words nobody wrote.
     spec = grades.parse_grading_spec(config)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
+
+
+@pytest.mark.parametrize(
+    ("day", "spoken"),
+    [
+        (1, "1st"),
+        (2, "2nd"),
+        (3, "3rd"),
+        (4, "4th"),
+        (11, "11th"),
+        (12, "12th"),
+        (13, "13th"),
+        (21, "21st"),
+        (22, "22nd"),
+        (23, "23rd"),
+        (31, "31st"),
+    ],
+)
+def test_a_day_is_spoken_with_its_ordinal(day, spoken):
+    # ONE spelling for the gradebook, the mail, the site and the form's JavaScript copy -
+    # and 11th-13th are the three a `day % 10` rule alone gets wrong.
+    assert grades.spoken_day(datetime(2026, 10, day)) == f"{spoken} Oct"

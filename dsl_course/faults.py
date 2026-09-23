@@ -211,6 +211,11 @@ class ConfigFault:
     # and it never earns anyone an email at 24h or a "this did not ship" once its moment
     # has passed.
     ceiling: Severity = Severity.MISSED
+    # The moment from which this fault is at least WARNING, however far off `fires` still
+    # is. A team-formation window that has stood open for a week with students still
+    # waiting is worth telling somebody about, even while its close is a fortnight away.
+    # None = the ladder alone decides.
+    warn_from: datetime | None = None
     # The line of the file this is written on, as the parser saw it. Every surface turns
     # it into `schedule.yml:36` and a deep link, because the entry name alone still leaves
     # faculty scrolling a file they wrote in August. For a CSV it is the row's own line
@@ -238,6 +243,19 @@ class ConfigFault:
     # This fault's own fix sentence, where the parser knows one better than the file's
     # (see FIX). Lower-case and unpunctuated at the front, so a caller can prefix `fix:`.
     fix_text: str = ""
+    # This fault's own CONSEQUENCE sentence, where the file's (see CONSEQUENCE) is not the
+    # price of THIS fault. One file can go wrong in ways that cost different things: a
+    # schedule.yml entry the parser dropped is not scheduled at all, while an entry whose
+    # team-formation window is running out is scheduled, has fired, and is short of the
+    # teams it fires into. Same voice as CONSEQUENCE - lower-case, no full stop - because
+    # the letter drops it into the same sentence. "" = take the file's.
+    consequence: str = ""
+    # What the LETTER calls these, where "N entries the toolkit cannot use" would be a
+    # false description. A window short of teams is the case it exists for: the entry is
+    # perfectly readable, so that wording sends a reader hunting for a syntax error that
+    # is not there. Singular and plural, because the subject line and the first line of
+    # the body count the same faults and must agree. () = take the generic wording.
+    noun: tuple[str, str] = ()
 
     @property
     def is_source(self) -> bool:
@@ -359,6 +377,8 @@ class ConfigFault:
             rung = Severity.WARNING
         else:
             rung = Severity.ADVISORY
+        if self.warn_from is not None and now >= self.warn_from:
+            rung = max(rung, Severity.WARNING)
         return min(rung, self.ceiling)
 
     def fix(self, course_org: str = "", rung: Severity | None = None) -> str:

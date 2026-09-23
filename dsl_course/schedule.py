@@ -93,7 +93,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .course import CONFIG_REPO, assignment_slug, coerce_date, is_repo_root
+from .course import (
+    CONFIG_REPO,
+    assignment_slug,
+    coerce_date,
+    is_repo_root,
+    pages_repo,
+    term_tag,
+)
+from .discovery import discover_assignments
 from .faults import (
     NOTIFY_FROM,
     SOURCE_CRITICAL_WINDOW,
@@ -1480,6 +1488,85 @@ def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | 
     return found[0] if found else None
 
 
+class AssignmentPage(NamedTuple):
+    """One assignment's page on the cohort site: its ordinal, its cohort-side name, the
+    course template it is drawn from, and its plan entry (None for a template the plan
+    does not name)."""
+
+    number: int
+    name: str
+    repo: str
+    hit: tuple[str, AssignmentEntry] | None
+
+    @property
+    def key(self) -> str:
+        """The SCHEDULE key, or "" for a template the plan does not name."""
+        return self.hit[0] if self.hit else ""
+
+    @property
+    def stem(self) -> str:
+        """`03-assignment-3` - the page's file under `_assignments/` is this plus `.md`,
+        and its URL this plus `.html`, so the file and the link cannot disagree."""
+        return f"{self.number:02d}-{self.name}"
+
+    def url(self, cohort_org: str) -> str:
+        """Where the cohort site serves it: the collection's default permalink, at the org
+        root the site is published to (`_view_url`'s base)."""
+        return f"https://{pages_repo(cohort_org)}/assignments/{self.stem}.html"
+
+
+def assignment_pages(
+    cohort_org: str, sched: Schedule, templates: list[str]
+) -> list[AssignmentPage]:
+    """Every assignment the cohort site has a page for, numbered as the site numbers them -
+    the ONE place that numbering is decided, because the site names the pages off it and
+    the team-formation mail, the lock and the Join-team form all link them.
+
+    `templates` is the course org's `assignment-*` template repos
+    (`discovery.discover_assignments`), cut to this cohort's own term tag. From BOTH sides:
+    the templates, so one handed out off-plan still has a page, and the plan's entries, so
+    one appears before its template is staged. Keyed on the COHORT-side name, because two
+    plan entries may cite one `course_source_repo`; sorted by it, so a page keeps its URL
+    when faculty add another mid-term.
+
+    HIDDEN ones are included (`show_on_site: false`): the ordinal is a position in the full
+    list, and the site skips a hidden page rather than renumbering around it, so hiding one
+    mid-term moves nobody else's URL."""
+    tag = term_tag(cohort_org)
+    if tag:
+        templates = [a for a in templates if a.lower().endswith(tag)]
+    by_name: dict[str, tuple[str, tuple[str, AssignmentEntry] | None]] = {}
+    for repo in templates:
+        hit = entry_for_repo(sched, repo)
+        name = cohort_name(*hit) if hit else assignment_slug(repo)
+        by_name.setdefault(name, (repo, hit))
+    for key, entry in sched.assignments.items():
+        by_name.setdefault(
+            cohort_name(key, entry), (entry.course_source_repo, (key, entry))
+        )
+    return [
+        AssignmentPage(i + 1, name, repo, hit)
+        for i, (name, (repo, hit)) in enumerate(sorted(by_name.items()))
+    ]
+
+
+def assignment_pages_by_key(
+    course_org: str, cohort_org: str, sched: Schedule
+) -> dict[str, AssignmentPage]:
+    """`assignment_pages` by SCHEDULE key, off a fresh listing of the course org's
+    templates - for a caller that links a page without building the site.
+
+    `{}` when the listing failed: every caller uses a page to decide whether a sentence
+    carries a link and a number, and one that could not look gets the wording that stands
+    on its own rather than a link to the wrong page."""
+    try:
+        templates = discover_assignments(course_org)
+    except RuntimeError as exc:
+        log_err(f"could not list {course_org}'s assignment templates: {exc}")
+        return {}
+    return {p.key: p for p in assignment_pages(cohort_org, sched, templates) if p.key}
+
+
 def resolve_target(
     sched: Schedule,
     repo: str,
@@ -1553,6 +1640,60 @@ def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
     """`grading_datetime_at` as an ISO string, or None if unscheduled."""
     at = grading_datetime_at(sched, slug)
     return at.isoformat() if at is not None else None
+
+
+def formation_window(
+    sched: Schedule, slug: str
+) -> tuple[datetime | None, datetime | None]:
+    """When a self-selected team may be formed: `(handout, grading pin)`, or `(None, None)`
+    if the slug is not in the schedule at all.
+
+    A window with no `opens` NEVER opens. An assignment with no `handout_datetime` is
+    handed out by hand at a moment nobody has written down, so there is no hour from which
+    telling a student "form your team now" would be true - and an invitation sent before
+    the brief exists asks them to team up over an assignment they cannot read.
+
+    It closes at the grading pin because that is when the snapshot freezes: a team minted
+    after it has nothing left to hand in, and would be provisioned a repo against work
+    already collected.
+
+    Deliberately no spec read and no I/O - this answers off the parsed schedule alone, so
+    `grades` (which imports this module) can ask without the import turning back on
+    itself. The cost is `grading_datetime_at`'s spec-less pin, which ignores the template's
+    late window; erring EARLY is the safe direction for a door that should be shut by the
+    time anything is graded."""
+    entry = sched.assignments.get(slug)
+    if entry is None:
+        return (None, None)
+    return (entry.handout_datetime, grading_datetime_at(sched, slug))
+
+
+def formation_state(
+    sched: Schedule, slug: str, now: datetime
+) -> tuple[str, datetime | None]:
+    """Where `now` falls in this assignment's team-formation window, and the moment that
+    window shuts: `pending` (the handout is still to come), `open` or `closed`.
+
+    `closed` covers every case the window does not open, the two ends of it and the entry
+    with no dates to judge by alike - `formation_window` returning no boundary at all is
+    a door that never opens, not one that opens forever.
+
+    Whether the assignment HAS a window is the caller's question, not this one's: it hangs
+    on `team_formation`, which lives in the template's `grading_config.yml` and which this
+    module deliberately cannot read. Both callers already hold the spec.
+
+    One place, because two things now answer off it minutes apart - the lock file the
+    Join-team form refuses on, and the cohort site's team-formation callout - and a page
+    that invites a student through a door the form has already shut is worse than either
+    saying nothing."""
+    opens, closes = formation_window(sched, slug)
+    if opens is None or closes is None:
+        return "closed", closes
+    if now < opens:
+        return "pending", closes
+    if now < closes:
+        return "open", closes
+    return "closed", closes
 
 
 # ---------------------------------------------------------------------- gh/git wiring
@@ -1733,13 +1874,22 @@ def _window_blurb() -> str:
     )
 
 
+def in_zone(tz_name: str, when: datetime) -> datetime:
+    """The same instant, told in `tz_name` - falling back to DEFAULT_TZ for a name nothing
+    recognises, exactly as the plan's own parse does.
+
+    For a caller holding the zone but not the plan it came out of (`team_formation`'s mail
+    renders one window's closing day and is handed the name alone)."""
+    return when.astimezone(_tz(tz_name))
+
+
 def in_cohort_zone(sched: Schedule, when: datetime) -> datetime:
     """The same instant, told in the cohort's own zone.
 
     The scheduler ticks in UTC, but everything a notification says about time is local by
     definition: a deadline faculty wrote as 08:00 Berlin, and a quiet window where 02:00
     means somebody's actual night rather than 02:00 in a datacentre."""
-    return when.astimezone(_tz(sched.timezone))
+    return in_zone(sched.timezone, when)
 
 
 class _Wanted(NamedTuple):

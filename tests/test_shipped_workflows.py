@@ -444,3 +444,22 @@ def test_the_theme_seam_job_builds_with_the_shipped_deploy_env_and_no_more():
     )
     shipped = {k: v for k, v in _site_build_step()["env"].items() if k != "BASE_PATH"}
     assert step["env"] == shipped
+
+
+def test_the_pages_deploy_retries_and_still_fails_when_every_attempt_does():
+    # `deploy-pages` fails transiently ("Failed to get ID Token. Request timeout"), and
+    # an unretried failure leaves the site stale until the next push. Each retry runs only
+    # when the attempt before it failed; the LAST has no continue-on-error, so a deploy
+    # that never lands still reds the run for whoever is watching it.
+    doc = SHIPPED_WORKFLOWS["templates/site/.github/workflows/deploy.yml"]
+    steps = doc["jobs"]["deploy"]["steps"]
+    deploys = [
+        s for s in steps if str(s.get("uses", "")).startswith("actions/deploy-pages@")
+    ]
+    assert [s["id"] for s in deploys] == ["deployment", "retry", "last"]
+    assert [s.get("continue-on-error", False) for s in deploys] == [True, True, False]
+    assert deploys[1]["if"] == "steps.deployment.outcome == 'failure'"
+    assert deploys[2]["if"] == "steps.retry.outcome == 'failure'"
+    url = doc["jobs"]["deploy"]["environment"]["url"]
+    for step in deploys:
+        assert f"steps.{step['id']}.outputs.page_url" in url

@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from dsl_course import faults, roster, sync_membership
+from dsl_course.grades import LockWrite
 
 
 def _stub_course_admins(monkeypatch, rv: int = 0):
@@ -26,7 +27,9 @@ def _team_lock_is_current(monkeypatch):
     tests that are about the sync's own orchestration; the ones that are about the lock
     file itself set their own."""
     monkeypatch.setattr(
-        sync_membership, "write_team_lock", lambda course, cohort, dry_run=False: True
+        sync_membership,
+        "sync_team_lock",
+        lambda course, cohort, dry_run=False: LockWrite(True, False),
     )
 
 
@@ -249,8 +252,10 @@ def test_every_cohorts_sync_refreshes_the_team_formation_lock(monkeypatch):
     locked: list[tuple[str, str]] = []
     monkeypatch.setattr(
         sync_membership,
-        "write_team_lock",
-        lambda course, cohort, dry_run=False: locked.append((course, cohort)) or True,
+        "sync_team_lock",
+        lambda course, cohort, dry_run=False: (
+            locked.append((course, cohort)) or LockWrite(True, False)
+        ),
     )
     monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A", "B"])
     monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
@@ -266,9 +271,42 @@ def test_every_cohorts_sync_refreshes_the_team_formation_lock(monkeypatch):
     assert locked == [("Course", "A"), ("Course", "B")]
 
 
+def test_a_push_that_moved_the_lock_moves_the_join_team_form_with_it(monkeypatch):
+    # The lock decides whether a team MAY form; the form's Assignment field decides whether
+    # a student can ask at all, and it is a REQUIRED dropdown rendered off that same lock.
+    # Written here but not regenerated, a push that opened an assignment left the chooser
+    # offering only the previous ones - so nobody could file the issue until the nightly
+    # refresh, however current the mirror was.
+    forms: list[str] = []
+    monkeypatch.setattr(
+        sync_membership,
+        "sync_team_lock",
+        lambda course, cohort, dry_run=False: LockWrite(True, cohort == "A"),
+    )
+    monkeypatch.setattr(
+        sync_membership,
+        "refresh_join_team_form",
+        lambda org: forms.append(org) or 0,
+    )
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A", "B"])
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(sync_membership.sync_roster, "sync", lambda org, **k: 0)
+    monkeypatch.setattr(sync_membership.sync_teams, "sync", lambda org, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
+    )
+
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert forms == ["A"], "only the cohort whose mirror actually moved"
+
+
 def test_a_lock_file_that_did_not_land_is_counted(monkeypatch):
     monkeypatch.setattr(
-        sync_membership, "write_team_lock", lambda course, cohort, dry_run=False: False
+        sync_membership,
+        "sync_team_lock",
+        lambda course, cohort, dry_run=False: LockWrite(False, False),
     )
     monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A"])
     monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])

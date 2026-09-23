@@ -53,23 +53,38 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 
 ## Group assignments (rolling basis)
 
->This workflow is carried out *during* course delivery, however groups need to be formed *before* the associated group assignment is released. 
+>This workflow is carried out *during* course delivery. Students form their teams **while the assignment is out**: self-selection opens at the hand-out and runs to the assignment's grading pin, and the release provisions each team's shared repo as it forms.
 
 - There are 2 methods to form groups:
    1. Students open a **Join team** issue in `welcome`, 
    2. instructors edit `classroom-config/teams.csv`(`assignment, team, github_handle`)
-- The issue flow only accepts an assignment that is **declared under `assignments:` in
-  `classroom-config/schedule.yml`** (declare it before students form teams) **and whose
-  template says `team_formation: self_select`**. It enforces that assignment's
-  `max_team_size` (default: the course's `assignment_defaults`, else 5). Both answers reach
-  the form through the generated mirror `classroom-config/assignments.lock.yml`. Three
-  refusals a student can meet, all labelled `needs-review`:
-  - `assignment-1 is an individual assignment - no teams.`
-  - `teams for assignment-1 are assigned by the instructor.` (write `teams.csv` yourself)
-  - `team-alpha already has 3 members (the cap for assignment-1 is 3).`
+- The issue flow only accepts an assignment **declared under `assignments:` in
+  `classroom-config/schedule.yml`**, **whose template says `team_formation: self_select`**,
+  and **whose team-formation window is open**. It enforces that assignment's
+  `max_team_size` (default: the course's `assignment_defaults`, else 5). Every answer
+  reaches the form through the generated mirror `classroom-config/assignments.lock.yml`.
+  Three outcomes, by label:
+  - `team-recorded` (closed): the row is in `teams.csv`. The comment points to step 2 on
+    the assignment page, where the team's repo appears within minutes.
+  - `team-refused` (closed as not planned): the **student** can fix it, and the comment
+    says how, with a link to a new Join team issue with the Team box filled in. Covers:
+    an individual or instructor-assigned assignment; the window not open yet or closed;
+    Join a team that doesn't exist (the nearest real team is named) or is full; Create
+    onto a name that exists, or differs from one only in case, dashes and underscores;
+    Join or Create of the team they're already in; an unreadable form, an unknown Action,
+    or a name that isn't letters, digits and dashes.
+  - `needs-review` (open): **you** must act - not on the roster or not onboarded, an
+    auditor, a missing lock or team cap, a teams.csv header problem, or a write that failed.
+- A student already in a team who **joins** or **creates** another is moved while the
+  window is open, in one write to `teams.csv`. Sync membership then takes them out of the
+  old GitHub team, including a team they leave empty. The old team's repo is kept, with
+  what they pushed.
 - An assignment whose course template does not exist yet refuses every request until the
   template is created.
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.
+- The teams that exist, and how much room each has, are listed on the assignment's page
+  on the cohort site - linked from the form, its refusals and the mail; students still
+  without a team are emailed while the window is open. Both: [09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams).
 - The **Sync membership** workflow then creates a GitHub team per group.
 - A **Release assignment** run then grants each team its shared repo (the template declares `type: group`).
 

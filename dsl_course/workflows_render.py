@@ -1064,6 +1064,74 @@ on:
 """
 
 
+def render_open_team_formation(cohort_orgs: list[str]) -> str:
+    """Ask the students who still have no team, on a faculty member's say-so.
+
+    The SAME pass the quarter-hourly tick runs, reached from a button: `team_formation.run`
+    reads the open windows and hands them to the very `notify_windows` the scheduler calls,
+    so the record, the claim ordering and the wording cannot fork. Idempotence therefore
+    needs nothing from this button - `mailed.csv` already holds what a first press sent, so
+    a second press mails nobody.
+
+    `assignment` is FREE TEXT and not a dropdown. Every other per-assignment button names
+    a course-org template repo, which this org can discover and list; a team-formation
+    window is keyed on a SCHEDULE key, which lives in each cohort's own private
+    schedule.yml - so a dropdown rendered once for the whole course org would either be
+    empty or be one cohort's keys offered to another. Left blank it asks about every window
+    open right now, which is the ordinary press; a key with no open window is refused by
+    name rather than passed over.
+    """
+    return f"""name: Open team formation
+
+# Emails every enrolled student who is still without a team for an assignment whose
+# team-formation window is open: the cap, the day formation closes, and a link to the
+# cohort's Join team form. It is the same message the scheduler sends by itself when a
+# window opens - this is how you send it again on your own say-so, after announcing the
+# assignment in class or once a cohort's mail secrets are finally set.
+# NOTHING IS SAID TWICE: every message is recorded in classroom-config's
+# team-formation/mailed.csv, so a second press reaches only the students a first press did
+# not - a newcomer who has since joined GitHub, and nobody else.
+# Leave `assignment` empty for every window that is open. Filling it in narrows the run to
+# ONE schedule.yml assignment key and leaves the other windows alone; a key with no open
+# window is an error, not a quiet no-op.
+# Overnight (23:00-07:00 in the cohort's own timezone) the message is HELD, pressed or not
+# - the students' night is the same night either way - and nothing is claimed, so the next
+# quarter-hourly tick sends it in the morning.
+# Dry run first; it claims nothing, sends nothing, and prints the counts with a sample of
+# the wording. Needs the GRAPH_* secrets to mail.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_cohort_dropdown(cohort_orgs)}
+      assignment:
+        description: "Only this schedule.yml assignment key (leave empty for every open window)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Preview the messages - claim nothing, send nothing"
+        type: boolean
+        default: true
+
+{_concurrency("open-team-formation")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  open-team-formation:
+{_run_preamble()}      - name: Open team formation
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
+          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          ASSIGNMENT: ${{{{ inputs.assignment }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+{_MAIL_ENV}
+        run: |
+          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
+          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
+{_DRY_RUN_GATE}
+          python3 -m dsl_course.team_formation "${{args[@]}}"
+"""
+
+
 def render_propagate_cohort(cohort_orgs: list[str]) -> str:
     """Carry a cohort's edits to released material back into the course org."""
     return f"""name: Propagate cohort edits

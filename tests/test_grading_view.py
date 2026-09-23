@@ -241,7 +241,7 @@ def test_the_late_penalty_is_taken_before_the_adjustment_is_added():
     assert view["final_grade"] == "20"
     assert view["penalty"] == "-20%"
     assert view["days_late"] == 2
-    assert view["submitted"] == "6 Oct 09:30"
+    assert view["submitted"] == "6th Oct 09:30"
 
 
 def test_a_final_grade_is_never_below_zero():
@@ -329,7 +329,7 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
         "\n"
         "| Assignment | Final grade | Submitted | Late | Team |\n"
         "|---|---|---|---|---|\n"
-        "| Assignment 1 · Neural networks from scratch | 40 / 50 | 3 Oct 22:14 | on time | team-alpha |\n"
+        "| Assignment 1 · Neural networks from scratch | 40 / 50 | 3rd Oct 22:14 | on time | team-alpha |\n"
         "\n"
         "## Assignment 1 · Neural networks from scratch\n"
         "**Final grade:** 40 / 50\n"

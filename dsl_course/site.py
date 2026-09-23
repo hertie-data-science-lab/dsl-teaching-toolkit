@@ -24,12 +24,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import stat
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
 from textwrap import indent
@@ -38,10 +39,11 @@ from urllib.parse import quote
 import yaml
 from pathspec import GitIgnoreSpec
 
-from . import schedule
+from . import schedule, teams
 from .course import (
     CUTOFF_SENTENCE,
     PUBLISH_FILE,
+    SELF_SELECT,
     assignment_slug,
     identifier,
     late_rule,
@@ -63,10 +65,11 @@ from .discovery import (
     handed_out_assignments,
     list_org_repos,
     live_cohorts,
+    welcome_issue_url,
 )
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
-from .grades import load_grading_spec, total_points
+from .grades import load_grading_spec, spoken_day, team_cap, total_points
 from .log import log, log_err, log_step, log_withheld
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -987,6 +990,34 @@ def _lecture_entry(
     )
 
 
+def member_digest(cohort_org: str, handle: str) -> str:
+    """A team member as the public cohort site carries them: SHA-256 of
+    `<cohort org>:<handle, lower-cased>`, hex. Never the handle itself - the page's script
+    hashes its reader's saved handle the same way (_layouts/assignment.html, `memberKey`)
+    to recognise their team, and nothing else can read one back. Salted with the org so one
+    student's digest differs from cohort to cohort. `.lower()`, not `.casefold()`, because
+    the browser side is `toLowerCase` and GitHub handles are ASCII."""
+    return hashlib.sha256(f"{cohort_org}:{handle.lower()}".encode()).hexdigest()
+
+
+def _formed_teams(cohort_org: str, key: str) -> list[tuple[str, list[str]]]:
+    """`(team, member handles)` for every team formed for `key` so far, by name.
+
+    The same reader `team_formation.open_windows` uses, on the same private file and keyed
+    on the same SCHEDULE key - so the table the site prints and the fault the teaching team
+    gets count one thing.
+
+    Never fatal, and that is the point of catching here: teams.csv is student-written, and a
+    row somebody broke must not take down the render of a cohort's whole website. The
+    callout above still goes out; only the table is missing."""
+    try:
+        groups = teams.teams_for(teams.load(cohort_org), key)
+    except RuntimeError as exc:
+        log_err(f"could not read {cohort_org}'s teams for {key}: {exc}")
+        return []
+    return sorted((team, sorted(members)) for team, members in groups.items())
+
+
 def _assignment_entry(
     course_org: str,
     cohort_org: str,
@@ -996,6 +1027,7 @@ def _assignment_entry(
     found: tuple[str, schedule.AssignmentEntry] | None = None,
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
+    sched: schedule.Schedule | None = None,
 ) -> str:
     """An assignment's page, plus the two schedule rows it drives: the entry's own
     `date:` is the "released!" row and its `due_event:` sub-block the due row.
@@ -1057,7 +1089,22 @@ def _assignment_entry(
       meant to be out by now, and a schedule that says so is not a secret worth keeping.
 
     `now` is the moment to judge the pin against (default: actual now, in the handout's own
-    cohort timezone - `_coerce_datetime` hands out nothing naive)."""
+    cohort timezone - `_coerce_datetime` hands out nothing naive).
+
+    A self-select GROUP assignment inside its team-formation window is the third state,
+    and it exists because the second bullet above is right about the brief and silent about
+    everything else: that handout parks and provisions nothing until a team exists, so the
+    pin published the brief and, beside it, a `repo_url` into a repo list an unteamed
+    student sees nothing in. Both stay - the assignment really is out, and a team that
+    formed on day one owns its repo already - and `team_join_url` / `team_join_cap` /
+    `team_join_closes` are written ALONGSIDE them: the thing the student can actually do
+    about an empty listing.
+
+    The WINDOW, off `sched` and never "has any team formed yet": the second is
+    cohort-wide, so the first team to form would take the invitation away from every
+    student still looking for one. `sched` is the plan the caller already parsed; without
+    it (a caller that has no plan to hand) there is no window and the page reads as it
+    always did."""
     slug = schedule.cohort_name(*found) if found else assignment_slug(repo)
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
@@ -1095,6 +1142,28 @@ def _assignment_entry(
     tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
     tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
+    # Is this assignment waiting on its teams RIGHT NOW? `schedule.formation_state` is the
+    # same call `grades.team_lock_entries` makes for the lock the Join-team form reads, so
+    # the page cannot invite a student through a door the form has already shut. The shape
+    # question is the spec's, like every other shape fact on this page: `assigned` teams
+    # are the teaching team's to write, and there is nothing for a student to open.
+    window, shuts = (
+        schedule.formation_state(sched, found[0], now or datetime.now(UTC))
+        if sched is not None and found is not None
+        else ("closed", None)
+    )
+    # Whether this page should ASK for a team. Keyed on the window, never on whether a
+    # team has formed: "has anybody formed one" is a cohort-wide answer, so the first team
+    # to form would take the call to action away from every student still without one.
+    #
+    # It does NOT suppress `repo_url`. Hiding the button for the whole window would punish
+    # exactly the students who acted first - a team that forms on day one would lose the
+    # link to its own repo until the window shut - and for a shared drop box, which exists
+    # from the hand-out whatever the teams do, it would hide a URL that was never empty.
+    # The two live side by side: the button works for a student whose team exists (GitHub
+    # filters the listing by what they can read), and the call to action beside it says
+    # what to do if it comes back empty.
+    forming = window == "open" and spec.team_formation_resolved == SELF_SELECT
     # Where the work goes. `submit_shape` is the SHAPE in one word (`course.submit_shape`:
     # `assignment-repo-private`, `assignment-repo-public`, `external`), written whatever
     # the handout state
@@ -1181,6 +1250,65 @@ def _assignment_entry(
     # sit above the line saying the assignment has not been handed out.
     note = shape_note(spec.submit_shape) if out else ""
     note_fm = f'shape_note: "{q(note)}"\n' if note else ""
+    # The one thing a student can act on while this assignment waits for its teams: the
+    # `welcome` repo's issue chooser, the cap on a team and the day the door shuts. Three
+    # keys and no fourth flag - their PRESENCE is the state, so a theme that has never
+    # heard of team formation renders nothing rather than an empty callout, and the layout
+    # and the schedule row read the same two facts rather than each wording its own.
+    #
+    # The first thing on either site to link `welcome` at all, so it is built from the
+    # COHORT org: the course org has no welcome repo, and the one this cohort's students
+    # are members of is the only one that would answer them.
+    #
+    # The day, not the moment, and SPOKEN here (`grades.spoken_day`, in the cohort's zone):
+    # it is the same day the Join-team form's refusal and the mail name, in the same
+    # spelling, and an hour would invite a student to read a deadline off a page whose
+    # timezone it does not state.
+    #
+    # WHICH teams exist rides with them, off the cohort's private teams.csv: a student
+    # deciding whether to start a team or ask to join one needs to know what is already
+    # there, and this page is the one list of them - a push to teams.csv re-syncs it.
+    #
+    # NAMES AND COUNTS, and no readable handle: each team's members ride as salted SHA-256
+    # digests (`member_digest`), for the page's script to recognise its own reader's team
+    # and nothing else.
+    #
+    # And each team's own repo URL, precomputed here off the same `submission_repo` the
+    # handout provisions with, so the page's script links a recognised reader straight to
+    # it without a second spelling of the name. A shared drop box is one repo for every
+    # team, so its URL is the drop box's; an external assignment has no repo to link.
+    team_fm = ""
+    if forming and shuts is not None:
+        welcome = welcome_issue_url(cohort_org)
+        cap = team_cap(course_org, spec)
+
+        def team_entry(name: str, handles: list[str]) -> str:
+            if external:
+                url = ""
+            elif spec.submit_shared:
+                url = f"https://github.com/{cohort_org}/{q(shared_repo(slug))}"
+            else:
+                url = (
+                    f"https://github.com/{cohort_org}/{q(submission_repo(slug, name))}"
+                )
+            digests = ", ".join(f'"{member_digest(cohort_org, h)}"' for h in handles)
+            return (
+                f'  - name: "{q(name)}"\n    members: {len(handles)}\n    cap: {cap}\n'
+                f"    members_sha256: [{digests}]\n"
+                + (f'    repo_url: "{url}"\n' if url else "")
+            )
+
+        listed = "".join(
+            team_entry(name, handles)
+            for name, handles in _formed_teams(cohort_org, found[0])
+        )
+        closes = spoken_day(schedule.in_cohort_zone(sched, shuts))
+        team_fm = (
+            f'team_join_url: "{welcome}"\n'
+            f'team_join_cap: "{cap}"\n'
+            f'team_join_closes: "{closes}"\n'
+            f'team_salt: "{q(cohort_org)}"\n' + (f"teams:\n{listed}" if listed else "")
+        )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1249,6 +1377,7 @@ def _assignment_entry(
         f"{late_fm}"
         f"{points_fm}"
         f"{note_fm}"
+        f"{team_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
@@ -1447,11 +1576,6 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         content_repos = cohort_content_repos(cohort_repos)
         release_sources = discover_release_sources(cohort_org, content_repos)
         assignments = discover_assignments(course_org)
-        # A persistent course org holds per-year templates (assignment-*-fYYYY); a cohort
-        # site should list only its own year's, matched on the cohort's fYYYY/sYYYY tag.
-        tag = term_tag(cohort_org)
-        if tag:
-            assignments = [a for a in assignments if a.lower().endswith(tag)]
         # Which of them this cohort has actually been given - what gates their briefs. Read
         # from the cohort org rather than inferred from the plan, since the manual workflow
         # hands out with no `handout_datetime` pinned at all.
@@ -1473,34 +1597,10 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # so the whole term is on the schedule the day it is written rather than filling in
         # release by release. Discovery still leads: a folder released outside the plan
         # (the manual workflow, an off-plan extra) keeps its row whether or not it is here.
-        # Every assignment this cohort has, from BOTH sides. Discovery finds the course
-        # org's template repos, which is how one handed out off-plan still appears; the
-        # plan's own `assignments:` entries are how one appears BEFORE its template is
-        # staged - a term written in August names repos nobody has created yet, and the
-        # schedule already publishes those dates. Without the plan side, a cohort could
-        # write four assignments and see one row.
-        #
-        # Keyed on the COHORT-side name - the identity assign.py and collect.py use -
-        # because two plan entries may cite one `course_source_repo`, and keying on the
-        # repo folded them into a single row. Sorted by that name, so an assignment's page
-        # keeps its URL when faculty add another mid-term.
-        by_name: dict[str, tuple[str, tuple[str, schedule.AssignmentEntry] | None]] = {}
-        for repo in assignments:
-            hit = schedule.entry_for_repo(sched, repo)
-            key = schedule.cohort_name(*hit) if hit else assignment_slug(repo)
-            by_name.setdefault(key, (repo, hit))
-        for plan_slug, plan_entry in sched.assignments.items():
-            by_name.setdefault(
-                schedule.cohort_name(plan_slug, plan_entry),
-                (plan_entry.course_source_repo, (plan_slug, plan_entry)),
-            )
-        # EVERY assignment, hidden ones included - so that an assignment's ORDINAL is its
-        # position in the full list. Filtering the list itself renumbered every assignment
-        # after a hidden one: hide assignment 2 mid-term and assignment 3's published page
-        # moves from `03-...` to `02-...`, and the fortnightly fallback date of any
-        # assignment the plan has not dated jumps two weeks earlier. The hidden ones are
-        # skipped where the pages are built, keeping their ordinals unspent.
-        cohort_assignments = sorted(by_name.items())
+        # Every assignment this cohort has a page for, numbered as every link to one
+        # numbers it (`schedule.assignment_pages`: this term's templates plus the plan's
+        # entries, hidden ones included so that a hidden page keeps its ordinal unspent).
+        pages = schedule.assignment_pages(cohort_org, sched, assignments)
 
         def shown(hit: tuple[str, schedule.AssignmentEntry] | None) -> bool:
             """Does this assignment appear on the site at all?
@@ -1546,7 +1646,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         log_step(
             f"Syncing {cohort_org}/{pages_repo(cohort_org)}: {len(rows)} session row(s) "
             f"({len(rows) - len(sources_by_row)} not released yet), "
-            f"{sum(1 for _, (_, hit) in cohort_assignments if shown(hit))} assignment(s)"
+            f"{sum(1 for page in pages if shown(page.hit))} assignment(s)"
         )
 
         # What a session row LINKS, out of everything it released - the default
@@ -1685,16 +1785,19 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 # so hiding one mid-term leaves every other assignment's URL - and every
                 # synthesised fallback date - exactly where it was.
                 "_assignments": {
-                    f"{i + 1:02d}-{name}.md": _assignment_entry(
+                    f"{page.stem}.md": _assignment_entry(
                         course_org,
                         cohort_org,
-                        repo,
-                        *_assignment_dates(hit, start + timedelta(days=(i + 1) * 14)),
-                        found=hit,
+                        page.repo,
+                        *_assignment_dates(
+                            page.hit, start + timedelta(days=page.number * 14)
+                        ),
+                        found=page.hit,
                         handed_out=handed_out,
+                        sched=sched,
                     )
-                    for i, (name, (repo, hit)) in enumerate(cohort_assignments)
-                    if shown(hit)
+                    for page in pages
+                    if shown(page.hit)
                 },
                 "_events": event_entries,
             },
