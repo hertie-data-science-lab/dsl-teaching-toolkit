@@ -101,7 +101,8 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 `submitted` can move at the freeze - the last derivation there will ever be.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
-no repo is created for it, so there is no commit to time.
+no repo is created for it, so there is no commit to time and nothing waits on the cutoff: mark it
+and run **Distribute grades** whenever you like.
 
 For `submit_via: shared_dropbox_repo` the timing is per FOLDER of the one drop box: `submitted` is the
 last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **and was made

@@ -1637,7 +1637,7 @@ def _status_line(
     if phase is not SheetPhase.OPEN:
         return f"FROZEN {spec.cutoff_display}".strip()
     if not spec.collects_commits:
-        return "OPEN - submitted outside GitHub"
+        return "submitted outside GitHub - nothing to collect; Distribute any time"
     # Named, because "3 of 5" reads differently for teams than for students and a grader
     # scanning this line wants to know which they are looking at without counting rows.
     unit = "teams" if spec.is_group else "students"

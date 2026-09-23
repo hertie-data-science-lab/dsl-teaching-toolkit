@@ -4380,8 +4380,55 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
         now=datetime(2026, 10, 2, tzinfo=BERLIN),  # still open
     ).written
     ((_path, text),) = written
-    assert "# Status: OPEN - submitted outside GitHub" in text
+    assert (
+        "# Status: submitted outside GitHub - nothing to collect; Distribute any time\n"
+        in text
+    )
     assert "info" not in grades.parse_sheet(text)["submissions"]["ada-l"]
+
+
+def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_never_froze(
+    tmp_path, monkeypatch
+):
+    # An in-class paper quiz: handed out after its due date, marks typed in later. The
+    # sheet is never frozen - there is nothing to collect - and nothing waits for it to be.
+    from tests.test_grades import _EXTERNAL_GRADING, ROSTER_ADA, _distribute
+
+    written = _sheet_env(monkeypatch, targets=SOLO_TARGETS, grading=_EXTERNAL_GRADING)
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=DUE + timedelta(days=1),
+        units=[("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])],  # off the roster
+    ).created
+    ((_path, text),) = written
+    rows = grades.parse_sheet(text)["submissions"]
+    assert set(rows) == {"ada-l", "ben-k"}
+    assert not any("info" in row for row in rows.values())
+    assert not grades.sheet_is_frozen(text)
+
+    blank = "  ada-l:\n    score_individual:\n"
+    assert text.count(blank) == 1
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={
+            "assignment-1": text.replace(blank, "  ada-l:\n    score_individual: 17\n")
+        },
+        grading=_EXTERNAL_GRADING,
+        roster_rows=ROSTER_ADA + "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-abd\n",
+        sent=2,
+    )
+    assert out["rc"] == 0
+    books = {repo: files for repo, files, _delete in out["gradebooks"]}
+    assert "| 17 |" in books["grades-ada-l"]["README.md"]
+    assert "| 17 |" not in books["grades-ben-k"]["README.md"]
+    assert "ada@uni.edu" in [m[0] for batch in out["outbox"] for m in batch]
 
 
 def test_the_freeze_reads_the_written_snapshot_and_seals_the_sheet(monkeypatch):
