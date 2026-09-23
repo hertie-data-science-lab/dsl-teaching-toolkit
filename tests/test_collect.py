@@ -4387,6 +4387,30 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
     assert "info" not in grades.parse_sheet(text)["submissions"]["ada-l"]
 
 
+def test_an_external_sheet_past_its_cutoff_keeps_the_external_wording(monkeypatch):
+    # The cutoff seals nothing for work handed in off GitHub, so the header must not
+    # say FROZEN - a grader reads that as "closed", and there is nothing to close.
+    written = _sheet_env(
+        monkeypatch, targets=SOLO_TARGETS, grading="submit_via: external\n"
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=DUE + timedelta(days=30),
+    ).written
+    ((_path, text),) = written
+    assert (
+        "# Status: submitted outside GitHub - nothing to collect; Distribute any time\n"
+        in text
+    )
+    assert "FROZEN" not in grades.sheet_header(text)
+
+
 def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
     tmp_path, monkeypatch
 ):
