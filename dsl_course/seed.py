@@ -77,6 +77,7 @@ from .workflows_render import (
     render_bootstrap_cohort,
     render_central_release,
     render_collect_submissions,
+    render_console,
     render_derive_student_version,
     render_distribute_grades,
     render_generate_syllabus,
@@ -289,6 +290,7 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/check-cohort-setup.yml": render_status(cohorts),
         ".github/workflows/refresh-actions.yml": render_refresh(),
         ".github/workflows/scheduled-release.yml": render_scheduler(),
+        ".github/workflows/console.yml": render_console(),
     }
     return {
         path: for_placement(content, central_ref).encode()
