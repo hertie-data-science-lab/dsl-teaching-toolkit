@@ -3,6 +3,16 @@
 
 import type { Assignment, AssignmentState, Release, ReleaseState, StageState } from './types';
 
+/** `v` as text, blank for null and undefined. */
+export function str(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v);
+}
+
+/** Lower case, each run of other characters one hyphen, none at either end. */
+export function kebab(s: string): string {
+  return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

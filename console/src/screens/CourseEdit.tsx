@@ -7,7 +7,7 @@ import courseSchema from '../../schemas/dsl_course.schema.json';
 import { useEnv, type Env } from '../env';
 import { matches } from '../edit/glob';
 import { useSave } from '../edit/save';
-import { YamlText, deepEqual } from '../edit/yamlText';
+import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -33,7 +33,6 @@ export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {
   return k ? { courseOrg: p.course.org, cohortOrg: k.org, where: k.termLabel } : null;
 }
 
-const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const clean = (v: Values): Values => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x === '' || x === null ? undefined : x]));
 
 // --------------------------------------------------------------------------- details

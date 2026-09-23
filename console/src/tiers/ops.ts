@@ -2,9 +2,7 @@
 // tables). Keys are the op's args-schema properties; anything not listed is Derived or
 // Hidden and never a field.
 
-import type { Tiers } from './types';
-
-const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
+import { opt, type Tiers } from './types';
 
 /** A release's destination: Advanced, defaulting to materials and the source path. */
 export function releaseDest(sourcePath: string): Tiers {

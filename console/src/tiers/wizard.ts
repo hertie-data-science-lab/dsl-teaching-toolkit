@@ -5,10 +5,9 @@
 // nothing to run.
 
 import { settingsTiers, type CourseDefaults } from './grading';
-import type { FieldTier, Tiers } from './types';
+import { opt, type FieldTier, type Tiers } from './types';
 import { ORG_RE, autogradeBlock, termLabel } from '../wizards/model';
 
-const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
 const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
 export function orgField(why: string): FieldTier {

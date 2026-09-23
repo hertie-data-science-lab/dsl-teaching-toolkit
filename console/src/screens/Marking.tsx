@@ -7,7 +7,7 @@ import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentIdent, assignmentTitle, fmtDay } from '../model/format';
+import { assignmentIdent, assignmentTitle, fmtDay, str } from '../model/format';
 import { cellValue, finalGrade, penaltyRate, penaltyText, readSheet, round, scoreTotal, type Unit } from '../model/marks';
 import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
@@ -43,7 +43,6 @@ function asgRef(a: Assignment, group: boolean): AsgRef {
 // --------------------------------------------------------------------------- marks
 
 const key = (path: Path) => JSON.stringify(path);
-const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
 
 function Marks(p: ReadyProps & { a: Assignment }) {
   const { a } = p;

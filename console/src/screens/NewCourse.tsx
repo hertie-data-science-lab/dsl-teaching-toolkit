@@ -5,7 +5,7 @@
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
-import { YamlText, deepEqual } from '../edit/yamlText';
+import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
 import { ABOUT, ASSIGNMENT_DEFAULTS, COHORT_DEFAULTS } from '../tiers/course';
@@ -53,8 +53,6 @@ export function ncDone(d: NcDraft, org: string, orgChecks: Check[] | null, setUp
   const setOk = setUp ? allOk(setUp) : d.setUp === org;
   return [orgOk, orgOk && setOk && d.detailsSaved === org, orgOk && setOk && d.detailsSaved === org && d.defaultsSaved === org, false];
 }
-
-const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 
 export function NewCourseScreen({ files, step: asked }: { files: Files; step?: number }) {
   const env = useEnv();

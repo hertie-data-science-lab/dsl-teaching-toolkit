@@ -7,7 +7,7 @@
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 import type { ComponentChildren } from 'preact';
 import { deepEqual } from '../edit/yamlText';
-import { md } from '../model/format';
+import { md, str } from '../model/format';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
 import { Prop } from '../ui/bits';
 import { Alert, Lock } from '../ui/icons';
@@ -127,10 +127,6 @@ interface FieldProps {
   error?: string;
   set: (k: string, v: unknown) => void;
   readOnly?: boolean;
-}
-
-function str(v: unknown): string {
-  return v === undefined || v === null ? '' : String(v);
 }
 
 export function Field({ id, k, t, value, values, error, set, readOnly }: FieldProps) {

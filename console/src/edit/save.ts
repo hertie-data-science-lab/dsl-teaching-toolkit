@@ -5,7 +5,7 @@
 
 import { useState } from 'preact/hooks';
 import type { Env } from '../env';
-import { ConflictError, authorOf, type GitHubClient } from '../github/client';
+import { ConflictError, authorOf, wait, type GitHubClient } from '../github/client';
 import type { Problem } from '../model/types';
 
 export interface Target {
@@ -27,8 +27,6 @@ export interface Verdict {
 }
 
 const FAILED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure']);
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
 /** Follow the check runs on `commit` until they finish, and say what they found. */
 export async function verdict(
   client: GitHubClient,

@@ -2,6 +2,7 @@
 // students see, the events, the term dates and the archive entry. States come from status.
 
 import { parse } from 'yaml';
+import { obj } from '../edit/yamlText';
 import { ASSIGNMENT_WORD, RELEASE_WORD, assignmentIdent, releaseIdent, sortKey } from './format';
 import type { Release, Status } from './types';
 
@@ -57,12 +58,11 @@ export function parseSchedule(text: string | null | undefined): Schedule | null 
   }
   if (!d || typeof d !== 'object') return null;
   const doc = d as Record<string, unknown>;
-  const map = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
   const releases: Record<string, SchedEntry> = {};
-  for (const [k, v] of Object.entries(map(doc.releases))) releases[k] = entry(v);
+  for (const [k, v] of Object.entries(obj(doc.releases))) releases[k] = entry(v);
   const assignments: Record<string, SchedEntry> = {};
-  for (const [k, v] of Object.entries(map(doc.assignments))) assignments[k] = entry(v);
-  const events = Object.entries(map(doc.events)).map(([k, v]) => ({ id: k, ...entry(v, { title: pretty(k), type: 'special_event' }) }));
+  for (const [k, v] of Object.entries(obj(doc.assignments))) assignments[k] = entry(v);
+  const events = Object.entries(obj(doc.events)).map(([k, v]) => ({ id: k, ...entry(v, { title: pretty(k), type: 'special_event' }) }));
   return {
     timezone: s(doc.timezone) || null,
     start: s(doc.semester_start) || null,

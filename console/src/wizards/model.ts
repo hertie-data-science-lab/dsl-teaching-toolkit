@@ -3,14 +3,11 @@
 // format pairs (research/06 C1, C2) and the request args each wizard sends.
 
 import { termOf } from '../model/discovery';
+import { kebab } from '../model/format';
 import type { Values } from '../tiers/types';
 
 /** The lab's bot: an owner of every course and cohort org until the console app replaces it. */
 export const BOT = 'hertie-dsl-bot';
-
-export function kebab(s: string): string {
-  return String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
 
 /** `hertie-<course-slug>-<code>`: lower case, no year; the code is folded to lower case. */
 export function courseOrgName(name: string, code: string): string {

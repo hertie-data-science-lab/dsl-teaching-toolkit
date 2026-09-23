@@ -3,7 +3,7 @@
 // form works on a flat model of strings and booleans; `toConfig` turns it back into the
 // file's shape.
 
-import type { Tiers, Values } from './types';
+import { opt, type Tiers, type Values } from './types';
 
 export const FORMATS: [string, string][] = [
   ['ipynb', 'Jupyter notebook'], ['py', 'Python files'], ['rmd', 'R Markdown'], ['qmd', 'Quarto'], ['latex', 'LaTeX'], ['none', 'No starter file'],
@@ -21,7 +21,6 @@ export interface CourseDefaults {
   teamSize: string;
 }
 
-const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
 const bool = (v: unknown) => (v === true ? 'true' : v === false ? 'false' : v == null ? undefined : String(v));
 const isDrop = (v: Values) => v.submit_via === 'shared_dropbox_repo';
 

@@ -3,7 +3,8 @@
 // file, so keys the sheet does not show are kept, and a default is written only when the
 // file already spelt it.
 
-import type { YamlText } from '../edit/yamlText';
+import { obj, type YamlText } from '../edit/yamlText';
+import { kebab } from './format';
 
 export type Block = 'releases' | 'assignments' | 'events';
 
@@ -84,7 +85,6 @@ export type Draft = ReleaseDraft | AssignmentDraft | EventDraft | TermDraft | Ar
 
 type Raw = Record<string, unknown>;
 
-const obj = (v: unknown): Raw => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Raw) : {});
 const s = (v: unknown): string => (v == null ? '' : v instanceof Date ? v.toISOString().slice(0, 16) : String(v));
 
 /** "2026-10-08T10:00" -> ["2026-10-08", "10:00"]; a bare date has no time. */
@@ -229,12 +229,10 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
   y.assign([d.kind, d.id], entryValue(d, obj(obj(doc[d.kind])[d.id])));
 }
 
-const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
 /** A fresh id in `block`: `lecture-6`, `lab-4`, `assignment-2`, `midterm-exam`. */
 export function freshId(doc: Raw, block: Block, stem: string): string {
   const taken = new Set([...Object.keys(obj(doc.releases)), ...Object.keys(obj(doc.assignments)), ...Object.keys(obj(doc.events))]);
-  const base = slug(stem) || block.slice(0, -1);
+  const base = kebab(stem) || block.slice(0, -1);
   if (/-\d+$/.test(base) || block !== 'releases') {
     let id = base, n = 2;
     while (taken.has(id)) id = `${base}-${n++}`;

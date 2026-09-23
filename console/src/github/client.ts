@@ -151,6 +151,9 @@ export function decodeBase64(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+/** Resolve after `ms` milliseconds: the pause between polls. */
+export const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 function enc(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');
 }

@@ -3,7 +3,7 @@
 // skipped, a non-number making the whole total unknown), then
 // `total x (1 - rate x days_late) + adjustment`, floored at 0. Never stored in the sheet.
 
-import type { Path } from '../edit/yamlText';
+import { obj, type Path } from '../edit/yamlText';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
 
@@ -30,8 +30,6 @@ export interface Sheet {
   frozen: boolean;
   units: Unit[];
 }
-
-const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 
 export function readSheet(text: string, doc: unknown): Sheet {
   const d = obj(doc);

@@ -20,6 +20,8 @@ export const CONSOLE_REPO = '.github';
 export const CLIENT = 'console/0.1';
 export const OUTCOME_TITLE = 'dsl-outcome';
 export const OUTCOMES_DIR = '.dsl/outcomes';
+/** A private outcome file's path inside `classroom-config`. */
+export const outcomePath = (op: string): string => `${OUTCOMES_DIR}/${op}.json`;
 
 export interface RequestInput {
   op: string;
@@ -209,7 +211,7 @@ export class DispatchAdapter implements Adapter {
     const [owner, repo] = h.cohortOrg ? [h.cohortOrg, 'classroom-config'] : [h.courseOrg, CONSOLE_REPO];
     let priv: Outcome | null = null;
     try {
-      const f = await this.client.getContents(owner, repo, `${OUTCOMES_DIR}/${h.op}.json`);
+      const f = await this.client.getContents(owner, repo, outcomePath(h.op));
       const o = f ? parseOutcome(f.text) : null;
       priv = o && o.run_id === h.runId ? o : null;
     } catch {
