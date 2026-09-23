@@ -1469,9 +1469,10 @@ def _release_phase(
     # mean carrying "the site owes a render" somewhere durable, which is a second piece of
     # cohort state to write, read and get wrong for a page that is a day stale at worst.
     if (release_changed or lock_changed) and defer_site_sync:
-        # A run fired by a classroom-config push, which fired Sync site too: rendering here
-        # as well pushed the site repo alongside it and lost the race. Queued behind Sync
-        # site's own concurrency group instead, so the render lands after this release.
+        # A run fired by a classroom-config push, which (for schedule.yml, people.yml or
+        # teams.csv) started Sync site too: rendering here as well pushed the site repo
+        # alongside it and lost the race. Queued behind Sync site's own concurrency group
+        # instead, so the render lands after this release.
         errors += _request_site_sync(course_org, cohort_org)
     elif release_changed or lock_changed:
         # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). This
@@ -1492,6 +1493,8 @@ def _request_site_sync(course_org: str, cohort_org: str) -> int:
     dispatch the cohort's classroom-config sends. Returns the error count."""
     code, out = gh(
         "api",
+        "--method",
+        "POST",
         f"repos/{course_org}/.github/dispatches",
         "-f",
         "event_type=sync-site",
@@ -1680,8 +1683,8 @@ def main() -> int:
         "--defer-site-sync",
         action="store_true",
         help="Hand the site render to the Sync site workflow (a sync-site dispatch) "
-        "instead of pushing it from here - for a run fired by the push that fired Sync "
-        "site too.",
+        "instead of pushing it from here - for a run fired by a classroom-config push, "
+        "which may have started Sync site too.",
     )
     parser.add_argument(
         "--now", default=None, help="Override 'now' (ISO date/datetime) - for testing."

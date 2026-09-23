@@ -26,7 +26,6 @@ from __future__ import annotations
 import re
 
 from . import mailer
-from .cadence import SCOPED_RUN_TITLE
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
@@ -37,6 +36,7 @@ from .course import (
     PUBLIC_HTML_PDF,
     PUBLIC_TYPES,
     SANDBOX_USER,
+    SCOPED_RUN_TITLE,
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -551,6 +551,16 @@ def _fill(
 # The unscoped pair, for the workflows with a single unattended job.
 _CRON_NOTICE = _fill(_CRON_NOTICE_TEMPLATE)
 _CRON_CLOSE = _fill(_CRON_CLOSE_TEMPLATE)
+
+# The scheduler's release job, whose issue is about the WHOLE course: a run a cohort's push
+# scoped to that one cohort (job-level `SCOPED`, see render_scheduler) neither files nor
+# closes it. Otherwise a green push in cohort A closes the issue cohort B's fault holds open,
+# and the next full tick re-files it - cc course-admin and a maintainer mail - once per push.
+_RELEASE_NOTICE = _fill(
+    _CRON_NOTICE_TEMPLATE,
+    failed="(failure() || cancelled()) && env.SCOPED == ''",
+    succeeded="success() && env.SCOPED == ''",
+)
 
 # The scheduler's grading legs report PER COHORT: they run in parallel, so on a shared
 # title a green cohort would close a red cohort's open issue. A cohort org name is not
@@ -1370,9 +1380,9 @@ on:
 
 # The cohort a run is SCOPED to, or ''. Only a classroom-config dispatcher's push names one
 # (`templates/classroom-config/dispatch-scheduled-release.yml` sends driver=classroom-config
-# and its own org as cohort_org): that push also fired Sync site, so the run releases into
-# the one cohort that changed and hands its site render to Sync site's queue rather than
-# racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
+# and its own org as cohort_org). The run releases into the one cohort that changed and
+# hands any site render to Sync site's queue - which a schedule.yml / people.yml / teams.csv
+# push has usually just started as well - rather than racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
 # (driver=ds01, no cohort), the button - walks every cohort as before. The payload is
 # written by whoever holds a cohort's bot token, so the scheduler checks the name against
 # the course's own registry before it touches anything.
@@ -1408,9 +1418,9 @@ def render_scheduler() -> str:
 # negligible.
 #
 # ONE COHORT, when a cohort's classroom-config push fired this run (driver=classroom-config):
-# that push also fired Sync site, so this run releases into that cohort alone and asks Sync
-# site - by dispatch, into its own queue - for any render its releases need, instead of
-# pushing the site repo alongside it. The cron and the ds01 timer still walk every cohort.
+# this run releases into that cohort alone and asks Sync site - by dispatch, into its own
+# queue, which the same push may already have started - for any render its releases need,
+# instead of pushing the site repo alongside it. The cron and the ds01 timer still walk every cohort.
 #
 # THREE JOBS. `release` walks every cohort (fast: dated copies and repo provisioning) and is
 # separate because a grading pass can run for two hours and must not hold up a release due
@@ -1439,12 +1449,15 @@ on:
 {_PERMISSIONS_JOBS}  release:
 {_RELEASE_CONCURRENCY}    outputs:
       cohorts: ${{{{ steps.cohorts.outputs.cohorts }}}}
+    # JOB-level, because the failure-issue steps' `if:` must see it and a step's `if:`
+    # reads only job- and workflow-level env.
+    env:
+      SCOPED: ${{{{ {_SCOPED_COHORT} }}}}
 {_ungated_preamble(_TIMEOUT_MANY_REPOS)}      - name: List the cohorts to grade
         id: cohorts
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          SCOPED: ${{{{ {_SCOPED_COHORT} }}}}
         run: |
           # FIRST, so the grading matrix is populated whatever the release pass does: a step
           # that fails skips the ones after it, and a release fault in one cohort must not
@@ -1462,7 +1475,6 @@ on:
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           EVENT: ${{{{ github.event_name }}}}
           DRIVER: ${{{{ github.event.client_payload.driver }}}}
-          SCOPED: ${{{{ {_SCOPED_COHORT} }}}}
 # A source the plan cites and the org has not got is emailed to the people git names for
 # it, from this step (see dsl_course.notify) - so the release pass carries the transport
 # alongside the token. Without it the digest issue's @mention is the only channel, which
@@ -1484,7 +1496,7 @@ on:
           fi
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
-{_CRON_NOTICE}  autograde:
+{_RELEASE_NOTICE}  autograde:
     # Named, because `autograde-report` below looks its legs up by name through the jobs
     # API - a string this file declares rather than one GitHub composes from the matrix.
     name: autograde ${{{{ matrix.cohort }}}}

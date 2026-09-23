@@ -524,7 +524,11 @@ org at :00/:15/:30/:45. A push to a cohort's `schedule.yml`, `people.yml`, `stud
 `teams.csv` dispatches the same event with `driver: classroom-config`, and that run releases
 into **that cohort only** (checked against the registry) and asks Sync site for any render
 instead of pushing the site itself. Each driver guards the other; the cron and ds01 runs
-always walk every cohort.
+always walk every cohort. All of them share the one `scheduled-release` group, which holds a
+single pending run, so a scoped arrival can displace a pending full one: the other cohorts
+then wait for the next full arrival (15 min or less with ds01, longer on GitHub's cron
+alone). Nothing is lost - every action is marker-gated. A scoped run neither files nor
+closes the *Scheduled release is failing* issue.
 
 Those four minutes are not a breach of the rule above: that rule is about **GitHub's** cron
 scheduler dropping the contended ones. A REST POST is served like any other API call, and the
@@ -539,7 +543,7 @@ org's `.github`; the last GitHub cron fire is printed there as information and n
 
 The check only runs inside a run, so driver health is decided at the first run more than 2h after
 the last dispatch-driven one - with ds01 down, the next GitHub-delivered cron run, which can take
-hours. Everything either alarm says is bounded by the **20** runs the check fetches, and both are
+hours. Everything either alarm says is bounded by the **100** runs the check fetches, and both are
 armed only while a dispatch-driven run sits inside that window: a freshly bootstrapped or newly
 promoted org never alarms on its way in, and an org whose dispatcher died long enough ago to
 scroll out of the window re-disarms unless its driver-health issue is already open.

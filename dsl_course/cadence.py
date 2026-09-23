@@ -65,6 +65,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
 
+from .course import SCOPED_RUN_TITLE
 from .ghcli import gh_json
 from .issues import close_issues_titled, find_issue, upsert_issue
 from .log import log, log_err, log_step, log_withheld
@@ -97,22 +98,18 @@ HEALTHY_GAP = timedelta(minutes=20)
 # every course org's `.github`. Renaming it there and not here leaves a course whose cadence
 # check reads a 404 - loudly (the read raises), but only in the logs.
 WORKFLOW_FILE = "scheduled-release.yml"
-# ~5 hours of quarter-hourly ticks: enough history for HEALTHY_GAPS and for the dead-man
-# threshold, in ONE request. EVERYTHING this module says is bounded by this window - which
-# is why there is no "no cron fire in 24h" rule (a 24h-old run cannot be in a 5h window, so
-# such a rule could only ever read as false) and why the bodies say "in the last 20 runs"
-# rather than implying knowledge of anything older.
-RUNS_PAGE = 20
+# The API's largest page - up to ~25 hours of quarter-hourly ticks - in ONE request. It has
+# to be that large because the runs a classroom-config push SCOPED to one cohort are skipped
+# (`SCOPED_RUN_TITLE`) but still take rows: at 20, one busy evening of pushes filled the
+# window and disarmed both alarms. EVERYTHING this module says is bounded by this window,
+# which is why the bodies say "in the last N runs" rather than implying knowledge of
+# anything older.
+RUNS_PAGE = 100
 
 # The two drivers, as GitHub names them in a run's `event`.
 DISPATCH_EVENT = "repository_dispatch"
 CRON_EVENT = "schedule"
 _DRIVERS = frozenset({CRON_EVENT, DISPATCH_EVENT})
-# The `run-name` prefix of a Scheduled release run scoped to ONE cohort
-# (`workflows_render._SCOPED_COHORT`). Such a run is neither a driver firing nor a tick of the
-# whole course: counted, a push in cohort A would shrink the gap a late release in cohort B
-# is measured by, and hide it. Read off `display_title`, the only place the listing shows it.
-SCOPED_RUN_TITLE = "Scheduled release for cohort"
 # A run that actually did the work. `cancelled` and `null` (still queued) prove a driver
 # FIRED but not that anything shipped, so they date the drivers and never the cadence.
 _EXECUTED = frozenset({"success", "failure"})

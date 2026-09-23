@@ -562,6 +562,8 @@ def test_a_config_push_run_queues_its_site_render_behind_sync_site(monkeypatch):
     assert sent == [
         (
             "api",
+            "--method",
+            "POST",
             "repos/Course-Org/.github/dispatches",
             "-f",
             "event_type=sync-site",

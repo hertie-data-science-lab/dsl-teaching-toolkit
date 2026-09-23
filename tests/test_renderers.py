@@ -18,7 +18,6 @@ import yaml
 from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import (
-    cadence,
     course,
     mailer,
     profile_readme,
@@ -1490,8 +1489,12 @@ def _runs_student_code(step: dict) -> bool:
 # its reporting moved to a job of its own and has to ASK the jobs API instead. `skipped`
 # there means "no leg ran at all", which is neither a failure to file nor a recovery to
 # close; every other non-success conclusion, `cancelled` included, is the fault to report.
+#
+# The third is the first with the scheduler release job's scope: a run a cohort's push
+# scoped to one cohort neither files nor closes the course-wide issue.
 FAILURE_GATES = {
     "(failure() || cancelled())": "success()",
+    "(failure() || cancelled()) && env.SCOPED == ''": "success() && env.SCOPED == ''",
     (
         "steps.graded.outputs.result != 'success' "
         "&& steps.graded.outputs.result != 'skipped'"
@@ -1747,7 +1750,7 @@ def test_every_unattended_run_files_and_closes_its_own_failure_issue(name):
             f"{name}: the notice rides {job_name}, which is skipped on the cron"
         )
         _assert_reports_a_failure(opener)
-        detached = _failure_gate(opener) != "(failure() || cancelled())"
+        detached = _failure_gate(opener).startswith("steps.graded")
         _assert_emails_the_maintainer(mailers[0], detached)
         if not detached:
             _assert_the_reported_step_writes_its_log(job, f"{name}.{job_name}")
@@ -2111,8 +2114,10 @@ def test_a_config_push_run_releases_into_its_own_cohort_only():
         next(s for s in release["steps"] if s.get("id") == "cohorts"),
         next(s for s in release["steps"] if "DRIVER" in (s.get("env") or {})),
     )
+    # Job-level, so the failure-issue steps' `if:` can read it.
+    assert release["env"]["SCOPED"] == "${{ " + _SCOPED + " }}"
     for s in (listing, step):
-        assert s["env"]["SCOPED"] == "${{ " + _SCOPED + " }}"
+        assert "SCOPED" not in (s.get("env") or {})
     choose = _block(step["run"], 'if [ -n "$SCOPED" ]', "fi")
     base = {"COURSE": "Course-Org"}
     assert _args_under_bash(choose, base | {"SCOPED": "Cohort-A"}) == [
@@ -2132,12 +2137,29 @@ def test_a_config_push_run_releases_into_its_own_cohort_only():
     # The title is what cadence reads to tell the two apart; the fire-once queue is the
     # same one whichever arrival it is.
     assert yaml.safe_load(ALL_RENDERED["scheduler"])["run-name"] == (
-        "${{ " + _SCOPED + " && format('" + cadence.SCOPED_RUN_TITLE
+        "${{ " + _SCOPED + " && format('" + course.SCOPED_RUN_TITLE
         + " {0}', github.event.client_payload.cohort_org) || 'Scheduled release' }}"
     )  # fmt: skip
     assert release["concurrency"]["group"] == (
         "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}"
     )
+
+
+def test_a_scoped_run_neither_files_nor_closes_the_course_failure_issue():
+    # A green push in cohort A closing the issue cohort B's fault holds open, and the next
+    # full tick re-filing it with a cc and a mail, is one fault mentioned once per push.
+    steps = _jobs_of(ALL_RENDERED["scheduler"])["release"]["steps"]
+    by_name = {s.get("name"): s for s in steps}
+    for name in (
+        "Report an unattended failure as an issue",
+        "Close the failure issue once a run succeeds",
+    ):
+        assert "&& env.SCOPED == ''" in by_name[name]["if"], name
+    # The mail rides on the notice step's own output, so it is gated with it.
+    mail = by_name["Email the maintainer the failed step's log"]
+    assert "steps.notice.outputs.report == 'true'" in mail["if"]
+    # Every other workflow's reporting is untouched.
+    assert "env.SCOPED" not in ALL_RENDERED["sync_site"]
 
 
 @pytest.mark.parametrize(

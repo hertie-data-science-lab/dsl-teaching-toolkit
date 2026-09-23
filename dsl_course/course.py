@@ -794,3 +794,11 @@ def row_name(declared: str, identifier: str) -> str:
         if not rest:
             return ""
     return name
+
+
+# The `run-name` prefix of a Scheduled release run scoped to ONE cohort
+# (`workflows_render._SCOPED_COHORT`), which `cadence` reads off the runs listing's
+# `display_title`. Such a run is neither a driver firing nor a tick of the whole course:
+# counted, a push in cohort A would shrink the gap a late release in cohort B is measured
+# by, and hide it.
+SCOPED_RUN_TITLE = "Scheduled release for cohort"

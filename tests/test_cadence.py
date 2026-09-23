@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import cadence, issues
+from dsl_course import cadence, course, issues
 from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -159,7 +159,7 @@ def test_a_run_scoped_to_one_cohort_is_no_tick_of_the_course():
     # gap another cohort's late release is measured by - and date the dispatcher, which it
     # is not. Its `run-name` says what it was; that is all the listing shows.
     scoped = _run(5, run_id=2) | {
-        "display_title": f"{cadence.SCOPED_RUN_TITLE} Cohort-A"
+        "display_title": f"{course.SCOPED_RUN_TITLE} Cohort-A"
     }
     v = _evaluate([scoped, _run(150, run_id=3)])
     assert v.prev_executed_at == NOW - timedelta(minutes=150)
@@ -419,7 +419,7 @@ def test_a_dispatcher_dead_long_enough_to_leave_the_window_is_still_watched(stub
     assert f"not once in the last {cadence.RUNS_PAGE} runs" in body
     assert cadence.read_state(body) == {"dispatch": cadence.DISPATCH_UNSEEN}
     # a body we did not write reads as no state, so this counts as a transition
-    assert comment is not None and "in the last 20 runs" in comment
+    assert comment is not None and f"in the last {cadence.RUNS_PAGE} runs" in comment
 
 
 def test_a_dead_dispatcher_opens_the_issue_in_the_public_dot_github(stub):
