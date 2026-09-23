@@ -370,7 +370,7 @@ def schedule_schema() -> dict:
     )
     assignment = _obj(_keys(KNOWN_ASSIGNMENT), ("due_datetime", "course_source_repo"))
     event = _obj(_keys(KNOWN_EVENT, {"type": _enum(_EVENT_TYPES)}))
-    archive = _obj(_keys(KNOWN_ARCHIVE))
+    archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
     top = _keys(
         KNOWN_TOP_LEVEL,
         {
