@@ -1637,7 +1637,7 @@ def _status_line(
     if not spec.collects_commits:
         # Before the freeze check: the cutoff seals nothing here (there is no `info:`), and
         # a FROZEN header would tell a grader the sheet had closed on something.
-        return "submitted outside GitHub - nothing to collect; Distribute any time"
+        return "submitted outside GitHub - nothing to collect; run Distribute grades any time"
     if phase is not SheetPhase.OPEN:
         return f"FROZEN {spec.cutoff_display}".strip()
     # Named, because "3 of 5" reads differently for teams than for students and a grader

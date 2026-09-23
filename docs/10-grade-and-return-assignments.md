@@ -5,7 +5,7 @@ One file to fill in, one button to send it. Everything else is the toolkit's.
 ## The shape of it
 
 ```
-HANDOUT ─────► DUE ─────► late window ─────► CUTOFF ─────► DISTRIBUTE
+HANDOUT ─────► DUE ─────► late window ─────► CUTOFF ─────► DISTRIBUTE GRADES
 (cron)         (cron)     (cron refreshes)   (cron)        (button)
    │             │              │               │              │
 sheet created  sheet        sheet refreshed   sheet         gradebook + CSV
@@ -143,7 +143,7 @@ repo's, so it would accuse the entire cohort of one student's late push), and
    gradebook always shows everything they have been marked on. A half-typed sheet is
    therefore a reason to wait.
 
-## What Distribute sends
+## What Distribute grades sends
 
 Three channels, and a submission repo is not one of them. Nothing a grader typed is ever
 posted into a repo: a student has one address for a mark, and a repo whose `visibility:`

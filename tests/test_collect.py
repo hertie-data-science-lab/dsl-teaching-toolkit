@@ -4381,7 +4381,7 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
     ).written
     ((_path, text),) = written
     assert (
-        "# Status: submitted outside GitHub - nothing to collect; Distribute any time\n"
+        "# Status: submitted outside GitHub - nothing to collect; run Distribute grades any time\n"
         in text
     )
     assert "info" not in grades.parse_sheet(text)["submissions"]["ada-l"]
@@ -4405,7 +4405,7 @@ def test_an_external_sheet_past_its_cutoff_keeps_the_external_wording(monkeypatc
     ).written
     ((_path, text),) = written
     assert (
-        "# Status: submitted outside GitHub - nothing to collect; Distribute any time\n"
+        "# Status: submitted outside GitHub - nothing to collect; run Distribute grades any time\n"
         in text
     )
     assert "FROZEN" not in grades.sheet_header(text)

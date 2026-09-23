@@ -209,7 +209,7 @@ def registrar_summary(cohort_org: str) -> str:
     log of a course org's `.github` is world-readable."""
     text = get_file_content(cohort_org, CONFIG_REPO, COHORT_CSV_NAME)
     if text is None:
-        return f"{COHORT_CSV_NAME} is NOT here - no grade was ever distributed"
+        return f"{COHORT_CSV_NAME} is NOT here - no grade was ever sent"
     rows = len(list(read_csv(text, (), COHORT_CSV_NAME)))
     return f"{COHORT_CSV_NAME}, {rows} student row(s)"
 

@@ -3984,7 +3984,7 @@ def distribute(
             # Nothing goes out, rather than everything but this one: a grader fixes the
             # file and presses the button again, where a partial send would have to be
             # reconciled student by student.
-            log_err(f"{exc} - nothing distributed; fix the file and run this again")
+            log_err(f"{exc} - nothing sent; fix the file and run this again")
             return 1
         if not sheets:
             log_err(
@@ -4035,7 +4035,7 @@ def distribute(
         # row will read `not submitted` for work that is sitting in the repo, because
         # nothing derives the submission facts until the due date has passed.
         log(
-            f"  WARNING: {undue} mark(s) distributed before the due date - the "
+            f"  WARNING: {undue} mark(s) sent before the due date - the "
             f"submission facts are not derived yet"
         )
 
@@ -4174,7 +4174,7 @@ def distribute(
     )
     if not recorded:
         log_err(
-            f"grades were distributed but {DISTRIBUTED_PATH} could not be written - the "
+            f"grades were sent but {DISTRIBUTED_PATH} could not be written - the "
             f"next run re-posts and re-emails what it cannot see was already sent"
         )
     # The dry run's preview is out of date once anything has gone out. Not a reason to red

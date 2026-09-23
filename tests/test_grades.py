@@ -1696,7 +1696,7 @@ def test_a_mark_sent_before_the_due_date_is_counted_and_said_out_loud(
     )
     printed = capsys.readouterr().out
     assert (
-        "WARNING: 1 mark(s) distributed before the due date - the submission facts "
+        "WARNING: 1 mark(s) sent before the due date - the submission facts "
         "are not derived yet" in printed
     )
     assert out["rc"] == 0  # counted, not blocked
