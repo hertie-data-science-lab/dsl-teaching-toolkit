@@ -256,6 +256,16 @@ class ConfigFault:
     # is not there. Singular and plural, because the subject line and the first line of
     # the body count the same faults and must agree. () = take the generic wording.
     noun: tuple[str, str] = ()
+    # This fault as ONE plain sentence for the console's problem list (`status.json`), in
+    # the design vocabulary: no backticks, no engine words, no identifier unless editing
+    # it is the fix. Set where the parser knows the words; "" = `status_json` derives one
+    # from `what`. The digest issue and the mail keep `what`.
+    plain: str = ""
+    # A fault about how ONE cohort uses a course file, not about the file: the repos this
+    # cohort handed out, this cohort's org settings, this cohort's schedule entry. The
+    # fix may still be in the course's template, but only this cohort pays for it, so
+    # `status_json` files it under the cohort and keeps it off the course's own stages.
+    per_cohort: bool = False
 
     @property
     def is_source(self) -> bool:

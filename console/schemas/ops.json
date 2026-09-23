@@ -393,6 +393,31 @@
     {
       "args_schema": {
         "additionalProperties": false,
+        "properties": {
+          "assignment": {
+            "description": "The schedule.yml assignments key",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignment"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "Team-formation emails sent, previewed or held; never an address.",
+      "doc": "docs/09-release-assignment-to-cohort.md",
+      "help": "Email every student still without a team for this assignment's open team-formation window.",
+      "name": "teams.open_window",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
         "properties": {},
         "required": [],
         "type": "object"

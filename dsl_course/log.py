@@ -72,3 +72,47 @@ def log_person(msg: str) -> None:
     are rare, and unactionable without saying who."""
     if os.environ.get("DSL_VERBOSE"):
         print(msg, flush=True)
+
+
+class Summary(int):
+    """A CLI's exit code that also says, in one sentence, what the run did.
+
+    An `int`, so it travels every path an exit code already travels unchanged:
+    `sys.exit(main())` exits with its value, and a caller that sums or compares codes
+    reads a number. The Console run (`python -m dsl_course.console`) runs a CLI's `main`
+    in-process and, when what comes back is one of these, turns it into the operation's
+    outcome - `text` is its `summary`, shown verbatim, so it is written in the words of
+    the design vocabulary and names nobody: it lands in a public annotation.
+
+    `counts` are integers only, `reasons` are `{"code", "text"}` pairs (a code in
+    UPPER_SNAKE, always with its sentence), and `conclusion` is set only to say a run
+    that exited 0 did nothing (`nothing_to_do`) or was passed over (`skipped`)."""
+
+    text: str
+    counts: dict[str, int]
+    reasons: list[dict]
+    conclusion: str | None
+
+    def __new__(
+        cls,
+        text: str,
+        counts: dict[str, int] | None = None,
+        reasons: list[dict] | None = None,
+        *,
+        code: int = 0,
+        conclusion: str | None = None,
+    ):
+        obj = super().__new__(cls, int(code))
+        obj.text = text
+        obj.counts = dict(counts or {})
+        obj.reasons = list(reasons or [])
+        obj.conclusion = conclusion
+        return obj
+
+    def __repr__(self) -> str:
+        return f"Summary({self.text!r}, code={int(self)})"
+
+
+def plural(n: int, one: str, many: str | None = None) -> str:
+    """`1 file`, `3 files`: a count with its noun, for a Summary's sentence."""
+    return f"{n} {one if n == 1 else (many or one + 's')}"

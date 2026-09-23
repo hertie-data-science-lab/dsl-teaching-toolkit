@@ -53,7 +53,7 @@ from .discovery import (
 )
 from .faults import Unusable
 from .gh_contents import get_file_with_sha, put_file, read_csv
-from .log import log_err, log_ok, log_person, log_step
+from .log import Summary, log_err, log_ok, log_person, log_step, plural
 
 # No ambiguous characters (0/O, 1/l/I) so a student can read the code off an email.
 _ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -391,7 +391,9 @@ def run(cohort_org: str) -> Outcome:
 _ADDRESS = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
-def resend_unjoined(cohort_org: str, dry_run: bool = True) -> Outcome:
+def resend_unjoined(
+    cohort_org: str, dry_run: bool = True
+) -> tuple[Outcome, dict[str, int]]:
     """Send a NEW code to every roster row without a `github_handle`, replacing the old
     one - which then stops working - and email it. The console's "send new codes".
 
@@ -399,19 +401,22 @@ def resend_unjoined(cohort_org: str, dry_run: bool = True) -> Outcome:
     counted, never named: the `Done` line lands in a public log. `dry_run` counts and
     changes nothing. Otherwise it follows `run`'s order: the transport is asked first,
     the codes are committed, `code_sent_at` is claimed, then the batch is sent and any
-    claim it did not spend is released, so a later roster push retries it."""
+    claim it did not spend is released, so a later roster push retries it.
+
+    Returns the outcome and its counts: `students` (who would get or got a new code),
+    `skipped` (rows whose address is unusable) and `sent`."""
     read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
     if read is None:
         log_err(
             f"Could not find {roster.ROSTER_PATH} in {cohort_org}/{roster.CONFIG_REPO}."
         )
-        return Outcome.NO_ROSTER
+        return Outcome.NO_ROSTER, {}
     raw, raw_sha = read
     try:
         students = roster.parse(raw)
     except Unusable as exc:
         log_err(f"{exc} No codes generated or sent.")
-        return Outcome.UNUSABLE_ROSTER
+        return Outcome.UNUSABLE_ROSTER, {}
     seen: set[str] = set()
     targets: list[tuple[int, roster.Student]] = []
     skipped = 0
@@ -430,10 +435,10 @@ def resend_unjoined(cohort_org: str, dry_run: bool = True) -> Outcome:
             f"Done - {json.dumps(counts)}"
             + (" (preview: no code changed, nothing sent)" if dry_run else "")
         )
-        return Outcome.NOTHING_TO_SEND
+        return Outcome.NOTHING_TO_SEND, counts
     if mailer.graph_config_from_env() is None:
         log_err(f"no mail transport for {cohort_org} - no code changed, nothing sent.")
-        return Outcome.NO_TRANSPORT
+        return Outcome.NO_TRANSPORT, counts
     taken = {s.enrol_code for s in students if s.enrol_code}
     fresh: list[tuple[int, str, str]] = []
     for i, s in targets:
@@ -456,7 +461,7 @@ def resend_unjoined(cohort_org: str, dry_run: bool = True) -> Outcome:
             f"could not write the new codes to {roster.ROSTER_PATH} in {cohort_org} - "
             f"the old codes still work and nothing was emailed."
         )
-        return Outcome.FAILED
+        return Outcome.FAILED, counts
     minted = {email: code for _i, email, code in fresh}
     # Email what the ROSTER holds, and only rows still unjoined that carry this run's code:
     # a Join that landed in between is somebody who needs no new code.
@@ -479,7 +484,7 @@ def resend_unjoined(cohort_org: str, dry_run: bool = True) -> Outcome:
             f"the new codes are in the roster and nothing was emailed; the next roster "
             f"push will not send them either, so run this again."
         )
-        return Outcome.FAILED
+        return Outcome.FAILED, counts
     try:
         sent = mailer.send_bulk(
             [code_message(s, welcome_url, course_name, replaces=True) for s in to_mail]
@@ -493,8 +498,8 @@ def resend_unjoined(cohort_org: str, dry_run: bool = True) -> Outcome:
     log_ok(f"Done - {json.dumps(counts)}")
     if unsent:
         _release_unsent(cohort_org, unsent, stamp)
-        return Outcome.FAILED
-    return Outcome.SENT
+        return Outcome.FAILED, counts
+    return Outcome.SENT, counts
 
 
 def _claim_sent(
@@ -609,6 +614,36 @@ def reds_the_run(outcome: Outcome) -> bool:
     return outcome not in _GREEN
 
 
+def new_codes_summary(
+    outcome: Outcome, counts: dict[str, int], dry_run: bool, rc: int
+) -> Summary | int:
+    """Send new codes' sentence, off `resend_unjoined`'s counts. Counts only: the run
+    log and the annotation are public, and every row here is a student."""
+    if not counts or rc:
+        return rc  # the roster could not be read, or the send failed: the log says why
+    who = plural(counts["students"], "student")
+    skipped = counts["skipped"]
+    tail = (
+        f" {plural(skipped, 'row')} skipped for an unusable email address."
+        if skipped
+        else ""
+    )
+    if dry_run:
+        text = f"{who} who have not joined would get new codes.{tail}"
+    elif not counts["students"]:
+        return Summary(
+            f"Every student on the roster has joined; no new codes to send.{tail}",
+            counts,
+            conclusion="nothing_to_do",
+        )
+    else:
+        text = (
+            f"New codes sent to {plural(counts['sent'], 'student')} who have not "
+            f"joined; their old codes no longer work.{tail}"
+        )
+    return Summary(text, counts)
+
+
 def refuse_unregistered(cohort_org: str, course_org: str) -> bool:
     """Whether a DISPATCHED send must be refused because `course_org` does not own
     `cohort_org`. True means refuse.
@@ -679,11 +714,14 @@ def main() -> int:
         # term that is over anyway.
         if not cohort_is_live(args.cohort_org):
             return 0
+        counts = None
         if args.resend_unjoined:
-            outcome = resend_unjoined(args.cohort_org, dry_run=args.dry_run)
+            outcome, counts = resend_unjoined(args.cohort_org, dry_run=args.dry_run)
         else:
             outcome = run(args.cohort_org)
         rc = int(reds_the_run(outcome))
+        if counts is not None:
+            rc = new_codes_summary(outcome, counts, args.dry_run, rc)
         # Dispatched by a roster push: the codes just sent change the cohort's status.
         # The course org is known only on that path, and the write is not counted.
         if args.dispatched_by and not args.dry_run:

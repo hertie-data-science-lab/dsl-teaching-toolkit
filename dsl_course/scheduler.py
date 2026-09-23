@@ -120,7 +120,7 @@ from .grades import (
     sheet_path,
     sync_team_lock,
 )
-from .log import log, log_err, log_ok, log_person, log_step
+from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
 from .repos import listed_is_private, set_visibility
 from .schedule import Release
 from .schedule_plan import deploy_dest
@@ -226,6 +226,30 @@ class Decision(NamedTuple):
 
     def line(self) -> str:
         return f"Decision: {self.ref} not released: {self.code} {self.text}"
+
+    def reason(self) -> dict:
+        """This decision as one of an outcome's `reasons`."""
+        return {"code": self.code, "text": f"{self.ref} not released: {self.text}"}
+
+
+def preview_summary(due: list[Release], decisions: list[Decision]) -> Summary:
+    """What the dry run tells the console: how much of what is due would go out now, and
+    every decision about what would not, as `reasons`. Entry names and counts only."""
+    held = {d.ref for d in decisions}
+    going = [
+        r for r in due if r.label not in held and (r.assignment_slug or "") not in held
+    ]
+    reasons = [d.reason() for d in decisions]
+    counts = {"due": len(due), "would_release": len(going), "held": len(decisions)}
+    if not due and not decisions:
+        return Summary("Automation has nothing due in this cohort right now.", counts)
+    text = (
+        f"Automation would release {len(going)} of "
+        f"{plural(len(due), 'due entry', 'due entries')} now"
+    )
+    if decisions:
+        text += f"; {plural(len(decisions), 'reason')} why something would not go out"
+    return Summary(f"{text}.", counts, reasons)
 
 
 def _entry_ref(where: str) -> str:
@@ -1579,11 +1603,11 @@ def _release_phase(
         for release in due:
             for line in describe(release, now):
                 log(f"    DRY-RUN  [{release.label}] {line}")
-        for decision in dry_run_decisions(
-            course_org, cohort_org, sched, due, now, listing
-        ):
+        decisions = dry_run_decisions(course_org, cohort_org, sched, due, now, listing)
+        for decision in decisions:
             log(decision.line())
-        return errors
+        preview = preview_summary(due, decisions)
+        return Summary(preview.text, preview.counts, preview.reasons, code=errors)
 
     release_changed = False
     if not releases:
@@ -1679,6 +1703,8 @@ def run(
     # release is failing` issue every six, mailing the maintainer about a typo in a cohort's
     # plan. (Individually DROPPED entries were always advisory - the rest of the plan runs.)
     errors = 0
+    # The release pass's preview, on a dry run: what the console shows of it.
+    preview: Summary | None = None
     if release:
         # ONE listing of the cohort for the whole tick, taken here at the start of it and
         # handed to every pass that asks a question of the org: the freeze's `pushed_at`,
@@ -1698,7 +1724,7 @@ def run(
         # nothing, and no receipt is posted on a repo nobody could confirm is private.
         # Not taken for the autograde phase, which asks the org nothing.
         listing = discovery.listing_by_name(cohort_org)
-        errors += _release_phase(
+        phase = _release_phase(
             course_org,
             cohort_org,
             sched,
@@ -1708,6 +1734,9 @@ def run(
             listing,
             defer_site_sync,
         )
+        errors += phase
+        if isinstance(phase, Summary):
+            preview = phase
         # Last of the release pass: the cohort's own end. A release due today ships
         # first, and then - on the day - the whole org is frozen behind it.
         errors += _archive_phase(course_org, cohort_org, sched, now, dry_run)
@@ -1720,7 +1749,7 @@ def run(
     if dry_run:
         # A preview writes nothing, so it has nothing of its own to report: the errors
         # above are the state of the org, not of this run.
-        return 0
+        return Summary(preview.text, preview.counts, preview.reasons) if preview else 0
     if errors:
         log_err(f"{errors} action(s) failed")
         return 1
@@ -1944,8 +1973,14 @@ def main() -> int:
     if not cohorts:
         if args.dry_run and rc == 0:
             # Registered but archived: the preview still says what would have been due.
-            for decision in archived_decisions(schedule.load(args.cohort_org), now):
+            decisions = archived_decisions(schedule.load(args.cohort_org), now)
+            for decision in decisions:
                 log(decision.line())
+            return Summary(
+                "This cohort is archived, so automation releases nothing.",
+                {"held": len(decisions)},
+                [d.reason() for d in decisions],
+            )
         return rc
     rc = run(
         args.course_org,

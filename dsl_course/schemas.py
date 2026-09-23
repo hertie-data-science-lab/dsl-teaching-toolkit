@@ -199,10 +199,13 @@ def status_schema() -> dict:
     `tests/test_status_json.py` validates its render against this. No automation
     heartbeat - it moves every tick, and the console reads it off the run list."""
     stages = {"type": "object", "additionalProperties": _enum(STAGE_STATES)}
+    # Why each stage that is not done is not: one sentence per stage id. Optional.
+    stage_why = {"type": "object", "additionalProperties": _str()}
     nullable = {"type": ["string", "null"]}
     unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
     # A status problem's pointer: the line, screen and entry are what the fault knows,
     # and `ref` names the branch when it is not the default (a template's `solution`).
+    # `url` is a fix that is a GitHub settings page rather than a file (its `path` is "").
     fix = _obj(
         {
             "repo": _str(),
@@ -211,6 +214,7 @@ def status_schema() -> dict:
             "screen": nullable,
             "entry": nullable,
             "ref": _str(),
+            "url": _str(),
         },
         ("repo", "path"),
     )
@@ -224,6 +228,7 @@ def status_schema() -> dict:
             "code": _str(),
             "app_installed": unknown,
             "stages": stages,
+            "stage_why": stage_why,
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": repo_state},
             "templates": {"type": "array", "items": repo_state},
@@ -242,6 +247,7 @@ def status_schema() -> dict:
             "live": {"type": "boolean"},
             "app_installed": unknown,
             "stages": stages,
+            "stage_why": stage_why,
             "archive_date": nullable,
         },
         ("org", "stages", "live"),
@@ -250,7 +256,8 @@ def status_schema() -> dict:
         {
             "id": _str(),
             "scope": _enum(PROBLEM_SCOPES),
-            "stage": nullable,
+            # A setup stage (C1-C6, K1-K7) or a running phase (`marking`); never null.
+            "stage": _str(),
             "text": _str(),
             "stops": _str(),
             "fix": fix,
@@ -285,7 +292,8 @@ def status_schema() -> dict:
             "show_on_site": {"type": "boolean"},
             "tbc": {"type": "boolean"},
         },
-        ("id", "state"),
+        # `when` always present (null while TBC): the console derives `late` from it.
+        ("id", "state", "when"),
     )
     assignment = _obj(
         {
@@ -306,7 +314,9 @@ def status_schema() -> dict:
             "returned": {"type": "boolean"},
             "problem": {"type": "boolean"},
         },
-        ("slug", "state"),
+        # The four moments are always present (null when unset), so the console can move
+        # an assignment from open to late window to marking on its own clock.
+        ("slug", "state", "handout", "due", "late_until", "solution_shown"),
     )
     count = {"type": "integer"}
     return _doc(

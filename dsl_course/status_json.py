@@ -108,6 +108,14 @@ PREREQUISITES = {
     "K6": ("K2",),
 }
 DONE, TODO, BLOCKED, PROBLEM = "done", "todo", "blocked", "problem"
+# What a blocked stage is waiting for, named by the prerequisite it waits on.
+WAITING_FOR = {
+    "C1": "the course org",
+    "C2": "the course to be set up",
+    "C4": "the course's materials to be ready",
+    "K1": "the cohort org",
+    "K2": "the cohort to be set up",
+}
 
 
 # ---------------------------------------------------------------------------- facts
@@ -242,7 +250,7 @@ STOPS = {
     teams.TEAMS_PATH: (
         "That row is ignored: the team is not created or the member not added."
     ),
-    grades.SHEETS_DIR: "That sheet is not refreshed, and none of its marks are returned.",
+    grades.SHEETS_DIR: "That sheet is not updated, and none of its marks are returned.",
     grades.GRADING_FILE: "Marking uses the toolkit's default for that value.",
     COURSE_CONFIG: (
         "Automation skips this course: staff access and cohorts are not updated."
@@ -279,12 +287,27 @@ _FILES = {
     grades.GRADING_FILE: _Where(
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
+    grades.LEGACY_GRADING_FILE: _Where(
+        "template", "course", "C5", "template", "GRADING_CONFIG"
+    ),
     COURSE_CONFIG: _Where("course", "course", "C3", "course", "COURSE"),
     COHORTS_PATH: _Where("registry", "course", "C2", "course", "COURSE"),
 }
-# A grading sheet belongs to the running phase, not to a setup stage: it has no K-stage.
-_SHEET = _Where("sheet", "cohort", None, "marks", "GRADING_SHEETS")
-_OTHER = _Where("config", "cohort", None, "", "CONFIG")
+# A grading sheet belongs to the running phase, not to a setup stage: its stage is the
+# marking phase, and the assignment is the entry in its id.
+MARKING = "marking"
+_SHEET = _Where("sheet", "cohort", MARKING, "marks", "GRADING_SHEETS")
+# Any other classroom-config file: the cohort's own setup.
+_OTHER = _Where("config", "cohort", "K2", "", "CONFIG")
+# A template fault only one cohort pays for (`ConfigFault.per_cohort`): the repos it
+# handed out, or its schedule entry. The cohort's, in the phase after hand out.
+HANDED_OUT = "open"
+_COHORT_TEMPLATE = _Where(
+    "template", "cohort", HANDED_OUT, "template", "GRADING_CONFIG"
+)
+# The cohort org's own member privileges: part of setting the cohort up, fixed on a
+# GitHub settings page rather than in a file.
+_ORG = _Where("org", "cohort", "K2", "", "ORG_SETTINGS")
 
 _SOURCE_CODES = {
     FaultKind.MISSING_PATH: "SOURCE_MISSING",
@@ -293,7 +316,105 @@ _SOURCE_CODES = {
 }
 
 
+# The vocabulary pass (design/vocabulary.md) over an engine sentence that has no `plain`
+# of its own: the engine's words on the left, the console's on the right. Whole words
+# only, so `grading_config.yml` and `grading_sheets/` - file names the fix edits - stay.
+_WORDS = (
+    ("submission units", "students or teams"),
+    ("submission unit", "student or team"),
+    ("an onboarded", "a joined"),
+    ("onboarded", "joined"),
+    ("enrolment codes", "codes"),
+    ("enrolment code", "code"),
+    ("enrolled", "joined"),
+    ("grading", "marking"),
+    ("graded", "marked"),
+    ("grades", "marks"),
+    ("grade", "mark"),
+    ("dry run", "preview"),
+)
+_ROLES = {
+    "instructors": "Instructor",
+    "teaching_assistants": "Teaching assistant",
+    "course_admins": "Course admin",
+}
+_PERSON = re.compile(r"^people\.(\w+)\[(\d+)\]$")
+_ROW = re.compile(r"^row (\d+)$")
+
+
+def plain_words(text: str) -> str:
+    """`text` without markdown and in the vocabulary's words."""
+    out = re.sub(r"`([^`]+?):`", r"\1", text)  # `email:` names the key, `email`
+    out = out.replace("`", "").replace("**", "")
+    for engine, console in _WORDS:
+        out = re.sub(rf"(?<![\w-]){re.escape(engine)}(?![\w-])", console, out)
+        out = re.sub(
+            rf"(?<![\w-]){re.escape(engine.capitalize())}(?![\w-])",
+            console.capitalize(),
+            out,
+        )
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def _first_sentence(text: str) -> str:
+    return re.split(r"(?<=[a-z0-9)])\. (?=[A-Z])", text, maxsplit=1)[0].rstrip(".")
+
+
+def _clause(what: str) -> str:
+    """The first clause of an engine sentence: what is wrong. What it costs follows a
+    dash (`_cost`), and a second sentence is detail."""
+    return plain_words(_first_sentence(what.split(" - ", 1)[0]))
+
+
+def _cost(what: str) -> str:
+    """What an engine sentence says the fault costs - the part after its dash - as a
+    sentence, or "" when it says nothing about that."""
+    if " - " not in what:
+        return ""
+    return _sentence(plain_words(_first_sentence(what.split(" - ", 1)[1])))
+
+
+def _subject(fault: ConfigFault, filed: _Where, entry: str) -> str:
+    """What a derived sentence is about, named the way the console names it."""
+    person = _PERSON.match(fault.where)
+    if person:
+        role = _ROLES.get(person[1], "Entry")
+        where = "course details" if filed.kind == "course" else "people.yml"
+        return f"{role} {int(person[2]) + 1} in {where}"
+    row = _ROW.match(fault.where)
+    if row and filed.kind in ("roster", "teams"):
+        return f"{'Roster' if filed.kind == 'roster' else 'Teams'} row {row[1]}"
+    if filed.kind == "schedule":
+        return f"Schedule entry {entry}" if entry != fault.where else "The schedule"
+    if filed.kind == "sheet":
+        sheet = f"{entry} marking sheet"
+        return f"Line {fault.lineno} of the {sheet}" if fault.lineno else f"The {sheet}"
+    if filed.kind == "template":
+        return f"The {entry} template's settings"
+    return {
+        "people": "people.yml",
+        "roster": "The roster",
+        "teams": "The teams file",
+        "course": "Course details",
+        "registry": "The course's list of cohorts",
+    }.get(filed.kind, fault.file)
+
+
+def plain_text(fault: ConfigFault, filed: _Where, entry: str) -> str:
+    """One plain sentence for a problem: the fault's own `plain` when its parser wrote
+    one, else its subject and the first clause of what is wrong."""
+    if fault.plain:
+        return fault.plain
+    clause = _clause(fault.what)
+    subject = _subject(fault, filed, entry)
+    return f"{subject}: {clause}." if clause else f"{subject} has a problem."
+
+
 def _where_filed(fault: ConfigFault) -> _Where:
+    if fault.where == grades.ORG_SETTINGS:
+        return _ORG
+    if fault.per_cohort:
+        return _COHORT_TEMPLATE
     if fault.file.startswith(f"{grades.SHEETS_DIR}/"):
         return _SHEET
     return _FILES.get(fault.file, _OTHER)
@@ -344,29 +465,22 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         entry = _entry_of(fault.where)
     else:
         code = filed.code
-        if filed is _FILES.get(grades.GRADING_FILE):
+        if filed.kind == "template":
             entry = assignment_slug(fault.in_repo)
-            text = _sentence(
-                f"{entry}'s {fault.file} ({fault.label}): {fault.what}",
-                capitalise=False,
-            )
         elif filed is _SHEET:
             entry = fault.file.removeprefix(f"{grades.SHEETS_DIR}/").removesuffix(
                 ".yml"
             )
-            text = _sentence(
-                f"{fault.at} ({fault.label}): {fault.what}", capitalise=False
-            )
         else:
             entry = _entry_of(fault.where)
-            text = _sentence(
-                f"{fault.at} ({fault.label}): {fault.what}", capitalise=False
-            )
+        text = plain_text(fault, filed, entry)
         stops = (
-            _sentence(fault.consequence)
+            _sentence(plain_words(fault.consequence))
             if fault.consequence
-            else STOPS.get(fault.file)
+            else _cost(fault.what)
+            or STOPS.get(fault.file)
             or STOPS.get(grades.SHEETS_DIR if filed is _SHEET else "", "")
+            or STOPS.get(grades.GRADING_FILE if filed.kind == "template" else "", "")
         )
     fix = {
         "repo": f"{fault.in_org or org}/{fault.in_repo}",
@@ -375,7 +489,18 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         "screen": filed.screen or None,
         "entry": entry if filed.kind in ("schedule", "template", "sheet") else None,
     }
-    if fault.ref and fault.ref != "main":
+    if filed is _ORG:
+        # A settings page, not a file: `url` is where the console sends the fix.
+        owner = fault.in_org or org
+        fix = {
+            "repo": f"{owner}/{fault.in_repo}",
+            "path": "",
+            "line": None,
+            "screen": None,
+            "entry": None,
+            "url": grades.MEMBER_PRIVILEGES_URL.format(org=owner),
+        }
+    elif fault.ref and fault.ref != "main":
         fix["ref"] = fault.ref
     return {
         "id": f"{filed.kind}:{_slugify(entry)}:{code}",
@@ -396,6 +521,25 @@ def _unique_ids(problems: list[dict]) -> list[dict]:
         if seen[p["id"]] > 1:
             p["id"] = f"{p['id']}:{seen[p['id']]}"
     return problems
+
+
+def stage_why(
+    states: dict[str, str], todo: dict[str, str | None], problems: list[dict]
+) -> dict[str, str]:
+    """One sentence per stage that is not done, saying why: the problems standing
+    against it, the prerequisite it waits for, or what its own predicate still lacks
+    (`todo`, the sentence each predicate returns when it is not met)."""
+    out: dict[str, str] = {}
+    for stage, state in states.items():
+        if state == PROBLEM:
+            n = sum(p["stage"] == stage for p in problems)
+            out[stage] = f"{n} problem{' needs' if n == 1 else 's need'} fixing."
+        elif state == BLOCKED:
+            pre = next(p for p in PREREQUISITES[stage] if states.get(p) != DONE)
+            out[stage] = f"Waiting for {WAITING_FOR.get(pre, pre)}."
+        elif state == TODO:
+            out[stage] = todo.get(stage) or "Not done yet."
+    return out
 
 
 def _stage_states(
@@ -467,28 +611,18 @@ def render_course(
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
-    paths = facts.github_paths or {}
     meta = facts.meta
-    done = {
-        "C1": facts.github_paths is not None,
-        "C2": COURSE_CONFIG in paths
-        and any(p.startswith(".github/workflows/") for p in paths),
-        "C3": all(meta.get(k) for k in ("course_name", "course_code"))
-        and bool(meta.get("course_description"))
-        and course_admin_count(meta) > 0,
-        "C4": bool(facts.materials)
-        and all(materials_state(m) == "ready" for m in facts.materials),
-        "C5": bool(facts.templates)
-        and all(template_state(t) == "ready" for t in facts.templates),
-        "C6": facts.public_site,
-    }
-    stages = _stage_states(COURSE_STAGES, done, [*problems, *rolled_up])
+    todo = course_checks(facts)
+    done = {stage: todo[stage] is None for stage in COURSE_STAGES}
+    standing = [*problems, *rolled_up]
+    stages = _stage_states(COURSE_STAGES, done, standing)
     block = {
         "org": facts.org,
         "name": str(meta.get("course_name") or meta.get("org_name") or ""),
         "code": str(meta.get("course_code") or ""),
         "app_installed": app_installed(facts.org),
         "stages": stages,
+        "stage_why": stage_why(stages, todo, standing),
         "ready": all(stages[s] == DONE for s in COURSE_STAGES[:5]),
         "materials": [
             {"repo": m.repo, "state": materials_state(m)} for m in facts.materials
@@ -504,6 +638,62 @@ def render_course(
         "cohorts": list(facts.registry),
     }
     return block, problems
+
+
+def _materials_why(m: MaterialsFacts) -> str:
+    if not _written(m.syllabus):
+        return f"{m.repo}'s SYLLABUS.md is still the placeholder"
+    return f"{m.repo} has no {PUBLISH_FILE} yet"
+
+
+def _first_of(what: str, reasons: list[str]) -> str:
+    """One sentence about the first of several things that are not ready."""
+    if len(reasons) == 1:
+        return f"{reasons[0]}."
+    return f"{len(reasons)} {what} are not ready yet; the first: {reasons[0]}."
+
+
+def course_checks(facts: CourseFacts) -> dict[str, str | None]:
+    """Each course stage's predicate: None when it is met, else the one sentence that
+    says what is still missing (lifecycle, course stages)."""
+    paths = facts.github_paths or {}
+    meta = facts.meta
+    out: dict[str, str | None] = dict.fromkeys(COURSE_STAGES)
+    if facts.github_paths is None:
+        out["C1"] = "The course org could not be read."
+    if COURSE_CONFIG not in paths:
+        out["C2"] = f"The course's .github has no {COURSE_CONFIG} yet."
+    elif not any(p.startswith(".github/workflows/") for p in paths):
+        out["C2"] = "The course's .github has no workflows yet."
+    if not all(meta.get(k) for k in ("course_name", "course_code")):
+        out["C3"] = "Course details have no course name or code yet."
+    elif not meta.get("course_description"):
+        out["C3"] = "Course details have no description yet."
+    elif course_admin_count(meta) == 0:
+        out["C3"] = "No course admin is declared in course details yet."
+    if not facts.materials:
+        out["C4"] = "There is no materials repo yet."
+    else:
+        pending = [
+            _materials_why(m) for m in facts.materials if materials_state(m) != "ready"
+        ]
+        if pending:
+            out["C4"] = _first_of("materials repos", pending)
+    if not facts.templates:
+        out["C5"] = "There is no assignment template yet."
+    else:
+        pending = [
+            f"{t.repo}'s README.md is still the placeholder"
+            for t in facts.templates
+            if template_state(t) == TODO
+        ]
+        if pending:
+            out["C5"] = _first_of("assignment templates", pending)
+        elif any(template_state(t) != "ready" for t in facts.templates):
+            out["C5"] = "An assignment template has settings that need fixing."
+    if not facts.public_site:
+        out["C6"] = "There is no public website; it is optional."
+    return out
 
 
 def term_label(tag: str | None) -> str | None:
@@ -818,6 +1008,60 @@ def _no_email_problem(
     ]
 
 
+def cohort_checks(
+    facts: CohortFacts, course: CourseFacts, instructors: int
+) -> dict[str, str | None]:
+    """Each cohort stage's predicate: None when it is met, else the one sentence that
+    says what is still missing (lifecycle, cohort stages)."""
+    sched = facts.sched
+    students = facts.students or []
+    site = pages_repo(facts.org)
+    out: dict[str, str | None] = dict.fromkeys(COHORT_STAGES)
+    if not facts.listing:
+        out["K1"] = "The cohort org could not be read, or holds no repos yet."
+    missing = [
+        r for r in (schedule.CONFIG_REPO, "welcome", site) if r not in facts.listing
+    ]
+    if missing:
+        out["K2"] = f"The cohort has no {' or '.join(missing)} repo yet."
+    elif facts.org.casefold() not in {c.casefold() for c in course.registry}:
+        out["K2"] = "The course does not list this cohort yet."
+    if facts.people is None:
+        out["K3"] = f"{sync_faculty.COHORT_PEOPLE_PATH} could not be read."
+    elif instructors == 0:
+        out["K3"] = (
+            f"No instructor is declared in {sync_faculty.COHORT_PEOPLE_PATH} yet."
+        )
+    if schedule.SCHEDULE_PATH not in facts.config_paths:
+        out["K4"] = f"There is no {schedule.SCHEDULE_PATH} yet."
+    elif sched.unparseable:
+        out["K4"] = f"{schedule.SCHEDULE_PATH} does not parse."
+    elif sched.semester_start is None or sched.semester_end is None:
+        out["K4"] = "The schedule has no term start or end date yet."
+    elif not (sched.releases or sched.assignments):
+        out["K4"] = "The schedule plans no releases or assignments yet."
+    unsent = sum(not s.code_sent_at.strip() for s in students)
+    if not students:
+        out["K5"] = "The roster has no students yet."
+    elif unsent:
+        out["K5"] = (
+            f"{unsent} student{' has' if unsent == 1 else 's have'} not been sent a "
+            f"code yet."
+        )
+    if site not in facts.listing:
+        out["K6"] = "The cohort has no student site yet."
+    elif not _written(facts.site_home):
+        out["K6"] = "The student site's home page is still the placeholder."
+    if not facts.archived:
+        when = sched.archive.when if sched.archive else None
+        out["K7"] = (
+            f"Not archived yet; the schedule archives it on {_day(when)}."
+            if when
+            else "Not archived yet; the schedule sets no archive date."
+        )
+    return out
+
+
 def cohort_inputs(facts: CohortFacts, course: CourseFacts) -> dict[str, str | None]:
     """The blob (or, for the sheets, tree) shas this status was computed from."""
     paths = facts.config_paths
@@ -888,20 +1132,9 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
     students = facts.students or []
     instructors, tas = _staff_counts(facts.people)
     site = pages_repo(facts.org)
-    done = {
-        "K1": bool(facts.listing),
-        "K2": all(r in facts.listing for r in (schedule.CONFIG_REPO, "welcome", site))
-        and facts.org.casefold() in {c.casefold() for c in course.registry},
-        "K3": facts.people is not None and instructors > 0,
-        "K4": schedule.SCHEDULE_PATH in facts.config_paths
-        and not sched.unparseable
-        and sched.semester_start is not None
-        and sched.semester_end is not None
-        and bool(sched.releases or sched.assignments),
-        "K5": bool(students) and all(s.code_sent_at.strip() for s in students),
-        "K6": site in facts.listing and _written(facts.site_home),
-        "K7": facts.archived,
-    }
+    todo = cohort_checks(facts, course, instructors)
+    done = {stage: todo[stage] is None for stage in COHORT_STAGES}
+    stages = _stage_states(COHORT_STAGES, done, problems)
     today = now.astimezone(ZoneInfo(sched.timezone)).date()
     week, weeks = term_weeks(sched.semester_start, sched.semester_end, today)
     tag = term_tag(facts.org)
@@ -924,7 +1157,8 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
             "weeks": weeks,
             "live": not facts.archived,
             "app_installed": app_installed(facts.org),
-            "stages": _stage_states(COHORT_STAGES, done, problems),
+            "stages": stages,
+            "stage_why": stage_why(stages, todo, problems),
             "archive_date": _iso(sched.archive.when if sched.archive else None),
         },
         "problems": problems,

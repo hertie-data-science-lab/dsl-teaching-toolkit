@@ -90,7 +90,11 @@
         },
         "required": [
           "slug",
-          "state"
+          "state",
+          "handout",
+          "due",
+          "late_until",
+          "solution_shown"
         ],
         "type": "object"
       },
@@ -116,6 +120,12 @@
         },
         "org": {
           "type": "string"
+        },
+        "stage_why": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "stages": {
           "additionalProperties": {
@@ -212,6 +222,12 @@
         },
         "ready": {
           "type": "boolean"
+        },
+        "stage_why": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "stages": {
           "additionalProperties": {
@@ -334,6 +350,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "url": {
+                "type": "string"
               }
             },
             "required": [
@@ -353,10 +372,7 @@
             "type": "string"
           },
           "stage": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "stops": {
             "type": "string"
@@ -454,7 +470,8 @@
         },
         "required": [
           "id",
-          "state"
+          "state",
+          "when"
         ],
         "type": "object"
       },

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -786,3 +786,311 @@ def test_every_render_validates_against_the_exported_schema():
         status_json.render_course_file(_course(), NOW),
     ):
         assert validate(doc, schemas.status_schema()) == []
+
+
+# ------------------------------------------------------------------ problem sentences
+
+# The demo's group project sheet: one student in two teams.
+DUPLICATE_SHEET = """\
+teams:
+  red:
+    members:
+      ada: {}
+      bob: {}
+    score: 5
+  blue:
+    members:
+      ada: {}
+"""
+
+
+def _problems(faults: list[ConfigFault]) -> list[dict]:
+    return [status_json.problem_from_fault(f, COHORT, NOW) for f in faults]
+
+
+def _many_faults() -> list[ConfigFault]:
+    """A fault from every hand-edited file, through the parsers that file them."""
+    faults: list[ConfigFault] = [_missing_s5(), _autograde_sometimes()]
+    faults += grades.sheet_faults("assignment-3-project", DUPLICATE_SHEET)
+    faults += grades.sheet_faults("assignment-4", "teams: [\n")
+    spec_faults, _ = grades.grading_spec_faults(
+        "assignment-3", "assignment-3-f2026", COURSE, "a: [\n", None
+    )
+    faults += spec_faults
+    sync_faculty.parse_faculty_from_meta(
+        load_yaml_lines(
+            "people:\n  instructors:\n    - github_handle: 'not valid!'\n"
+            "      email: p@x.edu\n  teaching_assistants:\n    - github_handle: ta1\n"
+        ),
+        faults,
+    )
+    faults += _sched(
+        "timezone: Europe/Berlin\nreleases:\n  s1:\n    event_datetime: someday\n"
+        "    deploy:\n      - course_source_repo: x\n        course_source_path: y\n"
+    ).faults
+    faults.append(header_fault("students.csv", ["github_handle"]))
+    return faults
+
+
+def test_a_held_mark_is_one_plain_sentence_with_its_fault_code_in_the_id():
+    (problem,) = _problems(grades.sheet_faults("assignment-3-project", DUPLICATE_SHEET))
+    assert problem["id"] == "sheet:assignment-3-project:GRADING_SHEETS"
+    assert problem["stage"] == "marking"
+    assert problem["text"] == (
+        "Line 9 of the assignment-3-project marking sheet lists a student who is also "
+        "in another team or entry, so marks for both are held."
+    )
+    assert problem["stops"] == (
+        "That sheet is not updated, and none of its marks are returned."
+    )
+    assert problem["fix"]["line"] == 9 and problem["fix"]["entry"] == (
+        "assignment-3-project"
+    )
+
+
+def test_no_problem_sentence_carries_markdown_or_a_null_stage():
+    problems = _problems(_many_faults())
+    assert len(problems) >= 8
+    for p in problems:
+        assert p["stage"], p["id"]
+        for key in ("text", "stops"):
+            assert "`" not in p[key] and "**" not in p[key], p[key]
+            assert p[key].endswith("."), p[key]
+            assert " - " not in p[key], p[key]
+
+
+def test_a_derived_sentence_names_its_subject_in_the_consoles_words():
+    by_id = {p["id"]: p for p in _problems(_many_faults())}
+    ta = by_id["people:people.teaching_assistants-0:PEOPLE"]
+    assert ta["text"] == "Teaching assistant 1 in people.yml: no usable email."
+    assert ta["stops"] == (
+        "Access is still granted, but no notification reaches this person."
+    )
+    assert by_id["schedule:s1:SCHEDULE"]["text"].startswith("Schedule entry s1: ")
+    texts = [p["text"] for p in by_id.values()]
+    assert (
+        "The assignment-3 template's settings file is not valid YAML, so the "
+        "assignment is marked on the toolkit's defaults."
+    ) in texts
+
+
+def test_the_vocabulary_pass_keeps_the_file_names_a_fix_edits():
+    assert (
+        status_json.plain_words(
+            "the `grading_config.yml` grading value is not read by the dry run"
+        )
+        == "the grading_config.yml marking value is not read by the preview"
+    )
+    assert status_json.plain_words("an onboarded handle") == "a joined handle"
+
+
+# ------------------------------------------------------------------ cohort-only template faults
+
+
+def _visibility_mismatch() -> ConfigFault:
+    """What `grades.grading_spec_faults` files for a private assignment whose repos
+    this cohort handed out public."""
+    rows = [
+        repo_row("assignment-1-ada", visibility="public"),
+        repo_row("assignment-1-bob", visibility="private"),
+    ]
+    faults, _ = grades.grading_spec_faults(
+        "assignment-1",
+        "assignment-1-f2026",
+        COURSE,
+        "visibility: private\n",
+        None,
+        handed_out=rows,
+    )
+    (fault,) = faults
+    return fault
+
+
+def test_a_visibility_mismatch_is_the_cohorts_problem_not_the_courses():
+    fault = _visibility_mismatch()
+    assert fault.per_cohort
+    doc = _render(cohort=_cohort(template_faults=[fault]))
+    (problem,) = doc["problems"]
+    assert (problem["scope"], problem["stage"]) == ("cohort", "open")
+    assert problem["id"] == "template:assignment-1:GRADING_CONFIG"
+    assert problem["text"] == (
+        "assignment-1's settings say its repos are private, but 1 of 2 handed out in "
+        "this cohort are not."
+    )
+    assert problem["stops"] == (
+        "Those repos stay as they are, and the pages the toolkit writes describe them "
+        "wrongly."
+    )
+    # The fix is still the template's line; the course's own stage does not move.
+    assert problem["fix"]["repo"] == f"{COURSE}/assignment-1-f2026"
+    assert doc["course"]["stages"]["C5"] == "done"
+    assert all(t["state"] == "ready" for t in doc["course"]["templates"])
+    assert "problem" not in doc["cohort"]["stages"].values()
+
+
+def test_the_course_file_never_lists_a_cohort_only_problem():
+    # The course's own gather reads each template with nothing handed out to compare
+    # it against, so the fault does not arise there at all.
+    faults, _ = grades.grading_spec_faults(
+        "assignment-1", "assignment-1-f2026", COURSE, "visibility: private\n", None
+    )
+    assert faults == []
+    course = status_json.render_course_file(_course(), NOW)
+    assert course["problems"] == [] and course["course"]["stages"]["C5"] == "done"
+
+
+def test_the_org_settings_problem_is_the_cohorts_setup(monkeypatch):
+    monkeypatch.setattr(
+        grades.gh_teams,
+        "org_settings",
+        lambda org: {grades.gh_teams.MEMBERS_CAN_DELETE: True},
+    )
+    (fault,) = grades._org_settings_faults(COHORT)
+    doc = _render(cohort=_cohort(template_faults=[fault]))
+    (problem,) = doc["problems"]
+    assert (problem["scope"], problem["stage"]) == ("cohort", "K2")
+    assert problem["id"] == "org:org-settings:ORG_SETTINGS"
+    assert problem["stops"] == "A student can delete or move their own submission."
+    assert problem["fix"]["url"] == (
+        f"https://github.com/organizations/{COHORT}/settings/member_privileges"
+    )
+    assert problem["fix"]["repo"] == f"{COHORT}/classroom-config"
+    assert doc["cohort"]["stages"]["K2"] == "problem"
+    assert doc["course"]["stages"]["C5"] == "done"
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_template_that_does_not_parse_stays_the_courses():
+    faults, _ = grades.grading_spec_faults(
+        "assignment-3", "assignment-3-f2026", COURSE, "a: [\n", None
+    )
+    course = _course()
+    course.templates[1].faults = faults
+    doc = _render(course, _cohort(template_faults=faults))
+    (problem,) = doc["problems"]
+    assert (problem["scope"], problem["stage"]) == ("course", "C5")
+    assert doc["course"]["stages"]["C5"] == "problem"
+    public = status_json.render_course_file(course, NOW)
+    assert [p["id"] for p in public["problems"]] == [problem["id"]]
+
+
+# ------------------------------------------------------------------ why a stage is not done
+
+
+def test_a_stage_that_is_not_done_says_why():
+    # The demo: one TA and no instructor, and last term's materials repo unwritten.
+    ta_only = sync_faculty.parse_faculty_from_meta(
+        {
+            "people": {
+                "teaching_assistants": [{"github_handle": "ta", "email": "t@x.edu"}]
+            }
+        }
+    )
+    course = _course(
+        materials=[
+            status_json.MaterialsFacts(
+                "course-materials-f2025", "<!-- dsl-stub: syllabus -->", True
+            ),
+            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True),
+        ]
+    )
+    doc = _render(course, _cohort(people=ta_only))
+    assert doc["cohort"]["stages"]["K3"] == "todo"
+    assert doc["cohort"]["stage_why"]["K3"] == (
+        "No instructor is declared in people.yml yet."
+    )
+    assert doc["course"]["stages"]["C4"] == "todo"
+    assert doc["course"]["stage_why"]["C4"] == (
+        "course-materials-f2025's SYLLABUS.md is still the placeholder."
+    )
+    # Done stages carry no sentence; every other one does.
+    for block in (doc["course"], doc["cohort"]):
+        assert set(block["stage_why"]) == {
+            s for s, state in block["stages"].items() if state != "done"
+        }
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_problem_or_a_prerequisite_is_the_why():
+    doc = _render(*_contract_scenario())
+    assert doc["cohort"]["stage_why"]["K4"] == "1 problem needs fixing."
+    half = _cohort(people=None)
+    del half.listing["welcome"]
+    doc = _render(cohort=half)
+    assert doc["cohort"]["stage_why"]["K2"] == "The cohort has no welcome repo yet."
+    assert doc["cohort"]["stages"]["K3"] == "blocked"
+    assert doc["cohort"]["stage_why"]["K3"] == "Waiting for the cohort to be set up."
+    doc = _render(cohort=_cohort(listing={}))
+    assert doc["cohort"]["stage_why"]["K2"] == "Waiting for the cohort org."
+
+
+def test_the_archive_stage_says_when():
+    doc = _render()
+    assert doc["cohort"]["stage_why"]["K7"] == (
+        "Not archived yet; the schedule sets no archive date."
+    )
+
+
+def test_the_course_file_carries_its_whys_too():
+    course = _course(public_site=False)
+    public = status_json.render_course_file(course, NOW)
+    assert public["course"]["stage_why"] == {
+        "C6": "There is no public website; it is optional."
+    }
+
+
+# ------------------------------------------------------------------ dates for the console's clock
+
+
+def _client_state(row: dict, now: datetime) -> str:
+    """What the console derives from an assignment row it already holds, with no
+    rewrite of status.json: open -> late window -> marking on the row's own dates."""
+    if row["state"] not in ("open", "late_window", "marking"):
+        return row["state"]
+    due = datetime.fromisoformat(row["due"])
+    late_until = datetime.fromisoformat(row["late_until"])
+    if now >= late_until:
+        return "marking"
+    return "late_window" if now >= due else "open"
+
+
+def test_every_assignment_and_release_carries_the_moments_the_console_needs():
+    doc = _render(*_contract_scenario())
+    for row in doc["assignments"]:
+        for key in ("handout", "due", "late_until", "solution_shown"):
+            assert key in row, (row["slug"], key)
+        for key in ("handout", "due", "late_until"):
+            if row[key] is not None:
+                assert datetime.fromisoformat(row[key]).tzinfo is not None
+    assert all("when" in r for r in doc["releases"])
+    assert validate(doc, schemas.status_schema()) == []
+    # The exported schema holds the writer to it: a row without them does not validate.
+    bare = json.loads(json.dumps(doc))
+    del bare["assignments"][0]["late_until"]
+    del bare["releases"][0]["when"]
+    assert len(validate(bare, schemas.status_schema())) == 2
+
+
+def test_the_console_can_move_open_to_late_window_without_a_rewrite():
+    # Rendered on Wednesday 23 Sep: assignment-2 is open, due Sunday 27 Sep.
+    course, cohort = _contract_scenario()
+    cohort.listing |= {
+        "assignment-2-ada": repo_row("assignment-2-ada"),
+        "assignment-2": repo_row(
+            "assignment-2", isTemplate=True, topics=["assignment-template"]
+        ),
+    }
+    written = next(
+        a for a in _render(course, cohort)["assignments"] if a["slug"] == "assignment-2"
+    )
+    assert written["state"] == "open"
+    due = datetime.fromisoformat(written["due"])
+    late_until = datetime.fromisoformat(written["late_until"])
+    assert due < late_until
+    for later in (due - timedelta(minutes=1), due, late_until):
+        engine = next(
+            a
+            for a in _render(course, cohort, now=later)["assignments"]
+            if a["slug"] == "assignment-2"
+        )
+        assert _client_state(written, later) == engine["state"]

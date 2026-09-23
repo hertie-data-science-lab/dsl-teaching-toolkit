@@ -460,6 +460,22 @@ def get_org_owners(org: str) -> frozenset[str] | None:
         return None
 
 
+# Every membership change `reconcile_team_members` has made in this process - or, on a
+# dry run, would have made. A tally rather than a return value because every caller sums
+# the function's ERROR count, and changes are what Check staff access reports: the
+# console reads it off `membership_changes()` around one run (`sync_membership.main`).
+_CHANGES = {"added": 0, "removed": 0}
+
+
+def membership_changes() -> dict[str, int]:
+    """`{"added": n, "removed": m}` since the last `reset_membership_changes()`."""
+    return dict(_CHANGES)
+
+
+def reset_membership_changes() -> None:
+    _CHANGES.update(added=0, removed=0)
+
+
 def _fold_diff(a: dict[str, str], b: dict[str, str]) -> list[str]:
     """Original-cased values of `a` whose casefold key is absent from `b`."""
     return [a[f] for f in a.keys() - b.keys()]
@@ -526,8 +542,10 @@ def reconcile_team_members(
     for handle in sorted(_fold_diff(wanted_by_fold, current_by_fold)):
         if dry_run:
             log_person(f"    DRY-RUN add {handle} -> {org}/{team}")
+            _CHANGES["added"] += 1
         elif add_team_member(org, team, handle):
             log_person(f"  [ok] {handle} -> {org}/{team}")
+            _CHANGES["added"] += 1
         else:
             errors += 1
     if prune:
@@ -563,8 +581,10 @@ def reconcile_team_members(
                 continue
             if dry_run:
                 log_person(f"    DRY-RUN remove {handle} <- {org}/{team}")
+                _CHANGES["removed"] += 1
             elif remove_team_member(org, team, handle):
                 log_person(f"  [ok] removed {handle} from {org}/{team}")
+                _CHANGES["removed"] += 1
             else:
                 errors += 1
     return errors

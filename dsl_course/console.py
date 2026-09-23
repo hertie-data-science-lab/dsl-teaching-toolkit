@@ -5,11 +5,11 @@ request (`ops.request`), runs the op's frozen CLI IN-PROCESS - importing the mod
 calling its `main`, with `sys.argv` set to the argv the registry spells - and turns what
 happened into a `dsl.outcome/1`: a public annotation and a private record (`ops.outcome`).
 
-First implementation of the outcome: `summary` is the CLI's last `Done ...` line (its JSON
-tail, when it has one, becomes `counts`), `conclusion` comes from the exit status and the
-preview flag, and each `Decision: <ref> not released: <CODE> <sentence>` line the
-scheduler's dry run prints becomes one of `reasons`. CLIs migrate to returning a real
-Outcome op by op.
+The outcome's words come from the CLI itself: a `main` that returns a `log.Summary` (an
+exit code carrying one sentence, its counts and its reasons) supplies `summary`, `counts`
+and `reasons`; one that returns a bare exit code gets the op's own `done_text`.
+`conclusion` comes from the exit status and the preview flag, unless the Summary says a
+successful run had nothing to do. Nothing is parsed out of the CLI's stdout.
 
 Whatever the target does - `sys.exit`, an argparse refusal, an exception - ends as a
 conclusion, never as a traceback in the public log.
@@ -22,7 +22,6 @@ import contextlib
 import importlib
 import json
 import os
-import re
 import sys
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -30,7 +29,7 @@ from datetime import datetime, timezone
 from . import schedule, status
 from .gh_teams import acting_login
 from .ghcli import gh
-from .log import log_err
+from .log import Summary, log_err
 from .ops.outcome import Outcome, annotation, write_private
 from .ops.registry import (
     REGISTRY,
@@ -45,37 +44,14 @@ from .ops.request import RequestError, check_access, parse_request
 # The ops that release a named schedule entry: the console may send just the entry, and the
 # deploy fields are read off the cohort's schedule.yml here.
 _ENTRY_OPS = ("release.now", "release.early", "release.rerun")
-_DONE_RE = re.compile(r"^\s*(?:\[ok\]\s*)?(Done\b.*)$")
-_DECISION_RE = re.compile(r"^\s*Decision: (\S+) not released: ([A-Z][A-Z0-9_]*) (.+)$")
 
 _FALLBACK = {
     "done": "Finished.",
     "previewed": "Preview finished; nothing was changed.",
     "nothing_to_do": "Nothing to do.",
+    "skipped": "Passed over; nothing was changed.",
     "failed": "Stopped with a problem; the run log says where.",
 }
-
-
-class _Tee:
-    """stdout that is both printed (the run log stays what it is today) and kept."""
-
-    def __init__(self, out) -> None:
-        self.out = out
-        self.lines: list[str] = []
-        self._part = ""
-
-    def write(self, text: str) -> int:
-        self.out.write(text)
-        self._part += text
-        *done, self._part = self._part.split("\n")
-        self.lines += done
-        return len(text)
-
-    def flush(self) -> None:
-        self.out.flush()
-
-    def captured(self) -> list[str]:
-        return self.lines + ([self._part] if self._part else [])
 
 
 def _now() -> str:
@@ -87,28 +63,27 @@ def _run_id() -> int | None:
     return int(raw) if raw.isdigit() else None
 
 
-def run_cli(module: str, argv: list[str]) -> tuple[int, list[str], bool]:
-    """Run `python -m dsl_course.<module> <argv>` in this process: (exit code, stdout
-    lines, whether it CRASHED).
+def run_cli(module: str, argv: list[str]) -> tuple[int, Summary | None, bool]:
+    """Run `python -m dsl_course.<module> <argv>` in this process: (exit code, the
+    `Summary` its `main` returned if it returned one, whether it CRASHED).
 
     `main()` reads `sys.argv`, as every frozen CLI does, so it is set for the call and put
     back after. A `SystemExit` is the CLI's own exit code. Any other exception is a crash:
     logged by TYPE only (its text may name somebody's repo), never as a traceback."""
     target = importlib.import_module(f"dsl_course.{module}")
-    tee = _Tee(sys.stdout)
     saved = sys.argv
     sys.argv = [f"dsl_course.{module}", *argv]
     try:
-        with contextlib.redirect_stdout(tee):
-            rc = target.main()
+        rc = target.main()
     except SystemExit as exc:
         rc = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
     except Exception as exc:
         log_err(f"{module} stopped on an unexpected {type(exc).__name__}.")
-        return 1, tee.captured(), True
+        return 1, None, True
     finally:
         sys.argv = saved
-    return int(rc or 0), tee.captured(), False
+    summary = rc if isinstance(rc, Summary) else None
+    return int(rc or 0), summary, False
 
 
 def entry_requests(request: Request) -> list[Request]:
@@ -144,26 +119,26 @@ def entry_requests(request: Request) -> list[Request]:
     ]
 
 
-def _summary_and_counts(lines: list[str]) -> tuple[str, dict]:
-    done = [m.group(1) for line in lines if (m := _DONE_RE.match(line))]
-    if not done:
-        return "", {}
-    last = done[-1]
-    counts: dict = {}
-    tail = last.split(" - ", 1)[1] if " - " in last else ""
-    with contextlib.suppress(json.JSONDecodeError):
-        parsed = json.loads(tail) if tail.startswith("{") else None
-        if isinstance(parsed, dict):
-            counts = {k: v for k, v in parsed.items() if isinstance(v, int)}
-    return last, counts
-
-
-def _reasons(lines: list[str]) -> list[dict]:
-    return [
-        {"code": m.group(2), "text": f"{m.group(1)} not released: {m.group(3)}"}
-        for line in lines
-        if (m := _DECISION_RE.match(line))
-    ]
+def combine(summaries: list[Summary]) -> tuple[str, dict, list[dict], str | None]:
+    """`(text, counts, reasons, conclusion)` of the op, from the Summary of each CLI call
+    it made - one, except for a release entry drawn from several source repos. Counts
+    add up; different sentences are joined into one; the conclusion override stands
+    only when every call agreed on it."""
+    texts = list(dict.fromkeys(s.text for s in summaries if s.text))
+    if len(texts) > 1:
+        rest = [t[:1].lower() + t[1:] for t in texts[1:]]
+        text = "; ".join(t.rstrip(".") for t in [texts[0], *rest]) + "."
+    else:
+        text = texts[0] if texts else ""
+    counts: dict[str, int] = {}
+    for s in summaries:
+        for key, value in s.counts.items():
+            if isinstance(value, int) and not isinstance(value, bool):
+                counts[key] = counts.get(key, 0) + value
+    reasons = [r for s in summaries for r in s.reasons]
+    overrides = {s.conclusion for s in summaries}
+    conclusion = overrides.pop() if len(overrides) == 1 else None
+    return text, counts, reasons, conclusion
 
 
 class Broken(RuntimeError):
@@ -172,19 +147,19 @@ class Broken(RuntimeError):
     "Console is failing" issue and mails the maintainer, so a refusal must never be it."""
 
 
-def execute(op: Operation, requests: list[Request]) -> tuple[int, list[str], bool]:
+def execute(op: Operation, requests: list[Request]) -> tuple[int, list[Summary], bool]:
     """Run the op once per request, then the refresh its workflow ends in. Stops at the
-    first failure, as the workflow's `bash -e` step would."""
-    rc, lines, crashed = 0, [], False
+    first failure, as the workflow's `bash -e` step would. The refresh's own summary is
+    not the op's."""
+    rc, summaries, crashed = 0, [], False
     for req in requests:
-        rc, out, crashed = run_cli(op.module, command(op, req))
-        lines += out
+        rc, summary, crashed = run_cli(op.module, command(op, req))
+        summaries += [summary] if summary is not None else []
         if rc:
-            return rc, lines, crashed
+            return rc, summaries, crashed
     if op.refresh_after and requests and not requests[0].preview:
-        rc, out, crashed = run_cli("seed", refresh_command(requests[0]))
-        lines += out
-    return rc, lines, crashed
+        rc, _summary, crashed = run_cli("seed", refresh_command(requests[0]))
+    return rc, summaries, crashed
 
 
 def dispatch(op: Operation, request: Request) -> tuple[bool, str]:
@@ -266,7 +241,7 @@ def _finish(outcome: Outcome, request: Request | None) -> None:
     hook = getattr(status, "write_after_op", None)
     if callable(hook):
         try:
-            hook(request)
+            hook(vars(request))
         except Exception as exc:
             log_err(f"could not refresh status.json: {type(exc).__name__}.")
 
@@ -293,22 +268,25 @@ def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bo
     requests = entry_requests(request)
     crashed = False
     if not requests:
-        conclusion, lines = "nothing_to_do", []
+        conclusion, summaries = "nothing_to_do", []
         summary = f"{request.args.get('entry')} has nothing to release."
     else:
-        rc, lines, crashed = execute(op, requests)
+        rc, summaries, crashed = execute(op, requests)
         conclusion = "failed" if rc else ("previewed" if request.preview else "done")
         summary = ""
-    done, counts = _summary_and_counts(lines)
+    text, counts, reasons, override = combine(summaries)
+    if conclusion == "done" and override:
+        conclusion = override
+    fallback = op.done_text if conclusion == "done" and op.done_text else None
     return Outcome(
         op=op.name,
         actor=request.actor,
         preview=request.preview,
         conclusion=conclusion,
-        summary=summary or done or _FALLBACK[conclusion],
+        summary=summary or text or fallback or _FALLBACK[conclusion],
         run_id=_run_id(),
         counts=counts,
-        reasons=_reasons(lines),
+        reasons=reasons,
         started=started,
         finished=_now(),
     ), crashed

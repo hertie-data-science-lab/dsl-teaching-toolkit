@@ -103,7 +103,7 @@ from .gh_contents import (
 )
 from .ghcli import bot_login, clone, gh, is_missing_resource
 from .issues import close_issues_titled, upsert_issue
-from .log import log, log_err, log_ok, log_person, log_step
+from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
 from .repos import (
     add_collaborator,
     create_repo,
@@ -585,6 +585,8 @@ def parse_sheet(
                     lineno=yaml_mark_line(exc),
                     fix="fix the YAML on the line above; nothing on this sheet is "
                     "refreshed or sent until it parses",
+                    plain=f"The {slug} marking sheet is not valid YAML, so nothing on "
+                    f"it is updated or returned.",
                 )
             )
         raise SheetUnreadable(_unreadable(exc)) from exc
@@ -597,6 +599,7 @@ def parse_sheet(
                     "exactly as it is",
                     fix="restore the sheet's shape - a `submissions:` (or `teams:`) "
                     "block of one entry per submission unit",
+                    plain=_SHEET_SHAPE_PLAIN.format(sheet=slug),
                 )
             )
         raise SheetUnreadable("the file is not a mapping")
@@ -1529,6 +1532,9 @@ def _spec_fault(
     lineno: int | None = None,
     fix: str = "",
     file: str = GRADING_FILE,
+    plain: str = "",
+    consequence: str = "",
+    per_cohort: bool = False,
 ) -> ConfigFault:
     """One value in one assignment's definition that will not grade as written.
 
@@ -1548,6 +1554,9 @@ def _spec_fault(
         in_org=course_org,
         ref=SOLUTION_BRANCH,
         fix_text=fix,
+        plain=plain,
+        consequence=consequence,
+        per_cohort=per_cohort,
     )
 
 
@@ -1593,6 +1602,8 @@ def grading_spec_faults(
                 "assignment grades on the toolkit's defaults",
                 lineno=yaml_mark_line(exc),
                 fix="fix the YAML on the line above",
+                plain=f"The {slug} template's settings file is not valid YAML, so "
+                f"the assignment is marked on the toolkit's defaults.",
             )
         ], None
     lines = key_lines(text)
@@ -1640,6 +1651,11 @@ def grading_spec_faults(
                 "template's `solution` branch, which is where the teaching team reads "
                 "it - or give this assignment a private repo per unit here "
                 "(`submit_via: assignment_repo`, `visibility: private`)",
+                plain=f"{slug} has a solution shown date in this cohort's schedule, "
+                f"but its settings give it no private repo to put the solution in.",
+                consequence="the solution shown date passes and no solution is "
+                "released",
+                per_cohort=True,
             )
         )
     return faults, spec
@@ -1774,6 +1790,11 @@ def _visibility_faults(
             fix=f"set `visibility:` back to what those repos are, or make each of them "
             f"{spec.visibility} by hand from its GitHub Settings - the toolkit never "
             f"re-opens a repo it has already created",
+            plain=f"{slug}'s settings say its repos are {spec.visibility}, but "
+            f"{len(wrong)} of {len(rows)} handed out in this cohort are not.",
+            consequence="those repos stay as they are, and the pages the toolkit "
+            "writes describe them wrongly",
+            per_cohort=True,
         )
     ]
 
@@ -1783,6 +1804,10 @@ def _visibility_faults(
 # assignments under one plan are three readings of one problem, and three keys would mail
 # about it three times and clear it three times.
 ORG_SETTINGS = "org settings"
+# The page both switches are on. Web-only: the API can read them and cannot set them.
+MEMBER_PRIVILEGES_URL = (
+    "https://github.com/organizations/{org}/settings/member_privileges"
+)
 
 
 def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
@@ -1803,16 +1828,19 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
     if settings is None:
         return []  # we could not look; `org_settings` has already said why
     wrong: list[str] = []
+    costs: list[str] = []
     if settings.get(gh_teams.MEMBERS_CAN_DELETE) is True:
         wrong.append(
             "**Allow members to delete or transfer repositories** is ON, so a student "
             "can delete or move their own submission"
         )
+        costs.append("a student can delete or move their own submission")
     if settings.get(gh_teams.MEMBERS_CAN_PUBLISH) is False:
         wrong.append(
             "**Allow members to change repository visibilities** is OFF, so no student "
             "can publish their work and the shape does nothing for them"
         )
+        costs.append("no student can publish their work")
     if not wrong:
         return []
     return [
@@ -1822,13 +1850,17 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
             f"`visibility: student_choice`, which makes each student an admin of their "
             f"own repo - and {' and '.join(wrong)}",
             file=GRADING_FILE,
+            in_org=cohort_org,
+            plain="This cohort's GitHub member privileges do not suit an assignment "
+            "that lets students choose their repo's visibility.",
+            consequence=" and ".join(costs),
+            per_cohort=True,
             # Both switches named whichever one is wrong: the fix is one visit to one
             # page, and a sentence that named only the offender would send somebody back
             # there a second time for the other.
             fix_text=(
                 f"on the cohort org's Member privileges page "
-                f"(https://github.com/organizations/{cohort_org}/settings/"
-                f"member_privileges) set **Allow members to change repository "
+                f"({MEMBER_PRIVILEGES_URL.format(org=cohort_org)}) set **Allow members to change repository "
                 f"visibilities** ON and **Allow members to delete or transfer "
                 f"repositories** OFF. Both are web-only org settings - the toolkit reads "
                 f"them and cannot set them - and they are the one-time cohort-org step "
@@ -1867,6 +1899,8 @@ def _undeclared_faults(
             file=LEGACY_GRADING_FILE,
             fix=f"rename `{LEGACY_GRADING_FILE}` to `{GRADING_FILE}` on the template's "
             f"`{SOLUTION_BRANCH}` branch",
+            plain=f"{slug} keeps its settings in {LEGACY_GRADING_FILE}, which is no "
+            f"longer read, so it is marked on the toolkit's defaults.",
         )
     ]
 
@@ -2856,6 +2890,7 @@ def sheet_hold_reasons(
             # No field for a duplicate: the key that repeats IS the handle.
             field="" if reason == "duplicate" else _hold_field(spec, reason),
             fix=fix.format(at=f"line {lineno}" if lineno else "that line"),
+            plain=_HOLD_PLAIN[reason].format(where=_sheet_where(slug, lineno)),
         )
         if fault.key not in recorded:
             recorded.add(fault.key)
@@ -2913,6 +2948,30 @@ _HOLD_FAULT = {
         "leave the handle on {at} in one submission unit only",
     ),
 }
+
+
+# The same four, as the console's problem list says them (`ConfigFault.plain`): where on
+# the sheet, then what it costs, in the vocabulary's words. Still never the unit.
+_HOLD_PLAIN = {
+    "score": "{where} has a mark that is not a number, so nothing is returned for that "
+    "student or team.",
+    "adjustment": "{where} has an adjustment that is not a number, so nothing is "
+    "returned for that student.",
+    "question": "{where} marks a question the assignment does not have, so nothing is "
+    "returned for that student or team.",
+    "duplicate": "{where} lists a student who is also in another team or entry, so "
+    "marks for both are held.",
+}
+_SHEET_SHAPE_PLAIN = (
+    "The {sheet} marking sheet is not one entry per student or team, so it is left as "
+    "it is."
+)
+
+
+def _sheet_where(slug: str, lineno: int | None) -> str:
+    """`Line 47 of the assignment-3 marking sheet` - a hold's place, for `_HOLD_PLAIN`."""
+    sheet = f"the {slug} marking sheet"
+    return f"Line {lineno} of {sheet}" if lineno else sheet[0].upper() + sheet[1:]
 
 
 def _hold_field(spec: SheetSpec, reason: str) -> str:
@@ -2982,7 +3041,12 @@ def key_lines(text: str) -> dict[tuple[str, ...], int]:
 
 
 def _sheet_fault(
-    slug: str, what: str, lineno: int | None = None, field: str = "", fix: str = ""
+    slug: str,
+    what: str,
+    lineno: int | None = None,
+    field: str = "",
+    fix: str = "",
+    plain: str = "",
 ) -> ConfigFault:
     """One thing in one grading sheet a grader has to settle.
 
@@ -2999,6 +3063,7 @@ def _sheet_fault(
         # deep link and the blame query use, so each fault lands on the sheet it is in.
         file=sheet_path(slug),
         fix_text=fix,
+        plain=plain,
     )
 
 
@@ -3033,6 +3098,7 @@ def sheet_faults(
                 field=spec.container_key,
                 fix=f"restore `{spec.container_key}:` to one indented entry per "
                 f"submission unit",
+                plain=_SHEET_SHAPE_PLAIN.format(sheet=slug),
             )
         ]
     sheet_hold_reasons(spec, sheet, faults, text, slug)
@@ -4258,7 +4324,9 @@ def distribute(
         # in by the time marks exist: `_on_the_roster` keeps only the books belonging to
         # somebody the roster knows, so an empty roster drops EVERY mark in the run as
         # `unknown`. This exit is the only signal that happened.
-        return 1 if provisioning_failed or not students or not previewed else 0
+        if provisioning_failed or not students or not previewed:
+            return 1
+        return return_summary(counts, len(pending) if notify else 0, dry_run=True)
 
     failed_mail, told = (
         _email_updates(
@@ -4316,7 +4384,7 @@ def distribute(
     # Counts only: this workflow's log is world-readable and every target here is a
     # student. The per-target lines above went through log_person.
     log_ok(f"Done - {json.dumps(counts)}")
-    return (
+    code = (
         1
         if provisioning_failed
         or counts["failed"]
@@ -4325,6 +4393,31 @@ def distribute(
         or not students
         else 0
     )
+    return return_summary(counts, counts["emails"], dry_run=False, code=code)
+
+
+def return_summary(
+    counts: dict[str, int], emails: int, dry_run: bool, code: int = 0
+) -> Summary:
+    """Return marks' sentence, off distribute's counts. Counts only - every target is a
+    student, and this lands in a public annotation."""
+    books = plural(counts["gradebooks"], "marks repo")
+    mails = plural(emails, "email")
+    if dry_run:
+        text = f"Preview: {books} would be updated and {mails} sent"
+    elif not counts["gradebooks"] and not emails:
+        text = "No new marks to return"
+    else:
+        text = f"Marks returned: {books} updated, {mails} sent"
+    if counts.get("held"):
+        text += f"; {plural(counts['held'], 'mark')} held until the sheet is fixed"
+    out = {k: v for k, v in counts.items() if isinstance(v, int)}
+    conclusion = (
+        "nothing_to_do"
+        if not dry_run and not code and not counts["gradebooks"] and not emails
+        else None
+    )
+    return Summary(f"{text}.", out, code=code, conclusion=conclusion)
 
 
 # The dry run's per-student detail: an issue in the PRIVATE classroom-config, found by

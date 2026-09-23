@@ -92,6 +92,9 @@ class Operation:
     real_flag: str | None = None
     # What the op's `counts` keys mean, for the console's details fold.
     counts_doc: str = ""
+    # The outcome's summary for a real run whose CLI returned a bare exit code rather
+    # than a `log.Summary` (an early exit, or a CLI that has no sentence of its own).
+    done_text: str = ""
     # Ends in `seed refresh`, as its workflow does, so a new repo gets its buttons.
     refresh_after: bool = False
     via: str = INLINE
@@ -191,6 +194,10 @@ def _a(request: Request, key: str, default=None):
 
 def _course_cohort(request: Request) -> list[str]:
     return ["--course-org", request.course_org, "--cohort-org", request.cohort_org]
+
+
+def _status_write(request: Request) -> list[str]:
+    return [*_course_cohort(request), "--write"]
 
 
 def _scheduler(request: Request) -> list[str]:
@@ -371,6 +378,10 @@ def _bootstrap_cohort(request: Request) -> list[str]:
     ]
 
 
+def _open_window(request: Request) -> list[str]:
+    return [*_course_cohort(request), "--assignment", _a(request, "assignment")]
+
+
 def _sync_membership(request: Request) -> list[str]:
     return ["--course-org", request.course_org, "--cohort-org", request.cohort_org]
 
@@ -397,6 +408,7 @@ def _release(name: str, help_text: str, args_schema: dict) -> Operation:
         argv=_deploy,
         preview_flag="--dry-run",
         counts_doc=_RELEASE_COUNTS,
+        done_text="Materials released.",
     )
 
 
@@ -408,9 +420,10 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Check the cohort's setup and refresh what the console shows.",
+        done_text="Status refreshed.",
         doc="docs/reference/actions-reference.md",
         module="status",
-        argv=_course_cohort,
+        argv=_status_write,
     ),
     Operation(
         name="cohort.preview_automation",
@@ -452,6 +465,7 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Keep this cohort's edits for future terms: one pull request per source repo.",
+        done_text="Cohort edits checked for future terms.",
         doc="docs/08-release-materials-to-cohort.md",
         module="propagate",
         argv=_course_cohort,
@@ -471,6 +485,7 @@ _OPS = (
             required=("course_source_repo",),
         ),
         help="Hand out an assignment now.",
+        done_text="Assignment handed out.",
         doc="docs/09-release-assignment-to-cohort.md",
         module="assign",
         argv=_handout,
@@ -493,6 +508,7 @@ _OPS = (
             required=("course_source_repo", "path"),
         ),
         help="Update every copy of an assignment with a fixed file.",
+        done_text="Every copy updated.",
         doc="docs/09-release-assignment-to-cohort.md",
         module="assign",
         argv=_patch,
@@ -529,6 +545,7 @@ _OPS = (
             }
         ),
         help="Return marks and feedback to students.",
+        done_text="Marks returned.",
         doc="docs/10-grade-and-return-assignments.md",
         module="grades",
         argv=_grades,
@@ -543,6 +560,7 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Send new codes to every student who has not joined; old codes stop working.",
+        done_text="New codes sent.",
         doc="docs/06-enrol-students-to-cohort.md",
         module="enrol_codes",
         argv=_send_codes,
@@ -556,9 +574,29 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Update the cohort site now.",
+        done_text="Student site updated.",
         doc="docs/11-configure-cohort-site.md",
         module="site",
         argv=_site_sync,
+    ),
+    Operation(
+        name="teams.open_window",
+        runs_as=DISPATCH,
+        scope=COHORT,
+        required_team=INSTRUCTORS_TEAM,
+        args_schema=_args(
+            {"assignment": _string(KEY_PATTERN, "The schedule.yml assignments key")},
+            required=("assignment",),
+        ),
+        help="Email every student still without a team for this assignment's open "
+        "team-formation window.",
+        done_text="Students without a team were emailed.",
+        doc="docs/09-release-assignment-to-cohort.md",
+        module="team_formation",
+        argv=_open_window,
+        preview_flag="--dry-run",
+        real_flag="--no-dry-run",
+        counts_doc="Team-formation emails sent, previewed or held; never an address.",
     ),
     Operation(
         name="access.check",
@@ -567,6 +605,7 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Check staff and student access against people.yml, the roster and teams.",
+        done_text="Staff access checked.",
         doc="docs/05-manage-teaching-team.md",
         module="sync_membership",
         argv=_sync_membership,
@@ -581,6 +620,7 @@ _OPS = (
             {"force": _boolean("Archive before the cohort's archive date")}
         ),
         help="Archive the cohort: every repo read-only, nothing deleted.",
+        done_text="Cohort archived.",
         doc="docs/10-grade-and-return-assignments.md",
         module="teardown",
         argv=_teardown,
@@ -603,6 +643,7 @@ _OPS = (
             required=("source_repo",),
         ),
         help="Publish the public website from a materials repo.",
+        done_text="Public website updated.",
         doc="docs/reference/actions-reference.md",
         module="site",
         argv=_publish,
@@ -616,6 +657,7 @@ _OPS = (
             {"course_source_repo": _TEMPLATE}, required=("course_source_repo",)
         ),
         help="Write the student starter onto main from the solution branch.",
+        done_text="Student starter written onto main.",
         doc="docs/03-add-assignment-to-course.md",
         module="derive",
         argv=_derive,
@@ -632,6 +674,7 @@ _OPS = (
             required=("course_source_repo",),
         ),
         help="Write the syllabus's session list from the cohort's schedule.",
+        done_text="Syllabus session list written.",
         doc="docs/07-schedule-releases.md",
         module="syllabus",
         argv=_syllabus,
@@ -654,6 +697,7 @@ _OPS = (
             required=("tag",),
         ),
         help="Create a materials repo for a term.",
+        done_text="Materials repo created.",
         doc="docs/02-add-materials-to-course.md",
         module="scaffold",
         argv=_new_materials,
@@ -680,6 +724,7 @@ _OPS = (
             required=("number", "tag"),
         ),
         help="Create an assignment template.",
+        done_text="Assignment template created.",
         doc="docs/03-add-assignment-to-course.md",
         module="scaffold",
         argv=_new_assignment,
@@ -687,6 +732,7 @@ _OPS = (
     ),
     Operation(
         name=BOOTSTRAP_OP,
+        done_text="Cohort set up.",
         runs_as=DISPATCH,
         scope=COHORT,
         required_team=COURSE_ADMIN_TEAM,
