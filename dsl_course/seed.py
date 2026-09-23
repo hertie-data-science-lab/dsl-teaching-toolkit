@@ -501,6 +501,8 @@ def refresh(course_org: str) -> int:
     )
     # An unregistration is never a silent success: see _live_cohorts.
     failures = unregistered
+    # status.json writes that did not land: warned about, never counted (see below).
+    status_misses = 0
     # `central.pin_central_ref` refuses a ref the central repo does not have, and every
     # workflow write below goes through it. Caught ONCE, here: the first refusal counts a
     # single failure and skips every later workflow write, leaving the PREVIOUS rendering
@@ -594,8 +596,17 @@ def refresh(course_org: str) -> int:
         failures += 0 if sync_team_lock(course_org, cohort).ok else 1
         failures += _converge_org(cohort, central_ref, listing, is_cohort=True)
         # Last, so it describes the cohort this refresh has just converged.
-        failures += refresh_status(course_org, cohort)
-    failures += refresh_status(course_org)
+        status_misses += refresh_status(course_org, cohort)
+    status_misses += refresh_status(course_org)
+    if status_misses:
+        # A warning, not a failure: status.json is the console's view, and an org that
+        # never opens the console must not have its nightly refresh go red over it. The
+        # Console's own Check setup still reports a write that did not land.
+        print(
+            f"::warning::status.json not refreshed for "
+            f"{status_misses} org(s); the next refresh tries again",
+            flush=True,
+        )
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1
