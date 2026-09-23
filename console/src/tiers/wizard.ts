@@ -5,10 +5,9 @@
 // nothing to run.
 
 import { settingsTiers, type CourseDefaults } from './grading';
-import type { FieldTier, Tiers } from './types';
+import { opt, type FieldTier, type Tiers } from './types';
 import { ORG_RE, autogradeBlock, termLabel } from '../wizards/model';
 
-const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });
 const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
 export function orgField(why: string): FieldTier {
@@ -82,9 +81,6 @@ export function assignmentMarking(d: CourseDefaults): Tiers {
     ...pick(s, ['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day']),
   };
 }
-
-/** The Advanced keys of step 3, whose values the wizard writes into grading_config.yml after creation. */
-export const MARKING_EXTRAS = ['tests', 'completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'];
 
 // ------------------------------------------------------------------ New materials
 

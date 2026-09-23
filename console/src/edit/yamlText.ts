@@ -38,6 +38,8 @@ function scalarText(v: unknown): string {
 
 const isPlain = (v: unknown) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+/** `v` when it is a plain mapping, else an empty one. */
+export const obj = (v: unknown): Record<string, unknown> => (isObj(v) ? v : {});
 
 function keyOf(p: Pair): string {
   return isScalar(p.key) ? String(p.key.value) : String(p.key);

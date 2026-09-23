@@ -7,11 +7,12 @@
 // revalidates with ETags, so an unchanged poll is a 304), then reads the public
 // `dsl-outcome` annotation off the job's check run and the private outcome file.
 
-import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
+import type { ValidateFunction } from 'ajv/dist/2020';
 import outcomeSchema from '../../schemas/outcome.schema.json';
 import requestSchema from '../../schemas/request.schema.json';
 import type { GitHubClient, Job } from '../github/client';
 import type { Outcome } from '../model/types';
+import { validator } from '../model/validate';
 import { opSpec } from './registry';
 
 export const CONSOLE_WORKFLOW = 'console.yml';
@@ -20,6 +21,8 @@ export const CONSOLE_REPO = '.github';
 export const CLIENT = 'console/0.1';
 export const OUTCOME_TITLE = 'dsl-outcome';
 export const OUTCOMES_DIR = '.dsl/outcomes';
+/** A private outcome file's path inside `classroom-config`. */
+export const outcomePath = (op: string): string => `${OUTCOMES_DIR}/${op}.json`;
 
 export interface RequestInput {
   op: string;
@@ -86,10 +89,8 @@ export class RequestInvalid extends Error {
   }
 }
 
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-const requestValidator = ajv.compile(requestSchema);
-const outcomeValidator = ajv.compile(outcomeSchema);
-const argValidators = new Map<string, ValidateFunction>();
+const requestValidator = validator(requestSchema);
+const outcomeValidator = validator(outcomeSchema);
 
 function messages(v: ValidateFunction): string[] {
   return (v.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`);
@@ -97,11 +98,7 @@ function messages(v: ValidateFunction): string[] {
 
 /** The args an op accepts, validated against its registry schema; errors as sentences. */
 export function validateArgs(op: string, args: Record<string, unknown>): string[] {
-  let v = argValidators.get(op);
-  if (!v) {
-    v = ajv.compile(opSpec(op).args_schema);
-    argValidators.set(op, v);
-  }
+  const v = validator(opSpec(op).args_schema);
   return v(args) ? [] : messages(v);
 }
 
@@ -209,7 +206,7 @@ export class DispatchAdapter implements Adapter {
     const [owner, repo] = h.cohortOrg ? [h.cohortOrg, 'classroom-config'] : [h.courseOrg, CONSOLE_REPO];
     let priv: Outcome | null = null;
     try {
-      const f = await this.client.getContents(owner, repo, `${OUTCOMES_DIR}/${h.op}.json`);
+      const f = await this.client.getContents(owner, repo, outcomePath(h.op));
       const o = f ? parseOutcome(f.text) : null;
       priv = o && o.run_id === h.runId ? o : null;
     } catch {

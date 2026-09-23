@@ -1564,7 +1564,7 @@ def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     seeded = fake.files[("course-materials-f2026", "README.md")]
-    assert deploy._is_withheld_stub("README.md", seeded)
+    assert deploy.is_withheld_stub("README.md", seeded)
 
 
 def test_the_syllabus_stub_is_faculty_owned_and_the_sample_is_refreshed(fake):

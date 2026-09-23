@@ -491,12 +491,12 @@ def _scaffold_readme() -> str:
 
 
 def test_the_scaffold_readme_is_recognised_as_unedited():
-    assert deploy._is_withheld_stub("README.md", _scaffold_readme())
+    assert deploy.is_withheld_stub("README.md", _scaffold_readme())
 
 
 def test_a_real_readme_is_released():
     real = "# Foundations of Machine Learning\n\nWelcome. Slides go up Tuesdays.\n"
-    assert not deploy._is_withheld_stub("README.md", real)
+    assert not deploy.is_withheld_stub("README.md", real)
 
 
 def test_a_readme_quoting_one_marker_is_still_released():
@@ -504,8 +504,8 @@ def test_a_readme_quoting_one_marker_is_still_released():
     # half-edited one where the faculty section is already gone - is the faculty's writing,
     # and withholding it would be the guard overreaching.
     half = f"# Real overview\n\nWe kept a note: {course.FACULTY_ONLY_HEADING}\n"
-    assert not deploy._is_withheld_stub("README.md", half)
-    assert not deploy._is_withheld_stub(
+    assert not deploy.is_withheld_stub("README.md", half)
+    assert not deploy.is_withheld_stub(
         "README.md", "# Real\n\n> **Replace this placeholder.** (quoted)\n"
     )
 
@@ -515,9 +515,9 @@ def test_only_a_root_readme_is_guarded():
     # folder; the stub only ever exists at the repo root. Matching on the file NAME rather
     # than the whole path would have withheld those too.
     for nested in ("lectures/01_intro/README.md", "labs/README.md", "docs/README.md"):
-        assert not deploy._is_withheld_stub(nested, _scaffold_readme())
-    assert deploy._is_withheld_stub("README.md", _scaffold_readme())
-    assert deploy._is_withheld_stub("/README.md", _scaffold_readme())
+        assert not deploy.is_withheld_stub(nested, _scaffold_readme())
+    assert deploy.is_withheld_stub("README.md", _scaffold_readme())
+    assert deploy.is_withheld_stub("/README.md", _scaffold_readme())
 
 
 def test_an_unwritten_syllabus_stub_is_withheld_too():
@@ -527,14 +527,14 @@ def test_an_unwritten_syllabus_stub_is_withheld_too():
     from dsl_course import scaffold
 
     stub = scaffold._SYLLABUS_STUB.format(tag="f2026")
-    assert deploy._is_withheld_stub("SYLLABUS.md", stub)
+    assert deploy.is_withheld_stub("SYLLABUS.md", stub)
     # Written, so released.
-    assert not deploy._is_withheld_stub(
+    assert not deploy.is_withheld_stub(
         "SYLLABUS.md",
         "# Machine Learning\n\n## 1. General information\n\nReal content.\n",
     )
     # Root only, as for the README.
-    assert not deploy._is_withheld_stub("docs/SYLLABUS.md", stub)
+    assert not deploy.is_withheld_stub("docs/SYLLABUS.md", stub)
 
 
 def test_the_excluded_root_files_are_named_from_one_place():

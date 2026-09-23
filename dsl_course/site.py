@@ -53,6 +53,7 @@ from .course import (
     shape_note,
     shared_repo,
     submission_repo,
+    term_label,
     term_tag,
 )
 from .discovery import (
@@ -118,8 +119,7 @@ def _semester_start(cohort_org: str) -> date:
 
 def _semester_label(cohort_org: str) -> str:
     """fYYYY -> 'Fall YYYY', sYYYY -> 'Spring YYYY' (for site.course_semester)."""
-    tag = term_tag(cohort_org)
-    return f"{'Fall' if tag[0] == 'f' else 'Spring'} {tag[1:]}" if tag else ""
+    return term_label(term_tag(cohort_org)) or ""
 
 
 @cache

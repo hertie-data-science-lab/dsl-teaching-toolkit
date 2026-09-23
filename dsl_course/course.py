@@ -599,6 +599,13 @@ def term_tag(name: str) -> str | None:
     return m.group(0) if m else None
 
 
+def term_label(tag: str | None) -> str | None:
+    """`f2026` -> `Fall 2026`, `s2027` -> `Spring 2027`: how a cohort is displayed."""
+    if not tag:
+        return None
+    return f"{'Fall' if tag[0] == 'f' else 'Spring'} {tag[1:]}"
+
+
 def pages_repo(org: str) -> str:
     """The GitHub Pages org site repo for an org - pushing it redeploys the site.
 

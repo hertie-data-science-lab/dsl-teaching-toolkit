@@ -56,6 +56,7 @@ from .course import (
     assignment_slug,
     is_repo_root,
     pages_repo,
+    term_label,
     term_tag,
 )
 from .discovery import (
@@ -74,15 +75,14 @@ from .gh_contents import (
 )
 from .gh_teams import get_team_members
 from .ghcli import gh
+from .ops.outcome import OUTCOMES_DIR
+from .ops.registry import STATUS_SCHEMA
 from .repos import default_branch
 from .schedule_plan import deploy_dest, deploy_section, row_kind
 from .sync_teams import known_handles
 
-SCHEMA = "dsl.status/1"
 # Where each file lives, inside `classroom-config` (cohort) or `.github` (course).
 STATUS_PATH = ".dsl/status.json"
-# Where the console's engine leaves each operation's private outcome (contracts section 2).
-OUTCOMES_DIR = ".dsl/outcomes"
 # How many recent operations the cohort file lists.
 RECENT_OPERATIONS = 10
 
@@ -582,7 +582,7 @@ def template_state(t: TemplateFacts) -> str:
     return "ready" if _written(t.readme) else TODO
 
 
-def app_installed(org: str) -> bool | None:
+def app_installed() -> bool | None:
     """C1/K1's "App installed" predicate. TODO(decision 0002): there is no App yet, so
     nothing can be asked; None is "not known", and no stage waits on it."""
     return None
@@ -623,7 +623,7 @@ def render_course(
         "org": facts.org,
         "name": str(meta.get("course_name") or meta.get("org_name") or ""),
         "code": str(meta.get("course_code") or ""),
-        "app_installed": app_installed(facts.org),
+        "app_installed": app_installed(),
         "stages": stages,
         "stage_why": stage_why(stages, todo, standing),
         "ready": all(stages[s] == DONE for s in COURSE_STAGES[:5]),
@@ -699,13 +699,6 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
     return out
 
 
-def term_label(tag: str | None) -> str | None:
-    """`f2026` -> `Fall 2026`, `s2027` -> `Spring 2027`: how a cohort is displayed."""
-    if not tag:
-        return None
-    return f"{'Fall' if tag[0] == 'f' else 'Spring'} {tag[1:]}"
-
-
 def term_weeks(
     start: date | None, end: date | None, today: date
 ) -> tuple[int | None, int | None]:
@@ -756,12 +749,6 @@ def _release_type(release: schedule.Release) -> str | None:
     return None
 
 
-def _blank(value: object) -> bool:
-    if isinstance(value, dict):
-        return all(_blank(v) for v in value.values())
-    return value is None or (isinstance(value, str) and not value.strip())
-
-
 def sheet_counts(
     sheet: dict | None, spec: grades.SheetSpec | None
 ) -> tuple[int, int, int | None]:
@@ -773,11 +760,12 @@ def sheet_counts(
     if not isinstance(container, dict):
         return 0, 0, None
     blocks = [b for b in container.values() if isinstance(b, dict)]
-    filled = sum(not _blank(b.get(spec.score_key)) for b in blocks)
+    filled = sum(not grades.is_blank(b.get(spec.score_key)) for b in blocks)
     if not spec.collects_commits:
         return filled, len(blocks), None
     submitted = sum(
-        not _blank((b.get(grades.INFO_KEY) or {}).get("submitted")) for b in blocks
+        not grades.is_blank((b.get(grades.INFO_KEY) or {}).get("submitted"))
+        for b in blocks
     )
     return filled, len(blocks), submitted
 
@@ -849,32 +837,28 @@ def render_assignments(
 ) -> list[dict]:
     """One row per assignment the schedule declares."""
     flagged = _problem_entries(problems)
-    sheet_specs = {
-        schedule.cohort_name(k, e): grades.sheet_spec(
-            facts.sched,
-            k,
-            schedule.cohort_name(k, e),
-            facts.specs.get(k, grades.GradingSpec()),
-            facts.specs.get(k, grades.GradingSpec()).is_group,
+    sheet_specs = {}
+    for k, e in facts.sched.assignments.items():
+        name = schedule.cohort_name(k, e)
+        gspec = facts.specs.get(k, grades.GradingSpec())
+        sheet_specs[name] = grades.sheet_spec(
+            facts.sched, k, name, gspec, gspec.is_group
         )
-        for k, e in facts.sched.assignments.items()
-    }
     rows = []
     for slug, entry in facts.sched.assignments.items():
         spec = facts.specs.get(slug, grades.GradingSpec())
         name = schedule.cohort_name(slug, entry)
         cutoff = grades.cutoff_at(facts.sched, slug, spec)
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
-        filled, on_sheet, submitted = sheet_counts(
-            facts.sheets.get(name), sheet_specs.get(name)
-        )
+        sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
+        filled, on_sheet, submitted = sheet_counts(sheet, sspec)
         total = on_sheet or units
         returned = (
             total > 0
             and filled == total
             and marks_returned(
-                facts.sheets.get(name),
-                sheet_specs.get(name),
+                sheet,
+                sspec,
                 facts.returned_at,
                 facts.sheet_changed.get(name),
             )
@@ -1130,7 +1114,7 @@ def render_course_file(course: CourseFacts, now: datetime) -> dict:
     that already stand in `.github`'s own digest issue. Nothing about a person."""
     block, problems = render_course(course, now)
     return {
-        "schema": SCHEMA,
+        "schema": STATUS_SCHEMA,
         "inputs": course_inputs(course),
         "course": block,
         "problems": _unique_ids(problems),
@@ -1186,7 +1170,7 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
         and facts.site_last_update < facts.config_last_update
     )
     return {
-        "schema": SCHEMA,
+        "schema": STATUS_SCHEMA,
         "inputs": cohort_inputs(facts, course),
         "course": course_block,
         "cohort": {
@@ -1197,7 +1181,7 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
             "week": week,
             "weeks": weeks,
             "live": not facts.archived,
-            "app_installed": app_installed(facts.org),
+            "app_installed": app_installed(),
             "stages": stages,
             "stage_why": stage_why(stages, todo, problems),
             "archive_date": _iso(sched.archive.when if sched.archive else None),
@@ -1337,7 +1321,17 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
         facts.teams = teams.load(cohort_org, facts.teams_faults, known)
     except Unusable:
         facts.teams = {}
-    grades.cohort_sheet_faults(course_org, cohort_org, sched, facts.sheet_faults)
+    # `grades.cohort_sheet_faults`, with each sheet read once for the faults and the marks.
+    sheet_specs = grades.sheet_specs(course_org, sched)
+    sheet_texts = {
+        name: get_file_content(
+            cohort_org, schedule.CONFIG_REPO, grades.sheet_path(name)
+        )
+        for name in sorted(sheet_specs)
+    }
+    for name, text in sheet_texts.items():
+        if text is not None:
+            facts.sheet_faults += grades.sheet_faults(name, text, sheet_specs[name])
     grades.grading_config_faults(
         course_org, cohort_org, sched, facts.template_faults, facts.listing
     )
@@ -1346,9 +1340,7 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
             course_org, entry.course_source_repo
         )
         name = schedule.cohort_name(slug, entry)
-        text = get_file_content(
-            cohort_org, schedule.CONFIG_REPO, grades.sheet_path(name)
-        )
+        text = sheet_texts[name]
         if text:
             try:
                 facts.sheets[name] = grades.parse_sheet(text)

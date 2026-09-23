@@ -261,13 +261,7 @@ def _finish(outcome: Outcome, request: Request | None) -> None:
         log("  the cohort is archived now, so the annotation is its only record")
     elif not write_private(outcome, request.cohort_org, request.course_org):
         raise Broken("the outcome could not be recorded")
-    # WP2's status writer. Until it lands there is nothing to call.
-    hook = getattr(status, "write_after_op", None)
-    if callable(hook):
-        try:
-            hook(vars(request))
-        except Exception as exc:
-            log_err(f"could not refresh status.json: {type(exc).__name__}.")
+    status.write_after_op(vars(request))
 
 
 def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bool]:

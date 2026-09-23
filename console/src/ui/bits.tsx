@@ -12,6 +12,16 @@ export function ghUrl(org: string, repo?: string, path?: string, branch = 'main'
   return `https://github.com/${org}${repo ? `/${repo}` : ''}${repo && path ? `/blob/${branch}/${path}` : ''}`;
 }
 
+/** GitHub's in-browser editor for one file, optionally at a line. */
+export function editUrl(org: string, repo: string, path: string, branch = 'main', line?: number): string {
+  return `https://github.com/${org}/${repo}/edit/${branch}/${path}${line ? `#L${line}` : ''}`;
+}
+
+/** One workflow run of `repo` (`owner/name`). */
+export function runUrl(repo: string, runId: number): string {
+  return `https://github.com/${repo}/actions/runs/${runId}`;
+}
+
 export function Help({ title, doc, children }: { title: string; doc?: string; children: ComponentChildren }) {
   return (
     <details class="help">
@@ -58,7 +68,7 @@ export const Prop = () => <span class="prop" title="Not in the engine today">pro
 
 export function EditFile({ org, repo, path, branch = 'main', line }: { org: string; repo: string; path: string; branch?: string; line?: number }) {
   return (
-    <a class="edit-file" href={`https://github.com/${org}/${repo}/edit/${branch}/${path}${line ? `#L${line}` : ''}`} target="_blank" rel="noopener">
+    <a class="edit-file" href={editUrl(org, repo, path, branch, line)} target="_blank" rel="noopener">
       Edit the file <Ext />
     </a>
   );
@@ -219,7 +229,7 @@ export function OpsList({
                   ) : null}
                   <p class="footnote">
                     Ran in {runRepo} as run #{o.run_id}.{' '}
-                    <a href={`https://github.com/${runRepo}/actions/runs/${o.run_id}`} target="_blank" rel="noopener">Open run</a>
+                    <a href={runUrl(runRepo, o.run_id)} target="_blank" rel="noopener">Open run</a>
                   </p>
                 </div>
               </details>

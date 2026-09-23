@@ -4,10 +4,11 @@
 // the schema through ajv plus each field's own check; a forced field is read-only with its
 // reason.
 
-import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
+import type { ErrorObject } from 'ajv/dist/2020';
 import type { ComponentChildren } from 'preact';
 import { deepEqual } from '../edit/yamlText';
-import { md } from '../model/format';
+import { md, str } from '../model/format';
+import { validator } from '../model/validate';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
 import { Prop } from '../ui/bits';
 import { Alert, Lock } from '../ui/icons';
@@ -59,9 +60,6 @@ export function effective(tiers: Tiers, values: Values): Values {
   return out;
 }
 
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-const compiled = new WeakMap<object, ValidateFunction>();
-
 function sentence(e: ErrorObject): string {
   switch (e.keyword) {
     case 'required':
@@ -82,11 +80,7 @@ export function fieldErrors(schema: object | null, tiers: Tiers, values: Values)
   const v = effective(tiers, values);
   const out: Record<string, string> = {};
   if (schema) {
-    let fn = compiled.get(schema);
-    if (!fn) {
-      fn = ajv.compile(schema);
-      compiled.set(schema, fn);
-    }
+    const fn = validator(schema);
     const data = Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined && x !== ''));
     if (!fn(data))
       for (const e of fn.errors ?? []) {
@@ -127,10 +121,6 @@ interface FieldProps {
   error?: string;
   set: (k: string, v: unknown) => void;
   readOnly?: boolean;
-}
-
-function str(v: unknown): string {
-  return v === undefined || v === null ? '' : String(v);
 }
 
 export function Field({ id, k, t, value, values, error, set, readOnly }: FieldProps) {

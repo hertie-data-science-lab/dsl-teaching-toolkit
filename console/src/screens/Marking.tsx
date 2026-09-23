@@ -1,13 +1,12 @@
 // S12 Marks (the grading sheet as a grid) and S9 Teams (teams.csv for a group assignment).
 
-import { useState } from 'preact/hooks';
-import { parse } from 'yaml';
+import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentIdent, assignmentTitle, fmtDay } from '../model/format';
+import { assignmentIdent, assignmentTitle, fmtDay, str } from '../model/format';
 import { cellValue, finalGrade, penaltyRate, penaltyText, readSheet, round, scoreTotal, type Unit } from '../model/marks';
 import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
@@ -17,20 +16,8 @@ import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Check, Ext, Lock } from '../ui/icons';
 import { NotFound } from './Assignments';
-import { todayOf, tzOf, yearOf } from './Cohort';
-import { WithStatus, cohortCrumbs, cohortScope } from './common';
+import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-
-function gradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
-  const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
-  if (f.kind !== 'ready') return {};
-  try {
-    const d = parse(f.text);
-    return d && typeof d === 'object' ? (d as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
 
 function courseDefault(p: ReadyProps, key: string): unknown {
   return ((p.course.meta?.assignment_defaults ?? {}) as Record<string, unknown>)[key];
@@ -43,7 +30,6 @@ function asgRef(a: Assignment, group: boolean): AsgRef {
 // --------------------------------------------------------------------------- marks
 
 const key = (path: Path) => JSON.stringify(path);
-const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
 
 function Marks(p: ReadyProps & { a: Assignment }) {
   const { a } = p;
@@ -52,7 +38,13 @@ function Marks(p: ReadyProps & { a: Assignment }) {
   const [save, runSave, setSave] = useSave(env);
   const path = `grading_sheets/${a.slug}.yml`;
   const file = p.files.file(p.cohort.org, 'classroom-config', path);
-  const cfg = gradingConfig(p, a.template);
+  const text = file.kind === 'ready' ? file.text : null;
+  const parsed = useMemo(() => {
+    if (text === null) return null;
+    const y = new YamlText(text);
+    return y.errors.length ? { error: y.errors[0] } : { sheet: readSheet(text, y.toJS()) };
+  }, [text]);
+  const cfg = useGradingConfig(p, a.template);
   const questions = cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null;
   const qs = questions ? Object.entries(questions) : [];
   const rateText = cfg.late_penalty_per_day ?? courseDefault(p, 'late_penalty_per_day') ?? '10%';
@@ -70,10 +62,9 @@ function Marks(p: ReadyProps & { a: Assignment }) {
   if (file.kind === 'loading') return <><Crumbs items={crumbs} />{head}<Loading what="Reading the mark sheet" /></>;
   if (file.kind !== 'ready')
     return <><Crumbs items={crumbs} />{head}<section class="panel section stub"><h2>No mark sheet yet</h2><p>The mark sheet appears at hand out, with a row for every student or team.</p></section></>;
-  const y = new YamlText(file.text);
-  if (y.errors.length)
-    return <><Crumbs items={crumbs} />{head}<CheckLine cls="bad">The mark sheet does not parse ({y.errors[0]}). Fix it with Edit the file.</CheckLine></>;
-  const sheet = readSheet(file.text, y.toJS());
+  if (!parsed?.sheet)
+    return <><Crumbs items={crumbs} />{head}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file.</CheckLine></>;
+  const { sheet } = parsed;
   const v = (pth: Path, orig: unknown) => (key(pth) in edits ? edits[key(pth)] : orig);
   const set = (pth: Path, raw: string, typed = false) => {
     setEdits({ ...edits, [key(pth)]: typed ? cellValue(raw) : raw.trim() ? raw : null });
@@ -213,7 +204,7 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
   const [save, runSave, setSave] = useSave(env);
   const file = p.files.file(p.cohort.org, 'classroom-config', 'teams.csv');
   const roster = p.files.file(p.cohort.org, 'classroom-config', 'students.csv');
-  const cfg = gradingConfig(p, a.template);
+  const cfg = useGradingConfig(p, a.template);
   const maxSize = Number(cfg.max_team_size ?? courseDefault(p, 'max_team_size') ?? 5) || 5;
   const formation = cfg.team_formation === 'assigned' ? 'You assign them' : 'Students form their own';
   const table = file.kind === 'ready' ? readTable(file.text) : { header: TEAMS_HEADER, rows: [] };

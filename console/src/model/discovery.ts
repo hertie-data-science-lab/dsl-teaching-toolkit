@@ -4,6 +4,7 @@
 
 import { parse } from 'yaml';
 import type { GitHubClient } from '../github/client';
+import { str } from './format';
 
 export const COURSE_HUB_TOPIC = 'dsl-course-hub';
 export const REGISTRY_PATH = 'cohort-courses-pages.yml';
@@ -26,6 +27,9 @@ export interface Course {
   meta: Record<string, unknown> | null; // dsl-course.yml as parsed, for Course details
 }
 
+/** "Course name, Fall 2026". */
+export const cohortName = (p: { course: Pick<Course, 'name'>; cohort: Pick<CohortRef, 'termLabel'> }) => `${p.course.name}, ${p.cohort.termLabel}`;
+
 const SEASON: Record<string, string> = { f: 'Fall', s: 'Spring', w: 'Winter', u: 'Summer' };
 
 /** "hertie-dsl-demo-f2026" -> { term: "f2026", label: "Fall 2026" }. */
@@ -46,10 +50,6 @@ export function parseRegistry(text: string | null | undefined): string[] {
   }
   const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { cohorts?: unknown }).cohorts : data;
   return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string' && c.length > 0) : [];
-}
-
-function str(v: unknown): string {
-  return typeof v === 'string' ? v : v == null ? '' : String(v);
 }
 
 export async function discoverCourse(client: GitHubClient, org: string): Promise<Course | null> {

@@ -10,7 +10,7 @@ import { discoverCourses, type Course } from './model/discovery';
 import { LiveFiles } from './model/files';
 import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
 import { StatusStore, type Loaded } from './model/status';
-import { DispatchAdapter } from './ops/adapter';
+import { DispatchAdapter, outcomePath } from './ops/adapter';
 import { OpPanel } from './ops/Panel';
 import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
@@ -193,7 +193,7 @@ export function createState({ auth, client }: AppDeps) {
     onFinished: (def) => {
       if (def.cohortOrg) {
         void statuses.reload(def.cohortOrg, 'classroom-config');
-        files.refresh(def.cohortOrg, 'classroom-config', `.dsl/outcomes/${def.op}.json`);
+        files.refresh(def.cohortOrg, 'classroom-config', outcomePath(def.op));
       }
       void statuses.reload(def.courseOrg, '.github');
     },

@@ -12,7 +12,7 @@ import type { Values } from '../tiers/types';
 import { cohortOrg as cohortOrgTiers } from '../tiers/wizard';
 import { Crumbs, Help } from '../ui/bits';
 import { useDraft } from '../wizards/drafts';
-import { cohortOrgName, cohortTerms, openAt, termLabel } from '../wizards/model';
+import { cohortOrgName, cohortTerms, openAt, TERM_RE, termLabel } from '../wizards/model';
 import { allOk, checkCohortSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
 import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified } from '../wizards/Wizard';
 import type { CourseProps } from './types';
@@ -53,7 +53,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
   const env = useEnv();
   const terms = cohortTerms(course.cohorts.map((c) => c.term), now);
   const [d, set] = useDraft<NkDraft>(`new-cohort:${course.org}`, () => ({}));
-  const term = d.term && /^[fs]\d{4}$/.test(d.term) ? d.term : terms[0];
+  const term = d.term && TERM_RE.test(d.term) ? d.term : terms[0];
   const org = d.org ?? cohortOrgName(course.org, course.code, term);
   const label = termLabel(term);
   const runs = env?.ops.runs.value.length ?? 0;

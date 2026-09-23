@@ -481,8 +481,12 @@ _CRON_CLOSE_TEMPLATE = (
 # `cancelled()`, not just `failure()`: a job killed by its own `timeout-minutes` is
 # CANCELLED, and a cron that reliably runs out of time is exactly the silent failure this
 # exists to surface.
+# The notice step's name, which the Console's copy swaps for its own.
+_CRON_NOTICE_NAME = "Report an unattended failure as an issue"
 _CRON_NOTICE_TEMPLATE = (
-    """      - name: Report an unattended failure as an issue
+    "      - name: "
+    + _CRON_NOTICE_NAME
+    + """
         id: notice
         if: """
     + _FAILED
@@ -1629,10 +1633,7 @@ _CONSOLE_REPORT = _fill(
         "A Console run failed or was cancelled: %s\\n\\n"
         "This issue closes itself once a Console run succeeds.\\n"
     ),
-).replace(
-    "Report an unattended failure as an issue",
-    "Report a failed Console run as an issue",
-)
+).replace(_CRON_NOTICE_NAME, "Report a failed Console run as an issue")
 
 
 def render_console() -> str:
@@ -1645,11 +1646,8 @@ def render_console() -> str:
     same refusal. The request reaches the CLI through `env:` only: it is JSON typed by
     whoever dispatched the run, and a `${{ }}` in a run block is substituted before the
     shell parses it."""
-    gate = _CHECK_TEAM_STEP.replace(
-        "      - name: Verify the user may run actions for THIS repo\n",
-        "      - name: Verify the user may run actions for THIS repo\n"
-        "        id: gate\n",
-    )
+    # `id: gate` goes straight under the step's `name:` line, its first.
+    gate = _CHECK_TEAM_STEP.replace("\n", "\n        id: gate\n", 1)
     return f"""name: Console
 
 # Runs what the Instructor Console asks for. Not a button to press here: the Console fills

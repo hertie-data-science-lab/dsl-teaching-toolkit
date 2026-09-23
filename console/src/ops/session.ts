@@ -4,6 +4,7 @@
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { effective } from '../forms/Form';
+import { wait } from '../github/client';
 import type { Operation } from '../model/types';
 import type { Tiers } from '../tiers/types';
 import type { Adapter, Handle, Progress, Result } from './adapter';
@@ -65,8 +66,6 @@ export interface SessionOptions {
   /** How many times to re-read a finished run whose outcome is not there yet. */
   outcomeTries?: number;
 }
-
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** The args a request for `def` carries: the options as the form resolves them, and the tick. */
 function requestArgs(def: OpDef, values: Record<string, unknown>, checked: boolean): Record<string, unknown> {

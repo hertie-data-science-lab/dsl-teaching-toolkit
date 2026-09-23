@@ -9,13 +9,13 @@ import { Field } from '../forms/Form';
 import { ago, fmtWhen } from '../model/format';
 import { parsePeople } from '../model/people';
 import type { Outcome } from '../model/types';
+import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { CheckLine, Crumbs, Help, Lives, Loading, OpsList } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Ext } from '../ui/icons';
-import { todayOf, tzOf, yearOf } from './Cohort';
-import { WithStatus, cohortCrumbs, cohortScope, useOperations } from './common';
+import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 const FRONT = /^---\n([\s\S]*?)\n---\n?/;
@@ -168,7 +168,7 @@ function Operations(p: ReadyProps) {
   const ops = useOperations(p.status.operations, p.cohort.org);
   const outcomes: Record<string, Outcome | undefined> = {};
   for (const op of new Set(ops.map((o) => o.op))) {
-    const f = p.files.file(p.cohort.org, 'classroom-config', `.dsl/outcomes/${op}.json`);
+    const f = p.files.file(p.cohort.org, 'classroom-config', outcomePath(op));
     if (f.kind === 'ready') {
       try {
         outcomes[op] = JSON.parse(f.text) as Outcome;

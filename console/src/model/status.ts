@@ -1,11 +1,11 @@
 // Reads `status.json` (contracts section 3), validates it against the exported schema and
 // decides whether it is stale by comparing its `inputs` with one tree read of the repo.
 
-import Ajv2020 from 'ajv/dist/2020';
 import { signal, type Signal } from '@preact/signals';
 import schema from '../../schemas/status.schema.json';
 import type { GitHubClient, Tree } from '../github/client';
 import type { Status } from './types';
+import { validator } from './validate';
 
 export const STATUS_PATH = '.dsl/status.json';
 
@@ -16,12 +16,11 @@ export type Loaded =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; status: Status; sha: string; stale: string[] };
 
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-const validator = ajv.compile(schema);
+const validStatus = validator(schema);
 
 export function validateStatus(data: unknown): string[] {
-  if (validator(data)) return [];
-  return (validator.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`);
+  if (validStatus(data)) return [];
+  return (validStatus.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message ?? 'is invalid'}`);
 }
 
 /**

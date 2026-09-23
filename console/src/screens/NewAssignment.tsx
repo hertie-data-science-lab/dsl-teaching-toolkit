@@ -3,18 +3,18 @@
 // accepts goes in its request; the Advanced marking values it does not accept are written
 // into the new template's grading_config.yml straight after, as its Settings form would.
 
-import Ajv2020 from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
-import { useSave } from '../edit/save';
+import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
+import { validator } from '../model/validate';
 import { createAssignment } from '../ops/defs';
 import { FORMATS, VISIBILITY, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
-import { Crumbs, Help } from '../ui/bits';
+import { Crumbs, Help, editUrl } from '../ui/bits';
 import { SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { useDraft } from '../wizards/drafts';
@@ -72,7 +72,7 @@ export function extrasOf(v: Values): Record<string, unknown> {
   return Object.fromEntries(EXTRA_KEYS.filter((k) => c[k] !== undefined).map((k) => [k, c[k]]));
 }
 
-const gradingValid = new Ajv2020({ allErrors: true, strict: false }).compile(gradingSchema);
+const gradingValid = validator(gradingSchema);
 
 /** grading_config.yml with `extras` applied, or null when nothing changes. */
 export function withExtras(text: string, extras: Record<string, unknown>): string | null {
@@ -156,7 +156,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const text = withExtras(tplNow.config.text, extrasOf(effective(tiers3, effective(tiers2, vv))));
     if (text === null) return set({ extrasSaved: repo });
     const y = new YamlText(text);
-    if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: `Not saved: grading_config.yml would not be valid (${(gradingValid.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` });
+    if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
     if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, text, tplNow.config.sha, { message: 'template: settings from the New assignment wizard, from the Instructor Console', statusRepo: [course.org, '.github'] }))
       set({ extrasSaved: repo });
   };
@@ -229,7 +229,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <>
             <Verified>Created. Nothing reaches students until you add it to a schedule.</Verified>
             <div class="actions">
-              <a class="btn" href={`https://github.com/${course.org}/${repo}/edit/main/README.md`} target="_blank" rel="noopener">Write the brief <Ext /></a>
+              <a class="btn" href={editUrl(course.org, repo, 'README.md')} target="_blank" rel="noopener">Write the brief <Ext /></a>
               {cohort ? <a class="btn outline" href={`?cohort=${cohort.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to {cohort.termLabel} schedule</a> : <a class="btn outline" href={`?course=${course.org}#new-cohort-1`}>Add to {termLabel(term)} schedule: set up the cohort first</a>}
             </div>
             <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>

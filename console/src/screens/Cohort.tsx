@@ -10,12 +10,8 @@ import { checkAccess, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
 import { Crumbs, Help, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
-import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, useOperations } from './common';
+import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-
-export const tzOf = (s: Status) => s.cohort?.timezone ?? 'Europe/Berlin';
-export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
-export const todayOf = (now: number, tz: string) => dayKey(new Date(now).toISOString(), tz);
 
 export function readSchedule(p: CohortProps): Schedule | null {
   const f = p.files.file(p.cohort.org, 'classroom-config', 'schedule.yml');

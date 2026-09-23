@@ -1,14 +1,14 @@
 // Course-side editors: S3 Course details (dsl-course.yml), S20 Public website, S19
 // Materials repo settings (publish.yml, .releaseignore).
 
-import Ajv2020 from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
 import courseSchema from '../../schemas/dsl_course.schema.json';
 import { useEnv, type Env } from '../env';
-import { matches } from '../edit/glob';
-import { useSave } from '../edit/save';
-import { YamlText, deepEqual } from '../edit/yamlText';
+import { compileAll, matchRules } from '../edit/glob';
+import { invalidText, useSave } from '../edit/save';
+import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
+import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { ABOUT, ASSIGNMENT_DEFAULTS, COHORT_DEFAULTS } from '../tiers/course';
@@ -20,8 +20,7 @@ import { Check, Ext } from '../ui/icons';
 import { courseView, CourseHeaderActions } from './Course';
 import type { CourseProps } from './types';
 
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-const validCourse = ajv.compile(courseSchema);
+const validCourse = validator(courseSchema);
 
 export function courseScope(p: Pick<CourseProps, 'course'>): Scope {
   return { courseOrg: p.course.org, where: p.course.name };
@@ -33,7 +32,6 @@ export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {
   return k ? { courseOrg: p.course.org, cohortOrg: k.org, where: k.termLabel } : null;
 }
 
-const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const clean = (v: Values): Values => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x === '' || x === null ? undefined : x]));
 
 // --------------------------------------------------------------------------- details
@@ -98,7 +96,7 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
 export function courseFileAfter(text: string, before: Details, after: Details, meta: Record<string, unknown>): { text: string } | { error: string } {
   const out = new YamlText(text);
   writeDetails(out, before, after, meta);
-  if (!validCourse(out.toJS())) return { error: `Not saved: dsl-course.yml would not be valid (${(validCourse.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` };
+  if (!validCourse(out.toJS())) return { error: invalidText('dsl-course.yml', validCourse) };
   return { text: out.text };
 }
 
@@ -277,10 +275,11 @@ export function WebsiteScreen(p: CourseProps) {
 
 function FileList({ files, patterns, cls, tag }: { files: string[]; patterns: string[]; cls: string; tag: string }) {
   const shown = files.slice(0, 400);
+  const rules = compileAll(patterns);
   return (
     <ul class="file-list">
       {shown.map((f) => {
-        const hit = matches(patterns, f);
+        const hit = matchRules(rules, f);
         return <li class={hit ? 'hit' : ''}><span>{f}</span>{hit ? <span class={`tag ${cls}`}>{tag}</span> : null}</li>;
       })}
       {files.length > shown.length ? <li>… and {files.length - shown.length} more</li> : null}

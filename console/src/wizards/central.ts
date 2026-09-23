@@ -4,7 +4,7 @@
 // its run, and then re-reads the org to verify. That workflow reports no dsl-outcome, so
 // the run's conclusion is the verdict and the org's live state is the proof.
 
-import type { GitHubClient } from '../github/client';
+import { wait, type GitHubClient } from '../github/client';
 import { ORG_RE } from './model';
 
 export const CENTRAL = { owner: 'hertie-data-science-lab', repo: 'dsl-teaching-toolkit', workflow: 'bootstrap-org.yml', ref: 'main' } as const;
@@ -40,8 +40,6 @@ export interface CentralRun {
   state: 'queued' | 'running' | 'completed';
   conclusion: string | null;
 }
-
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Dispatch Bootstrap Course Org and follow it to the end, reporting each poll. */
 export async function runBootstrap(

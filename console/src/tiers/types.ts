@@ -33,3 +33,6 @@ export interface FieldTier {
 }
 
 export type Tiers = Record<string, FieldTier>;
+
+/** One option of a select or radio field. */
+export const opt = (value: string, label: string, sub?: string) => ({ value, label, sub });

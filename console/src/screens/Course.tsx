@@ -1,10 +1,9 @@
 // S2 Course overview and S17 Template settings (read).
 
-import Ajv2020 from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
-import { useSave } from '../edit/save';
+import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { assignmentIdent } from '../model/format';
@@ -14,7 +13,8 @@ import { fromConfig, settingsTiers, toConfig, type CourseDefaults } from '../tie
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
-import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon } from '../ui/bits';
+import { validator } from '../model/validate';
+import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { courseScope, newestScope } from './CourseEdit';
 import type { CourseProps } from './types';
@@ -40,7 +40,7 @@ export function CourseHeaderActions({ course, ready }: { course: CourseProps['co
       <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-cohort-1`}>New cohort</a>
       <a class="btn outline" href="#website">Publish website</a>
       {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Check now" title="Check now runs on a cohort; this course has none yet." />}
-      <a class="btn quiet" href={`https://github.com/${course.org}`} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
+      <a class="btn quiet" href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </div>
   );
 }
@@ -171,7 +171,7 @@ export function CourseScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- S17
 
-const gradingValid = new Ajv2020({ allErrors: true, strict: false }).compile(gradingSchema);
+const gradingValid = validator(gradingSchema);
 
 function Questions({ rows, set }: { rows: [string, string][]; set: (r: [string, string][]) => void }) {
   const total = rows.reduce((s, [, n]) => s + (Number(n) || 0), 0);
@@ -241,7 +241,7 @@ export function TemplateScreen(p: CourseProps) {
       const rows = qdraft.filter(([name]) => name.trim());
       y.assign(['questions'], rows.length ? Object.fromEntries(rows.map(([name, n]) => [name.trim(), n === '' ? null : Number.isFinite(Number(n)) ? Number(n) : n])) : undefined);
     }
-    if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: `Not saved: grading_config.yml would not be valid (${(gradingValid.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` });
+    if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
     if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the Instructor Console`, statusRepo: [course.org, '.github'] })) {
       setValues(null);
       setQdraft(null);

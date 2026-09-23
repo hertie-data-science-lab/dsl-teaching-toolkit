@@ -40,7 +40,6 @@ OUTCOME_SCHEMA = "dsl.outcome/1"
 STATUS_SCHEMA = "dsl.status/1"
 
 DISPATCH = "dispatch"
-EDIT = "edit"
 COURSE = "course"
 COHORT = "cohort"
 BOOTSTRAP_OP = "cohort.bootstrap"
@@ -382,10 +381,6 @@ def _open_window(request: Request) -> list[str]:
     return [*_course_cohort(request), "--assignment", _a(request, "assignment")]
 
 
-def _sync_membership(request: Request) -> list[str]:
-    return ["--course-org", request.course_org, "--cohort-org", request.cohort_org]
-
-
 # ------------------------------------------------------------------ the registry
 
 _RELEASE_ENTRY_ARGS = _args(
@@ -608,7 +603,7 @@ _OPS = (
         done_text="Staff access checked.",
         doc="docs/05-manage-teaching-team.md",
         module="sync_membership",
-        argv=_sync_membership,
+        argv=_course_cohort,
         preview_flag="--dry-run",
     ),
     Operation(

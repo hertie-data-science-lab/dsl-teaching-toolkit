@@ -1,12 +1,10 @@
 // S6 Schedule with its entry sheet (the schedule editor) and S11 Release detail.
 
-import Ajv2020 from 'ajv/dist/2020';
-import { useState } from 'preact/hooks';
-import { parse } from 'yaml';
+import { useMemo, useState } from 'preact/hooks';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
-import { matches } from '../edit/glob';
-import { useSave } from '../edit/save';
+import { compileAll, matchRules } from '../edit/glob';
+import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
@@ -16,6 +14,7 @@ import {
   type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type TermDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
+import { validator } from '../model/validate';
 import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
@@ -23,14 +22,13 @@ import { TIMEZONES } from '../tiers/course';
 import { Crumbs, EditFile, Help, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { Check } from '../ui/icons';
-import { releaseRef, tzOf, yearOf } from './Cohort';
+import { releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
-import { CheckNow, WithStatus, cohortCrumbs, cohortScope } from './common';
+import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-const validSchedule = ajv.compile(scheduleSchema);
+const validSchedule = validator(scheduleSchema);
 
 /** What the student site shows in the Details cell. */
 function Details({ r }: { r: Row }) {
@@ -56,12 +54,17 @@ interface SchedFile {
 
 function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   const f = p.files.file(p.cohort.org, 'classroom-config', 'schedule.yml');
+  const text = f.kind === 'ready' ? f.text : null;
+  const parsed = useMemo(() => {
+    if (text === null) return null;
+    const y = new YamlText(text);
+    const errors = y.errors;
+    const doc = errors.length ? {} : ((y.toJS() ?? {}) as Record<string, unknown>);
+    return { doc: doc && typeof doc === 'object' ? doc : {}, error: errors[0] ?? null };
+  }, [text]);
   if (f.kind === 'loading') return 'loading';
   if (f.kind !== 'ready') return null;
-  const y = new YamlText(f.text);
-  const errors = y.errors;
-  const doc = errors.length ? {} : ((y.toJS() ?? {}) as Record<string, unknown>);
-  return { text: f.text, sha: f.sha, doc: doc && typeof doc === 'object' ? doc : {}, error: errors[0] ?? null };
+  return { text: f.text, sha: f.sha, ...parsed! };
 }
 
 // ------------------------------------------------------------------ the entry sheet
@@ -100,9 +103,9 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
     );
   }
   const ign = p.files.file(p.course.org, dp.repo, '.releaseignore');
-  const lines = ign.kind === 'ready' ? ign.text.split('\n') : [];
+  const rules = compileAll(ign.kind === 'ready' ? ign.text.split('\n') : []);
   const files = hit.dir ? tree.paths.filter((x) => !x.dir && x.path.startsWith(`${folder}/`)) : [hit];
-  const withheld = files.filter((x) => matches(lines, x.path)).length;
+  const withheld = files.filter((x) => matchRules(rules, x.path)).length;
   return <span class="valid-msg"><Check />Ready; {files.length} file{files.length === 1 ? '' : 's'}{withheld ? `, ${withheld} withheld` : ''}</span>;
 }
 
@@ -175,14 +178,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
 }
 
 function templateVisibility(p: ReadyProps, template: string): string {
-  if (!template) return 'private';
-  const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
-  if (f.kind !== 'ready') return 'private';
-  try {
-    return String((parse(f.text) as Record<string, unknown>)?.visibility ?? 'private');
-  } catch {
-    return 'private';
-  }
+  return template ? String(gradingConfig(p, template).visibility ?? 'private') : 'private';
 }
 
 function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; lateDays: string }) {
@@ -332,7 +328,7 @@ function View(p: ReadyProps) {
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
   const doc = sf?.doc ?? {};
-  const sched = sf && !sf.error ? parseSchedule(sf.text) : null;
+  const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
   const key = p.entry;
   const current = key && key !== 'new' && key !== 'term' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
@@ -376,7 +372,7 @@ function View(p: ReadyProps) {
     for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
     const out = y.toJS();
     if (!validSchedule(out)) {
-      setSave({ kind: 'bad', text: `Not saved: the schedule would not be valid (${(validSchedule.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` });
+      setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
       return;
     }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
