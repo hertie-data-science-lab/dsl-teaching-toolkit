@@ -1,12 +1,22 @@
 // S2 Course overview and S17 Template settings (read).
 
+import Ajv2020 from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
-import { parse } from 'yaml';
+import gradingSchema from '../../schemas/grading_config.schema.json';
+import { useEnv } from '../env';
+import { useSave } from '../edit/save';
+import { YamlText, deepEqual } from '../edit/yamlText';
+import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { assignmentIdent } from '../model/format';
+import { checkNow, derive } from '../ops/defs';
+import { OpButtons } from '../ops/Panel';
+import { fromConfig, settingsTiers, toConfig } from '../tiers/grading';
+import type { Tiers, Values } from '../tiers/types';
+import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
-import { CheckLine, Crumbs, EditFile, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon } from '../ui/bits';
-import { Ext, Lock } from '../ui/icons';
-import { CheckNow } from './common';
+import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon } from '../ui/bits';
+import { Ext } from '../ui/icons';
+import { courseScope, newestScope } from './CourseEdit';
 import type { CourseProps } from './types';
 
 /** The course block and course-scoped problems: from the course's own status, else a cohort's. */
@@ -27,9 +37,9 @@ function problemsOf(p: CourseProps, cohortOrg: string): number | null {
 export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
   return (
     <div class="actions">
-      <Soon label="New cohort" cls={ready ? 'btn' : 'btn quiet'} />
-      <Soon label="Publish website" cls="btn outline" />
-      <CheckNow />
+      <Soon label="New cohort" cls={ready ? 'btn' : 'btn quiet'} title="The New cohort wizard comes with the wizards." />
+      <a class="btn outline" href="#website">Publish website</a>
+      {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Check now" title="Check now runs on a cohort; this course has none yet." />}
       <a class="btn quiet" href={`https://github.com/${course.org}`} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </div>
   );
@@ -103,7 +113,7 @@ export function CourseScreen(p: CourseProps) {
                   <li>
                     <span class="r-title">{m.repo} <span class={`chip ${m.state === 'ready' ? 'ok' : 'amber'}`}>{m.state === 'ready' ? 'Ready' : 'Not written'}</span></span>
                     <span class="r-sub">{m.state === 'ready' ? 'Syllabus written.' : 'The syllabus is still the template text; students would see it at the first release.'}</span>
-                    <span class="r-side"><a class="btn small quiet" href={`https://github.com/${course.org}/${m.repo}`} target="_blank" rel="noopener">Open <Ext /></a></span>
+                    <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 ))}
               </ul>
@@ -112,7 +122,7 @@ export function CourseScreen(p: CourseProps) {
         </div>
         <div class="grid-2">
           <section class="panel section">
-            <div class="section-head"><h2>Course details</h2><Soon label="Edit course details" cls="btn small quiet" /></div>
+            <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
             <dl class="kv">
               <dt>Name</dt><dd>{course.name}</dd>
               <dt>Code</dt><dd>{course.code || 'not set'}</dd>
@@ -145,7 +155,7 @@ export function CourseScreen(p: CourseProps) {
             <section class="panel section">
               <div class="section-head"><h2>Public website</h2><span class={`chip ${pub ? 'ok' : ''}`}>{pub ? 'Published' : 'Not published'}</span></div>
               <p style="color:var(--ink-2)">Optional: an open version of your materials for anyone, updated daily.</p>
-              {pub ? <a class="textlink" href={`https://${course.org}.github.io`} target="_blank" rel="noopener">{course.org}.github.io</a> : null}
+              <a class="textlink" href="#website">Public website settings</a>
             </section>
           </div>
         </div>
@@ -156,22 +166,37 @@ export function CourseScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- S17
 
-const FORMAT_WORD: Record<string, string> = { ipynb: 'Jupyter notebook', py: 'Python files', rmd: 'R Markdown', qmd: 'Quarto', latex: 'LaTeX', none: 'No starter file' };
-const SUBMIT_WORD: Record<string, string> = { assignment_repo: 'Their own repo', shared_dropbox_repo: 'A shared drop box', external: 'Elsewhere', github: 'Their own repo' };
-const VIS_WORD: Record<string, string> = { private: 'Private', public: 'Public', student_choice: 'Student’s choice' };
-const yesNo = (v: unknown) => (v === true ? 'On' : v === false ? 'Off' : v == null ? '' : String(v));
+const gradingValid = new Ajv2020({ allErrors: true, strict: false }).compile(gradingSchema);
 
-function Field({ label, value, hint, bad }: { label: string; value: string; hint?: string; bad?: boolean }) {
+function Questions({ rows, set }: { rows: [string, string][]; set: (r: [string, string][]) => void }) {
+  const total = rows.reduce((s, [, n]) => s + (Number(n) || 0), 0);
   return (
     <div class="field">
-      <span class="label">{label}{hint ? <span class="default"> {hint}</span> : null}</span>
-      <div class="readonly" style={bad ? 'background:var(--bad-soft);color:var(--bad-ink)' : undefined}>{value || '—'}</div>
+      <span class="label">Points per question</span>
+      {rows.length ? (
+        <table class="qtable">
+          <thead><tr><th>Question</th><th>Points</th><th /></tr></thead>
+          <tbody>
+            {rows.map(([q, n], i) => (
+              <tr>
+                <td><input type="text" value={q} aria-label={`Question ${i + 1} name`} onInput={(e) => set(rows.map((r, j) => (j === i ? [(e.target as HTMLInputElement).value, r[1]] : r)))} /></td>
+                <td><input type="number" min="0" value={n} aria-label={`Question ${i + 1} points`} style="max-width:90px" onInput={(e) => set(rows.map((r, j) => (j === i ? [r[0], (e.target as HTMLInputElement).value] : r)))} /></td>
+                <td><button class="x" type="button" aria-label={`Remove question ${i + 1}`} onClick={() => set(rows.filter((_, j) => j !== i))}>&times;</button></td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr><td>Total</td><td>{total}</td><td /></tr></tfoot>
+        </table>
+      ) : <div class="readonly">Not set: the mark sheet takes one flat score.</div>}
+      <div><button class="btn small quiet" type="button" onClick={() => set([...rows, [`Q${rows.length + 1}`, '']])}>Add a question</button></div>
+      <p class="why">The mark sheet gets one column per question.</p>
     </div>
   );
 }
 
 export function TemplateScreen(p: CourseProps) {
   const { course, entry } = p;
+  const env = useEnv();
   const slug = entry ?? '';
   const v = courseView(p);
   const fromCourse = v.course?.templates?.find((t) => t.slug === slug)?.repo;
@@ -181,22 +206,44 @@ export function TemplateScreen(p: CourseProps) {
   const repo = fromCourse ?? fromCohort ?? slug;
   const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
   const problems = v.problems.filter((x) => x.fix?.entry === slug);
+  const [values, setValues] = useState<Values | null>(null);
+  const [qdraft, setQdraft] = useState<[string, string][] | null>(null);
+  const [save, runSave, setSave] = useSave(env);
   let cfg: Record<string, unknown> = {};
   let parseError = '';
   if (file.kind === 'ready') {
-    try {
-      cfg = (parse(file.text) ?? {}) as Record<string, unknown>;
-    } catch (e) {
-      parseError = e instanceof Error ? e.message : String(e);
-    }
+    const y = new YamlText(file.text);
+    if (y.errors.length) parseError = y.errors[0];
+    else cfg = (y.toJS() ?? {}) as Record<string, unknown>;
   }
-  const s = (k: string) => (cfg[k] == null ? '' : String(cfg[k]));
-  const group = s('type') === 'group';
-  const submit = s('submit_via') || 'assignment_repo';
-  const questions = cfg.questions && typeof cfg.questions === 'object' ? Object.entries(cfg.questions as Record<string, unknown>) : [];
-  const total = questions.reduce((a, [, n]) => a + (Number(n) || 0), 0);
-  const autograde = cfg.autograde;
-  const title = s('title');
+  const defaults = {
+    lateDays: dflt(course.meta, 'late_window_days') || '10', latePct: dflt(course.meta, 'late_penalty_per_day') || '10%', teamSize: dflt(course.meta, 'max_team_size') || '5',
+  };
+  const tiers = settingsTiers(defaults);
+  const base = fromConfig(cfg);
+  const cur = values ?? base;
+  const baseQ: [string, string][] = cfg.questions && typeof cfg.questions === 'object' ? Object.entries(cfg.questions as Record<string, unknown>).map(([q, n]) => [q, String(n ?? '')]) : [];
+  const q = qdraft ?? baseQ;
+  const errors = fieldErrors(null, tiers, cur);
+  const dirty = (values !== null && !deepEqual(effective(tiers, values), effective(tiers, base))) || (qdraft !== null && !deepEqual(qdraft, baseQ));
+  const title = String(cfg.title ?? '');
+  const scope = courseScope(p);
+  const doSave = async () => {
+    if (file.kind !== 'ready') return;
+    if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+    const y = new YamlText(file.text);
+    const was = toConfig(effective(tiers, base)), now = toConfig(effective(tiers, cur));
+    for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
+    if (qdraft !== null && !deepEqual(qdraft, baseQ)) {
+      const rows = qdraft.filter(([name]) => name.trim());
+      y.assign(['questions'], rows.length ? Object.fromEntries(rows.map(([name, n]) => [name.trim(), n === '' ? null : Number.isFinite(Number(n)) ? Number(n) : n])) : undefined);
+    }
+    if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: `Not saved: grading_config.yml would not be valid (${(gradingValid.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` });
+    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the Instructor Console`, statusRepo: [course.org, '.github'] })) {
+      setValues(null);
+      setQdraft(null);
+    }
+  };
   return (
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Templates', href: '#templates' }, { t: assignmentIdent(slug) }]} />
@@ -216,62 +263,36 @@ export function TemplateScreen(p: CourseProps) {
           <div class="form">
             <div class="form-section">
               <h3>What it is</h3>
-              <Field label="Title" value={title} hint="shown to students on the site and in their repo" />
+              <SchemaForm id="g1" schema={null} tiers={{ title: tiers.title }} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
               <Lives org={course.org} repo={repo} path="README.md" />
             </div>
             <div class="form-section">
               <h3>How students work on it</h3>
-              <Field label="Alone or in teams" value={group ? 'In teams' : 'Alone'} />
-              {group ? (
-                <div class="cond">
-                  <Field label="How teams form" value={s('team_formation') === 'assigned' ? 'You assign them' : 'Students form their own'} />
-                  <Field label="Largest team" value={s('max_team_size') || `course default: ${dflt(course.meta, 'max_team_size') || '5'}`} />
-                </div>
-              ) : null}
-              <Field label="Where students submit" value={SUBMIT_WORD[submit] ?? submit} />
-              {submit === 'external' ? <div class="cond"><Field label="Link to where they submit" value={s('submit_url')} /></div> : null}
-              <div class="field">
-                <span class="label">Who can see each student’s repo</span>
-                <div class="readonly"><Lock />{submit === 'assignment_repo' ? `${VIS_WORD[s('visibility') || 'private'] ?? s('visibility')}. Set when the template was created; cannot be changed.` : submit === 'shared_dropbox_repo' ? 'Private: a shared drop box is always private.' : 'Private: the repo holds the brief only.'}</div>
-              </div>
+              <SchemaForm id="g2" schema={null} tiers={pick(tiers, ['type', 'team_formation', 'max_team_size', 'submit_via', 'submit_url', 'visibility'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
             </div>
             <div class="form-section">
               <h3>How it is marked</h3>
-              <Field label="What students hand in" value={FORMAT_WORD[s('format')] ?? (s('format') || 'Jupyter notebook')} />
-              <Field label="Run automatic tests on submissions" value={yesNo(autograde)} bad={autograde !== undefined && typeof autograde !== 'boolean'} />
-              {autograde === true ? <div class="cond"><Field label="Tests folder" value="tests" hint="on the solution branch; students never see it" /></div> : null}
-              <div class="field">
-                <span class="label">Points per question</span>
-                {questions.length ? (
-                  <table class="qtable">
-                    <thead><tr><th>Question</th><th>Points</th></tr></thead>
-                    <tbody>{questions.map(([q, n]) => <tr><td>{q}</td><td>{String(n)}</td></tr>)}</tbody>
-                    <tfoot><tr><td>Total</td><td>{total}</td></tr></tfoot>
-                  </table>
-                ) : <div class="readonly">Not set: the mark sheet takes one flat score.</div>}
-              </div>
-              <details class="fold">
-                <summary>Advanced</summary>
-                <div class="fold-body">
-                  <Field label="Completion check" value={yesNo(cfg.completion_check) || 'auto'} />
-                  <Field label="Marker PDF" value={yesNo(cfg.grader_pdf) || 'Off'} />
-                  <Field label="Late work for this assignment" value={s('late_window_days') || s('late_penalty_per_day') ? `${s('late_penalty_per_day') || '10%'} per day, up to ${s('late_window_days') || '10'} days` : 'course default'} />
-                </div>
-              </details>
+              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['format', 'autograde', 'tests'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
+              <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} />
+              <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} advancedOpen={!!errors.late_window_days || !!errors.late_penalty_per_day} />
               <Lives org={course.org} repo={repo} path="grading_config.yml" branch="solution" />
               <p class="footnote">On the solution branch.</p>
             </div>
             <div class="form-section">
               <h3>Student version</h3>
               <p style="font-size:14px;color:var(--ink-2)">Builds the student starter on main from the solution branch, removing marked answers.</p>
-              <div class="actions"><Soon label="Preview" cls="btn small" /><Soon label="Derive student version" cls="btn small outline" /></div>
+              <div class="actions"><OpButtons def={derive(scope, slug, repo, `${assignmentIdent(slug)}${title ? `: ${title}` : ''}`)} small /></div>
             </div>
             <div class="form-section">
-              <div class="savebar"><Soon label="Save" title="Coming in this build: the template settings form." /><EditFile org={course.org} repo={repo} path="grading_config.yml" branch="solution" /></div>
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: course.org, repo, path: 'grading_config.yml', branch: 'solution' }} />
             </div>
           </div>
         </div>
       ) : null}
     </>
   );
+}
+
+function pick(t: Tiers, keys: string[]): Tiers {
+  return Object.fromEntries(keys.filter((k) => t[k]).map((k) => [k, t[k]]));
 }
