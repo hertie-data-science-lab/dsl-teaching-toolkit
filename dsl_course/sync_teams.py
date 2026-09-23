@@ -28,7 +28,12 @@ import argparse
 import sys
 
 from . import roster, schedule, teams
-from .gh_teams import create_team, list_teams, reconcile_team_members
+from .gh_teams import (
+    CREATED,
+    create_team_outcome,
+    list_teams,
+    reconcile_team_members,
+)
 from .log import log_err, log_ok, log_person, log_step
 
 # The naming rules live with the file's parser, which is the only thing that can refuse a
@@ -97,11 +102,19 @@ def ensure_team(org: str, slug: str, members: set[str], prune: bool) -> bool:
     Reconciliation goes through gh_teams.reconcile_team_members so pruning inherits its
     guard: an org Owner - or the acting login, which GitHub auto-adds as a member of
     whatever team it creates - is never removed. Without it, a maintainer or the bot
-    sitting in a project team would be evicted on the next pruning sync."""
-    ok = create_team(org, slug, description=PROJECT_TEAM_DESCRIPTION)
-    if not ok:
+    sitting in a project team would be evicted on the next pruning sync.
+
+    A team this call made is reconciled without reading it back: GitHub's REST API 404s a
+    new team for up to minutes, and its membership is known (see `just_created`)."""
+    outcome = create_team_outcome(org, slug, description=PROJECT_TEAM_DESCRIPTION)
+    if outcome is None:
         return False
-    return reconcile_team_members(org, slug, members, prune=prune) == 0
+    return (
+        reconcile_team_members(
+            org, slug, members, prune=prune, just_created=outcome == CREATED
+        )
+        == 0
+    )
 
 
 def known_handles(students: list[roster.Student] | None) -> set[str]:
