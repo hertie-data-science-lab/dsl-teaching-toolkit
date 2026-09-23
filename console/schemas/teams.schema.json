@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "columns": [
+    "assignment",
+    "team",
+    "github_handle"
+  ],
+  "items": {
+    "additionalProperties": false,
+    "properties": {
+      "assignment": {
+        "type": "string"
+      },
+      "github_handle": {
+        "type": "string"
+      },
+      "team": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "assignment",
+      "team",
+      "github_handle"
+    ],
+    "type": "object"
+  },
+  "title": "classroom-config/teams.csv",
+  "type": "array"
+}

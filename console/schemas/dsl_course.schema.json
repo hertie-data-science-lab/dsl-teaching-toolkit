@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assignment_defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "ipynb",
+            "py",
+            "rmd",
+            "qmd",
+            "latex",
+            "none"
+          ],
+          "type": "string"
+        },
+        "late_penalty_per_day": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "late_window_days": {
+          "type": "integer"
+        },
+        "max_team_size": {
+          "type": "integer"
+        },
+        "submit_via": {
+          "enum": [
+            "assignment_repo",
+            "shared_dropbox_repo",
+            "external"
+          ],
+          "type": "string"
+        },
+        "team_formation": {
+          "enum": [
+            "self_select",
+            "assigned"
+          ],
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "public",
+            "student_choice"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "central_ref": {
+      "pattern": "^(?:main|release|preview|[0-9a-f]{40})$",
+      "type": "string"
+    },
+    "cohort_defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "archive": {
+          "additionalProperties": false,
+          "properties": {
+            "auto": {
+              "type": "boolean"
+            },
+            "grace_days": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "course_code": {
+      "type": "string"
+    },
+    "course_description": {
+      "type": "string"
+    },
+    "course_name": {
+      "type": "string"
+    },
+    "org": {
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$",
+      "type": "string"
+    },
+    "org_name": {
+      "type": "string"
+    },
+    "people": {
+      "additionalProperties": false,
+      "properties": {
+        "course_admins": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "github_handle": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "github_handle"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "instructors": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "github_handle": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photo": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "site_link_extensions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "org"
+  ],
+  "title": ".github/dsl-course.yml",
+  "type": "object"
+}

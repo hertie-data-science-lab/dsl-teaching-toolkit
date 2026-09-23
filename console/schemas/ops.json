@@ -1,0 +1,664 @@
+{
+  "ops": [
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/reference/actions-reference.md",
+      "help": "Check the cohort's setup and refresh what the console shows.",
+      "name": "cohort.check",
+      "preview": false,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "Reasons carry one entry per release that is due and would not go out.",
+      "doc": "docs/07-schedule-releases.md",
+      "help": "Preview what automation would release in this cohort now.",
+      "name": "cohort.preview_automation",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "cohort_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "cohort_dest_repo": {
+            "description": "Cohort repo to release into",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "course_source_path": {
+            "description": "Path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "course_source_repo": {
+            "description": "Course-org repo to release from",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "entry": {
+            "description": "The schedule.yml releases key",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "Copied paths per destination, as deploy reports them.",
+      "doc": "docs/08-release-materials-to-cohort.md",
+      "help": "Release a scheduled entry now.",
+      "name": "release.now",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "cohort_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "cohort_dest_repo": {
+            "description": "Cohort repo to release into",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "course_source_path": {
+            "description": "Path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "course_source_repo": {
+            "description": "Course-org repo to release from",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "entry": {
+            "description": "The schedule.yml releases key",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "Copied paths per destination, as deploy reports them.",
+      "doc": "docs/08-release-materials-to-cohort.md",
+      "help": "Release a planned entry before its scheduled time.",
+      "name": "release.early",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "cohort_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "cohort_dest_repo": {
+            "description": "Cohort repo to release into",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "course_source_path": {
+            "description": "Path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "course_source_repo": {
+            "description": "Course-org repo to release from",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "entry": {
+            "description": "The schedule.yml releases key",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "Copied paths per destination, as deploy reports them.",
+      "doc": "docs/08-release-materials-to-cohort.md",
+      "help": "Release an entry again, to carry a fixed file.",
+      "name": "release.rerun",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "cohort_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "cohort_dest_repo": {
+            "description": "Cohort repo to release into",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "course_source_path": {
+            "description": "Path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "course_source_repo": {
+            "description": "Course-org repo to release from",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "course_source_repo",
+          "course_source_path"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "Copied paths per destination, as deploy reports them.",
+      "doc": "docs/08-release-materials-to-cohort.md",
+      "help": "Release a folder that is not in the schedule.",
+      "name": "release.adhoc",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/08-release-materials-to-cohort.md",
+      "help": "Keep this cohort's edits for future terms: one pull request per source repo.",
+      "name": "release.propagate_back",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "course_source_repo": {
+            "description": "The course-org assignment template repo",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "include_solution": {
+            "description": "Also push the solution branch",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "course_source_repo"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "Repos by what happened to them (created, skipped, ...).",
+      "doc": "docs/09-release-assignment-to-cohort.md",
+      "help": "Hand out an assignment now.",
+      "name": "assignment.handout_now",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "course_source_repo": {
+            "description": "The course-org assignment template repo",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "overwrite": {
+            "description": "Replace a file the student has changed",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "File or folder on the template's main",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "slug": {
+            "description": "The schedule.yml assignment key, when two share a template",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "course_source_repo",
+          "path"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/09-release-assignment-to-cohort.md",
+      "help": "Update every copy of an assignment with a fixed file.",
+      "name": "assignment.update_copies",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "course_source_repo": {
+            "description": "The course-org assignment template repo",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "slug": {
+            "description": "The schedule.yml assignment key, when two share a template",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "course_source_repo"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/10-grade-and-return-assignments.md",
+      "help": "Bring the marking sheet up to date with the latest submissions.",
+      "name": "assignment.collect_now",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "workflow:collect-submissions.yml"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_feedback": {
+            "description": "Put the feedback text in the email",
+            "type": "boolean"
+          },
+          "notify": {
+            "description": "Email students that there are new marks",
+            "type": "boolean"
+          },
+          "receipt_note": {
+            "description": "Post a note on each receipts thread",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "Gradebooks written and emails sent, as distribute reports them.",
+      "doc": "docs/10-grade-and-return-assignments.md",
+      "help": "Return marks and feedback to students.",
+      "name": "grades.return",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "Codes sent and rows skipped; never an address.",
+      "doc": "docs/06-enrol-students-to-cohort.md",
+      "help": "Send new codes to every student who has not joined; old codes stop working.",
+      "name": "roster.send_codes",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/11-configure-cohort-site.md",
+      "help": "Update the cohort site now.",
+      "name": "site.update",
+      "preview": false,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/05-manage-teaching-team.md",
+      "help": "Check staff and student access against people.yml, the roster and teams.",
+      "name": "access.check",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "description": "Archive before the cohort's archive date",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/10-grade-and-return-assignments.md",
+      "help": "Archive the cohort: every repo read-only, nothing deleted.",
+      "name": "cohort.archive",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_lectures": {
+            "description": "Publish lecture files",
+            "type": "boolean"
+          },
+          "readings_mode": {
+            "enum": [
+              "reading-list",
+              "actual-readings",
+              "none"
+            ],
+            "type": "string"
+          },
+          "source_repo": {
+            "description": "Materials repo; replaces the live public site",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_repo"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/reference/actions-reference.md",
+      "help": "Publish the public website from a materials repo.",
+      "name": "course.publish_website",
+      "preview": false,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "course",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "course_source_repo": {
+            "description": "The course-org assignment template repo",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "course_source_repo"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/03-add-assignment-to-course.md",
+      "help": "Write the student starter onto main from the solution branch.",
+      "name": "assignment.derive_starter",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "course",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "course_source_repo": {
+            "description": "Repo holding the syllabus",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "course_source_repo"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/07-schedule-releases.md",
+      "help": "Write the syllabus's session list from the cohort's schedule.",
+      "name": "assignment.generate_syllabus",
+      "preview": true,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "copy_from": {
+            "description": "Materials repo to copy forward",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "public_dirs": {
+            "enum": [
+              "(nothing public)",
+              "lectures",
+              "everything except readings",
+              "everything"
+            ],
+            "type": "string"
+          },
+          "public_types": {
+            "enum": [
+              "html",
+              "html + pdf",
+              "all files"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "description": "Term tag, e.g. f2026",
+            "pattern": "^[fs][0-9]{4}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/02-add-materials-to-course.md",
+      "help": "Create a materials repo for a term.",
+      "name": "materials.create",
+      "preview": false,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "course",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "autograde": {
+            "description": "Seed tests and run them at the cutoff",
+            "type": "boolean"
+          },
+          "copy_from": {
+            "description": "Template to copy forward",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "format": {
+            "description": "Starter file(s), comma-separated",
+            "pattern": "^(?:none|(?:ipynb|py|rmd|qmd|latex)(?:,(?:ipynb|py|rmd|qmd|latex))*)$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The assignment's name",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,200}$",
+            "type": "string"
+          },
+          "number": {
+            "description": "Assignment number",
+            "pattern": "^[0-9]{1,3}$",
+            "type": "string"
+          },
+          "submit_via": {
+            "enum": [
+              "assignment_repo",
+              "shared_dropbox_repo",
+              "external"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "description": "Term tag, e.g. f2026",
+            "pattern": "^[fs][0-9]{4}$",
+            "type": "string"
+          },
+          "team_formation": {
+            "enum": [
+              "self_select",
+              "assigned"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "individual",
+              "group"
+            ],
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "private",
+              "public",
+              "student_choice"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "tag"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/03-add-assignment-to-course.md",
+      "help": "Create an assignment template.",
+      "name": "assignment.create",
+      "preview": false,
+      "required_team": "instructors",
+      "runs_as": "dispatch",
+      "scope": "course",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/04-new-cohort-org.md",
+      "help": "Set up an empty cohort org for a new term.",
+      "name": "cohort.bootstrap",
+      "preview": false,
+      "required_team": "course-admin",
+      "runs_as": "dispatch",
+      "scope": "cohort",
+      "via": "inline"
+    }
+  ]
+}

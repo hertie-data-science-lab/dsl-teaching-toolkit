@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "autograde": {
+      "type": "boolean"
+    },
+    "completion_check": {
+      "type": "boolean"
+    },
+    "format": {
+      "enum": [
+        "ipynb",
+        "py",
+        "rmd",
+        "qmd",
+        "latex",
+        "none"
+      ],
+      "type": "string"
+    },
+    "grader_pdf": {
+      "type": "boolean"
+    },
+    "late_penalty_per_day": {
+      "type": [
+        "string",
+        "number"
+      ]
+    },
+    "late_window_days": {
+      "type": "integer"
+    },
+    "max_team_size": {
+      "type": "integer"
+    },
+    "questions": {
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number"
+        ]
+      },
+      "type": "object"
+    },
+    "submit_url": {
+      "type": "string"
+    },
+    "submit_via": {
+      "enum": [
+        "assignment_repo",
+        "shared_dropbox_repo",
+        "external"
+      ],
+      "type": "string"
+    },
+    "team_formation": {
+      "enum": [
+        "self_select",
+        "assigned"
+      ],
+      "type": "string"
+    },
+    "tests": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "individual",
+        "group"
+      ],
+      "type": "string"
+    },
+    "visibility": {
+      "enum": [
+        "private",
+        "public",
+        "student_choice"
+      ],
+      "type": "string"
+    }
+  },
+  "title": "grading_config.yml",
+  "type": "object"
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$",
+      "type": "string"
+    },
+    "args": {
+      "type": "object"
+    },
+    "client": {
+      "pattern": "^[A-Za-z0-9._/+-]{0,64}$",
+      "type": "string"
+    },
+    "cohort_org": {
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$",
+      "type": "string"
+    },
+    "course_org": {
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$",
+      "type": "string"
+    },
+    "op": {
+      "enum": [
+        "access.check",
+        "assignment.collect_now",
+        "assignment.create",
+        "assignment.derive_starter",
+        "assignment.generate_syllabus",
+        "assignment.handout_now",
+        "assignment.update_copies",
+        "cohort.archive",
+        "cohort.bootstrap",
+        "cohort.check",
+        "cohort.preview_automation",
+        "course.publish_website",
+        "grades.return",
+        "materials.create",
+        "release.adhoc",
+        "release.early",
+        "release.now",
+        "release.propagate_back",
+        "release.rerun",
+        "roster.send_codes",
+        "site.update"
+      ],
+      "type": "string"
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "schema": {
+      "enum": [
+        "dsl.request/1"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "op",
+    "actor",
+    "course_org",
+    "args",
+    "preview"
+  ],
+  "title": "dsl.request/1",
+  "type": "object"
+}

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "type": "string"
+    },
+    "conclusion": {
+      "enum": [
+        "done",
+        "nothing_to_do",
+        "skipped",
+        "previewed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "counts": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "type": "object"
+    },
+    "finished": {
+      "type": "string"
+    },
+    "op": {
+      "type": "string"
+    },
+    "people": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "handle": {
+            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$",
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle",
+          "text"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "reasons": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "fix": {
+            "additionalProperties": false,
+            "properties": {
+              "entry": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "path": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "screen": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "text"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "run_id": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "schema": {
+      "enum": [
+        "dsl.outcome/1"
+      ],
+      "type": "string"
+    },
+    "started": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "op",
+    "actor",
+    "preview",
+    "conclusion",
+    "summary"
+  ],
+  "title": "dsl.outcome/1",
+  "type": "object"
+}

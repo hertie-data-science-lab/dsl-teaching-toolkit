@@ -1,0 +1,525 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assignments": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "due": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handout": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "late_until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "marks": {
+            "additionalProperties": false,
+            "properties": {
+              "filled": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "problem": {
+            "type": "boolean"
+          },
+          "returned": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "solution_shown": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "declared",
+              "teams_forming",
+              "blocked",
+              "open",
+              "late_window",
+              "marking",
+              "returned"
+            ],
+            "type": "string"
+          },
+          "submissions": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "teams": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "template": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "units": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "slug",
+          "state"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "automation": {
+      "additionalProperties": false,
+      "properties": {
+        "driver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_tick": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "late": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "cohort": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "live": {
+          "type": "boolean"
+        },
+        "org": {
+          "type": "string"
+        },
+        "stages": {
+          "additionalProperties": {
+            "enum": [
+              "done",
+              "todo",
+              "blocked",
+              "problem"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "term": {
+          "type": "string"
+        },
+        "term_label": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "week": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "weeks": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "org",
+        "stages",
+        "live"
+      ],
+      "type": "object"
+    },
+    "course": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "cohorts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "materials": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repo",
+              "state"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "org": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "stages": {
+          "additionalProperties": {
+            "enum": [
+              "done",
+              "todo",
+              "blocked",
+              "problem"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "templates": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repo",
+              "state"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "org",
+        "stages"
+      ],
+      "type": "object"
+    },
+    "inputs": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "operations": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "conclusion": {
+            "enum": [
+              "done",
+              "nothing_to_do",
+              "skipped",
+              "previewed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "finished": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "conclusion"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "problems": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "fix": {
+            "additionalProperties": false,
+            "properties": {
+              "entry": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "path": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "screen": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "course",
+              "cohort"
+            ],
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "stops": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "stage",
+          "text"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "releases": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "dest": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repo"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "show_on_site": {
+            "type": "boolean"
+          },
+          "source": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repo"
+            ],
+            "type": "object"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "will_be_skipped",
+              "released",
+              "late"
+            ],
+            "type": "string"
+          },
+          "tbc": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "when": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "enum": [
+        "dsl.status/1"
+      ],
+      "type": "string"
+    },
+    "site": {
+      "additionalProperties": false,
+      "properties": {
+        "last_update": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "staff": {
+      "additionalProperties": false,
+      "properties": {
+        "instructors": {
+          "type": "integer"
+        },
+        "synced": {
+          "type": "boolean"
+        },
+        "tas": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "students": {
+      "additionalProperties": false,
+      "properties": {
+        "codes_sent": {
+          "type": "integer"
+        },
+        "joined": {
+          "type": "integer"
+        },
+        "rows": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "this_week": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "when",
+          "type",
+          "ref",
+          "state"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema",
+    "inputs",
+    "course",
+    "problems"
+  ],
+  "title": "dsl.status/1",
+  "type": "object"
+}
