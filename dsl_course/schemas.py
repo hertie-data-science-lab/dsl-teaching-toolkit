@@ -250,7 +250,8 @@ def status_schema() -> dict:
         {
             "id": _str(),
             "scope": _enum(PROBLEM_SCOPES),
-            "stage": nullable,
+            # A setup stage (C1-C6, K1-K7) or a running phase (`marking`); never null.
+            "stage": _str(),
             "text": _str(),
             "stops": _str(),
             "fix": fix,

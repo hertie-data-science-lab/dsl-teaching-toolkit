@@ -353,10 +353,7 @@
             "type": "string"
           },
           "stage": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "stops": {
             "type": "string"

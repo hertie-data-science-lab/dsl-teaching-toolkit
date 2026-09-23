@@ -786,3 +786,99 @@ def test_every_render_validates_against_the_exported_schema():
         status_json.render_course_file(_course(), NOW),
     ):
         assert validate(doc, schemas.status_schema()) == []
+
+
+# ------------------------------------------------------------------ problem sentences
+
+# The demo's group project sheet: one student in two teams.
+DUPLICATE_SHEET = """\
+teams:
+  red:
+    members:
+      ada: {}
+      bob: {}
+    score: 5
+  blue:
+    members:
+      ada: {}
+"""
+
+
+def _problems(faults: list[ConfigFault]) -> list[dict]:
+    return [status_json.problem_from_fault(f, COHORT, NOW) for f in faults]
+
+
+def _many_faults() -> list[ConfigFault]:
+    """A fault from every hand-edited file, through the parsers that file them."""
+    faults: list[ConfigFault] = [_missing_s5(), _autograde_sometimes()]
+    faults += grades.sheet_faults("assignment-3-project", DUPLICATE_SHEET)
+    faults += grades.sheet_faults("assignment-4", "teams: [\n")
+    spec_faults, _ = grades.grading_spec_faults(
+        "assignment-3", "assignment-3-f2026", COURSE, "a: [\n", None
+    )
+    faults += spec_faults
+    sync_faculty.parse_faculty_from_meta(
+        load_yaml_lines(
+            "people:\n  instructors:\n    - github_handle: 'not valid!'\n"
+            "      email: p@x.edu\n  teaching_assistants:\n    - github_handle: ta1\n"
+        ),
+        faults,
+    )
+    faults += _sched(
+        "timezone: Europe/Berlin\nreleases:\n  s1:\n    event_datetime: someday\n"
+        "    deploy:\n      - course_source_repo: x\n        course_source_path: y\n"
+    ).faults
+    faults.append(header_fault("students.csv", ["github_handle"]))
+    return faults
+
+
+def test_a_held_mark_is_one_plain_sentence_with_its_fault_code_in_the_id():
+    (problem,) = _problems(grades.sheet_faults("assignment-3-project", DUPLICATE_SHEET))
+    assert problem["id"] == "sheet:assignment-3-project:GRADING_SHEETS"
+    assert problem["stage"] == "marking"
+    assert problem["text"] == (
+        "Line 9 of the assignment-3-project marking sheet lists a student who is also "
+        "in another team or entry, so marks for both are held."
+    )
+    assert problem["stops"] == (
+        "That sheet is not updated, and none of its marks are returned."
+    )
+    assert problem["fix"]["line"] == 9 and problem["fix"]["entry"] == (
+        "assignment-3-project"
+    )
+
+
+def test_no_problem_sentence_carries_markdown_or_a_null_stage():
+    problems = _problems(_many_faults())
+    assert len(problems) >= 8
+    for p in problems:
+        assert p["stage"], p["id"]
+        for key in ("text", "stops"):
+            assert "`" not in p[key] and "**" not in p[key], p[key]
+            assert p[key].endswith("."), p[key]
+            assert " - " not in p[key], p[key]
+
+
+def test_a_derived_sentence_names_its_subject_in_the_consoles_words():
+    by_id = {p["id"]: p for p in _problems(_many_faults())}
+    ta = by_id["people:people.teaching_assistants-0:PEOPLE"]
+    assert ta["text"] == "Teaching assistant 1 in people.yml: no usable email."
+    assert ta["stops"] == (
+        "Access is still granted, but no notification reaches this person."
+    )
+    assert by_id["schedule:s1:SCHEDULE"]["text"].startswith("Schedule entry s1: ")
+    texts = [p["text"] for p in by_id.values()]
+    assert (
+        "The assignment-3 template's settings file is not valid YAML, so the "
+        "assignment is marked on the toolkit's defaults."
+    ) in texts
+
+
+def test_the_vocabulary_pass_keeps_the_file_names_a_fix_edits():
+    assert (
+        status_json.plain_words(
+            "the `grading_config.yml` grading value is not read by the dry run"
+        )
+        == "the grading_config.yml marking value is not read by the preview"
+    )
+    assert status_json.plain_words("an onboarded handle") == "a joined handle"

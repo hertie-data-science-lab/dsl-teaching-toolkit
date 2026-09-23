@@ -242,7 +242,7 @@ STOPS = {
     teams.TEAMS_PATH: (
         "That row is ignored: the team is not created or the member not added."
     ),
-    grades.SHEETS_DIR: "That sheet is not refreshed, and none of its marks are returned.",
+    grades.SHEETS_DIR: "That sheet is not updated, and none of its marks are returned.",
     grades.GRADING_FILE: "Marking uses the toolkit's default for that value.",
     COURSE_CONFIG: (
         "Automation skips this course: staff access and cohorts are not updated."
@@ -279,18 +279,118 @@ _FILES = {
     grades.GRADING_FILE: _Where(
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
+    grades.LEGACY_GRADING_FILE: _Where(
+        "template", "course", "C5", "template", "GRADING_CONFIG"
+    ),
     COURSE_CONFIG: _Where("course", "course", "C3", "course", "COURSE"),
     COHORTS_PATH: _Where("registry", "course", "C2", "course", "COURSE"),
 }
-# A grading sheet belongs to the running phase, not to a setup stage: it has no K-stage.
-_SHEET = _Where("sheet", "cohort", None, "marks", "GRADING_SHEETS")
-_OTHER = _Where("config", "cohort", None, "", "CONFIG")
+# A grading sheet belongs to the running phase, not to a setup stage: its stage is the
+# marking phase, and the assignment is the entry in its id.
+MARKING = "marking"
+_SHEET = _Where("sheet", "cohort", MARKING, "marks", "GRADING_SHEETS")
+# Any other classroom-config file: the cohort's own setup.
+_OTHER = _Where("config", "cohort", "K2", "", "CONFIG")
 
 _SOURCE_CODES = {
     FaultKind.MISSING_PATH: "SOURCE_MISSING",
     FaultKind.MISSING_REPO: "REPO_MISSING",
     FaultKind.WITHHELD: "SOURCE_WITHHELD",
 }
+
+
+# The vocabulary pass (design/vocabulary.md) over an engine sentence that has no `plain`
+# of its own: the engine's words on the left, the console's on the right. Whole words
+# only, so `grading_config.yml` and `grading_sheets/` - file names the fix edits - stay.
+_WORDS = (
+    ("submission units", "students or teams"),
+    ("submission unit", "student or team"),
+    ("an onboarded", "a joined"),
+    ("onboarded", "joined"),
+    ("enrolment codes", "codes"),
+    ("enrolment code", "code"),
+    ("enrolled", "joined"),
+    ("grading", "marking"),
+    ("graded", "marked"),
+    ("grades", "marks"),
+    ("grade", "mark"),
+    ("dry run", "preview"),
+)
+_ROLES = {
+    "instructors": "Instructor",
+    "teaching_assistants": "Teaching assistant",
+    "course_admins": "Course admin",
+}
+_PERSON = re.compile(r"^people\.(\w+)\[(\d+)\]$")
+_ROW = re.compile(r"^row (\d+)$")
+
+
+def plain_words(text: str) -> str:
+    """`text` without markdown and in the vocabulary's words."""
+    out = re.sub(r"`([^`]+?):`", r"\1", text)  # `email:` names the key, `email`
+    out = out.replace("`", "").replace("**", "")
+    for engine, console in _WORDS:
+        out = re.sub(rf"(?<![\w-]){re.escape(engine)}(?![\w-])", console, out)
+        out = re.sub(
+            rf"(?<![\w-]){re.escape(engine.capitalize())}(?![\w-])",
+            console.capitalize(),
+            out,
+        )
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def _first_sentence(text: str) -> str:
+    return re.split(r"(?<=[a-z0-9)])\. (?=[A-Z])", text, maxsplit=1)[0].rstrip(".")
+
+
+def _clause(what: str) -> str:
+    """The first clause of an engine sentence: what is wrong. What it costs follows a
+    dash (`_cost`), and a second sentence is detail."""
+    return plain_words(_first_sentence(what.split(" - ", 1)[0]))
+
+
+def _cost(what: str) -> str:
+    """What an engine sentence says the fault costs - the part after its dash - as a
+    sentence, or "" when it says nothing about that."""
+    if " - " not in what:
+        return ""
+    return _sentence(plain_words(_first_sentence(what.split(" - ", 1)[1])))
+
+
+def _subject(fault: ConfigFault, filed: _Where, entry: str) -> str:
+    """What a derived sentence is about, named the way the console names it."""
+    person = _PERSON.match(fault.where)
+    if person:
+        role = _ROLES.get(person[1], "Entry")
+        where = "course details" if filed.kind == "course" else "people.yml"
+        return f"{role} {int(person[2]) + 1} in {where}"
+    row = _ROW.match(fault.where)
+    if row and filed.kind in ("roster", "teams"):
+        return f"{'Roster' if filed.kind == 'roster' else 'Teams'} row {row[1]}"
+    if filed.kind == "schedule":
+        return f"Schedule entry {entry}" if entry != fault.where else "The schedule"
+    if filed.kind == "sheet":
+        sheet = f"{entry} marking sheet"
+        return f"Line {fault.lineno} of the {sheet}" if fault.lineno else f"The {sheet}"
+    if filed.kind == "template":
+        return f"The {entry} template's settings"
+    return {
+        "people": "people.yml",
+        "roster": "The roster",
+        "teams": "The teams file",
+        "course": "Course details",
+        "registry": "The course's list of cohorts",
+    }.get(filed.kind, fault.file)
+
+
+def plain_text(fault: ConfigFault, filed: _Where, entry: str) -> str:
+    """One plain sentence for a problem: the fault's own `plain` when its parser wrote
+    one, else its subject and the first clause of what is wrong."""
+    if fault.plain:
+        return fault.plain
+    clause = _clause(fault.what)
+    subject = _subject(fault, filed, entry)
+    return f"{subject}: {clause}." if clause else f"{subject} has a problem."
 
 
 def _where_filed(fault: ConfigFault) -> _Where:
@@ -344,29 +444,22 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         entry = _entry_of(fault.where)
     else:
         code = filed.code
-        if filed is _FILES.get(grades.GRADING_FILE):
+        if filed.kind == "template":
             entry = assignment_slug(fault.in_repo)
-            text = _sentence(
-                f"{entry}'s {fault.file} ({fault.label}): {fault.what}",
-                capitalise=False,
-            )
         elif filed is _SHEET:
             entry = fault.file.removeprefix(f"{grades.SHEETS_DIR}/").removesuffix(
                 ".yml"
             )
-            text = _sentence(
-                f"{fault.at} ({fault.label}): {fault.what}", capitalise=False
-            )
         else:
             entry = _entry_of(fault.where)
-            text = _sentence(
-                f"{fault.at} ({fault.label}): {fault.what}", capitalise=False
-            )
+        text = plain_text(fault, filed, entry)
         stops = (
-            _sentence(fault.consequence)
+            _sentence(plain_words(fault.consequence))
             if fault.consequence
-            else STOPS.get(fault.file)
+            else _cost(fault.what)
+            or STOPS.get(fault.file)
             or STOPS.get(grades.SHEETS_DIR if filed is _SHEET else "", "")
+            or STOPS.get(grades.GRADING_FILE if filed.kind == "template" else "", "")
         )
     fix = {
         "repo": f"{fault.in_org or org}/{fault.in_repo}",

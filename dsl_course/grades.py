@@ -585,6 +585,8 @@ def parse_sheet(
                     lineno=yaml_mark_line(exc),
                     fix="fix the YAML on the line above; nothing on this sheet is "
                     "refreshed or sent until it parses",
+                    plain=f"The {slug} marking sheet is not valid YAML, so nothing on "
+                    f"it is updated or returned.",
                 )
             )
         raise SheetUnreadable(_unreadable(exc)) from exc
@@ -597,6 +599,7 @@ def parse_sheet(
                     "exactly as it is",
                     fix="restore the sheet's shape - a `submissions:` (or `teams:`) "
                     "block of one entry per submission unit",
+                    plain=_SHEET_SHAPE_PLAIN.format(sheet=slug),
                 )
             )
         raise SheetUnreadable("the file is not a mapping")
@@ -1529,6 +1532,7 @@ def _spec_fault(
     lineno: int | None = None,
     fix: str = "",
     file: str = GRADING_FILE,
+    plain: str = "",
 ) -> ConfigFault:
     """One value in one assignment's definition that will not grade as written.
 
@@ -1548,6 +1552,7 @@ def _spec_fault(
         in_org=course_org,
         ref=SOLUTION_BRANCH,
         fix_text=fix,
+        plain=plain,
     )
 
 
@@ -1593,6 +1598,8 @@ def grading_spec_faults(
                 "assignment grades on the toolkit's defaults",
                 lineno=yaml_mark_line(exc),
                 fix="fix the YAML on the line above",
+                plain=f"The {slug} template's settings file is not valid YAML, so "
+                f"the assignment is marked on the toolkit's defaults.",
             )
         ], None
     lines = key_lines(text)
@@ -1867,6 +1874,8 @@ def _undeclared_faults(
             file=LEGACY_GRADING_FILE,
             fix=f"rename `{LEGACY_GRADING_FILE}` to `{GRADING_FILE}` on the template's "
             f"`{SOLUTION_BRANCH}` branch",
+            plain=f"{slug} keeps its settings in {LEGACY_GRADING_FILE}, which is no "
+            f"longer read, so it is marked on the toolkit's defaults.",
         )
     ]
 
@@ -2856,6 +2865,7 @@ def sheet_hold_reasons(
             # No field for a duplicate: the key that repeats IS the handle.
             field="" if reason == "duplicate" else _hold_field(spec, reason),
             fix=fix.format(at=f"line {lineno}" if lineno else "that line"),
+            plain=_HOLD_PLAIN[reason].format(where=_sheet_where(slug, lineno)),
         )
         if fault.key not in recorded:
             recorded.add(fault.key)
@@ -2913,6 +2923,30 @@ _HOLD_FAULT = {
         "leave the handle on {at} in one submission unit only",
     ),
 }
+
+
+# The same four, as the console's problem list says them (`ConfigFault.plain`): where on
+# the sheet, then what it costs, in the vocabulary's words. Still never the unit.
+_HOLD_PLAIN = {
+    "score": "{where} has a mark that is not a number, so nothing is returned for that "
+    "student or team.",
+    "adjustment": "{where} has an adjustment that is not a number, so nothing is "
+    "returned for that student.",
+    "question": "{where} marks a question the assignment does not have, so nothing is "
+    "returned for that student or team.",
+    "duplicate": "{where} lists a student who is also in another team or entry, so "
+    "marks for both are held.",
+}
+_SHEET_SHAPE_PLAIN = (
+    "The {sheet} marking sheet is not one entry per student or team, so it is left as "
+    "it is."
+)
+
+
+def _sheet_where(slug: str, lineno: int | None) -> str:
+    """`Line 47 of the assignment-3 marking sheet` - a hold's place, for `_HOLD_PLAIN`."""
+    sheet = f"the {slug} marking sheet"
+    return f"Line {lineno} of {sheet}" if lineno else sheet[0].upper() + sheet[1:]
 
 
 def _hold_field(spec: SheetSpec, reason: str) -> str:
@@ -2982,7 +3016,12 @@ def key_lines(text: str) -> dict[tuple[str, ...], int]:
 
 
 def _sheet_fault(
-    slug: str, what: str, lineno: int | None = None, field: str = "", fix: str = ""
+    slug: str,
+    what: str,
+    lineno: int | None = None,
+    field: str = "",
+    fix: str = "",
+    plain: str = "",
 ) -> ConfigFault:
     """One thing in one grading sheet a grader has to settle.
 
@@ -2999,6 +3038,7 @@ def _sheet_fault(
         # deep link and the blame query use, so each fault lands on the sheet it is in.
         file=sheet_path(slug),
         fix_text=fix,
+        plain=plain,
     )
 
 
@@ -3033,6 +3073,7 @@ def sheet_faults(
                 field=spec.container_key,
                 fix=f"restore `{spec.container_key}:` to one indented entry per "
                 f"submission unit",
+                plain=_SHEET_SHAPE_PLAIN.format(sheet=slug),
             )
         ]
     sheet_hold_reasons(spec, sheet, faults, text, slug)

@@ -256,6 +256,11 @@ class ConfigFault:
     # is not there. Singular and plural, because the subject line and the first line of
     # the body count the same faults and must agree. () = take the generic wording.
     noun: tuple[str, str] = ()
+    # This fault as ONE plain sentence for the console's problem list (`status.json`), in
+    # the design vocabulary: no backticks, no engine words, no identifier unless editing
+    # it is the fix. Set where the parser knows the words; "" = `status_json` derives one
+    # from `what`. The digest issue and the mail keep `what`.
+    plain: str = ""
 
     @property
     def is_source(self) -> bool:
