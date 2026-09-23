@@ -36,6 +36,22 @@ later without touching the screens.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `people.yml`, a template's `grading_config.yml`, the site's `index.md`.
 
+## What it changes
+
+- Files, as the signed-in user, with a sha-conditional write (a file that moved on since it
+  was read is refused, never overwritten): `schedule.yml`, `people.yml`, `students.csv`,
+  `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
+  `grading_config.yml` (on `solution`), a materials repo's `publish.yml` and `.releaseignore`,
+  the site's `index.md` and `_announcements/`. YAML is edited in place (`src/edit/yamlText.ts`):
+  only the changed values' bytes move, so comments and their columns survive. After a write the
+  console follows the commit's checks and says what they found.
+- Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,
+  ref `main`, one `request` input; contracts section 1). `src/ops/adapter.ts` dispatches with
+  `return_run_details`, polls the run, and reads the public `dsl-outcome` annotation and the
+  private outcome file. Hand out, return marks, archive, update every copy and send new codes
+  unlock only after a preview in the same session; publishing the public website, which has no
+  engine preview, asks for a confirmation instead.
+
 ## Schemas
 
 `schemas/` holds the JSON Schemas the engine exports with `python -m dsl_course.schemas`;
@@ -44,5 +60,7 @@ a Python test fails when they drift. Never edit them by hand.
 ## Routes
 
 Hash tokens as in the design mockup: `#cohort`, `#schedule-s5`, `#assignment-<slug>`,
-`#release-<id>`, `#template-<slug>`. A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
+`#release-<id>`, `#template-<slug>`, `#marks-<slug>`, `#teams-<slug>`, `#materials-<repo>`;
+the schedule editor also opens `#schedule-new`, `#schedule-term` and `#schedule-archive`.
+A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or cohort rides in the query string: `?cohort=<org>` or `?course=<org>`.
