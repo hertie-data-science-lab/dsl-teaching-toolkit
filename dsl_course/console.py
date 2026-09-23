@@ -45,6 +45,11 @@ from .ops.request import RequestError, check_access, parse_request
 # deploy fields are read off the cohort's schedule.yml here.
 _ENTRY_OPS = ("release.now", "release.early", "release.rerun")
 
+_REFRESH_FAILED = {
+    "code": "REFRESH_FAILED",
+    "text": "Done, but the buttons were not all refreshed; the nightly refresh adds them.",
+}
+
 # The op that archives the cohort's classroom-config, where its own record would go.
 _ARCHIVE_OP = "cohort.archive"
 
@@ -153,7 +158,7 @@ class Broken(RuntimeError):
 def execute(op: Operation, requests: list[Request]) -> tuple[int, list[Summary], bool]:
     """Run the op once per request, then the refresh its workflow ends in. Stops at the
     first failure, as the workflow's `bash -e` step would. The refresh's own summary is
-    not the op's."""
+    not the op's, and neither is its exit code: a refresh that failed is a reason."""
     rc, summaries, crashed = 0, [], False
     for req in requests:
         rc, summary, crashed = run_cli(op.module, command(op, req))
@@ -161,7 +166,11 @@ def execute(op: Operation, requests: list[Request]) -> tuple[int, list[Summary],
         if rc:
             return rc, summaries, crashed
     if op.refresh_after and requests and not requests[0].preview:
-        rc, _summary, crashed = run_cli("seed", refresh_command(requests[0]))
+        # The op has done its work; a refresh that did not finish is a reason on it, not
+        # its failure - reporting a made repo as not made invites a colliding retry.
+        refresh_rc, _summary, crashed = run_cli("seed", refresh_command(requests[0]))
+        if refresh_rc:
+            summaries.append(Summary("", reasons=[_REFRESH_FAILED]))
     return rc, summaries, crashed
 
 

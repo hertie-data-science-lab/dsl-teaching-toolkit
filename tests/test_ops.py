@@ -557,3 +557,19 @@ def test_a_trailing_newline_does_not_pass_a_pattern():
     with pytest.raises(RequestError) as exc:
         parse_request(json.dumps(_request(args={"entry": "s5\n"})))
     assert exc.value.code == "BAD_ARGS"
+
+
+def test_a_failed_refresh_after_a_new_template_is_a_reason_not_a_failure(
+    monkeypatch, capsys, engine
+):
+    from dsl_course import scaffold, seed
+
+    monkeypatch.setattr(scaffold, "main", lambda: 0)
+    monkeypatch.setattr(seed, "main", lambda: 1)
+    raw = _request(
+        op="assignment.create", args={"number": "2", "tag": "f2026"}, preview=False
+    )
+    del raw["cohort_org"]
+    rc, body, _ = _main(monkeypatch, capsys, raw)
+    assert rc == 0 and body["conclusion"] == "done"
+    assert [r["code"] for r in body["reasons"]] == ["REFRESH_FAILED"]
