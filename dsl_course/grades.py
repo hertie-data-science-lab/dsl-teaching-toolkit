@@ -3858,8 +3858,40 @@ def _has_mark(book: dict[str, dict]) -> bool:
     return any(key in view for view in book.values() for key in _GRADER_KEYS)
 
 
-# The data file of a gradebook, named here because two things key on it: the commit, which
-# is over the whole book, and the EMAIL, which is over this file alone (see `distribute`).
+# Leads every EMAIL digest `_marks_digest` writes. A digest without it is LEGACY - a hash
+# of the whole grades.yml, or of the whole book before that - and `distribute` carries it
+# over rather than reading the change of scheme as a change of marks.
+MARKS_DIGEST_PREFIX = "m1:"
+
+
+def _canonical(value: object) -> object:
+    """`value` with every mapping key a string, so a per-question map keyed `1:` beside
+    `Q2:` still sorts."""
+    if isinstance(value, dict):
+        return {str(key): _canonical(item) for key, item in value.items()}
+    return value
+
+
+def _marks_digest(book: dict[str, dict]) -> str:
+    """What the EMAIL keys on: what a grader wrote, per assignment, and nothing else. A
+    refreshed `submitted`, a new `max_points` or a respelt date moves grades.yml without
+    there being anything new for a student to read; a late penalty that moves a mark
+    moves `final_grade`, so it is still in here."""
+    projection = {
+        slug: {key: view[key] for key in _GRADER_KEYS if key in view}
+        for slug, view in book.items()
+    }
+    text = json.dumps(
+        _canonical({slug: keys for slug, keys in projection.items() if keys}),
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+    return MARKS_DIGEST_PREFIX + content_hash(text)
+
+
+# The data file of a gradebook. The commit is over the whole book; the email's LEGACY
+# digest was over this file alone, and is recognised by hashing it (see `distribute`).
 GRADES_DATA = "grades.yml"
 
 
@@ -4016,15 +4048,17 @@ def distribute(
     #    telling recorded, which would stop them being told when it lands.
     #    TWO digests per student, because the two channels are answering different
     #    questions. The COMMIT is keyed on the whole book, so every wording change the
-    #    toolkit makes to the README lands; the EMAIL is keyed on `grades.yml` alone, so
-    #    "there is something new to read" means a MARK moved. Keyed on one hash, a single
-    #    standing sentence added to the page re-mailed every student in every live cohort
-    #    to tell them nothing.
+    #    toolkit makes to the README lands; the EMAIL is keyed on what a grader wrote
+    #    (`_marks_digest`), so "there is something new to read" means a MARK moved. Keyed
+    #    on one hash, a single standing sentence added to the page re-mailed every student
+    #    in every live cohort to tell them nothing.
     live: dict[str, str] = {}
+    legacy: dict[str, str] = {}
     for handle in sorted(books):
         files = _gradebook_files(handle, books[handle], titles)
         digest = content_hash("".join(f.decode() for f in files.values()))
-        marks = content_hash(files[GRADES_DATA].decode())
+        marks = _marks_digest(books[handle])
+        legacy[handle] = content_hash(files[GRADES_DATA].decode())
         if record.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0] == digest:
             live[handle] = marks
             continue
@@ -4055,13 +4089,18 @@ def distribute(
         told = record.get((handle, "", CHANNEL_EMAIL), ("",))[0]
         if told == marks:
             continue
-        if told and told == distributed.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0]:
-            # A row written when BOTH channels were keyed on the whole book: it holds the
-            # digest of the content this cohort's last run committed, so this student has
-            # already been told about everything their book then held. Carried over to the
-            # marks digest in place - the CSV keeps its columns, and the row means what it
-            # says once more. Without this, the first run after any change to the README
-            # wording mails a whole live cohort about nothing.
+        described = (
+            legacy[handle],
+            distributed.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0],
+        )
+        if told and not told.startswith(MARKS_DIGEST_PREFIX) and told in described:
+            # A LEGACY row that still describes this book: a hash of this very grades.yml,
+            # or - from when BOTH channels were keyed on the whole book - of the content
+            # this cohort's last run committed. Either way this student has already been
+            # told about everything it holds. Carried over to the marks digest in place -
+            # the CSV keeps its columns, and the row means what it says once more. A
+            # legacy row that matches neither falls through to exactly what the old code
+            # did with it, so the change of scheme can never mail anybody on its own.
             record[(handle, "", CHANNEL_EMAIL)] = (marks, now, "")
             carried += 1
             continue
