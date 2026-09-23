@@ -42,9 +42,9 @@ PUBLISH_CONFIG = "_publish-config.yml"
 # sit beside the renderers whose front matter they read.
 #
 # A commit, not a tag, because a tag can be moved off the code it was cut from; this SHA
-# is the theme's `v2.0.0`.
+# is the theme's `v2.0.0` plus the footer link swap (theme PR #20).
 THEME_REPO = "hertie-data-science-lab/dsl-jekyll-theme"
-THEME_REF = "e4b8fdc9e87b4729c9dcef142591551a2361d4b5"
+THEME_REF = "c33c9b7e471914cb8014a09a12710cb98819e0d9"
 
 # `_config.yml` keys the sync owns because the templates it ships DEPEND on them, as
 # opposed to the course-identity keys, which are content. Written whether or not the
