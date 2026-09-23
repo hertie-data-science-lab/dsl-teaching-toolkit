@@ -1,6 +1,8 @@
 // A small fetch-based GitHub REST client. Every call goes out with the signed-in user's
 // token; GET responses are cached in memory by URL and revalidated with If-None-Match, so a
-// 304 costs no rate limit and returns the cached body.
+// 304 costs no rate limit and returns the cached body. The browser's own HTTP cache is kept
+// out of it (`no-store`): GitHub sends `max-age=60`, so after a write dropped our entry the
+// browser would otherwise answer the next read with the body from before the write.
 
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -209,7 +211,7 @@ export class GitHubClient {
     const url = this.url(path);
     const cached = this.cache.get(url);
     const extra: Record<string, string> = cached ? { 'If-None-Match': cached.etag } : {};
-    const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(extra) });
+    const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(extra), cache: 'no-store' });
     this.noteRateLimit(res);
     if (res.status === 304 && cached) return { body: cached.body as T, headers: cached.headers };
     if (!res.ok) return this.fail(res, url);
@@ -239,12 +241,15 @@ export class GitHubClient {
       method,
       headers: this.headers(body === undefined ? undefined : { 'Content-Type': 'application/json' }),
       body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store',
     });
     this.noteRateLimit(res);
     if (!res.ok) return this.fail(res, url);
-    // A write changes what the next read returns: drop every cached GET under this repo.
+    // A write changes what the next read returns: drop every cached GET under this repo,
+    // however its owner and name were cased (GitHub reads them case-insensitively).
     const m = /^\/repos\/[^/]+\/[^/]+/.exec(path);
-    if (m) for (const k of [...this.cache.keys()]) if (k.startsWith(`${this.base}${m[0]}/`)) this.cache.delete(k);
+    const under = m ? `${this.base}${m[0]}/`.toLowerCase() : null;
+    if (under) for (const k of [...this.cache.keys()]) if (k.toLowerCase().startsWith(under)) this.cache.delete(k);
     if (res.status === 204) return null;
     const text = await res.text();
     return text ? (JSON.parse(text) as T) : null;
@@ -412,7 +417,7 @@ export class GitHubClient {
   /** Whether `user` is a member of `org` (as far as the caller may see). */
   async isOrgMember(org: string, user: string): Promise<boolean | null> {
     const url = this.url(`/orgs/${org}/members/${user}`);
-    const res = await this.fetchFn(url, { method: 'GET', headers: this.headers() });
+    const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(), cache: 'no-store' });
     this.noteRateLimit(res);
     if (res.status === 204) return true;
     if (res.status === 404 || res.status === 302) return false;

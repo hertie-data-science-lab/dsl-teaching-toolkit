@@ -7,6 +7,7 @@ export interface Seen {
   method: string;
   headers: Record<string, string>;
   body: unknown;
+  cache?: RequestCache;
 }
 
 type Handler = (req: Seen) => Response | { status?: number; body?: unknown; headers?: Record<string, string> };
@@ -34,7 +35,7 @@ export class FakeGitHub {
   fetch = async (input: string, init: RequestInit = {}): Promise<Response> => {
     const method = (init.method ?? 'GET').toUpperCase();
     const headers = (init.headers ?? {}) as Record<string, string>;
-    const req: Seen = { url: input, method, headers, body: init.body ? JSON.parse(String(init.body)) : undefined };
+    const req: Seen = { url: input, method, headers, body: init.body ? JSON.parse(String(init.body)) : undefined, cache: init.cache };
     this.seen.push(req);
     const path = input.replace('https://api.github.com', '');
     for (const [m, p, h] of this.routes) {
