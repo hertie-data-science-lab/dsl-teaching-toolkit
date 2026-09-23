@@ -1,0 +1,171 @@
+{
+  "schema": "dsl.status/1",
+  "inputs": {
+    "schedule.yml": "sha-0",
+    "people.yml": "sha-1",
+    "students.csv": "sha-2",
+    "teams.csv": "sha-3",
+    "grading_sheets": "sha-4",
+    "course/dsl-course.yml": "sha-5",
+    "assignments.lock.yml": "sha-6"
+  },
+  "course": {
+    "org": "hertie-dsl-demo-course-e1234",
+    "name": "Machine Learning",
+    "code": "E1234",
+    "stages": {
+      "C1": "done",
+      "C2": "done",
+      "C3": "done",
+      "C4": "done",
+      "C5": "problem",
+      "C6": "todo"
+    },
+    "ready": false,
+    "materials": [
+      {
+        "repo": "course-materials-f2026",
+        "state": "ready"
+      }
+    ],
+    "templates": [
+      {
+        "repo": "assignment-3-f2026",
+        "slug": "assignment-3",
+        "state": "problem"
+      }
+    ],
+    "cohorts": [
+      "hertie-dsl-demo-f2026"
+    ]
+  },
+  "cohort": {
+    "org": "hertie-dsl-demo-f2026",
+    "term": "f2026",
+    "term_label": "Fall 2026",
+    "timezone": "Europe/Berlin",
+    "week": 3,
+    "weeks": 15,
+    "live": true,
+    "stages": {
+      "K1": "done",
+      "K2": "done",
+      "K3": "done",
+      "K4": "problem",
+      "K5": "problem",
+      "K6": "done",
+      "K7": "todo"
+    },
+    "archive_date": "2027-01-31"
+  },
+  "problems": [
+    {
+      "id": "schedule:s5:SOURCE_MISSING",
+      "scope": "cohort",
+      "stage": "K4",
+      "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
+      "stops": "The release on Thu 8 Oct will be skipped.",
+      "fix": {
+        "repo": "hertie-dsl-demo-f2026/classroom-config",
+        "path": "schedule.yml",
+        "line": 41,
+        "screen": "schedule",
+        "entry": "s5"
+      }
+    },
+    {
+      "id": "template:assignment-3:GRADING_CONFIG",
+      "scope": "course",
+      "stage": "C5",
+      "text": "assignment-3's grading_config.yml has autograde: sometimes, which is not yes or no.",
+      "stops": "Marking of Assignment 3 cannot start.",
+      "fix": {
+        "repo": "hertie-dsl-demo-course-e1234/assignment-3-f2026",
+        "path": "grading_config.yml",
+        "line": 7,
+        "screen": "template",
+        "entry": "assignment-3"
+      }
+    }
+  ],
+  "this_week": [
+    {
+      "when": "2026-09-24T10:00:00+02:00",
+      "type": "release",
+      "ref": "s3",
+      "title": "Session 3: Trees",
+      "state": "planned"
+    },
+    {
+      "when": "2026-09-27T23:59:00+02:00",
+      "type": "due",
+      "ref": "assignment-2",
+      "title": "Assignment 2: Regression",
+      "state": "open"
+    }
+  ],
+  "releases": [
+    {
+      "id": "s5",
+      "when": "2026-10-08T10:00:00+02:00",
+      "type": "lecture",
+      "title": "Trees and ensembles",
+      "state": "will_be_skipped",
+      "source": {
+        "repo": "course-materials-f2026",
+        "path": "lectures/05_trees"
+      },
+      "dest": {
+        "repo": "materials",
+        "path": "lectures/05_trees"
+      },
+      "show_on_site": true,
+      "tbc": false
+    }
+  ],
+  "assignments": [
+    {
+      "slug": "assignment-2",
+      "title": "Regression",
+      "template": "assignment-2-f2026",
+      "state": "open",
+      "handout": "2026-09-15T10:00:00+02:00",
+      "due": "2026-09-27T23:59:00+02:00",
+      "late_until": "2026-10-07T23:59:00+02:00",
+      "solution_shown": null,
+      "units": 48,
+      "submissions": 37,
+      "teams": null,
+      "marks": {
+        "filled": 0,
+        "total": 48
+      },
+      "returned": false,
+      "problem": false
+    }
+  ],
+  "students": {
+    "rows": 48,
+    "codes_sent": 47,
+    "joined": 41
+  },
+  "staff": {
+    "instructors": 2,
+    "tas": 1,
+    "synced": true
+  },
+  "site": {
+    "url": "https://hertie-dsl-demo-f2026.github.io",
+    "last_update": "2026-09-21T06:02:00Z",
+    "stale": true
+  },
+  "operations": [
+    {
+      "run_id": 4821,
+      "op": "release.now",
+      "conclusion": "done",
+      "summary": "Released Session 3: 7 files to materials.",
+      "finished": "2026-09-23T09:01:10Z"
+    }
+  ]
+}

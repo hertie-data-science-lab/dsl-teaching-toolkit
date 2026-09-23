@@ -1,0 +1,274 @@
+// One render per screen, with the contracts example as the status fixture.
+
+import { render } from 'preact-render-to-string';
+import { describe, expect, it } from 'vitest';
+import { PatAuth } from '../src/auth/pat';
+import type { Course } from '../src/model/discovery';
+import { StaticFiles } from '../src/model/files';
+import type { Loaded } from '../src/model/status';
+import type { Status } from '../src/model/types';
+import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
+import { CohortScreen } from '../src/screens/Cohort';
+import { CourseScreen, TemplateScreen } from '../src/screens/Course';
+import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
+import { StaffScreen, StudentsScreen } from '../src/screens/People';
+import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
+import { OperationsScreen, SiteScreen } from '../src/screens/Site';
+import type { CohortProps } from '../src/screens/types';
+import { Footer, Sidenav, Topbar } from '../src/ui/shell';
+import example from './fixtures/status.example.json';
+
+const STATUS = example as unknown as Status;
+const NOW = Date.parse('2026-09-23T10:00:00+02:00');
+const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
+const COHORT_ORG = 'hertie-dsl-demo-f2026';
+const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
+const course: Course = {
+  org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: 'A course.', write: true,
+  admins: ['a-example'], cohorts: [cohort], meta: { assignment_defaults: { late_window_days: 10, late_penalty_per_day: '10%', max_team_size: 5 } },
+};
+const ready: Loaded = { kind: 'ready', status: STATUS, sha: 's', stale: [] };
+
+const SCHEDULE = `timezone: Europe/Berlin
+semester_start: 2026-09-07
+semester_end: 2026-12-18
+releases:
+  s5:
+    event_datetime: 2026-10-08T10:00
+    title: Trees and ensembles
+    details: Trees, bagging and *random forests*.
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/05_trees
+assignments:
+  assignment-2:
+    course_source_repo: assignment-2-f2026
+    details: Fit, regularise and **explain** a model.
+    handout_datetime: 2026-09-15T10:00
+    due_datetime: 2026-09-27T23:59
+events:
+  midterm:
+    type: exam
+    title: Midterm
+    details: Room 2.61, closed book.
+    event_datetime: 2026-10-22T10:00
+  reading:
+    title: Reading week
+    event_datetime: 2026-10-26
+`;
+const STUDENTS = '﻿hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@students.example.org,Anna Adams,enrolled,anna-a,101,SECRETCODE1,2026-09-02T09:30:00Z\nben@example,Ben Baker,enrolled,,,,\ncarla@students.example.org,Carla Cohen,auditor,,,SECRETCODE3,2026-09-02T09:30:00Z\n';
+const PEOPLE = 'people:\n  instructors:\n    - github_handle: a-example\n      email: a@staff.example.org\n      name: Dr A. Example\n      photo: images/a.jpg\n  teaching_assistants:\n    - github_handle: b-sample\n      email: b@staff.example.org\n      name: B. Sample\n      start: "2026-09-01"\n      end: "2026-12-31"\n';
+const GRADING = 'title: Group project\ntype: group\nteam_formation: self_select\nmax_team_size: 4\nsubmit_via: assignment_repo\nvisibility: private\nformat: ipynb\nautograde: sometimes\ncompletion_check: true\ngrader_pdf: false\nquestions:\n  proposal: 20\n  analysis: 30\n';
+const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.now', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
+
+const files = new StaticFiles(
+  {
+    [`${COHORT_ORG}/classroom-config/schedule.yml`]: SCHEDULE,
+    [`${COHORT_ORG}/classroom-config/students.csv`]: STUDENTS,
+    [`${COHORT_ORG}/classroom-config/people.yml`]: PEOPLE,
+    [`${COHORT_ORG}/classroom-config/.dsl/outcomes/release.now.json`]: OUTCOME,
+    [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **Machine Learning**.\n',
+    [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING,
+  },
+  { [`${COHORT_ORG}/${COHORT_ORG}.github.io/_announcements`]: ['2026-09-21-scikit.md'] },
+);
+
+const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files, now: NOW, heartbeat: { lastTick: '2026-09-23T07:48:00Z', late: false }, ...over });
+const html = (v: preact.VNode) => render(v);
+const text = (v: preact.VNode) => html(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, '’').replace(/\s+/g, ' ');
+
+describe('S0 sign in', () => {
+  it('asks for a classic token with repo and workflow', () => {
+    const t = text(<SignInScreen auth={new PatAuth({ store: null })} onSignedIn={() => {}} />);
+    expect(t).toContain('GitHub token');
+    expect(t).toMatch(/repo .*workflow/);
+    expect(html(<SignInScreen auth={new PatAuth({ store: null })} onSignedIn={() => {}} />)).toContain('scopes=repo,workflow');
+  });
+});
+
+describe('S1 home', () => {
+  it('lists cohorts by urgency with their problem counts and next dates, read-only ones greyed', () => {
+    const ro: Course = { ...course, org: 'hertie-ids-c11', name: 'Intro to Data Science', write: false, cohorts: [{ org: 'hertie-ids-f2026', term: 'f2026', termLabel: 'Fall 2026' }] };
+    const out = html(<HomeScreen courses={[course, ro]} cohortStates={{ [COHORT_ORG]: ready }} now={NOW} user={{ login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }} />);
+    expect(out).toContain('Machine Learning, Fall 2026');
+    expect(out).toContain('2 problems');
+    expect(out).toContain('Week 3 of 15');
+    expect(out).toContain('you are a course admin');
+    expect(out).toContain('Session 3: Trees');
+    expect(out).toMatch(/cohort-card ro[^"]*" href="\?cohort=hertie-ids-f2026/);
+    expect(out.indexOf('Machine Learning, Fall 2026')).toBeLessThan(out.indexOf('Intro to Data Science, Fall 2026'));
+  });
+});
+
+describe('S4 cohort overview', () => {
+  const out = html(<CohortScreen {...props()} />);
+  const t = text(<CohortScreen {...props()} />);
+  it('leads with the header, term strip, problems, this week and assignments', () => {
+    expect(t).toContain('Machine Learning, Fall 2026');
+    expect(t).toContain('Week 3 of 15.');
+    expect(t).toContain('Setup done, but 2 stages have a problem');
+    expect(out).toContain('class="term-strip"');
+    expect((out.match(/class="wk[ "]/g) ?? []).length).toBe(15);
+    expect(out).toContain('wk now');
+    expect(t).toContain('Session 5 cites folder lectures/05_trees');
+    expect(t).toContain('The release on Thu 8 Oct will be skipped.');
+    expect(out).toContain('href="#schedule-s5"');
+    expect(out).toContain('href="#template-assignment-3"');
+    expect(t).toContain('(course)');
+    expect(t).toContain('Assignment 2: Regression');
+    expect(t).toContain('37 of 48 submitted so far.');
+  });
+  it('shows students beside automation, heartbeat from the run list', () => {
+    expect(t).toContain('on the roster');
+    expect(t).toMatch(/Checked \d+ min ago/);
+    expect(t).toContain('Released Session 3: 7 files to materials.');
+  });
+  it('has Check now and More in the header, disabled until the operation panel lands', () => {
+    expect(out).toMatch(/<button class="btn" type="button" disabled[^>]*>Check now/);
+    expect(t).toContain('Preview the next automatic run');
+    expect(t).toContain('What happens here');
+  });
+  it('flags a stale status', () => {
+    expect(text(<CohortScreen {...props({ loaded: { ...ready, stale: ['schedule.yml'] } as Loaded })} />)).toContain('schedule.yml changed since this cohort was last checked');
+  });
+  it('shows Status not computed yet when the file is absent', () => {
+    const a = html(<CohortScreen {...props({ loaded: { kind: 'absent' } })} />);
+    expect(a).toContain('Status not computed yet');
+    expect(a).toMatch(/disabled[^>]*>Check now/);
+  });
+});
+
+describe('S16 and S10 assignments', () => {
+  it('lists every assignment with state and progress', () => {
+    const t = text(<AssignmentsScreen {...props()} />);
+    expect(t).toContain('Assignment 2: Regression');
+    expect(t).toContain('open');
+    expect(t).toContain('37 of 48 submitted');
+  });
+  it('shows the lifeline, dates and actions by state', () => {
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2' })} />);
+    expect(out).toContain('class="lifeline"');
+    expect(out).toMatch(/<li class="now" aria-current="step">.*?Open/);
+    expect(out).toContain('Late work until');
+    expect(out).toContain('Update every copy');
+    expect(out).toContain('Collect now');
+    expect(out).toContain('Template ready.');
+  });
+  it('says when an assignment is not in the status', () => {
+    expect(text(<AssignmentScreen {...props({ entry: 'assignment-9' })} />)).toContain('No assignment called assignment-9');
+  });
+});
+
+describe('S6 schedule and S11 release', () => {
+  it('shows Type, Details as markdown and State, with events from schedule.yml', () => {
+    const out = html(<ScheduleScreen {...props()} />);
+    expect(out).toContain('<span>Details</span>');
+    expect(out).toContain('<i>random forests</i>');
+    expect(out).toContain('st-chip skip');
+    expect(out).toContain('<b>Exam</b>: Midterm');
+    expect(out).toContain('<b>Session 5</b>: Trees and ensembles');
+    expect(out).toContain('<b>Assignment 2</b>: Regression');
+    expect(out).toContain('today-line');
+  });
+  it('opens the entry a Fix link points to', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
+    expect(out).toContain('trow lec fault current');
+    expect(out).toContain('class="entry"');
+    expect(out).toContain('course-materials-f2026/lectures/05_trees');
+  });
+  it('renders a release with its source, destination and problem', () => {
+    const t = text(<ReleaseScreen {...props({ entry: 's5' })} />);
+    expect(t).toContain('Session 5 : Trees and ensembles');
+    expect(t).toContain('will be skipped');
+    expect(t).toContain(`${COURSE_ORG}/course-materials-f2026/lectures/05_trees`);
+    expect(t).toContain(`${COHORT_ORG}/materials/lectures/05_trees`);
+    expect(t).toContain('Fix the folder');
+  });
+});
+
+describe('S8 students', () => {
+  const out = html(<StudentsScreen {...props()} />);
+  it('shows counts and the grid with system columns, never the enrol code', () => {
+    expect(out).toContain('<span class="n">48</span>');
+    expect(out).toContain('Anna Adams');
+    expect(out).toContain('class="sys"');
+    expect(out).toContain('Joined');
+    expect(out).toContain('Code sent; not joined');
+    expect(out).toContain('Not sent');
+    expect(out).not.toContain('SECRETCODE');
+  });
+});
+
+describe('S7 staff', () => {
+  it('lists instructors and teaching assistants with access and dates', () => {
+    const t = text(<StaffScreen {...props()} />);
+    expect(t).toContain('Dr A. Example');
+    expect(t).toContain('Teaching assistant');
+    expect(t).toContain('Has access');
+    expect(t).toContain('1 Sep to 31 Dec');
+    expect(t).toContain('1 instructor and 1 teaching assistant');
+  });
+});
+
+describe('S14 site and S18 operations', () => {
+  it('shows the last update, the home text as students see it, and announcements', () => {
+    const out = html(<SiteScreen {...props()} />);
+    expect(out).toContain('Out of date.');
+    expect(out).toContain('Welcome to <b>Machine Learning</b>.');
+    expect(out).not.toContain('layout: home');
+    expect(out).toContain('2026-09-21-scikit');
+  });
+  it('lists operations with the outcome sentence, details fold and the run', () => {
+    const out = html(<OperationsScreen {...props()} />);
+    expect(out).toContain('Released Session 3: 7 files to materials.');
+    expect(out).toContain('RELEASED');
+    expect(out).toContain(`https://github.com/${COURSE_ORG}/.github/actions/runs/4821`);
+  });
+});
+
+describe('S2 course and S17 template', () => {
+  const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
+  it('shows problems, templates, materials, details and cohorts', () => {
+    const t = text(<CourseScreen {...cp} />);
+    expect(t).toContain('Not ready for a new cohort');
+    expect(t).toContain('Marking of Assignment 3 cannot start.');
+    expect(t).toContain('assignment-3-f2026');
+    expect(t).toContain('course-materials-f2026');
+    expect(t).toContain('10% per day, up to 10 days');
+    expect(t).toContain('Fall 2026');
+  });
+  it('reads grading_config.yml into the tiered form and marks the bad value', () => {
+    const out = html(<TemplateScreen {...cp} entry="assignment-3" />);
+    expect(out).toContain('Group project');
+    expect(out).toContain('In teams');
+    expect(out).toContain('sometimes');
+    expect(out).toContain('var(--bad-soft)');
+    expect(out).toContain('<td>proposal</td>');
+    expect(out).toContain('<td>50</td>');
+    expect(out).toContain('/edit/solution/grading_config.yml');
+  });
+});
+
+describe('read only and the shell', () => {
+  it('shows the read-only view for a course the user cannot change', () => {
+    const t = text(<ReadonlyScreen course={{ ...course, write: false }} cohort={cohort} />);
+    expect(t).toContain('Read only.');
+    expect(t).toContain('No roster, no marks, no buttons.');
+  });
+  it('puts the switcher, nav with the problem count and header links in the frame', () => {
+    const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="week" problems={2} />);
+    expect(nav).toContain('Machine Learning, Fall 2026');
+    expect(nav).toContain('New cohort of Machine Learning');
+    expect(nav).toContain('class="n-count"');
+    expect(nav).toContain('aria-current="page"');
+    expect(nav).toContain('2 problems');
+    const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} course={{ ...course, write: false }} cohort={cohort} navOpen={false} onMenu={() => {}} />);
+    expect(top).toContain('read only');
+    expect(top).toContain(`https://${COHORT_ORG}.github.io`);
+    expect(top).toContain('Cohort on GitHub');
+    expect(top).toContain('Course on GitHub');
+    const foot = text(<Footer course={course} cohort={cohort} />);
+    expect(foot).toContain('Friedrichstraße 180');
+    expect(foot).toContain('Part of the Hertie Data Science Lab.');
+  });
+});
