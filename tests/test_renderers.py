@@ -85,12 +85,17 @@ ALL_RENDERED = {
     "publish_site": workflows_render.render_publish_site(["course-materials-f2026"]),
     "status": workflows_render.render_status(["Cohort-f2026"]),
     "scheduler": workflows_render.render_scheduler(),
+    "console": workflows_render.render_console(),
 }
 
 # The renderers with no check-team gate: neither a cron run nor a repository_dispatch has
 # an actor to check, and each job only re-calls idempotent functions (the scheduler's
 # releases, refresh's re-seeding, the codes send's `code_sent_at` idempotence).
 UNGATED = {"scheduler", "refresh", "send_codes"}
+
+# Gated by a check-team STEP rather than a job: the Console is one job, so the run it
+# dispatches has one job to follow.
+STEP_GATED = {"console"}
 
 # The seeded crons. Nobody watches them, and GitHub emails a scheduled-run failure only to
 # whoever last committed the cron file - the bot - so each has to report itself.
@@ -114,6 +119,8 @@ GIT_PUSHERS = (
     "dsl_course.scaffold",
     "dsl_course.site",
     "dsl_course.scheduler",
+    # Every op the Console runs goes through it, releases and hand-outs included.
+    "dsl_course.console",
 )
 # The two scheduler sub-commands that only READ: one lists the cohorts, the other
 # validates the course's own config. Neither clones anything, so neither needs git.
@@ -147,6 +154,8 @@ JOB_TIMEOUTS = {
     # Patch released assignment reads and commits into every submission repo of one
     # assignment, in series - the same shape as a handout.
     "patch_assignment": 60,
+    # The Console runs any op, the grading ones included, in its one job.
+    "console": 120,
 }
 # The scheduler is the one workflow whose jobs carry DIFFERENT budgets: it releases and
 # grades in two jobs precisely so the two-hour one is never in the release's way, and giving
@@ -196,7 +205,9 @@ def test_renders_valid_yaml(name):
     doc = yaml.safe_load(ALL_RENDERED[name])
     assert isinstance(doc, dict) and doc.get("name")
     # Every faculty workflow is a workflow_dispatch with a check-team gate.
-    assert ("check-team" in workflow_jobs(ALL_RENDERED[name])) is (name not in UNGATED)
+    assert ("check-team" in workflow_jobs(ALL_RENDERED[name])) is (
+        name not in UNGATED | STEP_GATED
+    )
 
 
 @pytest.mark.parametrize("name", sorted(DATED_RENDERED))
@@ -742,8 +753,9 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     repo, files, deleted = commits[0]
     assert repo == ".github"
     assert (
-        len(files) == 20
-    )  # three grading buttons became two, the two end-of-term ones, and the team nudge
+        len(files) == 21
+    )  # three grading buttons became two, the two end-of-term ones, the team nudge, Console
+    assert ".github/workflows/console.yml" in files
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",
@@ -1883,6 +1895,8 @@ SERIALISED_WRITERS = {
     "archive_cohort": "archive-cohort",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
+    # Per ACTOR: one person's presses run in order, and two people never wait on each other.
+    "console": "console-${{ github.actor }}",
 }
 
 
@@ -2270,7 +2284,7 @@ MAIL_SENDERS = ("send_codes", "distribute_grades", "open_team_formation")
 # ...plus the scheduler, which mails a cohort about a source it has not staged, and
 # every cron, whose failure step mails the maintainer the log (asserted per cron in
 # test_every_unattended_run_files_and_closes_its_own_failure_issue).
-MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status", "scheduler")
+MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status", "scheduler", "console")
 
 
 def _secret_ref(name: str) -> str:
@@ -2474,3 +2488,107 @@ def test_the_publishing_answers_reach_the_scaffolder():
     assert step["env"]["PUBLIC_DIRS"] == "${{ inputs.public_dirs }}"
     assert step["env"]["PUBLIC_TYPES"] == "${{ inputs.public_types }}"
     assert "--public-dirs" in step["run"] and "--public-types" in step["run"]
+
+
+# ------------------------------------------------------------------ the Console workflow
+
+
+def _console_steps() -> list[dict]:
+    (job,) = workflow_jobs(ALL_RENDERED["console"]).values()
+    return job["steps"]
+
+
+def test_the_console_takes_one_request_and_names_only_the_actor():
+    doc = yaml.safe_load(ALL_RENDERED["console"])
+    assert workflow_inputs(ALL_RENDERED["console"]) == {
+        "request": {
+            "description": "Filled in by the Instructor Console; not for hand use",
+            "required": True,
+            "type": "string",
+        }
+    }
+    assert set(_trigger(ALL_RENDERED["console"])) == {"workflow_dispatch"}
+    # The run name is what every viewer of the public Actions tab reads: the actor, never
+    # the op or anything else the caller typed.
+    assert doc["run-name"] == "Console by ${{ github.actor }}"
+    assert len(doc["jobs"]) == 1
+
+
+def test_the_console_gates_before_it_fetches_anything():
+    steps = _console_steps()
+    gate = steps[0]
+    # The same check, and the same refusal, as every other button's check-team job.
+    check_team = workflow_jobs(ALL_RENDERED["status"])["check-team"]["steps"][0]
+    assert gate["run"] == check_team["run"]
+    assert gate["env"] == check_team["env"]
+    assert gate["id"] == "gate"
+    checkout = next(
+        i for i, s in enumerate(steps) if "actions/checkout" in s.get("uses", "")
+    )
+    assert checkout == 1
+    assert steps[checkout]["with"]["repository"] == workflows_render.CENTRAL
+    # Pinned at placement to the ref THIS org runs, like every other workflow.
+    placed = yaml.safe_load(
+        workflows_render.for_placement(ALL_RENDERED["console"], "main")
+    )
+    (job,) = placed["jobs"].values()
+    assert job["steps"][checkout]["with"]["ref"] == "main"
+    assert any(s.get("with", {}).get("cache") == "pip" for s in steps)
+
+
+def test_the_console_gate_refuses_a_caller_without_write(tmp_path):
+    fake = tmp_path / "gh"
+    fake.write_text("#!/bin/sh\necho read\n")
+    fake.chmod(0o755)
+    run = subprocess.run(
+        ["bash", "-e", "-c", _console_steps()[0]["run"]],
+        env={
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "ACTOR": "someone",
+            "REPO": "Course-Org/.github",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert run.returncode == 1
+    assert "@someone lacks write on Course-Org/.github" in run.stdout
+
+
+def test_the_request_reaches_the_cli_through_env_only():
+    (step,) = [s for s in _console_steps() if "dsl_course.console" in s.get("run", "")]
+    assert step["env"]["REQUEST"] == "${{ inputs.request }}"
+    assert 'python -m dsl_course.console --request "$REQUEST"' in step["run"]
+    assert "${{" not in step["run"]
+
+
+def test_a_broken_console_run_is_reported_but_a_refused_caller_is_not(tmp_path):
+    (job,) = workflow_jobs(ALL_RENDERED["console"]).values()
+    steps = job["steps"]
+    (opener,) = [s for s in steps if s.get("id") == "notice"]
+    (mail,) = [s for s in steps if "dsl_course.notify" in s.get("run", "")]
+    closer = _closer(job)
+    # Every Console run is a dispatch, so the crons' "not a manual run" guard would make
+    # these steps dead; what they skip instead is a run the gate refused.
+    for step in (opener, mail):
+        assert "workflow_dispatch" not in step["if"]
+        assert "steps.gate.outcome == 'success'" in step["if"]
+        assert "cancelled()" in step["if"]
+    assert "steps.notice.outputs.report == 'true'" in mail["if"]
+    assert set(mailer.GRAPH_ENV) <= set(mail["env"])
+    assert closer["if"] == "success()"
+    assert _issue_title(opener) == _issue_title(closer) == '"$WORKFLOW is failing"'
+    _assert_the_reported_step_writes_its_log(job, "console")
+    # Executed: with nothing open, a failure files the issue.
+    assert _run_issue_step(opener, tmp_path / "x", [], WORKFLOW="Console") == [
+        "create --repo"
+    ]
+
+
+def test_the_course_page_lists_the_console_as_auto_handled():
+    page = profile_readme.render_profile_readme(
+        "My-Course-E1", "My-Course-E1", "My Course", [], False, central_ref="main"
+    )
+    auto = page.split("### Automatically handled")[1]
+    (row,) = [line for line in auto.splitlines() if "console.yml" in line]
+    assert "Runs what the Instructor Console asks for" in row
+    assert row.rstrip().endswith("| Auto-handled |")

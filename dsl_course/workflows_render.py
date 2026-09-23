@@ -153,12 +153,10 @@ def _concurrency(name: str) -> str:
     )
 
 
-_CHECK_TEAM = """  check-team:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Verify the user may run actions for THIS repo
+# The gate as a STEP, so a single-job workflow (the Console) can run it inline, ahead of its
+# checkout, with the same logic and the same message as the `check-team` job every other
+# button needs.
+_CHECK_TEAM_STEP = """      - name: Verify the user may run actions for THIS repo
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           ACTOR: ${{ github.actor }}
@@ -172,6 +170,16 @@ _CHECK_TEAM = """  check-team:
           cat /tmp/gherr || true
           exit 1
 """
+
+_CHECK_TEAM = (
+    """  check-team:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+"""
+    + _CHECK_TEAM_STEP
+)
 
 # Job time budgets. Every job is bounded (an unbounded one that hangs holds a runner for
 # GitHub's 6-hour default), but the bound has to fit the work: a timeout that fires on a
@@ -271,11 +279,15 @@ def _install_steps(sandbox: bool) -> str:
 """
 
 
-def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> str:
+def _ungated_preamble(
+    minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False, first: str = ""
+) -> str:
+    """`first` is any step that must run before the checkout - the Console's inline
+    check-team gate, so nothing is fetched or installed for a caller it refuses."""
     return f"""    runs-on: ubuntu-latest
     timeout-minutes: {minutes}
     steps:
-      - uses: {_CHECKOUT}
+{first}      - uses: {_CHECKOUT}
         with:
           repository: {CENTRAL}
           ref: {CENTRAL_REF_PLACEHOLDER}
@@ -390,6 +402,11 @@ _FAILED = "__CRON_FAILED_IF__"
 _SUCCEEDED = "__CRON_SUCCEEDED_IF__"
 _LOG_TAIL = "__CRON_LOG_TAIL__"
 _MAIL_LOG_ENV = "__CRON_MAIL_LOG_ENV__"
+# Which events report at all, and what the issue's first line says. The crons skip a
+# workflow_dispatch (someone is watching that run) and call their run "unattended"; the
+# Console is dispatched on every run, by the Console rather than a person reading the log.
+_UNATTENDED = "__CRON_UNATTENDED_IF__"
+_NOTE = "__CRON_NOTE__"
 
 # Where a cron step keeps its own output for the mail step below to tail. The runner's
 # temp directory, so it is per JOB - the scheduler's grading matrix runs a leg per cohort,
@@ -419,7 +436,8 @@ _CRON_MAIL_TEMPLATE = (
     """      - name: Email the maintainer the failed step's log
         if: """
     + _FAILED
-    + """ && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
+    + _UNATTENDED
+    + """ && steps.notice.outputs.report == 'true'
         env:
           WORKFLOW: ${{ github.workflow }}
           COURSE: ${{ github.repository_owner }}
@@ -467,7 +485,8 @@ _CRON_NOTICE_TEMPLATE = (
         id: notice
         if: """
     + _FAILED
-    + """ && github.event_name != 'workflow_dispatch'
+    + _UNATTENDED
+    + """
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           WORKFLOW: ${{ github.workflow }}
@@ -479,7 +498,9 @@ _CRON_NOTICE_TEMPLATE = (
           title="$WORKFLOW"""
     + _SCOPE
     + """ is failing"
-          note=$(printf 'The unattended run failed or was cancelled: %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n' "$RUN_URL")
+          note=$(printf '"""
+    + _NOTE
+    + """' "$RUN_URL")
           # A filed issue emails only the repo's watchers, which in practice is nobody, so
           # the FIRST report mentions the org's admins; course-admin, not instructors,
           # because broken infrastructure is not the teaching staff's problem.
@@ -528,6 +549,11 @@ def _fill(
     succeeded: str = "success()",
     log_tail: str = f"tail -n 30 {_RUN_LOG} 2>/dev/null",
     mail_log_env: str = "",
+    unattended: str = " && github.event_name != 'workflow_dispatch'",
+    note: str = (
+        "The unattended run failed or was cancelled: %s\\n\\nNothing retries it before"
+        " the next scheduled run. This issue closes itself once a run succeeds.\\n"
+    ),
 ) -> str:
     """Bind one job's issue scope - and how it tells a failure from a success, and where it
     reads the failed log - into a reporting template.
@@ -545,6 +571,8 @@ def _fill(
         .replace(_SUCCEEDED, succeeded)
         .replace(_LOG_TAIL, log_tail)
         .replace(_MAIL_LOG_ENV, mail_log_env)
+        .replace(_UNATTENDED, unattended)
+        .replace(_NOTE, note)
     )
 
 
@@ -1570,6 +1598,78 @@ on:
         run: |
           python3 -m dsl_course.status --course-org "$COURSE" --cohort-org "$COHORT_ORG" >> "$GITHUB_STEP_SUMMARY"
 """
+
+
+# The Console's failure reporting: the cron trio, fired on the dispatches it is made of.
+# Whoever pressed the button in the Console sees the op's own outcome there; what nobody
+# sees is the RUN breaking - a traceback, a revoked token, a timeout - which only the
+# maintainer can fix. So a failure files the one "Console is failing" issue and mails the
+# maintainer its log, and the next good run closes it.
+#
+# Only once the gate has passed (`steps.gate`): a refused caller is not a broken run, and
+# must not be able to mail the maintainer by pressing the button.
+_CONSOLE_REPORT = _fill(
+    _CRON_NOTICE_TEMPLATE,
+    failed="(failure() || cancelled()) && steps.gate.outcome == 'success'",
+    unattended="",
+    note=(
+        "A Console run failed or was cancelled: %s\\n\\n"
+        "This issue closes itself once a Console run succeeds.\\n"
+    ),
+).replace(
+    "Report an unattended failure as an issue",
+    "Report a failed Console run as an issue",
+)
+
+
+def render_console() -> str:
+    """The one workflow the Instructor Console dispatches: a single `request` input
+    (contracts.md, `dsl.request/1`), handed to `dsl_course.console`, which validates it,
+    re-checks the actor's access, runs the op and reports its outcome.
+
+    One job, so the Console polls one job for one answer. The check-team gate is therefore
+    a STEP ahead of the checkout rather than a job of its own, with the same logic and the
+    same refusal. The request reaches the CLI through `env:` only: it is JSON typed by
+    whoever dispatched the run, and a `${{ }}` in a run block is substituted before the
+    shell parses it."""
+    gate = _CHECK_TEAM_STEP.replace(
+        "      - name: Verify the user may run actions for THIS repo\n",
+        "      - name: Verify the user may run actions for THIS repo\n"
+        "        id: gate\n",
+    )
+    return f"""name: Console
+
+# Runs what the Instructor Console asks for. Not a button to press here: the Console fills
+# in `request` and follows the run.
+#
+# The run name carries the actor and nothing the caller typed. The op's outcome - the
+# public `dsl-outcome` annotation, the private outcome file, the refreshed status.json -
+# is written by `dsl_course.console` itself, so there is no step for it here.
+run-name: Console by ${{{{ github.actor }}}}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: "Filled in by the Instructor Console; not for hand use"
+        required: true
+        type: string
+
+# One queue PER PERSON: two presses by one instructor run in order rather than at once,
+# and two instructors never wait on each other. Actions holds one pending run per group,
+# so a third press while two are outstanding replaces the pending one.
+{_concurrency("console-${{ github.actor }}")}
+{_PERMISSIONS_JOBS}  console:
+{_ungated_preamble(_TIMEOUT_GRADING, first=gate)}      - name: Run the request
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          REQUEST: ${{{{ inputs.request }}}}
+{_MAIL_ENV}
+        run: |
+          gh auth setup-git
+          python -m dsl_course.console --request "$REQUEST"{_TEE_RUN_LOG}
+{_CONSOLE_REPORT}"""
 
 
 def render_refresh() -> str:
