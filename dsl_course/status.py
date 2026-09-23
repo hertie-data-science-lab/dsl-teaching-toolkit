@@ -10,9 +10,15 @@ changes no state.
 Row IDs (B1, C2, ...) are internal stable identifiers for the checklist rows - they key the
 REQUIRED set and the JSON output, and are not tied to any numbering in the docs.
 
+It also writes the lifecycle's machine-readable twin, `status.json` (`dsl.status/1`, built
+by `status_json`): `write` puts it where the console reads it, and `write_after_op` is the
+hook the Console run calls at the end of every operation.
+
 Usage:
     python3 -m dsl_course.status --course-org COURSE --cohort-org COHORT
     python3 -m dsl_course.status --course-org COURSE --cohort-org COHORT --format json
+    python3 -m dsl_course.status --course-org COURSE [--cohort-org COHORT] --json-v1
+    python3 -m dsl_course.status --course-org COURSE [--cohort-org COHORT] --write
 """
 
 from __future__ import annotations
@@ -34,13 +40,15 @@ from . import (
     roster,
     schedule,
     source_digest,
+    status_json,
     sync_faculty,
     teams,
 )
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
+from .gh_contents import put_file
 from .issues import open_titles
-from .log import log_err
+from .log import log_err, log_ok, log_step
 from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
@@ -440,12 +448,111 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     return data
 
 
+# ------------------------------------------------------------------ status.json
+
+
+def _document(course_org: str, cohort_org: str | None) -> dict:
+    """The cohort's `status.json` document, or the course's when no cohort is named."""
+    if cohort_org:
+        return status_json.collect_cohort(course_org, cohort_org)
+    return status_json.collect_course(course_org)
+
+
+def write(course_org: str, cohort_org: str | None = None) -> int:
+    """Write `status.json`: the cohort's into its private `classroom-config`, or - with no
+    cohort - the course's into its PUBLIC `.github` (counts only; see `status_json`).
+    Returns the error count.
+
+    `put_file` blob-compares, so a render identical to the file makes no commit. It is
+    tried twice: the four dispatchers a config push fires all end here within the same
+    minute, and the loser of that race is refused for a sha that moved under it - the
+    second attempt re-reads it. An archived cohort is left alone: it is read-only, and a
+    finished term's status is whatever it last said."""
+    if cohort_org:
+        org, repo = cohort_org, schedule.CONFIG_REPO
+    else:
+        org, repo = course_org, ".github"
+    doc = _document(course_org, cohort_org)
+    # The cohort can arrive in a dispatch payload, which whoever holds a cohort's bot
+    # token writes: the course's own registry decides, as it does for every dispatch.
+    registered = {c.casefold() for c in doc["course"]["cohorts"]}
+    if cohort_org and cohort_org.casefold() not in registered:
+        log_err(f"{cohort_org} is not registered under {course_org} - no status.json")
+        return 1
+    if cohort_org and not doc["cohort"]["live"]:
+        log_step(f"  [skip] {cohort_org} status.json (archived cohort - left frozen)")
+        return 0
+    content = status_json.dumps(doc)
+    message = "ci: refresh status.json"
+    if put_file(org, repo, status_json.STATUS_PATH, content, message) or put_file(
+        org, repo, status_json.STATUS_PATH, content, message
+    ):
+        log_ok(f"status.json current in {org}/{repo}")
+        return 0
+    return 1
+
+
+def refresh(course_org: str, cohort_org: str | None = None) -> int:
+    """`write`, for a caller whose own work is already done and must not be undone by
+    this: every exception is logged and counted, never raised. Returns the error count."""
+    try:
+        return write(course_org, cohort_org)
+    except Exception as exc:
+        log_err(
+            f"could not refresh status.json for {cohort_org or course_org} "
+            f"({type(exc).__name__}): {exc}"
+        )
+        return 1
+
+
+def write_after_op(request: dict) -> int:
+    """The hook the Console run calls at the end of every operation, with its
+    `dsl.request/1` request. Rewrites the cohort's status when the request names one, and
+    the course's always - a course operation (a new template, a fixed dsl-course.yml)
+    changes what every cohort's file says about the course too. Never raises; returns the
+    error count, which the caller may ignore: the operation's outcome is its own."""
+    course_org = str(request.get("course_org") or "")
+    if not course_org:
+        log_err("status.json not refreshed: the request names no course_org")
+        return 1
+    cohort_org = str(request.get("cohort_org") or "") or None
+    errors = refresh(course_org, cohort_org) if cohort_org else 0
+    return errors + refresh(course_org)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
-    parser.add_argument("--cohort-org", required=True)
+    parser.add_argument(
+        "--cohort-org",
+        default=None,
+        help="Required for the checklist; optional with --json-v1/--write (course only).",
+    )
     parser.add_argument("--format", choices=["md", "json"], default="md")
+    parser.add_argument(
+        "--json-v1",
+        action="store_true",
+        help="Print the status.json document (dsl.status/1) instead of the checklist.",
+    )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="Write status.json into classroom-config (cohort) or .github (course).",
+    )
     args = parser.parse_args()
+    if args.write:
+        return refresh(args.course_org, args.cohort_org)
+    if args.json_v1:
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                doc = _document(args.course_org, args.cohort_org)
+        except (RuntimeError, yaml.YAMLError) as exc:
+            log_err(str(exc))
+            return 1
+        print(json.dumps(doc, indent=2, ensure_ascii=False))
+        return 0
+    if not args.cohort_org:
+        parser.error("--cohort-org is required for the checklist")
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:

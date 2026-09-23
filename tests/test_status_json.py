@@ -1,0 +1,806 @@
+"""status.json (`dsl.status/1`): the lifecycle model rendered from facts, and the writer.
+
+The render is pure, so every test here builds the facts a gather would have read - a
+parsed schedule, the faults the digest parsers produce, a listing - and asserts on the
+document. The writer and the hook are driven with the reads stubbed at the consumer.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from dsl_course import grades, roster, schedule, status, status_json, sync_faculty
+from dsl_course.faults import ConfigFault, FaultKind, header_fault
+from dsl_course.gh_contents import load_yaml_lines
+from tests.conftest import repo_row
+
+COURSE = "hertie-dsl-demo-course-e1234"
+COHORT = "hertie-dsl-demo-f2026"
+BERLIN = ZoneInfo("Europe/Berlin")
+# Wednesday 23 Sep 2026, 11:00 in Berlin - the contract example's "now".
+NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
+
+SCHEDULE = """\
+timezone: Europe/Berlin
+semester_start: 2026-09-07
+semester_end: 2026-12-18
+releases:
+  s3:
+    event_datetime: 2026-09-24T10:00
+    title: Trees
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/03_trees
+  s5:
+    event_datetime: 2026-10-08T10:00
+    title: Trees and ensembles
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/05_trees
+assignments:
+  assignment-2:
+    course_source_repo: assignment-2-f2026
+    title: Regression
+    handout_datetime: 2026-09-15T10:00
+    due_datetime: 2026-09-27T23:59
+  assignment-3:
+    course_source_repo: assignment-3-f2026
+    handout_datetime: 2026-10-20T10:00
+    due_datetime: 2026-11-01T23:59
+"""
+
+# The contract's example document, verbatim (contracts.md section 3). The render must
+# carry every key it carries, at every level, so WP1's exported schema and this module
+# describe one shape.
+CONTRACT_EXAMPLE = {
+    "schema": "dsl.status/1",
+    "inputs": {
+        "schedule.yml": "<blob sha>",
+        "people.yml": "...",
+        "students.csv": "...",
+        "teams.csv": "...",
+        "grading_sheets": "<sha of the directory tree>",
+        "course/dsl-course.yml": "...",
+        "assignments.lock.yml": "...",
+    },
+    "course": {
+        "org": "hertie-dsl-demo-course-e1234",
+        "name": "Machine Learning",
+        "code": "E1234",
+        "stages": {
+            "C1": "done",
+            "C2": "done",
+            "C3": "done",
+            "C4": "done",
+            "C5": "problem",
+            "C6": "todo",
+        },
+        "ready": False,
+        "materials": [{"repo": "course-materials-f2026", "state": "ready"}],
+        "templates": [
+            {"repo": "assignment-3-f2026", "slug": "assignment-3", "state": "problem"}
+        ],
+        "cohorts": ["hertie-dsl-demo-f2026"],
+    },
+    "cohort": {
+        "org": "hertie-dsl-demo-f2026",
+        "term": "f2026",
+        "term_label": "Fall 2026",
+        "timezone": "Europe/Berlin",
+        "week": 3,
+        "weeks": 15,
+        "live": True,
+        "stages": {
+            "K1": "done",
+            "K2": "done",
+            "K3": "done",
+            "K4": "problem",
+            "K5": "problem",
+            "K6": "done",
+            "K7": "todo",
+        },
+        "archive_date": "2027-01-31",
+    },
+    "problems": [
+        {
+            "id": "schedule:s5:SOURCE_MISSING",
+            "scope": "cohort",
+            "stage": "K4",
+            "text": "Session 5 cites folder lectures/05_trees, which is not in "
+            "course-materials-f2026.",
+            "stops": "The release on Thu 8 Oct will be skipped.",
+            "fix": {
+                "repo": "hertie-dsl-demo-f2026/classroom-config",
+                "path": "schedule.yml",
+                "line": 41,
+                "screen": "schedule",
+                "entry": "s5",
+            },
+        },
+    ],
+    "this_week": [
+        {
+            "when": "2026-09-24T10:00:00+02:00",
+            "type": "release",
+            "ref": "s3",
+            "title": "Session 3: Trees",
+            "state": "planned",
+        },
+    ],
+    "releases": [
+        {
+            "id": "s5",
+            "when": "2026-10-08T10:00:00+02:00",
+            "type": "lecture",
+            "title": "Trees and ensembles",
+            "state": "will_be_skipped",
+            "source": {"repo": "course-materials-f2026", "path": "lectures/05_trees"},
+            "dest": {"repo": "materials", "path": "lectures/05_trees"},
+            "show_on_site": True,
+            "tbc": False,
+        }
+    ],
+    "assignments": [
+        {
+            "slug": "assignment-2",
+            "title": "Regression",
+            "template": "assignment-2-f2026",
+            "state": "open",
+            "handout": "2026-09-15T10:00:00+02:00",
+            "due": "2026-09-27T23:59:00+02:00",
+            "late_until": "2026-10-07T23:59:00+02:00",
+            "solution_shown": None,
+            "units": 48,
+            "submissions": 37,
+            "teams": None,
+            "marks": {"filled": 0, "total": 48},
+            "returned": False,
+            "problem": False,
+        }
+    ],
+    "students": {"rows": 48, "codes_sent": 47, "joined": 41},
+    "staff": {"instructors": 2, "tas": 1, "synced": True},
+    "site": {
+        "url": "https://hertie-dsl-demo-f2026.github.io",
+        "last_update": "2026-09-21T06:02:00Z",
+        "stale": True,
+    },
+    "automation": {
+        "last_tick": "2026-09-23T08:45:00Z",
+        "driver": "ds01",
+        "late": False,
+    },
+    "operations": [
+        {
+            "run_id": 4821,
+            "op": "release.now",
+            "conclusion": "done",
+            "summary": "Released Session 3: 7 files to materials.",
+            "finished": "2026-09-23T09:01:10Z",
+        }
+    ],
+}
+
+
+def _sched(text: str = SCHEDULE) -> schedule.Schedule:
+    return schedule.parse(load_yaml_lines(text))
+
+
+def _student(handle: str = "", sent: str = "2026-09-01T10:00:00Z") -> roster.Student:
+    return roster.Student("s@x.edu", "S", handle, "", code_sent_at=sent)
+
+
+def _people(email: str | None = "prof@x.edu") -> dict:
+    entry = {"github_handle": "prof", **({"email": email} if email else {})}
+    return sync_faculty.parse_faculty_from_meta({"people": {"instructors": [entry]}})
+
+
+def _course(**over) -> status_json.CourseFacts:
+    facts = status_json.CourseFacts(
+        org=COURSE,
+        meta={
+            "course_name": "Machine Learning",
+            "course_code": "E1234",
+            "course_description": "Learning from data.",
+            "people": {
+                "course_admins": [{"github_handle": "admin1", "email": "a@x.edu"}]
+            },
+        },
+        github_paths={
+            "dsl-course.yml": "c0ffee",
+            "cohort-courses-pages.yml": "facade",
+            ".github/workflows/scheduled-release.yml": "beef",
+        },
+        registry=[COHORT],
+        materials=[
+            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True)
+        ],
+        templates=[
+            status_json.TemplateFacts("assignment-2-f2026", "# Regression"),
+            status_json.TemplateFacts("assignment-3-f2026", "# Trees"),
+        ],
+        public_site=True,
+    )
+    for key, value in over.items():
+        setattr(facts, key, value)
+    return facts
+
+
+def _cohort(**over) -> status_json.CohortFacts:
+    site = f"{COHORT}.github.io"
+    listing = {
+        name: repo_row(name)
+        for name in ("classroom-config", "welcome", site, "materials")
+    }
+    facts = status_json.CohortFacts(
+        org=COHORT,
+        listing=listing,
+        config_paths={
+            "schedule.yml": "5c4ed",
+            "people.yml": "9e091",
+            "students.csv": "57ude",
+            "teams.csv": "7ea45",
+            "grading_sheets": "5hee7",
+            "assignments.lock.yml": "10c4",
+        },
+        sched=_sched(),
+        people=_people(),
+        students=[_student("ada"), _student("")],
+        dest_paths={"materials": {"lectures", "lectures/03_trees"}},
+        site_home="# Welcome to Machine Learning",
+        site_last_update=datetime(2026, 9, 22, 6, 2, tzinfo=UTC),
+        config_last_update=datetime(2026, 9, 21, 6, 0, tzinfo=UTC),
+        staff_synced=True,
+    )
+    for key, value in over.items():
+        setattr(facts, key, value)
+    return facts
+
+
+def _missing_s5() -> ConfigFault:
+    """What `schedule.source_faults` files for a release folder nobody has written."""
+    return ConfigFault(
+        "releases.s5",
+        f"{COURSE}/course-materials-f2026/lectures/05_trees does not exist",
+        datetime(2026, 10, 8, 10, 0, tzinfo=BERLIN),
+        field="course_source_path",
+        kind=FaultKind.MISSING_PATH,
+        file="schedule.yml",
+        lineno=41,
+        repo="course-materials-f2026",
+        path="lectures/05_trees",
+    )
+
+
+def _autograde_sometimes() -> ConfigFault:
+    """What `grades.grading_spec_faults` files for an unreadable value."""
+    return ConfigFault(
+        "assignments.assignment-3",
+        "`autograde: sometimes` is not yes or no",
+        datetime(2026, 11, 1, 23, 59, tzinfo=BERLIN),
+        field="autograde",
+        lineno=7,
+        file=grades.GRADING_FILE,
+        in_repo="assignment-3-f2026",
+        in_org=COURSE,
+        ref="solution",
+    )
+
+
+def _contract_scenario() -> tuple[status_json.CourseFacts, status_json.CohortFacts]:
+    course = _course()
+    course.templates[1].faults = [_autograde_sometimes()]
+    cohort = _cohort(
+        schedule_faults=[_missing_s5()],
+        roster_faults=[header_fault("students.csv", ["github_handle"])],
+        template_faults=[_autograde_sometimes()],
+    )
+    return course, cohort
+
+
+def _render(course=None, cohort=None, now=NOW) -> dict:
+    return status_json.render_cohort(course or _course(), cohort or _cohort(), now)
+
+
+def _keys(doc, prefix="") -> set[str]:
+    """Every key path in a document, lists folded to their first element."""
+    out: set[str] = set()
+    if isinstance(doc, dict):
+        for k, v in doc.items():
+            out.add(f"{prefix}{k}")
+            out |= _keys(v, f"{prefix}{k}.")
+    elif isinstance(doc, list) and doc:
+        out |= _keys(doc[0], f"{prefix}[].")
+    return out
+
+
+# ---------------------------------------------------------------------------- the model
+
+
+def test_contract_example_validates():
+    # WP1 exports the JSON Schema; until it lands, the contract's own example is the
+    # shape. Every key path the example carries, the render carries too (the render may
+    # add: `app_installed`, `copies`, `fix.ref`).
+    doc = _render(*_contract_scenario())
+    doc["operations"] = [CONTRACT_EXAMPLE["operations"][0]]  # none in the fixture
+    missing = _keys(CONTRACT_EXAMPLE) - _keys(doc)
+    assert missing == set()
+    assert doc["schema"] == "dsl.status/1"
+
+
+def test_a_healthy_cohort_has_every_setup_stage_done_and_no_problems():
+    doc = _render(
+        cohort=_cohort(students=[_student("ada"), _student("bob")]),
+    )
+    assert doc["problems"] == []
+    assert doc["course"]["stages"] == dict.fromkeys(status_json.COURSE_STAGES, "done")
+    assert doc["course"]["ready"] is True
+    stages = doc["cohort"]["stages"]
+    assert {
+        k: stages[k] for k in ("K1", "K2", "K3", "K4", "K5", "K6")
+    } == dict.fromkeys(("K1", "K2", "K3", "K4", "K5", "K6"), "done")
+    # Archiving is the end of the term, not a setup step a healthy cohort has done.
+    assert stages["K7"] == "todo"
+    assert doc["cohort"]["live"] is True
+    assert doc["cohort"]["term_label"] == "Fall 2026"
+    assert (doc["cohort"]["week"], doc["cohort"]["weeks"]) == (3, 15)
+
+
+def test_the_contract_example_marks_k4_k5_and_c5_and_lists_three_problems():
+    doc = _render(*_contract_scenario())
+    assert doc["cohort"]["stages"]["K4"] == "problem"
+    assert doc["cohort"]["stages"]["K5"] == "problem"
+    assert doc["course"]["stages"]["C5"] == "problem"
+    assert doc["course"]["ready"] is False
+    assert [p["id"] for p in doc["problems"]] == [
+        "schedule:s5:SOURCE_MISSING",
+        "roster:header:ROSTER",
+        "template:assignment-3:GRADING_CONFIG",
+    ]
+    source, _, template = doc["problems"]
+    assert source["stops"] == "The release on Thu 8 Oct will be skipped."
+    assert source["fix"] == {
+        "repo": f"{COHORT}/classroom-config",
+        "path": "schedule.yml",
+        "line": 41,
+        "screen": "schedule",
+        "entry": "s5",
+    }
+    # A course-side fault, shown on the cohort it will affect and tagged with where the
+    # fix lives - on the template's solution branch.
+    assert (template["scope"], template["stage"]) == ("course", "C5")
+    assert template["fix"]["repo"] == f"{COURSE}/assignment-3-f2026"
+    assert template["fix"]["ref"] == "solution"
+    assert template["stops"] == "Marking uses the toolkit's default for that value."
+    release = next(r for r in doc["releases"] if r["id"] == "s5")
+    assert release["state"] == "will_be_skipped"
+    assignment = next(a for a in doc["assignments"] if a["slug"] == "assignment-3")
+    assert assignment["problem"] is True
+
+
+def test_two_faults_on_one_entry_are_two_problems():
+    second = _missing_s5()
+    second.path = "lectures/05_forests"
+    doc = _render(cohort=_cohort(schedule_faults=[_missing_s5(), second]))
+    assert [p["id"] for p in doc["problems"]] == [
+        "schedule:s5:SOURCE_MISSING",
+        "schedule:s5:SOURCE_MISSING:2",
+    ]
+
+
+def test_a_source_whose_moment_passed_was_skipped_and_its_release_is_late():
+    doc = _render(
+        cohort=_cohort(schedule_faults=[_missing_s5()]),
+        now=datetime(2026, 10, 9, 9, 0, tzinfo=UTC),
+    )
+    assert doc["problems"][0]["stops"] == "The release on Thu 8 Oct was skipped."
+    assert next(r for r in doc["releases"] if r["id"] == "s5")["state"] == "late"
+
+
+def test_release_states_follow_the_destination():
+    doc = _render(now=datetime(2026, 9, 25, 9, 0, tzinfo=UTC))
+    states = {r["id"]: r["state"] for r in doc["releases"]}
+    # s3's folder is in materials; s5 is still to come.
+    assert states == {"s3": "released", "s5": "planned"}
+    s3 = next(r for r in doc["releases"] if r["id"] == "s3")
+    assert (s3["type"], s3["dest"]) == (
+        "lecture",
+        {"repo": "materials", "path": "lectures/03_trees"},
+    )
+
+
+def test_an_archived_cohort_is_not_live_and_k7_is_done():
+    cohort = _cohort()
+    cohort.listing["classroom-config"] = repo_row("classroom-config", archived=True)
+    doc = _render(cohort=cohort)
+    assert doc["cohort"]["live"] is False
+    assert doc["cohort"]["stages"]["K7"] == "done"
+
+
+def test_this_week_runs_from_local_midnight_for_seven_days():
+    sched = _sched(
+        """\
+timezone: Europe/Berlin
+events:
+  e0:
+    title: starts the week
+    event_datetime: 2026-09-23T00:00
+  e1:
+    title: last minute of it
+    event_datetime: 2026-09-29T23:59
+  e2:
+    title: the next week
+    event_datetime: 2026-09-30T00:00
+  e3:
+    title: yesterday
+    event_datetime: 2026-09-22T23:59
+"""
+    )
+    rows = status_json.this_week(sched, [], [], NOW)
+    assert [r["ref"] for r in rows] == ["e0", "e1"]
+    assert rows[0]["when"] == "2026-09-23T00:00:00+02:00"
+
+
+def test_this_week_lists_releases_and_due_dates_in_order():
+    doc = _render()
+    assert [(r["type"], r["ref"]) for r in doc["this_week"]] == [
+        ("release", "s3"),
+        ("due", "assignment-2"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("now", "units", "expected"),
+    [
+        (datetime(2026, 9, 14, 12, 0, tzinfo=UTC), 0, "declared"),
+        (datetime(2026, 9, 20, 12, 0, tzinfo=UTC), 2, "open"),
+        # Due 27 Sep 23:59 Berlin; the late window (10 days by default) runs to 7 Oct.
+        (datetime(2026, 9, 27, 21, 58, tzinfo=UTC), 2, "open"),
+        (datetime(2026, 9, 27, 21, 59, tzinfo=UTC), 2, "late_window"),
+        (datetime(2026, 10, 7, 21, 58, tzinfo=UTC), 2, "late_window"),
+        (datetime(2026, 10, 7, 21, 59, tzinfo=UTC), 2, "marking"),
+    ],
+)
+def test_an_assignment_moves_through_due_and_the_late_cutoff(now, units, expected):
+    listing = _cohort().listing | {
+        f"assignment-2-{h}": repo_row(f"assignment-2-{h}")
+        for h in ("ada", "bob")[:units]
+    }
+    listing["assignment-2"] = repo_row(
+        "assignment-2", isTemplate=True, topics=["assignment-template"]
+    )
+    doc = _render(cohort=_cohort(listing=listing), now=now)
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert (row["state"], row["units"]) == (expected, units)
+    assert row["late_until"] == "2026-10-07T23:59:00+02:00"
+
+
+def test_a_group_assignment_with_no_copies_after_hand_out_is_forming_teams():
+    group = grades.GradingSpec(type="group", team_formation="self_select")
+    doc = _render(cohort=_cohort(specs={"assignment-2": group}))
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert (row["state"], row["teams"]) == ("teams_forming", 0)
+    assigned = grades.GradingSpec(type="group", team_formation="assigned")
+    doc = _render(cohort=_cohort(specs={"assignment-2": assigned}))
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert row["state"] == "blocked"
+
+
+def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():
+    sheet = {
+        "submissions": {
+            "ada": {"info": {"submitted": "2026-09-27"}, "score_individual": 8},
+            "bob": {"info": {"submitted": None}, "score_individual": None},
+        }
+    }
+    later = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+    doc = _render(cohort=_cohort(sheets={"assignment-2": sheet}), now=later)
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert (row["marks"], row["submissions"], row["state"]) == (
+        {"filled": 1, "total": 2},
+        1,
+        "marking",
+    )
+    sheet["submissions"]["bob"]["score_individual"] = 5
+    doc = _render(
+        cohort=_cohort(
+            sheets={"assignment-2": sheet}, returned_to={"assignment-2": {"ada", "bob"}}
+        ),
+        now=later,
+    )
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert (row["returned"], row["state"]) == (True, "returned")
+
+
+def test_a_staff_entry_without_an_email_is_a_counted_problem():
+    doc = _render(cohort=_cohort(people=_people(email=None)))
+    assert doc["cohort"]["stages"]["K3"] == "problem"
+    (problem,) = doc["problems"]
+    assert problem["id"] == "people:staff:NO_EMAIL"
+    assert "prof" not in json.dumps(problem)
+
+
+def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
+    doc = _render()
+    assert doc["inputs"] == {
+        "schedule.yml": "5c4ed",
+        "people.yml": "9e091",
+        "students.csv": "57ude",
+        "teams.csv": "7ea45",
+        "grading_sheets": "5hee7",
+        "course/dsl-course.yml": "c0ffee",
+        "assignments.lock.yml": "10c4",
+    }
+    stamp = re.compile(
+        r"generated|written|timestamp|updated_at|rendered|as_of", re.IGNORECASE
+    )
+    assert not [k for k in _keys(doc) if stamp.search(k)]
+    # Two renders of one state are one blob, which is what makes the write a no-op.
+    assert status_json.dumps(_render()) == status_json.dumps(_render())
+
+
+def test_the_course_file_carries_no_handle_email_or_student_repo():
+    course = _course(
+        faults=[
+            ConfigFault(
+                "people.course_admins[0]",
+                "no usable `email:` - access is still granted, but no fault reaches "
+                "this person",
+                file="dsl-course.yml",
+                field="email",
+                in_repo=".github",
+                lineno=12,
+            )
+        ]
+    )
+    doc = status_json.render_course_file(course, NOW)
+    text = json.dumps(doc)
+    assert "admin1" not in text and "@x.edu" not in text
+    assert set(doc) == {"schema", "inputs", "course", "problems"}
+    assert doc["course"]["stages"]["C3"] == "problem"
+    assert doc["inputs"] == {
+        "dsl-course.yml": "c0ffee",
+        "cohort-courses-pages.yml": "facade",
+    }
+
+
+def test_automation_reads_the_newest_executed_tick_and_skips_scoped_runs():
+    runs = [
+        {
+            "event": "schedule",
+            "conclusion": "success",
+            "created_at": "2026-09-23T07:52:00Z",
+        },
+        {
+            "event": "repository_dispatch",
+            "conclusion": "success",
+            "created_at": "2026-09-23T08:45:00Z",
+        },
+        {
+            "event": "repository_dispatch",
+            "conclusion": "success",
+            "created_at": "2026-09-23T08:58:00Z",
+            "display_title": "Scheduled release for cohort x",
+        },
+        {
+            "event": "repository_dispatch",
+            "conclusion": None,
+            "created_at": "2026-09-23T08:59:00Z",
+        },
+    ]
+    assert status_json.automation_from_runs(runs, NOW) == {
+        "last_tick": "2026-09-23T08:45:00Z",
+        "driver": "ds01",
+        "late": False,
+    }
+    assert (
+        status_json.automation_from_runs(
+            runs, datetime(2026, 9, 23, 11, 0, tzinfo=UTC)
+        )["late"]
+        is True
+    )
+
+
+def test_term_weeks_before_during_and_after_the_term():
+    start, end = date(2026, 9, 7), date(2026, 12, 18)
+    assert status_json.term_weeks(start, end, date(2026, 9, 1)) == (0, 15)
+    assert status_json.term_weeks(start, end, date(2026, 9, 7)) == (1, 15)
+    assert status_json.term_weeks(start, end, date(2027, 1, 5)) == (15, 15)
+    assert status_json.term_weeks(None, end, date(2026, 9, 7)) == (None, None)
+
+
+# ---------------------------------------------------------------------------- writer
+
+
+def _stub_write(monkeypatch, doc: dict, results=(True,)):
+    puts: list[tuple] = []
+    answers = iter(results)
+    monkeypatch.setattr(status, "_document", lambda course, cohort: doc)
+    monkeypatch.setattr(
+        status,
+        "put_file",
+        lambda org, repo, path, content, msg: (
+            puts.append((org, repo, path, content)) or next(answers)
+        ),
+    )
+    return puts
+
+
+def test_write_puts_the_cohort_file_into_classroom_config(monkeypatch):
+    doc = _render()
+    puts = _stub_write(monkeypatch, doc)
+    assert status.write(COURSE, COHORT) == 0
+    assert puts == [
+        (COHORT, "classroom-config", ".dsl/status.json", status_json.dumps(doc))
+    ]
+
+
+def test_write_puts_the_course_file_into_dot_github(monkeypatch):
+    doc = status_json.render_course_file(_course(), NOW)
+    puts = _stub_write(monkeypatch, doc)
+    assert status.write(COURSE) == 0
+    assert [(o, r, p) for o, r, p, _ in puts] == [
+        (COURSE, ".github", ".dsl/status.json")
+    ]
+
+
+def test_write_tries_twice_for_the_dispatchers_race(monkeypatch):
+    puts = _stub_write(monkeypatch, _render(), results=(False, True))
+    assert status.write(COURSE, COHORT) == 0
+    assert len(puts) == 2
+
+
+def test_write_refuses_a_cohort_the_registry_does_not_list(monkeypatch):
+    puts = _stub_write(monkeypatch, _render(course=_course(registry=["someone-else"])))
+    assert status.write(COURSE, COHORT) == 1
+    assert puts == []
+
+
+def test_write_leaves_an_archived_cohort_frozen(monkeypatch):
+    cohort = _cohort()
+    cohort.listing["classroom-config"] = repo_row("classroom-config", archived=True)
+    puts = _stub_write(monkeypatch, _render(cohort=cohort))
+    assert status.write(COURSE, COHORT) == 0
+    assert puts == []
+
+
+def test_write_after_op_refreshes_the_cohort_then_the_course(monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(
+        status, "write", lambda course, cohort=None: seen.append((course, cohort)) or 0
+    )
+    request = {
+        "schema": "dsl.request/1",
+        "op": "release.now",
+        "course_org": COURSE,
+        "cohort_org": COHORT,
+    }
+    assert status.write_after_op(request) == 0
+    assert seen == [(COURSE, COHORT), (COURSE, None)]
+    seen.clear()
+    assert status.write_after_op({"op": "assignment.create", "course_org": COURSE}) == 0
+    assert seen == [(COURSE, None)]
+
+
+def test_write_after_op_never_raises(monkeypatch):
+    def boom(course, cohort=None):
+        raise RuntimeError("could not list repos")
+
+    monkeypatch.setattr(status, "write", boom)
+    assert status.write_after_op({"course_org": COURSE, "cohort_org": COHORT}) == 2
+    assert status.write_after_op({}) == 1
+
+
+def test_json_v1_prints_the_document(monkeypatch, capsys):
+    monkeypatch.setattr(status, "_document", lambda course, cohort: {"schema": "x"})
+    monkeypatch.setattr("sys.argv", ["status", "--course-org", COURSE, "--json-v1"])
+    assert status.main() == 0
+    assert json.loads(capsys.readouterr().out) == {"schema": "x"}
+
+
+def test_the_checklist_still_needs_a_cohort(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["status", "--course-org", COURSE])
+    with pytest.raises(SystemExit):
+        status.main()
+
+
+# ---------------------------------------------------------------------------- gather
+
+
+def test_collect_cohort_walks_every_read_end_to_end(monkeypatch):
+    # The wiring between the loaders and the facts: every read answered from memory, the
+    # rest of the pipeline real. `conftest._no_live_gh` catches any read this misses.
+    files = {
+        (COHORT, "classroom-config", "schedule.yml"): SCHEDULE,
+        (COHORT, "classroom-config", "grading_sheets/assignment-2.yml"): (
+            "submissions:\n  ada:\n    score_individual: 7\n"
+        ),
+        (COHORT, "classroom-config", ".dsl/outcomes/release.now.json"): json.dumps(
+            CONTRACT_EXAMPLE["operations"][0]
+        ),
+        (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
+        (COURSE, "course-materials-f2026", "publish.yml"): "public: lectures\n",
+        (COURSE, "assignment-2-f2026", "README.md"): "# Regression",
+        (COURSE, "assignment-2-f2026", "grading_config.yml"): "autograde: sometimes\n",
+        (COHORT, f"{COHORT}.github.io", "index.md"): "# Welcome",
+    }
+
+    def content(org, repo, path, ref=""):
+        return files.get((org, repo, path))
+
+    listings = {
+        COURSE: [
+            repo_row(".github"),
+            repo_row("course-materials-f2026"),
+            repo_row("assignment-2-f2026", isTemplate=True),
+        ],
+        COHORT: [
+            repo_row(n)
+            for n in ("classroom-config", "welcome", f"{COHORT}.github.io", "materials")
+        ],
+    }
+    for module in (status_json, schedule, grades):
+        monkeypatch.setattr(module, "get_file_content", content)
+    schedule._schedule_text.cache_clear()
+    monkeypatch.setattr(status_json, "list_org_repos", lambda org: listings[org])
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(
+        status_json,
+        "repo_path_shas",
+        lambda org, repo, branch: (
+            {"dsl-course.yml": "c0ffee"}
+            if repo == ".github"
+            else {"schedule.yml": "5c4ed", ".dsl/outcomes/release.now.json": "0u7"}
+        ),
+    )
+    monkeypatch.setattr(
+        status_json,
+        "org_meta",
+        lambda org: {"course_name": "Machine Learning", "course_code": "E1234"},
+    )
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_course_config", lambda org, faults: {}
+    )
+    monkeypatch.setattr(
+        status_json, "read_cohort_registry", lambda org, faults: [COHORT]
+    )
+    monkeypatch.setattr(
+        schedule,
+        "source_repo_paths",
+        lambda org, repo: {"lectures/03_trees", "lectures/05_trees"},
+    )
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_cohort_people", lambda org, faults: _people()
+    )
+    monkeypatch.setattr(
+        status_json.roster, "load", lambda org, faults=None: [_student("ada")]
+    )
+    monkeypatch.setattr(
+        status_json.teams, "load", lambda org, faults=None, known=None: {}
+    )
+    monkeypatch.setattr(
+        status_json, "repo_tree", lambda org, repo, branch: ("lectures",)
+    )
+    monkeypatch.setattr(status_json, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
+    monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
+    monkeypatch.setattr(status_json.cadence, "fetch_runs", lambda org: [])
+    monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
+
+    doc = status_json.collect_cohort(COURSE, COHORT, NOW)
+    assert doc["cohort"]["org"] == COHORT
+    assert doc["inputs"]["schedule.yml"] == "5c4ed"
+    assert doc["inputs"]["course/dsl-course.yml"] == "c0ffee"
+    assert doc["staff"] == {"instructors": 1, "tas": 0, "synced": True}
+    assert doc["operations"][0]["op"] == "release.now"
+    a2 = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert a2["marks"] == {"filled": 1, "total": 1}
+    # The template's unreadable value, seen from the cohort that cites it and from the
+    # course: one fault, both scopes' problem lists.
+    assert "template:assignment-2:GRADING_CONFIG" in [p["id"] for p in doc["problems"]]
+    course = status_json.collect_course(COURSE, NOW)
+    assert course["course"]["templates"][0]["state"] == "problem"
