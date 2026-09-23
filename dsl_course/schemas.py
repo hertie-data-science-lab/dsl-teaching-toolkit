@@ -195,10 +195,25 @@ PROBLEM_SCOPES = ("course", "cohort")
 
 
 def status_schema() -> dict:
-    """Hand-written from contracts section 3; the status writer (WP2) keeps it honest."""
+    """Hand-written from contracts section 3; the status writer (WP2) keeps it honest:
+    `tests/test_status_json.py` validates its render against this. No automation
+    heartbeat - it moves every tick, and the console reads it off the run list."""
     stages = {"type": "object", "additionalProperties": _enum(STAGE_STATES)}
     nullable = {"type": ["string", "null"]}
-    fix = outcome_schema()["properties"]["reasons"]["items"]["properties"]["fix"]
+    unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
+    # A status problem's pointer: the line, screen and entry are what the fault knows,
+    # and `ref` names the branch when it is not the default (a template's `solution`).
+    fix = _obj(
+        {
+            "repo": _str(),
+            "path": _str(),
+            "line": {"type": ["integer", "null"]},
+            "screen": nullable,
+            "entry": nullable,
+            "ref": _str(),
+        },
+        ("repo", "path"),
+    )
     repo_state = _obj(
         {"repo": _str(), "slug": _str(), "state": _str()}, ("repo", "state")
     )
@@ -207,6 +222,7 @@ def status_schema() -> dict:
             "org": _str(),
             "name": _str(),
             "code": _str(),
+            "app_installed": unknown,
             "stages": stages,
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": repo_state},
@@ -218,12 +234,13 @@ def status_schema() -> dict:
     cohort = _obj(
         {
             "org": _str(),
-            "term": _str(),
-            "term_label": _str(),
+            "term": nullable,
+            "term_label": nullable,
             "timezone": _str(),
             "week": {"type": ["integer", "null"]},
             "weeks": {"type": ["integer", "null"]},
             "live": {"type": "boolean"},
+            "app_installed": unknown,
             "stages": stages,
             "archive_date": nullable,
         },
@@ -233,7 +250,7 @@ def status_schema() -> dict:
         {
             "id": _str(),
             "scope": _enum(PROBLEM_SCOPES),
-            "stage": _str(),
+            "stage": nullable,
             "text": _str(),
             "stops": _str(),
             "fix": fix,
@@ -250,16 +267,21 @@ def status_schema() -> dict:
         },
         ("when", "type", "ref", "state"),
     )
-    place = _obj({"repo": _str(), "path": _str()}, ("repo",))
+    # An entry with nothing to copy has no source or destination.
+    place = {
+        **_obj({"repo": _str(), "path": _str()}, ("repo",)),
+        "type": ["object", "null"],
+    }
     release = _obj(
         {
             "id": _str(),
             "when": nullable,
-            "type": _str(),
+            "type": nullable,
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
             "dest": place,
+            "copies": {"type": "integer"},
             "show_on_site": {"type": "boolean"},
             "tbc": {"type": "boolean"},
         },
@@ -292,7 +314,7 @@ def status_schema() -> dict:
         _obj(
             {
                 "schema": {"type": "string", "enum": [STATUS_SCHEMA]},
-                "inputs": {"type": "object", "additionalProperties": _str()},
+                "inputs": {"type": "object", "additionalProperties": nullable},
                 "course": course,
                 "cohort": cohort,
                 "problems": {"type": "array", "items": problem},
@@ -300,21 +322,12 @@ def status_schema() -> dict:
                 "releases": {"type": "array", "items": release},
                 "assignments": {"type": "array", "items": assignment},
                 "students": _obj({"rows": count, "codes_sent": count, "joined": count}),
-                "staff": _obj(
-                    {"instructors": count, "tas": count, "synced": {"type": "boolean"}}
-                ),
+                "staff": _obj({"instructors": count, "tas": count, "synced": unknown}),
                 "site": _obj(
                     {
                         "url": _str(),
                         "last_update": nullable,
                         "stale": {"type": "boolean"},
-                    }
-                ),
-                "automation": _obj(
-                    {
-                        "last_tick": nullable,
-                        "driver": nullable,
-                        "late": {"type": "boolean"},
                     }
                 ),
                 "operations": {

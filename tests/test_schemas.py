@@ -227,11 +227,6 @@ CONTRACT_STATUS = {
         "last_update": "2026-09-21T06:02:00Z",
         "stale": True,
     },
-    "automation": {
-        "last_tick": "2026-09-23T08:45:00Z",
-        "driver": "ds01",
-        "late": False,
-    },
     "operations": [
         {
             "run_id": 4821,

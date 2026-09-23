@@ -14,9 +14,18 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import grades, roster, schedule, status, status_json, sync_faculty
+from dsl_course import (
+    grades,
+    roster,
+    schedule,
+    schemas,
+    status,
+    status_json,
+    sync_faculty,
+)
 from dsl_course.faults import ConfigFault, FaultKind, header_fault
 from dsl_course.gh_contents import load_yaml_lines
+from dsl_course.ops.request import validate
 from tests.conftest import repo_row
 
 COURSE = "hertie-dsl-demo-course-e1234"
@@ -763,3 +772,17 @@ def test_collect_cohort_walks_every_read_end_to_end(monkeypatch):
     assert "template:assignment-2:GRADING_CONFIG" in [p["id"] for p in doc["problems"]]
     course = status_json.collect_course(COURSE, NOW)
     assert course["course"]["templates"][0]["state"] == "problem"
+
+
+def test_every_render_validates_against_the_exported_schema():
+    # WP1's `console/schemas/status.schema.json` is what the console reads the file by.
+    healthy = _render(cohort=_cohort(students=[_student("ada"), _student("bob")]))
+    archived = _cohort(sched=_sched("timezone: Europe/Berlin\n"), people=None)
+    archived.listing["classroom-config"] = repo_row("classroom-config", archived=True)
+    for doc in (
+        _render(*_contract_scenario()),
+        healthy,
+        _render(cohort=archived),
+        status_json.render_course_file(_course(), NOW),
+    ):
+        assert validate(doc, schemas.status_schema()) == []
