@@ -1,11 +1,10 @@
 // S6 Schedule with its entry sheet (the schedule editor) and S11 Release detail.
 
-import Ajv2020 from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { matches } from '../edit/glob';
-import { useSave } from '../edit/save';
+import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
@@ -15,6 +14,7 @@ import {
   type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type TermDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
+import { validator } from '../model/validate';
 import { keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
@@ -28,8 +28,7 @@ import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, y
 import type { CohortProps, ReadyProps } from './types';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-const validSchedule = ajv.compile(scheduleSchema);
+const validSchedule = validator(scheduleSchema);
 
 /** What the student site shows in the Details cell. */
 function Details({ r }: { r: Row }) {
@@ -368,7 +367,7 @@ function View(p: ReadyProps) {
     for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
     const out = y.toJS();
     if (!validSchedule(out)) {
-      setSave({ kind: 'bad', text: `Not saved: the schedule would not be valid (${(validSchedule.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` });
+      setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
       return;
     }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;

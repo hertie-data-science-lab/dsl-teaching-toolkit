@@ -3,6 +3,7 @@
 // The engine's own checks (Validate schedule, the digests) stay the judge; the console only
 // reports them.
 
+import type { ValidateFunction } from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
 import type { Env } from '../env';
 import { ConflictError, authorOf, wait, type GitHubClient } from '../github/client';
@@ -24,6 +25,11 @@ export type SaveState =
 export interface Verdict {
   ok: boolean | null; // null: no check ran, or none finished in time
   text: string;
+}
+
+/** Why a save was refused: the first two things `validate` found wrong with `what`. */
+export function invalidText(what: string, validate: ValidateFunction): string {
+  return `Not saved: ${what} would not be valid (${(validate.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).`;
 }
 
 const FAILED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure']);
