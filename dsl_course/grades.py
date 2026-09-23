@@ -2031,6 +2031,25 @@ def team_lock_entries(
     return entries
 
 
+def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
+    """The cohort's assignments whose teams the STUDENTS form, in schedule order.
+
+    A template nobody has written declares nothing and is not one of them - the lock has
+    already locked its form to `none` - and `team_formation_resolved` answers `none` for
+    anything that is not a group assignment, so the shape question and the group question
+    are one test.
+
+    Free to ask: `declared_grading_spec` memoises the template's text per process, and by
+    the time a tick reaches this every one of them has been read already."""
+    return [
+        key
+        for key, entry in sched.assignments.items()
+        if (spec := declared_grading_spec(course_org, entry.course_source_repo))
+        is not None
+        and spec.team_formation_resolved == SELF_SELECT
+    ]
+
+
 def _formation_pages(
     course_org: str, cohort_org: str, sched: schedule.Schedule
 ) -> dict[str, str]:
@@ -2038,12 +2057,7 @@ def _formation_pages(
 
     Asked only when the plan HAS a self-select assignment: the pages cost a listing of the
     course org, and the lock is written on every tick of a cohort with any assignment."""
-    if not any(
-        (spec := declared_grading_spec(course_org, entry.course_source_repo))
-        is not None
-        and spec.team_formation_resolved == SELF_SELECT
-        for entry in sched.assignments.values()
-    ):
+    if not self_select_keys(course_org, sched):
         return {}
     return {
         key: page.url(cohort_org)

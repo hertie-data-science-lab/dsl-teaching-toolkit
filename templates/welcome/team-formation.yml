@@ -308,6 +308,8 @@ jobs:
                 `Thanks @${handle} - \`${assignment}\` has no team-size cap recorded. ` +
                 `A maintainer will action this.`,
                 'needs-review');
+              // Where the teams are listed, for the comments below to point at.
+              const page = lock.page ? `[the assignment page](${lock.page})` : 'the assignment page on the course site';
 
               // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
               // once near a project deadline, and each appends to the SAME file; the `sha`
@@ -341,8 +343,9 @@ jobs:
                 const current = mine ? cell(mine, iTeam).toLowerCase() : '';
                 if (current === team) return refuse(
                   `Thanks @${handle} - **${team}** is already your team for \`${assignment}\` - nothing to do.`);
-                const size = rows.filter(r =>
-                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
+                const sizeOf = (name) => rows.filter(r =>
+                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === name).length;
+                const size = sizeOf(team);
                 // Near miss: the same name once case and separators are taken out of it.
                 // A mistyped Join and an accidental second team are ONE typo seen from two
                 // sides - `teamalpha` for `team-alpha` - so every path is answered from the
@@ -354,9 +357,6 @@ jobs:
                   .map(r => cell(r, iTeam).toLowerCase())
                   .filter(Boolean))].sort();
                 const near = named.find(t => t !== team && flat(t) === flat(team));
-                const sizeOf = (name) => rows.filter(r =>
-                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === name).length;
-                const page = lock.page ? `[the assignment page](${lock.page})` : 'the assignment page on the course site';
                 // Joining a team that is not there, or is full.
                 const missing = () =>
                   `Thanks @${handle} - there is no team **${team}** for \`${assignment}\`.` +
@@ -424,7 +424,6 @@ jobs:
               // window only opens once the assignment has handed out, the handout re-fires
               // on every Scheduled release run, and this commit to teams.csv dispatches one
               // (dispatch-scheduled-release.yml), which provisions this team's repo.
-              const page = lock.page ? `[the assignment page](${lock.page})` : 'the assignment page on the course site';
               const lines = outcome.left
                 ? [
                   `Done @${handle} - you've left **${outcome.left}** and ${outcome.count === 1 ? 'started' : 'joined'} **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`,
