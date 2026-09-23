@@ -10,7 +10,7 @@ import { Field, Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
 import { parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
+  ARCHIVE_GRACE_DAYS, blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
   type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type TermDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
@@ -283,13 +283,14 @@ function TermForm({ d, set, errors }: { d: TermDraft; set: Setter<TermDraft>; er
   );
 }
 
-function ArchiveForm({ d, set }: { d: ArchiveDraft; set: Setter<ArchiveDraft> }) {
+function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveDraft>; errors: Record<string, string> }) {
   return (
     <>
       <F id="e-aon" k="on" d={d} set={set} t={{ tier: 'default', label: 'Archive automatically', widget: 'checkbox', defaultLabel: 'off means never' }} />
       {d.on ? (
         <div class="cond">
-          <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: 'default: 60 days after the term ends', reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
+          <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the term ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
+          <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after term end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the term ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
           <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Cohort archived' }} />
           <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{{date}} is filled in with the archive date.')} />
           <Common d={d} set={set} />
@@ -462,7 +463,7 @@ function View(p: ReadyProps) {
                 : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} lateDays={lateDays} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'term' ? <TermForm d={d} set={set} errors={errors} />
-                : <ArchiveForm d={d} set={set} />}
+                : <ArchiveForm d={d} set={set} errors={errors} />}
             </div>
           </div>
           <div class="entry-foot">
