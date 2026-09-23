@@ -1122,6 +1122,14 @@ on:
         description: "Skip the email notification (just push the grades)"
         type: boolean
         default: false
+      receipt_note:
+        description: "Also post 'Marks returned: see your marks repo.' once on each student's receipts issue"
+        type: boolean
+        default: false
+      include_feedback:
+        description: "Put the markers' feedback text into each student's email"
+        type: boolean
+        default: false
 
 {_concurrency("distribute-grades")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -1132,11 +1140,15 @@ on:
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           SILENT: ${{{{ inputs.silent }}}}
+          RECEIPT_NOTE: ${{{{ inputs.receipt_note }}}}
+          INCLUDE_FEEDBACK: ${{{{ inputs.include_feedback }}}}
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
 {_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
+          [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
+          [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
 """
 

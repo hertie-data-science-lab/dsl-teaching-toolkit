@@ -470,6 +470,17 @@ def receipt_marker(sha: str, event: str) -> str:
     return f"<!-- dsl-receipt:{sha or 'none'}:{event} -->"
 
 
+# What `Distribute grades --receipt-note` posts on a unit's receipts issue, and the hidden
+# mark that makes a re-run post it once per assignment. Deliberately NOT a `dsl-receipt:`
+# mark: a receipt records a submission, and this records nothing about one.
+MARKS_RETURNED_NOTE = "Marks returned: see your marks repo."
+
+
+def marks_returned_marker(slug: str) -> str:
+    """The hidden mark on the marks-returned note for assignment `slug`."""
+    return f"<!-- dsl-marks-returned:{slug} -->"
+
+
 def late_rule(window_days: int | None, penalty: str | None) -> str:
     """The late-work rule an assignment declares, as the half-sentence that follows
     "Late work: " - `10% per day, up to 10 days`, `accepted up to 7 days late`, or `not
