@@ -51,6 +51,14 @@ later without touching the screens.
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no
   engine preview, asks for a confirmation instead.
+- Wizards: New course, New cohort, New assignment, New materials. Each step checks live state
+  before it lets you continue (the org exists, `hertie-dsl-bot` is an owner, the set-up left
+  its repos, the template has both branches and a settings file that parses), and unfinished
+  answers stay in this browser so leaving loses nothing. Setting up a course is the one
+  operation outside the instructor's orgs: the wizard dispatches the central
+  `bootstrap-org.yml` in `hertie-data-science-lab/dsl-teaching-toolkit` and follows its run.
+  New assignment writes the Advanced marking values `assignment.create` does not take into
+  the new template's `grading_config.yml`.
 
 ## Schemas
 
@@ -62,5 +70,8 @@ a Python test fails when they drift. Never edit them by hand.
 Hash tokens as in the design mockup: `#cohort`, `#schedule-s5`, `#assignment-<slug>`,
 `#release-<id>`, `#template-<slug>`, `#marks-<slug>`, `#teams-<slug>`, `#materials-<repo>`;
 the schedule editor also opens `#schedule-new`, `#schedule-term` and `#schedule-archive`.
+Wizards: `#new-course-1..4`, `#new-cohort-1..3`, `#new-assignment-1..4`, `#new-materials`; a
+step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
+opens a new assignment entry for that template; `?wizard=new-cohort-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or cohort rides in the query string: `?cohort=<org>` or `?course=<org>`.
