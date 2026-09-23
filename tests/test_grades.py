@@ -1717,6 +1717,7 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 "team_formation_window": "none",
                 # No window, so no day for a refusal about one to name.
                 "team_formation_closes": None,
+                "team_formation_page": None,
             },
             "project": {
                 "team_formation": "self_select",
@@ -1724,6 +1725,8 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 # No handout_datetime on `_sched`, so the window never opens.
                 "team_formation_window": "closed",
                 "team_formation_closes": _DUE.date(),
+                # No `pages` handed in, so none to link - the key is still written.
+                "team_formation_page": None,
             },
         }
     }
@@ -1872,6 +1875,12 @@ def _writes(monkeypatch, existing, ok: bool = True) -> list[dict]:
     monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
     monkeypatch.setattr(grades, "org_meta", lambda org: {})
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
+    # The course org's templates, which number the assignment pages the lock links.
+    monkeypatch.setattr(
+        grades.schedule,
+        "discover_assignments",
+        lambda org: ["assignment-4-project-f2026"],
+    )
 
     def read(org, repo, path):
         if isinstance(existing, Exception):
@@ -1903,7 +1912,26 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "max_team_size": 5,
         "team_formation_window": "closed",
         "team_formation_closes": _DUE.date(),
+        # The assignment's page on the cohort site, which lists the teams - numbered and
+        # named exactly as the site names it, so the refusal that links it cannot drift.
+        "team_formation_page": "https://cohort.github.io/assignments/01-project.html",
     }
+
+
+def test_the_lock_links_no_page_for_an_individual_assignment_and_lists_nothing(
+    monkeypatch,
+):
+    # The page is for the refusal of a Join, which only a self-select assignment gets - and
+    # a plan with none of those does not pay a listing of the course org for it.
+    puts = _writes(monkeypatch, None)
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: individual\n")
+
+    def boom(org):
+        raise AssertionError("no self-select assignment, so no listing")
+
+    monkeypatch.setattr(grades.schedule, "discover_assignments", boom)
+    assert grades.sync_team_lock("COURSE", "COHORT", _sched(a1="assignment-1")).ok
+    assert "    team_formation_page:\n" in puts[0]["content"].decode()
 
 
 def test_the_lock_write_says_whether_the_file_actually_moved(monkeypatch):
@@ -2018,3 +2046,25 @@ def test_half_a_late_rule_is_never_completed_from_the_default(config, window, pe
     # sentence out of the syllabus would grade a cohort by words nobody wrote.
     spec = grades.parse_grading_spec(config)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
+
+
+@pytest.mark.parametrize(
+    ("day", "spoken"),
+    [
+        (1, "1st"),
+        (2, "2nd"),
+        (3, "3rd"),
+        (4, "4th"),
+        (11, "11th"),
+        (12, "12th"),
+        (13, "13th"),
+        (21, "21st"),
+        (22, "22nd"),
+        (23, "23rd"),
+        (31, "31st"),
+    ],
+)
+def test_a_day_is_spoken_with_its_ordinal(day, spoken):
+    # ONE spelling for the gradebook, the mail, the site and the form's JavaScript copy -
+    # and 11th-13th are the three a `day % 10` rule alone gets wrong.
+    assert grades.spoken_day(datetime(2026, 10, day)) == f"{spoken} Oct"

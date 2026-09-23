@@ -47,6 +47,6 @@ second copy of the facts to go stale.
     {% endif %}
     {%- endif -%}
     {%- if include.event.team_join_url -%}
-    <br/>[<a target="_blank" rel="noopener" href="{{ include.event.team_join_url }}">Form your team</a>] by {{ include.event.team_join_closes | date: site.dateformat }}
+    <br/>[<a target="_blank" rel="noopener" href="{{ include.event.team_join_url }}">Form your team</a>] by {{ include.event.team_join_closes }}
     {%- endif -%}
 </div>

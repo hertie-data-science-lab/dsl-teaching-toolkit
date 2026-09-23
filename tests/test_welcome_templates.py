@@ -410,9 +410,15 @@ def test_the_scanner_reads_every_scalar_for_every_shape():
     # older toolkit looks like: the two window scalars come back unset, and the workflow
     # reads that as open rather than shut (see the behavioural test further down).
     assert _lock_answers(_LOCK_FILE, ["solo", "project", "allocated", "invented"]) == [
-        {"formation": "none", "cap": 5, "window": None, "closes": ""},
-        {"formation": "self_select", "cap": 3, "window": None, "closes": ""},
-        {"formation": "assigned", "cap": 4, "window": None, "closes": ""},
+        {"formation": "none", "cap": 5, "window": None, "closes": "", "page": ""},
+        {
+            "formation": "self_select",
+            "cap": 3,
+            "window": None,
+            "closes": "",
+            "page": "",
+        },
+        {"formation": "assigned", "cap": 4, "window": None, "closes": "", "page": ""},
         None,  # a slug the lock file does not carry
     ]
 
@@ -430,9 +436,25 @@ def test_the_scanner_is_not_confused_by_the_files_own_header():
     # Every line of the header is a comment, and the file always carries one.
     from dsl_course import grades
 
-    real = grades.team_lock_text({"project": ("self_select", 3, "open", "2026-10-04")})
+    real = grades.team_lock_text(
+        {
+            "project": (
+                "self_select",
+                3,
+                "open",
+                "2026-10-04",
+                "https://cohort.github.io/assignments/02-assignment-2.html",
+            )
+        }
+    )
     assert _lock_answers(real, ["project"]) == [
-        {"formation": "self_select", "cap": 3, "window": "open", "closes": "2026-10-04"}
+        {
+            "formation": "self_select",
+            "cap": 3,
+            "window": "open",
+            "closes": "2026-10-04",
+            "page": "https://cohort.github.io/assignments/02-assignment-2.html",
+        }
     ]
 
 
@@ -445,17 +467,24 @@ def test_an_empty_close_date_is_still_a_line_the_scanner_reads():
 
     real = grades.team_lock_text(
         {
-            "early": ("self_select", 3, "closed", ""),
-            "later": ("self_select", 4, "open", "2026-11-30"),
+            "early": ("self_select", 3, "closed", "", ""),
+            "later": ("self_select", 4, "open", "2026-11-30", ""),
         }
     )
     assert _lock_answers(real, ["early", "later"]) == [
-        {"formation": "self_select", "cap": 3, "window": "closed", "closes": ""},
+        {
+            "formation": "self_select",
+            "cap": 3,
+            "window": "closed",
+            "closes": "",
+            "page": "",
+        },
         {
             "formation": "self_select",
             "cap": 4,
             "window": "open",
             "closes": "2026-11-30",
+            "page": "",
         },
     ]
 
@@ -541,11 +570,7 @@ def test_refresh_seeds_exactly_the_routing_labels_the_forms_declare(monkeypatch)
         )
     seeded = {name for name, _, _ in welcome.WELCOME_LABELS}
     # Every label a form declares must be seeded, or that form's issues are skipped.
-    assert declared <= seeded
-    # `team-list` is seeded but declared by no form ON PURPOSE: it marks the list this
-    # workflow writes, and keeping it off the routing label is what stops the list
-    # triggering a run that answers it in public.
-    assert seeded - declared == {"team-list"}
+    assert seeded == declared
 
     monkeypatch.setattr(welcome, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
@@ -640,17 +665,10 @@ def _run_form(
     body: str,
     handle: str = "stu",
     roster: tuple[str, ...] | None = None,
-    issues: list[dict] | None = None,
-    issues_break: bool = False,
 ) -> dict:
     """Run the SHIPPED team-formation script over these files and this issue, and return
-    what it did: `comments`, `labels`, `writes` (each teams.csv it committed), `states`,
-    `created` / `edited` (the public team list it opened or rewrote), `pinned` and
-    `issues` - the repo's open issues afterwards, to hand to the NEXT run.
-
-    `issues` seeds the welcome repo's open issues, so a second join meets the list the
-    first one left behind. `issues_break` makes every read of them fail, which is the
-    join that must still be reported as done.
+    what it did: `comments`, `labels`, `writes` (each teams.csv it committed) and
+    `states`.
 
     `await`/`async` are taken out so the stubs can answer synchronously - the same trick
     `_lock_answers` plays on one helper, over the whole script. Nothing else is rewritten,
@@ -669,10 +687,7 @@ def _run_form(
     harness = (
         f"const FILES = {json.dumps(files)};\n"
         f"const ISSUE = {json.dumps(issue)};\n"
-        f"const ISSUES = {json.dumps(issues or [])};\n"
-        f"const BREAK_ISSUES = {json.dumps(issues_break)};\n"
-        "const OUT = { comments: [], labels: [], writes: [], states: [],"
-        " created: [], edited: [], pinned: [], issues: ISSUES };\n"
+        "const OUT = { comments: [], labels: [], writes: [], states: [] };\n"
         # base64 both ways is a no-op here, so the stubs hold plain text.
         "const Buffer = { from: (s, e) => ({ toString: () => s }) };\n"
         "const process = { env: { HAS_BOT: 'true' } };\n"
@@ -681,8 +696,6 @@ def _run_form(
         "const context = { repo: { owner: 'cohort', repo: 'welcome' },"
         " payload: { issue: ISSUE } };\n"
         "const github = {\n"
-        "  paginate: (fn, a) => fn(a),\n"
-        "  graphql: (q, v) => { OUT.pinned.push(v.id); return {}; },\n"
         "  rest: {\n"
         "  repos: {\n"
         "    getContent: (a) => { if (!(a.path in FILES)) {"
@@ -694,17 +707,7 @@ def _run_form(
         "  issues: {\n"
         "    createComment: (a) => { OUT.comments.push(a.body); return {}; },\n"
         "    addLabels: (a) => { OUT.labels.push(a.labels[0]); return {}; },\n"
-        "    listForRepo: (a) => { if (BREAK_ISSUES) {"
-        " const e = new Error('no'); e.status = 403; throw e; }\n"
-        "      return ISSUES.filter(i => !a.labels || (i.labels || []).indexOf(a.labels) >= 0); },\n"
-        "    create: (a) => { const made = { number: 100 + ISSUES.length,"
-        " node_id: `N${100 + ISSUES.length}`, title: a.title, body: a.body,"
-        " labels: a.labels || [] };\n"
-        "      ISSUES.push(made); OUT.created.push(made); return { data: made }; },\n"
-        "    update: (a) => { const it = ISSUES.filter(i => i.number === a.issue_number)[0];\n"
-        "      if (a.body !== undefined) { if (it) it.body = a.body;"
-        " OUT.edited.push({ number: a.issue_number, body: a.body }); }\n"
-        "      if (a.state) OUT.states.push(a.state); return {}; },\n"
+        "    update: (a) => { if (a.state) OUT.states.push(a.state); return {}; },\n"
         "  },\n"
         "} };\n"
         "(function () {\n" + code + "\n})();\n"
@@ -720,10 +723,18 @@ def _run_form(
     return json.loads(run.stdout)
 
 
-def _lock_for(window: str, closes: str = "2026-10-04", cap: int = 4) -> str:
+# The assignment's page on the cohort site, as the lock carries it for the refusals.
+_PAGE = "https://cohort.github.io/assignments/02-assignment-2.html"
+
+
+def _lock_for(
+    window: str, closes: str = "2026-10-04", cap: int = 4, page: str = _PAGE
+) -> str:
     from dsl_course import grades
 
-    return grades.team_lock_text({"assignment-2": ("self_select", cap, window, closes)})
+    return grades.team_lock_text(
+        {"assignment-2": ("self_select", cap, window, closes, page)}
+    )
 
 
 # team-alpha has two of its four seats taken.
@@ -741,7 +752,7 @@ def test_a_shut_window_refuses_and_says_which_day_it_shut():
     )
     assert out["writes"] == [], "a request outside the window was recorded anyway"
     assert out["labels"] == ["needs-review"]
-    assert "team formation for `assignment-2` closed on 4 Oct." in out["comments"][0]
+    assert "team formation for `assignment-2` closed on 4th Oct." in out["comments"][0]
 
 
 @needs_js
@@ -759,7 +770,7 @@ def test_a_window_that_has_not_opened_yet_never_says_it_closed():
     said = out["comments"][0]
     assert "is not open yet" in said
     assert "closed on" not in said, "a pending window must not claim it has shut"
-    assert "runs until 4 Oct" in said
+    assert "runs until 4th Oct" in said
 
 
 @needs_js
@@ -849,6 +860,23 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     assert "no team **team-zeta** for `assignment-2`" in out["comments"][0]
     assert "Did you mean" not in out["comments"][0]
     assert "Create a new team" in out["comments"][0]
+    # Somewhere to look is the assignment's page on the cohort site - the one list of
+    # teams - carried in the lock because this script cannot work its URL out.
+    assert f"listed on [the assignment's page]({_PAGE})" in out["comments"][0]
+
+
+@needs_js
+def test_a_lock_with_no_page_still_says_where_the_teams_are_listed():
+    # A lock written before the page was carried, or one whose course listing failed: the
+    # page is named without a link rather than linked to nowhere.
+    out = _run_form(
+        _lock_for("open", page=""),
+        _TEAMS_CSV,
+        _form_body("assignment-2", "Join an existing team", "team-zeta"),
+    )
+    said = out["comments"][0]
+    assert "listed on the assignment's page on the cohort site" in said
+    assert "](" not in said
 
 
 @needs_js
@@ -880,185 +908,15 @@ def test_an_issue_from_a_form_with_no_action_field_is_answered_as_it_always_was(
     assert started["writes"][0].endswith("assignment-2,team-gamma,stu\n")
 
 
-# --- The public team list ------------------------------------------------------------
-#
-# teams.csv is private, so the Join-team form's "type its name exactly" only ever worked
-# for people who had already agreed a team face to face. These run the shipped script and
-# read the issue it actually writes.
-
-
-def _teams_list(out: dict) -> str:
-    """The body of the `Teams for ...` issue this run opened or rewrote."""
-    wrote = out["created"] + out["edited"]
-    assert len(wrote) == 1, f"expected one team-list write, got {wrote}"
-    return wrote[0]["body"]
-
-
-@needs_js
-def test_a_first_join_opens_the_public_team_list():
-    out = _run_form(
-        _lock_for("open"),
-        _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-    )
-    (made,) = out["created"]
-    assert made["title"] == "Teams for assignment-2"
-    # Its OWN label, never the routing one: the next run finds it again in one listing,
-    # and a list wearing `team-formation` would trigger the very workflow that wrote it.
-    assert made["labels"] == ["team-list"]
-    assert out["pinned"] == [made["node_id"]], "the form calls it pinned; it must be"
-    assert made["body"].splitlines()[0] == (
-        "Up to 4 people per team. Team formation closes on 4 Oct."
-    )
-    assert "- **team-alpha** - 3/4, room for 1" in made["body"]
-
-
-@needs_js
-def test_a_list_for_a_window_with_no_close_date_says_only_the_cap():
-    out = _run_form(
-        _lock_for("open", closes=""),
-        _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-    )
-    assert _teams_list(out).splitlines()[0] == "Up to 4 people per team."
-    assert "closes" not in _teams_list(out)
-
-
-@needs_js
-def test_a_second_join_rewrites_the_same_list_rather_than_opening_another():
-    first = _run_form(
-        _lock_for("open"),
-        _TEAMS_CSV,
-        _form_body("assignment-2", "Create a new team", "team-beta"),
-    )
-    # The file the first join left behind is what the second one reads.
-    second = _run_form(
-        _lock_for("open"),
-        first["writes"][-1],
-        _form_body("assignment-2", "Join an existing team", "team-beta"),
-        handle="cara",
-        roster=("ann", "bob", "stu", "cara"),
-        issues=first["issues"],
-    )
-    assert second["created"] == [], "a second list was opened for the same assignment"
-    (edit,) = second["edited"]
-    assert edit["number"] == first["created"][0]["number"]
-    assert second["pinned"] == [], "an issue that already exists is not pinned again"
-    assert "- **team-alpha** - 2/4, room for 2" in edit["body"]
-    assert "- **team-beta** - 2/4, room for 2" in edit["body"]
-
-
-@needs_js
-def test_a_full_team_is_listed_as_full():
-    out = _run_form(
-        _lock_for("open", cap=3),
-        _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-    )
-    assert "- **team-alpha** - 3/3, full" in _teams_list(out)
-    assert "room for" not in _teams_list(out)
-
-
-@needs_js
-def test_the_list_is_rebuilt_from_the_rows_not_incremented():
-    # THE property that makes a lost update harmless. The concurrency group is per ISSUE
-    # on purpose, so two joins can reach the upsert at once and one edit can be lost. A
-    # body rendered from the rows this run wrote is right again on the very next join;
-    # a count carried forward would stay wrong for the rest of the term. The list handed
-    # in here is deliberately WRONG, and the run must not build on it.
-    stale = {
-        "number": 42,
-        "title": "Teams for assignment-2",
-        "labels": ["team-list"],
-        "body": "Up to 4 people per team.\n\n- **team-alpha** - 1/4, room for 3",
-    }
-    out = _run_form(
-        _lock_for("open"),
-        _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-        issues=[stale],
-    )
-    (edit,) = out["edited"]
-    assert edit["number"] == 42
-    assert "- **team-alpha** - 3/4, room for 1" in edit["body"]
-    assert "1/4" not in edit["body"], "the stale count survived the rewrite"
-
-
-@needs_js
-def test_the_list_carries_no_handle_from_the_roster():
-    # THE regression guard. `welcome` is PUBLIC and this issue is the one thing in it the
-    # whole cohort is pointed at. A team name is student-chosen and public by
-    # construction; who is in it is not - no handle, no name, no email, no
-    # `<slug>-<handle>` repo name, ever.
-    people = ("mariechen", "jbloggs", "hbaker")
-    csv = _TEAMS_HEADER + (
-        "assignment-2,team-alpha,mariechen\nassignment-2,team-alpha,jbloggs\n"
-    )
-    out = _run_form(
-        _lock_for("open"),
-        csv,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-        handle="hbaker",
-        roster=people,
-    )
-    written = _teams_list(out).lower()
-    for who in people:
-        assert who not in written, f"the public team list names {who}"
-    assert f"assignment-2-{people[2]}" not in written
-    # ...and it does carry what it is for.
-    assert "team-alpha" in written and "3/4" in written
-
-
-@needs_js
-def test_a_team_list_that_cannot_be_written_still_reports_the_join_as_done():
-    # The membership is already in teams.csv by the time the list is touched. A student
-    # must never be told their join failed because a cosmetic list could not be updated -
-    # and `needs-review` must not be raised for something the next join fixes by itself.
-    out = _run_form(
-        _lock_for("open"),
-        _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
-        issues_break=True,
-    )
-    assert out["writes"][0].endswith("assignment-2,team-alpha,stu\n")
-    assert out["labels"] == ["team-recorded"] and out["states"] == ["closed"]
-    assert out["created"] == [] and out["edited"] == []
-    assert "you're in team **team-alpha**" in out["comments"][0]
-
-
-def test_the_workflow_does_not_answer_its_own_team_list():
-    # The list is opened with DSL_BOT_TOKEN, a PAT - whose issues, unlike the ambient
-    # token's, DO start workflow runs. Were it to carry the ROUTING label, opening it
-    # would answer it in public with "I can't find you on the course enrolment roster",
-    # on the one issue the whole cohort is pointed at. The two labels are what make that
-    # unreachable, so this pins them apart at both ends rather than trusting a title.
-    doc = yaml.safe_load((WELCOME / "team-formation.yml").read_text())
-    guard = doc["jobs"]["form-team"]["if"]
-    routes_on = yaml.safe_load(
-        (WELCOME / "ISSUE_TEMPLATE/02-join-team.yml").read_text()
-    )["labels"]
-    assert routes_on == ["team-formation"]
-    assert f"'{routes_on[0]}'" in guard
-
-    script = script_of("team-formation.yml", "form-team")
-    # The label the list is LOOKED UP by, and the one it is CREATED with, must be the same
-    # label - or a second list is opened on every join - and it must not be the routing
-    # one, or opening it starts a run against itself.
-    (listed,) = set(re.findall(r"labels: '([\w-]+)', per_page", script))
-    assert f"labels: ['{listed}']" in script, (
-        "the list is created and looked up under different labels"
-    )
-    assert listed != routes_on[0]
-
-
-def test_the_join_team_form_points_at_a_list_that_exists():
-    # The form promises a PINNED issue by that title; the workflow has to be the thing
-    # that makes both halves of that sentence true.
+def test_nothing_opens_or_names_a_team_list_issue_any_more():
+    # The assignment's page on the cohort site is the one list of teams. A second list in
+    # the public welcome repo was a second writer to keep in step, and a second place a
+    # student could be sent to that disagreed with the first.
     form = (WELCOME / "ISSUE_TEMPLATE/02-join-team.yml").read_text()
-    assert "pinned **Teams for \\<assignment\\>** issue" in form
     script = script_of("team-formation.yml", "form-team")
-    assert "const TEAMS_ISSUE_PREFIX = 'Teams for '" in script
-    assert "pinIssue" in script
+    for text in (form, script):
+        assert "Teams for" not in text
+        assert "pinIssue" not in text and "team-list" not in text
 
 
 # --- The generated Assignment field --------------------------------------------------
@@ -1095,48 +953,36 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
 
 
 def test_the_template_still_carries_the_sentence_the_links_are_spliced_over():
-    # The header names the team list; `join_team_form` rewrites that one sentence into a
-    # LINK to it. A rewording in the template with none here would silently stop the
-    # splice and leave every cohort with an issue nobody can click through to.
+    # The header names the assignment's page; `join_team_form` rewrites that one sentence
+    # into a LINK to it. A rewording in the template with none here would silently stop
+    # the splice and leave every cohort with a page nobody can click through to.
     assert welcome.TEAM_LIST_SENTENCE in welcome.template(welcome.JOIN_TEAM_FORM)
 
 
-def test_the_header_links_the_team_list_of_the_one_open_assignment():
-    # "Type its name exactly as that issue spells it" is an instruction a student can only
-    # follow if they can reach the issue - which lives in the very repo they are filing in,
-    # which is exactly why nobody notices it is missing.
-    form = welcome.join_team_form(
-        ["assignment-2"], {"assignment-2": "https://github.com/Org/welcome/issues/12"}
-    )
+def test_the_header_links_the_page_of_the_one_open_assignment():
+    # "Type its name exactly as that page spells it" is an instruction a student can only
+    # follow if they can reach the page.
+    form = welcome.join_team_form(["assignment-2"], {"assignment-2": _PAGE})
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
-    assert (
-        "listed in [Teams for assignment-2](https://github.com/Org/welcome/issues/12)."
-        in header
-    )
-    assert "pinned **Teams for" not in header
+    assert f"listed on [the assignment's page]({_PAGE})." in header
+    assert welcome.TEAM_LIST_SENTENCE not in header
 
 
 def test_two_open_assignments_get_a_line_each():
+    third = "https://cohort.github.io/assignments/03-assignment-3.html"
     form = welcome.join_team_form(
         ["assignment-2", "assignment-3"],
-        {
-            "assignment-2": "https://github.com/Org/welcome/issues/12",
-            "assignment-3": "https://github.com/Org/welcome/issues/13",
-        },
+        {"assignment-2": _PAGE, "assignment-3": third},
     )
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
-    assert "listed here:" in header
-    assert (
-        "- [Teams for assignment-2](https://github.com/Org/welcome/issues/12)" in header
-    )
-    assert (
-        "- [Teams for assignment-3](https://github.com/Org/welcome/issues/13)" in header
-    )
+    assert "listed on each assignment's page:" in header
+    assert f"- [assignment-2]({_PAGE})" in header
+    assert f"- [assignment-3]({third})" in header
 
 
-def test_a_slug_whose_list_is_not_known_is_left_unlinked_rather_than_linked_nowhere():
-    # A cohort seeded before the list existed, or one whose welcome repo could not be
-    # listed this run. The reviewed sentence still reads correctly on its own.
+def test_a_slug_whose_page_is_not_known_is_left_unlinked_rather_than_linked_nowhere():
+    # A lock written before the page was carried, or one whose course listing failed. The
+    # reviewed sentence still reads correctly on its own.
     form = welcome.join_team_form(["assignment-2"], {})
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
     assert welcome.TEAM_LIST_SENTENCE in header
@@ -1163,14 +1009,15 @@ def test_only_the_assignments_whose_window_is_open_are_offered():
 
     lock = grades.team_lock_text(
         {
-            "a1": ("none", 5, "none", ""),
-            "a2": ("self_select", 4, "closed", "2026-09-01"),
-            "a3": ("self_select", 4, "open", "2026-10-04"),
-            "a4": ("assigned", 4, "none", ""),
+            "a1": ("none", 5, "none", "", ""),
+            "a2": ("self_select", 4, "closed", "2026-09-01", "https://c.github.io/a2"),
+            "a3": ("self_select", 4, "open", "2026-10-04", "https://c.github.io/a3"),
+            "a4": ("assigned", 4, "none", "", ""),
         }
     )
-    assert welcome.open_formation_slugs(lock) == ["a3"]
-    assert welcome.open_formation_slugs("assignments:\n  {}\n") == []
+    # Each with the page the header links, read off the same lock.
+    assert welcome.open_formations(lock) == {"a3": "https://c.github.io/a3"}
+    assert welcome.open_formations("assignments:\n  {}\n") == {}
 
 
 def test_a_cohort_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatch):
@@ -1180,13 +1027,13 @@ def test_a_cohort_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatch)
         monkeypatch.setattr(
             welcome, "get_file_content", lambda *a, _answer=answer, **k: _answer
         )
-        assert welcome._open_formation_slugs("Org") == []
+        assert welcome._open_formations("Org") == {}
 
     def boom(*a, **k):
         raise RuntimeError("403")
 
     monkeypatch.setattr(welcome, "get_file_content", boom)
-    assert welcome._open_formation_slugs("Org") == []
+    assert welcome._open_formations("Org") == {}
 
 
 def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
@@ -1195,9 +1042,10 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
     # which moves with the calendar. One file, one commit, one blob compare.
     from dsl_course import grades, welcome
 
-    lock = grades.team_lock_text({"a3": ("self_select", 4, "open", "2026-10-04")})
+    lock = grades.team_lock_text(
+        {"a3": ("self_select", 4, "open", "2026-10-04", "https://c.github.io/a3")}
+    )
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: lock)
-    monkeypatch.setattr(welcome, "list_issue_url", lambda org, slug: "")
     monkeypatch.setattr(
         welcome,
         "put_files",
@@ -1224,6 +1072,8 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
     assert dropdown["type"] == "dropdown" and dropdown["attributes"]["options"] == [
         "a3"
     ]
+    # And the header links its page, off the same lock - no second lookup.
+    assert "[the assignment's page](https://c.github.io/a3)" in content.decode()
 
 
 def test_a_form_that_could_not_be_written_is_reported(monkeypatch, capsys):

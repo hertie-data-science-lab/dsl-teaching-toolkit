@@ -408,7 +408,7 @@ def test_the_fault_climbs_the_rungs_towards_the_moment_formation_shuts(cohort):
     )
     assert fault.is_source is False and fault.fires == SHUTS
     rungs = [
-        fault.severity(SHUTS - timedelta(days=5)),
+        fault.severity(OPENS + timedelta(days=3)),
         fault.severity(SHUTS - timedelta(hours=20)),
         fault.severity(SHUTS - timedelta(hours=8)),
         fault.severity(SHUTS - timedelta(hours=2)),
@@ -421,6 +421,22 @@ def test_the_fault_climbs_the_rungs_towards_the_moment_formation_shuts(cohort):
         Severity.CRITICAL,
         Severity.MISSED,
     ]
+
+
+def test_a_window_open_for_a_week_with_somebody_waiting_is_at_least_a_warning(cohort):
+    # The ladder alone says nothing until a day before the close, so a fortnight-long
+    # window nobody has acted on would sit below the notify bar for most of its life. Once
+    # it has stood open for a week, the digest files it - and the climb above is unchanged.
+    cohort()
+    sched = _sched()
+    (fault,) = team_formation.window_faults(
+        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+    )
+    week = OPENS + team_formation.WARN_AFTER_OPEN
+    assert fault.severity(week - timedelta(minutes=1)) is Severity.ADVISORY
+    assert fault.severity(week) is Severity.WARNING
+    assert fault.severity(SHUTS - timedelta(hours=8)) is Severity.URGENT
+    assert fault.severity(SHUTS + timedelta(hours=1)) is Severity.MISSED
 
 
 def test_the_fault_survives_the_close_and_reaches_MISSED(cohort):
@@ -486,169 +502,6 @@ def test_nothing_the_shut_window_s_fault_says_names_a_student(cohort):
         "wizards",
     ):
         assert secret not in text, f"{secret!r} reached a public surface"
-
-
-# ----------------------------------------------------------------- the public team list
-
-
-class Issues:
-    """The welcome repo's issues, as `dsl_course.issues` sees them: what was searched for,
-    what was opened, and what was pinned."""
-
-    def __init__(self, existing: int | None = None, fail: bool = False):
-        self.existing, self.fail = existing, fail
-        self.searched: list[tuple[str, str, str]] = []
-        self.made: list[tuple[str, str, str, tuple]] = []
-        self.pinned: list[str] = []
-
-    def find_issue(self, repo, title, label=""):
-        self.searched.append((repo, title, label))
-        if self.fail:
-            raise RuntimeError("API rate limit exceeded")
-        n = self.existing
-        return team_formation.issues.Issue(n, "") if n else None
-
-    def upsert_issue(self, repo, title, body, comment=None, existing=None, labels=()):
-        self.made.append((repo, title, body, tuple(labels)))
-        return team_formation.issues.Upserted(0, f"https://github.com/{repo}/issues/7")
-
-    def gh(self, *args):
-        self.pinned.append(args[2] if len(args) > 2 else "")
-        return 0, ""
-
-
-@pytest.fixture
-def welcome_issues(monkeypatch):
-    """The issue primitives, on the CONSUMER's imported names."""
-
-    def _wire(**kw) -> Issues:
-        fake = Issues(**kw)
-        monkeypatch.setattr(team_formation.issues, "find_issue", fake.find_issue)
-        monkeypatch.setattr(team_formation.issues, "upsert_issue", fake.upsert_issue)
-        monkeypatch.setattr(team_formation, "gh", fake.gh)
-        return fake
-
-    return _wire
-
-
-def _window(cohort, teams_csv: str = "") -> team_formation.Window:
-    cohort(teams_csv=teams_csv)
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
-    return window
-
-
-def test_the_list_issue_opens_with_the_window_rather_than_on_the_first_join(
-    cohort, welcome_issues
-):
-    # The workflow maintains it from the first join onwards, which is one join too late:
-    # day one is the day the whole cohort is asked to form a team, and both the mail and
-    # the form header want a URL to link.
-    fake = welcome_issues()
-    url = team_formation.ensure_list_issue(
-        COHORT, _window(cohort), "Europe/Berlin", dry_run=False
-    )
-    assert url == f"https://github.com/{COHORT}/welcome/issues/7"
-    (repo, title, body, labels) = fake.made[0]
-    assert (repo, title) == (f"{COHORT}/welcome", "Teams for assignment-2")
-    # The label is how the OTHER writer finds it again: the Join-team workflow looks it up
-    # by that label and this exact title, and would open a second list without it.
-    assert labels == ("team-list",)
-    assert fake.searched == [(f"{COHORT}/welcome", title, "team-list")]
-    assert "No teams yet" in body and "Up to 4 people per team" in body
-    assert "closes on 4 Oct" in body
-    assert fake.pinned, "the form and the mail both call it the pinned list"
-
-
-def test_a_list_issue_that_already_exists_is_left_exactly_as_it_is(
-    cohort, welcome_issues
-):
-    # Once it is there the Join-team workflow owns the body: it rewrites it from the rows
-    # it just wrote, which is the only state that can be sure what teams.csv now says.
-    fake = welcome_issues(existing=12)
-    url = team_formation.ensure_list_issue(
-        COHORT, _window(cohort), "Europe/Berlin", dry_run=False
-    )
-    assert url == f"https://github.com/{COHORT}/welcome/issues/12"
-    assert fake.made == [] and fake.pinned == []
-
-
-def test_a_listing_that_failed_opens_no_second_list(cohort, welcome_issues, capsys):
-    # Absence has to be a real answer. A rate-limited tick that created one anyway would
-    # leave a second list beside the one the cohort is already reading.
-    fake = welcome_issues(fail=True)
-    assert (
-        team_formation.ensure_list_issue(
-            COHORT, _window(cohort), "Europe/Berlin", dry_run=False
-        )
-        is None
-    )
-    assert fake.made == []
-    assert "rate limit" in capsys.readouterr().err
-
-
-def test_a_dry_run_opens_nothing_and_says_what_it_would_open(
-    cohort, welcome_issues, capsys
-):
-    fake = welcome_issues()
-    team_formation.ensure_list_issue(
-        COHORT, _window(cohort), "Europe/Berlin", dry_run=True
-    )
-    assert (fake.searched, fake.made) == ([], [])
-    assert "would ensure `Teams for assignment-2`" in capsys.readouterr().out
-
-
-def test_the_list_body_is_names_and_counts_and_never_a_handle(cohort):
-    # The welcome repo is PUBLIC and this issue is the one thing in it the whole cohort is
-    # sent to. A team name is student-chosen and public by construction; who is in it is not.
-    window = _window(
-        cohort,
-        _rows(
-            ("team-x", "anna-adams"),
-            ("team-x", "ben-baker"),
-            ("team-y", "carla-cohen"),
-            ("team-y", "dan-doyle"),
-            ("team-y", "Carla-Cohen"),
-        ),
-    )
-    body = team_formation.list_body(window, "Europe/Berlin")
-    # The same shape the Join-team workflow rewrites it into after every join.
-    assert "- **team-x** - 2/4, room for 2" in body
-    assert "- **team-y** - 2/4, room for 2" in body
-    for handle in ("anna-adams", "ben-baker", "carla-cohen", "dan-doyle", "x.edu"):
-        assert handle not in body
-
-
-def test_a_full_team_is_called_full_rather_than_offered_no_room(cohort):
-    window = _window(
-        cohort,
-        _rows(
-            ("team-x", "anna-adams"),
-            ("team-x", "ben-baker"),
-            ("team-x", "carla-cohen"),
-            ("team-x", "dan-doyle"),
-        ),
-    )
-    assert "- **team-x** - 4/4, full" in team_formation.list_body(window, "UTC")
-
-
-def test_the_url_is_looked_up_by_the_same_label_and_title_the_workflow_uses(
-    welcome_issues,
-):
-    fake = welcome_issues(existing=5)
-    assert (
-        team_formation.list_issue_url(COHORT, "assignment-2")
-        == f"https://github.com/{COHORT}/welcome/issues/5"
-    )
-    assert fake.searched == [
-        (f"{COHORT}/welcome", "Teams for assignment-2", "team-list")
-    ]
-
-
-def test_a_url_nobody_could_look_up_is_no_url_rather_than_a_link_to_nowhere(
-    welcome_issues,
-):
-    welcome_issues(fail=True)
-    assert team_formation.list_issue_url(COHORT, "assignment-2") is None
 
 
 # ------------------------------------------------------------------ telling the cohort
@@ -804,13 +657,12 @@ def post(monkeypatch):
         monkeypatch.setattr(
             team_formation, "course_name_of", lambda org: "Deep Learning"
         )
-        # The public team list the body links. A real one is opened by the tick that opens
-        # the window; here it is one issue search stubbed at the module boundary, so the
-        # mail tests below neither reach GitHub nor lose the sentence.
+        # The course org's templates, which number the assignment's page on the cohort
+        # site: one off-plan template sorts first, so `assignment-2` is page 2.
         monkeypatch.setattr(
-            team_formation,
-            "list_issue_url",
-            lambda org, key: f"https://github.com/{org}/welcome/issues/12",
+            team_formation.schedule,
+            "discover_assignments",
+            lambda org: ["a1-f2026", "a2-f2026"],
         )
         return rec, sender
 
@@ -993,7 +845,7 @@ def test_the_reminder_goes_out_inside_the_last_48_hours_to_whoever_is_still_unte
     assert sender.to == {"ben@x.edu", "carla@x.edu", "dan@x.edu"}
     assert rec.recipients(team_formation.PHASE_REMINDER) == sender.to
     (subject, _body) = (sender.sent[0].subject, sender.sent[0].body)
-    assert subject.startswith("Team formation for assignment-2 closes on 4 Oct")
+    assert subject.startswith("Team formation for Assignment 2 closes on 4th Oct")
 
 
 def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phases(
@@ -1016,7 +868,7 @@ def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phas
     )
     assert _tick(sched=short) == 0
     assert len(sender.sent) == 4, "one message each, not one per phase"
-    assert sender.sent[0].subject.startswith("Form your team for assignment-2")
+    assert sender.sent[0].subject.startswith("Form your team for Assignment 2")
     assert rec.recipients("open") == rec.recipients("reminder") == set(ADDRESSES)
 
 
@@ -1170,7 +1022,8 @@ def test_a_batch_that_stops_inside_the_second_window_releases_that_window_s_clai
     assert _tick(sched=two) == 0
     assert len(sender2.sent) == 4
     assert {m.to for m in sender2.sent} == set(ADDRESSES)
-    assert all("a-2" in m.subject for m in sender2.sent)
+    # `a-2` is the plan's second page on the site, so it is Assignment 2.
+    assert all("Assignment 2" in m.subject for m in sender2.sent)
 
 
 def test_the_public_count_is_per_window_and_not_per_address(cohort, post, capsys):
@@ -1220,12 +1073,14 @@ def _body(cohort, post, **kw) -> tuple[str, str]:
 
 def test_the_message_carries_what_a_student_needs_in_order_to_act(cohort, post):
     subject, body = _body(cohort, post)
-    assert subject == "Form your team for assignment-2 - Deep Learning"
+    assert subject == "Form your team for Assignment 2 - Deep Learning"
     assert "the Deep Learning course" in body
     assert "up to 4 people" in body, "the cap the Join-team form enforces"
-    assert "closes on 4 Oct" in body, "the day, in the cohort's own zone"
+    assert "closes on 4th Oct" in body, "the day, in the cohort's own zone"
     assert f"https://github.com/{COHORT}/welcome/issues/new/choose" in body
-    assert f"https://github.com/{COHORT}/welcome/issues/12" in body, "the team list"
+    assert "https://cohort-f2026.github.io/assignments/02-assignment-2.html" in body, (
+        "the assignment's page, which lists the teams"
+    )
     # No Join-course line: every recipient is onboarded by construction, and a student
     # who is not enters `waiting` on the tick after they join and is sent this then.
     assert "Join course" not in body
@@ -1255,14 +1110,50 @@ def test_a_roster_row_with_no_name_is_greeted_without_one(cohort, post):
 
 def test_the_assignment_is_named_as_the_site_names_it(cohort, post):
     # `assignment-2` is what the PLAN calls it. The gradebook, the brief and the course
-    # site all print the title, and this is the one mail a student gets about it.
+    # site all print the title, and the site numbers the page - and this is the one mail a
+    # student gets about it.
     cohort(
         spec=GradingSpec(type="group", team_formation="self_select", title="Project")
     )
     _rec, sender = post()
     _tick()
-    assert sender.sent[0].subject == "Form your team for Project - Deep Learning"
-    assert "Project in the Deep Learning course" in sender.sent[0].body
+    assert (
+        sender.sent[0].subject
+        == "Form your team for Assignment 2: Project - Deep Learning"
+    )
+    assert "Assignment 2: Project in the Deep Learning course" in sender.sent[0].body
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Project", "Assignment 3: Project"),
+        ("Assignment 3: Project", "Assignment 3: Project"),
+        ("assignment 3 - Project", "assignment 3 - Project"),
+        ("assignment-3", "Assignment 3"),
+        # Another number is a different assignment's, not this one's: numbered anyway.
+        ("Assignment 30", "Assignment 3: Assignment 30"),
+    ],
+)
+def test_the_number_is_not_doubled_up(title, expected):
+    assert team_formation.numbered(title, "assignment-3", 3) == expected
+
+
+def test_a_page_nobody_could_look_up_leaves_the_title_and_drops_the_link(
+    cohort, post, monkeypatch
+):
+    # A course org whose templates could not be listed: no number to give and no page to
+    # link, so the mail says what stands on its own rather than naming the wrong page.
+    cohort()
+    _rec, sender = post()
+
+    def refuse(org):
+        raise RuntimeError("API rate limit exceeded")
+
+    monkeypatch.setattr(team_formation.schedule, "discover_assignments", refuse)
+    _tick()
+    assert sender.sent[0].subject == "Form your team for assignment-2 - Deep Learning"
+    assert "github.io" not in sender.sent[0].body
 
 
 def test_the_message_says_nothing_about_working_alone(cohort, post):
@@ -1278,13 +1169,14 @@ def test_the_closing_day_is_told_in_the_cohorts_zone(cohort, post):
     # A window shutting at 00:30 Berlin is the 3rd in UTC and the 4th to everybody reading
     # the mail.
     just_after_midnight = datetime(2026, 10, 5, 0, 30, tzinfo=BERLIN)
-    assert team_formation.spoken_date(just_after_midnight, "Europe/Berlin") == "5 Oct"
-    assert team_formation.spoken_date(just_after_midnight, "UTC") == "4 Oct"
+    assert team_formation.spoken_date(just_after_midnight, "Europe/Berlin") == "5th Oct"
+    assert team_formation.spoken_date(just_after_midnight, "UTC") == "4th Oct"
 
 
 def test_the_sample_is_placeholders_and_the_same_template_as_the_send(cohort, post):
     subject, body = team_formation.sample_message(COHORT, "Deep Learning")
-    assert "<assignment>" in subject and "<n>" in body and "<date>" in body
+    assert "Assignment <n>: <title>" in subject
+    assert "<n>" in body and "<date>" in body and "<assignment page>" in body
     # The NAME is a placeholder too: the preview is printed in a public run log.
     assert body.startswith("Dear <first name>,")
     assert f"https://github.com/{COHORT}/welcome/issues/new/choose" in body
@@ -1298,7 +1190,7 @@ def test_the_dry_run_prints_the_sample_claims_nothing_and_sends_nothing(
     assert _tick(dry_run=True) == 0
     out = capsys.readouterr().out
     assert rec.attempts == [] and sender.batches == []
-    assert "<assignment>" in out, "the sample, never a real body"
+    assert "Assignment <n>: <title>" in out, "the sample, never a real body"
     assert "would mail 4 of 4 enrolled student(s)" in out
     for address in ADDRESSES:
         assert address not in out

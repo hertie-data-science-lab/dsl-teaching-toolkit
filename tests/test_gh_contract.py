@@ -13,12 +13,11 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
 
 import pytest
 
 from dsl_course import bootstrap_course as bc
-from dsl_course import issues, pulls, seed
+from dsl_course import pulls, seed
 
 needs_gh = pytest.mark.skipif(shutil.which("gh") is None, reason="gh CLI not installed")
 
@@ -169,56 +168,5 @@ def test_every_pr_flag_the_code_passes_really_exists(monkeypatch):
                 flag = token.split("=", 1)[0]
                 assert flag in published, (
                     f"`gh pr {args[1]} {flag}` is not a real flag - gh publishes "
-                    f"{sorted(published)}"
-                )
-
-
-def _record_issue_calls(monkeypatch) -> list[tuple[str, ...]]:
-    """Every `gh issue ...` argv the team list builds: the label-narrowed search that finds
-    it, the labelled create that opens it, and the pin that keeps the form's word."""
-    from dsl_course import team_formation
-
-    calls: list[tuple[str, ...]] = []
-
-    def fake_gh(*args: str, **kwargs) -> tuple[int, str]:
-        calls.append(args)
-        return (0, "https://github.com/Cohort/welcome/issues/7")
-
-    def fake_gh_json(*args: str, **kwargs) -> list[dict]:
-        calls.append(args)
-        return []
-
-    monkeypatch.setattr(issues, "gh", fake_gh)
-    monkeypatch.setattr(issues, "gh_json", fake_gh_json)
-    monkeypatch.setattr(team_formation, "gh", fake_gh)
-    window = team_formation.Window(
-        key="assignment-2",
-        name="assignment-2",
-        title="Assignment 2",
-        closes=datetime(2026, 10, 4, tzinfo=timezone.utc),
-        sizes=(),
-        waiting=(),
-        enrolled=4,
-        cap=4,
-    )
-    team_formation.ensure_list_issue("Cohort", window, "UTC", dry_run=False)
-    assert {a[1] for a in calls} == {"list", "create", "pin"}, (
-        f"the `gh issue` harness has drifted - captured {calls}"
-    )
-    return calls
-
-
-@needs_gh
-def test_every_issue_flag_the_code_passes_really_exists(monkeypatch):
-    # The team list is the one thing in a PUBLIC repo a whole cohort is sent to, and it is
-    # opened by an unattended tick - an invented flag here is a cohort mailed a link to an
-    # issue that was never created.
-    for args in _record_issue_calls(monkeypatch):
-        published = _published_flags("issue", args[1])
-        for token in args:
-            if token.startswith("--"):
-                flag = token.split("=", 1)[0]
-                assert flag in published, (
-                    f"`gh issue {args[1]} {flag}` is not a real flag - gh publishes "
                     f"{sorted(published)}"
                 )

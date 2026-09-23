@@ -8,9 +8,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        The teams that already exist, and how much room each has left, are listed in the pinned **Teams for \<assignment\>** issue.
+        The teams that already exist, and how much room each has left, are listed on the assignment's page on the cohort site.
 
-        To **join** one, choose *Join an existing team* and type its name exactly as that issue spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
+        To **join** one, choose *Join an existing team* and type its name exactly as that page spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
   # dsl:assignment-field:start - this cohort's open assignments are spliced in here as a
   # dropdown by dsl_course.welcome.join_team_form; edits between these markers are
   # overwritten on the next refresh. The free-text field below is what a cohort with no

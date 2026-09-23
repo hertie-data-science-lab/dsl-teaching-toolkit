@@ -29,6 +29,7 @@ import tempfile
 import textwrap
 import time
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -1895,15 +1896,18 @@ _TEAM_LOCK_HEADER = f"""\
 #   team_formation_closes:
 #                   the date that window shuts, bare ISO (`2026-10-04`), for the refusal
 #                   to name - empty when there is no window, or no date to give
+#   team_formation_page:
+#                   the assignment's page on the cohort site, which lists the teams that
+#                   exist - for the refusal to link; empty for anything not self-select
 #
 # An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
 # until the template says what it is, nobody can mint a GitHub team for it.
 """
 
 
-def team_lock_text(entries: dict[str, tuple[str, int, str, str]]) -> str:
+def team_lock_text(entries: dict[str, tuple[str, int, str, str, str]]) -> str:
     """The lock file's whole text, from
-    `{schedule key: (team_formation, cap, window, closes)}`.
+    `{schedule key: (team_formation, cap, window, closes, page)}`.
 
     Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: it is
     read by a line scanner with no YAML library to hand (the Join-team form's JavaScript),
@@ -1912,21 +1916,22 @@ def team_lock_text(entries: dict[str, tuple[str, int, str, str]]) -> str:
     sorted, so a re-sync of an unchanged cohort produces an identical blob and `put_file`
     writes nothing.
 
-    `team_formation_closes` is written even when it is empty - the key with nothing after
-    it. The scanner reads one shape, and a line that comes and goes is a second shape:
-    the entry whose close date the schedule cannot give is exactly the entry a reader is
-    most likely to get wrong."""
+    `team_formation_closes` and `team_formation_page` are written even when they are empty
+    - the key with nothing after it. The scanner reads one shape, and a line that comes and
+    goes is a second shape: the entry whose close date the schedule cannot give is exactly
+    the entry a reader is most likely to get wrong."""
     lines = [_TEAM_LOCK_HEADER, "assignments:"]
     if not entries:
         lines.append("  {}")
     for key in sorted(entries):
-        formation, cap, window, closes = entries[key]
+        formation, cap, window, closes, page = entries[key]
         lines += [
             f"  {key}:",
             f"    team_formation: {formation}",
             f"    max_team_size: {cap}",
             f"    team_formation_window: {window}",
             f"    team_formation_closes: {closes}".rstrip(),
+            f"    team_formation_page: {page}".rstrip(),
         ]
     return "\n".join(lines) + "\n"
 
@@ -1964,8 +1969,11 @@ def parse_team_lock(text: str) -> dict[str, dict[str, str]]:
 
 
 def team_lock_entries(
-    course_org: str, sched: schedule.Schedule, now: datetime | None = None
-) -> dict[str, tuple[str, int, str, str]]:
+    course_org: str,
+    sched: schedule.Schedule,
+    now: datetime | None = None,
+    pages: Mapping[str, str] | None = None,
+) -> dict[str, tuple[str, int, str, str, str]]:
     """What each of this cohort's assignments allows, resolved off the ONE place that
     declares it - the template's `grading_config.yml` - plus where `now` falls in its
     team-formation window, and the day that window shuts.
@@ -1985,9 +1993,14 @@ def team_lock_entries(
     The close is a bare DATE, not the pin's full moment: the only reader is a refusal
     comment a student reads, and an hour in the workflow's timezone answers a question
     nobody asked. Empty whenever there is no window, or no pin to take one from - the
-    refusal then says only that the window is shut."""
+    refusal then says only that the window is shut.
+
+    `pages` is each assignment's page on the cohort site by schedule key
+    (`_formation_pages`), written for a self-select entry alone: that page lists the teams
+    that exist, and it is what a refused Join links."""
     now = now if now is not None else datetime.now(UTC)
-    entries: dict[str, tuple[str, int, str, str]] = {}
+    pages = pages or {}
+    entries: dict[str, tuple[str, int, str, str, str]] = {}
     for key, entry in sched.assignments.items():
         spec = declared_grading_spec(course_org, entry.course_source_repo)
         if spec is None:
@@ -1997,22 +2010,46 @@ def team_lock_entries(
                 f"locking it to `{NO_TEAMS}`, so no team can be formed for it until the "
                 f"template declares what the assignment is"
             )
-            entries[key] = (NO_TEAMS, team_cap(course_org, spec), "none", "")
+            entries[key] = (NO_TEAMS, team_cap(course_org, spec), "none", "", "")
             continue
         formation = spec.team_formation_resolved
-        window, shuts = "none", ""
+        window, shuts, page = "none", "", ""
         if formation == SELF_SELECT:
             # The same call the cohort site's team-formation callout makes, so the page
             # that invites a student in and the form that lets them in shut together.
             window, closes = schedule.formation_state(sched, key, now)
             shuts = closes.date().isoformat() if closes is not None else ""
+            page = pages.get(key, "")
         entries[key] = (
             formation,
             team_cap(course_org, spec),
             window,
             shuts,
+            page,
         )
     return entries
+
+
+def _formation_pages(
+    course_org: str, cohort_org: str, sched: schedule.Schedule
+) -> dict[str, str]:
+    """Each self-select assignment's page URL on the cohort site, by schedule key.
+
+    Asked only when the plan HAS a self-select assignment: the pages cost a listing of the
+    course org, and the lock is written on every tick of a cohort with any assignment."""
+    if not any(
+        (spec := declared_grading_spec(course_org, entry.course_source_repo))
+        is not None
+        and spec.team_formation_resolved == SELF_SELECT
+        for entry in sched.assignments.values()
+    ):
+        return {}
+    return {
+        key: page.url(cohort_org)
+        for key, page in schedule.assignment_pages_by_key(
+            course_org, cohort_org, sched
+        ).items()
+    }
 
 
 def team_cap(course_org: str, spec: GradingSpec | None) -> int:
@@ -2077,7 +2114,11 @@ def sync_team_lock(
         # `grading_config.yml`, and a preview that never writes has nothing to do with them.
         log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
         return LockWrite(True, False)
-    content = team_lock_text(team_lock_entries(course_org, sched, now)).encode()
+    content = team_lock_text(
+        team_lock_entries(
+            course_org, sched, now, _formation_pages(course_org, cohort_org, sched)
+        )
+    ).encode()
     try:
         existing = get_file_with_sha(cohort_org, CONFIG_REPO, TEAM_LOCK_PATH)
     except RuntimeError:
@@ -2539,14 +2580,21 @@ _MONTHS = (
 
 
 def spoken_day(at: datetime) -> str:
-    """`4 Oct` - the toolkit's own spelling of a day, in whatever zone `at` is already in.
+    """`26th Oct` - the toolkit's own spelling of a day, in whatever zone `at` is already
+    in.
 
     ONE spelling, because four surfaces name the same day and a student who is told one
     date by the Join-team form and another by the mail beside it has been told two things.
-    The gradebook's Submitted column, the team-formation mail and the form's refusal all
-    come through here; the form's own JavaScript carries its copy because it cannot import
-    this one."""
-    return f"{at.day} {_MONTHS[at.month - 1]}"
+    The gradebook's Submitted column, the team-formation mail, the cohort site's
+    team-formation callout and the form's refusal all come through here; the form's own
+    JavaScript carries its copy (`spokenDate`) because it cannot import this one."""
+    day = at.day
+    suffix = (
+        "th"
+        if 11 <= day % 100 <= 13
+        else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    )
+    return f"{day}{suffix} {_MONTHS[at.month - 1]}"
 
 
 _PRIVACY_HEADER = (

@@ -81,26 +81,22 @@ Things whose *literal spelling* is depended on from outside Python:
   name. Change a column and change both sides.
 - **`grades.team_lock_text`'s LAYOUT.** `classroom-config/assignments.lock.yml` is parsed by
   line scanners - one in `templates/welcome/team-formation.yml` (github-script has no YAML
-  library), one in `welcome.open_formation_slugs` - which match a two-space assignment key
+  library), one in `welcome.open_formations` - which match a two-space assignment key
   and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
-  `team_formation_closes:` under it. Re-indenting the writer, or nesting the entries any
-  deeper, makes every Join-team request in every cohort read as "not an assignment here" -
-  and the form is the only place a student would find out. `team_formation_closes:` is
-  written even when its value is empty: the shape the scanners see is constant, and a line
-  that comes and goes is a second shape. A MISSING `team_formation_window:` reads as open,
-  never as closed, so a cohort whose lock predates the window keeps forming teams.
+  `team_formation_closes:` / `team_formation_page:` under it. Re-indenting the writer, or
+  nesting the entries any deeper, makes every Join-team request in every cohort read as
+  "not an assignment here" - and the form is the only place a student would find out.
+  `team_formation_closes:` and `team_formation_page:` are written even when empty: the
+  shape the scanners see is constant, and a line that comes and goes is a second shape. A
+  MISSING `team_formation_window:` reads as open, never as closed, so a cohort whose lock
+  predates the window keeps forming teams.
   `tests/test_welcome_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
-- **`Teams for <assignment>`** - the title of the public team list `team-formation.yml`
-  keeps in each cohort's `welcome` repo. The title is the issue's only key: the workflow
-  finds the list again by exact title, and the Join-team form's markdown, the form's own
-  refusals and `team_formation`'s email each spell it out to a student. Four ends; change
-  none of them alone. The list wears the `team-list` label and NOT the `team-formation`
-  one the job's `if:` routes on - it is opened with `DSL_BOT_TOKEN`, a PAT whose issues
-  *do* start runs, so one label would have the list answer itself in public with "I can't
-  find you on the course enrolment roster". Two labels rather than a title guard, which a
-  retitled issue would slip past. The body carries **team names and counts only** -
-  `welcome` is public, and who is in a team is not.
+- **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<cohort name>`, ordinal
+  from `schedule.assignment_pages`) names the site's `_assignments/` file AND every link to
+  it: the team-formation mail, the lock's `team_formation_page:` (which the Join-team form's
+  header and refusals link) and the site itself. That page is the one list of a window's
+  teams - names and counts only. Never build the URL anywhere else.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_COHORT_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the

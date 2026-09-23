@@ -578,11 +578,6 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
         "_teams_text",
         teams_csv if callable(teams_csv) else lambda org: teams_csv or None,
     )
-    monkeypatch.setattr(
-        site,
-        "list_issue_url",
-        lambda org, key: f"https://github.com/{org}/welcome/issues/12",
-    )
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
@@ -628,9 +623,10 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
         in out
     )
     # The cap the Join-team form enforces, and the day it stops accepting - the same date
-    # the lock file gives that form's refusal to name.
+    # the lock file gives that form's refusal to name, SPOKEN as the mail and the refusal
+    # speak it (`grades.spoken_day`).
     assert 'team_join_cap: "4"' in out
-    assert 'team_join_closes: "2026-10-20"' in out
+    assert 'team_join_closes: "20th Oct"' in out
 
 
 def test_the_teams_that_exist_are_listed_beside_the_invitation(monkeypatch):
@@ -651,9 +647,6 @@ def test_the_teams_that_exist_are_listed_beside_the_invitation(monkeypatch):
     assert "teams:\n" in out
     assert '  - name: "team-alpha"\n    members: 2\n    cap: 4\n' in out
     assert '  - name: "team-bravo"\n    members: 1\n    cap: 4\n' in out
-    # The list issue too: it is where each name is spelt exactly as the Join-team form
-    # insists it be typed, and it updates within seconds of a join.
-    assert 'team_list_url: "https://github.com/Cohort-f2026/welcome/issues/12"' in out
 
 
 def test_no_handle_from_teams_csv_reaches_the_public_page(monkeypatch):
@@ -679,7 +672,7 @@ def test_a_window_with_no_teams_yet_prints_no_table(monkeypatch):
 def test_a_teams_csv_that_cannot_be_read_still_renders_the_page(monkeypatch, capsys):
     # teams.csv is student-written and lives behind an API. Neither a broken header nor a
     # rate limit may take down the render of a cohort's whole website - the callout is the
-    # part that matters, and the list issue it links carries the same names.
+    # part that matters.
     def boom(org):
         raise RuntimeError("API rate limit exceeded")
 

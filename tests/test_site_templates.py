@@ -453,7 +453,6 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "team_join_url",
         "team_join_cap",
         "team_join_closes",
-        "team_list_url",
         "teams",
     ],
 )
@@ -1551,7 +1550,9 @@ def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
         "https://github.com/hertie-dsl-fixture-f2026/welcome/issues/new/choose"
     )
     assert page["team_join_cap"] == "4"
-    assert page["team_join_closes"] == "2026-11-26"
+    # Already spoken (`grades.spoken_day`), so it is printed as it stands - the same
+    # spelling the mail and the Join-team form's refusal use for the same day.
+    assert page["team_join_closes"] == "26th Nov"
     # The layout renders the whole block off the key's presence - no second flag, and
     # nothing to render for an assignment that has no window open.
     layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
@@ -1559,7 +1560,7 @@ def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
     flat = " ".join(arm.split())
     assert 'href="{{ page.team_join_url }}"' in flat
     assert "{{ page.team_join_cap }}" in flat
-    assert "{{ page.team_join_closes | date: site.dateformat }}" in flat
+    assert "{{ page.team_join_closes }}" in flat
     # A team is the only thing being asked for. Whether anybody may hand in on their own,
     # and how few a team may be, are not this page's to answer - the Join-team form holds
     # the rules it enforces, and a sentence here would be a second copy of them.
@@ -1576,7 +1577,6 @@ def test_the_teams_that_exist_are_shown_under_the_invitation(generated):
         {"name": "team-alpha", "members": 2, "cap": 4},
         {"name": "team-bravo", "members": 4, "cap": 4},
     ]
-    assert page["team_list_url"].endswith("/welcome/issues/12")
     layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
     arm = layout.split("{% if page.team_join_url %}")[1].split("</div>")[0]
     flat = " ".join(arm.split())
@@ -1586,7 +1586,9 @@ def test_the_teams_that_exist_are_shown_under_the_invitation(generated):
     assert "{% for team in page.teams %}" in flat
     assert "{% assign left = team.cap | minus: team.members %}" in flat
     assert "{{ team.name }}" in flat and "full" in flat
-    assert 'href="{{ page.team_list_url }}"' in flat
+    # This page is the one list: it says how to type a name, and what an empty one means.
+    assert "type its name exactly as the table spells it" in flat
+    assert "No teams yet" in flat
 
 
 def test_the_schedule_row_names_the_same_day_as_the_page(generated):
@@ -1600,7 +1602,7 @@ def test_the_schedule_row_names_the_same_day_as_the_page(generated):
         '<a target="_blank" rel="noopener" href="{{ include.event.team_join_url }}">'
         in row
     )
-    assert "{{ include.event.team_join_closes | date: site.dateformat }}" in row
+    assert "{{ include.event.team_join_closes }}" in row
     # The brief is still linked: the assignment is out, and this is a line BESIDE that,
     # not the stand-in a pending row renders.
     assert "{{ include.event.content }}" in row

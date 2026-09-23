@@ -2844,3 +2844,49 @@ def test_an_archive_block_with_no_title_carries_the_default_one():
     assert parse({"archive": {}}).archive.title == schedule.ARCHIVE_TITLE
     # And a cohort that wrote no block at all has no row to name.
     assert parse({}).archive is None
+
+
+def test_assignment_pages_are_numbered_as_the_site_numbers_them():
+    # The ONE numbering the site names its pages by and every link to one is built from:
+    # this term's templates plus the plan's entries, sorted by cohort-side name, hidden
+    # ones keeping their ordinal so hiding one moves nobody else's URL.
+    sched = schedule.Schedule(
+        assignments={
+            "assignment-2": schedule.AssignmentEntry(
+                course_source_repo="assignment-2-f2026",
+                due_datetime=None,
+                show_on_site=False,
+            ),
+            "project": schedule.AssignmentEntry(
+                course_source_repo="assignment-4-f2026",
+                due_datetime=None,
+                cohort_dest_repo="team-project",
+            ),
+        }
+    )
+    templates = ["assignment-1-f2026", "assignment-2-f2026", "assignment-9-s2025"]
+    pages = schedule.assignment_pages("Cohort-F2026", sched, templates)
+    assert [(p.number, p.name, p.key) for p in pages] == [
+        (1, "assignment-1", ""),  # off-plan template: a page, and no schedule key
+        (2, "assignment-2", "assignment-2"),  # hidden, and still numbered
+        (3, "team-project", "project"),  # the plan's own, before its template exists
+    ]
+    assert pages[2].stem == "03-team-project"
+    assert pages[2].url("Cohort-F2026") == (
+        "https://cohort-f2026.github.io/assignments/03-team-project.html"
+    )
+
+
+def test_pages_by_key_that_could_not_be_listed_are_none_rather_than_wrong(monkeypatch):
+    def refuse(org):
+        raise RuntimeError("API rate limit exceeded")
+
+    monkeypatch.setattr(schedule, "discover_assignments", refuse)
+    sched = schedule.Schedule(
+        assignments={
+            "a": schedule.AssignmentEntry(
+                course_source_repo="a-f2026", due_datetime=None
+            )
+        }
+    )
+    assert schedule.assignment_pages_by_key("Course", "Cohort-f2026", sched) == {}

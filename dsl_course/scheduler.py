@@ -1277,13 +1277,6 @@ def _team_formation_phase(
     that refuses them. `refresh_join_team_form` pushes that one file, and only when the lock
     actually moved.
 
-    THE PUBLIC TEAM LIST OPENS WITH THE WINDOW, on that same tick. The Join-team workflow
-    maintains it from the first join onwards, which is one join too late: the mail and the
-    form header both want to LINK it, and on day one - the day the whole cohort is asked to
-    form a team - there was nothing to link. `ensure_list_issue` opens it and hands the URL
-    straight to the form, so the tick pays one search per open window rather than one per
-    surface that names it.
-
     THE MAIL CANNOT ABORT THE TICK. `notify_windows` re-raises whatever the transport
     raised - `mailer` turns a failed Graph token request into a RuntimeError, which is what
     an expired GRAPH_CLIENT_CERT, a revoked app or a tenant outage all look like - and
@@ -1319,20 +1312,7 @@ def _team_formation_phase(
         # four other places that each need the same line), so there is nothing to say here.
         errors, changed = (0 if write.ok else 1), write.changed
         if changed:
-            # The list issue first, so the form it is about to re-push can link it. Only
-            # the windows a student can still act on: a shut one keeps its fault for the
-            # teaching team, and nobody is being sent to a list for it.
-            links = {
-                w.key: url
-                for w in windows or ()
-                if not w.shut
-                and (
-                    url := team_formation.ensure_list_issue(
-                        cohort_org, w, sched.timezone, dry_run=dry_run
-                    )
-                )
-            }
-            errors += welcome.refresh_join_team_form(cohort_org, links)
+            errors += welcome.refresh_join_team_form(cohort_org)
     try:
         errors += team_formation.notify_windows(
             course_org, cohort_org, sched, windows, now, dry_run=dry_run

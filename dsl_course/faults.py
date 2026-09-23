@@ -211,6 +211,11 @@ class ConfigFault:
     # and it never earns anyone an email at 24h or a "this did not ship" once its moment
     # has passed.
     ceiling: Severity = Severity.MISSED
+    # The moment from which this fault is at least WARNING, however far off `fires` still
+    # is. A team-formation window that has stood open for a week with students still
+    # waiting is worth telling somebody about, even while its close is a fortnight away.
+    # None = the ladder alone decides.
+    warn_from: datetime | None = None
     # The line of the file this is written on, as the parser saw it. Every surface turns
     # it into `schedule.yml:36` and a deep link, because the entry name alone still leaves
     # faculty scrolling a file they wrote in August. For a CSV it is the row's own line
@@ -372,6 +377,8 @@ class ConfigFault:
             rung = Severity.WARNING
         else:
             rung = Severity.ADVISORY
+        if self.warn_from is not None and now >= self.warn_from:
+            rung = max(rung, Severity.WARNING)
         return min(rung, self.ceiling)
 
     def fix(self, course_org: str = "", rung: Severity | None = None) -> str:

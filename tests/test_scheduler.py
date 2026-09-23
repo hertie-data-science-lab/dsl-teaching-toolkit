@@ -186,17 +186,7 @@ def join_form_writes(monkeypatch):
     monkeypatch.setattr(
         scheduler.welcome,
         "refresh_join_team_form",
-        lambda org, list_urls=None: orgs.append(org) or 0,
-    )
-    # Opened on the same tick and handed to the form above, so the header can link it
-    # (`team_formation.ensure_list_issue`): one issue search per open window on a path most
-    # of these tests are not about.
-    monkeypatch.setattr(
-        scheduler.team_formation,
-        "ensure_list_issue",
-        lambda org, window, tz, *, dry_run: (
-            f"https://github.com/{org}/welcome/issues/1"
-        ),
+        lambda org: orgs.append(org) or 0,
     )
     return orgs
 
@@ -814,72 +804,6 @@ def test_the_tick_that_moves_the_lock_moves_the_join_team_form_too(
     assert join_form_writes == ["Cohort-Org"]
 
 
-def test_the_tick_that_opens_the_window_opens_the_public_team_list_too(
-    monkeypatch, team_lock_writes
-):
-    # The list is what the mail's second link and the form's header point at, and until now
-    # it existed only from the first JOIN onwards - so on day one, when the whole cohort is
-    # asked to form a team, there was nothing to link. Opened here, and the URL handed
-    # straight to the form rather than looked up a second time.
-    monkeypatch.setattr(
-        scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, True)
-    )
-    ensured: list[tuple] = []
-    monkeypatch.setattr(
-        scheduler.team_formation,
-        "ensure_list_issue",
-        lambda org, window, tz, *, dry_run: (
-            ensured.append((org, window.key, dry_run))
-            or f"https://github.com/{org}/welcome/issues/1"
-        ),
-    )
-    handed: list = []
-    monkeypatch.setattr(
-        scheduler.welcome,
-        "refresh_join_team_form",
-        lambda org, list_urls=None: handed.append(list_urls) or 0,
-    )
-    scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
-    )
-    assert ensured == [("Cohort-Org", "assignment-2", False)]
-    assert handed == [
-        {"assignment-2": "https://github.com/Cohort-Org/welcome/issues/1"}
-    ]
-
-
-def test_a_window_that_has_already_shut_gets_no_list_opened_for_it(
-    monkeypatch, team_lock_writes, join_form_writes
-):
-    # A shut window is carried for the teaching team's fault alone. Nobody is being sent to
-    # a list for it, and opening one would be a public invitation through a door the
-    # Join-team form has already locked.
-    monkeypatch.setattr(
-        scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, True)
-    )
-    ensured: list = []
-    monkeypatch.setattr(
-        scheduler.team_formation,
-        "ensure_list_issue",
-        lambda org, window, tz, *, dry_run: ensured.append(window.key) or "",
-    )
-    shut = scheduler.team_formation.Window(
-        key="assignment-2",
-        name="assignment-2",
-        title="Assignment 2",
-        closes=WHEN - timedelta(hours=1),
-        sizes=(),
-        waiting=(roster.Student("s@x.edu", "S", "s", "1"),),
-        enrolled=4,
-        cap=4,
-        shut=True,
-    )
-    scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [shut]
-    )
-    assert ensured == []
-
-
 def test_a_tick_whose_lock_did_not_move_leaves_the_join_team_form_alone(
     monkeypatch, join_form_writes, team_lock_writes
 ):
@@ -897,9 +821,7 @@ def test_a_join_team_form_that_could_not_be_written_reds_the_tick(
     monkeypatch.setattr(
         scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, True)
     )
-    monkeypatch.setattr(
-        scheduler.welcome, "refresh_join_team_form", lambda org, list_urls=None: 1
-    )
+    monkeypatch.setattr(scheduler.welcome, "refresh_join_team_form", lambda org: 1)
     errors, _changed = scheduler._team_formation_phase(
         "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
     )

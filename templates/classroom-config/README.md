@@ -72,7 +72,7 @@ it is what stops a re-run repeating itself and what lets a failed notification b
 
 ## `assignments.lock.yml` - what the Join-team form is allowed to do (generated)
 
-SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `welcome` repo, under a token that cannot reach an assignment template, so it cannot read an assignment's `grading_config.yml`. This file mirrors the answers it needs - `team_formation`, `max_team_size`, and whether team formation is open for that assignment right now (`team_formation_window`, with the day it shuts in `team_formation_closes`) - one entry per assignment in `schedule.yml`.
+SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `welcome` repo, under a token that cannot reach an assignment template, so it cannot read an assignment's `grading_config.yml`. This file mirrors the answers it needs - `team_formation`, `max_team_size`, and whether team formation is open for that assignment right now (`team_formation_window`, with the day it shuts in `team_formation_closes`, and the assignment's page on the cohort site in `team_formation_page`) - one entry per assignment in `schedule.yml`.
 
 It is rewritten by the quarter-hourly **Scheduled release** tick - which is what opens and shuts the window on its own clock - and again by **Sync membership** (which a push to `schedule.yml` triggers), by every **Release assignment**, and by the nightly **Refresh actions**. Change an assignment by editing its own `grading_config.yml` on the template's `solution` branch; this file catches up on the next sync. An assignment whose template does not exist yet is locked to `none`, so no team can be formed for it until the template says what it is.
 

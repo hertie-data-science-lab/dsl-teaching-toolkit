@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
 from typing import NamedTuple
 
 from .ghcli import gh, gh_json
@@ -55,7 +54,7 @@ class Issue(NamedTuple):
     closed: bool = False
 
 
-def _titled(repo: str, title: str, state: str = "open", label: str = "") -> list[Issue]:
+def _titled(repo: str, title: str, state: str = "open") -> list[Issue]:
     """Every issue in `repo` titled EXACTLY `title`, lowest number first. Raises when the
     listing could not be read: absence has to be a real answer.
 
@@ -63,12 +62,6 @@ def _titled(repo: str, title: str, state: str = "open", label: str = "") -> list
     search (see `find_issues`). A closed one must not be ADOPTED - the point of closing is
     that the condition cleared, so the next occurrence is a new issue and a new
     notification - only READ, for the state it left behind.
-
-    `label` narrows the search to issues carrying it, for a caller whose issue is ALSO
-    maintained by something else: the public team list is written from here and from the
-    Join-team workflow's JavaScript, and that workflow looks the issue up by label and
-    exact title. Searching on both is what keeps the two writers on one issue rather than
-    letting either open a second.
 
     Read through `gh_json`, which parses stdout ALONE: `gh` hands back stdout and stderr
     joined, so one advisory on stderr (a token nearing expiry, an update notice) beside a
@@ -86,7 +79,6 @@ def _titled(repo: str, title: str, state: str = "open", label: str = "") -> list
             state,
             "--search",
             f"{title} in:title",
-            *(("--label", label) if label else ()),
             "--limit",
             _LIST_LIMIT,
             "--json",
@@ -105,10 +97,9 @@ def _titled(repo: str, title: str, state: str = "open", label: str = "") -> list
     ]
 
 
-def find_issue(repo: str, title: str, label: str = "") -> Issue | None:
-    """The open issue in `repo` with this exact title, or None. `label` narrows it (see
-    `_titled`)."""
-    found = _titled(repo, title, label=label)
+def find_issue(repo: str, title: str) -> Issue | None:
+    """The open issue in `repo` with this exact title, or None."""
+    found = _titled(repo, title)
     return found[0] if found else None
 
 
@@ -204,7 +195,6 @@ def upsert_issue(
     body: str,
     comment: str | None = None,
     existing: Issue | None | _Unasked = _UNASKED,
-    labels: Sequence[str] = (),
 ) -> Upserted:
     """Make `repo`'s issue titled `title` say `body` - editing it if it is open, opening it
     if it is not. Reports the error count and the issue's URL (see `Upserted`).
@@ -215,11 +205,7 @@ def upsert_issue(
 
     `existing` is a `find_issue` result the caller has already fetched - every consumer
     reads the body for its own previous state before deciding what to write, so without
-    this the search runs twice per tick.
-
-    `labels` are applied on CREATE only: they are how another writer finds this issue
-    again (the Join-team workflow looks the team list up by label and exact title), and
-    re-asserting them on every edit would fight a human who took one off."""
+    this the search runs twice per tick."""
     if existing is _UNASKED:
         try:
             existing = find_issue(repo, title)
@@ -233,15 +219,7 @@ def upsert_issue(
         )
     else:
         code, out = gh(
-            "issue",
-            "create",
-            "--repo",
-            repo,
-            "--title",
-            title,
-            "--body",
-            body,
-            *[arg for label in labels for arg in ("--label", label)],
+            "issue", "create", "--repo", repo, "--title", title, "--body", body
         )
         found = _ISSUE_URL.search(out or "")
         url = found.group(0) if found else None

@@ -93,7 +93,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .course import CONFIG_REPO, assignment_slug, coerce_date, is_repo_root
+from .course import (
+    CONFIG_REPO,
+    assignment_slug,
+    coerce_date,
+    is_repo_root,
+    pages_repo,
+    term_tag,
+)
+from .discovery import discover_assignments
 from .faults import (
     NOTIFY_FROM,
     SOURCE_CRITICAL_WINDOW,
@@ -1478,6 +1486,85 @@ def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | 
     goes through `entries_for_repo` and refuses the ambiguity."""
     found = entries_for_repo(sched, repo)
     return found[0] if found else None
+
+
+class AssignmentPage(NamedTuple):
+    """One assignment's page on the cohort site: its ordinal, its cohort-side name, the
+    course template it is drawn from, and its plan entry (None for a template the plan
+    does not name)."""
+
+    number: int
+    name: str
+    repo: str
+    hit: tuple[str, AssignmentEntry] | None
+
+    @property
+    def key(self) -> str:
+        """The SCHEDULE key, or "" for a template the plan does not name."""
+        return self.hit[0] if self.hit else ""
+
+    @property
+    def stem(self) -> str:
+        """`03-assignment-3` - the page's file under `_assignments/` is this plus `.md`,
+        and its URL this plus `.html`, so the file and the link cannot disagree."""
+        return f"{self.number:02d}-{self.name}"
+
+    def url(self, cohort_org: str) -> str:
+        """Where the cohort site serves it: the collection's default permalink, at the org
+        root the site is published to (`_view_url`'s base)."""
+        return f"https://{pages_repo(cohort_org)}/assignments/{self.stem}.html"
+
+
+def assignment_pages(
+    cohort_org: str, sched: Schedule, templates: list[str]
+) -> list[AssignmentPage]:
+    """Every assignment the cohort site has a page for, numbered as the site numbers them -
+    the ONE place that numbering is decided, because the site names the pages off it and
+    the team-formation mail, the lock and the Join-team form all link them.
+
+    `templates` is the course org's `assignment-*` template repos
+    (`discovery.discover_assignments`), cut to this cohort's own term tag. From BOTH sides:
+    the templates, so one handed out off-plan still has a page, and the plan's entries, so
+    one appears before its template is staged. Keyed on the COHORT-side name, because two
+    plan entries may cite one `course_source_repo`; sorted by it, so a page keeps its URL
+    when faculty add another mid-term.
+
+    HIDDEN ones are included (`show_on_site: false`): the ordinal is a position in the full
+    list, and the site skips a hidden page rather than renumbering around it, so hiding one
+    mid-term moves nobody else's URL."""
+    tag = term_tag(cohort_org)
+    if tag:
+        templates = [a for a in templates if a.lower().endswith(tag)]
+    by_name: dict[str, tuple[str, tuple[str, AssignmentEntry] | None]] = {}
+    for repo in templates:
+        hit = entry_for_repo(sched, repo)
+        name = cohort_name(*hit) if hit else assignment_slug(repo)
+        by_name.setdefault(name, (repo, hit))
+    for key, entry in sched.assignments.items():
+        by_name.setdefault(
+            cohort_name(key, entry), (entry.course_source_repo, (key, entry))
+        )
+    return [
+        AssignmentPage(i + 1, name, repo, hit)
+        for i, (name, (repo, hit)) in enumerate(sorted(by_name.items()))
+    ]
+
+
+def assignment_pages_by_key(
+    course_org: str, cohort_org: str, sched: Schedule
+) -> dict[str, AssignmentPage]:
+    """`assignment_pages` by SCHEDULE key, off a fresh listing of the course org's
+    templates - for a caller that links a page without building the site.
+
+    `{}` when the listing failed: every caller uses a page to decide whether a sentence
+    carries a link and a number, and one that could not look gets the wording that stands
+    on its own rather than a link to the wrong page."""
+    try:
+        templates = discover_assignments(course_org)
+    except RuntimeError as exc:
+        log_err(f"could not list {course_org}'s assignment templates: {exc}")
+        return {}
+    return {p.key: p for p in assignment_pages(cohort_org, sched, templates) if p.key}
 
 
 def resolve_target(

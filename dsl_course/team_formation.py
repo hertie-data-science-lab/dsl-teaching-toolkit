@@ -59,17 +59,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
-from . import config_digest, grades, issues, mailer, roster, schedule, teams
+from . import config_digest, grades, mailer, roster, schedule, teams
 from .course import CONFIG_REPO, SELF_SELECT, course_phrase
 from .discovery import cohort_is_live, course_name_of, welcome_issue_url
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
-from .ghcli import gh
 from .log import log, log_err, log_ok, log_person, log_step
 
 # What the cohort LOSES while somebody is still unteamed, and what would put it right -
@@ -97,6 +97,12 @@ FIX = (
     "the line above to keep team formation open for longer."
 )
 
+# How long a window may stand open with somebody still waiting before its fault reaches
+# the notify bar (`faults.NOTIFY_FROM`) on its own. The ladder alone says nothing until a
+# day before the close, and a fortnight-long window nobody has acted on for a week is a
+# cohort that has not been told - worth hearing about while there is still time to act.
+WARN_AFTER_OPEN = timedelta(days=7)
+
 
 @dataclass(frozen=True)
 class Window:
@@ -121,9 +127,8 @@ class Window:
     title: str
     closes: datetime
     # Every team with at least one row for `key` in teams.csv, as `(name, members)`, sorted
-    # by name. The NAMES are carried because the public list issue prints them - a team
-    # name is student-chosen and public by construction, unlike who is in it - and the
-    # counts because both that list and the cohort site say how much room each has left.
+    # by name. `teams` counts them for the fault; the cohort site prints the names and the
+    # room each has left off the same file (`site._formed_teams`).
     sizes: tuple[tuple[str, int], ...]
     # Enrolled, onboarded roster rows with no teams.csv row for `key` - and the people the
     # mail below is addressed to.
@@ -146,6 +151,8 @@ class Window:
     # carried for the teaching team's fault alone (see the module docstring): the mail is
     # for windows a student can still act on, and nothing else here reports one.
     shut: bool = False
+    # When the window OPENED - the handout - from which `WARN_AFTER_OPEN` is counted.
+    opens: datetime | None = None
 
     @property
     def teams(self) -> int:
@@ -248,6 +255,7 @@ def open_windows(
                 enrolled=len(participants),
                 cap=grades.team_cap(course_org, spec),
                 shut=shut,
+                opens=opens,
             )
         )
     return found
@@ -308,6 +316,9 @@ def _fault(sched: schedule.Schedule, window: Window) -> ConfigFault:
     where it does not (`schedule.formation_window` closes on the grading pin). Naming the
     key that actually decided is what makes the deep link land where somebody would edit
     to give the cohort more time.
+
+    FLOORED at WARNING once the window has been open for `WARN_AFTER_OPEN` (`warn_from`):
+    the ladder off `fires` stays as it is, and only lifts the fault above that floor.
     """
     entry = sched.assignments[window.key]
     field = "grading_datetime" if entry.grading_datetime is not None else "due_datetime"
@@ -315,6 +326,7 @@ def _fault(sched: schedule.Schedule, window: Window) -> ConfigFault:
         f"assignments.{window.key}",
         _what(window),
         fires=window.closes,
+        warn_from=window.opens + WARN_AFTER_OPEN if window.opens else None,
         field=field,
         lineno=schedule.line_of(entry.lines, field),
         file=schedule.SCHEDULE_PATH,
@@ -349,129 +361,6 @@ def _what(window: Window) -> str:
         f"student(s) are not in a team yet, across the {window.teams} team(s) formed so "
         f"far"
     )
-
-
-# ----------------------------------------------------------------- the public team list
-
-# The one thing in the public `welcome` repo the whole cohort is pointed at: which teams
-# exist and how much room each has. teams.csv is private, so without it a student with
-# nobody to team up with has no way to find out who is looking - which is the likeliest
-# reason a cohort forms no teams at all.
-#
-# TWO WRITERS, one issue. The Join-team workflow rewrites it after every successful join
-# (templates/welcome/team-formation.yml), and this opens it WITH the window - because on
-# day one there is nothing to rewrite, and the day one is exactly when the mail and the
-# form need a URL to link. They find each other by the same two things: the `team-list`
-# label and this exact title. Change either here and the workflow opens a second list.
-WELCOME_REPO = "welcome"
-TEAM_LIST_LABEL = "team-list"
-TEAM_LIST_PREFIX = "Teams for "
-
-# What an empty list says. The issue exists from the window's first minute, so its first
-# reader is somebody who has been mailed and has arrived before anybody has acted.
-NO_TEAMS_YET = (
-    "No teams yet - be the first: open a **Join team** issue and choose *Create a new "
-    "team*."
-)
-
-
-def list_issue_title(key: str) -> str:
-    """The team list's title for one assignment - the KEY both writers find it by."""
-    return f"{TEAM_LIST_PREFIX}{key}"
-
-
-def _welcome_repo(cohort_org: str) -> str:
-    return f"{cohort_org}/{WELCOME_REPO}"
-
-
-def list_issue_url(cohort_org: str, key: str) -> str | None:
-    """Where this assignment's team list lives, or None when there is none to link.
-
-    None on a listing that failed as well as on one that found nothing: this is only ever
-    used to decide whether a sentence carries a link, and a cohort whose welcome repo could
-    not be listed gets the wording that stands on its own rather than a link to nowhere.
-
-    NAMES AND COUNTS are what the issue holds, so the URL is safe on every public surface -
-    it is the mail's second link and the Join-team form's header."""
-    try:
-        found = issues.find_issue(
-            _welcome_repo(cohort_org), list_issue_title(key), label=TEAM_LIST_LABEL
-        )
-    except RuntimeError as exc:
-        log_err(f"could not look for the team list for {key} in {cohort_org}: {exc}")
-        return None
-    return issues.issue_url(_welcome_repo(cohort_org), found.number) if found else None
-
-
-def list_body(window: Window, tz_name: str) -> str:
-    """The list issue's body: the cap, the day formation shuts, and one line per team.
-
-    NAMES AND COUNTS ONLY. The repo is PUBLIC and this issue is the one thing in it a whole
-    cohort is sent to. A team name is student-chosen and public by construction; who is in
-    it is not - so no handle, no person's name, no address and no `<slug>-<handle>` repo
-    name may appear here, ever.
-
-    The same shape the Join-team workflow rewrites it into after each join (`teamsIssueBody`
-    there), down to the wording of a full team: the two writers alternate on one issue, and
-    a reader must not be able to tell which of them last touched it."""
-    head = (
-        f"Up to {window.cap} people per team. Team formation closes on "
-        f"{spoken_date(window.closes, tz_name)}."
-    )
-    if not window.sizes:
-        return f"{head}\n\n{NO_TEAMS_YET}"
-    lines = [
-        f"- **{name}** - {taken}/{window.cap}, "
-        + (f"room for {window.cap - taken}" if taken < window.cap else "full")
-        for name, taken in window.sizes
-    ]
-    return "\n".join([head, "", *lines])
-
-
-def ensure_list_issue(
-    cohort_org: str, window: Window, tz_name: str, *, dry_run: bool
-) -> str | None:
-    """Make sure this window's team list EXISTS, and hand back its URL.
-
-    Opens it, never updates it: once it is there the Join-team workflow owns the body and
-    rewrites it from the rows it just wrote, which is the only writer that can be sure what
-    teams.csv now says. An issue found here is therefore left exactly as it is - including
-    one a tick opened weeks ago and students have since filled.
-
-    Pinned on the way in, because the form and the mail both call it the pinned list. Best
-    effort: a repo holds at most three pinned issues, so a fourth group assignment's list
-    is simply not pinned - a reason to carry on, never to fail.
-
-    A dry run says what it would open and asks nothing of GitHub, so a preview cannot
-    create the one thing on this path that is visible to a whole cohort."""
-    repo = _welcome_repo(cohort_org)
-    title = list_issue_title(window.key)
-    if dry_run:
-        log(f"  DRY-RUN would ensure `{title}` in {repo}")
-        return None
-    try:
-        existing = issues.find_issue(repo, title, label=TEAM_LIST_LABEL)
-    except RuntimeError as exc:
-        # NOT created on a listing that failed: absence has to be a real answer, or a
-        # rate-limited tick opens a second list beside the one the cohort is reading.
-        log_err(f"could not look for `{title}` in {repo}: {exc}")
-        return None
-    if existing:
-        return issues.issue_url(repo, existing.number)
-    made = issues.upsert_issue(
-        repo,
-        title,
-        list_body(window, tz_name),
-        existing=None,
-        labels=(TEAM_LIST_LABEL,),
-    )
-    if made.errors or made.url is None:
-        return None
-    log_ok(f"opened `{title}` in {repo}")
-    code, out = gh("issue", "pin", made.url, "--repo", repo)
-    if code != 0:
-        log(f"  (could not pin `{title}` in {repo}: {out[:120]})")
-    return made.url
 
 
 # ------------------------------------------------------------------- telling the cohort
@@ -512,12 +401,12 @@ Claim = tuple[str, str, str]
 
 
 def spoken_date(when: datetime, tz_name: str) -> str:
-    """`4 Oct`, in the cohort's own zone - what the Join-team form calls the same day.
+    """`4th Oct`, in the cohort's own zone - what the Join-team form calls the same day.
 
-    The spelling is `grades.spoken_day`'s, which is also the gradebook's and the form's
-    (`spokenDate`, in templates/welcome/team-formation.yml): written out rather than left
-    to `strftime`, which answers in the runner's locale, and shared so the mail, the pinned
-    team list and the refusal a late student gets all name one day one way.
+    The spelling is `grades.spoken_day`'s, which is also the gradebook's, the cohort site's
+    and the form's (`spokenDate`, in templates/welcome/team-formation.yml): written out
+    rather than left to `strftime`, which answers in the runner's locale, and shared so the
+    mail, the site and the refusal a late student gets all name one day one way.
 
     The zone matters at both ends of it: a window shutting at 00:30 Berlin is the 3rd in
     UTC and the 4th to everybody who reads the mail."""
@@ -535,6 +424,23 @@ def greeting(name: str) -> str:
     return f"Dear {first}," if first else "Hello,"
 
 
+def numbered(title: str, name: str, number: int | None) -> str:
+    """`Assignment 3: Project` - the assignment as its page on the cohort site is
+    numbered, then as a student calls it.
+
+    Not doubled up: a title that already starts `Assignment 3`, or that is only the slug,
+    is the number and nothing more to add. Without a number (the page could not be looked
+    up) it is the title alone."""
+    if number is None:
+        return title
+    lead = f"Assignment {number}"
+    if title == name:
+        return lead
+    if re.match(rf"assignment[\s_-]*{number}\b", title, re.IGNORECASE):
+        return title
+    return f"{lead}: {title}"
+
+
 def _render(
     salutation: str,
     title: str,
@@ -543,7 +449,7 @@ def _render(
     cohort_org: str,
     course_name: str,
     phase: str,
-    list_url: str | None,
+    page_url: str | None,
 ) -> tuple[str, str]:
     """The wording, off plain values - so the preview's placeholders and a real window's
     facts go through ONE template and the sample cannot drift from the send. The
@@ -552,17 +458,17 @@ def _render(
 
     It carries exactly what a student needs in order to act, and nothing else: who it is
     for, which course, which assignment, how big a team may be, the day formation shuts,
-    the form, and the list that says which teams have room. Plain text, like the other two
+    the form, and the page that says which teams have room. Plain text, like the other two
     student mails.
 
-    The assignment is named by its TITLE, not by the schedule key: this is the one mail
-    about it a student ever gets, and `assignment-2` is what the plan calls it rather than
-    what the site and the brief do.
+    The assignment is named by its number and TITLE (`numbered`), not by the schedule key:
+    this is the one mail about it a student ever gets, and `assignment-2` is what the plan
+    calls it rather than what the site and the brief do.
 
-    `list_url` is the public team list, and the sentence pointing at it goes ONLY when
-    there is one to point at (the tick that opens the window opens the issue too, so there
-    normally is). A cohort whose welcome repo could not be listed gets a shorter mail
-    rather than a link to nowhere.
+    `page_url` is the assignment's page on the cohort site, which lists the teams that
+    exist, and the sentence pointing at it goes ONLY when there is one to point at. A
+    course org whose templates could not be listed gets a shorter mail rather than a link
+    to the wrong page.
 
     It says NOTHING about working alone, about a solo team or about a minimum size.
     Whether a one-person team is allowed is the instructor's call, it is written down
@@ -582,9 +488,9 @@ def _render(
         opening = f"{title} in {course} is a group assignment."
         cap_line = f"Teams are up to {cap} people. Team formation closes on {day}."
     listed = (
-        f"\n\nThe teams that exist, and how much room each has, are listed here:\n"
-        f"  {list_url}"
-        if list_url
+        f"\n\nThe teams that exist, and how much room each has, are listed on the "
+        f"assignment's page:\n  {page_url}"
+        if page_url
         else ""
     )
     body = (
@@ -605,7 +511,7 @@ def message(
     phase: str,
     tz_name: str,
     name: str = "",
-    list_url: str | None = None,
+    page: schedule.AssignmentPage | None = None,
 ) -> tuple[str, str]:
     """The `(subject, body)` one open window sends ONE of its unteamed students.
 
@@ -613,16 +519,19 @@ def message(
     `mailer.Message` per recipient, so this costs nothing, and a mail asking somebody to go
     and find three people to work with reads better addressed to them than to a cohort.
     The name therefore appears in the BODY and nowhere else - not in a log line, not in the
-    dry run's sample, and not in a subject that a mail client shows in a list."""
+    dry run's sample, and not in a subject that a mail client shows in a list.
+
+    `page` is the assignment's page on the cohort site (`schedule.assignment_pages`): its
+    number names the assignment, and its URL is the list of teams."""
     return _render(
         greeting(name),
-        window.title,
+        numbered(window.title, window.name, page.number if page else None),
         window.cap,
         spoken_date(window.closes, tz_name),
         cohort_org,
         course_name,
         phase,
-        list_url,
+        page.url(cohort_org) if page else None,
     )
 
 
@@ -637,13 +546,13 @@ def sample_message(cohort_org: str, course_name: str = "") -> tuple[str, str]:
     The `open` phase, because that is the one every window sends."""
     return _render(
         "Dear <first name>,",
-        "<assignment>",
+        "Assignment <n>: <title>",
         "<n>",
         "<date>",
         cohort_org,
         course_name,
         PHASE_OPEN,
-        "<team list>",
+        "<assignment page>",
     )
 
 
@@ -885,29 +794,12 @@ def _course_name(course_org: str) -> str:
         return ""
 
 
-def _list_links(cohort_org: str, windows: list[Window]) -> dict[str, str]:
-    """Each window's public team list, by schedule key - the second link in every body.
-
-    Asked HERE and not in `open_windows`, which runs on every cohort on every tick: this is
-    one issue search per window, and it is paid only on a tick that has a message to write.
-    Once the cohort has teamed up nothing is owed, so nothing is looked up.
-
-    A window whose list could not be found is simply absent from the map, and `_render`
-    then writes a body without that sentence."""
-    found = {}
-    for window in windows:
-        url = list_issue_url(cohort_org, window.key)
-        if url:
-            found[window.key] = url
-    return found
-
-
 def _messages(
     nudges: list[_Nudge],
     cohort_org: str,
     course_name: str,
     tz_name: str,
-    links: dict[str, str],
+    pages: dict[str, schedule.AssignmentPage],
 ) -> list[mailer.Message]:
     """The batch these nudges are, rendered once - so the dry run previews exactly the
     messages a real run would send rather than a description of them."""
@@ -921,7 +813,7 @@ def _messages(
                 n.phase,
                 tz_name,
                 n.name,
-                links.get(n.window.key),
+                pages.get(n.window.key),
             ),
         )
         for n in nudges
@@ -933,7 +825,7 @@ def _preview(
     course_org: str,
     windows: list[Window],
     nudges: list[_Nudge],
-    tz_name: str,
+    sched: schedule.Schedule,
 ) -> None:
     """The dry run's report: counts a reader can check, then `send_bulk`'s own preview of
     the real batch.
@@ -962,7 +854,11 @@ def _preview(
         )
     mailer.send_bulk(
         _messages(
-            nudges, cohort_org, course_name, tz_name, _list_links(cohort_org, windows)
+            nudges,
+            cohort_org,
+            course_name,
+            sched.timezone,
+            schedule.assignment_pages_by_key(course_org, cohort_org, sched),
         ),
         dry_run=True,
         sample=sample_message(cohort_org, course_name)[1],
@@ -1035,7 +931,7 @@ def notify_windows(
     if not cohort_is_live(cohort_org):
         return 0
     if dry_run:
-        _preview(cohort_org, course_org, live, nudges, sched.timezone)
+        _preview(cohort_org, course_org, live, nudges, sched)
         return 0
     if mailer.graph_config_from_env() is None:
         log(
@@ -1064,12 +960,15 @@ def notify_windows(
     mine = [n for n in mine if n.phases]
     if not mine:
         return 0
+    # The pages are looked up HERE, on a tick that has a message to write, and not in
+    # `open_windows`, which runs on every cohort on every tick: they cost a listing of the
+    # course org, and once the cohort has teamed up nothing is owed.
     messages = _messages(
         mine,
         cohort_org,
         _course_name(course_org),
         sched.timezone,
-        _list_links(cohort_org, live),
+        schedule.assignment_pages_by_key(course_org, cohort_org, sched),
     )
     try:
         # WHICH MESSAGES went out, by position, and never which ADDRESSES: `mine` and the

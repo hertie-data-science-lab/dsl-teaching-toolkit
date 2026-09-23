@@ -23,7 +23,6 @@ from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
 from .repos import ensure_label
 from .roster import CONFIG_REPO
-from .team_formation import TEAM_LIST_LABEL, list_issue_url
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
@@ -133,16 +132,6 @@ def example_course_file(rel: str) -> str:
 WELCOME_LABELS = (
     ("onboarding", "0e8a16", "Join course issue - routes the Onboard student workflow"),
     ("team-formation", "1d76db", "Join team issue - routes the Form team workflow"),
-    # The public team list wears its OWN label, and that is a safety property, not
-    # bookkeeping: the workflow routes on `team-formation`, the list is opened with a PAT
-    # whose issues DO start runs, and a list carrying the routing label would answer
-    # itself with "I can't find you on the enrolment roster" - in public, on the one issue
-    # the whole cohort is pointed at.
-    (
-        TEAM_LIST_LABEL,
-        "c5def5",
-        "Teams for <assignment> - the public team list, maintained by the Form team workflow",
-    ),
 )
 
 
@@ -157,9 +146,10 @@ ASSIGNMENT_FIELD_START = "# dsl:assignment-field:start"
 ASSIGNMENT_FIELD_END = "# dsl:assignment-field:end"
 
 
-def open_formation_slugs(lock_text: str) -> list[str]:
+def open_formations(lock_text: str) -> dict[str, str]:
     """The assignments in a cohort's `assignments.lock.yml` whose team-formation window is
-    OPEN, sorted.
+    OPEN, sorted, each with its page on the cohort site (`team_formation_page`, "" where
+    the lock carries none).
 
     A filter over `grades.parse_team_lock`, which lives beside the writer of that file: the
     format is hand-rolled for a line scanner, and a second scanner here would be a second
@@ -169,47 +159,46 @@ def open_formation_slugs(lock_text: str) -> list[str]:
     needs no second opinion about the shape either: every other assignment is one the form
     would refuse anyway, and offering it in the dropdown would be inviting a student to be
     refused."""
-    return sorted(
-        key
-        for key, entry in parse_team_lock(lock_text).items()
+    return {
+        key: entry.get("team_formation_page", "")
+        for key, entry in sorted(parse_team_lock(lock_text).items())
         if entry.get("team_formation_window", "").lower() == "open"
-    )
+    }
 
 
-# The form's own first sentence, as the reviewed template spells it. It names the team
-# list without being able to link it, because until a cohort's list issue exists there is
-# no URL - so it is the wording a cohort with none receives, and the anchor the real links
-# below are spliced over. Pinned against the template by a test: a rewording there with no
+# The form's own first sentence, as the reviewed template spells it. It names the page
+# without being able to link it, because the page's URL is per cohort - so it is the
+# wording a cohort whose lock carries none receives, and the anchor the real links below
+# are spliced over. Pinned against the template by a test: a rewording there with no
 # rewording here would silently stop the splice.
 TEAM_LIST_SENTENCE = (
-    r"The teams that already exist, and how much room each has left, are listed in the "
-    r"pinned **Teams for \<assignment\>** issue."
+    "The teams that already exist, and how much room each has left, are listed on the "
+    "assignment's page on the cohort site."
 )
 
 
 def _team_list_header(
-    open_slugs: Sequence[str], list_urls: Mapping[str, str] | None
+    open_slugs: Sequence[str], page_urls: Mapping[str, str] | None
 ) -> str:
-    """The header sentence, naming the team list a student can actually open.
+    """The header sentence, linking the page a student can actually open.
 
     One open assignment is the ordinary case and gets one link inside the sentence; several
-    get a line each, because "listed in these two issues" with both links inline is a
-    sentence nobody reads to the end of. A slug whose list is not known is left out rather
+    get a line each, because "listed on these two pages" with both links inline is a
+    sentence nobody reads to the end of. A slug whose page is not known is left out rather
     than linked to nowhere, and a header that knows none of them is the template's own."""
-    links = [(s, (list_urls or {}).get(s, "")) for s in open_slugs]
+    links = [(s, (page_urls or {}).get(s, "")) for s in open_slugs]
     links = [(s, u) for s, u in links if u]
     if not links:
         return TEAM_LIST_SENTENCE
     lead = "The teams that already exist, and how much room each has left, are listed"
     if len(links) == 1:
-        slug, url = links[0]
-        return f"{lead} in [Teams for {slug}]({url})."
-    listed = "\n".join(f"        - [Teams for {slug}]({url})" for slug, url in links)
-    return f"{lead} here:\n\n{listed}"
+        return f"{lead} on [the assignment's page]({links[0][1]})."
+    listed = "\n".join(f"        - [{slug}]({url})" for slug, url in links)
+    return f"{lead} on each assignment's page:\n\n{listed}"
 
 
 def join_team_form(
-    open_slugs: Sequence[str], list_urls: Mapping[str, str] | None = None
+    open_slugs: Sequence[str], page_urls: Mapping[str, str] | None = None
 ) -> str:
     """The Join-team issue form for a cohort whose open assignments are `open_slugs`.
 
@@ -222,12 +211,12 @@ def join_team_form(
     render, which would take the Join-team route away from a cohort entirely rather than
     merely leave it awkward.
 
-    `list_urls` links the public team list from the header, by schedule key. The form tells
-    a student to type a team's name "exactly as that issue spells it", so an issue they
-    cannot reach in one click is an instruction they cannot follow - and the list is in the
-    same repo the form is filed in, which is precisely why nobody notices it is missing."""
+    `page_urls` links each assignment's page on the cohort site from the header, by
+    schedule key (the lock's `team_formation_page`). The form tells a student to type a
+    team's name "exactly as that page spells it", so a page they cannot reach in one click
+    is an instruction they cannot follow."""
     form = template(JOIN_TEAM_FORM).replace(
-        TEAM_LIST_SENTENCE, _team_list_header(open_slugs, list_urls)
+        TEAM_LIST_SENTENCE, _team_list_header(open_slugs, page_urls)
     )
     if not open_slugs:
         return form
@@ -254,8 +243,8 @@ def join_team_form(
     return form[:start] + block + form[end + len(ASSIGNMENT_FIELD_END) :]
 
 
-def _open_formation_slugs(org: str) -> list[str]:
-    """`open_formation_slugs` for a live cohort, or none of them.
+def _open_formations(org: str) -> dict[str, str]:
+    """`open_formations` for a live cohort, or none of them.
 
     Every way of not reading the lock lands on the free-text fallback: a cohort seeded
     before the file existed, one whose sync has not run yet, and a read that failed for a
@@ -268,28 +257,14 @@ def _open_formation_slugs(org: str) -> list[str]:
             f"could not read {TEAM_LOCK_PATH} in {org} ({exc}) - the Join-team form is "
             f"seeded with a free-text Assignment field this run"
         )
-        return []
-    return open_formation_slugs(text) if text else []
+        return {}
+    return open_formations(text) if text else {}
 
 
 JOIN_TEAM_FORM_PATH = ".github/ISSUE_TEMPLATE/02-join-team.yml"
 
 
-def _list_urls(org: str, open_slugs: Sequence[str]) -> dict[str, str]:
-    """Each open assignment's team list in this cohort's welcome repo, by schedule key.
-
-    One issue search per OPEN window, which is nearly always one and never many: only a
-    self-select group assignment inside its window is here at all. A caller that has just
-    opened those issues itself passes what it already knows instead (the scheduler's tick)."""
-    found = {}
-    for slug in open_slugs:
-        url = list_issue_url(org, slug)
-        if url:
-            found[slug] = url
-    return found
-
-
-def refresh_join_team_form(org: str, list_urls: Mapping[str, str] | None = None) -> int:
+def refresh_join_team_form(org: str) -> int:
     """Re-push JUST the Join-team form, so its Assignment dropdown offers what the cohort's
     lock says is open RIGHT NOW. Returns the failure count.
 
@@ -305,18 +280,13 @@ def refresh_join_team_form(org: str, list_urls: Mapping[str, str] | None = None)
     not actually changed is written nothing and commits nothing.
 
     The full refresh keeps doing what it does - bootstrap and the nightly run converge the
-    whole set, this one keeps the dropdown honest between them.
-
-    `list_urls` is the header's links, handed in by a caller that has just ensured those
-    issues exist (`scheduler._team_formation_phase`) and looked up here otherwise."""
-    slugs = _open_formation_slugs(org)
+    whole set, this one keeps the dropdown honest between them."""
+    opened = _open_formations(org)
     if put_file(
         org,
         "welcome",
         JOIN_TEAM_FORM_PATH,
-        join_team_form(
-            slugs, list_urls if list_urls is not None else _list_urls(org, slugs)
-        ).encode(),
+        join_team_form(list(opened), opened).encode(),
         "ci: refresh the Join-team form's open assignments",
     ):
         return 0
@@ -365,7 +335,7 @@ def refresh_welcome_workflows(org: str) -> int:
                 "welcome/team-formation.yml"
             ).encode(),
             JOIN_TEAM_FORM_PATH: join_team_form(
-                open_now := _open_formation_slugs(org), _list_urls(org, open_now)
+                list(open_now := _open_formations(org)), open_now
             ).encode(),
             ".github/ISSUE_TEMPLATE/config.yml": template(
                 "welcome/ISSUE_TEMPLATE/config.yml"

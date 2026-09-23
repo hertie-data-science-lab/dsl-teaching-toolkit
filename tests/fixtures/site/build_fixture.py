@@ -165,12 +165,6 @@ def _formed_teams(_org: str, _key: str) -> list[tuple[str, int]]:
     return [("team-alpha", 2), ("team-bravo", 4)]
 
 
-def _list_issue_url(org: str, _key: str) -> str:
-    """The public team list the page links. A real cohort's is opened by the tick that
-    opens the window (`team_formation.ensure_list_issue`)."""
-    return f"https://github.com/{org}/welcome/issues/12"
-
-
 def _grading_spec(_org: str, repo: str):
     """The assignment's own definition, which names the repo shape a student looks for,
     says whether the work is handed in on GitHub at all, and declares what happens to work
@@ -361,8 +355,8 @@ def _assignments() -> dict[str, str]:
             now=NOW,
         ),
         # Out, and waiting for its teams: the brief is published, no `repo_url` is, and
-        # the `team_join_*` keys, the teams formed so far and the link to the public list
-        # say what to do about it instead.
+        # the `team_join_*` keys and the teams formed so far say what to do about it
+        # instead.
         "08-assignment-8.md": site._assignment_entry(
             COURSE_ORG,
             COHORT_ORG,
@@ -459,10 +453,10 @@ def generated(
     claim a copy nothing ever made."""
     real_tree, real_content = site._repo_tree, site.get_file_content
     real_spec, real_clone = site.load_grading_spec, site.clone
-    real_teams, real_list = site._formed_teams, site.list_issue_url
+    real_teams = site._formed_teams
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
     site.load_grading_spec, site.clone = _grading_spec, _clone
-    site._formed_teams, site.list_issue_url = _formed_teams, _list_issue_url
+    site._formed_teams = _formed_teams
     try:
         with tempfile.TemporaryDirectory() as work:
             hosted = site._mirror_public(
@@ -475,7 +469,7 @@ def generated(
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
         site.load_grading_spec, site.clone = real_spec, real_clone
-        site._formed_teams, site.list_issue_url = real_teams, real_list
+        site._formed_teams = real_teams
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary
