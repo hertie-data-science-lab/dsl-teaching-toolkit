@@ -170,11 +170,6 @@ CONTRACT_EXAMPLE = {
         "last_update": "2026-09-21T06:02:00Z",
         "stale": True,
     },
-    "automation": {
-        "last_tick": "2026-09-23T08:45:00Z",
-        "driver": "ds01",
-        "late": False,
-    },
     "operations": [
         {
             "run_id": 4821,
@@ -540,6 +535,8 @@ def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
         r"generated|written|timestamp|updated_at|rendered|as_of", re.IGNORECASE
     )
     assert not [k for k in _keys(doc) if stamp.search(k)]
+    # The scheduler's heartbeat moves every tick; in the file it would commit every 15 min.
+    assert "automation" not in doc
     # Two renders of one state are one blob, which is what makes the write a no-op.
     assert status_json.dumps(_render()) == status_json.dumps(_render())
 
@@ -567,43 +564,6 @@ def test_the_course_file_carries_no_handle_email_or_student_repo():
         "dsl-course.yml": "c0ffee",
         "cohort-courses-pages.yml": "facade",
     }
-
-
-def test_automation_reads_the_newest_executed_tick_and_skips_scoped_runs():
-    runs = [
-        {
-            "event": "schedule",
-            "conclusion": "success",
-            "created_at": "2026-09-23T07:52:00Z",
-        },
-        {
-            "event": "repository_dispatch",
-            "conclusion": "success",
-            "created_at": "2026-09-23T08:45:00Z",
-        },
-        {
-            "event": "repository_dispatch",
-            "conclusion": "success",
-            "created_at": "2026-09-23T08:58:00Z",
-            "display_title": "Scheduled release for cohort x",
-        },
-        {
-            "event": "repository_dispatch",
-            "conclusion": None,
-            "created_at": "2026-09-23T08:59:00Z",
-        },
-    ]
-    assert status_json.automation_from_runs(runs, NOW) == {
-        "last_tick": "2026-09-23T08:45:00Z",
-        "driver": "ds01",
-        "late": False,
-    }
-    assert (
-        status_json.automation_from_runs(
-            runs, datetime(2026, 9, 23, 11, 0, tzinfo=UTC)
-        )["late"]
-        is True
-    )
 
 
 def test_term_weeks_before_during_and_after_the_term():
@@ -788,7 +748,6 @@ def test_collect_cohort_walks_every_read_end_to_end(monkeypatch):
     )
     monkeypatch.setattr(status_json, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
-    monkeypatch.setattr(status_json.cadence, "fetch_runs", lambda org: [])
     monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
 
     doc = status_json.collect_cohort(COURSE, COHORT, NOW)

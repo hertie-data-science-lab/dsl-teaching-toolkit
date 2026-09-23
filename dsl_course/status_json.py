@@ -23,6 +23,9 @@ computed from - so a reader tells a stale status from a current one with one tre
 and a render that matches the file byte for byte makes no commit. The moments inside it
 (a release's `when`, the site's last update) are facts about the cohort, not about when
 this was written.
+Nothing that moves on every scheduler tick is in it - the automation heartbeat
+included, which the console reads off the workflow's run list - or every cohort's
+classroom-config would take a commit every quarter hour.
 
 PUBLIC AND PRIVATE. The cohort file lives in the private `classroom-config`; the course
 file lives in the course org's PUBLIC `.github`, so `render_course` puts nothing in it but
@@ -41,14 +44,13 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from . import cadence, grades, roster, schedule, sync_faculty, team_formation, teams
+from . import grades, roster, schedule, sync_faculty, team_formation, teams
 from .course import (
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
     INSTRUCTORS_TEAM,
     MATERIALS_REPO_PREFIX,
     PUBLISH_FILE,
-    SCOPED_RUN_TITLE,
     SOLUTION_BRANCH,
     active_today,
     assignment_slug,
@@ -180,7 +182,6 @@ class CohortFacts:
     config_last_update: datetime | None = None
     # Whether the instructors team holds exactly who people.yml grants. None = unread.
     staff_synced: bool | None = None
-    runs: list[dict] = field(default_factory=list)  # the scheduler's recent runs
     outcomes: list[dict] = field(default_factory=list)  # parsed dsl.outcome/1 files
 
     @property
@@ -766,36 +767,6 @@ def this_week(
     return [row for _, row in sorted(items, key=lambda p: p[0])]
 
 
-def automation_from_runs(runs: list[dict], now: datetime) -> dict:
-    """The scheduler's last executed tick, which driver delivered it, and whether it is
-    late (more than `cadence.GAP_SLO` ago). A cohort-scoped run is a config push, not a
-    tick, and does not count."""
-    newest: tuple[datetime, str] | None = None
-    for run in runs:
-        if str(run.get("display_title") or "").startswith(SCOPED_RUN_TITLE):
-            continue
-        event = str(run.get("event") or "")
-        if event not in (cadence.CRON_EVENT, cadence.DISPATCH_EVENT):
-            continue
-        if run.get("conclusion") not in ("success", "failure"):
-            continue
-        raw = str(run.get("created_at") or "")
-        try:
-            at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if newest is None or at > newest[0]:
-            newest = (at, event)
-    if newest is None:
-        return {"last_tick": None, "driver": None, "late": True}
-    at, event = newest
-    return {
-        "last_tick": at.isoformat().replace("+00:00", "Z"),
-        "driver": "ds01" if event == cadence.DISPATCH_EVENT else "github",
-        "late": now - at > cadence.GAP_SLO,
-    }
-
-
 def render_operations(outcomes: list[dict]) -> list[dict]:
     """The most recent operations first, off their private outcome files."""
     keep = ("run_id", "op", "conclusion", "summary", "finished")
@@ -971,7 +942,6 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
             "last_update": _iso(facts.site_last_update),
             "stale": stale,
         },
-        "automation": automation_from_runs(facts.runs, now),
         "operations": render_operations(facts.outcomes),
     }
 
@@ -1129,10 +1099,6 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
         facts.staff_synced = {m.casefold() for m in members} == {
             w.casefold() for w in want
         }
-    try:
-        facts.runs = cadence.fetch_runs(course_org)
-    except RuntimeError:
-        facts.runs = []  # `automation` then reads as late, which is the safe answer
     facts.outcomes = _outcomes(cohort_org, facts.config_paths)
     return facts
 
