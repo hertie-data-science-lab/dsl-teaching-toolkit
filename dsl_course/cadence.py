@@ -46,8 +46,10 @@ under Actions congestion would read a 15 min cadence as 21 and stall both close 
 Two things neither alarm can see. Lateness is measured from the last run that EXECUTED,
 success or failure, so a streak of red runs that finally ships a moment is not reported
 here; the `<workflow> is failing` issue covers that case from the first red run. And any
-`repository_dispatch` run counts as the dispatcher, a push to a cohort's `schedule.yml`
-included, because the runs listing does not carry `client_payload.driver`.
+`repository_dispatch` run counts as the dispatcher, because the runs listing does not carry
+`client_payload.driver` - except a run a cohort's classroom-config push SCOPED to that one
+cohort, which says so in its title (`SCOPED_RUN_TITLE`) and is read as no tick at all: it
+released into one cohort, so it can neither date the dispatcher nor close a gap for the rest.
 
 Every line either module publishes carries workflow names, timestamps, minutes, schedule
 labels and counts - never a handle, a student repo, or a `describe()` line (which names
@@ -106,6 +108,11 @@ RUNS_PAGE = 20
 DISPATCH_EVENT = "repository_dispatch"
 CRON_EVENT = "schedule"
 _DRIVERS = frozenset({CRON_EVENT, DISPATCH_EVENT})
+# The `run-name` prefix of a Scheduled release run scoped to ONE cohort
+# (`workflows_render._SCOPED_COHORT`). Such a run is neither a driver firing nor a tick of the
+# whole course: counted, a push in cohort A would shrink the gap a late release in cohort B
+# is measured by, and hide it. Read off `display_title`, the only place the listing shows it.
+SCOPED_RUN_TITLE = "Scheduled release for cohort"
 # A run that actually did the work. `cancelled` and `null` (still queued) prove a driver
 # FIRED but not that anything shipped, so they date the drivers and never the cadence.
 _EXECUTED = frozenset({"success", "failure"})
@@ -259,6 +266,8 @@ def evaluate(now: datetime, runs: list[dict], own_run_id: str | None) -> Verdict
     for run in runs:
         if str(run.get("id")) == str(own_run_id):
             own_started = _moment(run.get("created_at")) or own_started
+            continue
+        if str(run.get("display_title") or "").startswith(SCOPED_RUN_TITLE):
             continue
         at = _moment(run.get("created_at"))
         if at is None:

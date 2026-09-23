@@ -1,0 +1,14 @@
+# The AUTOGRADER's runtime, on top of the core. Installed by exactly the jobs that grade -
+# the ones whose preamble creates the sandbox account (`workflows_render._ungated_preamble`
+# with sandbox=True: Collect submissions and the scheduler's autograde legs). Without these
+# `python -m pytest` is "No module named pytest" and every target scores the grading-failed
+# zero, so a job that grades and installs only requirements.txt costs the whole cohort.
+# Pinned for the same reason as the core.
+-r requirements.txt
+pytest==8.4.2
+nbconvert==7.17.1
+# The KERNEL `nbconvert --execute` drives for the completion check (dsl_course/collect.py).
+# nbconvert does not depend on it - it only needs one to CONVERT - so a runner with just
+# nbconvert reports "no such kernel: python3" for every notebook and the check records a
+# cohort of `did-not-run`.
+ipykernel==7.3.0

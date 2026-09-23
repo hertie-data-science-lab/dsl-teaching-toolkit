@@ -154,6 +154,20 @@ def test_prev_executed_ignores_a_cancelled_run_and_a_manual_dispatch():
     assert v.gap == timedelta(minutes=90)
 
 
+def test_a_run_scoped_to_one_cohort_is_no_tick_of_the_course():
+    # A classroom-config push's run releases into ONE cohort. Counted, it would shrink the
+    # gap another cohort's late release is measured by - and date the dispatcher, which it
+    # is not. Its `run-name` says what it was; that is all the listing shows.
+    scoped = _run(5, run_id=2) | {
+        "display_title": f"{cadence.SCOPED_RUN_TITLE} Cohort-A"
+    }
+    v = _evaluate([scoped, _run(150, run_id=3)])
+    assert v.prev_executed_at == NOW - timedelta(minutes=150)
+    assert v.ds01_dead is True
+    whole = _run(5, run_id=2) | {"display_title": "Scheduled release"}
+    assert _evaluate([whole]).prev_executed_at == NOW - timedelta(minutes=5)
+
+
 def test_no_executed_run_in_the_window_leaves_the_gap_unknown():
     v = _evaluate([_run(5, conclusion="cancelled")])
     assert v.prev_executed_at is None and v.gap is None
