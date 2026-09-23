@@ -472,6 +472,9 @@ def write(course_org: str, cohort_org: str | None = None) -> int:
         org, repo = cohort_org, schedule.CONFIG_REPO
     else:
         org, repo = course_org, ".github"
+    # This run's memo of students.csv can predate a Send codes that stamped it since; the
+    # status counts the codes sent, so it reads the file as it is now.
+    roster.reread()
     doc = _document(course_org, cohort_org)
     # The cohort can arrive in a dispatch payload, which whoever holds a cohort's bot
     # token writes: the course's own registry decides, as it does for every dispatch.
@@ -517,9 +520,11 @@ def refresh(course_org: str, cohort_org: str | None = None) -> int:
     try:
         return write(course_org, cohort_org)
     except Exception as exc:
+        # The type only: this runs in public logs, and the text of a read that failed can
+        # name the repo it was reading - a student's, for a submission or a gradebook.
         log_err(
             f"could not refresh status.json for {cohort_org or course_org} "
-            f"({type(exc).__name__}): {exc}"
+            f"({type(exc).__name__})"
         )
         return 1
 

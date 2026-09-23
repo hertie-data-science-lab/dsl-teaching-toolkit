@@ -1094,3 +1094,30 @@ def test_the_console_can_move_open_to_late_window_without_a_rewrite():
             if a["slug"] == "assignment-2"
         )
         assert _client_state(written, later) == engine["state"]
+
+
+def test_a_failed_refresh_names_no_repo(monkeypatch, capsys):
+    def boom(course, cohort):
+        raise RuntimeError("gh: Not Found (repos/x/assignment-3-octocat)")
+
+    monkeypatch.setattr(status, "_document", boom)
+    assert status.refresh(COURSE, COHORT) == 1
+    out = capsys.readouterr()
+    assert "octocat" not in out.out + out.err
+    assert "RuntimeError" in out.out + out.err
+
+
+def test_write_reads_the_roster_as_it_is_now(monkeypatch):
+    texts = iter(["before the send", "after the send"])
+    monkeypatch.setattr(roster, "get_file_content", lambda *a, **k: next(texts))
+    assert roster._roster_text(COHORT) == "before the send"
+    seen = []
+
+    def document(course, cohort):
+        seen.append(roster._roster_text(cohort))
+        return _render()
+
+    monkeypatch.setattr(status, "_document", document)
+    monkeypatch.setattr(status, "put_file", lambda *a, **k: True)
+    status.write(COURSE, COHORT)
+    assert seen == ["after the send"]
