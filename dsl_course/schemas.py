@@ -199,6 +199,8 @@ def status_schema() -> dict:
     `tests/test_status_json.py` validates its render against this. No automation
     heartbeat - it moves every tick, and the console reads it off the run list."""
     stages = {"type": "object", "additionalProperties": _enum(STAGE_STATES)}
+    # Why each stage that is not done is not: one sentence per stage id. Optional.
+    stage_why = {"type": "object", "additionalProperties": _str()}
     nullable = {"type": ["string", "null"]}
     unknown = {"type": ["boolean", "null"]}  # `app_installed` until decision 0002
     # A status problem's pointer: the line, screen and entry are what the fault knows,
@@ -226,6 +228,7 @@ def status_schema() -> dict:
             "code": _str(),
             "app_installed": unknown,
             "stages": stages,
+            "stage_why": stage_why,
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": repo_state},
             "templates": {"type": "array", "items": repo_state},
@@ -244,6 +247,7 @@ def status_schema() -> dict:
             "live": {"type": "boolean"},
             "app_installed": unknown,
             "stages": stages,
+            "stage_why": stage_why,
             "archive_date": nullable,
         },
         ("org", "stages", "live"),

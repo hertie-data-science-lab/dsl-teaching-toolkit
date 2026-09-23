@@ -117,6 +117,12 @@
         "org": {
           "type": "string"
         },
+        "stage_why": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
         "stages": {
           "additionalProperties": {
             "enum": [
@@ -212,6 +218,12 @@
         },
         "ready": {
           "type": "boolean"
+        },
+        "stage_why": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "stages": {
           "additionalProperties": {

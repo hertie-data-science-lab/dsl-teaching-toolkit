@@ -972,3 +972,68 @@ def test_a_template_that_does_not_parse_stays_the_courses():
     assert doc["course"]["stages"]["C5"] == "problem"
     public = status_json.render_course_file(course, NOW)
     assert [p["id"] for p in public["problems"]] == [problem["id"]]
+
+
+# ------------------------------------------------------------------ why a stage is not done
+
+
+def test_a_stage_that_is_not_done_says_why():
+    # The demo: one TA and no instructor, and last term's materials repo unwritten.
+    ta_only = sync_faculty.parse_faculty_from_meta(
+        {
+            "people": {
+                "teaching_assistants": [{"github_handle": "ta", "email": "t@x.edu"}]
+            }
+        }
+    )
+    course = _course(
+        materials=[
+            status_json.MaterialsFacts(
+                "course-materials-f2025", "<!-- dsl-stub: syllabus -->", True
+            ),
+            status_json.MaterialsFacts("course-materials-f2026", "# Syllabus", True),
+        ]
+    )
+    doc = _render(course, _cohort(people=ta_only))
+    assert doc["cohort"]["stages"]["K3"] == "todo"
+    assert doc["cohort"]["stage_why"]["K3"] == (
+        "No instructor is declared in people.yml yet."
+    )
+    assert doc["course"]["stages"]["C4"] == "todo"
+    assert doc["course"]["stage_why"]["C4"] == (
+        "course-materials-f2025's SYLLABUS.md is still the placeholder."
+    )
+    # Done stages carry no sentence; every other one does.
+    for block in (doc["course"], doc["cohort"]):
+        assert set(block["stage_why"]) == {
+            s for s, state in block["stages"].items() if state != "done"
+        }
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_problem_or_a_prerequisite_is_the_why():
+    doc = _render(*_contract_scenario())
+    assert doc["cohort"]["stage_why"]["K4"] == "1 problem needs fixing."
+    half = _cohort(people=None)
+    del half.listing["welcome"]
+    doc = _render(cohort=half)
+    assert doc["cohort"]["stage_why"]["K2"] == "The cohort has no welcome repo yet."
+    assert doc["cohort"]["stages"]["K3"] == "blocked"
+    assert doc["cohort"]["stage_why"]["K3"] == "Waiting for the cohort to be set up."
+    doc = _render(cohort=_cohort(listing={}))
+    assert doc["cohort"]["stage_why"]["K2"] == "Waiting for the cohort org."
+
+
+def test_the_archive_stage_says_when():
+    doc = _render()
+    assert doc["cohort"]["stage_why"]["K7"] == (
+        "Not archived yet; the schedule sets no archive date."
+    )
+
+
+def test_the_course_file_carries_its_whys_too():
+    course = _course(public_site=False)
+    public = status_json.render_course_file(course, NOW)
+    assert public["course"]["stage_why"] == {
+        "C6": "There is no public website; it is optional."
+    }
