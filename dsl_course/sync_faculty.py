@@ -61,7 +61,12 @@ from .discovery import (
 )
 from .faults import ConfigFault, Unusable
 from .gh_contents import line_of, load_yaml_config, take_lines
-from .gh_teams import create_team, is_valid_github_username, reconcile_team_members
+from .gh_teams import (
+    CREATED,
+    create_team_outcome,
+    is_valid_github_username,
+    reconcile_team_members,
+)
 from .log import log, log_err, log_ok, log_step
 
 ROLE_TEAM = {
@@ -588,10 +593,12 @@ def sync_cohort_instructors(
     if tag is None:
         return errors
     team = f"{INSTRUCTORS_TEAM}-{tag}"
+    outcome = None
     if not dry_run:
-        if not create_team(
+        outcome = create_team_outcome(
             course_org, team, f"Instructors for {tag} (cohort-declared)"
-        ):
+        )
+        if outcome is None:
             # The team could not be created; granting it repo access and reconciling its
             # membership would all fail against a non-existent team (triple-counting the
             # one root failure and firing doomed API calls). Report it once and stop here.
@@ -599,8 +606,15 @@ def sync_cohort_instructors(
         for repo in _tag_repos(content_repos, assignments, tag):
             if not grant_team_repo_access(course_org, team, repo, "push"):
                 errors += 1
+    # A team made a moment ago is not read back: GitHub's REST API 404s a new team for up
+    # to minutes, which would spend the whole lag budget and abort the reconcile.
     errors += reconcile_team_members(
-        course_org, team, desired, prune=True, dry_run=dry_run
+        course_org,
+        team,
+        desired,
+        prune=True,
+        dry_run=dry_run,
+        just_created=outcome == CREATED,
     )
     return errors
 

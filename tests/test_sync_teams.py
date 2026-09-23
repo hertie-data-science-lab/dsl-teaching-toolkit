@@ -57,7 +57,9 @@ def test_desired_teams_unions_case_colliding_team_names():
 def stub_team(monkeypatch):
     """Stub the gh primitives ensure_team drives; return the recorded add/remove calls."""
     calls = {"added": [], "removed": []}
-    monkeypatch.setattr(sync_teams, "create_team", lambda *a, **k: True)
+    monkeypatch.setattr(
+        sync_teams, "create_team_outcome", lambda *a, **k: gh_teams.EXISTED
+    )
     monkeypatch.setattr(
         gh_teams,
         "get_team_members",
@@ -90,6 +92,38 @@ def test_ensure_team_prunes_stray_members_but_never_owners_or_the_bot(stub_team)
     assert ok
     assert stub_team["added"] == ["ben-baker"]
     assert stub_team["removed"] == ["zoe-zed"]
+
+
+def test_ensure_team_on_a_team_it_just_created_never_reads_it_back(
+    stub_team, monkeypatch
+):
+    # GitHub's REST API 404s a new team's member listing for up to minutes; reading it
+    # aborted the reconcile. The creator's membership is known: only the acting login.
+    monkeypatch.setattr(
+        sync_teams, "create_team_outcome", lambda *a, **k: gh_teams.CREATED
+    )
+    monkeypatch.setattr(
+        gh_teams,
+        "get_team_members",
+        lambda org, team: pytest.fail("read a team it had just created"),
+    )
+    monkeypatch.setattr(
+        gh_teams,
+        "get_team_member_ids",
+        lambda org, team: pytest.fail("read a team it had just created"),
+    )
+    ok = sync_teams.ensure_team(
+        "org", "assignment-4-project-wizards", {"anna-adams", "ben-baker"}, prune=True
+    )
+    assert ok
+    assert stub_team["added"] == ["anna-adams", "ben-baker"]
+    assert stub_team["removed"] == []
+
+
+def test_ensure_team_stops_when_the_team_could_not_be_made(stub_team, monkeypatch):
+    monkeypatch.setattr(sync_teams, "create_team_outcome", lambda *a, **k: None)
+    assert not sync_teams.ensure_team("org", "team-x", {"anna-adams"}, prune=True)
+    assert stub_team["added"] == []
 
 
 def test_ensure_team_without_prune_only_adds(stub_team):

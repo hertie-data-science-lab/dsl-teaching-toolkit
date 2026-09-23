@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from dsl_course import faults as faults_mod
-from dsl_course import gh_contents, sync_faculty
+from dsl_course import gh_contents, gh_teams, sync_faculty
 
 
 def _parse(raw: str) -> dict:
@@ -95,7 +95,9 @@ def test_sync_cohort_instructors_counts_failed_grants(monkeypatch):
     monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: {})
     monkeypatch.setattr(sync_faculty, "reconcile_team_members", lambda *a, **k: 0)
     monkeypatch.setattr(sync_faculty, "term_tag", lambda org: "f2026")
-    monkeypatch.setattr(sync_faculty, "create_team", lambda *a, **k: True)
+    monkeypatch.setattr(
+        sync_faculty, "create_team_outcome", lambda *a, **k: gh_teams.EXISTED
+    )
     monkeypatch.setattr(
         sync_faculty, "grant_team_repo_access", lambda *a, **k: False
     )  # every grant fails
@@ -111,7 +113,7 @@ def test_sync_cohort_instructors_skips_wiring_when_team_creation_fails(monkeypat
     # team (which would triple-count the one failure and fire doomed API calls).
     monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: {})
     monkeypatch.setattr(sync_faculty, "term_tag", lambda org: "f2026")
-    monkeypatch.setattr(sync_faculty, "create_team", lambda *a, **k: False)
+    monkeypatch.setattr(sync_faculty, "create_team_outcome", lambda *a, **k: None)
     grants = []
     monkeypatch.setattr(
         sync_faculty, "grant_team_repo_access", lambda *a, **k: grants.append(a) or True
@@ -599,3 +601,40 @@ def test_the_faculty_sweep_leaves_a_closed_out_cohort_alone(monkeypatch):
     )
     assert sync_faculty.sync("Course") == 0
     assert (seen, admins) == (["Cohort-B"], [["Cohort-B"]])
+
+
+@pytest.mark.parametrize(
+    ("outcome", "reads_course_team"),
+    [(gh_teams.CREATED, False), (gh_teams.EXISTED, True)],
+)
+def test_a_just_created_instructors_tag_team_is_not_read_back(
+    monkeypatch, outcome, reads_course_team
+):
+    # A course org's first sync creates `instructors-<tag>`; GitHub's REST API 404s its
+    # member listing for up to minutes, so reading it back spent the whole lag budget and
+    # aborted. A team that was already there is still read.
+    monkeypatch.setattr(
+        sync_faculty,
+        "load_cohort_faculty",
+        lambda org: {"instructors": [{"github_handle": "prof-a"}]},
+    )
+    monkeypatch.setattr(sync_faculty, "create_team_outcome", lambda *a, **k: outcome)
+    monkeypatch.setattr(sync_faculty, "grant_team_repo_access", lambda *a, **k: True)
+    read = []
+    monkeypatch.setattr(
+        gh_teams, "get_team_members", lambda org, team: read.append(org) or set()
+    )
+    added = []
+    monkeypatch.setattr(
+        gh_teams,
+        "add_team_member",
+        lambda org, team, h, role="member": added.append((org, team, h)) or True,
+    )
+    monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: "the-bot")
+    errors = sync_faculty.sync_cohort_instructors(
+        "course-org", "cohort-f2026", [], [], dry_run=False
+    )
+    assert errors == 0
+    assert read == ["cohort-f2026"] + (["course-org"] if reads_course_team else [])
+    assert ("course-org", "instructors-f2026", "prof-a") in added

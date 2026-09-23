@@ -66,10 +66,11 @@ from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 from . import config_digest, grades, mailer, roster, schedule, teams
-from .course import CONFIG_REPO, SELF_SELECT, course_phrase
+from .course import CONFIG_REPO, course_phrase
 from .discovery import cohort_is_live, course_name_of, welcome_issue_url
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
+from .grades import self_select_keys
 from .log import log, log_err, log_ok, log_person, log_step
 
 # What the cohort LOSES while somebody is still unteamed, and what would put it right -
@@ -126,8 +127,8 @@ class Window:
     # than by the slug the plan is keyed on.
     title: str
     closes: datetime
-    # Every team with at least one row for `key` in teams.csv, as `(name, members)`, sorted
-    # by name. `teams` counts them for the fault; the cohort site prints the names and the
+    # Every team with at least one row for `key` in teams.csv, as `(name, member count)`,
+    # sorted by name. `teams` counts them for the fault; the cohort site prints the names and the
     # room each has left off the same file (`site._formed_teams`).
     sizes: tuple[tuple[str, int], ...]
     # Enrolled, onboarded roster rows with no teams.csv row for `key` - and the people the
@@ -261,27 +262,6 @@ def open_windows(
     return found
 
 
-def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
-    """The cohort's assignments whose teams the STUDENTS form, in schedule order.
-
-    A template nobody has written declares nothing and is not one of them - the lock has
-    already locked its form to `none` - and `team_formation_resolved` answers `none` for
-    anything that is not a group assignment, so the shape question and the group question
-    are one test.
-
-    Free to ask: `declared_grading_spec` memoises the template's text per process, and by
-    the time the tick reaches this every one of them has been read already. That is what
-    makes it worth asking BEFORE the team-formation lock is written - a cohort with none
-    of these has a lock nothing on the tick's clock can move."""
-    return [
-        key
-        for key, entry in sched.assignments.items()
-        if (spec := grades.declared_grading_spec(course_org, entry.course_source_repo))
-        is not None
-        and spec.team_formation_resolved == SELF_SELECT
-    ]
-
-
 def window_faults(
     sched: schedule.Schedule, windows: list[Window] | None
 ) -> list[ConfigFault] | None:
@@ -403,9 +383,9 @@ Claim = tuple[str, str, str]
 def spoken_date(when: datetime, tz_name: str) -> str:
     """`4th Oct`, in the cohort's own zone - what the Join-team form calls the same day.
 
-    The spelling is `grades.spoken_day`'s, which is also the gradebook's, the cohort site's
-    and the form's (`spokenDate`, in templates/welcome/team-formation.yml): written out
-    rather than left to `strftime`, which answers in the runner's locale, and shared so the
+    The spelling is `grades.spoken_day`'s, which is also the cohort site's and the form's
+    (`spokenDate`, in templates/welcome/team-formation.yml): written out rather than left
+    to `strftime`, which answers in the runner's locale, and shared so the
     mail, the site and the refusal a late student gets all name one day one way.
 
     The zone matters at both ends of it: a window shutting at 00:30 Berlin is the 3rd in
@@ -559,12 +539,12 @@ def sample_message(cohort_org: str, course_name: str = "") -> tuple[str, str]:
 def _phases(window: Window, now: datetime) -> tuple[str, ...]:
     """Which messages this window owes at `now`.
 
-    `open` always - `open_windows` hands back nothing that is not open. `reminder` as well
+    `open` always - `notify_windows` hands in only the windows still open. `reminder` as well
     once the door is inside REMINDER_LEAD, so a window SHORTER than that owes both at its
     first tick: they go as ONE message (see `_Nudge.phase`), because two mails in the same
     minute is the thing a reminder must never become.
 
-    Neither can outlive the window. A tick after it shuts does not see the window at all,
+    Neither can outlive the window. A tick after it shuts does not mail about it at all,
     so a message the quiet hours held overnight is one never sent rather than one that
     arrives after the door - which is the honest answer, since the form would by then
     refuse the team it asked for."""
@@ -847,9 +827,8 @@ def _preview(
         # The FAULT's denominator, which is also this mail's: both are drawn from the
         # onboarded roster, so the preview and the digest cannot disagree about how many
         # students a window is waiting on.
-        population = window.enrolled
         log(
-            f"  {window.name}: would mail {len(owed)} of {population} enrolled "
+            f"  {window.name}: would mail {len(owed)} of {window.enrolled} enrolled "
             f"student(s) ({phases})"
         )
     mailer.send_bulk(
@@ -990,7 +969,7 @@ def notify_windows(
             continue
         # Counts only: every recipient here is a student, and this log is world-readable.
         log_ok(
-            f"mailed {len([i for i, _n in owed if i in delivered])} of {len(owed)} "
+            f"mailed {sum(i in delivered for i, _n in owed)} of {len(owed)} "
             f"student(s) about {window.name}"
         )
         for i, n in owed:

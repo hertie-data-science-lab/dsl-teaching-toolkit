@@ -46,7 +46,7 @@ fill schedule.yml, the whole term, up front
 materials · assignments · autograde runs`"]
     I["Sync site (automatic)"]
     J["`**10 Grade + return**
-autograde → marks → preview → distribute`"]
+autograde → marks → preview → Distribute grades`"]
     E --> T
     E --> F
     E --> S

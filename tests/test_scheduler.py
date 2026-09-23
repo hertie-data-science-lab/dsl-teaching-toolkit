@@ -124,20 +124,6 @@ def _grading_spec_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _cohort_forms_its_own_teams(monkeypatch):
-    """Whether the cohort has a self-select group assignment at all - the question the tick
-    asks before it writes the team-formation lock. Answered off each template's
-    grading_config.yml, which is real gh I/O, so it is stubbed to the ordinary case: yes,
-    one. The tick only asks whether the list is empty, so the lock is written exactly as it
-    was before the gate; the tests that are ABOUT the gate stub it themselves."""
-    monkeypatch.setattr(
-        scheduler.team_formation,
-        "self_select_keys",
-        lambda course_org, sched: ["assignment-2"],
-    )
-
-
-@pytest.fixture(autouse=True)
 def _no_open_notices(monkeypatch):
     """Every tick asks the cohort's `classroom-config` which archive notices are open, so
     it can close one whose date has moved or been taken away

@@ -81,7 +81,7 @@ Things whose *literal spelling* is depended on from outside Python:
   name. Change a column and change both sides.
 - **`grades.team_lock_text`'s LAYOUT.** `classroom-config/assignments.lock.yml` is parsed by
   line scanners - one in `templates/welcome/team-formation.yml` (github-script has no YAML
-  library), one in `welcome.open_formations` - which match a two-space assignment key
+  library), one in `grades.parse_team_lock` - which match a two-space assignment key
   and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
   `team_formation_closes:` / `team_formation_page:` under it. Re-indenting the writer, or
   nesting the entries any deeper, makes every Join-team request in every cohort read as

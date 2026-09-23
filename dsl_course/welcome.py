@@ -13,7 +13,7 @@ or a nightly run would clobber a live roster.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 
@@ -186,17 +186,14 @@ TEAM_LIST_SENTENCE = (
 )
 
 
-def _team_list_header(
-    open_slugs: Sequence[str], page_urls: Mapping[str, str] | None
-) -> str:
+def _team_list_header(opened: Mapping[str, str]) -> str:
     """The header sentence, linking the page a student can actually open.
 
     One open assignment is the ordinary case and gets one link inside the sentence; several
     get a line each, because "listed on these two pages" with both links inline is a
     sentence nobody reads to the end of. A slug whose page is not known is left out rather
     than linked to nowhere, and a header that knows none of them is the template's own."""
-    links = [(s, (page_urls or {}).get(s, "")) for s in open_slugs]
-    links = [(s, u) for s, u in links if u]
+    links = [(s, u) for s, u in opened.items() if u]
     if not links:
         return TEAM_LIST_SENTENCE
     lead = "The teams that already exist, and how much room each has left, are listed"
@@ -206,10 +203,9 @@ def _team_list_header(
     return f"{lead} on each assignment's page:\n\n{listed}"
 
 
-def join_team_form(
-    open_slugs: Sequence[str], page_urls: Mapping[str, str] | None = None
-) -> str:
-    """The Join-team issue form for a cohort whose open assignments are `open_slugs`.
+def join_team_form(opened: Mapping[str, str]) -> str:
+    """The Join-team issue form for a cohort whose open assignments are `opened`'s keys
+    (`open_formations`), in order.
 
     With any, the Assignment field becomes a dropdown of exactly those: a free-text slug is
     a guess, and a guess that misses is answered by a workflow comment some minutes later,
@@ -220,20 +216,20 @@ def join_team_form(
     render, which would take the Join-team route away from a cohort entirely rather than
     merely leave it awkward.
 
-    `page_urls` links each assignment's page on the cohort site from the header, by
-    schedule key (the lock's `team_formation_page`). The form tells a student to type a
+    `opened`'s values link each assignment's page on the cohort site from the header ("" =
+    not known; the lock's `team_formation_page`). The form tells a student to type a
     team's name "exactly as that page spells it", so a page they cannot reach in one click
     is an instruction they cannot follow."""
     form = template(JOIN_TEAM_FORM).replace(
-        TEAM_LIST_SENTENCE, _team_list_header(open_slugs, page_urls)
+        TEAM_LIST_SENTENCE, _team_list_header(opened)
     )
-    if not open_slugs:
+    if not opened:
         return form
     start = form.find(ASSIGNMENT_FIELD_START)
     end = form.find(ASSIGNMENT_FIELD_END)
     if start == -1 or end == -1 or end < start:
         return form
-    options = "\n".join(f"        - {slug}" for slug in open_slugs)
+    options = "\n".join(f"        - {slug}" for slug in opened)
     block = (
         f"{ASSIGNMENT_FIELD_START} - AUTO-GENERATED from this cohort's\n"
         "  # `classroom-config/assignments.lock.yml`: the assignments open for team\n"
@@ -290,12 +286,11 @@ def refresh_join_team_form(org: str) -> int:
 
     The full refresh keeps doing what it does - bootstrap and the nightly run converge the
     whole set, this one keeps the dropdown honest between them."""
-    opened = _open_formations(org)
     if put_file(
         org,
         "welcome",
         JOIN_TEAM_FORM_PATH,
-        join_team_form(list(opened), opened).encode(),
+        join_team_form(_open_formations(org)).encode(),
         "ci: refresh the Join-team form's open assignments",
     ):
         return 0
@@ -343,9 +338,7 @@ def refresh_welcome_workflows(org: str) -> int:
             ".github/workflows/team-formation.yml": welcome_workflow(
                 "welcome/team-formation.yml"
             ).encode(),
-            JOIN_TEAM_FORM_PATH: join_team_form(
-                list(open_now := _open_formations(org)), open_now
-            ).encode(),
+            JOIN_TEAM_FORM_PATH: join_team_form(_open_formations(org)).encode(),
             ".github/ISSUE_TEMPLATE/config.yml": template(
                 "welcome/ISSUE_TEMPLATE/config.yml"
             ).encode(),

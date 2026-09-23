@@ -1247,7 +1247,7 @@ def _team_formation_phase(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    windows: list[team_formation.Window] | None = None,
+    windows: list[team_formation.Window] | None,
 ) -> tuple[int, bool]:
     """Bring the team-formation lock up to this moment. Returns `(errors, lock_changed)`.
 
@@ -1263,12 +1263,8 @@ def _team_formation_phase(
 
     `lock_changed` is `sync_team_lock`'s own blob compare, handed back to `_release_phase`:
     the tick that moves the window is the tick that has to re-render the site showing it.
-    It is true on EXACTLY ONE tick per transition, and it is not a retry flag - by the next
-    tick the lock is current, so the compare is False whatever the render did with it. A
-    site sync that fails on that one tick is therefore not re-attempted on the scheduler's
-    clock; the daily **Sync site** cron is what converges it, which bounds the exposure
-    (students holding a mailed link to a callout the site is not yet showing) at ~24h. Both
-    ends of that are spelled out where it is consumed, in `_release_phase`.
+    True on exactly one tick per transition and NOT a retry flag - see the one site sync in
+    `_release_phase` for what a failed render then costs.
 
     The FORM moves with the lock, and on the same tick: the Join-team form's Assignment
     field is a `required` dropdown rendered from the lock, so a window that opened this

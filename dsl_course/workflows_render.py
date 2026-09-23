@@ -1078,14 +1078,15 @@ def render_distribute_grades(cohort_orgs: list[str]) -> str:
 # said twice - a re-run after one correction reaches one student.
 # There is no assignment to pick: every run rebuilds every gradebook from every sheet,
 # which is what keeps a gradebook the whole of a student's marks.
-# Dry run first; it writes nothing and prints the counts. Needs the GRAPH_* secrets to mail.
+# Dry run first; it writes no grades, sends no mail, and posts who gets what as a
+# "Distribute grades preview" issue in classroom-config. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
       dry_run:
-        description: "Preview the grade emails - push nothing, send nothing"
+        description: "Preview who gets what, as an issue in classroom-config - push no grades, send nothing"
         type: boolean
         default: true
       silent:
