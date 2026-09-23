@@ -2278,6 +2278,6 @@ def test_half_a_late_rule_is_never_completed_from_the_default(config, window, pe
     ],
 )
 def test_a_day_is_spoken_with_its_ordinal(day, spoken):
-    # ONE spelling for the gradebook, the mail, the site and the form's JavaScript copy -
+    # ONE spelling for the mail, the site and the form's JavaScript copy -
     # and 11th-13th are the three a `day % 10` rule alone gets wrong.
     assert grades.spoken_day(datetime(2026, 10, day)) == f"{spoken} Oct"

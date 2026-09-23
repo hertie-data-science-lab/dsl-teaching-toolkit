@@ -2584,11 +2584,12 @@ def spoken_day(at: datetime) -> str:
     """`26th Oct` - the toolkit's own spelling of a day, in whatever zone `at` is already
     in.
 
-    ONE spelling, because four surfaces name the same day and a student who is told one
+    ONE spelling, because three surfaces name the same day and a student who is told one
     date by the Join-team form and another by the mail beside it has been told two things.
-    The gradebook's Submitted column, the team-formation mail, the cohort site's
-    team-formation callout and the form's refusal all come through here; the form's own
-    JavaScript carries its copy (`spokenDate`) because it cannot import this one."""
+    The team-formation mail, the cohort site's team-formation callout and the form's
+    refusal all come through here; the form's own JavaScript carries its copy
+    (`spokenDate`) because it cannot import this one. The gradebook's Submitted column does
+    NOT (`_submitted_display`): respelling it would rewrite every student's grades.yml."""
     day = at.day
     suffix = (
         "th"
@@ -2690,7 +2691,7 @@ def _submitted_display(value: object, external: bool = False) -> str:
         moment = datetime.fromisoformat(text)
     except ValueError:
         return text
-    day = spoken_day(moment)
+    day = f"{moment.day} {_MONTHS[moment.month - 1]}"
     return day if "T" not in text and " " not in text else f"{day} {moment:%H:%M}"
 
 
