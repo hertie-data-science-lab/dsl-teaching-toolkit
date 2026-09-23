@@ -14,6 +14,8 @@ export interface CohortProps {
   now: number;
   entry?: string;
   heartbeat?: Heartbeat | null;
+  /** A template for the schedule editor's new entry (`?template=`, from New assignment). */
+  prefill?: string;
 }
 
 /** A cohort screen whose status is ready. */

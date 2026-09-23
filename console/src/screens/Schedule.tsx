@@ -324,7 +324,9 @@ function View(p: ReadyProps) {
   const tz = tzOf(status), year = yearOf(now, tz);
   const scope = cohortScope(p);
   const [filters, setFilters] = useState<Record<Block, boolean>>({ releases: true, assignments: true, events: true });
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [drafts, setDrafts] = useState<Record<string, Draft>>((): Record<string, Draft> =>
+    p.prefill && p.entry === 'new' ? { new: { ...(blankDraft('handout', { repo: '' }) as AssignmentDraft), template: p.prefill } } : {},
+  );
   const [removed, setRemoved] = useState<Record<string, Block>>({});
   const [save, runSave, setSave] = useSave(env);
   const file = useSchedFile(p);

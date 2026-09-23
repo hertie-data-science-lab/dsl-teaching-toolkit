@@ -5,7 +5,7 @@ import type { Assignment, AssignmentState, Status } from '../model/types';
 import { Check } from '../ui/icons';
 import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
-import { Crumbs, Help, ProblemCards, Soon } from '../ui/bits';
+import { Crumbs, Help, ProblemCards } from '../ui/bits';
 import { asgSummary, todayOf, tzOf, yearOf } from './Cohort';
 import { WithStatus, cohortCrumbs, cohortName, cohortScope } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -40,7 +40,7 @@ function Index(p: ReadyProps) {
             {list.length === 1 ? 'One' : list.length} this term.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
         </div>
-        <div class="actions"><Soon label="New assignment" title="The New assignment wizard is on the course page." /></div>
+        <div class="actions"><a class="btn" href={`?course=${p.course.org}#new-assignment-1`}>New assignment</a></div>
       </div>
       <Help title="How assignments move" doc="09-release-assignment-to-cohort.md">
         <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; settings live on the template.</p>
