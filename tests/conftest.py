@@ -22,6 +22,7 @@ from dsl_course import (
     collect,
     discovery,
     gh_contents,
+    gh_teams,
     ghcli,
     grades,
     issues,
@@ -62,6 +63,15 @@ def _empty_write_governor():
     """`ghcli`'s write pacer keeps its timestamps at module level, so they would otherwise
     accumulate across the session until an unrelated test slept for a real minute."""
     ghcli._write_times.clear()
+
+
+@pytest.fixture(autouse=True)
+def _team_lag_waits_cost_nothing(monkeypatch):
+    """`gh_teams` rides out GitHub's 404 on a just-created team by sleeping, against a
+    budget kept at module level: give every test a fresh budget and a sleep that returns
+    at once, so a test that stubs a 404 member listing does not wait two real minutes."""
+    monkeypatch.setattr(gh_teams, "_lag_spent", 0)
+    monkeypatch.setattr(gh_teams, "_sleep", lambda s: None)
 
 
 @pytest.fixture(autouse=True)

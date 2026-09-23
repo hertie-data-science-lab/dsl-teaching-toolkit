@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Iterable
 from functools import cache, lru_cache
 
-from .ghcli import gh, is_already_exists
+from .ghcli import gh, is_already_exists, is_missing_resource
 from .log import log, log_err, log_ok, log_person, log_skip
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
@@ -310,6 +311,46 @@ def add_team_member(org: str, team_slug: str, login: str, role: str = "member") 
     return False
 
 
+# GitHub's REST reads can answer 404 for a team for several minutes after it was created,
+# while GraphQL already sees it: a team created at 10:16 could not have its members listed
+# by Sync membership at 10:21, so the reconcile aborted and the second joiner waited for a
+# manual re-run. The creating run and the reading run are different processes,
+# so "created by us" cannot pick out the reads worth waiting for; a PER-PROCESS budget bounds
+# it instead. Once one ladder's worth of waiting is spent, every later 404 in the same run
+# answers at once - so a sync over many teams, or one that meets a team that really is gone,
+# adds at most `_LAG_BUDGET` seconds in total, never that much per team.
+_LAG_DELAYS = (10, 20, 40, 60)
+_LAG_BUDGET = sum(_LAG_DELAYS)
+_lag_spent = 0
+# At module level so a test can spend the budget without spending the time.
+_sleep = time.sleep
+
+
+def _gh_riding_team_lag(*args: str) -> tuple[int, str]:
+    """`gh(*args)` for a READ on a team, repeating a 404 while this run's lag budget lasts.
+
+    Only a 404 is repeated: every other failure is already `gh`'s retry ladder's business,
+    and comes straight back. If every attempt 404s the last answer is returned unchanged,
+    so the caller's "could not be read" path is exactly what it was.
+
+    Reads only. A membership PUT is not routed here: it runs only after the listing has
+    succeeded (the team is visible by then), and a 404 on it is also GitHub's answer for a
+    login that no longer exists - a renamed student, every night - which would spend the
+    budget on something no wait can fix."""
+    global _lag_spent
+    code, out = gh(*args)
+    for delay in _LAG_DELAYS:
+        if code == 0 or not is_missing_resource(out):
+            break
+        if _lag_spent + delay > _LAG_BUDGET:
+            break
+        log(f"  [wait] team not visible to the API yet (404), retrying in {delay}s")
+        _lag_spent += delay
+        _sleep(delay)
+        code, out = gh(*args)
+    return code, out
+
+
 def _team_member_rows(org: str, team_slug: str) -> dict[str, str] | None:
     """`{login: GitHub id}` for a team's current members - the ONE listing behind both
     public readers - or None if it could not be READ.
@@ -317,7 +358,7 @@ def _team_member_rows(org: str, team_slug: str) -> dict[str, str] | None:
     None (a non-zero exit OR unparseable JSON) must never be conflated with an empty team:
     reconciling against an unreadable team would add or prune blind. Mirrors
     get_org_owners."""
-    code, out = gh(
+    code, out = _gh_riding_team_lag(
         "api", f"orgs/{org}/teams/{team_slug}/members?per_page=100", "--paginate"
     )
     if code != 0:

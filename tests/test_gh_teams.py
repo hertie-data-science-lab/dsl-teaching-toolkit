@@ -4,6 +4,8 @@ stop a sweep pruning the wrong person."""
 
 from __future__ import annotations
 
+import pytest
+
 from dsl_course import gh_teams
 
 
@@ -425,3 +427,60 @@ def test_2fa_that_cannot_be_enforced_is_named_and_counted_not_red(monkeypatch, c
     monkeypatch.setattr(gh_teams, "gh", fake_gh)
     assert gh_teams.converge_org_settings("Course-Org") == 0
     assert "2FA not enforced: 3 members without 2FA" in capsys.readouterr().out
+
+
+_MEMBERS_OK = (0, '[{"login": "alice", "id": 1}]')
+_NOT_FOUND = (1, 'gh: Not Found (HTTP 404) {"message":"Not Found"}')
+
+
+def _answers(monkeypatch, *replies):
+    """Stub the members listing to give `replies` in turn; return the calls it saw and the
+    sleeps the lag ladder asked for."""
+    calls, slept = [], []
+    queue = list(replies)
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: calls.append(a) or queue.pop(0))
+    monkeypatch.setattr(gh_teams, "_sleep", slept.append)
+    return calls, slept
+
+
+def test_a_just_created_team_that_404s_then_appears_is_read(monkeypatch):
+    # GitHub's REST API 404s a new team for minutes; the reconcile used to abort on it.
+    calls, slept = _answers(monkeypatch, _NOT_FOUND, _NOT_FOUND, _MEMBERS_OK)
+    assert gh_teams.get_team_members("org", "assignment-2-team-x") == {"alice"}
+    assert len(calls) == 3
+    assert slept == [10, 20]
+
+
+def test_a_team_that_404s_throughout_still_aborts_the_reconcile(monkeypatch):
+    calls, slept = _answers(monkeypatch, *[_NOT_FOUND] * 5)
+    monkeypatch.setattr(
+        gh_teams, "add_team_member", lambda *a, **k: pytest.fail("added blind")
+    )
+    assert gh_teams.reconcile_team_members("org", "team-x", {"alice"}) == 1
+    assert len(calls) == 5
+    assert sum(slept) == gh_teams._LAG_BUDGET
+
+
+def test_a_failure_that_is_not_a_404_is_not_retried(monkeypatch):
+    calls, slept = _answers(monkeypatch, (1, "gh: HTTP 403 Forbidden"))
+    assert gh_teams.get_team_members("org", "team-x") is None
+    assert len(calls) == 1
+    assert slept == []
+
+
+def test_the_lag_wait_is_bounded_per_run_not_per_team(monkeypatch):
+    # A sync over many teams that each 404 must not multiply the wait: one ladder's worth
+    # for the whole process, and every later 404 answers at once.
+    calls, slept = _answers(monkeypatch, *[_NOT_FOUND] * 40)
+    for n in range(8):
+        assert gh_teams.get_team_members("org", f"team-{n}") is None
+    assert sum(slept) == gh_teams._LAG_BUDGET <= 130
+    assert len(calls) == len(gh_teams._LAG_DELAYS) + 8
+
+
+def test_a_partly_spent_budget_never_overshoots(monkeypatch):
+    monkeypatch.setattr(gh_teams, "_lag_spent", gh_teams._LAG_BUDGET - 25)
+    _, slept = _answers(monkeypatch, *[_NOT_FOUND] * 5)
+    assert gh_teams.get_team_members("org", "team-x") is None
+    assert slept == [10]
+    assert gh_teams._lag_spent <= gh_teams._LAG_BUDGET
