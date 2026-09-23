@@ -555,9 +555,10 @@ nothing. It is the code path the workflow runs, and the one-shot markers are wha
 it safe.
 
 Every `workflow_dispatch` job sits behind the `check-team` gate (`workflows_render._CHECK_TEAM`),
-which asks for write on the repo the button lives in. The scheduler, refresh and Send enrolment
-codes are **ungated**: neither a cron nor a `repository_dispatch` has an actor to check, and each
-only re-calls idempotent work. Send enrolment codes has no `workflow_dispatch` at all - a push to
+which asks for write on the repo the button lives in. The Console runs the same check as the
+first STEP of its one job, so the run it follows has a single job. The scheduler, refresh and
+Send enrolment codes are **ungated**: neither a cron nor a `repository_dispatch` has an actor to
+check, and each only re-calls idempotent work. Send enrolment codes has no `workflow_dispatch` at all - a push to
 a cohort's `students.csv` is its only trigger, and therefore the only way codes are sent.
 
 `seed refresh` is serialised against itself (`concurrency: seed-refresh`) and **deliberately not
