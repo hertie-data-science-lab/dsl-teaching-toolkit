@@ -116,6 +116,14 @@ export class OpsSession {
       return;
     }
     this.notice.value = null;
+    if (c && c.phase === 'ready' && this.gateKey(c.def) === this.gateKey(def) && !def.info) {
+      // The same operation again (the page's verb after the panel's preview): keep its
+      // options and its preview rather than starting over.
+      this.patch({ min: false });
+      if (start === 'run' && this.canRun(this.current.value!)) void this.start(c.mode === 'previewOnly' ? 'preview' : 'run');
+      else if (start === 'preview' && (c.mode === 'gated' || c.mode === 'preview')) void this.start('preview');
+      return;
+    }
     this.current.value = {
       def, mode: modeOf(def.op), values: { ...def.args }, checked: false, phase: 'ready', running: null,
       handle: null, progress: null, dry: null, result: null, error: null, min: false,

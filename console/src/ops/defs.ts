@@ -177,6 +177,15 @@ export function publishWebsite(s: Scope, repos: string[], values: { source_repo?
   };
 }
 
+export function teamsWindow(s: Scope, a: AsgRef, closes: string): OpDef {
+  return {
+    ...base(s, 'teams.open_window', a.slug), name: 'Email students without a team', title: a.title, where: `Window open until ${closes}`,
+    intro: 'Emails every joined student who is not in a team yet, with the link to the team list on the student site.',
+    verb: 'Send the emails', running: 'Emailing students without a team', cancel: 'Stop; emails already sent stay sent',
+    args: { assignment: a.slug },
+  };
+}
+
 export function derive(s: Scope, slug: string, repo: string, title: string): OpDef {
   return {
     ...base(s, 'assignment.derive_starter', slug), name: 'Derive student version', title, where: 'Template',

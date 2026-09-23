@@ -11,9 +11,9 @@ import { assignmentIdent, assignmentTitle, fmtDay } from '../model/format';
 import { cellValue, finalGrade, penaltyRate, penaltyText, readSheet, round, scoreTotal, type Unit } from '../model/marks';
 import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
-import { returnMarks, type AsgRef } from '../ops/defs';
+import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, Crumbs, Help, Lives, Loading, Prop } from '../ui/bits';
+import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Check, Ext, Lock } from '../ui/icons';
 import { NotFound } from './Assignments';
@@ -291,7 +291,8 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
                 : window === 'closed' ? 'Only you can change teams now.'
                 : 'This assignment is handed out by hand, so students cannot form teams on the site; assign them here.'}
             </p>
-            <p class="footnote">The window runs from hand out to the end of late work, both set in the schedule. <Prop /> A separate close date is proposed.</p>
+            <p class="footnote">The window runs from hand out to the end of late work, both set in the schedule.</p>
+            {window === 'open' && free.length ? <div class="actions"><OpButtons def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} small label={`Email ${free.length} without a team`} /></div> : null}
             <a class="textlink" href={`#schedule-${a.slug}`}>Change the dates in the schedule</a>
           </section>
           <section class="panel section">
@@ -321,7 +322,7 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
               const full = t.members.length >= maxSize;
               return (
                 <div class="team">
-                  <div class="team-h">{t.name}<span class={full ? 'full' : ''}>{t.members.length} of {maxSize}{full ? ', full' : ''}</span></div>
+                  <div class="team-h">{t.name}<span class={full ? 'full' : undefined}>{t.members.length} of {maxSize}{full ? ', full' : ''}</span></div>
                   <div class="members">
                     {t.members.map((m) => <span class="member">{nameOf(m)} <button class="x" type="button" aria-label={`Take ${nameOf(m)} out of ${t.name}`} onClick={() => move(m, null)}>&times;</button></span>)}
                     {!t.members.length ? <span class="footnote">No members yet; an empty team is not saved.</span> : null}
