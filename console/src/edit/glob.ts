@@ -48,12 +48,19 @@ function hits(r: Rule, path: string, isDir: boolean): boolean {
   return false;
 }
 
+/** The pattern list's rules, compiled once for matching many paths. */
+export function compileAll(lines: string[]): Rule[] {
+  return lines.map(compile).filter((r): r is Rule => r !== null);
+}
+
+/** Whether `path` matches the rules, gitignore style: the last matching rule decides. */
+export function matchRules(rules: Rule[], path: string, isDir = false): boolean {
+  let hit = false;
+  for (const r of rules) if (hits(r, path, isDir)) hit = !r.neg;
+  return hit;
+}
+
 /** Whether `path` matches the pattern list, gitignore style: the last matching line decides. */
 export function matches(lines: string[], path: string, isDir = false): boolean {
-  let hit = false;
-  for (const l of lines) {
-    const r = compile(l);
-    if (r && hits(r, path, isDir)) hit = !r.neg;
-  }
-  return hit;
+  return matchRules(compileAll(lines), path, isDir);
 }

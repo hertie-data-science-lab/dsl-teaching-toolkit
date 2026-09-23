@@ -1,5 +1,5 @@
 import type { ComponentChildren, VNode } from 'preact';
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { parse } from 'yaml';
 import { useEnv } from '../env';
 import { cohortName } from '../model/discovery';
@@ -20,16 +20,30 @@ export const tzOf = (s: Status) => s.cohort?.timezone ?? 'Europe/Berlin';
 export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
 export const todayOf = (now: number, tz: string) => dayKey(new Date(now).toISOString(), tz);
 
-/** A template's grading_config.yml as parsed, or {} while it is missing or unreadable. */
-export function gradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
+const configText = (p: ReadyProps, template: string): string | null => {
   const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
-  if (f.kind !== 'ready') return {};
+  return f.kind === 'ready' ? f.text : null;
+};
+
+function parseConfig(text: string | null): Record<string, unknown> {
+  if (text === null) return {};
   try {
-    const d = parse(f.text);
+    const d = parse(text);
     return d && typeof d === 'object' ? (d as Record<string, unknown>) : {};
   } catch {
     return {};
   }
+}
+
+/** A template's grading_config.yml as parsed, or {} while it is missing or unreadable. */
+export function gradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
+  return parseConfig(configText(p, template));
+}
+
+/** gradingConfig for a component: parsed again only when the file's text changes. */
+export function useGradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
+  const text = configText(p, template);
+  return useMemo(() => parseConfig(text), [text]);
 }
 
 /** Who an operation on this cohort acts for. */

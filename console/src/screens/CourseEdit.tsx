@@ -4,7 +4,7 @@
 import { useState } from 'preact/hooks';
 import courseSchema from '../../schemas/dsl_course.schema.json';
 import { useEnv, type Env } from '../env';
-import { matches } from '../edit/glob';
+import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
@@ -275,10 +275,11 @@ export function WebsiteScreen(p: CourseProps) {
 
 function FileList({ files, patterns, cls, tag }: { files: string[]; patterns: string[]; cls: string; tag: string }) {
   const shown = files.slice(0, 400);
+  const rules = compileAll(patterns);
   return (
     <ul class="file-list">
       {shown.map((f) => {
-        const hit = matches(patterns, f);
+        const hit = matchRules(rules, f);
         return <li class={hit ? 'hit' : ''}><span>{f}</span>{hit ? <span class={`tag ${cls}`}>{tag}</span> : null}</li>;
       })}
       {files.length > shown.length ? <li>… and {files.length - shown.length} more</li> : null}
