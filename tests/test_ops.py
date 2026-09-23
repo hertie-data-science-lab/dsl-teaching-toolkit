@@ -514,3 +514,37 @@ def test_collect_now_starts_its_own_workflow(monkeypatch, capsys, engine):
     )
     assert f"inputs[cohort_org]={COHORT}" in args
     assert not any("dry_run" in a for a in args)
+
+
+def test_a_refusal_for_another_courses_cohort_writes_nowhere(
+    monkeypatch, capsys, engine
+):
+    monkeypatch.setattr(request_mod, "discover_cohorts", lambda org: ["other-f2026"])
+    rc, body, _ = _main(monkeypatch, capsys, _request(op="grades.return", args={}))
+    assert rc == 0
+    assert body["reasons"][0]["code"] == "NOT_ALLOWED"
+    assert engine == []
+
+
+def test_a_real_archive_is_not_a_broken_run(monkeypatch, capsys, engine):
+    from dsl_course import teardown
+
+    monkeypatch.setattr(teardown, "main", lambda: 0)
+    monkeypatch.setattr(
+        outcome_mod, "put_file", lambda *a, **k: False
+    )  # classroom-config is read-only now
+    rc, body, _ = _main(
+        monkeypatch, capsys, _request(op="cohort.archive", args={}, preview=False)
+    )
+    assert rc == 0 and body["conclusion"] == "done"
+
+
+def test_a_previewed_collect_says_previewed(monkeypatch, capsys, engine):
+    monkeypatch.setattr(console, "gh", lambda *a, **k: (0, "{}"))
+    raw = _request(
+        op="assignment.collect_now",
+        args={"course_source_repo": "assignment-1-f2026"},
+        preview=True,
+    )
+    rc, body, _ = _main(monkeypatch, capsys, raw)
+    assert rc == 0 and body["conclusion"] == "previewed"
