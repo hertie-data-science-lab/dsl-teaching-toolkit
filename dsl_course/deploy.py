@@ -125,7 +125,7 @@ def _warn_ignored_source(source_org: str, repo: str, path: str) -> None:
     )
 
 
-def _is_withheld_stub(path: str, text: str) -> bool:
+def is_withheld_stub(path: str, text: str) -> bool:
     """Whether a copy is one of the root stubs this toolkit seeds, still unwritten.
 
     The ROOT file only - `path` must be exactly one of `WITHHELD_ROOT_STUBS`, not merely end
@@ -142,12 +142,6 @@ def _is_withheld_stub(path: str, text: str) -> bool:
     if name == "README.md":
         return all(marker in text for marker in UNEDITED_README_MARKERS)
     return is_untouched_stub(text)
-
-
-def is_unwritten_stub(path: str, text: str) -> bool:
-    """`_is_withheld_stub` for a caller outside the release: the scheduler's dry run,
-    which says why a due copy of one of these files will ship nothing."""
-    return _is_withheld_stub(path, text)
 
 
 def _resolve_within(base: Path, rel: str) -> Path | None:
@@ -605,7 +599,7 @@ def deploy_many(
                     if srcp == src_root:
                         for stub in WITHHELD_ROOT_STUBS:
                             f = srcp / stub
-                            if f.is_file() and _is_withheld_stub(
+                            if f.is_file() and is_withheld_stub(
                                 stub, f.read_text(encoding="utf-8", errors="replace")
                             ):
                                 withheld |= {stub}
@@ -624,7 +618,7 @@ def deploy_many(
                             deny_for(src_root),
                         ),
                     )
-                elif _is_withheld_stub(
+                elif is_withheld_stub(
                     d.course_source_path,
                     srcp.read_text(encoding="utf-8", errors="replace"),
                 ):

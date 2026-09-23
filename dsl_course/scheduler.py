@@ -108,7 +108,7 @@ from .collect import (
     sync_sheet,
 )
 from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
-from .deploy import WITHHELD_ROOT_STUBS, deploy_many, is_unwritten_stub
+from .deploy import WITHHELD_ROOT_STUBS, deploy_many, is_withheld_stub
 from .faults import ConfigFault, FaultKind, Severity, Unusable
 from .gh_contents import get_file_content
 from .ghcli import gh
@@ -297,7 +297,7 @@ def _stub_decisions(
             if path not in WITHHELD_ROOT_STUBS:
                 continue
             text = get_file_content(course_org, d.course_source_repo, path)
-            if text is not None and is_unwritten_stub(path, text):
+            if text is not None and is_withheld_stub(path, text):
                 out.append(
                     Decision(
                         release.label,
