@@ -71,7 +71,7 @@ from .discovery import cohort_is_live, course_name_of, welcome_issue_url
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
 from .grades import self_select_keys
-from .log import log, log_err, log_ok, log_person, log_step
+from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
 
 # What the cohort LOSES while somebody is still unteamed, and what would put it right -
 # this fault's own two sentences, in the voice of `faults.CONSEQUENCE` and `faults._FIX`.
@@ -891,33 +891,46 @@ def notify_windows(
        one, to a whole cohort, and that asymmetry is deliberate."""
     live = [w for w in windows or () if not w.shut]
     if not any(w.waiting for w in live):
-        return 0
+        return _NOBODY_WAITING
     read = _read_mailed(cohort_org)
     if read is None:
         return 1
     rows, sha = read
     nudges = _nudges(live, now, rows)
     if not nudges:
-        return 0
+        return _NOBODY_WAITING
+    emails = plural(len(nudges), "team-formation email")
     if config_digest.in_quiet_hours(schedule.in_cohort_zone(sched, now)):
         log(
             f"  [skip] {len(nudges)} team-formation message(s) held until "
             f"{config_digest.QUIET_UNTIL:02d}:00 in {sched.timezone}"
         )
-        return 0
+        return Summary(
+            f"{emails} held until {config_digest.QUIET_UNTIL:02d}:00, the cohort's "
+            f"morning; automation sends them then.",
+            {"held": len(nudges)},
+            conclusion="skipped",
+        )
     # Asked here rather than left to the scheduler's own guard because this module is the
     # one that WRITES. `cohort_is_live` logs its own line.
     if not cohort_is_live(cohort_org):
         return 0
     if dry_run:
         _preview(cohort_org, course_org, live, nudges, sched)
-        return 0
+        return Summary(
+            f"Preview: {emails} would go to students without a team.",
+            {"emails": len(nudges)},
+        )
     if mailer.graph_config_from_env() is None:
         log(
             f"  [skip] no mail transport for {cohort_org} - nothing claimed, and the "
             f"next tick offers these {len(nudges)} message(s) again"
         )
-        return 0
+        return Summary(
+            f"{emails} not sent: this course has no mail set up.",
+            {"held": len(nudges)},
+            conclusion="skipped",
+        )
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     claimed = _claim(
         cohort_org, {c for n in nudges for c in n.claims}, stamp, rows, sha
@@ -985,7 +998,18 @@ def notify_windows(
     if unsent:
         _release(cohort_org, {c for n in unsent for c in n.claims}, stamp)
         return 1
-    return 0
+    return Summary(
+        f"{plural(len(delivered), 'team-formation email')} sent to students without "
+        f"a team.",
+        {"emails": len(delivered)},
+    )
+
+
+# What a press that had nobody to reach says. Counts nothing: there is nothing to count.
+_NOBODY_WAITING = Summary(
+    "Every student already has a team, or has been told; nothing to send.",
+    conclusion="nothing_to_do",
+)
 
 
 # --------------------------------------------------------------- the faculty button
@@ -1076,7 +1100,10 @@ def run(
             f"no team-formation window is open in {cohort_org} right now - nothing to "
             f"send."
         )
-        return 0
+        return Summary(
+            "No team-formation window is open right now; nothing to send.",
+            conclusion="nothing_to_do",
+        )
     log_step(
         f"Team formation in {cohort_org}: {len(windows)} open window(s)"
         + (f", asked about {only} alone" if only else "")

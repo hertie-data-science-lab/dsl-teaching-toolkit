@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,16 +28,18 @@ from dsl_course import (
     site_repo,
     status,
     sync_membership,
+    team_formation,
     teardown,
 )
 from dsl_course.log import Summary
 from dsl_course.ops import outcome as outcome_mod
 from dsl_course.ops import request as request_mod
-from dsl_course.ops.registry import REGISTRY
-from dsl_course.schedule import Release
+from dsl_course.ops.registry import REGISTRY, command
+from dsl_course.schedule import Release, Schedule
 
 COURSE = "hertie-dsl-demo-course-e1234"
 COHORT = "hertie-dsl-demo-f2026"
+NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 
 # ------------------------------------------------------------------ the carrier
@@ -461,3 +465,70 @@ def test_archiving_an_archived_cohort_had_nothing_to_do(monkeypatch):
     out = teardown.close_out(COURSE, COHORT, dry_run=False)
     assert out == 0 and out.conclusion == "nothing_to_do"
     assert out.text == "This cohort is already archived."
+
+
+# ------------------------------------------------------------------ teams.open_window
+
+
+def _open_window_request(preview: bool) -> request_mod.Request:
+    return request_mod.parse_request(
+        json.dumps(
+            {
+                "schema": "dsl.request/1",
+                "op": "teams.open_window",
+                "actor": "prof",
+                "course_org": COURSE,
+                "cohort_org": COHORT,
+                "args": {"assignment": "assignment-3-project"},
+                "preview": preview,
+            }
+        )
+    )
+
+
+def test_open_window_spells_the_open_team_formation_flags():
+    op = REGISTRY["teams.open_window"]
+    assert (op.scope, op.required_team, op.via) == ("cohort", "instructors", "inline")
+    base = [
+        "--course-org",
+        COURSE,
+        "--cohort-org",
+        COHORT,
+        "--assignment",
+        "assignment-3-project",
+    ]
+    assert command(op, _open_window_request(True)) == [*base, "--dry-run"]
+    assert command(op, _open_window_request(False)) == [*base, "--no-dry-run"]
+
+
+def test_open_window_needs_the_assignment():
+    with pytest.raises(request_mod.RequestError):
+        request_mod.parse_request(
+            json.dumps(
+                {
+                    "schema": "dsl.request/1",
+                    "op": "teams.open_window",
+                    "actor": "prof",
+                    "course_org": COURSE,
+                    "cohort_org": COHORT,
+                    "args": {},
+                    "preview": True,
+                }
+            )
+        )
+
+
+def test_a_press_with_no_open_window_had_nothing_to_do(monkeypatch):
+    monkeypatch.setattr(team_formation.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(team_formation, "open_windows", lambda *a: [])
+    out = team_formation.run(COURSE, COHORT, NOW)
+    assert out == 0 and out.conclusion == "nothing_to_do"
+    assert out.text == "No team-formation window is open right now; nothing to send."
+
+
+def test_a_window_nobody_is_waiting_on_has_nothing_to_send():
+    window = SimpleNamespace(shut=False, waiting=())
+    out = team_formation.notify_windows(
+        COURSE, COHORT, Schedule(), [window], NOW, dry_run=True
+    )
+    assert out == 0 and out.conclusion == "nothing_to_do"

@@ -43,7 +43,8 @@
         "release.propagate_back",
         "release.rerun",
         "roster.send_codes",
-        "site.update"
+        "site.update",
+        "teams.open_window"
       ],
       "type": "string"
     },

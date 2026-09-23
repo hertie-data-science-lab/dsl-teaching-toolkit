@@ -378,6 +378,10 @@ def _bootstrap_cohort(request: Request) -> list[str]:
     ]
 
 
+def _open_window(request: Request) -> list[str]:
+    return [*_course_cohort(request), "--assignment", _a(request, "assignment")]
+
+
 def _sync_membership(request: Request) -> list[str]:
     return ["--course-org", request.course_org, "--cohort-org", request.cohort_org]
 
@@ -574,6 +578,25 @@ _OPS = (
         doc="docs/11-configure-cohort-site.md",
         module="site",
         argv=_site_sync,
+    ),
+    Operation(
+        name="teams.open_window",
+        runs_as=DISPATCH,
+        scope=COHORT,
+        required_team=INSTRUCTORS_TEAM,
+        args_schema=_args(
+            {"assignment": _string(KEY_PATTERN, "The schedule.yml assignments key")},
+            required=("assignment",),
+        ),
+        help="Email every student still without a team for this assignment's open "
+        "team-formation window.",
+        done_text="Students without a team were emailed.",
+        doc="docs/09-release-assignment-to-cohort.md",
+        module="team_formation",
+        argv=_open_window,
+        preview_flag="--dry-run",
+        real_flag="--no-dry-run",
+        counts_doc="Team-formation emails sent, previewed or held; never an address.",
     ),
     Operation(
         name="access.check",

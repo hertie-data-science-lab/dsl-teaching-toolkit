@@ -63,6 +63,8 @@ CONTRACT_OPS = {
     "materials.create",
     "assignment.create",
     "cohort.bootstrap",
+    # Added after the contract's first list: Open team formation, shipped 23 Sep.
+    "teams.open_window",
 }
 
 
