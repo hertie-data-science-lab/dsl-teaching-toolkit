@@ -71,7 +71,10 @@ Things whose *literal spelling* is depended on from outside Python:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `derive`, `enrol_codes`, `grades`,
   `list_orgs`, `notify`, `propagate`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`,
   `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
-  `sync_teams`, `team_formation`, `teardown`.
+  `sync_teams`, `team_formation`, `teardown`, `console`, `schemas`.
+  `console` runs one Instructor Console request (the Console workflow's only engine step).
+  `schemas` exports the console's JSON Schemas into `console/schemas/`, and
+  `tests/test_schemas.py` holds the committed copy to a fresh export.
   A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
   parser rather than a subcommand, for the same reason: `--patch-path` switches it from
   handing an assignment out to patching one that is already out, and every org's Release
