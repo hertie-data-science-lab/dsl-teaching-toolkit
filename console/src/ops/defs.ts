@@ -201,3 +201,29 @@ export function generateSyllabus(s: Scope, repo: string): OpDef {
     verb: 'Write the session list', running: 'Writing the session list', cancel: 'Stop', args: { course_source_repo: repo },
   };
 }
+
+// ------------------------------------------------------------------ the wizards' operations
+
+export function bootstrapCohort(s: Scope & { cohortOrg: string }, courseName: string): OpDef {
+  return {
+    ...base(s, 'cohort.bootstrap', s.cohortOrg), name: 'Set up', title: `${courseName}, ${s.where}`, where: s.cohortOrg,
+    intro: 'Makes the student site, the join form and the cohort’s settings in the new org. It takes about a minute.',
+    verb: `Set up ${s.where}`, running: `Setting up ${s.where}`, cancel: 'Stop; what is already made stays and a second run finishes it', args: {},
+  };
+}
+
+export function createAssignment(s: Scope, repo: string, title: string, args: Record<string, unknown>): OpDef {
+  return {
+    ...base(s, 'assignment.create', repo), name: 'New assignment', title, where: s.where,
+    intro: `Creates ${repo}: a main branch for the brief students get and a solution branch for marking. Nothing reaches students until it is on a schedule.`,
+    verb: 'Create assignment', running: `Creating ${repo}`, cancel: 'Stop', args,
+  };
+}
+
+export function createMaterials(s: Scope, repo: string, args: Record<string, unknown>): OpDef {
+  return {
+    ...base(s, 'materials.create', repo), name: 'New materials', title: repo, where: s.where,
+    intro: `Creates ${repo}, private to staff until releases copy it to a cohort.`,
+    verb: 'Create materials repo', running: `Creating ${repo}`, cancel: 'Stop', args,
+  };
+}

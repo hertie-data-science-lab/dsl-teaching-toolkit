@@ -4,7 +4,7 @@
 import Ajv2020 from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
 import courseSchema from '../../schemas/dsl_course.schema.json';
-import { useEnv } from '../env';
+import { useEnv, type Env } from '../env';
 import { matches } from '../edit/glob';
 import { useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
@@ -38,14 +38,14 @@ const clean = (v: Values): Values => Object.fromEntries(Object.entries(v).map(([
 
 // --------------------------------------------------------------------------- details
 
-interface Admin {
+export interface Admin {
   github_handle: string;
   email: string;
   start: string;
   end: string;
 }
 
-function detailsOf(meta: Record<string, unknown>) {
+export function detailsOf(meta: Record<string, unknown>) {
   const ad = obj(meta.assignment_defaults), cd = obj(meta.cohort_defaults), arch = obj(cd.archive);
   const people = obj(meta.people);
   const admins = (Array.isArray(people.course_admins) ? people.course_admins : []).map((a) => {
@@ -62,7 +62,7 @@ function detailsOf(meta: Record<string, unknown>) {
   };
 }
 
-type Details = ReturnType<typeof detailsOf>;
+export type Details = ReturnType<typeof detailsOf>;
 
 /** Write only what changed, key by key, into dsl-course.yml. */
 export function writeDetails(y: YamlText, before: Details, after: Details, meta: Record<string, unknown>): void {
@@ -94,6 +94,55 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
   emptyMap('cohort_defaults');
 }
 
+/** dsl-course.yml after `after`, or why it would not be valid. */
+export function courseFileAfter(text: string, before: Details, after: Details, meta: Record<string, unknown>): { text: string } | { error: string } {
+  const out = new YamlText(text);
+  writeDetails(out, before, after, meta);
+  if (!validCourse(out.toJS())) return { error: `Not saved: dsl-course.yml would not be valid (${(validCourse.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` };
+  return { text: out.text };
+}
+
+/** The first new admin handle with no GitHub account, or null (a failed lookup counts as there). */
+export async function missingAdmin(env: Env | null, before: Admin[], after: Admin[]): Promise<string | null> {
+  if (!env) return null;
+  for (const a of after.filter((x) => x.github_handle.trim() && !before.some((b) => b.github_handle === x.github_handle))) {
+    let ok = true;
+    try {
+      ok = await env.client.userExists(a.github_handle.trim());
+    } catch {
+      ok = true;
+    }
+    if (!ok) return a.github_handle;
+  }
+  return null;
+}
+
+/** Course admins as rows: handle and email, optional dates, add and remove. */
+export function AdminRows({ admins, onChange, id }: { admins: Admin[]; onChange: (a: Admin[]) => void; id: string }) {
+  const admin = (i: number, patch: Partial<Admin>) => onChange(admins.map((a, j) => (j === i ? { ...a, ...patch } : a)));
+  return (
+    <>
+      {admins.map((a, i) => (
+        <div class="deploy">
+          <div class="row-2">
+            <div class="field"><label for={`${id}-h${i}`}>GitHub handle</label><input type="text" id={`${id}-h${i}`} value={a.github_handle} onInput={(e) => admin(i, { github_handle: (e.target as HTMLInputElement).value })} /><p class="why">Checked: the account must exist.</p></div>
+            <div class="field"><label for={`${id}-e${i}`}>Email</label><input type="email" id={`${id}-e${i}`} value={a.email} onInput={(e) => admin(i, { email: (e.target as HTMLInputElement).value })} /><p class="why">Fault mails go here; without one, the lab’s list is used.</p></div>
+          </div>
+          <details class="fold" open={!!(a.start || a.end)}>
+            <summary>Dates</summary>
+            <div class="fold-body"><div class="row-2">
+              <div class="field"><label for={`${id}-s${i}`}>From <span class="default">optional</span></label><input type="date" id={`${id}-s${i}`} value={a.start} onInput={(e) => admin(i, { start: (e.target as HTMLInputElement).value })} /></div>
+              <div class="field"><label for={`${id}-n${i}`}>Until <span class="default">optional</span></label><input type="date" id={`${id}-n${i}`} value={a.end} onInput={(e) => admin(i, { end: (e.target as HTMLInputElement).value })} /></div>
+            </div></div>
+          </details>
+          {admins.length > 1 ? <div><button class="btn small quiet" type="button" onClick={() => onChange(admins.filter((_, j) => j !== i))}>Remove</button></div> : null}
+        </div>
+      ))}
+      <div><button class="btn small quiet" type="button" onClick={() => onChange([...admins, { github_handle: '', email: '', start: '', end: '' }])}>Add an admin</button></div>
+    </>
+  );
+}
+
 export function DetailsScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
@@ -114,23 +163,12 @@ export function DetailsScreen(p: CourseProps) {
     if (!y || file.kind !== 'ready') return;
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const after = { ...d, cohort: effective(COHORT_DEFAULTS, d.cohort) };
-    const out = new YamlText(file.text);
-    writeDetails(out, before, after, meta);
-    if (!validCourse(out.toJS())) return setSave({ kind: 'bad', text: `Not saved: dsl-course.yml would not be valid (${(validCourse.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).` });
-    if (env) {
-      for (const a of after.admins.filter((x) => x.github_handle.trim() && !before.admins.some((b) => b.github_handle === x.github_handle))) {
-        let ok = true;
-        try {
-          ok = await env.client.userExists(a.github_handle.trim());
-        } catch {
-          ok = true;
-        }
-        if (!ok) return setSave({ kind: 'bad', text: `There is no GitHub account called ${a.github_handle}.` });
-      }
-    }
+    const out = courseFileAfter(file.text, before, after, meta);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    const missing = await missingAdmin(env, before.admins, after.admins);
+    if (missing) return setSave({ kind: 'bad', text: `There is no GitHub account called ${missing}.` });
     if (await runSave({ owner: course.org, repo: '.github', path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the Instructor Console', statusRepo: [course.org, '.github'] })) setDraft(null);
   };
-  const admin = (i: number, patch: Partial<Admin>) => set({ admins: d.admins.map((a, j) => (j === i ? { ...a, ...patch } : a)) });
   return (
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Course details' }]} />
@@ -156,23 +194,7 @@ export function DetailsScreen(p: CourseProps) {
             <div class="form-section">
               <h3>Course admins</h3>
               <p class="footnote">Course admins keep every button for this course across years. They can differ from a given term’s instructors, who are set per cohort under Staff.</p>
-              {d.admins.map((a, i) => (
-                <div class="deploy">
-                  <div class="row-2">
-                    <div class="field"><label for={`cda-h${i}`}>GitHub handle</label><input type="text" id={`cda-h${i}`} value={a.github_handle} onInput={(e) => admin(i, { github_handle: (e.target as HTMLInputElement).value })} /><p class="why">Checked: the account must exist.</p></div>
-                    <div class="field"><label for={`cda-e${i}`}>Email</label><input type="email" id={`cda-e${i}`} value={a.email} onInput={(e) => admin(i, { email: (e.target as HTMLInputElement).value })} /><p class="why">Fault mails go here; without one, the lab’s list is used.</p></div>
-                  </div>
-                  <details class="fold" open={!!(a.start || a.end)}>
-                    <summary>Dates</summary>
-                    <div class="fold-body"><div class="row-2">
-                      <div class="field"><label for={`cda-s${i}`}>From <span class="default">optional</span></label><input type="date" id={`cda-s${i}`} value={a.start} onInput={(e) => admin(i, { start: (e.target as HTMLInputElement).value })} /></div>
-                      <div class="field"><label for={`cda-n${i}`}>Until <span class="default">optional</span></label><input type="date" id={`cda-n${i}`} value={a.end} onInput={(e) => admin(i, { end: (e.target as HTMLInputElement).value })} /></div>
-                    </div></div>
-                  </details>
-                  {d.admins.length > 1 ? <div><button class="btn small quiet" type="button" onClick={() => set({ admins: d.admins.filter((_, j) => j !== i) })}>Remove</button></div> : null}
-                </div>
-              ))}
-              <div><button class="btn small quiet" type="button" onClick={() => set({ admins: [...d.admins, { github_handle: '', email: '', start: '', end: '' }] })}>Add an admin</button></div>
+              <AdminRows admins={d.admins} id="cda" onChange={(admins) => set({ admins })} />
             </div>
             <div class="form-section">
               <h3>Assignment defaults</h3>

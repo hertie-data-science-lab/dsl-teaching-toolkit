@@ -134,13 +134,13 @@ function Switcher({ courses, course, cohort, cohortStates }: {
       </button>
       <div class="popmenu" hidden={!open} role="menu" onClick={(e) => (e.target as Element).closest('a') && setOpen(false)}>
         <a href="#home" role="menuitem">All courses</a>
-        <span class="disabled" role="menuitem" aria-disabled="true">New course<small>Coming in this build</small></span>
+        <a href="#new-course-1" role="menuitem">New course</a>
         {!course ? (
           <span class="disabled" role="menuitem" aria-disabled="true">New cohort<small>Select a course first</small></span>
         ) : !course.write ? (
           <span class="disabled" role="menuitem" aria-disabled="true">New cohort of {course.name}<small>You have no write access</small></span>
         ) : (
-          <span class="disabled" role="menuitem" aria-disabled="true">New cohort of {course.name}<small>Coming in this build</small></span>
+          <a href={`?course=${course.org}#new-cohort-1`} role="menuitem">New cohort of {course.name}</a>
         )}
         <hr />
         {courses.map((c) => (

@@ -72,7 +72,7 @@ export function HomeScreen({ courses, cohortStates, user }: HomeProps) {
       <Crumbs items={[{ t: 'All courses' }]} />
       <div class="page-head">
         <div><h1>Your courses</h1><p class="lede">Ordered by what needs you. Greyed rows are courses you can see but not change.</p></div>
-        <div class="actions"><span class="soon" title="Coming in this build"><button class="btn" type="button" disabled>New course</button></span></div>
+        <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
       </div>
       <Help title="What am I looking at?" doc="01-new-course-org.md">
         <p>A course holds your materials and assignment templates for every term. Each term runs as its own cohort, which students join. What you can change follows GitHub: the console only offers what your account can do.</p>

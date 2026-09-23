@@ -390,6 +390,25 @@ export class GitHubClient {
     return (await this.get<{ items: GhRepo[] }>(`/search/repositories?q=${encodeURIComponent(q)}&per_page=100`)).items;
   }
 
+  /** An org, or null when there is none of that name (or it is not visible). */
+  getOrg(org: string): Promise<GhOrg | null> {
+    return this.getOrNull<GhOrg>(`/orgs/${encodeURIComponent(org)}`);
+  }
+
+  /**
+   * `user`'s membership of `org` (state and role), null when they are neither a member nor
+   * invited. Only an owner of the org may read another member's role; anyone else gets a
+   * GitHubError, which the caller reports as "could not tell".
+   */
+  getOrgMembership(org: string, user: string): Promise<{ state: string; role: string } | null> {
+    return this.getOrNull<{ state: string; role: string }>(`/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(user)}`);
+  }
+
+  /** A branch, or null when the repo has no branch of that name. */
+  getBranch(owner: string, repo: string, branch: string): Promise<{ name: string } | null> {
+    return this.getOrNull<{ name: string }>(`/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`);
+  }
+
   /** Whether `user` is a member of `org` (as far as the caller may see). */
   async isOrgMember(org: string, user: string): Promise<boolean | null> {
     const url = this.url(`/orgs/${org}/members/${user}`);

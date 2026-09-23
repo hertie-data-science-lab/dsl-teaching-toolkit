@@ -15,6 +15,8 @@ export interface Env {
   ops: OpsSession;
   statuses: StatusStore;
   files: Files;
+  /** Read the course list again (a wizard just made a course or a cohort). */
+  rediscover?: () => Promise<void>;
   /** How long to wait between reads of a commit's checks (tests pass 0). */
   pollMs?: number;
 }

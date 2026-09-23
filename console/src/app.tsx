@@ -16,7 +16,7 @@ import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { MarksScreen, TeamsScreen } from './screens/Marking';
-import { COHORT_SCREENS, COURSE_SCREENS, landing, parseHash, parseSearch, resolveContext } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, parseHash, parseSearch, resolveContext, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
@@ -24,6 +24,10 @@ import { HomeScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { StaffScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
+import { NewAssignmentScreen } from './screens/NewAssignment';
+import { NewCohortScreen } from './screens/NewCohort';
+import { NewCourseScreen } from './screens/NewCourse';
+import { NewMaterialsScreen } from './screens/NewMaterials';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading } from './ui/bits';
 import { Footer, Sidenav, Topbar } from './ui/shell';
@@ -106,24 +110,31 @@ export function App({ state: s }: { state: AppState }) {
 
   const screen = route.screen || landing(courses);
   const r = { ...route, screen };
-  const ctx = resolveContext(courses, parseSearch(s.search.value), r);
+  const sel = parseSearch(s.search.value);
+  const ctx = resolveContext(courses, sel, r);
+  const wiz = wizardOf(screen);
   const cohortStates: Record<string, Loaded> = {};
   const wanted = screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
   for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org).value;
   const cohortLoaded = ctx.cohort && ctx.course?.write ? s.statuses.cohort(ctx.cohort.org).value : undefined;
   const problems = cohortLoaded?.kind === 'ready' ? (cohortLoaded.status.problems ?? []).length : 0;
-  const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? screen;
+  const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
 
   let body;
-  if (screen === 'home') {
+  if (wiz?.name === 'new-course') {
+    body = <NewCourseScreen files={s.files} step={wiz.step} />;
+  } else if (screen === 'home') {
     body = <HomeScreen courses={courses} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
     body = <HomeScreen courses={courses} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course.write) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
-  } else if (screen in COURSE_SCREENS || !ctx.cohort) {
+  } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
     const cp: CourseProps = { course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
-    body = screen === 'template' ? <TemplateScreen {...cp} />
+    body = wiz?.name === 'new-cohort' ? <NewCohortScreen {...cp} step={wiz.step} />
+      : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
+      : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
+      : screen === 'template' ? <TemplateScreen {...cp} />
       : screen === 'details' ? <DetailsScreen {...cp} />
       : screen === 'website' ? <WebsiteScreen {...cp} />
       : screen === 'materials' && route.entry ? <MaterialsScreen {...cp} />
@@ -131,7 +142,7 @@ export function App({ state: s }: { state: AppState }) {
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry,
-      heartbeat: s.heartbeat(ctx.course.org),
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       cohort: () => <CohortScreen {...cp} />,
@@ -158,7 +169,10 @@ export function App({ state: s }: { state: AppState }) {
         <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
           <Sidenav courses={courses} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} />
         </aside>
-        <main id="view" tabindex={-1}>{body}</main>
+        <main id="view" tabindex={-1}>
+          {sel.wizard && ctx.course && !wiz ? <p class="note" style="margin-bottom:18px"><a href={`?course=${ctx.course.org}#${sel.wizard}`}>Back to the {sel.wizard.startsWith('new-cohort') ? 'New cohort' : 'wizard'}</a> when you are done here.</p> : null}
+          {body}
+        </main>
       </div>
       <Footer course={ctx.course} cohort={ctx.cohort} />
       <OpPanel />
@@ -199,7 +213,7 @@ export function createState({ auth, client }: AppDeps) {
     ops,
     /** What screens need to change anything, for the signed-in user. */
     env(user: GhUser): Env {
-      if (!env || env.user !== user) env = { client, user, ops, statuses, files };
+      if (!env || env.user !== user) env = { client, user, ops, statuses, files, rediscover: st.rediscover };
       return env;
     },
     heartbeat(org: string): Heartbeat | null | undefined {
@@ -211,6 +225,13 @@ export function createState({ auth, client }: AppDeps) {
         void loadHeartbeat(client, org, Date.now()).then((h) => (sig.value = h));
       }
       return b.value;
+    },
+    async rediscover() {
+      try {
+        st.courses.value = await discoverCourses(client);
+      } catch {
+        /* the old list stays; the next sign-in reads it again */
+      }
     },
     signedIn(u: GhUser) {
       st.user.value = u;
