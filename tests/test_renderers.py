@@ -1001,20 +1001,23 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     # a faculty member can read the vocabulary off. Asserted as the WHOLE joined list
     # rather than one member at a time: `py` is a substring of `ipynb`, so a per-member
     # check passes a description that dropped it.
-    assert "type" not in inputs["format"] and inputs["format"]["default"] == "ipynb"
+    # Four boxes arrive at the course-default sentinel, which the scaffold resolves
+    # against the course's `assignment_defaults:` (tests/test_scaffold.py).
+    sentinel = course.COURSE_DEFAULT_CHOICE
+    assert "type" not in inputs["format"] and inputs["format"]["default"] == sentinel
     assert ", ".join(course.STARTER_FORMATS) in inputs["format"]["description"]
     assert course.NO_STARTER in inputs["format"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
-    assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
-    assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
-    assert inputs["submit_via"]["default"] == "assignment_repo"
+    assert inputs["team_formation"]["options"] == [sentinel, *course.TEAM_FORMATIONS]
+    assert inputs["submit_via"]["options"] == [sentinel, *course.SUBMIT_VIA]
+    assert inputs["submit_via"]["default"] == sentinel
     # The legacy `github` spelling is read for ever, but this form is a fresh choice, so
     # it is never among the words the dropdown offers or defaults to.
     assert "github" not in inputs["submit_via"]["options"]
     # The vocabulary itself: a word enters it when the handout can CREATE it, so the
     # dropdown and the reader can never disagree about what is on offer.
-    assert inputs["visibility"]["options"] == list(course.VISIBILITIES)
-    assert inputs["visibility"]["default"] == "private"
+    assert inputs["visibility"]["options"] == [sentinel, *course.VISIBILITIES]
+    assert inputs["visibility"]["default"] == sentinel
     # And the box says what each of them does: the form is the only place an instructor
     # meets this vocabulary before they have a `grading_config.yml` to read.
     for word in course.VISIBILITIES:

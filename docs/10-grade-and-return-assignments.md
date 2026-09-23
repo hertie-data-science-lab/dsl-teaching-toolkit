@@ -159,6 +159,11 @@ could change is not it.
 Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so a re-run
 after one correction reaches one student. `silent` skips the email.
 
+Two options, both off by default. `include_feedback` puts the markers' feedback text into
+the email. `receipt_note` posts one line, "Marks returned: see your marks repo.", on each
+returned student's or team's receipts issue - once per assignment, however often you run
+it. The note carries no mark.
+
 The gradebook and the email are decided separately, on purpose. The **commit** is made
 whenever anything in the repo would change, so an improvement to the page's own wording
 reaches every student. The **email** is sent only when a MARK moves - a grade, a score or

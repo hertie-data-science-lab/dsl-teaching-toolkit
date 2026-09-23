@@ -247,7 +247,8 @@ When this cohort is frozen read-only: every repository in the org archived, noth
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `event_datetime` | no | `semester_end` + 60 days | the day the whole cohort org is archived |
+| `event_datetime` | no | `semester_end` + `grace_days` | the day the whole cohort org is archived |
+| `grace_days` | no | `60` | how many days after `semester_end` the default date falls |
 | `title` | no | `Cohort archived` | the row's Title column |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
 | `details` | no | *none* | the sentence that row and that notice say - all of it; `{date}` in it is filled in with the archive date |

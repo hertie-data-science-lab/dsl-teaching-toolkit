@@ -58,6 +58,7 @@ site_link_extensions: [pdf, html]  # optional - cohort sites only; see below
 people:
   course_admins:
     - github_handle: "janedoe"   # admin on the course org + every cohort
+      email: "jane@example.org"  # optional, PUBLIC - where a fault in this file is mailed
     - github_handle: "visiting"
       start: "2026-09-01"        # optional - access auto-starts/lapses on these dates
       end: "2027-06-30"
@@ -68,6 +69,21 @@ own `course-admin` team, and never re-declared per year. Deleting an entry, or a
 passing, revokes on the next sync. This org's `instructors`/`teaching_assistants` keys are
 display-only cards; TAs are declared per cohort in [`people.yml`](#peopleyml).
 Runbook: [05](05-manage-teaching-team.md).
+
+An admin's `email` is optional. When any admin has one, a fault in this file is mailed to
+those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret. This
+file is public, so an address written here is public too.
+
+`assignment_defaults:` is what **New assignment** stamps into each new assignment's
+`grading_config.yml`: `max_team_size`, `late_window_days` and `late_penalty_per_day`, plus
+`format`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
+of the same name when they are left at `(course default)`.
+
+`cohort_defaults:` is what **Bootstrap cohort** writes into a new cohort's `schedule.yml`:
+`timezone:`, and `archive: {auto, grace_days}` - `auto: false` seeds no `archive:` block,
+so that cohort is never archived automatically; `grace_days` sets how long after
+`semester_end` it is. Unset, a new cohort gets today's skeleton. Neither block changes a
+cohort or an assignment that already exists.
 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 cohort website - a push here re-syncs them all: [11](11-configure-cohort-site.md).

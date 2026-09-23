@@ -29,6 +29,7 @@ from . import mailer
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
+    COURSE_DEFAULT_CHOICE,
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
     NOTHING_PUBLIC,
@@ -1121,6 +1122,14 @@ on:
         description: "Skip the email notification (just push the grades)"
         type: boolean
         default: false
+      receipt_note:
+        description: "Also post 'Marks returned: see your marks repo.' once on each student's receipts issue"
+        type: boolean
+        default: false
+      include_feedback:
+        description: "Put the markers' feedback text into each student's email"
+        type: boolean
+        default: false
 
 {_concurrency("distribute-grades")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -1131,11 +1140,15 @@ on:
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           SILENT: ${{{{ inputs.silent }}}}
+          RECEIPT_NOTE: ${{{{ inputs.receipt_note }}}}
+          INCLUDE_FEEDBACK: ${{{{ inputs.include_feedback }}}}
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
 {_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
+          [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
+          [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
 """
 
@@ -1811,13 +1824,13 @@ on:
 # takes one option and nothing else. The vocabulary therefore lives in the description,
 # which is where `scaffold.parse_formats` refuses an answer back to - and it is READ off
 # `course.STARTER_FORMATS`, like the three dropdowns below it, because a box offering a
-# word the reader would refuse is exactly the form that lies. `ipynb` is pre-filled for
-# the same reason `cohort_dest_repo` carries `materials`: it is the answer the toolkit
-# supplies anyway, so showing it teaches the default rather than hiding it.
+# word the reader would refuse is exactly the form that lies. It and three of the
+# dropdowns arrive at `COURSE_DEFAULT_CHOICE`: the course's `assignment_defaults:` answers
+# them, else the toolkit's own (`scaffold.resolve_answers`).
 _STARTER_FORMATS_INPUT = f"""\
       format:
-        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only"
-        default: "ipynb\""""
+        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else ipynb"
+        default: "{COURSE_DEFAULT_CHOICE}\""""
 
 
 def render_new_assignment(assignments: list[str] | None = None) -> str:
@@ -1859,13 +1872,13 @@ on:
 {_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-10 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
-{_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select", required=False)}
-{_choice_input("submit_via", "8. Where students hand in. assignment_repo = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole cohort, each student pushes into their own folder, peers can read it", list(SUBMIT_VIA), "assignment_repo", required=False)}
+{_choice_input("team_formation", f"7. Group only: self_select = students use the Join team form; assigned = you write teams.csv. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else self_select", [COURSE_DEFAULT_CHOICE, *TEAM_FORMATIONS], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("submit_via", f"8. Where students hand in. assignment_repo = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole cohort, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
       autograde:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
-{_choice_input("visibility", "10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing", list(VISIBILITIES), "private", required=False)}
+{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else private", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:

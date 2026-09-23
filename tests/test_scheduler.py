@@ -4475,3 +4475,26 @@ def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
             == 0
         )
         assert taken[0]["shared"] is shared
+
+
+def test_the_dry_run_ends_with_its_decisions_and_a_real_run_takes_none(
+    monkeypatch, capsys
+):
+    # After the preview's own lines, so a reader (and the console) sees what would fire
+    # and then why anything due will not. A real run never asks.
+    _formation_tick(monkeypatch, lambda *a, **k: LockWrite(True, False))
+    asked: list[bool] = []
+
+    def decisions(*a, **k):
+        asked.append(True)
+        return [scheduler.Decision("w1", "ALREADY_DONE", "Every copy is out.")]
+
+    monkeypatch.setattr(scheduler, "dry_run_decisions", decisions)
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True, autograde=False)
+    out = capsys.readouterr().out
+    line = "Decision: w1 not released: ALREADY_DONE Every copy is out."
+    assert line in out
+    assert out.rindex("DRY-RUN  [") < out.index(line)
+    scheduler.run("Course-Org", "Cohort-Org", now, dry_run=False, autograde=False)
+    assert asked == [True]

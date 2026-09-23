@@ -11,6 +11,9 @@
         "event_datetime": {
           "type": "string"
         },
+        "grace_days": {
+          "type": "integer"
+        },
         "show_on_site": {
           "type": "boolean"
         },

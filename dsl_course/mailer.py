@@ -36,7 +36,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import NamedTuple
@@ -107,8 +107,8 @@ _SINGLE_LINE = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_SENDER")
 # alongside GRAPH_ENV, so a rename cannot leave an org silently unaddressed.
 MAINTAINER_ENV = "DSL_MAINTAINER_EMAIL"
 # Where a fault in the COURSE org's own config goes: the course admins, comma-separated.
-# An org SECRET and never a line in `dsl-course.yml`, which is public and is itself one of
-# the files these mails are about. Held centrally as a repository variable on the toolkit
+# The FALLBACK: an admin's own `email:` in `dsl-course.yml` wins when any admin declares
+# one (see `course_admin_addresses`). Held centrally as a repository variable on the toolkit
 # and propagated onto each course org by `bootstrap_course`, exactly as MAINTAINER_ENV is.
 # COURSE orgs only: every course-level mail is sent from the course org's `.github`, and
 # no workflow seeded into a cohort may wire the mail env at all (see maintainers.md).
@@ -165,11 +165,16 @@ def maintainer_address() -> str | None:
     return None
 
 
-def course_admin_addresses() -> tuple[str, ...]:
-    """The course admins' addresses for THIS org, in declaration order. `()` when the
-    secret is unset, blank, or holds nothing that can be an address.
+def course_admin_addresses(declared: Iterable[str] = ()) -> tuple[str, ...]:
+    """The course admins' addresses for THIS org, in declaration order. `()` when none is
+    declared and the secret is unset, blank, or holds nothing that can be an address.
 
-    A comma-separated list, because that is what fits in one org secret and one repository
+    `declared` is the `email:` of each active admin in `dsl-course.yml`
+    (`sync_faculty.course_admin_emails`). When it holds any address it is the answer and
+    the secret is not read: the file is where a course keeps its admins, and a secret
+    somebody set at bootstrap goes stale the first time an admin changes.
+
+    The secret is a comma-separated list, because that is what fits in one org secret and one repository
     variable - there is no handle here, and therefore no way (and no need) to address one
     admin rather than another: a course-level fault is the course's to fix, and the
     committer git names is @mentioned on the digest issue instead.
@@ -179,6 +184,9 @@ def course_admin_addresses() -> tuple[str, ...]:
 
     Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, a count, or
     `mask_email` of the value."""
+    own = tuple(a for a in (str(d).strip() for d in declared) if "@" in a)
+    if own:
+        return own
     raw = os.environ.get(COURSE_ADMIN_ENV) or ""
     return tuple(a for a in (part.strip() for part in raw.split(",")) if "@" in a)
 

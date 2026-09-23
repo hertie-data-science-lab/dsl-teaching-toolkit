@@ -160,6 +160,11 @@ NO_STARTER = "none"
 # commented example turning into a live one otherwise costs a cohort.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
+# The answer New assignment's format, team_formation, submit_via and visibility boxes
+# arrive with when nobody touches them: "use the course's `assignment_defaults:`, else the
+# toolkit's own". Here because two layers spell it: the rendered form offers it and the
+# scaffold's CLI resolves it.
+COURSE_DEFAULT_CHOICE = "(course default)"
 # The starters an instructor may actually name, `none` being the answer that means none of
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.
 STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)
@@ -463,6 +468,17 @@ def receipt_marker(sha: str, event: str) -> str:
     nothing while a genuinely new push still gets its own receipt. A run with no submission
     to point at keys on `none`, which is equally once-only."""
     return f"<!-- dsl-receipt:{sha or 'none'}:{event} -->"
+
+
+# What `Distribute grades --receipt-note` posts on a unit's receipts issue, and the hidden
+# mark that makes a re-run post it once per assignment. Deliberately NOT a `dsl-receipt:`
+# mark: a receipt records a submission, and this records nothing about one.
+MARKS_RETURNED_NOTE = "Marks returned: see your marks repo."
+
+
+def marks_returned_marker(slug: str) -> str:
+    """The hidden mark on the marks-returned note for assignment `slug`."""
+    return f"<!-- dsl-marks-returned:{slug} -->"
 
 
 def late_rule(window_days: int | None, penalty: str | None) -> str:

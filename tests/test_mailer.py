@@ -427,3 +427,17 @@ def test_a_course_org_without_the_secret_has_no_admin_addresses(monkeypatch):
         else:
             monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, value)
         assert mailer.course_admin_addresses() == ()
+
+
+def test_an_admin_email_declared_in_the_course_file_beats_the_secret(monkeypatch):
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "secret@x.edu")
+    assert mailer.course_admin_addresses(["a@x.edu", "b@x.edu"]) == (
+        "a@x.edu",
+        "b@x.edu",
+    )
+
+
+def test_the_secret_is_the_fallback_when_no_admin_declares_an_address(monkeypatch):
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "secret@x.edu")
+    for declared in ([], ["", "  "], ["nothing-like-an-address"]):
+        assert mailer.course_admin_addresses(declared) == ("secret@x.edu",)

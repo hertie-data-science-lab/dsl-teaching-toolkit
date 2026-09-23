@@ -124,6 +124,7 @@ def wired(monkeypatch):
         people: dict | None = PEOPLE,
         maintainer: str | None = "maint@x.edu",
         configured: bool = True,
+        course_people: dict | None = None,
     ) -> _Sent:
         monkeypatch.setattr(notify, "blame_logins", lambda *a, **k: blame or {})
         monkeypatch.setattr(notify, "last_committer", lambda *a, **k: committer)
@@ -136,6 +137,15 @@ def wired(monkeypatch):
             lambda *a, **k: (
                 notify.sync_faculty.parse_faculty_from_meta(people)
                 if people is not None
+                else None
+            ),
+        )
+        monkeypatch.setattr(
+            notify.sync_faculty,
+            "load_faculty",
+            lambda *a, **k: (
+                notify.sync_faculty.parse_faculty_from_meta(course_people)
+                if course_people is not None
                 else None
             ),
         )
@@ -1423,3 +1433,28 @@ def test_a_partly_delivered_archive_notice_is_not_recorded_as_sent(wired, monkey
         notify.notify_cohort_archiving("Cohort-f2026", "Course-Org", ARCHIVES, NOW)
         is False
     )
+
+
+DECLARED = {
+    "people": {
+        "course_admins": [
+            {"github_handle": "lonny", "email": "lonny@own.edu"},
+            {"github_handle": "luis"},
+        ]
+    }
+}
+
+
+def test_an_admin_email_in_dsl_course_yml_beats_the_org_secret(wired, admins):
+    admins(", ".join(ADMINS))
+    wired(blame={8: "JanG"}, course_people=DECLARED)
+    routing = notify.route_course(COURSE, [_course_fault()], NOW)
+    (routed,) = routing.by_key.values()
+    assert routed.to == ("lonny@own.edu",)
+
+
+def test_a_cohort_with_no_address_falls_back_to_the_declared_admins(wired, admins):
+    admins(", ".join(ADMINS))
+    wired(blame={131: "JanG"}, people={"people": {}}, course_people=DECLARED)
+    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    assert routing.by_key[_KEY].to == ("lonny@own.edu",)

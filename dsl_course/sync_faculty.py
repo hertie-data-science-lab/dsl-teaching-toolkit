@@ -173,11 +173,36 @@ def parse_faculty_from_meta(
                             repo,
                         )
                     )
-                # A COHORT's file only. `email:` is what a notification is addressed to,
-                # and only a cohort declares people who are notified through their entry:
-                # a course org's dsl-course.yml holds course_admins (mailed through the
-                # `DSL_COURSE_ADMIN_EMAILS` org secret, never from a public file) and
-                # display-only website cards, neither of which carries one.
+                # A course admin's `email:` is OPTIONAL: when any admin declares one,
+                # `mailer.course_admin_addresses` prefers them over the
+                # `DSL_COURSE_ADMIN_EMAILS` org secret. Absent is fine; present and
+                # unusable is a fault, because the admin who wrote it expects mail.
+                if (
+                    role == "course_admins"
+                    and file == COURSE_CONFIG
+                    and str(p.get("email") or "").strip()
+                    and valid_email(p.get("email")) is None
+                ):
+                    log_err(
+                        f"  ! course_admins entry {p['github_handle']} has an `email:` "
+                        f"that is not an address - this admin is not emailed: see "
+                        f"{COURSE_CONFIG}"
+                    )
+                    if faults is not None:
+                        faults.append(
+                            _people_fault(
+                                role,
+                                index,
+                                "email",
+                                "this `email:` is not an address - access is still "
+                                "granted, but no course mail reaches this admin",
+                                lines,
+                                file,
+                                repo,
+                            )
+                        )
+                # `email:` is REQUIRED on a cohort's teaching entries: only a cohort
+                # declares people who are notified through their entry alone.
                 if (
                     role in TEACHING_ROLES
                     and file == COHORT_PEOPLE_PATH
@@ -308,6 +333,19 @@ def teaching_contacts(faculty: dict[str, list[dict]], today: str) -> list[Contac
         if email:
             out.append(Contact(str(p["github_handle"]), email, role))
     return out
+
+
+def course_admin_emails(faculty: dict[str, list[dict]], today: str) -> list[str]:
+    """The usable `email:` of every course admin active on `today`, in declaration order.
+
+    What `mailer.course_admin_addresses` prefers over the org secret. Never log the
+    return value - an address is personal data; log a count."""
+    return [
+        email
+        for p in faculty.get("course_admins") or []
+        if active_today(p.get("start"), p.get("end"), today)
+        and (email := valid_email(p.get("email")))
+    ]
 
 
 def without_email(faculty: dict[str, list[dict]], today: str) -> list[str]:

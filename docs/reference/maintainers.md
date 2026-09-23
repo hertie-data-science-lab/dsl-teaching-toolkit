@@ -279,8 +279,10 @@ with the same flags on an org bootstrapped before it existed:
 It is a comma-separated list of the course admins' addresses, and it is who hears about a
 fault in that course org's OWN config - `dsl-course.yml` and `cohort-courses-pages.yml`,
 which share one digest issue in the course org's `.github` (*dsl-course.yml / cohort registry
-has entries the sync cannot use*). An org secret and never an `email:` in `dsl-course.yml`:
-that file is public, and is itself one of the files these mails are about. Two steps read it
+has entries the sync cannot use*). It is the FALLBACK: when any admin in `dsl-course.yml`
+carries an optional `email:`, `mailer.course_admin_addresses` uses those and never reads the
+secret. That file is public, so the secret is how an admin keeps an address private, and an
+`email:` that is not an address is a fault in the same digest. Two steps read it
 - the scheduler's release pass and Sync membership's automatic job, both in the course org -
 and no other rendered workflow carries it (`tests/test_renderers.py` enforces both halves).
 Unset, the digest issue's `cc @<course>/course-admin` is the only channel and the run log
@@ -562,7 +564,9 @@ scroll out of the window re-disarms unless its driver-health issue is already op
 **Break-glass.** If both drivers are down, or Actions itself is out, drive a course org from a
 laptop with a `repo`-scoped token: `GH_TOKEN=<token> python3 -m dsl_course.scheduler
 --course-org <org> --all-cohorts`. Add `--dry-run` first - it prints what would fire and writes
-nothing. It is the code path the workflow runs, and the one-shot markers are what make repeating
+nothing, then one `Decision: <ref> not released: <CODE> <sentence>` line per due item it
+will not release (`SOURCE_MISSING`, `SOURCE_UNWRITTEN`, `WITHHELD`, `COHORT_ARCHIVED`,
+`TEAMS_INCOMPLETE`, `ALREADY_DONE`), which the console reads as reasons. It is the code path the workflow runs, and the one-shot markers are what make repeating
 it safe.
 
 Every `workflow_dispatch` job sits behind the `check-team` gate (`workflows_render._CHECK_TEAM`),
@@ -570,7 +574,9 @@ which asks for write on the repo the button lives in. The Console runs the same 
 first STEP of its one job, so the run it follows has a single job. The scheduler, refresh and
 Send enrolment codes are **ungated**: neither a cron nor a `repository_dispatch` has an actor to
 check, and each only re-calls idempotent work. Send enrolment codes has no `workflow_dispatch` at all - a push to
-a cohort's `students.csv` is its only trigger, and therefore the only way codes are sent.
+a cohort's `students.csv` is its only trigger, and therefore the only way codes are sent
+automatically. The other way is `enrol_codes --resend-unjoined` (the console's "send new
+codes"), which replaces every unjoined row's code and has a `--dry-run`.
 
 `seed refresh` is serialised against itself (`concurrency: seed-refresh`) and **deliberately not
 shared** with the click workflows that end in a refresh. Actions concurrency has no queue - a group

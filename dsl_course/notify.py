@@ -26,9 +26,9 @@ below it the course admins and then the maintainer (`_fallback_to`), for a cohor
 people.yml can address nobody at all.
 
 A fault in the COURSE org's own config is the one exception (`route_course`). Its
-addressees are the course admins, out of an org SECRET rather than out of the public file
-half these faults are IN - so there is no handle to address one of them by, and git's
-answer is spent on the digest's @mention instead of on the To line.
+addressees are the course admins - their `email:` in `dsl-course.yml` when any admin
+declares one, else an org SECRET - all of them on every mail, and git's answer is spent
+on the digest's @mention instead of on the To line.
 
 Neither mail ever fails a run. A notification that could not be delivered must not take a
 release cron down with it - the same contract the digest has.
@@ -247,7 +247,21 @@ def _bot() -> str:
         return ""
 
 
-def _fallback_to() -> tuple[str, ...]:
+def _declared_admin_emails(course_org: str, now: datetime) -> list[str]:
+    """The `email:` of each active course admin in the course org's `dsl-course.yml`,
+    or none when the file declares none or cannot be read.
+
+    Guarded like `_teaching_contacts`: every caller is about to tell somebody something,
+    and `mailer.course_admin_addresses` falls back to the org secret on an empty list."""
+    try:
+        faculty = sync_faculty.load_faculty(course_org) or {}
+    except Exception as exc:
+        log_err(f"could not read {course_org}'s course admins ({read_error(exc)})")
+        faculty = {}
+    return sync_faculty.course_admin_emails(faculty, now.date().isoformat())
+
+
+def _fallback_to(course_org: str, now: datetime) -> tuple[str, ...]:
     """The To line for a cohort fault its own people.yml can address nobody for: the course
     ADMINS, then the MAINTAINER, then nobody.
 
@@ -258,7 +272,9 @@ def _fallback_to() -> tuple[str, ...]:
     maintainer, who is the last person who can act on an org that declares neither.
 
     A count and which fallback it was, never an address: this runs in a PUBLIC repo."""
-    admins = _addresses(mailer.course_admin_addresses())
+    admins = _addresses(
+        mailer.course_admin_addresses(_declared_admin_emails(course_org, now))
+    )
     if admins:
         log(f"  [fallback] no cohort address - mailing {len(admins)} course admin(s)")
         return admins
@@ -355,7 +371,7 @@ def route(
         # git could name from it - all of this tick's faults or none. One fallback set for
         # the lot, and the @mention (`mention`) is untouched: who wrote the line does not
         # change because nobody in the cohort can be written to.
-        fallback = _fallback_to()
+        fallback = _fallback_to(course_org, now)
         routed = {key: Routed(fallback, ()) for key in routed}
     return Routing(routed, sorted(dict.fromkeys(mention)))
 
@@ -369,12 +385,12 @@ def route_course(
     """Who hears about a fault in the COURSE org's own config. `route`'s course-level twin.
 
     Two things differ, and both follow from the file being the course's rather than a
-    cohort's. The addresses are the course ADMINS' and they come from an org SECRET
-    (`mailer.course_admin_addresses`), never from the public `dsl-course.yml` that half
-    these faults are IN - so there is no handle-to-address map here, and therefore no way
-    to write to one admin rather than another. And the person git names is @mentioned on
-    the issue rather than addressed: the issue is where the line is, and the mail goes to
-    the people who own the course.
+    cohort's. The addresses are the course ADMINS' - their own `email:` in
+    `dsl-course.yml` when any admin declares one, else the org SECRET
+    (`mailer.course_admin_addresses`) - and every admin gets every course mail, so there
+    is no handle-to-address routing here. And the person git names is @mentioned on the
+    issue rather than addressed: the issue is where the line is, and the mail goes to the
+    people who own the course.
 
     `admins` is the handles the course declares, for the degraded-mode count alone - the
     caller has already parsed them, and a second read to print a number would be an API
@@ -382,14 +398,17 @@ def route_course(
     loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
     if not loud:
         return Routing()
-    to = _addresses(mailer.course_admin_addresses())
+    to = _addresses(
+        mailer.course_admin_addresses(_declared_admin_emails(course_org, now))
+    )
     if not to:
         # A COUNT and the variable's NAME, never an address and never who is missing one:
         # this runs in the course org's public `.github`. `_deliver` then says that the
         # digest @mention is the only channel left.
         log(
             f"  [skip] {len(list(admins))} addressee(s) without email - "
-            f"{mailer.COURSE_ADMIN_ENV} is not set on {course_org}"
+            f"no admin declares `email:` and {mailer.COURSE_ADMIN_ENV} is not set "
+            f"on {course_org}"
         )
     bot = _bot()
     mention: list[str] = []
@@ -1107,10 +1126,9 @@ def notify_cohort_archiving(
     A `False` from an org with no address or no mail transport is the honest answer and
     the self-healing one: the issue is still filed, and a tick after somebody wires the
     transport up sends the mail rather than deciding it was already sent."""
-    to = (
-        _addresses(c.email for c in _teaching_contacts(cohort_org, now))
-        or _fallback_to()
-    )
+    to = _addresses(
+        c.email for c in _teaching_contacts(cohort_org, now)
+    ) or _fallback_to(course_org, now)
     if not to:
         log(
             f"  [skip] no notification address for {cohort_org} - the notice issue is "

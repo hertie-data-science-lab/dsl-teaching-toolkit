@@ -144,6 +144,12 @@ def _is_withheld_stub(path: str, text: str) -> bool:
     return is_untouched_stub(text)
 
 
+def is_unwritten_stub(path: str, text: str) -> bool:
+    """`_is_withheld_stub` for a caller outside the release: the scheduler's dry run,
+    which says why a due copy of one of these files will ship nothing."""
+    return _is_withheld_stub(path, text)
+
+
 def _resolve_within(base: Path, rel: str) -> Path | None:
     """Resolve `rel` under the clone `base`, or None if it escapes it.
 

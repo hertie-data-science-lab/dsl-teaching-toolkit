@@ -51,6 +51,7 @@ from .course import (
     DEFAULT_MAX_TEAM_SIZE,
     FORMATS,
     GRADEBOOK_PREFIX,
+    MARKS_RETURNED_NOTE,
     NO_STARTER,
     NO_TEAMS,
     RECEIPTS_ISSUE_LABEL,
@@ -70,10 +71,12 @@ from .course import (
     creates_unit_repos,
     has_receipts_issue,
     identifier,
+    marks_returned_marker,
     receipt_body,
     receipts_issue_body,
     resolve_is_group,
     row_name,
+    submission_repo,
     submit_shape,
     visibility_is_students,
 )
@@ -1194,17 +1197,20 @@ _READERS = {
     "grader_pdf": lambda v, w, d: _boolean(v, "grader_pdf", w, d),
 }
 SPEC_KEYS = tuple(_READERS)
-# What a COURSE may set once for every assignment under it, in `dsl-course.yml`: exactly
-# the settings `New assignment` does NOT ask for, and stamps from here instead. The
-# per-assignment keys - the title, the shape, the question maxima - are deliberately not
-# among them: they are what makes one assignment different from the next. Nor are
-# `submit_via` and `autograde`, which the button DOES ask for and always answers - a
-# course default the form can never lose to would be a setting that reads as policy and
-# changes nothing.
+# What a COURSE may set once for every assignment under it, in `dsl-course.yml`. The
+# first three are settings `New assignment` does NOT ask for and stamps from here; the
+# other four ARE boxes on the form, and apply when the box is left at
+# `course.COURSE_DEFAULT_CHOICE` (see `scaffold.resolve_answers`). The per-assignment
+# keys - the title, the type, the question maxima - are deliberately not among them: they
+# are what makes one assignment different from the next.
 COURSE_DEFAULT_KEYS = (
     "max_team_size",
     "late_window_days",
     "late_penalty_per_day",
+    "format",
+    "submit_via",
+    "team_formation",
+    "visibility",
 )
 # Where the course-wide block lives, for the warnings it produces.
 ASSIGNMENT_DEFAULTS_KEY = "assignment_defaults"
@@ -3952,10 +3958,90 @@ def _commit_record(
     return False
 
 
+def _returned_units(
+    specs: dict[str, SheetSpec],
+    sheets: dict[str, dict],
+    books: dict[str, dict[str, dict]],
+    live: dict[str, str],
+) -> list[tuple[SheetSpec, str]]:
+    """`(spec, unit repo)` for every unit whose marks this run's gradebooks now hold: a
+    member's book is live and carries a final grade for that assignment. Only shapes with
+    a receipts issue of their own, since the note goes there."""
+    out: list[tuple[SheetSpec, str]] = []
+    held = {h.casefold() for h in live}
+    by_fold = {h.casefold(): h for h in books}
+    for slug in sorted(sheets):
+        spec = specs[slug]
+        if not (spec.has_receipts_issue and spec.creates_unit_repos):
+            continue
+        for unit, block in ((sheets[slug] or {}).get(spec.container_key) or {}).items():
+            if not isinstance(block, dict):
+                continue
+            members = (block.get("members") or {}) if spec.is_group else {unit: None}
+            if any(
+                str(m).casefold() in held
+                and "final_grade"
+                in (books.get(by_fold.get(str(m).casefold(), "")) or {}).get(slug, {})
+                for m in members
+            ):
+                out.append((spec, submission_repo(slug, str(unit))))
+    return out
+
+
+def _post_returned_notes(
+    cohort_org: str,
+    units: list[tuple[SheetSpec, str]],
+    listed: dict[str, dict] | None,
+) -> int:
+    """Post `MARKS_RETURNED_NOTE` on each unit's receipts issue, once per assignment
+    (`marks_returned_marker`). Only on an issue that already exists and a repo the listing
+    still says is private - the same guard every write into a receipts thread takes.
+    Returns how many units now carry the note. Never fatal: the gradebook is the record."""
+    posted = 0
+    for spec, repo in units:
+        if receipts_thread_policy(spec, listed, repo) == THREAD_NONE:
+            continue
+        found = find_receipts_issue(cohort_org, repo)
+        if isinstance(found, IssueLookupFailed) or found is None:
+            log_person(
+                f"    [skip] {cohort_org}/{repo}: no receipts issue for the note"
+            )
+            continue
+        if post_marked_comment(
+            cohort_org,
+            repo,
+            found[0],
+            MARKS_RETURNED_NOTE,
+            marks_returned_marker(spec.slug),
+        ):
+            posted += 1
+            log_person(f"    marks-returned note on {cohort_org}/{repo}#{found[0]}")
+    return posted
+
+
+def feedback_text(book: dict[str, dict], titles: dict[str, str]) -> str:
+    """The feedback in one student's gradebook, as plain text for an email: one paragraph
+    per assignment that has any. "" when there is none."""
+    parts: list[str] = []
+    for slug in sorted(book):
+        view = book[slug]
+        said = [
+            str(view[key]).strip()
+            for key in ("feedback", "team_feedback")
+            if not _blank(view.get(key))
+        ]
+        if said:
+            parts.append(f"{titles.get(slug) or slug}:\n" + "\n\n".join(said))
+    return "\n\n".join(parts)
+
+
 def distribute(
     cohort_org: str,
     notify: bool = True,
     dry_run: bool = False,
+    *,
+    receipt_note: bool = False,
+    include_feedback: bool = False,
 ) -> int:
     """Send every mark a grader has written where it has to go: each student's private
     gradebook, the registrar's export, and an email saying there is something new to read.
@@ -3981,7 +4067,11 @@ def distribute(
 
     Dry run - the default - writes no grades and sends nothing: it prints the counts a
     grader checks before pressing it for real, and posts the per-student detail as an
-    issue in the private classroom-config (`_preview`)."""
+    issue in the private classroom-config (`_preview`).
+
+    `receipt_note` also posts `MARKS_RETURNED_NOTE` once per assignment on each returned
+    unit's receipts issue; `include_feedback` puts the feedback text into the email. Both
+    off by default."""
     # ONE listing of the cohort for the whole run: it answers "does this student already
     # have a gradebook?". A dry run writes nothing and needs none.
     listed = None if dry_run else listing_by_name(cohort_org)
@@ -4139,6 +4229,11 @@ def distribute(
             f"record now keys on the marks alone and nothing is re-sent"
         )
 
+    if dry_run and receipt_note:
+        log(
+            f"  would post the marks-returned note on up to "
+            f"{len(_returned_units(specs, sheets, books, live))} receipts issue(s)"
+        )
     if dry_run:
         previewed = _preview(
             cohort_org,
@@ -4166,11 +4261,24 @@ def distribute(
         return 1 if provisioning_failed or not students or not previewed else 0
 
     failed_mail, told = (
-        _email_updates(cohort_org, pending, dry_run=False)
+        _email_updates(
+            cohort_org,
+            pending,
+            dry_run=False,
+            feedback=(
+                {h: feedback_text(books[h], titles) for h in pending}
+                if include_feedback
+                else None
+            ),
+        )
         if notify and pending
         else (0, [])
     )
     counts["emails"] = len(told)
+    if receipt_note:
+        counts["receipt_notes"] = _post_returned_notes(
+            cohort_org, _returned_units(specs, sheets, books, live), listed
+        )
     for handle in told:
         record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
 
@@ -4487,7 +4595,7 @@ def _preview_body(
 
 
 def update_message(
-    student: roster.Student, cohort_org: str, course_name: str = ""
+    student: roster.Student, cohort_org: str, course_name: str = "", feedback: str = ""
 ) -> mailer.Message:
     """The 'your grades have been updated' email for one student: (to, subject, body).
 
@@ -4503,6 +4611,8 @@ def update_message(
         f"your private gradebook:\n"
         f"  {url}\n"
     )
+    if feedback:
+        body += f"\nFeedback from your markers:\n\n{feedback}\n"
     subject = (
         f"Your grades for {course_name} have been updated"
         if course_name
@@ -4511,19 +4621,23 @@ def update_message(
     return (student.hertie_email, subject, body)
 
 
-def sample_message(cohort_org: str, course_name: str = "") -> tuple[str, str]:
+def sample_message(
+    cohort_org: str, course_name: str = "", feedback: bool = False
+) -> tuple[str, str]:
     """The notification's `(subject, body)` rendered with PLACEHOLDERS, for the preview.
 
     `update_message` with a placeholder in place of a student - see `mailer.sample_of`."""
     return mailer.sample_message_of(
-        lambda student: update_message(student, cohort_org, course_name),
+        lambda student: update_message(
+            student, cohort_org, course_name, "<feedback>" if feedback else ""
+        ),
         github_handle="<handle>",
     )
 
 
-def sample_body(cohort_org: str, course_name: str = "") -> str:
+def sample_body(cohort_org: str, course_name: str = "", feedback: bool = False) -> str:
     """The body alone - what `send_bulk` prints beneath a dry-run send."""
-    return sample_message(cohort_org, course_name)[1]
+    return sample_message(cohort_org, course_name, feedback)[1]
 
 
 def _course_name(cohort_org: str) -> str:
@@ -4543,7 +4657,10 @@ def _course_name(cohort_org: str) -> str:
 
 
 def _email_updates(
-    cohort_org: str, handles: list[str], dry_run: bool = False
+    cohort_org: str,
+    handles: list[str],
+    dry_run: bool = False,
+    feedback: dict[str, str] | None = None,
 ) -> tuple[int, list[str]]:
     """Email each student a 'grades updated' notification to their Hertie email address,
     linking to their private gradebook repo (the grade's source of truth).
@@ -4586,7 +4703,11 @@ def _email_updates(
             handles_for[email].append(handle)
             continue
         handles_for[email] = [handle]
-        messages.append(update_message(student, cohort_org, course_name))
+        messages.append(
+            update_message(
+                student, cohort_org, course_name, (feedback or {}).get(handle, "")
+            )
+        )
     if not messages:
         # A withdrawn student is an ordinary state and must not red every distribution
         # from here on; a count says it happened without naming anyone.
@@ -4594,7 +4715,9 @@ def _email_updates(
             log_err(f"{len(handles)} gradebook(s) have no roster row with an email")
         return 0, []
     sent = mailer.send_bulk(
-        messages, dry_run=dry_run, sample=sample_body(cohort_org, course_name)
+        messages,
+        dry_run=dry_run,
+        sample=sample_body(cohort_org, course_name, feedback is not None),
     )
     failed = len(messages) - len(sent)
     if failed:
@@ -4614,6 +4737,17 @@ def main() -> int:
         action="store_true",
         help="Skip the email notification (just push the grades).",
     )
+    p.add_argument(
+        "--receipt-note",
+        action="store_true",
+        help="Also post 'Marks returned: see your marks repo.' once on each returned "
+        "unit's receipts issue.",
+    )
+    p.add_argument(
+        "--include-feedback",
+        action="store_true",
+        help="Put the markers' feedback text into each student's email.",
+    )
     # Default ON: the rendered workflow passes --dry-run / --no-dry-run explicitly, so a
     # bare local invocation cannot send by accident.
     p.add_argument(
@@ -4632,6 +4766,8 @@ def main() -> int:
             args.cohort_org,
             notify=not args.no_notify,
             dry_run=args.dry_run,
+            receipt_note=args.receipt_note,
+            include_feedback=args.include_feedback,
         )
     except RuntimeError as exc:
         log_err(str(exc))
