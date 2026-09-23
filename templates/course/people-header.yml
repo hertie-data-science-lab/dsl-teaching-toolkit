@@ -2,7 +2,9 @@
 # People. Two DIFFERENT things live under the `people:` key below - don't
 # confuse them:
 #
-#   course_admins        GRANTS ACCESS. The single source of truth for course-wide
+#   course_admins        GRANTS ACCESS. Course admins keep every button for this
+#                        course across years; a term's instructors are set per
+#                        cohort in people.yml. The single source of truth for course-wide
 #                        admin rights - the `course-admin` team here, mirrored into
 #                        every cohort org. A handle added any other way is reverted
 #                        on the next sync unless it's declared here; removing a

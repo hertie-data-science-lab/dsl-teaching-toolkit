@@ -279,8 +279,10 @@ with the same flags on an org bootstrapped before it existed:
 It is a comma-separated list of the course admins' addresses, and it is who hears about a
 fault in that course org's OWN config - `dsl-course.yml` and `cohort-courses-pages.yml`,
 which share one digest issue in the course org's `.github` (*dsl-course.yml / cohort registry
-has entries the sync cannot use*). An org secret and never an `email:` in `dsl-course.yml`:
-that file is public, and is itself one of the files these mails are about. Two steps read it
+has entries the sync cannot use*). It is the FALLBACK: when any admin in `dsl-course.yml`
+carries an optional `email:`, `mailer.course_admin_addresses` uses those and never reads the
+secret. That file is public, so the secret is how an admin keeps an address private, and an
+`email:` that is not an address is a fault in the same digest. Two steps read it
 - the scheduler's release pass and Sync membership's automatic job, both in the course org -
 and no other rendered workflow carries it (`tests/test_renderers.py` enforces both halves).
 Unset, the digest issue's `cc @<course>/course-admin` is the only channel and the run log

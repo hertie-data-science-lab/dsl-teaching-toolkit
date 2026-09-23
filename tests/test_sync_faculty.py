@@ -638,3 +638,49 @@ def test_a_just_created_instructors_tag_team_is_not_read_back(
     assert errors == 0
     assert read == ["cohort-f2026"] + (["course-org"] if reads_course_team else [])
     assert ("course-org", "instructors-f2026", "prof-a") in added
+
+
+# ------------------------------------------------------------- course admins' own emails
+
+COURSE_PEOPLE = """people:
+  course_admins:
+    - github_handle: lonny
+      email: lonny@x.edu
+    - github_handle: luis
+      email: not-an-address
+    - github_handle: old-admin
+      email: old@x.edu
+      end: "2020-01-01"
+    - github_handle: quiet
+"""
+
+
+def _course_faults(raw: str) -> list:
+    found = []
+    sync_faculty.parse_faculty_from_meta(
+        gh_contents.load_yaml_lines(raw), found, file="dsl-course.yml", repo=".github"
+    )
+    return found
+
+
+def test_a_course_admin_email_that_is_not_an_address_is_a_course_fault(capsys):
+    # Optional, so an admin without one is fine; one that cannot be an address was meant
+    # to be mailed and will not be.
+    (fault,) = _course_faults(COURSE_PEOPLE)
+    assert (fault.where, fault.field, fault.lineno) == (
+        "people.course_admins[1]",
+        "email",
+        6,
+    )
+    assert fault.file == "dsl-course.yml" and fault.in_repo == ".github"
+    assert "not-an-address" not in capsys.readouterr().out
+
+
+def test_course_admin_emails_are_the_active_usable_ones_in_order():
+    faculty = _parse(COURSE_PEOPLE)
+    assert sync_faculty.course_admin_emails(faculty, "2026-09-23") == ["lonny@x.edu"]
+
+
+def test_a_course_admin_email_in_a_cohort_file_is_not_checked():
+    # A cohort's people.yml drops course_admins altogether; nothing to report there.
+    assert _faults(COURSE_PEOPLE) == []

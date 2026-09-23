@@ -136,9 +136,9 @@ Nothing converges it onto an org bootstrapped before it existed - that is one co
 
 A sixth, `DSL_COURSE_ADMIN_EMAILS`, answers the same *who hears* question one level down: a
 fault in a COURSE org's own `dsl-course.yml` or cohort registry stops that course being
-synced at all, and the people who can fix it are its course admins. Comma-separated, and an
-org secret rather than an `email:` in `dsl-course.yml` - that file is public, and is itself
-one of the files these mails are about. It travels the same route (a repository variable
+synced at all, and the people who can fix it are its course admins. Comma-separated, and the
+FALLBACK: an admin's own optional `email:` in `dsl-course.yml` wins when any admin has one
+(that file is public, so the secret is how an admin keeps an address private). It travels the same route (a repository variable
 here, an org secret there) and is set on COURSE orgs only: every course-level mail is sent
 from the course org's `.github`. Unset, the digest issue's `cc @<course>/course-admin` is
 the only channel and the run log says so.
