@@ -564,7 +564,9 @@ scroll out of the window re-disarms unless its driver-health issue is already op
 **Break-glass.** If both drivers are down, or Actions itself is out, drive a course org from a
 laptop with a `repo`-scoped token: `GH_TOKEN=<token> python3 -m dsl_course.scheduler
 --course-org <org> --all-cohorts`. Add `--dry-run` first - it prints what would fire and writes
-nothing. It is the code path the workflow runs, and the one-shot markers are what make repeating
+nothing, then one `Decision: <ref> not released: <CODE> <sentence>` line per due item it
+will not release (`SOURCE_MISSING`, `SOURCE_UNWRITTEN`, `WITHHELD`, `COHORT_ARCHIVED`,
+`TEAMS_INCOMPLETE`, `ALREADY_DONE`), which the console reads as reasons. It is the code path the workflow runs, and the one-shot markers are what make repeating
 it safe.
 
 Every `workflow_dispatch` job sits behind the `check-team` gate (`workflows_render._CHECK_TEAM`),

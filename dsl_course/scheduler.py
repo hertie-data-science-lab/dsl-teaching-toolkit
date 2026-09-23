@@ -76,6 +76,7 @@ import json
 import sys
 from collections.abc import Callable
 from datetime import date, datetime, timezone
+from typing import NamedTuple
 
 from . import (
     cadence,
@@ -106,9 +107,10 @@ from .collect import (
     snapshot_path,
     sync_sheet,
 )
-from .course import COURSE_ADMIN_TEAM
-from .deploy import deploy_many
-from .faults import ConfigFault, Severity, Unusable
+from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
+from .deploy import WITHHELD_ROOT_STUBS, deploy_many, is_unwritten_stub
+from .faults import ConfigFault, FaultKind, Severity, Unusable
+from .gh_contents import get_file_content
 from .ghcli import gh
 from .grades import (
     cohort_sheet_faults,
@@ -210,6 +212,148 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
         solution = " + model solution" if release.assignment_solution else ""
         lines.append(f"assignment {release.assignment}{solution}{actions_suffix}")
     return lines
+
+
+class Decision(NamedTuple):
+    """Why something due will not be released - what the dry run says after its preview,
+    one line each, for the console to lift into an outcome's `reasons`. `ref` is the
+    schedule entry (a release label, or an assignment slug for its handout); `text` never
+    names a student, a handle or a `<slug>-<handle>` repo: the log is public."""
+
+    ref: str
+    code: str
+    text: str
+
+    def line(self) -> str:
+        return f"Decision: {self.ref} not released: {self.code} {self.text}"
+
+
+def _entry_ref(where: str) -> str:
+    """`releases.lecture-2` / `assignments.a1` -> the entry's own name."""
+    return where.split(".", 1)[1] if "." in where else where
+
+
+def source_decisions(faults: list[ConfigFault], now: datetime) -> list[Decision]:
+    """A `SOURCE_MISSING` or `WITHHELD` decision for every source fault whose moment has
+    arrived - what `schedule.source_faults` found, said about what is due now."""
+    out = []
+    for f in faults:
+        if f.fires is None or f.fires > now or f.kind is None:
+            continue
+        code = "WITHHELD" if f.kind is FaultKind.WITHHELD else "SOURCE_MISSING"
+        out.append(Decision(_entry_ref(f.where), code, f"{f.what}."))
+    return out
+
+
+def archived_decisions(sched: schedule.Schedule, now: datetime) -> list[Decision]:
+    """One `COHORT_ARCHIVED` decision per entry that is due in a cohort already archived:
+    nothing is ever released into a frozen org."""
+    refs = [r.label for r in due_releases(sched.releases, now)] + [
+        slug
+        for slug, entry in sched.assignments.items()
+        if entry.handout_datetime is not None and entry.handout_datetime <= now
+    ]
+    return [
+        Decision(
+            ref, "COHORT_ARCHIVED", "This cohort is archived, so nothing is released."
+        )
+        for ref in refs
+    ]
+
+
+def _stub_decisions(
+    course_org: str, due: list[Release], now: datetime
+) -> list[Decision]:
+    """`SOURCE_UNWRITTEN` for a due copy of a root stub (SYLLABUS.md, README.md) that is
+    still the placeholder the toolkit seeded - the release withholds it."""
+    out = []
+    for release in due:
+        for d in release.due_deploys(now):
+            path = d.course_source_path.strip("/")
+            if path not in WITHHELD_ROOT_STUBS:
+                continue
+            text = get_file_content(course_org, d.course_source_repo, path)
+            if text is not None and is_unwritten_stub(path, text):
+                out.append(
+                    Decision(
+                        release.label,
+                        "SOURCE_UNWRITTEN",
+                        f"{d.course_source_repo}/{path} is still the placeholder, so it "
+                        f"is held back.",
+                    )
+                )
+    return out
+
+
+def _handout_decisions(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    due: list[Release],
+    listing: dict[str, dict] | None,
+) -> list[Decision]:
+    """`TEAMS_INCOMPLETE` for a due group handout with no teams yet, and `ALREADY_DONE`
+    for a due handout whose every repo is already in the cohort."""
+    out = []
+    handouts = [r for r in due if r.assignment and r.assignment_slug]
+    if not handouts:
+        return out
+    per_team = teams.load(cohort_org)
+    students = roster.load(cohort_org) or []
+    onboarded = [s.github_handle for s in roster.enrolled(students) if s.onboarded]
+    for release in handouts:
+        key = release.assignment_slug
+        entry = sched.assignments.get(key)
+        gspec = load_grading_spec(course_org, release.assignment)
+        if entry is None or not gspec.creates_repos:
+            continue
+        name = schedule.cohort_name(key, entry)
+        units = list(teams.teams_for(per_team, key)) if gspec.is_group else onboarded
+        if gspec.is_group and not units:
+            out.append(
+                Decision(
+                    key,
+                    "TEAMS_INCOMPLETE",
+                    "No teams have formed yet, so there is nobody to hand it out to.",
+                )
+            )
+            continue
+        if listing is None or not units:
+            continue
+        repos = (
+            [submission_repo(name, u) for u in units]
+            if gspec.creates_unit_repos
+            else [shared_repo(name)]
+        )
+        have = {name.casefold() for name in listing}
+        if all(repo.casefold() in have for repo in repos):
+            out.append(
+                Decision(key, "ALREADY_DONE", "Every copy has already been handed out.")
+            )
+    return out
+
+
+def dry_run_decisions(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    due: list[Release],
+    now: datetime,
+    listing: dict[str, dict] | None,
+) -> list[Decision]:
+    """Every decision the dry run can name for this cohort. Guarded: a read that fails
+    costs its decisions, never the preview."""
+    out: list[Decision] = []
+    for decide in (
+        lambda: source_decisions(schedule.source_faults(sched, course_org), now),
+        lambda: _stub_decisions(course_org, due, now),
+        lambda: _handout_decisions(course_org, cohort_org, sched, due, listing),
+    ):
+        try:
+            out += decide()
+        except Exception as exc:
+            log_err(f"could not work out every decision for {cohort_org}: {exc}")
+    return out
 
 
 # ---------------------------------------------------------------------- gh/git wiring
@@ -1435,6 +1579,10 @@ def _release_phase(
         for release in due:
             for line in describe(release, now):
                 log(f"    DRY-RUN  [{release.label}] {line}")
+        for decision in dry_run_decisions(
+            course_org, cohort_org, sched, due, now, listing
+        ):
+            log(decision.line())
         return errors
 
     release_changed = False
@@ -1794,6 +1942,10 @@ def main() -> int:
     # frozen, and running it would only spend a tick on 403s.
     cohorts, rc = _one_cohort(args.course_org, args.cohort_org)
     if not cohorts:
+        if args.dry_run and rc == 0:
+            # Registered but archived: the preview still says what would have been due.
+            for decision in archived_decisions(schedule.load(args.cohort_org), now):
+                log(decision.line())
         return rc
     rc = run(
         args.course_org,
