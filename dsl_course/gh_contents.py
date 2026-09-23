@@ -351,6 +351,21 @@ def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     return {path: sha for path, sha in entries}
 
 
+def repo_path_shas(org: str, repo: str, branch: str) -> dict[str, str]:
+    """`{path: sha}` for every entry in `org/repo`'s `branch`, directories included - ONE
+    recursive fetch.
+
+    `repo_blob_shas` with the trees kept: a directory's sha changes whenever anything under
+    it does, so one entry answers "has any grading sheet moved?" without listing them. What
+    `status.json` records its inputs by, so a reader can tell a stale status from one tree
+    read of its own."""
+    lines = _tree(
+        org, repo, branch, r'"\(.truncated)", (.tree[] | [.path, .sha] | @tsv)'
+    )
+    entries = (line.split("\t") for line in lines if "\t" in line)
+    return {path: sha for path, sha in entries}
+
+
 def get_blob(org: str, repo: str, sha: str) -> bytes | None:
     """The exact bytes of one blob, addressed by its git sha. None when the blob is gone.
 
