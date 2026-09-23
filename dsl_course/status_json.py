@@ -837,32 +837,28 @@ def render_assignments(
 ) -> list[dict]:
     """One row per assignment the schedule declares."""
     flagged = _problem_entries(problems)
-    sheet_specs = {
-        schedule.cohort_name(k, e): grades.sheet_spec(
-            facts.sched,
-            k,
-            schedule.cohort_name(k, e),
-            facts.specs.get(k, grades.GradingSpec()),
-            facts.specs.get(k, grades.GradingSpec()).is_group,
+    sheet_specs = {}
+    for k, e in facts.sched.assignments.items():
+        name = schedule.cohort_name(k, e)
+        gspec = facts.specs.get(k, grades.GradingSpec())
+        sheet_specs[name] = grades.sheet_spec(
+            facts.sched, k, name, gspec, gspec.is_group
         )
-        for k, e in facts.sched.assignments.items()
-    }
     rows = []
     for slug, entry in facts.sched.assignments.items():
         spec = facts.specs.get(slug, grades.GradingSpec())
         name = schedule.cohort_name(slug, entry)
         cutoff = grades.cutoff_at(facts.sched, slug, spec)
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
-        filled, on_sheet, submitted = sheet_counts(
-            facts.sheets.get(name), sheet_specs.get(name)
-        )
+        sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
+        filled, on_sheet, submitted = sheet_counts(sheet, sspec)
         total = on_sheet or units
         returned = (
             total > 0
             and filled == total
             and marks_returned(
-                facts.sheets.get(name),
-                sheet_specs.get(name),
+                sheet,
+                sspec,
                 facts.returned_at,
                 facts.sheet_changed.get(name),
             )
