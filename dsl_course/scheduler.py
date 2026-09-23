@@ -376,7 +376,10 @@ def dry_run_decisions(
         try:
             out += decide()
         except Exception as exc:
-            log_err(f"could not work out every decision for {cohort_org}: {exc}")
+            log_err(
+                f"could not work out every decision for {cohort_org} "
+                f"({type(exc).__name__})"
+            )
     return out
 
 

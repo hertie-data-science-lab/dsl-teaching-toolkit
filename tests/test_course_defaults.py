@@ -34,6 +34,16 @@ def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
     assert "visibility" in capsys.readouterr().err
 
 
+def test_a_course_default_format_is_a_list_of_starters_as_the_box_takes(capsys):
+    got = grades.parse_assignment_defaults({"format": "ipynb, py"})
+    assert got == {"format": "ipynb,py"}
+    # An unusable answer is dropped, so the toolkit's ipynb applies - never `none`.
+    for bad in ("ipnb", "none,py", ""):
+        assert grades.parse_assignment_defaults({"format": bad}) == {}
+        assert "format" in capsys.readouterr().err
+    assert scaffold.resolve_answers({"format": SENTINEL}, {}) == {"format": "ipynb"}
+
+
 def test_the_legacy_submit_via_word_reads_as_its_new_name():
     assert grades.parse_assignment_defaults({"submit_via": "github"}) == {
         "submit_via": "assignment_repo"

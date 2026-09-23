@@ -118,3 +118,32 @@ def test_the_cli_refuses_a_preview_of_the_ordinary_send(monkeypatch, capsys):
     with pytest.raises(SystemExit) as refused:
         enrol_codes.main()
     assert refused.value.code == 2
+
+
+def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):
+    """The code write loses a race to the Join issues of every target, and its retry lands
+    on a roster where all of them have joined: nobody needs mail, and that is not a
+    failure to stamp."""
+    for name in mailer.GRAPH_ENV:
+        monkeypatch.setenv(name, "set")
+    joined = ROSTER.replace(
+        "ada@uni.edu,Ada,enrolled,,", "ada@uni.edu,Ada,enrolled,adagh,"
+    ).replace("dee@uni.edu,Dee,auditor,,", "dee@uni.edu,Dee,auditor,deegh,")
+    reads = iter([(ROSTER, "sha1"), (joined, "sha2"), (joined, "sha2")])
+    monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda *a: next(reads))
+    puts: list[str | None] = []
+
+    def put_file(org, repo, path, content, message, expected_sha=None):
+        puts.append(expected_sha)
+        return expected_sha == "sha2"
+
+    monkeypatch.setattr(enrol_codes, "put_file", put_file)
+    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "ML")
+    monkeypatch.setattr(enrol_codes, "welcome_issue_url", lambda org: "https://w")
+    monkeypatch.setattr(
+        enrol_codes.mailer, "send_bulk", lambda *a, **k: pytest.fail("mailed")
+    )
+    outcome, counts = enrol_codes.resend_unjoined("COHORT", dry_run=False)
+    assert outcome is enrol_codes.Outcome.NOTHING_TO_SEND
+    assert not enrol_codes.reds_the_run(outcome)
+    assert counts["students"] == 0

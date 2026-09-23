@@ -161,7 +161,7 @@ export function OpPanel() {
     );
   } else {
     const allowed = ops.canRun({ ...c, values }) && !invalid;
-    const gatedShut = mode === 'gated' && !ops.isPreviewed(d);
+    const gatedShut = mode === 'gated' && !ops.isPreviewed(d, c.values, c.checked);
     body = (
       <>
         <p class="op-intro">{d.intro}</p>

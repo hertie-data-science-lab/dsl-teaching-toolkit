@@ -1104,8 +1104,22 @@ def test_refresh_rewrites_every_cohorts_status_and_the_courses(monkeypatch):
     ]
 
 
-def test_a_status_that_did_not_land_reds_the_refresh(monkeypatch):
+def test_a_status_that_did_not_land_only_warns(monkeypatch, capsys):
+    # status.json is the console's view: an org that never opens the console must not
+    # have its nightly refresh go red over it. A warning, and the exit status unchanged.
     _stub_refresh(monkeypatch, status_failures=lambda course, cohort=None: 1)
+    assert seed.refresh("Course-Org") == 0
+    assert (
+        "::warning::status.json not refreshed for 3 org(s)" in capsys.readouterr().out
+    )
+
+
+def test_a_failing_status_writer_leaves_a_failed_refresh_failed(monkeypatch):
+    _stub_refresh(
+        monkeypatch,
+        status_failures=lambda course, cohort=None: 1,
+        lock_failures=lambda course, cohort: LockWrite(False, False),
+    )
     assert seed.refresh("Course-Org") == 1
 
 

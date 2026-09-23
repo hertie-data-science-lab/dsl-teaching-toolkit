@@ -116,6 +116,19 @@ describe('the schedule entry sheet model', () => {
     expect(y.text).toBe(src.replace('lectures/05_trees\n', 'lectures/05_trees_and_ensembles\n'));
   });
 
+  it('keeps a moment as the file spells it when only the title changes', () => {
+    const src =
+      'releases:\n  s5:\n    event_datetime: "2026-10-08T10:00:00+01:00"\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n' +
+      'assignments:\n  a2:\n    course_source_repo: assignment-2-f2026\n    handout_datetime: 2026-09-15 10:00\n    due_datetime: 2026-09-27T23:59:00+02:00\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    writeDraft(y, { ...(readDraft(doc, 's5') as ReleaseDraft), title: 'Trees and ensembles' }, doc);
+    writeDraft(y, { ...(readDraft(doc, 'a2') as never as object), title: 'Regression' } as never, doc);
+    expect(y.text).toBe(
+      `${src.replace('title: Trees\n', 'title: Trees and ensembles\n')}    title: Regression\n`,
+    );
+  });
+
   it('turns automatic archiving off by removing the block, and checks an assignment’s dates', () => {
     const y = new YamlText(SEEDED);
     const doc = y.toJS() as Record<string, unknown>;

@@ -145,6 +145,20 @@ describe('the gate', () => {
     expect(posts).toEqual([true, false]);
   });
 
+  it('shuts the verb again when an option changes after the preview', async () => {
+    const e = engine({ annotation: { ...publicOutcome, op: 'cohort.archive' } });
+    const s = run(e);
+    s.open(defs.archive(scope, 'Sun 31 Jan 2027', false));
+    await s.start('preview');
+    // Previewed without archiving early; ticking it is a different run, not yet previewed.
+    s.setChecked(true);
+    expect(s.canRun(s.current.value!)).toBe(false);
+    await s.start('run');
+    expect(e.gh.seen.filter((x) => x.method === 'POST')).toHaveLength(1);
+    await s.start('preview');
+    expect(s.canRun(s.current.value!)).toBe(true);
+  });
+
   it('does not unlock on a failed preview', async () => {
     const e = engine({ annotation: { ...publicOutcome, conclusion: 'failed' } });
     const s = run(e);

@@ -29,6 +29,22 @@ describe('GitHubClient', () => {
     expect(second?.text).toBe('timezone: Europe/Berlin\n');
   });
 
+  it('keeps the browser cache out, and a write drops the read however it was cased', async () => {
+    let text = 'v1';
+    const gh = new FakeGitHub()
+      .on('GET', /\/repos\/Org\/R\/contents\/a\.yml/, () => json(fileBody('a.yml', text), 200, { etag: `"${text}"` }))
+      .on('PUT', /\/repos\/org\/r\/contents\/a\.yml/, () => {
+        text = 'v2';
+        return { body: { content: { sha: 'n' }, commit: { sha: 'c' } } };
+      });
+    const c = client(gh);
+    expect((await c.getContents('Org', 'R', 'a.yml'))?.text).toBe('v1');
+    await c.putContents({ owner: 'org', repo: 'r', path: 'a.yml', text: 'v2', sha: 's', message: 'm', author: { name: 'a', email: 'a@x' } });
+    expect((await c.getContents('Org', 'R', 'a.yml'))?.text).toBe('v2');
+    expect(gh.seen[2].headers['If-None-Match']).toBeUndefined();
+    expect(gh.seen.every((r) => r.cache === 'no-store')).toBe(true);
+  });
+
   it('turns a missing file into null', async () => {
     expect(await client(new FakeGitHub()).getContents('o', 'r', 'nope.yml')).toBeNull();
   });

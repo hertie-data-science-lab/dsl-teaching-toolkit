@@ -200,6 +200,13 @@ def _roster_text(cohort_org: str) -> str | None:
     return get_file_content(cohort_org, CONFIG_REPO, ROSTER_PATH)
 
 
+def reread() -> None:
+    """Forget the memoised roster text, so the next `load` reads the file again. For a
+    caller that REPORTS the send columns (`status.json` counts codes sent) at the end of a
+    run that began before a send."""
+    _roster_text.cache_clear()
+
+
 def load(
     cohort_org: str, faults: list[ConfigFault] | None = None
 ) -> list[Student] | None:

@@ -68,10 +68,24 @@ export interface SessionOptions {
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** The args a request for `def` carries: the options as the form resolves them, and the tick. */
+function requestArgs(def: OpDef, values: Record<string, unknown>, checked: boolean): Record<string, unknown> {
+  const args = def.options ? effective(def.options, values) : { ...values };
+  if (def.needsCheck?.arg && checked) args[def.needsCheck.arg] = true;
+  return args;
+}
+
+/** The args as one comparable string: sorted, blanks dropped as the request drops them. */
+function argsKey(args: Record<string, unknown>): string {
+  const kept = Object.entries(args).filter(([, v]) => v !== undefined && v !== null && v !== '');
+  return JSON.stringify(kept.sort(([a], [b]) => a.localeCompare(b)));
+}
+
 export class OpsSession {
   readonly current = signal<Current | null>(null);
   readonly runs = signal<(Operation & { cohort?: string; course: string })[]>([]);
-  readonly previewed = signal<Record<string, true>>({});
+  /** The gate: per op and scope, the args its last good preview in this session ran with. */
+  readonly previewed = signal<Record<string, string>>({});
   readonly notice = signal<string | null>(null);
   private readonly pollMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -90,14 +104,18 @@ export class OpsSession {
     return `${def.op}|${def.cohortOrg ?? def.courseOrg}|${def.key}`;
   }
 
-  isPreviewed(def: OpDef): boolean {
-    return !!this.previewed.value[this.gateKey(def)];
+  /**
+   * Whether this session previewed `def` with exactly these options: a preview unlocks the
+   * run it showed, not one whose options were changed after it.
+   */
+  isPreviewed(def: OpDef, values: Record<string, unknown> = def.args, checked = false): boolean {
+    return this.previewed.value[this.gateKey(def)] === argsKey(requestArgs(def, values, checked));
   }
 
   /** Whether the verb may run now: gated ops need this session's preview, a check box its tick. */
   canRun(c: Current): boolean {
     if (c.phase === 'running') return false;
-    if (c.mode === 'gated' && !this.isPreviewed(c.def)) return false;
+    if (c.mode === 'gated' && !this.isPreviewed(c.def, c.values, c.checked)) return false;
     if (c.def.needsCheck && !c.checked) return false;
     return true;
   }
@@ -174,8 +192,7 @@ export class OpsSession {
     if (kind === 'run' && !this.canRun(c)) return;
     const def = c.def;
     const preview = kind === 'preview';
-    const args = def.options ? effective(def.options, c.values) : { ...c.values };
-    if (def.needsCheck?.arg && c.checked) args[def.needsCheck.arg] = true;
+    const args = requestArgs(def, c.values, c.checked);
     this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, ...(preview ? { dry: null } : { result: null }) });
     let handle: Handle;
     try {
@@ -217,7 +234,7 @@ export class OpsSession {
       ...this.runs.value,
     ];
     const ok = !!o && o.conclusion !== 'failed';
-    if (preview && ok) this.previewed.value = { ...this.previewed.value, [this.gateKey(def)]: true };
+    if (preview && ok) this.previewed.value = { ...this.previewed.value, [this.gateKey(def)]: argsKey(args) };
     if (this.current.value?.handle === handle) {
       this.patch(preview ? { phase: 'ready', running: null, dry: result } : { phase: 'done', running: null, result });
     }

@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from . import schedule, status
 from .gh_teams import acting_login
 from .ghcli import gh
-from .log import Summary, log_err
+from .log import Summary, log, log_err
 from .ops.outcome import Outcome, annotation, write_private
 from .ops.registry import (
     REGISTRY,
@@ -44,6 +44,14 @@ from .ops.request import RequestError, check_access, parse_request
 # The ops that release a named schedule entry: the console may send just the entry, and the
 # deploy fields are read off the cohort's schedule.yml here.
 _ENTRY_OPS = ("release.now", "release.early", "release.rerun")
+
+_REFRESH_FAILED = {
+    "code": "REFRESH_FAILED",
+    "text": "Done, but the buttons were not all refreshed; the nightly refresh adds them.",
+}
+
+# The op that archives the cohort's classroom-config, where its own record would go.
+_ARCHIVE_OP = "cohort.archive"
 
 _FALLBACK = {
     "done": "Finished.",
@@ -150,7 +158,7 @@ class Broken(RuntimeError):
 def execute(op: Operation, requests: list[Request]) -> tuple[int, list[Summary], bool]:
     """Run the op once per request, then the refresh its workflow ends in. Stops at the
     first failure, as the workflow's `bash -e` step would. The refresh's own summary is
-    not the op's."""
+    not the op's, and neither is its exit code: a refresh that failed is a reason."""
     rc, summaries, crashed = 0, [], False
     for req in requests:
         rc, summary, crashed = run_cli(op.module, command(op, req))
@@ -158,7 +166,11 @@ def execute(op: Operation, requests: list[Request]) -> tuple[int, list[Summary],
         if rc:
             return rc, summaries, crashed
     if op.refresh_after and requests and not requests[0].preview:
-        rc, _summary, crashed = run_cli("seed", refresh_command(requests[0]))
+        # The op has done its work; a refresh that did not finish is a reason on it, not
+        # its failure - reporting a made repo as not made invites a colliding retry.
+        refresh_rc, _summary, crashed = run_cli("seed", refresh_command(requests[0]))
+        if refresh_rc:
+            summaries.append(Summary("", reasons=[_REFRESH_FAILED]))
     return rc, summaries, crashed
 
 
@@ -228,6 +240,16 @@ def _loose(text: str) -> dict:
     return {}
 
 
+def _sealed(outcome: Outcome, request: Request) -> bool:
+    """Whether the op has just made the private record unwritable: a real archive seals
+    `classroom-config` as its last step, so there is nowhere left to write to."""
+    return (
+        request.op == _ARCHIVE_OP
+        and not request.preview
+        and outcome.conclusion in ("done", "nothing_to_do")
+    )
+
+
 def _finish(outcome: Outcome, request: Request | None) -> None:
     """Emit the annotation, then - for a request that got past its identity check - the
     private record and the status refresh. A record that cannot be written is a broken
@@ -235,7 +257,9 @@ def _finish(outcome: Outcome, request: Request | None) -> None:
     print(annotation(outcome), flush=True)
     if request is None:
         return
-    if not write_private(outcome, request.cohort_org, request.course_org):
+    if _sealed(outcome, request):
+        log("  the cohort is archived now, so the annotation is its only record")
+    elif not write_private(outcome, request.cohort_org, request.course_org):
         raise Broken("the outcome could not be recorded")
     # WP2's status writer. Until it lands there is nothing to call.
     hook = getattr(status, "write_after_op", None)
@@ -257,7 +281,7 @@ def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bo
             op=op.name,
             actor=request.actor,
             preview=request.preview,
-            conclusion="done",
+            conclusion="previewed" if request.preview else "done",
             summary=f"Started {op.workflow}: {detail}"
             if detail
             else f"Started {op.workflow}.",
@@ -312,7 +336,9 @@ def run(text: str) -> int:
         return 0
     refusal = check_access(request)
     if refusal:
-        _finish(_refuse("NOT_ALLOWED", refusal, raw, started), request)
+        # Not recorded privately either: the refusal may be that the cohort is not this
+        # course's, and a refused caller must not be able to write into any org.
+        _finish(_refuse("NOT_ALLOWED", refusal, raw, started), None)
         return 0
     try:
         outcome, crashed = _outcome(REGISTRY[request.op], request, started)

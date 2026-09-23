@@ -511,14 +511,38 @@ def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():
         "marking",
     )
     sheet["submissions"]["bob"]["score_individual"] = 5
-    doc = _render(
-        cohort=_cohort(
-            sheets={"assignment-2": sheet}, returned_to={"assignment-2": {"ada", "bob"}}
-        ),
-        now=later,
+    marked = datetime(2026, 10, 10, 9, 0, tzinfo=UTC)
+    back = {"ada": later, "bob": later}
+
+    def state(returned_at, changed=marked):
+        doc = _render(
+            cohort=_cohort(
+                sheets={"assignment-2": sheet},
+                returned_at=returned_at,
+                sheet_changed={"assignment-2": changed},
+            ),
+            now=later,
+        )
+        row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+        return row["returned"], row["state"]
+
+    assert state(back) == (True, "returned")
+    # Bob's gradebook was never written: not every unit has its marks back.
+    assert state({"ada": later}) == (False, "marking")
+    # A mark changed on the sheet after the return is not returned yet.
+    assert state(back, changed=later + timedelta(hours=1)) == (False, "marking")
+
+
+def test_returned_is_read_off_the_gradebook_rows_distribute_writes(monkeypatch):
+    text = (
+        "target,assignment,channel,content_hash,distributed_at,issue\n"
+        "Ada,,gradebook,abc,2026-10-12T09:00:00+00:00,\n"
+        "bob,,email,m:1,2026-10-12T09:00:00+00:00,\n"
     )
-    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
-    assert (row["returned"], row["state"]) == (True, "returned")
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: text)
+    assert status_json._returned_at(COHORT) == {
+        "ada": datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+    }
 
 
 def test_a_staff_entry_without_an_email_is_a_counted_problem():
@@ -1094,3 +1118,41 @@ def test_the_console_can_move_open_to_late_window_without_a_rewrite():
             if a["slug"] == "assignment-2"
         )
         assert _client_state(written, later) == engine["state"]
+
+
+def test_a_failed_refresh_names_no_repo(monkeypatch, capsys):
+    def boom(course, cohort):
+        raise RuntimeError("gh: Not Found (repos/x/assignment-3-octocat)")
+
+    monkeypatch.setattr(status, "_document", boom)
+    assert status.refresh(COURSE, COHORT) == 1
+    out = capsys.readouterr()
+    assert "octocat" not in out.out + out.err
+    assert "RuntimeError" in out.out + out.err
+
+
+def test_write_reads_the_roster_as_it_is_now(monkeypatch):
+    texts = iter(["before the send", "after the send"])
+    monkeypatch.setattr(roster, "get_file_content", lambda *a, **k: next(texts))
+    assert roster._roster_text(COHORT) == "before the send"
+    seen = []
+
+    def document(course, cohort):
+        seen.append(roster._roster_text(cohort))
+        return _render()
+
+    monkeypatch.setattr(status, "_document", document)
+    monkeypatch.setattr(status, "put_file", lambda *a, **k: True)
+    status.write(COURSE, COHORT)
+    assert seen == ["after the send"]
+
+
+def test_check_setup_still_reports_a_write_that_did_not_land(monkeypatch):
+    # cohort.check runs `status --write`: its Outcome must say failed, unlike the
+    # nightly refresh, which only warns.
+    _stub_write(monkeypatch, _render(), results=(False, False))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["status", "--course-org", COURSE, "--cohort-org", COHORT, "--write"],
+    )
+    assert status.main() == 1

@@ -100,6 +100,20 @@ export function joinWhen(date: string, time: string): string | undefined {
   return time ? `${date}T${time}` : date;
 }
 
+/**
+ * The moment to write for a date and time the sheet shows: the file's own value when it
+ * still says that - so an offset (`+01:00`), seconds or a space the instructor wrote are
+ * kept, not rewritten to the sheet's `T10:00` - else the sheet's.
+ */
+export function whenOf(raw: unknown, date: string, time: string): unknown {
+  const t = s(raw);
+  if (t && t.toLowerCase() !== 'tbc') {
+    const [d, h] = splitWhen(raw);
+    if (d === date && h === time) return raw;
+  }
+  return joinWhen(date, time);
+}
+
 /** Which block an entry id is in. */
 export function blockOf(doc: Raw, id: string): Block | null {
   for (const b of ['releases', 'assignments', 'events'] as Block[]) if (id in obj(doc[b])) return b;
@@ -158,7 +172,7 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
     const rawDeploys = Array.isArray(raw.deploy) ? raw.deploy : [];
     return {
       ...raw,
-      event_datetime: joinWhen(d.date, d.time),
+      event_datetime: whenOf(raw.event_datetime, d.date, d.time),
       type: text(d.type),
       ...display(raw, d),
       deploy: d.deploys.length
@@ -167,7 +181,7 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
             return {
               ...r, course_source_repo: dp.repo, course_source_path: dp.folder,
               cohort_dest_repo: dp.dest && (dp.dest !== 'materials' || r.cohort_dest_repo) ? dp.dest : undefined,
-              cohort_dest_path: text(dp.path), deploy_datetime: dp.diff ? joinWhen(dp.atDate, dp.atTime) : undefined,
+              cohort_dest_path: text(dp.path), deploy_datetime: dp.diff ? whenOf(r.deploy_datetime, dp.atDate, dp.atTime) : undefined,
             };
           })
         : undefined,
@@ -176,15 +190,15 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
   if (d.kind === 'assignments') {
     return {
       ...raw, ...display(raw, d), course_source_repo: d.template, cohort_dest_repo: text(d.cohortRepo),
-      handout_datetime: d.manual ? undefined : joinWhen(d.handoutDate, d.handoutTime),
-      due_datetime: joinWhen(d.dueDate, d.dueTime),
-      grading_datetime: joinWhen(d.lateDate, d.lateTime),
-      solution_datetime: d.solutionOn && !d.manual ? joinWhen(d.solutionDate, d.solutionTime) : undefined,
+      handout_datetime: d.manual ? undefined : whenOf(raw.handout_datetime, d.handoutDate, d.handoutTime),
+      due_datetime: whenOf(raw.due_datetime, d.dueDate, d.dueTime),
+      grading_datetime: whenOf(raw.grading_datetime, d.lateDate, d.lateTime),
+      solution_datetime: d.solutionOn && !d.manual ? whenOf(raw.solution_datetime, d.solutionDate, d.solutionTime) : undefined,
     };
   }
   return {
     ...raw, type: keep(raw.type, d.type, 'special_event'), ...display(raw, d),
-    event_datetime: joinWhen(d.date, d.time) ?? 'tbc', tbc: d.date ? keep(raw.tbc, d.tbc, false) : undefined,
+    event_datetime: whenOf(raw.event_datetime, d.date, d.time) ?? 'tbc', tbc: d.date ? keep(raw.tbc, d.tbc, false) : undefined,
   };
 }
 
@@ -204,7 +218,7 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     const raw = obj(doc.archive);
     y.assign(['archive'], {
       ...raw,
-      event_datetime: d.date || ('event_datetime' in raw ? null : undefined),
+      event_datetime: d.date ? whenOf(raw.event_datetime, d.date, splitWhen(raw.event_datetime)[1]) : 'event_datetime' in raw ? null : undefined,
       title: text(d.title),
       details: text(d.details),
       show_on_site: keep(raw.show_on_site, d.show, true),

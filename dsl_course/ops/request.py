@@ -71,6 +71,14 @@ def _is(value: object, kind: str) -> bool:
     return isinstance(value, _TYPES[kind])
 
 
+def _js_anchors(pattern: str) -> str:
+    """`pattern` as JSON Schema (ECMA) reads it: a closing `$` is the end of the string.
+    Python's `$` also matches before a final newline, so `alice\\n` would pass as a handle."""
+    if pattern.endswith("$") and not pattern.endswith("\\$"):
+        return pattern[:-1] + r"\Z"
+    return pattern
+
+
 def validate(value: object, schema: dict, where: str = "$") -> list[str]:
     """Every way `value` breaks `schema`, as `path: problem` lines. Empty means valid.
 
@@ -88,7 +96,7 @@ def validate(value: object, schema: dict, where: str = "$") -> list[str]:
     if (
         "pattern" in schema
         and isinstance(value, str)
-        and not re.search(schema["pattern"], value)
+        and not re.search(_js_anchors(schema["pattern"]), value)
     ):
         problems.append(f"{where}: does not match the expected form")
     if isinstance(value, dict):
