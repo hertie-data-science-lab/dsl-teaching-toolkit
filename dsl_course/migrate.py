@@ -34,6 +34,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 import yaml
 
@@ -72,7 +73,7 @@ from .gh_contents import (
     move_files,
     repo_blob_shas,
 )
-from .ghcli import gh
+from .ghcli import gh, git
 from .grades import (
     GRADING_FILE,
     TEAM_LOCK_PATH,
@@ -378,25 +379,33 @@ def _files(org: str, repo: str, branch: str = "") -> dict[str, str]:
     return repo_blob_shas(org, repo, branch)
 
 
-def _actions_enabled(org: str, repo: str) -> bool:
-    """Whether Actions run in `org/repo`. A read that fails RAISES: "could not tell"
-    is never "paused" or "unpaused"."""
-    code, out = gh("api", f"repos/{org}/{repo}/actions/permissions", "--jq", ".enabled")
-    if code != 0 or out.strip() not in ("true", "false"):
+def _actions_state(org: str, repo: str) -> dict:
+    """`{"enabled": bool, "allowed_actions": str | None}` for `org/repo`. A read that
+    fails RAISES: "could not tell" is never "paused" or "unpaused"."""
+    code, out = gh("api", f"repos/{org}/{repo}/actions/permissions")
+    try:
+        data = json.loads(out) if code == 0 else None
+    except json.JSONDecodeError:
+        data = None
+    readable = isinstance(data, dict) and isinstance(data.get("enabled"), bool)
+    if not readable:
         raise RuntimeError(
             f"could not read the Actions setting of {org}/{repo}: {out[:200]}"
         )
-    return out.strip() == "true"
+    return {"enabled": data["enabled"], "allowed_actions": data.get("allowed_actions")}
 
 
-def _set_actions(org: str, repo: str, enabled: bool) -> bool:
+def _actions_enabled(org: str, repo: str) -> bool:
+    return _actions_state(org, repo)["enabled"]
+
+
+def _set_actions(org: str, repo: str, state: dict) -> bool:
+    """Set `org/repo`'s Actions to `state` (`_actions_state`'s shape)."""
+    args = ["-F", f"enabled={str(state['enabled']).lower()}"]
+    if state["enabled"] and state.get("allowed_actions"):
+        args += ["-f", f"allowed_actions={state['allowed_actions']}"]
     code, out = gh(
-        "api",
-        "--method",
-        "PUT",
-        f"repos/{org}/{repo}/actions/permissions",
-        "-F",
-        f"enabled={str(enabled).lower()}",
+        "api", "--method", "PUT", f"repos/{org}/{repo}/actions/permissions", *args
     )
     if code != 0:
         log_err(f"could not switch Actions in {org}/{repo}: {out[:200]}")
@@ -467,23 +476,13 @@ class Step:
     bracket: str = ""
 
 
-def _enable_hint(targets: list[tuple[str, str]]) -> str:
-    repos = ", ".join(f"{o}/{r}" for o, r in targets)
-    return (
-        f"Actions are still DISABLED in: {repos}. Re-run the migration with "
-        f"--no-preview to finish, or re-enable each by hand: gh api -X PUT "
-        f"repos/<org>/<repo>/actions/permissions -F enabled=true"
-    )
+def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
+    """Print the plan; then (not in preview) do, verify, stop at the first failure.
 
-
-def run(
-    org: str,
-    steps: list[Step],
-    preview: bool,
-    targets: Callable[[], list[tuple[str, str]]],
-) -> int:
-    """Print the plan; then (not in preview) do, verify, stop at the first failure. Any
-    failure while the org is paused says so, and how to release it."""
+    From the moment the pause is reached until the unpause is verified, ANY way out - a
+    failed step, an error, a Ctrl-C - names the repos whose Actions are still off and
+    where their earlier settings are recorded. The names come from what the pause
+    recorded, not from a fresh read, so they are there even when GitHub is not."""
     paused = False
     step = steps[0]
     try:
@@ -507,6 +506,7 @@ def run(
         for step in steps:
             if step.bracket == "pause" and not idle:
                 paused = True
+                pause.load()
             if done(step):
                 log(f"  [skip] {step.name}: already migrated")
                 continue
@@ -516,35 +516,72 @@ def run(
                     f"{step.name} did not verify - stopped here. "
                     f"Rollback: {step.rollback}"
                 )
-                if paused:
-                    log_err(_enable_hint(targets()))
                 return 1
             if step.bracket == "unpause":
                 paused = False
             log_ok(f"{step.name}: done and verified")
     except Exception as exc:
         log_err(f"{step.name}: stopped by an error - {exc}")
-        if paused:
-            try:
-                log_err(_enable_hint(targets()))
-            except Exception:
-                log_err("Actions may still be DISABLED in this org's workflow repos.")
         return 1
+    finally:
+        # `saved` is filled only once the settings are recorded, the moment before any
+        # repo is switched off - so a stop before that says nothing it need not.
+        if paused and pause.saved:
+            log_err(pause.hint())
     log_ok(f"{org} is migrated")
     return 0
 
 
-def _pause_step(targets: Callable[[], list[tuple[str, str]]]) -> Step:
-    started: list[str] = []
+OFF = {"enabled": False, "allowed_actions": None}
+PAUSE_RECORD = records.path("migration_pause")
+PAUSE_COMMIT = "migrate: record the Actions settings paused"
 
-    def names() -> str:
-        return ", ".join(f"{o}/{r}" for o, r in targets())
 
-    def disabled() -> bool:
-        return not any(_actions_enabled(o, r) for o, r in targets())
+class Pause:
+    """The migration's pause of one org: every repo whose workflows act on it switched
+    off, and - in `<org>/.github/.system/migration-pause.json`, written BEFORE anything is
+    switched - what each was set to, so the unpause restores exactly that and a run that
+    stops (or is interrupted) can always be resumed or released by hand."""
 
-    def quiet() -> bool:
-        alive = _alive(targets())
+    def __init__(self, org: str, targets: Callable[[], list[tuple[str, str]]]) -> None:
+        self.org, self.targets = org, targets
+        self.saved: dict[str, dict] = {}  # "org/repo" -> its setting before the pause
+        self.started = ""
+
+    def record(self) -> dict[str, dict] | None:
+        text = get_file_content(self.org, ".github", PAUSE_RECORD)
+        return json.loads(text) if text else None
+
+    def load(self) -> None:
+        """Remember the recorded repos, so a stop can name them even if GitHub can't
+        be read by then."""
+        self.saved = self.record() or self.saved
+
+    @staticmethod
+    def _live(key: str) -> tuple[str, str]:
+        """A recorded repo under its name now (the rename step may have moved it)."""
+        org, repo = key.split("/", 1)
+        new = REPO_RENAMES.get(repo)
+        if new and repo not in _listing(org) and new in _listing(org):
+            return org, new
+        return org, repo
+
+    def hint(self) -> str:
+        repos = ", ".join(self.saved) or f"(see {self.org}/.github/{PAUSE_RECORD})"
+        return (
+            f"Actions are still DISABLED in: {repos}. Their settings before the pause "
+            f"are in {self.org}/.github/{PAUSE_RECORD}. Re-run the migration with "
+            f"--no-preview to finish (or to restore them), or restore each by hand: "
+            f"gh api -X PUT repos/<org>/<repo>/actions/permissions -F enabled=true"
+        )
+
+    # the pause step ---------------------------------------------------------
+    def disabled(self) -> bool:
+        saved = self.record()
+        return bool(saved) and not any(_actions_enabled(*self._live(k)) for k in saved)
+
+    def quiet(self, keys: list[str]) -> bool:
+        alive = _alive([self._live(k) for k in keys])
         if alive:
             log_err(
                 f"a workflow run is queued or running in {', '.join(alive)} - wait "
@@ -552,50 +589,86 @@ def _pause_step(targets: Callable[[], list[tuple[str, str]]]) -> Step:
             )
         return not alive
 
-    def do() -> bool:
-        started[:] = [_now()]
-        return all(_set_actions(o, r, False) for o, r in targets())
+    def pause(self) -> bool:
+        saved = self.record()
+        if saved is None:
+            saved = {f"{o}/{r}": _actions_state(o, r) for o, r in self.targets()}
+            if not move_files(
+                self.org,
+                ".github",
+                {},
+                PAUSE_COMMIT,
+                files={PAUSE_RECORD: (json.dumps(saved, indent=2) + "\n").encode()},
+            ):
+                return False
+        self.saved = saved
+        self.started = _now()
+        return all(_set_actions(*self._live(k), OFF) for k in saved)
 
-    def verify() -> bool:
-        if not disabled():
+    def paused(self) -> bool:
+        if not self.disabled():
             log_err("Actions did not read back as disabled")
             return False
-        since = f"created=%3E%3D{started[0]}" if started else ""
-        late = [f"{o}/{r}" for o, r in targets() if since and _run_count(o, r, since)]
+        since = f"created=%3E%3D{self.started}"
+        late = [
+            "/".join(self._live(k))
+            for k in self.saved
+            if self.started and _run_count(*self._live(k), since)
+        ]
         if late:
             log_err(
                 f"a run started after the pause in {', '.join(late)} - wait for it "
                 f"to finish, then re-run the migration"
             )
             return False
-        return quiet()
+        return self.quiet(list(self.saved))
 
-    return Step(
-        "pause automation",
-        done=lambda: disabled() and quiet(),
-        plan=lambda: [f"disable Actions in {names()}"],
-        do=do,
-        verify=verify,
-        rollback="re-enable Actions in each repo named below",
-        bracket="pause",
-    )
+    # the unpause step --------------------------------------------------------
+    def restore(self) -> bool:
+        saved = self.record()
+        if saved is None:
+            return True
+        self.saved = saved
+        if not all(_set_actions(*self._live(k), state) for k, state in saved.items()):
+            return False
+        return move_files(self.org, ".github", {}, PAUSE_COMMIT, delete=[PAUSE_RECORD])
 
+    def restored(self) -> bool:
+        if self.record() is not None:
+            return False
+        for key, want in self.saved.items():
+            got = _actions_state(*self._live(key))
+            if got["enabled"] != want["enabled"] or (
+                want["enabled"] and got["allowed_actions"] != want["allowed_actions"]
+            ):
+                log_err(f"{key}: Actions did not come back as they were ({want})")
+                return False
+        return True
 
-def _unpause_step(targets: Callable[[], list[tuple[str, str]]]) -> Step:
-    def enabled() -> bool:
-        return all(_actions_enabled(o, r) for o, r in targets())
-
-    return Step(
-        "unpause automation",
-        done=enabled,
-        plan=lambda: [
-            "enable Actions in " + ", ".join(f"{o}/{r}" for o, r in targets())
-        ],
-        do=lambda: all(_set_actions(o, r, True) for o, r in targets()),
-        verify=enabled,
-        rollback="re-enable Actions in each repo by hand (see the line below)",
-        bracket="unpause",
-    )
+    def steps(self) -> tuple[Step, Step]:
+        names = lambda: ", ".join(f"{o}/{r}" for o, r in self.targets())
+        pause = Step(
+            "pause automation",
+            done=lambda: self.disabled() and self.quiet(list(self.record() or {})),
+            plan=lambda: [
+                f"record the Actions settings in {self.org}/.github/{PAUSE_RECORD}",
+                f"disable Actions in {names()}",
+            ],
+            do=self.pause,
+            verify=self.paused,
+            rollback="restore Actions in each repo named below",
+            bracket="pause",
+        )
+        unpause = Step(
+            "unpause automation",
+            done=lambda: self.record() is None,
+            plan=lambda: [f"restore the recorded Actions settings in {names()}"],
+            do=self.restore,
+            verify=self.restored,
+            rollback="restore Actions in each repo by hand (see the line below)",
+            bracket="unpause",
+        )
+        return pause, unpause
 
 
 def _status_step(course_org: str, semester_org: str | None) -> Step:
@@ -672,6 +745,7 @@ class Semester:
     def __init__(self, org: str, course_org: str) -> None:
         self.org, self.course = org, course_org
         self.people = ""
+        self.pause = Pause(org, self.targets)
 
     def config(self) -> str:
         """The config repo under whichever name it has right now."""
@@ -897,7 +971,7 @@ class Semester:
     def steps(self) -> list[Step]:
         repo = f"{self.org}/{CONFIG_REPO}"
         return [
-            _pause_step(self.targets),
+            self.pause.steps()[0],
             Step(
                 "rename repos",
                 done=self.renamed,
@@ -947,7 +1021,7 @@ class Semester:
                 verify=lambda: not self.drift(),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            _unpause_step(self.targets),
+            self.pause.steps()[1],
             _status_step(self.course, self.org),
         ]
 
@@ -958,6 +1032,7 @@ class Semester:
 class Course:
     def __init__(self, org: str) -> None:
         self.org = org
+        self.pause = Pause(org, self.targets)
 
     def targets(self) -> list[tuple[str, str]]:
         """`.github` and every content repo and template that carries a workflow."""
@@ -1092,7 +1167,7 @@ class Course:
     def steps(self) -> list[Step]:
         dotgithub = f"{self.org}/.github"
         return [
-            _pause_step(self.targets),
+            self.pause.steps()[0],
             Step(
                 "registry",
                 done=self.registry_done,
@@ -1167,7 +1242,7 @@ class Course:
                 verify=lambda: not self.drift(),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            _unpause_step(self.targets),
+            self.pause.steps()[1],
             _status_step(self.org, None),
         ]
 
@@ -1219,14 +1294,15 @@ def preflight(org: str) -> Course | Semester | None:
             return None
         parent = Course(course)
         target = Semester(org, course)
-        # The course is complete when every step of its own migration is done and its
-        # Actions are on - unless they are off because THIS semester's migration paused
-        # them and stopped (its own repos are off too): then this run resumes it.
-        own = _with_workflows(
-            org, [target.config(), target.join(), pages_repo(org), ".github"]
+        # The course is complete when every step of its own migration is done, its own
+        # pause is released (no record left), and its Actions are on - unless they are
+        # off because THIS semester's migration paused them and stopped (its record is
+        # there): then this run resumes it. Another semester's pause in flight shows as
+        # the course's Actions off with no record here, and is refused.
+        resuming = target.pause.record() is not None
+        course_on = parent.pause.record() is None and all(
+            _actions_enabled(o, r) for o, r in parent.targets()
         )
-        resuming = bool(own) and not any(_actions_enabled(o, r) for o, r in own)
-        course_on = all(_actions_enabled(o, r) for o, r in parent.targets())
         if not parent.work_done() or not (course_on or resuming):
             log_err(
                 f"{course} is not fully migrated, or another migration under it is "
@@ -1249,6 +1325,40 @@ def preflight(org: str) -> Course | Semester | None:
     return target
 
 
+ROOT = Path(__file__).resolve().parents[1]
+_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def checkout_drift(ref: str) -> list[str] | None:
+    """The engine and template files where THIS checkout differs from `ref` (as of the
+    last fetch), uncommitted edits included; None when git cannot say."""
+    base = ref if _SHA.fullmatch(ref) else f"origin/{ref}"
+    code, out = git(
+        "diff", "--name-only", base, "--", "dsl_course", "templates", cwd=str(ROOT)
+    )
+    if code != 0:
+        return None
+    return [line for line in out.splitlines() if line.strip()]
+
+
+def _warn_drift(course: str, ref: str) -> None:
+    """Say, by file, where the checkout that renders differs from what the org runs."""
+    drift = checkout_drift(ref)
+    if drift is None:
+        log_err(
+            f"could not compare this checkout with {ref} (the ref {course} runs) - "
+            f"check out {ref} so the migration renders what the org will run"
+        )
+    elif drift:
+        shown = ", ".join(drift[:20]) + (" ..." if len(drift) > 20 else "")
+        log_err(
+            f"this checkout differs from {ref}, the ref {course} runs, in "
+            f"{len(drift)} file(s): {shown}. The re-render writes what THIS checkout "
+            f"says and the org's next Refresh writes what {ref} says - check out {ref}, "
+            f"or pin the course to this code first"
+        )
+
+
 def main() -> int:
     parser = CLIParser(description=__doc__)
     parser.add_argument("org", help="The course org or semester org to migrate")
@@ -1262,8 +1372,10 @@ def main() -> int:
     if target is None:
         return 1
     course = target.course if isinstance(target, Semester) else args.org
-    log(f"  central ref of the course: {central_ref_for(course)}")
-    return run(args.org, target.steps(), args.preview, target.targets)
+    ref = central_ref_for(course)
+    log(f"  central ref of the course: {ref}")
+    _warn_drift(course, ref)
+    return run(args.org, target.steps(), args.preview, target.pause)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,9 @@ RECORDS = {
     # the course org's `.github`: the refresh's heartbeat and its miss ledger
     "heartbeat": "last-refresh",
     "missing_semesters": "missing-semesters",
+    # the org's `.github`, only while `migrate` has its Actions paused: what each repo was
+    # set to before, so the unpause restores exactly that
+    "migration_pause": "migration-pause.json",
     # materials repos: the toolkit describing itself, never released
     "maintaining": "MAINTAINING.md",
     "syllabus_sample": "SYLLABUS.md.sample",

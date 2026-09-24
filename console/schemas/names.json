@@ -11,6 +11,7 @@
     "heartbeat": ".system/last-refresh",
     "lock": ".system/assignments.lock.yml",
     "maintaining": ".system/MAINTAINING.md",
+    "migration_pause": ".system/migration-pause.json",
     "missing_semesters": ".system/missing-semesters",
     "outcomes": ".system/outcomes",
     "pointer": ".system/dsl-course.yml",

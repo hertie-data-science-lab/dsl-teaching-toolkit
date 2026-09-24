@@ -81,7 +81,7 @@ class FakeGitHub:
     def __init__(self) -> None:
         self.repos: dict[tuple[str, str], dict] = {}
         self.redirects: dict[tuple[str, str], str] = {}
-        self.actions: dict[tuple[str, str], bool] = {}
+        self.actions: dict[tuple[str, str], dict] = {}
         self.runs: dict[tuple[str, str], list[tuple[str, str]]] = {}
         self.commits: list[tuple[str, str, str, str]] = []
         self.paused_at_commit: list[bool] = []
@@ -107,8 +107,12 @@ class FakeGitHub:
     def tree(self, org, name, branch="main"):
         return self._repo(org, name)["branches"][branch]
 
+    def setting(self, org, name):
+        default = {"enabled": True, "allowed_actions": "all"}
+        return self.actions.get((org, self._name(org, name)), default)
+
     def enabled(self, org, name):
-        return self.actions.get((org, self._name(org, name)), True)
+        return self.setting(org, name)["enabled"]
 
     def workflow_repos(self):
         return [
@@ -186,12 +190,22 @@ class FakeGitHub:
         key = (org, self._name(org, name))
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
-                self.actions[key] = fields["enabled"] == "true"
-                self.puts.append((*key, self.actions[key]))
-                if not self.actions[key] and self.run_after_pause == key:
+                on = fields["enabled"] == "true"
+                was = self.setting(*key)
+                allowed = fields.get("allowed_actions", was["allowed_actions"])
+                self.actions[key] = {
+                    "enabled": on,
+                    "allowed_actions": allowed if on else None,
+                }
+                self.puts.append((*key, on))
+                if not on and self.run_after_pause == key:
                     self.runs.setdefault(key, []).append(("9999-12-31T00:00:00Z", "x"))
                 return 0, ""
-            return 0, "true" if self.enabled(*key) else "false"
+            state = self.setting(*key)
+            body = {"enabled": state["enabled"]}
+            if state["enabled"]:
+                body["allowed_actions"] = state["allowed_actions"]
+            return 0, json.dumps(body)
         if parts[3:] == ["actions", "runs"]:
             runs = self.runs.get(key, [])
             if query.startswith("status="):
@@ -228,6 +242,8 @@ def fake(monkeypatch):
     # The REAL default_branch / repo_missing, over the same stub: a 404 is a 404.
     monkeypatch.setattr(repos, "gh", f.gh)
     monkeypatch.setattr(migrate, "central_ref_for", lambda org: "main")
+    # The checkout is the pinned ref, unless a test says otherwise.
+    monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     return f
 
@@ -397,9 +413,11 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     assert "cohort_dest" not in schedule
     assert "    kind: lecture" in schedule and "    kind: exam" in schedule
     assert fake._repo(SEM, ".github")["topics"] == [SEMESTER_TOPIC]
-    # Every commit landed with Actions off everywhere - but the status check, which runs
-    # after the unpause - and all are back on now.
-    assert fake.commits and all(fake.paused_at_commit[:-1])
+    # The pause record is written first, while everything still runs; every commit after
+    # it landed with Actions off everywhere, until the restore (the record's removal and
+    # the status check come after it); and all are back on now.
+    assert fake.commits[0][3] == migrate.PAUSE_COMMIT
+    assert all(fake.paused_at_commit[1:-2]) and not any(fake.paused_at_commit[-2:])
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
     assert semester == ["join", "config", "profile", "status"]
     layout = [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT]
@@ -435,7 +453,8 @@ def test_a_failed_step_stops_and_says_the_org_is_still_paused(
     assert not fake.enabled(SEM, OLD_CONFIG_REPO) and not fake.enabled(
         COURSE, ".github"
     )
-    assert fake.commits == [] and semester == []
+    # Nothing but the record of what the settings were.
+    assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT] and semester == []
 
 
 def test_a_crash_mid_run_says_the_org_is_still_paused(
@@ -444,7 +463,7 @@ def test_a_crash_mid_run_says_the_org_is_still_paused(
     def boom(*a, **k):
         raise RuntimeError("HTTP 502")
 
-    monkeypatch.setattr(migrate, "move_files", boom)
+    monkeypatch.setattr(migrate.Semester, "layout", boom)
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     err = capsys.readouterr().err
     assert "layout: stopped by an error - HTTP 502" in err
@@ -467,7 +486,7 @@ def test_a_run_that_starts_after_the_pause_stops_it(
     err = capsys.readouterr().err
     assert f"a run started after the pause in {COURSE}/.github" in err
     assert "wait for it to finish, then re-run the migration" in err
-    assert fake.commits == []
+    assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT]
 
 
 def test_a_run_in_progress_refuses_the_migration(fake, semester, monkeypatch, capsys):
@@ -491,7 +510,8 @@ def test_a_semester_waits_for_its_whole_course(
     if unfinished == "registry":
         fake.tree(COURSE, ".github")["cohort-courses-pages.yml"] = b"cohorts: []\n"
     else:
-        fake.actions[(COURSE, ".github")] = False  # the course's own run stopped paused
+        # Off with no record of this semester's: another run holds the course.
+        fake.actions[(COURSE, ".github")] = {"enabled": False, "allowed_actions": None}
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     assert f"{COURSE} is not fully migrated" in capsys.readouterr().err
     assert fake.puts == [] and fake.enabled(COURSE, "course-materials-f2026")
@@ -649,7 +669,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         ".system/SYLLABUS.md.sample",
         "SYLLABUS.md",
     }
-    assert all(fake.paused_at_commit[:-1]) and fake.enabled(COURSE, ".github")
+    assert all(fake.paused_at_commit[1:-2]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
 
     commits, puts = list(fake.commits), list(fake.puts)
@@ -727,3 +747,50 @@ def test_the_format_key_becomes_a_list():
 
 def test_the_registry_key_is_renamed_and_nothing_else():
     assert migrate.registry_keys("# c\ncohorts:\n- a\n") == "# c\nsemesters:\n- a\n"
+
+
+def test_the_unpause_restores_each_repos_own_earlier_setting(
+    fake, semester, monkeypatch
+):
+    fake.actions[(SEM, "sem-f2026.github.io")] = {
+        "enabled": False,
+        "allowed_actions": None,
+    }
+    fake.actions[(COURSE, ".github")] = {"enabled": True, "allowed_actions": "selected"}
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert not fake.enabled(SEM, "sem-f2026.github.io")  # off before, off after
+    assert fake.setting(COURSE, ".github") == {
+        "enabled": True,
+        "allowed_actions": "selected",
+    }
+    # Recorded under its old name, restored under the new one.
+    assert fake.enabled(SEM, CONFIG_REPO)
+    assert migrate.PAUSE_RECORD not in fake.tree(SEM, ".github")
+
+
+def test_a_ctrl_c_after_the_pause_names_the_paused_repos(
+    fake, semester, monkeypatch, capsys
+):
+    def interrupted(*a, **k):
+        # GitHub unreadable by now too: the names must come from what the pause recorded.
+        monkeypatch.setattr(migrate, "list_org_repos", lambda org: 1 / 0)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(migrate.Semester, "rename", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _main(monkeypatch, SEM, "--no-preview")
+    err = capsys.readouterr().err
+    assert f"Actions are still DISABLED in: {SEM}/{OLD_CONFIG_REPO}, " in err
+    assert f"{COURSE}/.github" in err and migrate.PAUSE_RECORD in err
+
+
+def test_a_checkout_that_is_not_the_pinned_ref_is_named_by_file(
+    fake, semester, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        migrate, "git", lambda *a, **k: (0, "dsl_course/grades.py\ntemplates/x.yml\n")
+    )
+    assert _main(monkeypatch, SEM) == 0
+    err = capsys.readouterr().err
+    assert "this checkout differs from main" in err
+    assert "2 file(s): dsl_course/grades.py, templates/x.yml" in err
