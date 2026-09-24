@@ -1,7 +1,7 @@
 # SYSTEM-OWNED - do not edit. This form's field ids are a contract with .github/workflows/team-formation.yml,
 # which parses them; both are re-pushed by every bootstrap and nightly refresh.
 name: Join team
-description: Join or form a team for a group assignment
+description: Join, start or switch team for a group assignment
 title: "Join team"
 labels: ["team-formation"]
 body:
@@ -10,7 +10,7 @@ body:
       value: |
         The teams that already exist, and how much room each has left, are listed on the assignment's page on the cohort site.
 
-        To **join** one, choose *Join an existing team* and type its name exactly as that page spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
+        To **join** one, choose *Join or switch to an existing team* and type its name exactly as that page spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
 
         Already in a team? Joining or creating another moves you out of your current one while team formation is open.
   # dsl:assignment-field:start - this cohort's open assignments are spliced in here as a
@@ -32,7 +32,7 @@ body:
       label: Action
       description: Joining a team and starting one are different things - say which, so a typo in the name below cannot silently open a second team.
       options:
-        - Join an existing team
+        - Join or switch to an existing team
         - Create a new team
     validations:
       required: true

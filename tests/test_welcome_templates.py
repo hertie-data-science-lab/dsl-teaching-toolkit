@@ -752,7 +752,7 @@ def test_a_shut_window_refuses_and_says_which_day_it_shut():
     out = _run_form(
         _lock_for("closed"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["writes"] == [], "a request outside the window was recorded anyway"
     assert out["labels"] == ["team-refused"]
@@ -768,7 +768,7 @@ def test_a_window_that_has_not_opened_yet_never_says_it_closed():
     out = _run_form(
         _lock_for("pending"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["writes"] == [], "a request before the window opened was recorded anyway"
     assert out["labels"] == ["team-refused"]
@@ -787,7 +787,7 @@ def test_a_lock_written_before_the_window_existed_still_forms_teams():
         "assignments:\n  assignment-2:\n"
         "    team_formation: self_select\n    max_team_size: 4\n",
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["labels"] == ["team-recorded"]
     assert "assignment-2,team-alpha,stu" in out["writes"][0]
@@ -804,7 +804,7 @@ def test_creating_a_team_whose_name_is_taken_is_refused_not_joined():
     assert (
         "**team-alpha** already exists for `assignment-2` (2/4)" in out["comments"][0]
     )
-    assert "Join an existing team" in out["comments"][0]
+    assert "Join or switch to an existing team" in out["comments"][0]
 
 
 @needs_js
@@ -814,7 +814,7 @@ def test_joining_a_mistyped_name_names_the_team_that_was_meant():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "TeamAlpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "TeamAlpha"),
     )
     assert out["writes"] == []
     assert "no team **teamalpha** for `assignment-2`" in out["comments"][0]
@@ -840,7 +840,7 @@ def test_creating_a_near_miss_of_an_existing_name_is_refused_too(team):
     assert (
         "**team-alpha** already exists for `assignment-2` (2/4)" in out["comments"][0]
     )
-    assert "Join an existing team" in out["comments"][0]
+    assert "Join or switch to an existing team" in out["comments"][0]
     assert "team=team-alpha" in out["comments"][0], "the new issue is prefilled"
 
 
@@ -862,7 +862,7 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-zeta"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-zeta"),
     )
     assert out["writes"] == []
     assert "no team **team-zeta** for `assignment-2`" in out["comments"][0]
@@ -888,7 +888,7 @@ def test_a_lock_with_no_page_still_says_where_the_teams_are_listed():
     out = _run_form(
         _lock_for("open", page=""),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-zeta"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-zeta"),
     )
     said = out["comments"][0]
     assert "spelt exactly as on the assignment page on the course site" in said
@@ -898,7 +898,10 @@ def test_a_lock_with_no_page_still_says_where_the_teams_are_listed():
 @needs_js
 @pytest.mark.parametrize(
     "action,team",
-    [("Join an existing team", "team-alpha"), ("Create a new team", "team-beta")],
+    [
+        ("Join or switch to an existing team", "team-alpha"),
+        ("Create a new team", "team-beta"),
+    ],
     ids=["join", "create"],
 )
 def test_both_actions_still_end_in_a_row_in_teams_csv(action, team):
@@ -929,7 +932,7 @@ def test_a_recorded_join_points_at_the_next_step():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     said = out["comments"][0]
     assert "you're in team **team-alpha** for `assignment-2` (3/4)" in said
@@ -950,7 +953,10 @@ def test_a_recorded_create_tells_the_student_how_teammates_join():
     )
     said = out["comments"][0]
     assert "you're in team **team-beta** for `assignment-2` (1/4)" in said
-    assert "choose *Join an existing team* and type **team-beta** exactly" in said
+    assert (
+        "choose *Join or switch to an existing team* and type **team-beta** exactly"
+        in said
+    )
 
 
 _IN_BETA = _TEAMS_CSV + "assignment-2,team-beta,stu\n"
@@ -963,7 +969,7 @@ def test_joining_while_in_a_team_moves_you_in_one_write():
     out = _run_form(
         _lock_for("open"),
         _IN_BETA,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     (written,) = out["writes"]
     assert "assignment-2,team-beta,stu" not in written
@@ -1004,9 +1010,17 @@ def test_creating_while_in_a_team_moves_you_to_the_new_one():
 @pytest.mark.parametrize(
     "action,team,expect",
     [
-        ("Join an existing team", "team-beta", "**team-beta** is already your team"),
+        (
+            "Join or switch to an existing team",
+            "team-beta",
+            "**team-beta** is already your team",
+        ),
         ("Create a new team", "team-beta", "**team-beta** is already your team"),
-        ("Join an existing team", "teamalpha", "Did you mean **team-alpha** (2/4)?"),
+        (
+            "Join or switch to an existing team",
+            "teamalpha",
+            "Did you mean **team-alpha** (2/4)?",
+        ),
         ("Create a new team", "team_alpha", "**team-alpha** already exists"),
     ],
     ids=["join-own", "create-own", "join-miss", "create-taken"],
@@ -1027,7 +1041,7 @@ def test_moving_into_a_full_team_is_refused():
     out = _run_form(
         _lock_for("open"),
         full,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
         roster=("ann", "bob", "cy", "di", "stu"),
     )
     assert out["writes"] == []
@@ -1039,7 +1053,7 @@ def test_a_move_after_the_window_shuts_is_the_window_refusal():
     out = _run_form(
         _lock_for("closed"),
         _IN_BETA,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
     assert out["writes"] == []
     assert "closed on 4th Oct" in out["comments"][0]
@@ -1057,7 +1071,7 @@ def test_an_action_the_workflow_does_not_know_is_refused_not_crashed():
     assert out["writes"] == []
     said = out["comments"][0]
     assert "I don't recognise that Action" in said
-    assert "*Join an existing team* or *Create a new team*" in said
+    assert "*Join or switch to an existing team* or *Create a new team*" in said
     assert out["labels"] == ["team-refused"]
     assert out["states"] == ["closed:not_planned"]
 
@@ -1092,7 +1106,7 @@ def test_a_student_not_on_the_roster_stays_open_for_staff():
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
-        _form_body("assignment-2", "Join an existing team", "team-alpha"),
+        _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
         handle="stranger",
         roster=("ann", "bob"),
     )
@@ -1139,7 +1153,7 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
     assert fields["assignment"]["validations"]["required"] is True
     # The action field is never generated - two fixed options, the same in every cohort.
     assert fields["action"]["attributes"]["options"] == [
-        "Join an existing team",
+        "Join or switch to an existing team",
         "Create a new team",
     ]
 
