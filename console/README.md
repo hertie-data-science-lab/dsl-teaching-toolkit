@@ -45,6 +45,14 @@ Build-time settings, for `npm run build` or `npm run dev`:
     VITE_GH_APP_CLIENT_ID=Iv23...    # the GitHub App's client id; empty hides the App button
     VITE_AUTH_RELAY_URL=https://dsl-console-auth.<subdomain>.workers.dev
 
+The deployed console gets them in `.github/workflows/console-pages.yml`, as an `env:` on the
+`npm run build` step (not wired yet; D2 adds it), from repository variables:
+
+    - run: npm run build
+      env:
+        VITE_GH_APP_CLIENT_ID: ${{ vars.GH_APP_CLIENT_ID }}
+        VITE_AUTH_RELAY_URL: ${{ vars.AUTH_RELAY_URL }}
+
 ## What it reads
 
 - Courses: orgs from `GET /user/orgs` whose `.github` repo carries the `dsl-course-hub`

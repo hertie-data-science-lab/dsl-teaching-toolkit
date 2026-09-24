@@ -55,7 +55,8 @@ console with that as `VITE_AUTH_RELAY_URL`.
 The console is served from `https://hertie-data-science-lab.github.io`, an origin every
 GitHub Pages site in that organisation shares (project sites are paths on it). So the
 relay's CORS check admits any of those sites, and the console's `sessionStorage` (the
-access and refresh tokens) is readable by script on any of them. The console's CSP (D2)
+access and refresh tokens) is readable by script on any of them opened in the same tab, a
+link followed from the console for one. The console's CSP (D2)
 limits script injected into the console itself; it does nothing about a sibling Pages site
 in the same organisation. Keep that organisation's Pages sites to repos the maintainers
 control, or serve the console from its own origin.
