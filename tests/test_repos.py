@@ -518,16 +518,3 @@ def test_a_rename_succeeds_only_when_github_names_the_repo_anew(monkeypatch):
     assert not repos.rename_repo("Org", "grades-a", "grades-b")
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 422"))
     assert not repos.rename_repo("Org", "grades-a", "grades-b")
-
-
-def test_collaborator_permission_speaks_the_puts_vocabulary(monkeypatch):
-    # The listing says `write`/`read`; the PUT refuses both.
-    monkeypatch.setattr(
-        repos, "gh", lambda *a, **k: (0, "Ada\twrite\nBen\tread\nCy\tmaintain\n")
-    )
-    assert repos.collaborator_permission("Org", "r", "ada") == "push"
-    assert repos.collaborator_permission("Org", "r", "ben") == "pull"
-    assert repos.collaborator_permission("Org", "r", "cy") == "maintain"
-    assert repos.collaborator_permission("Org", "r", "zoe") == ""
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
-    assert repos.collaborator_permission("Org", "r", "ada") is None

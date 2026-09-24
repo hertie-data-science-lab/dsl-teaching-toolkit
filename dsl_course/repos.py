@@ -906,38 +906,6 @@ def direct_collaborators(
     return frozenset(logins)
 
 
-# What the collaborators LISTING calls a permission, in the words the PUT takes. The two
-# vocabularies differ (#214), and a `write` sent back as a permission is refused.
-_ROLE_TO_PERMISSION = {"read": "pull", "write": "push"}
-
-
-def collaborator_permission(
-    org: str, repo: str, login: str, *, person: bool = False
-) -> str | None:
-    """The permission `login`'s DIRECT grant on `org/repo` carries, in the PUT's vocabulary
-    (`pull`/`triage`/`push`/`maintain`/`admin`); "" when they hold no direct grant; None
-    when the listing could not be read."""
-    rows, out = _direct_logins(
-        org,
-        repo,
-        "collaborators?affiliation=direct&per_page=100",
-        ".[] | [.login, .role_name] | @tsv",
-    )
-    if rows is None:
-        _failed_on(
-            person,
-            f"could not read a repo's collaborators in {org}",
-            f"could not read {org}/{repo}'s collaborators: {out[:160]}",
-        )
-        return None
-    for row in rows:
-        who, _, role = row.partition("\t")
-        if who.strip().casefold() == login.casefold():
-            role = role.strip()
-            return _ROLE_TO_PERMISSION.get(role, role)
-    return ""
-
-
 def remove_collaborator(
     org: str, repo: str, login: str, *, person: bool = False
 ) -> bool:

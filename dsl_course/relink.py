@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from . import roster, teams
+from . import roster, schedule, teams
 from .collect import AUTOGRADE_DIR
 from .course import (
     COURSE_ADMIN_TEAM,
@@ -32,8 +32,9 @@ from .course import (
     INSTRUCTORS_TEAM,
     submission_repo,
     submission_suffix,
+    unit_permission,
 )
-from .discovery import classify_repos
+from .discovery import classify_repos, course_org_for_cohort
 from .enrol_codes import write_column
 from .faults import Unusable
 from .gh_contents import (
@@ -58,6 +59,7 @@ from .ghcli import BOT_EMAIL, bot_login, gh
 from .grades import (
     CHANNEL_EMAIL,
     DISTRIBUTED_PATH,
+    GRADEBOOK_PERMISSION,
     INFO_KEY,
     SHEETS_DIR,
     SheetUnreadable,
@@ -66,13 +68,13 @@ from .grades import (
     key_lines,
     parse_distributed,
     parse_sheet,
+    sheet_specs,
 )
 from .issues import close_by_creator
 from .log import log, log_err, log_err_person, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
     archive_repo,
-    collaborator_permission,
     direct_collaborators,
     rename_repo,
     repo_missing,
@@ -109,7 +111,6 @@ class Pending:
     new_id: str
     old: str
     old_id: str
-    old_on_roster: bool = False  # the old login is still another row's handle
 
     @property
     def line(self) -> int:
@@ -137,7 +138,12 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
         if not s.onboarded or not stored.isdigit():
             continue
         new_id = id_of_login(s.github_handle)
-        if not new_id:
+        if new_id == "":
+            _skip(
+                line, f"no GitHub account is called @{s.github_handle} - check the cell"
+            )
+            continue
+        if new_id is None:
             unanswered += 1
             log_person(f"    no definite answer for @{s.github_handle} (line {line})")
             continue
@@ -180,12 +186,10 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
                 "name - put their CURRENT login in the row",
             )
             continue
-        old_on_roster = handles[old.casefold()] > 0
-        found.append(
-            Pending(
-                i, s.hertie_email, s.github_handle, new_id, old, stored, old_on_roster
-            )
-        )
+        if handles[old.casefold()]:
+            _skip(line, "the previously linked account is still another row's handle")
+            continue
+        found.append(Pending(i, s.hertie_email, s.github_handle, new_id, old, stored))
     if unanswered:
         log_err(
             f"{unanswered} roster row(s) in {org} could not be checked for a switched "
@@ -324,23 +328,32 @@ def _move_repos(
     return True
 
 
+def _unit_permissions(org: str) -> dict[str, str]:
+    """`{cohort template: the grant its units get}`, by provisioning's own rule off each
+    assignment's `grading_config.yml`."""
+    specs = sheet_specs(course_org_for_cohort(org), schedule.load(org))
+    return {name: unit_permission(spec.visibility) for name, spec in specs.items()}
+
+
 def _move_grants(
     org: str, p: Pending, existing: dict[str, dict], team_repos: set[str]
 ) -> bool:
-    """Step 2: the new login gets the old one's direct grant on every repo now named after
-    it, and the old login's grant and invitations go. The drop box's push grant is the
-    handout's, and the next one re-grants it."""
+    """Step 2: the new login gets the grant provisioning gives on every repo now named
+    after it, and the old login's grant and invitations go. The drop box's push grant is
+    the handout's, and the next one re-grants it."""
+    templates = classify_repos(list(existing.values()))
+    permissions: dict[str, str] | None = None
     for repo in _repos_of(existing, p.new, team_repos):
         have = direct_collaborators(org, repo, person=True)
         if have is None:
             return False
         if p.new.casefold() not in have:
-            permission = collaborator_permission(org, repo, p.old, person=True)
-            if permission is None:
-                return False
-            if not permission:
-                gradebook = repo.casefold().startswith(GRADEBOOK_PREFIX)
-                permission = "pull" if gradebook else "maintain"
+            if templates.get(repo) is None:
+                permission = GRADEBOOK_PERMISSION
+            else:
+                if permissions is None:
+                    permissions = _unit_permissions(org)
+                permission = permissions.get(templates[repo], unit_permission(""))
             if not add_collaborator(
                 org, repo, p.new, permission=permission, person=True
             ):
@@ -528,22 +541,24 @@ def _config_changes(
 
 def _remove_old_member(org: str, p: Pending) -> bool:
     """Take the old account out of the org (or cancel its invitation) - only a plain
-    `member`, in no faculty team and named on no other roster row. The faculty-access
-    floor: staff are never demoted, so anything else is left and said privately. False
-    only when the removal itself failed."""
-    if p.old_on_roster:
-        log_person(f"  [skip] @{p.old} is still on the roster - left in {org}")
-        return True
+    `member` in no faculty team (`pending` already refused one still on the roster). The
+    faculty-access floor: staff are never demoted, so a definite owner or faculty member
+    is left and said privately. False when GitHub gave no definite answer or the removal
+    failed - the id then stays, and the next sync asks again."""
     role = org_member_role(org, p.old)
+    if role is None:
+        return False
     if role == "":
         return True
     if role != "member":
-        log_person(f"  [skip] @{p.old} is {role or 'unreadable'} in {org} - left")
+        log_person(f"  [skip] @{p.old} is {role} in {org} - left")
         return True
     for team in (INSTRUCTORS_TEAM, COURSE_ADMIN_TEAM):
         members = get_team_members(org, team)
-        if members is None or p.old.casefold() in {m.casefold() for m in members}:
-            log_person(f"  [skip] @{p.old} may be faculty ({team}) in {org} - left")
+        if members is None:
+            return False
+        if p.old.casefold() in {m.casefold() for m in members}:
+            log_person(f"  [skip] @{p.old} is faculty ({team}) in {org} - left")
             return True
     if not remove_org_membership(org, p.old):
         log_err("could not remove a relinked student's old account from the org")

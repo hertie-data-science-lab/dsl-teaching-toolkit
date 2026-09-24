@@ -177,6 +177,12 @@ def visibility_is_students(visibility: str) -> bool:
     return visibility == "student_choice"
 
 
+def unit_permission(visibility: str) -> str:
+    """The grant a submission unit gets on its own repo: `maintain`, which excludes
+    GitHub's visibility switch, or `admin` where the student owns that switch."""
+    return "admin" if visibility_is_students(visibility) else "maintain"
+
+
 def github_visibility(visibility: str) -> str:
     """What GITHUB will call a repo the toolkit handed out under this `visibility:`.
 

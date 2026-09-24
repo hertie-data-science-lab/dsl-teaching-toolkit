@@ -98,6 +98,7 @@ class World:
         self.archived: set[str] = set()
         self.fail: str | None = None
         self.fail_times = 1
+        self.specs = {"assignment-1": SPEC}
         self.gone: dict[str, str | None] = {}
         self.head = 0
         self.race = None
@@ -231,11 +232,6 @@ def world(monkeypatch) -> World:
             k.casefold() for k in w.repos[repo]["collab"]
         ),
     )
-    monkeypatch.setattr(
-        relink,
-        "collaborator_permission",
-        lambda org, repo, login, person=False: w.repos[repo]["collab"].get(login, ""),
-    )
 
     def grant(org, repo, login, permission="push", person=False):
         if w.failing("grant"):
@@ -260,6 +256,9 @@ def world(monkeypatch) -> World:
 
     monkeypatch.setattr(relink, "close_by_creator", close)
     monkeypatch.setattr(relink, "bot_login", lambda: "dsl-bot")
+    monkeypatch.setattr(relink, "course_org_for_cohort", lambda org: "Course")
+    monkeypatch.setattr(relink.schedule, "load", lambda org: None)
+    monkeypatch.setattr(relink, "sheet_specs", lambda course, sched: w.specs)
 
     def gh(*args, **kwargs):
         repo = args[1].split("/")[2]
@@ -425,6 +424,12 @@ def test_the_same_id_is_a_rename_and_not_a_relink(world):
             id="squat-guard",
         ),
         pytest.param(lambda w: setattr(w, "subjects", None), id="history-unreadable"),
+        pytest.param(
+            lambda w: setattr(
+                w, "roster", roster_text(extra=[f"c@x.edu,Cy,,{OLD},,,"])
+            ),
+            id="old-login-still-on-the-roster",
+        ),
     ],
 )
 def test_a_row_that_cannot_be_told_for_certain_is_left_alone(world, setup):
@@ -571,16 +576,6 @@ def test_the_old_account_leaves_the_org(world):
     [
         pytest.param(lambda w: w.org.update({OLD: "admin"}), id="owner"),
         pytest.param(lambda w: w.faculty.update({"instructors": {OLD}}), id="faculty"),
-        pytest.param(
-            lambda w: w.faculty.update({"course-admin": None}), id="faculty-unreadable"
-        ),
-        pytest.param(lambda w: w.org.update({OLD: None}), id="role-unreadable"),
-        pytest.param(
-            lambda w: setattr(
-                w, "roster", roster_text(extra=[f"c@x.edu,Cy,,{OLD},,,"])
-            ),
-            id="still-on-the-roster",
-        ),
     ],
 )
 def test_the_old_account_is_kept_when_it_may_be_staff(world, setup):
@@ -614,3 +609,51 @@ def test_a_deleted_old_account_is_one_line_for_faculty(world, capsys):
     err = capsys.readouterr().err
     assert err.count("has been deleted") == 1 and "could not be checked" not in err
     assert NEW not in err  # the handle itself is verbose-only
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        pytest.param(lambda w: w.faculty.update({"course-admin": None}), id="teams"),
+        pytest.param(lambda w: w.org.update({OLD: None}), id="role"),
+    ],
+)
+def test_an_unclear_membership_answer_holds_the_id_for_the_next_sync(world, setup):
+    setup(world)
+    assert run(world)[0] == 1
+    assert OLD in world.org and world.stored_id() == OLD_ID
+    world.org[OLD], world.faculty = "member", {}
+    assert run(world)[0] == 0
+    assert OLD not in world.org and world.stored_id() == NEW_ID
+
+
+def test_a_mistyped_handle_is_named_for_faculty_not_counted_as_unanswered(
+    world, capsys
+):
+    world.users.pop(NEW)
+    run(world)
+    err = capsys.readouterr().err
+    assert err.count(f"no GitHub account is called @{NEW}") == 1
+    assert "could not be checked" not in err
+
+
+# ------------------------------------------------------------ the grant
+
+
+def test_a_student_choice_repo_is_granted_admin_as_provisioning_does(world):
+    world.specs = {
+        "assignment-1": grades.SheetSpec(
+            slug="assignment-1", title="A1", is_group=False, visibility="student_choice"
+        )
+    }
+    run(world)
+    assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "admin"}
+    assert world.repos[f"grades-{NEW}"]["collab"] == {NEW: "pull"}
+
+
+def test_the_grant_follows_provisioning_even_when_the_old_one_was_pruned(world):
+    # An unfinished relink's pass ends in sync_roster's prune, which revokes the old
+    # login's grant - so the old grant is no guide to what the new login should get.
+    world.repos[f"assignment-1-{OLD}"]["collab"] = {}
+    run(world)
+    assert world.repos[f"assignment-1-{NEW}"]["collab"] == {NEW: "maintain"}
