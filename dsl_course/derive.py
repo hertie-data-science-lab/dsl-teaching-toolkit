@@ -496,7 +496,14 @@ def derive_student_version(
     details: list[str] = []
     regions = cells = 0
     for path in sources:
-        text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
+        try:
+            text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
+        except RuntimeError as exc:
+            # GitHub refused the read (permission, rate limit, network). Its answer names
+            # the file and says why; it is the course's own template, so it may be shown.
+            log_err(f"  ! {exc}")
+            reasons.append(_refused("READ_FAILED", f"{path} could not be read: {exc}."))
+            continue
         if text is None:
             # The tree listed it a moment ago, so this is a race or a permission fault
             # rather than an absence - either way the derived set is incomplete.
@@ -593,10 +600,8 @@ def main() -> int:
         )
     except RuntimeError as exc:
         log_err(str(exc))
-        text = (
-            "A file on the solution branch could not be read; the run log says which."
-        )
-        return Summary(text, reasons=[_refused("READ_FAILED", text)], code=1)
+        text = f"The derive stopped: {exc}."
+        return Summary(text, reasons=[_refused("DERIVE_STOPPED", text)], code=1)
 
 
 if __name__ == "__main__":

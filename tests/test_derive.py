@@ -382,6 +382,29 @@ def test_a_failed_write_is_a_reason(monkeypatch):
     assert [r["code"] for r in out.reasons] == ["WRITE_FAILED"]
 
 
+def test_a_file_github_will_not_serve_is_a_reason_naming_it(monkeypatch):
+    _Repo({"solution/starter.py": FENCED_PY, "solution/b.py": FENCED_PY}).install(
+        monkeypatch
+    )
+
+    def read(org, repo, path, ref=""):
+        if path == "solution/b.py":
+            raise RuntimeError(f"could not read {org}/{repo}/{path}: HTTP 403")
+        return FENCED_PY
+
+    monkeypatch.setattr(derive, "get_file_content", read)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert out == 1
+    assert out.reasons == [
+        {
+            "code": "READ_FAILED",
+            "text": "solution/b.py could not be read: could not read "
+            "Course/assignment-1-f2026/solution/b.py: HTTP 403.",
+        }
+    ]
+    assert len(out.details) == 1
+
+
 def test_a_broken_region_and_an_empty_template_are_reasons(monkeypatch):
     _Repo({"solution/broken.py": "### BEGIN SOLUTION\nx = 1\n"}).install(monkeypatch)
     out = derive.derive_student_version("Course", "assignment-1-f2026", True)
