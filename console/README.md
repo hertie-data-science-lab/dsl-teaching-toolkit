@@ -220,9 +220,12 @@ a first visit, mostly free 304s after).
 The instructor screens take every repo and path name from `src/model/names.ts`, which reads
 `schemas/names.json` when the engine exports it (decisions 0010 and 0012). The console reads
 the new names only. An org that still carries a retired one (the `classroom-config` or
-`welcome` repo, `people.yml`, `.dsl/`, the `dsl-cohort` topic, the old course registry) shows
-one screen, "This semester has not been migrated yet" (or course), with the engine's
-`NOT_MIGRATED` sentence for each, and nothing else of it loads (`src/model/migration.ts`).
+`welcome` repo, `people.yml`, `.dsl/`, the `dsl-cohort` topic, the old course registry or its
+`cohorts:` key, `cohort_defaults:` in `dsl-course.yml`) shows one screen, "This semester has
+not been migrated yet" (or course), with the engine's `NOT_MIGRATED` sentence for each, and
+nothing else of it loads (`src/model/migration.ts`). Only the org a page is about is checked.
+A check GitHub does not answer shows "Could not check whether this semester is migrated" and
+runs again on the next page; it never counts as migrated.
 
 ## Schemas
 
