@@ -16,7 +16,7 @@ const LOGIN = 'octo-student';
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&rsquo;/g, '’').replace(/\s+/g, ' ');
 
 function siteFake(fake = new FakeGitHub()): FakeGitHub {
-  for (const dir of ['_lectures', '_events', '_assignments']) {
+  for (const dir of ['_lectures', '_events', '_assignments', '_announcements']) {
     const names = Object.keys(FILES).filter((f) => f.startsWith(`${dir}/`));
     fake.on('GET', `/repos/${ORG}/${SITE}/contents/${dir}`, names.map((p) => ({ name: p.split('/')[1], path: p, sha: `sha-${p}`, type: 'file' })));
   }
@@ -66,7 +66,7 @@ describe('the site source behind StudentData', () => {
     const f = (await src.facts(ORG))!;
     expect(f.instructors.map((c) => [c.name, c.role, c.picture])).toEqual([
       ['Prof. Lynn Kaack, PhD', 'instructor', 'https://github.com/LynnKaack.png'],
-      ['Henry Baker', 'teaching_assistant', ''],
+      ['Henry Baker', 'teaching_assistant', `https://${ORG}.github.io/_images/pp/henrycgbaker.jpg`],
     ]);
     const n = fake.seen.length;
     await src.facts(ORG.toUpperCase());
@@ -163,7 +163,8 @@ describe('a student’s own data', () => {
         { id: 3, body: '<!-- dsl-marks-returned:assignment-2 -->\nMarks returned: see your marks repo.', created_at: '2026-10-12T09:00:00Z', html_url: '' },
       ]);
     const r = await readReceipts(client(fake), ORG, 'assignment-2-octo-student');
-    expect(r).toEqual({ url: 'https://github.com/x/1', last: { text: 'Updated after a late push: `def5678`.', when: '2026-10-01T09:00:00Z' } });
+    expect(r).toMatchObject({ url: 'https://github.com/x/1', last: { text: 'Updated after a late push: `def5678`.', when: '2026-10-01T09:00:00Z' } });
+    expect(r!.thread.map((c) => c.kind)).toEqual(['receipt', 'receipt', 'marks']);
     expect(await readReceipts(client(new FakeGitHub().on('GET', /\/issues/, [])), ORG, 'r')).toBeNull();
   });
 });
@@ -178,6 +179,7 @@ async function mineFixture(): Promise<Mine> {
       'assignment-6': { slug: 'assignment-6', repo: 'assignment-6-submissions', team: null, members: null, shared: true },
     },
     gradebook: parseGradebook(GRADES, '2026-09-23T08:00:00Z'),
+    auditor: false,
   };
 }
 
@@ -218,7 +220,7 @@ describe('the screens', () => {
   });
 
   it('Assignments shows my repo, team, receipts, dates and late rule, and the hand-in place for external work', async () => {
-    const receipts = { 'assignment-2-octo-student': { url: 'https://github.com/r/1', last: { text: 'Recorded `abc1234`.', when: '2026-09-30T00:00:00Z' } } };
+    const receipts = { 'assignment-2-octo-student': { url: 'https://github.com/r/1', last: { text: 'Recorded `abc1234`.', when: '2026-09-30T00:00:00Z' }, body: '', thread: [] } };
     const v = <AssignmentsView org={ORG} facts={await demoFacts()} mine={await mineFixture()} now={NOW} studentView={false} receipts={receipts} />;
     const out = render(v);
     const t = text(v);

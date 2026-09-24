@@ -139,7 +139,7 @@ export function landing(courses: Course[]): string {
 
 /** The student screens, in nav order, with their labels; `week` is where a semester opens. */
 export const STUDENT_SCREENS: [string, string][] = [
-  ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['join', 'Join'], ['instructors', 'Instructors'],
+  ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['setup', 'Set up'], ['join', 'Join'], ['instructors', 'Instructors'],
 ];
 
 /** The link to a semester's student screens. */

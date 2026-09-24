@@ -9,6 +9,8 @@ import { createAuth, type ConsoleAuth } from './auth/console';
 import { GitHubClient, type GhUser } from './github/client';
 import { discoverEstate, studentSemesters, type Estate, type Mode } from './model/discovery';
 import { LiveFiles } from './model/files';
+import { forgetMyTeams } from './model/mine';
+import { forgetStudentPrefs } from './model/prefs';
 import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
 import { StatusStore, type Loaded } from './model/status';
 import { DispatchAdapter, outcomePath } from './ops/adapter';
@@ -31,11 +33,12 @@ import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
-import { StudentScreen, studentScreen } from './screens/Student';
+import { StudentScreen, forgetStudentData, studentScreen } from './screens/Student';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
+import { forgetRendered } from './ui/rendered';
 import { Footer, Sidenav, StudentNav, Topbar } from './ui/shell';
 
 export interface AppDeps {
@@ -181,9 +184,9 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'home') {
-    body = <HomeScreen courses={courses} semesters={semesters} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
+    body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
-    body = <HomeScreen courses={courses} semesters={semesters} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
+    body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course.write) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
@@ -320,6 +323,11 @@ export function createState({ auth, client }: AppDeps) {
         .catch((e: unknown) => (st.error.value = `Could not list your courses: ${e instanceof Error ? e.message : String(e)}`));
     },
     signOut() {
+      const login = st.user.value?.login;
+      if (login) forgetStudentPrefs(login);
+      forgetRendered();
+      forgetMyTeams(client);
+      forgetStudentData(client);
       auth.signOut();
       client.clearCache();
       files.forget();

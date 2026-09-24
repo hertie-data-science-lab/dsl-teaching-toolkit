@@ -1,6 +1,7 @@
 // What a student's screens know about a semester that is the same for every student: the
-// schedule rows with their kinds, the assignments' dates and rules, the instructors' cards,
-// the archive date. It comes through ONE interface, `StudentData`, because its source will
+// schedule rows with their kinds and readings, the assignments' dates, rules, briefs and
+// team lists (names and headcounts only), the instructors' cards, the home text and
+// announcements, the archive date. It comes through ONE interface, `StudentData`, because its source will
 // change: today it is the public site repo's generated files (`SiteSource`); once the engine
 // writes `.github/.system/student-status.json` (WP-D4), a source reading that one file
 // replaces it and no screen changes. The semester's own `status.json` is private
@@ -29,7 +30,29 @@ export interface ScheduleRow {
   /** False for a session whose materials are not out yet. */
   released: boolean;
   /** Released files: `path` within `repo` when they live in a materials repo the console can open. */
-  links: { name: string; repo?: string; path?: string; url: string }[];
+  links: FileLink[];
+  /** The date is provisional ("TBC"); the row still happens when it says. */
+  tbc: boolean;
+  /** The released reading files of the session (also among `links`). */
+  readings: FileLink[];
+  /** The session's reading list as prose (markdown), when its readings shipped one. */
+  readingList: string;
+  /** The session has readings planned that are not released yet. */
+  readingsPending: boolean;
+}
+
+export interface FileLink {
+  name: string;
+  repo?: string;
+  path?: string;
+  url: string;
+}
+
+/** A team formed for a group assignment: its name, how many are in it and the most it may hold. Never who. */
+export interface TeamRoom {
+  name: string;
+  members: number;
+  cap: number | null;
 }
 
 export type SubmitVia = 'assignment_repo' | 'shared_dropbox_repo' | 'external' | '';
@@ -60,6 +83,26 @@ export interface SemesterAssignment {
   solutionShown: string | null;
   maxPoints: string;
   handedOut: boolean;
+  /** The brief (markdown), once handed out; '' before. */
+  brief: string;
+  /** The shape in one word: assignment-repo-private | assignment-repo-public | assignment-repo-student-choice | shared-dropbox-repo | external. */
+  shape: string;
+  /** Who can read the repo handed out ("NB: ..."), once handed out. */
+  shapeNote: string;
+  /** The dates are provisional. */
+  tbc: boolean;
+  /** The teams formed so far, while team formation is open. */
+  teams: TeamRoom[];
+}
+
+/** The student may make the repo public themselves after the late cutoff. */
+export const STUDENT_CHOICE = 'assignment-repo-student-choice';
+
+export interface Announcement {
+  when: string;
+  title: string;
+  /** Markdown. */
+  details: string;
 }
 
 export interface InstructorCard {
@@ -69,9 +112,13 @@ export interface InstructorCard {
   /** An image URL the console may load, or '' (initials are shown instead). */
   picture: string;
   role: 'instructor' | 'teaching_assistant';
+  /** Only where the instructor chose to show it. */
+  email: string;
 }
 
 export interface SemesterFacts {
+  /** "Deep Learning"; '' when the source does not say. */
+  courseName: string;
   timezone: string;
   rows: ScheduleRow[];
   assignments: SemesterAssignment[];
@@ -82,12 +129,43 @@ export interface SemesterFacts {
   latePolicy: string[];
   /** The materials repos released files live in (normally one, `materials`). */
   materialsRepos: string[];
+  /** The instructors' own welcome text (markdown); '' when none. */
+  homeMarkdown: string;
+  /** Hand-written announcements, newest first. */
+  announcements: Announcement[];
+  /** The released syllabus, pinned; null when none has been released. */
+  syllabus: FileLink | null;
 }
 
 /** Where a student's screens get the semester's shared facts. */
 export interface StudentData {
   /** The semester's facts, or null when the source has nothing for it. */
   facts(org: string): Promise<SemesterFacts | null>;
+  /** An instructor card's picture as a URL the image policy lets through (a `data:` URL for one the source hosts), or '' for initials. */
+  picture(org: string, url: string): Promise<string>;
+}
+
+/** Hosts the console's image policy (`img-src`) loads from directly. */
+export const IMG_HOSTS = /^https:\/\/(avatars\.githubusercontent\.com|github\.com)\//;
+
+/** A picture hosted on the semester's own site, as `[repo, path]` in its site repo; null for anything else (or a path that does not decode). */
+export function sitePicture(url: string, org: string): [string, string] | null {
+  const site = `${org.toLowerCase()}.github.io`;
+  const m = /^https:\/\/([^/]+)\/(.+)$/.exec(url);
+  if (!m || m[1].toLowerCase() !== site) return null;
+  try {
+    return [site, decodeURIComponent(m[2])];
+  } catch {
+    return null;
+  }
+}
+
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+
+function bytesToBase64(b: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 export const DEFAULT_TZ = 'Europe/Berlin';
@@ -174,7 +252,7 @@ const ARCHIVE_ROWS = ['semester-archived', 'cohort-archived'];
 const stem = (name: string) => name.replace(/\.md$/, '');
 const SHAPES: Record<string, SubmitVia> = { external: 'external', 'shared-dropbox-repo': 'shared_dropbox_repo' };
 
-function assignmentOf(file: string, fm: Record<string, unknown>): SemesterAssignment {
+function assignmentOf(file: string, fm: Record<string, unknown>, body: string): SemesterAssignment {
   const shape = str(fm.submit_shape);
   const submitVia: SubmitVia = SHAPES[shape] ?? (shape.startsWith('assignment-repo') ? 'assignment_repo' : '');
   const due = (fm.due_event as Record<string, unknown> | undefined)?.date;
@@ -199,7 +277,29 @@ function assignmentOf(file: string, fm: Record<string, unknown>): SemesterAssign
     solutionShown: fm.solution_datetime ? str(fm.solution_datetime) : null,
     maxPoints: str(fm.max_points),
     handedOut: fm.handout_pending !== true,
+    brief: fm.handout_pending === true ? '' : briefOf(body),
+    shape,
+    shapeNote: str(fm.shape_note),
+    tbc: fm.tbc === true,
+    teams: (Array.isArray(fm.teams) ? (fm.teams as Record<string, unknown>[]) : []).map((t) => {
+      const n = Number(str(t.members));
+      const c = Number(str(t.cap));
+      // Names and headcounts only: the site's member digests are never read.
+      return { name: str(t.name), members: Number.isFinite(n) ? n : 0, cap: Number.isFinite(c) && c > 0 ? c : Number.isFinite(cap) && cap > 0 ? cap : null };
+    }).filter((t) => t.name),
   };
+}
+
+/** A generated page's body without its front matter. */
+export function bodyOf(text: string): string {
+  const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text);
+  return m ? text.slice(m[0].length) : text;
+}
+
+/** The brief as the assignment page carries it: its body, out of the `{% raw %}` guard the site wraps it in. */
+function briefOf(body: string): string {
+  const b = body.replace(/\{%-?\s*(end)?raw\s*-?%\}/g, '').trim();
+  return b === 'Assignment brief.' ? '' : b;
 }
 
 function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: string): ScheduleRow[] {
@@ -210,43 +310,52 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     details: str(fm.details),
     allDay: fm.hide_time === true,
     released: fm.unreleased !== true,
-    links: [] as ScheduleRow['links'],
+    links: [] as FileLink[],
+    tbc: fm.tbc === true,
+    readings: [] as FileLink[],
+    readingList: '',
+    readingsPending: fm.readings_pending === true,
   };
   if (dir === '_assignments') {
     const slug = id.replace(/^\d+-/, '');
     const due = fm.due_event as Record<string, unknown> | undefined;
     const out: ScheduleRow[] = [];
-    if (fm.date) out.push({ ...base, id: `${id}:handout`, kind: 'assignment', when: str(fm.date), assignment: slug, details: '' });
-    if (due?.date) out.push({ ...base, id: `${id}:due`, kind: 'due', when: str(due.date), assignment: slug, details: '' });
+    if (fm.date) out.push({ ...base, id: `${id}:handout`, kind: 'assignment', when: str(fm.date), assignment: slug });
+    if (due?.date) out.push({ ...base, id: `${id}:due`, kind: 'due', when: str(due.date), assignment: slug, details: str(due.details), tbc: due.tbc === true || base.tbc });
     return out;
   }
   if (!fm.date) return [];
-  const links = Array.isArray(fm.links) ? (fm.links as Record<string, unknown>[]) : [];
+  const raw = Array.isArray(fm.links) ? (fm.links as Record<string, unknown>[]) : [];
+  const links = raw.map((l) => {
+    const url = str(l.url);
+    const rp = repoPath(url, org);
+    return { name: str(l.name), url, ...(rp ?? {}) };
+  });
   return [{
     ...base,
     id,
     kind: str(fm.kind) || str(fm.type) || (dir === '_lectures' ? 'lecture' : 'special_event'),
     when: str(fm.date),
-    links: links.map((l) => {
-      const url = str(l.url);
-      const rp = repoPath(url, org);
-      return { name: str(l.name), url, ...(rp ?? {}) };
-    }),
+    links,
+    readings: links.filter((_, i) => /^readings?$/.test(str(raw[i].section))),
+    readingList: str(fm.reading_list).trim(),
   }];
 }
 
-const cardsOf = (list: unknown, role: InstructorCard['role']): InstructorCard[] =>
+const cardsOf = (list: unknown, role: InstructorCard['role'], org: string): InstructorCard[] =>
   (Array.isArray(list) ? (list as Record<string, unknown>[]) : []).map((p) => ({
     name: str(p.name),
     title: str(p.title),
     webpage: str(p.webpage),
-    picture: pictureOf(str(p.profile_pic)),
+    picture: pictureOf(str(p.profile_pic), org),
     role,
+    email: str(p.email),
   })).filter((c) => c.name);
 
-/** A picture the console's image policy lets through (GitHub avatars); anything else shows initials. */
-function pictureOf(src: string): string {
-  return /^https:\/\/(avatars\.githubusercontent\.com|github\.com)\//.test(src) ? src : '';
+/** A card picture as an absolute URL: a site-relative one (`/_images/pp/x.jpg`) resolves against the semester's site. */
+export function pictureOf(src: string, org: string): string {
+  if (/^https:\/\//.test(src)) return src;
+  return src.startsWith('/') ? `https://${org.toLowerCase()}.github.io${src}` : '';
 }
 
 /**
@@ -264,6 +373,16 @@ export class SiteSource implements StudentData {
     private readonly clock: () => number = Date.now,
   ) {}
 
+  /** A picture on the semester's site, read from its site repo through the API (the page may not load github.io) as a data: URL; '' otherwise. */
+  async picture(org: string, url: string): Promise<string> {
+    if (IMG_HOSTS.test(url)) return url;
+    const at = sitePicture(url, org);
+    const mime = MIME[at?.[1].split('.').pop()?.toLowerCase() ?? ''];
+    if (!at || !mime) return '';
+    const b = await this.client.getSmallBytes(org, at[0], at[1]);
+    return b ? `data:${mime};base64,${bytesToBase64(b)}` : '';
+  }
+
   /** Read once per semester and kept for FRESH_MS, so moving between screens costs nothing. */
   facts(org: string): Promise<SemesterFacts | null> {
     const key = org.toLowerCase();
@@ -278,41 +397,73 @@ export class SiteSource implements StudentData {
   private async read(org: string): Promise<SemesterFacts | null> {
     const site = `${org}.github.io`;
     const c = this.client;
-    const dirs = ['_lectures', '_events', '_assignments'] as const;
-    const [listings, people, late, materials] = await Promise.all([
+    const dirs = ['_lectures', '_events', '_assignments', '_announcements'] as const;
+    const [listings, people, late, materials, config, home] = await Promise.all([
       Promise.all(dirs.map((d) => c.listDir(org, site, d))),
       c.getContents(org, site, '_data/people.yml'),
       c.getContents(org, site, '_data/late_policy.yml'),
       c.getContents(org, site, '_data/materials.yml'),
+      c.getContents(org, site, '_config.yml'),
+      c.getContents(org, site, 'index.md'),
     ]);
-    if (listings.every((l) => l === null) && !people) return null;
+    if (listings.slice(0, 3).every((l) => l === null) && !people) return null;
     const files = dirs.flatMap((d, i) => (listings[i] ?? []).filter((e: DirEntry) => e.type === 'file' && e.name.endsWith('.md')).map((e) => [d, e] as const));
     const texts = await Promise.all(files.map(([, e]) => c.getContents(org, site, e.path)));
     const rows: ScheduleRow[] = [];
     const assignments: SemesterAssignment[] = [];
+    const announcements: Announcement[] = [];
     let archive: string | null = null;
     files.forEach(([d, e], i) => {
-      const fm = frontMatter(texts[i]?.text ?? '');
+      const text = texts[i]?.text ?? '';
+      const fm = frontMatter(text);
+      if (d === '_announcements') {
+        if (fm.date) announcements.push({ when: str(fm.date), title: str(fm.title), details: str(fm.details) || bodyOf(text).trim() });
+        return;
+      }
       // `semester-archived.md` since the rename, `cohort-archived.md` on a site synced before it.
       const archiveRow = d === '_events' && ARCHIVE_ROWS.includes(stem(e.name));
       if (archiveRow) archive = fm.date ? str(fm.date) : null;
       // An old site titles that row with the old word; the console says semester.
       const title = str(fm.title) === 'Cohort archived' ? 'Semester archived' : str(fm.title);
       rows.push(...rowsOf(d, e.name, archiveRow ? { ...fm, title, details: '' } : fm, org));
-      if (d === '_assignments') assignments.push(assignmentOf(e.name, fm));
+      if (d === '_assignments') assignments.push(assignmentOf(e.name, fm, bodyOf(text)));
     });
     const ppl = yamlOf(people?.text);
     const lp = yamlOf(late?.text);
+    const cfg = yamlOf(config?.text);
+    const mat = yamlOf(materials?.text);
+    const syllabus = str(mat.syllabus);
+    const sp = syllabus ? repoPath(syllabus, org) : null;
+    announcements.sort((a, b) => instant(b.when) - instant(a.when));
     return {
-      timezone: DEFAULT_TZ,
+      courseName: str(cfg.course_name),
+      timezone: str(cfg.timezone) || DEFAULT_TZ,
       rows,
       assignments,
-      instructors: [...cardsOf(ppl.instructors, 'instructor'), ...cardsOf(ppl.teaching_assistants, 'teaching_assistant')],
+      instructors: [...cardsOf(ppl.instructors, 'instructor', org), ...cardsOf(ppl.teaching_assistants, 'teaching_assistant', org)],
       archive,
       latePolicy: (Array.isArray(lp.policies) ? lp.policies : []).map(str).filter(Boolean),
       materialsRepos: materialsReposOf(materials?.text ?? '', org),
+      homeMarkdown: homeText(bodyOf(home?.text ?? ''), cfg),
+      announcements,
+      syllabus: syllabus ? { name: sp ? (sp.path.split('/').pop() ?? sp.path) : 'Syllabus', url: syllabus, ...(sp ?? {}) } : null,
     };
   }
+}
+
+/**
+ * The site's home page (`index.md`, the instructors' own) as plain markdown: `{{ site.x }}`
+ * filled from `_config.yml`, an `{% if site.x %}` block kept only when x is set, and any other
+ * Liquid tag dropped. Enough for what a home page carries; the site itself is the reference.
+ */
+export function homeText(body: string, cfg: Record<string, unknown>): string {
+  const val = (k: string) => str(cfg[k]);
+  return body
+    .replace(/\{%-?\s*if\s+site\.(\w+)\s*-?%\}([\s\S]*?)\{%-?\s*endif\s*-?%\}/g, (_, k: string, inner: string) => (val(k) ? inner : ''))
+    .replace(/\{\{-?\s*site\.(\w+)\s*-?\}\}/g, (_, k: string) => val(k))
+    .replace(/\{%[\s\S]*?%\}|\{\{[\s\S]*?\}\}/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function yamlOf(text: string | undefined): Record<string, unknown> {

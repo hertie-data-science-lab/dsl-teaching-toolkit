@@ -42,6 +42,15 @@ export interface GhRepo {
   pushed_at?: string | null;
   permissions?: { admin?: boolean; maintain?: boolean; push?: boolean; triage?: boolean; pull?: boolean };
   html_url: string;
+  /** On a single-repo read: whether it is a fork, and of what. */
+  fork?: boolean;
+  parent?: { full_name: string };
+}
+
+export interface GhTeam {
+  slug: string;
+  name: string;
+  organization: { login: string };
 }
 
 export interface FileContent {
@@ -333,6 +342,11 @@ export class GitHubClient {
     return this.listPages<OrgMembership>('/user/memberships/orgs?state=active');
   }
 
+  /** The org invitations the signed-in user has not accepted yet, every page (classic and GitHub App tokens). */
+  listPendingMemberships(): Promise<OrgMembership[]> {
+    return this.listPages<OrgMembership>('/user/memberships/orgs?state=pending');
+  }
+
   /** The accounts of the App installations the user's App token can see, every page (GitHub App tokens only). */
   async listInstallationAccounts(): Promise<{ login: string; type: string }[]> {
     const list = await this.listPages<{ account?: { login?: string; type?: string } | null }>('/user/installations', (p) => (p as { installations: [] }).installations ?? []);
@@ -581,6 +595,23 @@ export class GitHubClient {
       if (e instanceof GitHubError) return null;
       throw e;
     }
+  }
+
+  /** The teams the signed-in person is in, across every org their token reaches (one listing, every page). */
+  listMyTeams(): Promise<GhTeam[]> {
+    return this.listPages<GhTeam>('/user/teams');
+  }
+
+  /** `user`'s membership state of team `team` in `org` (`active` | `pending`), null when not a member (404); any other failure throws, so a caller never mistakes "could not tell" for "not a member". A member may read their own membership of a secret team. */
+  async getTeamMembership(org: string, team: string, user: string): Promise<string | null> {
+    const r = await this.getOrNull<{ state: string }>(`/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(team)}/memberships/${encodeURIComponent(user)}`);
+    return r?.state ?? null;
+  }
+
+  /** A small file's bytes through the contents API (up to 1 MB), or null when it is absent. */
+  async getSmallBytes(owner: string, repo: string, path: string): Promise<Uint8Array | null> {
+    const r = await this.getOrNull<{ type?: string; content?: string }>(`/repos/${owner}/${repo}/contents/${enc(path)}`);
+    return r && r.type === 'file' && r.content ? decodeBytes(r.content) : null;
   }
 
   /** Whether `user` is a member of `org` (as far as the caller may see). */

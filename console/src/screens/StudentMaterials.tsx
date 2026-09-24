@@ -1,15 +1,18 @@
 // Materials for a student: the released `materials` repo as a tree (one recursive tree read),
-// and a file opened in the console from the private copy with the student's own token.
-// Nothing is published anywhere; see model/materials.ts for how each kind is shown.
+// a file opened in the console from the private copy with the student's own token, and the
+// readings of each session. Nothing is published anywhere; see model/materials.ts for how
+// each kind is shown.
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { TreeEntry } from '../github/client';
 import { buildTree, type TreeNode } from '../edit/badges';
 import { openDeck } from '../model/deckTab';
+import { fmtDay } from '../model/format';
 import { showFile, type Shown } from '../model/materials';
+import { DEFAULT_TZ, sortedRows, type SemesterFacts } from '../model/student';
 import { studentHref } from '../router';
-import { CheckLine, Loading } from '../ui/bits';
+import { CheckLine, Loading, Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
 
@@ -136,4 +139,31 @@ export function ShownView({ shown, name }: { shown: Shown; name: string }) {
         </p>
       );
   }
+}
+
+/** The readings of every session: its reading files (opened here), its reading list, or "to come" while they are planned but not out. */
+export function ReadingsView({ org, facts, now }: { org: string; facts: SemesterFacts; now: number }) {
+  const tz = facts.timezone || DEFAULT_TZ;
+  const rows = sortedRows(facts.rows, tz).filter((r) => r.readings.length || r.readingList || r.readingsPending);
+  if (!rows.length) return null;
+  const year = new Date(now).getFullYear();
+  return (
+    <section class="panel section" aria-labelledby="h-readings">
+      <h2 id="h-readings">Readings</h2>
+      <ul class="plain-list readings">
+        {rows.map((r) => (
+          <li>
+            <b>{r.title}</b>{r.subtitle ? `: ${r.subtitle}` : ''} <span class="footnote">{fmtDay(r.when, tz, year)}</span>
+            {r.readings.length ? (
+              <ul class="plain-list">
+                {r.readings.map((l) => <li>{l.repo && l.path && facts.materialsRepos.includes(l.repo) ? <a href={materialHref(org, l.repo, l.path)}>{l.name}</a> : <a href={l.url} target="_blank" rel="noopener">{l.name} <Ext /></a>}</li>)}
+              </ul>
+            ) : null}
+            {r.readingList ? <Md class="reading-list" src={r.readingList.replace(/^#{1,6}\s+(.+)$/gm, '**$1**')} /> : null}
+            {!r.readings.length && !r.readingList ? <span class="footnote"> Readings to come.</span> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }

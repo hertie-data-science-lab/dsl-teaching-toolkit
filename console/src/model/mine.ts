@@ -1,17 +1,22 @@
 // A student's own facts in one semester, read from GitHub with their own token: which
 // assignment repos they hold (their own `<slug>-<handle>`, their team's `<slug>-<team>`, the
-// shared drop box), their team's members, the Submission receipts thread in each repo, and
-// their gradebook `grades-<handle>/grades.yml`. Nothing here reads another student's data:
+// shared drop box), their team (from the repo, or from their GitHub teams where the shape
+// makes no team repo) and its members, whether they audit, the Submission receipts thread in
+// each repo, and their gradebook `grades-<handle>/grades.yml`. Nothing here reads another student's data:
 // GitHub shows a student only the repos they were granted, and a team repo counts as theirs
 // only where they can push to it (a demo org's public repos are readable by anyone).
 
+import { signal } from '@preact/signals';
 import { parse } from 'yaml';
-import type { GhIssue, GhRepo, GitHubClient } from '../github/client';
+import type { GhIssue, GhRepo, GhTeam, GitHubClient } from '../github/client';
 import type { SemesterAssignment } from './student';
+import type { PatchLine } from './week';
 
 /** The receipts issue's labels, newest first: `dsl-receipts` since the rename, `dsl-feedback` on older issues (course.RECEIPTS_ISSUE_LABELS). */
 export const RECEIPTS_LABELS = ['dsl-receipts', 'dsl-feedback'];
 export const RECEIPTS_TITLE = 'Submission receipts';
+/** The semester's read-only role team (course.AUDITORS_TEAM). Secret, but a member may read their own membership. */
+export const AUDITORS_TEAM = 'auditors';
 
 export interface MyUnit {
   slug: string;
@@ -52,6 +57,8 @@ export interface Mine {
   units: Record<string, MyUnit>;
   /** null: no gradebook yet (none has been returned, or the account has none: an auditor). */
   gradebook: Gradebook | null;
+  /** The person audits this semester: materials and schedule, no repos, teams or marks. */
+  auditor: boolean;
 }
 
 const flat = (v: unknown): string => (v === null || v === undefined ? '' : typeof v === 'object' ? '' : String(v).trim());
@@ -142,28 +149,108 @@ export function unitOf(a: SemesterAssignment, repos: GhRepo[], login: string, sl
   return team ? { ...none, repo: team.name, team: team.name.slice(a.slug.length + 1) } : none;
 }
 
-/** Everything the student's own screens need for one semester (a few calls: the repo list, the gradebook, each team). */
+/**
+ * The student's team for group assignment `a` from their GitHub teams in `org`: the team
+ * `<slug>-<team>` (teams.team_slug) of THIS assignment, matched to the longest known slug.
+ * This is how a drop-box or external group finds its team: those shapes make no team repo.
+ */
+export function teamOf(a: SemesterAssignment, teams: GhTeam[], org: string, slugs: string[] = [a.slug]): { team: string; slug: string } | null {
+  const all = slugs.includes(a.slug) ? slugs : [...slugs, a.slug];
+  const t = teams.find((x) => x.organization.login.toLowerCase() === org.toLowerCase() && x.slug.toLowerCase() !== a.slug.toLowerCase() && ownerSlug(x.slug, all) === a.slug);
+  if (!t) return null;
+  const pre = `${a.slug}-`.toLowerCase();
+  return { team: t.name.toLowerCase().startsWith(pre) ? t.name.slice(pre.length) : t.slug.slice(pre.length), slug: t.slug };
+}
+
+const teamLists = new WeakMap<GitHubClient, Promise<GhTeam[]>>();
+
+/** The person's GitHub teams across every org (`/user/teams`), read once per session, not once per semester. A failed read is not kept. */
+export function myTeams(client: GitHubClient): Promise<GhTeam[]> {
+  let p = teamLists.get(client);
+  if (!p) {
+    p = client.listMyTeams();
+    teamLists.set(client, p);
+    p.catch(() => teamLists.delete(client));
+  }
+  return p;
+}
+
+/** Drop the session's team list (sign-out). */
+export const forgetMyTeams = (client: GitHubClient) => teamLists.delete(client);
+
+/** Semesters (lower-cased org) where the person is known to audit, from the last readMine: the nav hides Marks and Join there. */
+export const auditing = signal<ReadonlySet<string>>(new Set());
+
+export const knownAuditor = (org: string) => auditing.value.has(org.toLowerCase());
+
+function noteRole(org: string, auditor: boolean) {
+  const k = org.toLowerCase();
+  if (auditor === auditing.value.has(k)) return;
+  const next = new Set(auditing.value);
+  if (auditor) next.add(k);
+  else next.delete(k);
+  auditing.value = next;
+}
+
+/**
+ * Everything the student's own screens need for one semester (a few calls: the repo list, the
+ * gradebook, the role, their teams, each team's members). It fails as a whole when the role
+ * cannot be read: a screen then promises nothing, rather than treating a possible auditor as
+ * a student.
+ */
 export async function readMine(client: GitHubClient, org: string, login: string, assignments: SemesterAssignment[]): Promise<Mine> {
   const book = `grades-${login}`;
-  const [repos, grades, updated] = await Promise.all([
+  const groups = assignments.some((a) => a.group);
+  const [repos, grades, updated, audit, teams] = await Promise.all([
     client.listOrgRepos(org),
     client.getContents(org, book, 'grades.yml').catch(() => null),
     client.lastCommitDate(org, book, 'grades.yml').catch(() => null),
+    client.getTeamMembership(org, AUDITORS_TEAM, login),
+    groups ? myTeams(client).catch(() => [] as GhTeam[]) : ([] as GhTeam[]),
   ]);
+  const slugs = assignments.map((x) => x.slug);
   const units: Record<string, MyUnit> = {};
   await Promise.all(assignments.map(async (a) => {
-    const u = unitOf(a, repos, login, assignments.map((x) => x.slug));
-    const members = u.team ? await client.listTeamMembers(org, `${a.slug}-${u.team}`.toLowerCase()) : null;
-    units[a.slug] = { ...u, members };
+    const u = unitOf(a, repos, login, slugs);
+    const found = a.group && !u.team ? teamOf(a, teams, org, slugs) : null;
+    const team = u.team ?? found?.team ?? null;
+    const members = team ? await client.listTeamMembers(org, found?.slug ?? `${a.slug}-${team}`.toLowerCase()) : null;
+    units[a.slug] = { ...u, team, members };
   }));
-  return { units, gradebook: grades ? parseGradebook(grades.text, updated) : null };
+  noteRole(org, audit === 'active');
+  return { units, gradebook: grades ? parseGradebook(grades.text, updated) : null, auditor: audit === 'active' };
+}
+
+/** What a comment on the receipts thread is: a receipt, a note that the instructors updated files, the marks-returned note, or anyone's comment. */
+export type ThreadKind = 'receipt' | 'patch' | 'marks' | 'comment';
+
+export interface ThreadEntry {
+  kind: ThreadKind;
+  text: string;
+  when: string;
+  url: string;
 }
 
 export interface Receipts {
   url: string;
   /** The newest receipt (the engine's comment), its hidden marks removed; null before the deadline. */
   last: { text: string; when: string } | null;
+  /** The issue's own text: the due date, the late rule and, for a team, the CONTRIBUTIONS.md ask. */
+  body: string;
+  /** Every comment, oldest first. */
+  thread: ThreadEntry[];
 }
+
+/** A comment's kind from the engine's hidden mark on it (course.receipt_marker, assign.PATCH_MARKER, course.marks_returned_marker). */
+export function threadKind(body: string): ThreadKind {
+  if (/<!-- dsl-receipt:/.test(body)) return 'receipt';
+  if (/<!-- dsl-patch:/.test(body)) return 'patch';
+  if (/<!-- dsl-marks-returned:/.test(body)) return 'marks';
+  return 'comment';
+}
+
+/** The patch notes of a thread ("pull before you continue"). */
+export const patchNotes = (r: Receipts | null | undefined) => (r?.thread ?? []).filter((e) => e.kind === 'patch');
 
 /** A comment's text as a person reads it: the engine's hidden `<!-- ... -->` marks taken out. */
 export const readable = (body: string) => body.replace(/<!--[\s\S]*?-->/g, '').trim();
@@ -182,10 +269,26 @@ export async function readReceipts(client: GitHubClient, org: string, repo: stri
   issue ??= (await client.listIssues(org, repo, 'state=all')).find((i) => !i.pull_request && i.title === RECEIPTS_TITLE);
   if (!issue) return null;
   const comments = issue.comments ? await client.listIssueComments(org, repo, issue.number) : [];
-  const receipts = comments.filter((c) => /<!-- dsl-receipt:/.test(c.body));
+  const thread = comments.map((c) => ({ kind: threadKind(c.body), text: readable(c.body), when: c.created_at, url: c.html_url }));
+  const receipts = thread.filter((c) => c.kind === 'receipt');
   const last = receipts[receipts.length - 1];
-  return { url: issue.html_url, last: last ? { text: readable(last.body), when: last.created_at } : null };
+  return { url: issue.html_url, last: last ? { text: last.text, when: last.when } : null, body: readable(issue.body ?? ''), thread };
 }
 
 export const repoUrl = (org: string, repo: string) => `https://github.com/${org}/${repo}`;
 export const gradebookUrl = (org: string, login: string) => `https://github.com/${org}/grades-${login}`;
+
+/** The Submission receipts threads of the student's private repos in the semester, by repo (a thread that cannot be read is null). */
+export async function readAllReceipts(client: GitHubClient, org: string, assignments: SemesterAssignment[], mine: Mine): Promise<Record<string, Receipts | null>> {
+  const repos = assignments.filter((a) => a.privateRepo).map((a) => mine.units[a.slug]?.repo).filter((r): r is string => !!r);
+  return Object.fromEntries(await Promise.all(repos.map(async (r) => [r, await readReceipts(client, org, r).catch(() => null)] as const)));
+}
+
+/** Every patch note across the student's threads, for This week. */
+export function patchLines(assignments: SemesterAssignment[], mine: Mine | null, receipts: Record<string, Receipts | null> | null | undefined): PatchLine[] {
+  if (!mine || !receipts) return [];
+  return assignments.flatMap((a) => {
+    const repo = mine.units[a.slug]?.repo;
+    return repo ? patchNotes(receipts[repo]).map((p) => ({ slug: a.slug, when: p.when })) : [];
+  });
+}

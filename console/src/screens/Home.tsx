@@ -5,7 +5,7 @@ import { useState } from 'preact/hooks';
 import type { ConsoleAuth } from '../auth/console';
 import { FINE_GRAINED_SETTINGS_URL, NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '../auth/pat';
 import type { GhUser } from '../github/client';
-import { cohortName, semesterName, type Course, type CohortRef, type Semester, type TokenKind } from '../model/discovery';
+import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, type Semester, type TokenKind } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { hiddenSemesters, saveHiddenSemesters } from '../model/prefs';
 import type { Loaded } from '../model/status';
@@ -81,6 +81,28 @@ function semesterCard(s: Semester): Card {
   };
 }
 
+/** Semesters that invited the person: they appear once the invitation is accepted on GitHub. */
+export function InvitedGroup({ invited }: { invited: Semester[] }) {
+  if (!invited.length) return null;
+  return (
+    <section class="section" aria-labelledby="h-invited">
+      <h2 id="h-invited">Invited</h2>
+      <ul class="cohort-list">
+        {invited.map((s) => (
+          <li>
+            <a class="cohort-card" href={invitationUrl(s.org)} target="_blank" rel="noopener">
+              <span class="cc-name">{semesterName(s)}<span>You are invited; accept on GitHub to join</span></span>
+              <span class="cc-week" />
+              <span class="chip amber">Invited</span>
+              <span class="cc-next"><span>Accept the invitation <Ext /></span></span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** Your semesters, and the per-viewer choice of which of them show. */
 function SemestersGroup({ semesters, login, lead, hidden, setHidden }: { semesters: Semester[]; login: string; lead: boolean; hidden: Set<string>; setHidden: (h: Set<string>) => void }) {
   const flip = (org: string) => {
@@ -125,16 +147,17 @@ function NothingFound({ kind }: { kind?: TokenKind }) {
   );
 }
 
-export function HomeScreen({ courses, semesters = [], kind, cohortStates, user, now }: HomeProps) {
+export function HomeScreen({ courses, semesters = [], invited = [], kind, cohortStates, user, now }: HomeProps) {
   const [hidden, setHidden] = useState(() => hiddenSemesters(user.login));
-  if (!courses.length && semesters.length) {
+  if (!courses.length && (semesters.length || invited.length)) {
     return (
       <>
         <Crumbs items={[{ t: 'Your semesters' }]} />
         <div class="page-head"><div><h1>Your semesters</h1><p class="lede">Every semester you are a student of; archived ones stay here as history</p></div></div>
         <div class="stack">
+          <InvitedGroup invited={invited} />
           <StudentWeekHome semesters={semesters.filter((x) => !hidden.has(x.org))} now={now} />
-          <SemestersGroup semesters={semesters} login={user.login} lead hidden={hidden} setHidden={setHidden} />
+          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead hidden={hidden} setHidden={setHidden} /> : null}
           <JoinStart />
         </div>
       </>
@@ -178,6 +201,7 @@ export function HomeScreen({ courses, semesters = [], kind, cohortStates, user, 
               </ul>
             </section>
           ) : null}
+          <InvitedGroup invited={invited} />
           {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead={false} hidden={hidden} setHidden={setHidden} /> : null}
         </div>
       )}

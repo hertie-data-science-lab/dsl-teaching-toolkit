@@ -1,6 +1,8 @@
 // The demo semester's public site data as the engine generates it today (hertie-dsl-demo-f2026,
-// read 2026-09-24), trimmed to the front matter and a few rows of each kind. Team hashes
-// dropped; the instructors are the demo's public cards.
+// read 2026-09-24), trimmed to the front matter and a few rows of each kind, plus the fields
+// the demo does not happen to exercise today (a TBC date, an announcement, a student-choice
+// shape, a second team). Team digests kept as the site writes them: the console must never
+// read them. The instructors are the demo's public cards.
 
 export const ORG = 'hertie-dsl-demo-f2026';
 export const SITE = `${ORG}.github.io`;
@@ -16,6 +18,10 @@ date: 2026-08-04T10:00:00
 title: "Session 1"
 subtitle: "Deep learning in public policy"
 details: "What deep learning is, where it already sits in public-sector decision making."
+reading_list: |2
+  ### Session 1 readings
+
+  Read chapter 1 before class.
 links:
     - url: https://github.com/${ORG}/materials/blob/main/lectures/01_deep-learning-in-public-policy/Session1_E1394_DL_preLecture.pdf
       view_url: https://${SITE}/files/materials/lectures/01_deep-learning-in-public-policy/Session1_E1394_DL_preLecture.pdf
@@ -24,6 +30,9 @@ links:
     - url: https://github.com/${ORG}/materials/blob/main/lectures/01_deep-learning-in-public-policy/Session1_demo_deck.html
       name: "Session1_demo_deck.html"
       section: "lecture"
+    - url: https://github.com/${ORG}/materials/blob/main/readings/01_deep-learning-in-public-policy/chapter1.pdf
+      name: "chapter1.pdf"
+      section: "reading"
 ---
 `,
   '_lectures/lab-03.md': `---
@@ -31,6 +40,7 @@ ${HEAD}
 type: lab
 date: 2026-09-21T14:00:00
 title: "Lab 3"
+tbc: true
 links:
     - url: https://github.com/${ORG}/materials/blob/main/labs/03_deep-neural-networks-2/Lab_Session_3.ipynb
       name: "Lab_Session_3.ipynb"
@@ -45,6 +55,7 @@ title: "Session 12"
 subtitle: "Tutorial presentations"
 details: "Students present their tutorial topic to the group."
 unreleased: true
+readings_pending: true
 links: []
 ---
 _**Materials for session 12 are not yet released**._
@@ -86,14 +97,20 @@ repo_name_is_shape: true
 cutoff_sentence: "What is on main at the grading cutoff is what is marked."
 late_rule: "10% per day, up to 10 days"
 max_points: "25"
+shape_note: "NB: this repo is private - only you and the instructors can read it."
 due_event:
     type: due
     date: 2026-09-29T23:59:00
     title: "Assignment 2"
     subtitle: "Classification and evaluation"
+    details: "Hand in the notebook and the one-page memo."
 ---
 {% raw %}
-The brief.
+Train two classifiers and **compare** them.
+
+## What to submit
+
+The notebook.
 {% endraw %}
 `,
   '_assignments/03-assignment-3-project.md': `---
@@ -110,6 +127,17 @@ max_points: "50"
 team_join_url: "https://github.com/${ORG}/welcome/issues/new/choose"
 team_join_cap: "3"
 team_join_closes: "26th Oct"
+team_salt: "${ORG}"
+teams:
+  - name: "team-latency"
+    members: 1
+    cap: 3
+    members_sha256: ["9c485c533ec9dfa703e56b41491adb26f1d11bdcac8c15bdf87d8d9701c8a4bb"]
+    repo_url: "https://github.com/${ORG}/assignment-3-project-team-latency"
+  - name: "team-full"
+    members: 3
+    cap: 3
+    members_sha256: ["aa", "bb", "cc"]
 due_event:
     type: due
     date: 2026-10-23T23:59:00
@@ -126,6 +154,7 @@ submit_shape: "shared-dropbox-repo"
 submit_path: "<your-handle>/"
 repo_name: "assignment-6-submissions"
 late_rule: "10% per day, up to 10 days"
+shape_note: "NB: everyone in the semester can read the whole repo, so commit nothing you would not show the class."
 due_event:
     type: due
     date: 2026-09-20T23:59:00
@@ -153,6 +182,7 @@ ${HEAD}
 type: assignment
 date: 2026-11-01T10:00:00
 title: "Assignment 8"
+tbc: true
 handout_pending: true
 submit_shape: "assignment-repo-private"
 repo_name: "assignment-8-<your-handle>"
@@ -162,6 +192,49 @@ due_event:
     title: "Assignment 8"
 ---
 `,
+  '_assignments/09-assignment-9.md': `---
+${HEAD}
+kind: assignment
+date: 2026-08-20T10:00:00
+title: "Assignment 9"
+subtitle: "Portfolio piece"
+submit_shape: "assignment-repo-student-choice"
+repo_name: "assignment-9-<your-handle>"
+repo_name_is_shape: true
+late_rule: "not accepted after the deadline"
+shape_note: "NB: this repo is private-by-default; you are its admin - after the late cutoff you may make it public from Settings > Danger zone if you want it in your portfolio."
+due_event:
+    kind: due
+    date: 2026-09-10T23:59:00
+    title: "Assignment 9"
+---
+{% raw %}
+Build something you would show an employer.
+{% endraw %}
+`,
+  '_announcements/2026-09-22-room.md': `---
+date: 2026-09-22T09:00:00
+title: "Room change"
+details: "From this week the lab meets in **room 2.30**."
+---
+`,
+  'index.md': `---
+layout: home
+---
+
+Welcome to **{{ site.course_name }}** at the [Hertie School Data Science Lab]({{ site.dsl_org_url }}).
+
+{% if site.content_repo %}
+Course materials are available in the [content repository]({{ site.content_repo }}).
+{% endif %}
+
+**Questions?** Ask in the first session.
+`,
+  '_config.yml': `course_name: "Deep Learning (Demo)"
+course_semester: "Fall 2026"
+dsl_org_url: "https://github.com/hertie-data-science-lab"
+github_org: "${ORG}"
+`,
   '_data/people.yml': `# GENERATED by the DSL course sync - do not edit this file.
 instructor:
   name: "Prof. Lynn Kaack, PhD"
@@ -170,6 +243,7 @@ instructors:
     profile_pic: "https://github.com/LynnKaack.png"
     webpage: "https://www.hertie-school.org/de/research/faculty-and-researchers/profile/person/kaack"
     title: "Assistant Professor of Computer Science and Public Policy"
+    email: "instructor@example.org"
 teaching_assistants:
   - name: "Henry Baker"
     profile_pic: "/_images/pp/henrycgbaker.jpg"
