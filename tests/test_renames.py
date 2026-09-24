@@ -267,6 +267,39 @@ def test_the_old_file_or_shape_is_refused_and_nobody_is_pruned(
         sync_faculty.load_semester_faculty("Sem")
 
 
+def test_an_old_people_file_beside_the_seeded_skeleton_prunes_nobody(monkeypatch):
+    # The seeded instructors.yml is all comments: it parses to {} - no list at all. Beside
+    # a live people.yml that is a semester that has not migrated, and it must never be
+    # read as an empty desired set, which a prune=True reconcile would act on.
+    _semester_files(monkeypatch, {"instructors.yml": {}, "people.yml": OLD_PEOPLE})
+    found: list = []
+    assert sync_faculty.read_semester_people("Sem", found) is None
+    assert [(f.code, f.file) for f in found] == [(NOT_MIGRATED, "people.yml")]
+    reconciled: list = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "reconcile_team_members",
+        lambda *a, **k: reconciled.append(a) or 0,
+    )
+    assert sync_faculty.sync_semester_instructors("C", "Sem", [], []) == 0
+    assert reconciled == []
+
+
+def test_a_skeleton_instructors_file_alone_is_a_fault_and_prunes_nobody(monkeypatch):
+    _semester_files(monkeypatch, {"instructors.yml": {}})
+    found: list = []
+    assert sync_faculty.read_semester_people("Sem", found) is None
+    assert "no `instructors:` list" in found[0].what
+    reconciled: list = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "reconcile_team_members",
+        lambda *a, **k: reconciled.append(a) or 0,
+    )
+    assert sync_faculty.sync_semester_instructors("C", "Sem", [], []) == 0
+    assert reconciled == []
+
+
 def test_the_new_instructors_file_is_read(monkeypatch):
     _semester_files(monkeypatch, {"instructors.yml": NEW_INSTRUCTORS})
     faculty = sync_faculty.read_semester_people("Sem", [])

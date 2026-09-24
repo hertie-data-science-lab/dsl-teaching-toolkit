@@ -452,8 +452,9 @@ def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
     """Fetch + parse this semester's own classroom-config/instructors.yml - instructors/TAs
     only (no course_admins key here; that role stays exclusively course-level).
 
-    Returns None when instructors.yml is genuinely ABSENT (do not prune); a present-but-empty
-    people block parses to {} and legitimately empties the team.
+    Returns None when instructors.yml is genuinely ABSENT (do not prune). A file with no
+    `instructors:` list raises `NoInstructorsList`, and `instructors: []` - said in as many
+    words - is the one way to empty the team.
 
     THE door to a semester's instructors.yml, and memoised per process like `repos._repo`: a
     release tick asks it who to notify, `status` asks it who is unreachable, and the file
@@ -464,6 +465,12 @@ def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
     if meta is None:
         return None
     return _semester_roles_only(parse_faculty_from_meta(meta, file=path))
+
+
+class NoInstructorsList(Unusable):
+    """A present `instructors.yml` that declares no `instructors:` list - the seeded,
+    all-comment skeleton, or a file emptied by hand. Refused rather than read as "nobody":
+    a sweep with prune on an empty desired set would strip every instructor's access."""
 
 
 def _load_semester_file(
@@ -478,13 +485,21 @@ def _load_semester_file(
         if lines
         else load_yaml_config(semester_org, CONFIG_REPO, SEMESTER_PEOPLE_PATH)
     )
-    if meta is None and load_yaml_config(semester_org, CONFIG_REPO, OLD_PEOPLE_FILE):
+    listed = isinstance(meta, dict) and isinstance(meta.get("instructors"), list)
+    # The old file beside a new one that lists nobody - absent, or the seeded all-comment
+    # skeleton - is a semester that has not migrated, whatever the new file says.
+    if not listed and load_yaml_config(semester_org, CONFIG_REPO, OLD_PEOPLE_FILE):
         raise NotMigrated(
             OLD_PEOPLE_FILE, INSTRUCTORS_FILE, f"{semester_org}/{CONFIG_REPO}"
         )
     # The old file's shape under the new name: refused too, never read as "nobody".
-    if isinstance(meta, dict) and "people" in meta and "instructors" not in meta:
+    if isinstance(meta, dict) and "people" in meta and not listed:
         raise NotMigrated("people:", "instructors:", SEMESTER_PEOPLE_PATH)
+    if meta is not None and not listed:
+        raise NoInstructorsList(
+            f"{semester_org}/{CONFIG_REPO}/{SEMESTER_PEOPLE_PATH} declares no "
+            f"`instructors:` list - nothing is reconciled from it"
+        )
     return meta, SEMESTER_PEOPLE_PATH
 
 
@@ -508,6 +523,14 @@ def read_semester_people(
         # The old file, or its old shape in the new one: filed against whichever holds it.
         file = OLD_PEOPLE_FILE if exc.old == OLD_PEOPLE_FILE else SEMESTER_PEOPLE_PATH
         faults.append(not_migrated_fault(exc.old, exc.new, where=file, file=file))
+        return None
+    except NoInstructorsList:
+        faults.append(
+            _file_fault(
+                "this file declares no `instructors:` list yet, so nothing is reconciled "
+                "from it"
+            )
+        )
         return None
     except yaml.YAMLError:
         faults.append(_file_fault("this file is not valid YAML, so none of it is read"))
@@ -678,7 +701,13 @@ def sync_semester_instructors(
     `content_repos`/`assignments` are the course org's discovered repos, passed in
     (rather than re-discovered here) so a multi-semester `sync()` fetches them once,
     not once per semester."""
-    faculty = load_semester_faculty(semester_org)
+    try:
+        faculty = load_semester_faculty(semester_org)
+    except (NotMigrated, NoInstructorsList) as exc:
+        # Fail CLOSED: an old or empty file is no desired set to prune to. Skip this
+        # semester's instructors sweep - the digest issue carries the fault - and stay green.
+        log_err(f"  ! {exc} - instructors not reconciled for {semester_org}; skipping")
+        return 0
     if faculty is None:
         # ABSENT instructors.yml: reconciling an empty desired set with prune=True would strip
         # this semester's instructors team (and its course-org tag team). Refuse to prune -
