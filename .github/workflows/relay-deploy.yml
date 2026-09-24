@@ -1,7 +1,7 @@
 name: relay-deploy
 
-# Deploy the console's sign-in relay (relay/) to Cloudflare Workers. Skips until the
-# GH_APP_CLIENT_ID repository variable is set. Secrets and variables: relay/README.md.
+# Deploy the console's sign-in relay (relay/) to Cloudflare Workers, from main only. Skips
+# until the GH_APP_CLIENT_ID repository variable is set. Secrets and variables: relay/README.md.
 on:
   push:
     branches: [main]
@@ -17,8 +17,10 @@ concurrency:
 
 jobs:
   deploy:
-    if: vars.GH_APP_CLIENT_ID != ''
+    if: github.ref == 'refs/heads/main' && vars.GH_APP_CLIENT_ID != ''
     runs-on: ubuntu-latest
+    # The deploy secrets live in this environment, restricted to main.
+    environment: relay
     timeout-minutes: 10
     defaults:
       run:
