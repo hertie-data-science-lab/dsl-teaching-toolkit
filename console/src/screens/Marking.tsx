@@ -1,5 +1,5 @@
 // The assignment hub's Marks tab (S12, the grading sheet as a grid) and Teams tab (S9,
-// teams.csv for a team assignment).
+// teams.csv for a team assignment), and the cohort's read-only Marks overview.
 
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -7,19 +7,20 @@ import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentTitle, fmtDay, str } from '../model/format';
-import { cellValue, finalGrade, penaltyRate, penaltyText, readSheet, round, scoreTotal, type Unit } from '../model/marks';
+import { ASSIGNMENT_WORD, assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
+import { cellValue, finalGrade, gradebookWrites, penaltyRate, penaltyText, readSheet, returnedOn, round, scoreTotal, type Unit } from '../model/marks';
 import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, Help, Lives, Loading } from '../ui/bits';
+import { tabHref } from '../router';
+import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Check, Ext, Lock } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { readSchedule } from './Cohort';
-import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
-import type { ReadyProps } from './types';
+import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
+import type { CohortProps, ReadyProps } from './types';
 
 function courseDefault(p: ReadyProps, key: string): unknown {
   return ((p.course.meta?.assignment_defaults ?? {}) as Record<string, unknown>)[key];
@@ -330,4 +331,73 @@ export function TeamsTab(p: TabProps) {
       </div>
     </>
   );
+}
+
+// --------------------------------------------------------------------------- overview
+
+const SHEETS = 'grading_sheets';
+const LEDGER = 'gradebook/distributed.csv';
+
+function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes: Map<string, string> | null }) {
+  const { a, status, now } = p;
+  const tz = tzOf(status), year = yearOf(now, tz);
+  const path = `${SHEETS}/${a.slug}.yml`;
+  const changed = p.hasSheet ? p.files.lastChange(p.cohort.org, 'classroom-config', path) : null;
+  const sheet = a.returned && p.hasSheet ? p.files.file(p.cohort.org, 'classroom-config', path) : null;
+  const text = sheet?.kind === 'ready' ? sheet.text : null;
+  const doc = text !== null ? new YamlText(text) : null;
+  const on = text !== null && doc && !doc.errors.length && p.writes ? returnedOn(readSheet(text, doc.toJS()), p.writes) : null;
+  return (
+    <tr>
+      <td><a class="rowlink" href={tabHref(a.slug, 'marks')}>{assignmentTitle(a)}</a></td>
+      <td><span class={`chip ${a.state === 'marking' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span></td>
+      <td class="num">{p.hasSheet ? `${a.marks.filled} / ${a.marks.total}` : <span class="footnote">No mark sheet yet</span>}</td>
+      <td>{a.returned ? <><span class="chip ok">Yes</span>{on ? ` ${fmtDay(on, tz, year)}` : ''}</> : 'No'}</td>
+      <td class="num">{changed === undefined ? '…' : changed ? fmtWhen(changed, tz, year) : ''}</td>
+    </tr>
+  );
+}
+
+function MarksOverview(p: ReadyProps) {
+  const list = p.status.assignments ?? [];
+  const dir = p.files.dir(p.cohort.org, 'classroom-config', SHEETS);
+  const sheets = new Set(dir.kind === 'ready' ? dir.entries.map((e) => e.name) : []);
+  const ledger = p.files.file(p.cohort.org, 'classroom-config', LEDGER);
+  const writes = ledger.kind === 'ready' ? gradebookWrites(ledger.text) : ledger.kind === 'loading' ? null : new Map<string, string>();
+  const returned = list.filter((a) => a.returned).length;
+  const toMark = list.reduce((n, a) => n + (sheets.has(`${a.slug}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
+  return (
+    <>
+      <Crumbs items={cohortCrumbs(p, 'Marks')} />
+      <div class="page-head">
+        <div>
+          <h1>Marks</h1>
+          <p class="lede">{sheets.size ? `${returned} of ${list.length} assignment${list.length === 1 ? '' : 's'} returned; ${toMark} mark${toMark === 1 ? '' : 's'} still to enter.` : 'Where marking stands this term, one row per assignment.'}</p>
+        </div>
+      </div>
+      <Help title="Where marks are entered" doc="10-grade-and-return-assignments.md">
+        <p>This page only reads. Open an assignment to enter its marks and return them to students.</p>
+      </Help>
+      {dir.kind === 'loading' ? <Loading what="Reading the mark sheets" /> : !sheets.size ? (
+        <section class="panel section stub">
+          <h2>No mark sheets yet</h2>
+          <p>A mark sheet appears when an assignment is handed out, with a row for every student or team.</p>
+        </section>
+      ) : (
+        <>
+          <div class="table-wrap">
+            <table class="grid" style="min-width:680px">
+              <thead><tr><th>Assignment</th><th>State</th><th>Marked</th><th>Returned</th><th>Last change</th></tr></thead>
+              <tbody>{list.map((a) => <OverviewRow {...p} a={a} hasSheet={sheets.has(`${a.slug}.yml`)} writes={writes} />)}</tbody>
+            </table>
+          </div>
+          <p class="footnote" style="margin-top:8px">Returned: the day the last student’s marks repo was updated. Last change: the newest edit to the mark sheet.</p>
+        </>
+      )}
+    </>
+  );
+}
+
+export function MarksOverviewScreen(p: CohortProps) {
+  return <WithStatus props={p} title="Marks" crumbs={cohortCrumbs(p, 'Marks')}>{(r) => <MarksOverview {...r} />}</WithStatus>;
 }

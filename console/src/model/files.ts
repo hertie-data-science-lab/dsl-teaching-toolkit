@@ -24,6 +24,8 @@ export interface Files {
   file(owner: string, repo: string, path: string, ref?: string): FileState;
   dir(owner: string, repo: string, path: string): DirState;
   member(org: string, user: string): boolean | null | undefined; // undefined while loading
+  /** When a file last changed (ISO), null when that cannot be told; undefined while loading. */
+  lastChange(owner: string, repo: string, path: string): string | null | undefined;
   tree(owner: string, repo: string, ref?: string): TreeState;
   repos(org: string): ReposState;
   /** Record a file the console just wrote, so every screen shows the new text and sha. */
@@ -37,6 +39,7 @@ export class LiveFiles implements Files {
   private files = new Map<string, Signal<FileState>>();
   private dirs = new Map<string, Signal<DirState>>();
   private members = new Map<string, Signal<boolean | null | undefined>>();
+  private changes = new Map<string, Signal<string | null | undefined>>();
   private trees = new Map<string, Signal<TreeState>>();
   private orgRepos = new Map<string, Signal<ReposState>>();
   constructor(private readonly client: GitHubClient) {}
@@ -62,6 +65,7 @@ export class LiveFiles implements Files {
 
   refresh(owner: string, repo: string, path: string, ref?: string): void {
     this.files.delete(this.fileKey(owner, repo, path, ref));
+    this.changes.delete(`${owner}/${repo}/${path}`);
     this.dirs.delete(`${owner}/${repo}/${path}`);
   }
 
@@ -139,8 +143,24 @@ export class LiveFiles implements Files {
     return s.value;
   }
 
+  lastChange(owner: string, repo: string, path: string): string | null | undefined {
+    const k = `${owner}/${repo}/${path}`;
+    let s = this.changes.get(k);
+    if (!s) {
+      const sig = signal<string | null | undefined>(undefined);
+      s = sig;
+      this.changes.set(k, sig);
+      this.client
+        .lastCommitDate(owner, repo, path)
+        .then((v) => (sig.value = v))
+        .catch(() => (sig.value = null));
+    }
+    return s.value;
+  }
+
   forget(): void {
     this.files.clear();
+    this.changes.clear();
     this.dirs.clear();
     this.members.clear();
     this.trees.clear();
@@ -155,7 +175,11 @@ export class StaticFiles implements Files {
     private readonly dirMap: Record<string, string[]> = {},
     private readonly treeMap: Record<string, string[]> = {},
     private readonly repoMap: Record<string, Partial<GhRepo>[]> = {},
+    private readonly changeMap: Record<string, string> = {},
   ) {}
+  lastChange(owner: string, repo: string, path: string): string | null {
+    return this.changeMap[`${owner}/${repo}/${path}`] ?? null;
+  }
   repos(org: string): ReposState {
     const r = this.repoMap[org];
     return r ? { kind: 'ready', repos: r.map((x) => ({ full_name: `${org}/${x.name}`, private: true, default_branch: 'main', html_url: `https://github.com/${org}/${x.name}`, name: '', ...x })) } : { kind: 'absent' };

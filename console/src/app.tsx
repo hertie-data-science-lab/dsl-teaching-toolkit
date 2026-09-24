@@ -24,6 +24,7 @@ import { HomeScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { StaffScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
+import { MarksOverviewScreen } from './screens/Marking';
 import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
@@ -165,6 +166,7 @@ export function App({ state: s }: { state: AppState }) {
       staff: () => <StaffScreen {...cp} />,
       site: () => <SiteScreen {...cp} />,
       operations: () => <OperationsScreen {...cp} />,
+      marks: () => <MarksOverviewScreen {...cp} />,
       archive: () => <ArchiveScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.cohort)();

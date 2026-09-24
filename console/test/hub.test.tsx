@@ -8,6 +8,8 @@ import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
 import { hashOf, parseHash } from '../src/router';
 import { AssignmentScreen, defaultTab } from '../src/screens/Assignments';
+import { MarksOverviewScreen } from '../src/screens/Marking';
+import { gradebookWrites, readSheet, returnedOn } from '../src/model/marks';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 
@@ -66,5 +68,41 @@ describe('the assignment hub', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'overview' })} />);
     expect(current(out)).toBe('Overview');
     expect(out).toContain('What you can do, by state');
+  });
+});
+
+describe('the Marks overview', () => {
+  const back: Assignment = { ...solo, slug: 'assignment-1', title: 'Intro', state: 'returned', units: 2, marks: { filled: 2, total: 2 }, returned: true };
+  const SHEET = 'submissions:\n  anna-a:\n    score_individual: 9\n  ben-b:\n    score_individual: 7\n';
+  const LEDGER = 'target,assignment,channel,content_hash,distributed_at,issue\nanna-a,,gradebook,abc,2026-09-10T08:00:00+00:00,\nben-b,,gradebook,def,2026-09-11T09:00:00+00:00,\nben-b,,email,def,2026-09-12T09:00:00+00:00,\n';
+  const withSheets = new StaticFiles(
+    { [`${COHORT_ORG}/classroom-config/grading_sheets/assignment-1.yml`]: SHEET, [`${COHORT_ORG}/classroom-config/gradebook/distributed.csv`]: LEDGER },
+    { [`${COHORT_ORG}/classroom-config/grading_sheets`]: ['assignment-1.yml'] },
+    {}, {},
+    { [`${COHORT_ORG}/classroom-config/grading_sheets/assignment-1.yml`]: '2026-09-09T14:30:00Z' },
+  );
+  const st: Loaded = { kind: 'ready', status: { ...status, assignments: [back, solo] }, sha: 's', stale: [] };
+
+  it('dates a return by the last gradebook write of the sheet’s students', () => {
+    const w = gradebookWrites(LEDGER);
+    expect(w.get('ben-b')).toBe('2026-09-11T09:00:00+00:00');
+    expect(returnedOn(readSheet(SHEET, { submissions: { 'anna-a': {}, 'ben-b': {} } }), w)).toBe('2026-09-11T09:00:00+00:00');
+  });
+
+  it('lists one read-only row per assignment, linking to its Marks tab', () => {
+    const out = render(<MarksOverviewScreen {...props({ loaded: st, files: withSheets })} />);
+    expect(out).toContain('1 of 2 assignments returned; 0 marks still to enter.');
+    expect(out).toContain('href="#assignment-assignment-1/marks">Assignment 1: Intro');
+    expect(out).toContain('<td class="num">2 / 2</td>');
+    expect(out).toContain('<span class="chip ok">Yes</span> Fri 11 Sep');
+    expect(out).toContain('Wed 9 Sep');
+    expect(out).toContain('No mark sheet yet');
+    expect(out).not.toContain('<input');
+  });
+
+  it('says so when no mark sheet exists yet', () => {
+    const out = render(<MarksOverviewScreen {...props()} />);
+    expect(out).toContain('No mark sheets yet');
+    expect(out).not.toContain('<table');
   });
 });

@@ -3,6 +3,7 @@
 // skipped, a non-number making the whole total unknown), then
 // `total x (1 - rate x days_late) + adjustment`, floored at 0. Never stored in the sheet.
 
+import { readTable } from '../edit/csv';
 import { obj, type Path } from '../edit/yamlText';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
@@ -116,4 +117,33 @@ export function cellValue(raw: string): string | number | null {
   if (!t) return null;
   const n = Number(t);
   return Number.isFinite(n) && /^-?\d+(\.\d+)?$/.test(t) ? n : raw;
+}
+
+/** Every student handle on a sheet: the students, or each team's members. */
+export function sheetHandles(sheet: Sheet): string[] {
+  return sheet.units.flatMap((u) => u.people.map((x) => x.handle));
+}
+
+/**
+ * `gradebook/distributed.csv` (machine-written) as handle -> when that student's gradebook
+ * was last written: the `gradebook` rows for the whole book (`assignment` blank), as the
+ * engine's `status_json._returned_at` reads them.
+ */
+export function gradebookWrites(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of readTable(text).rows) {
+    const target = (r.target ?? '').trim(), when = (r.distributed_at ?? '').trim();
+    if (target && when && (r.channel ?? '').trim() === 'gradebook' && !(r.assignment ?? '').trim()) out.set(target.toLowerCase(), when);
+  }
+  return out;
+}
+
+/** When a returned sheet's marks reached the last of its students: the latest of their gradebook writes. */
+export function returnedOn(sheet: Sheet, writes: Map<string, string>): string | null {
+  let last: string | null = null;
+  for (const h of sheetHandles(sheet)) {
+    const at = writes.get(h.toLowerCase());
+    if (at && (!last || Date.parse(at) > Date.parse(last))) last = at;
+  }
+  return last;
 }
