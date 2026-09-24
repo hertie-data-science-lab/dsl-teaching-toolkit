@@ -87,21 +87,33 @@ Each screen reads with the student's own account:
 
 | Screen | Shared facts (`StudentData`) | The student's own (GitHub, directly) |
 |---|---|---|
-| This week (per semester, and on Home across the semesters shown) | rows due, handed out, released or on in the next 7 days; releases of the last 7; open team formation | gradebook's last change (marks returned); whether they have a team |
-| Schedule | rows by week, coloured by kind | their state on hand-out and due rows; rows for their repos marked |
-| Assignments | dates, late cutoff, late rule, how to hand in, solution shown | `<slug>-<handle>`, a team repo they can push to (team from its name, members from the team), the drop box; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos) and its newest receipt |
+| This week (per semester, and on Home across the semesters shown, each line in its semester's timezone) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation; the About block: course name, syllabus pinned, the home text, announcements | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
+| Schedule | rows by week, coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
+| Assignments | dates (TBC), late cutoff, late rule, points, how to hand in, solution shown, the shape note, the brief (a fold, rendered by GitHub), the course's late-work sentences | `<slug>-<handle>`, a team repo they can push to, the drop box; their team (from the repo, else from `GET /user/teams` by the `<slug>-` prefix, so a drop-box or external group finds it too) and its members; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos): its body, the newest receipt, a patch note as "pull before you continue", every comment in a fold; the CONTRIBUTIONS.md ask on a team repo; for a student-choice repo after the cutoff, the Settings link to make it public |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
-| Materials | the materials repos | the repo's recursive tree; each file read when opened |
-| Join | assignments forming teams | their own Join course / Join team issues in `welcome` and the automation's last reply |
-| Instructors | the cards | none |
+| Materials | the materials repos; each session's readings | the repo's recursive tree; each file read when opened |
+| Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`); clone commands, VS Code and github.dev links; their assignment repos to clone. The local folders are kept in this browser only |
+| Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `welcome` and the automation's last reply; after "You joined", the invitation's accept link |
+| Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
+
+Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/memberships/{login}`
+(the team is secret, but a member may read their own membership). An **auditor** sees the
+materials and the schedule and a note saying what auditing means; nothing offers them a repo,
+a team or marks. On Home, a semester that has **invited** the person (`GET
+/user/memberships/orgs?state=pending`, classic and App sign-in) shows as Invited with GitHub's
+accept link; a fine-grained token cannot list invitations.
 
 The shared facts come through one interface, `StudentData` (`src/model/student.ts`). Today
 it is `SiteSource`: the public site repo's generated files, read through the API
-(`_lectures/`, `_events/`, `_assignments/` front matter, `kind` or the older `type`; `_data/people.yml`,
-`late_policy.yml`, `materials.yml`). Once the engine writes a public-safe
-`.github/.system/student-status.json`, a source reading that one file replaces it (WP-D4).
-In a Student view nothing of the student's own is read. An archived semester is listed
-with a link to its org and nothing of it is read.
+(`_lectures/`, `_events/`, `_assignments/` front matter, `kind` or the older `type`, and
+each assignment page's body as the brief; `_announcements/`; `index.md` with its Liquid
+filled from `_config.yml`; `_data/people.yml`, `late_policy.yml`, `materials.yml`). The
+site's team digests are never read. Once the engine writes a public-safe
+`.github/.system/student-status.json`, a source reading that one file replaces it (WP-D4) and
+no screen changes. In a Student view nothing of the student's own is read.
+
+An **archived semester** is history: the student's own repos (read-only) and their marks from
+the gradebook, from the same reads as a live one. No operation runs against it.
 
 **Materials** open inside the console from the private copy: markdown and notebooks through
 GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
@@ -130,10 +142,13 @@ the student's issues every 15 s for up to 5 minutes while one still waits. `?joi
 member of yet.
 
 **Rate limit** (5,000 requests an hour per person; every read is ETag-cached, and an
-unchanged 304 costs nothing): opening a semester reads its site once, about 4 + one per
-generated file (about 40 on the demo; 1 once `student-status.json` exists), then the repo
-list, the gradebook and its last commit, and one call per team. Assignments adds two calls
-per private repo (receipts issue, comments). A file costs one call, a markdown file or notebook
+unchanged 304 costs nothing): opening a semester reads its site once, about 7 + one per
+generated file (about 44 on the demo; 1 once `student-status.json` exists), then the repo
+list, the gradebook and its last commit, the auditors membership, `/user/teams` when the
+semester has a group assignment, and one call per team. This week and Assignments add two
+calls per private repo (receipts issue, comments). A brief or the home text is rendered once
+per page load (one `/markdown` call, on opening the fold). Set up adds one call per materials
+repo. A file costs one call, a markdown file or notebook
 two, an HTML page one per bundle file it uses (at most 80); file bytes are kept by blob sha
 (up to 64 MB), so reopening costs nothing. Home's This week repeats the
 semester read for each semester shown.
@@ -208,5 +223,5 @@ opens a new assignment entry for that template; `?wizard=new-semester-3` adds a 
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?semester=<org>` or `?course=<org>`.
 Student screens: `?semester=<org>#week` (and `#schedule`, `#assignments`, `#marks`,
-`#materials`, `#materials-<repo>/<path>` for an open file, `#join`, `#instructors`);
+`#materials`, `#materials-<repo>/<path>` for an open file, `#setup`, `#join`, `#instructors`);
 `?join=<org>` for Join course.
