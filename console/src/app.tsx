@@ -20,6 +20,7 @@ import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, parseHash, parseSe
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
+import { MaterialsIndexScreen, TemplatesIndexScreen } from './screens/CourseIndex';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { StaffScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
@@ -77,8 +78,7 @@ export function App({ state: s }: { state: AppState }) {
   useEffect(() => {
     document.body.classList.remove('nav-open');
     s.navOpen.value = false;
-    const target = { materials: 'sec-materials', templates: 'sec-templates' }[route.screen];
-    const el = target ? document.getElementById(target) : route.screen === 'schedule' && route.entry ? document.querySelector('.trow.current') : null;
+    const el = route.screen === 'schedule' && route.entry ? document.querySelector('.trow.current') : null;
     if (el) el.scrollIntoView({ block: route.screen === 'schedule' ? 'center' : 'start' });
     else window.scrollTo(0, 0);
   }, [s.hash.value, s.search.value]);
@@ -139,6 +139,8 @@ export function App({ state: s }: { state: AppState }) {
       : screen === 'details' ? <DetailsScreen {...cp} />
       : screen === 'website' ? <WebsiteScreen {...cp} />
       : screen === 'materials' && route.entry ? <MaterialsScreen {...cp} />
+      : screen === 'materials' ? <MaterialsIndexScreen {...cp} />
+      : screen === 'templates' ? <TemplatesIndexScreen {...cp} />
       : <CourseScreen {...cp} />;
   } else {
     const cp: CohortProps = {
