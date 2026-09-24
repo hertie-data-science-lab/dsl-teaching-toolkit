@@ -276,7 +276,7 @@ export class GitHubClient {
     return out;
   }
 
-  /** Every repo of an org the caller can see, every page. */
+  /** Every repo of an org the caller can see, every page (up to 1,900 repos: 19 pages of 100, a runaway guard). */
   async listOrgRepos(org: string): Promise<GhRepo[]> {
     const out: GhRepo[] = [];
     for (let page = 1; page < 20; page++) {

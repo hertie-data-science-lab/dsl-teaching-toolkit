@@ -3,22 +3,22 @@
 import { BADGE_WORD, buildTree, type Badge, type TreeNode } from '../edit/badges';
 import { editUrl } from './bits';
 
-const BADGE_CLASS: Record<Badge, string> = { public: 'ok', withheld: 'amber', released: '' };
+const BADGE_CLASS: Record<Badge, string> = { public: 'ok', withheld: 'amber', released: '', never_public: '' };
 
-function counts(n: TreeNode, badges: Record<string, Badge>, out: Record<Badge, number> = { public: 0, withheld: 0, released: 0 }) {
+function counts(n: TreeNode, badges: Record<string, Badge>, out: Record<Badge, number> = { public: 0, withheld: 0, released: 0, never_public: 0 }) {
   if (!n.children) out[badges[n.path] ?? 'released']++;
   else for (const c of n.children) counts(c, badges, out);
   return out;
 }
 
-function Node({ n, badges, org, repo, branch, depth }: { n: TreeNode; badges: Record<string, Badge>; org: string; repo: string; branch: string; depth: number }) {
+function Node({ n, badges, org, repo, branch, depth }: { n: TreeNode; badges: Record<string, Badge>; org: string; repo: string; branch: string | null; depth: number }) {
   if (!n.children) {
     const b = badges[n.path] ?? 'released';
     return (
       <li class="ft-file">
         <span class="ft-name">{n.name}</span>
         <span class={`chip ${BADGE_CLASS[b]}`}>{BADGE_WORD[b]}</span>
-        <a class="textlink" href={editUrl(org, repo, n.path, branch)} target="_blank" rel="noopener" aria-label={`Edit ${n.path} on GitHub`}>Edit on GitHub</a>
+        {branch ? <a class="textlink" href={editUrl(org, repo, n.path, branch)} target="_blank" rel="noopener" aria-label={`Edit ${n.path} on GitHub`}>Edit on GitHub</a> : null}
       </li>
     );
   }
@@ -37,7 +37,8 @@ function Node({ n, badges, org, repo, branch, depth }: { n: TreeNode; badges: Re
   );
 }
 
-export function FileTree({ files, badges, org, repo, branch = 'main' }: { files: string[]; badges: Record<string, Badge>; org: string; repo: string; branch?: string }) {
+/** `branch` is the repo's default branch; while it is unknown (null) the Edit links are left out. */
+export function FileTree({ files, badges, org, repo, branch }: { files: string[]; badges: Record<string, Badge>; org: string; repo: string; branch: string | null }) {
   if (!files.length) return <p class="footnote">The repo has no files yet.</p>;
   return <ul class="file-tree">{buildTree(files).map((n) => <Node n={n} badges={badges} org={org} repo={repo} branch={branch} depth={0} />)}</ul>;
 }

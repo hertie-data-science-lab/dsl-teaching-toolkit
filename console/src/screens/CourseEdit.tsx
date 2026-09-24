@@ -275,8 +275,10 @@ export function WebsiteScreen(p: CourseProps) {
 // --------------------------------------------------------------------------- materials repo settings
 
 /** Beside a rule list: the rules that match no file, or that every rule matches one. */
-function Unmatched({ rules, loading }: { rules: string[]; loading: boolean }) {
+function Unmatched({ rules, total, loading, partial }: { rules: string[]; total: number; loading: boolean; partial: boolean }) {
   if (loading) return <Loading />;
+  if (!total) return <p class="footnote">No rules yet.</p>;
+  if (partial) return <p class="footnote">Cannot tell which rules match nothing: the file list is incomplete.</p>;
   return rules.length ? (
     <ul class="unmatched">{rules.map((r) => <li><code>{r}</code> matches no file</li>)}</ul>
   ) : <p class="footnote">Every rule matches at least one file.</p>;
@@ -307,7 +309,8 @@ export function MaterialsScreen(p: CourseProps) {
   const scope = newestScope(p);
   const badged = badgeFiles(files, pubLines, ignLines);
   const repos = p.files.repos(course.org);
-  const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined) ?? 'main';
+  const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined) ?? null;
+  const partial = tree.kind === 'ready' && tree.truncated;
   const savePub = async () => {
     if (pub === null) return;
     const y = new YamlText(pubFile.kind === 'ready' ? pubFile.text : PUBLISH_STUB);
@@ -333,7 +336,7 @@ export function MaterialsScreen(p: CourseProps) {
       <div class="stack">
         <section class="panel section">
           <h2>Syllabus</h2>
-          {m ? (m.state === 'ready' ? <div class="check-line ok"><Check /><span>Written.</span></div> : <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine>) : <p class="footnote">Not checked yet.</p>}
+          {m ? (m.state === 'ready' ? <div class="check-line ok"><Check /><span>Written.</span></div> : pubFile.kind === 'ready' ? <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine> : <p class="footnote">Not ready yet.</p>) : <p class="footnote">Not checked yet.</p>}
           <div class="actions"><EditFile org={course.org} repo={repo} path="SYLLABUS.md" /></div>
           {scope ? (
             <>
@@ -351,7 +354,7 @@ export function MaterialsScreen(p: CourseProps) {
               <p class="hint">One pattern per line. Empty means nothing is public.</p>
               {pubY?.errors.length ? <CheckLine cls="bad">publish.yml does not parse ({pubY.errors[0]}); fix it with Edit the file.</CheckLine> : null}
             </div>
-            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.public} loading={tree.kind === 'loading'} /></div>
+            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.public} total={badged.rules.public} loading={tree.kind === 'loading'} partial={partial} /></div>
           </div>
           <SaveBar state={pubSave} onSave={() => void savePub()} small disabled={pub === null || pub === pubText || !!pubY?.errors.length} file={{ org: course.org, repo, path: 'publish.yml' }} />
           <Lives org={course.org} repo={repo} path="publish.yml" />
@@ -364,14 +367,15 @@ export function MaterialsScreen(p: CourseProps) {
               <textarea class="code" id="ign-pat" onInput={(e) => setIgn((e.target as HTMLTextAreaElement).value)}>{ign ?? ignText}</textarea>
               <p class="hint">A release that needs a withheld file is reported as a problem. This preview reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
             </div>
-            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.withheld} loading={tree.kind === 'loading'} /></div>
+            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.withheld} total={badged.rules.withheld} loading={tree.kind === 'loading'} partial={partial} /></div>
           </div>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ign === null || ign === ignText} file={{ org: course.org, repo, path: '.releaseignore' }} />
           <Lives org={course.org} repo={repo} path=".releaseignore" />
         </section>
         <section class="panel section">
           <h2>Files</h2>
-          <p class="footnote">What happens to each file at a release, from the rules above as you type them. Withheld wins over published openly.</p>
+          <p class="footnote">What happens to each file at a release, from the rules above as you type them. Withheld wins over published openly. A published deck’s <code>_files/</code> folder is published with it; solutions, tests, grading_config.yml and .env files are never published.</p>
+          {partial ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
           {tree.kind === 'loading' ? <Loading what="Reading the repo" /> : tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : <FileTree files={files} badges={badged.badges} org={course.org} repo={repo} branch={branch} />}
         </section>
       </div>

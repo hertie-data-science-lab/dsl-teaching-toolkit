@@ -14,7 +14,8 @@ export type FileState =
 export type DirState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; entries: DirEntry[] };
 
 /** A repo's whole tree at a ref: every path, with `dir` for folders. */
-export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; paths: { path: string; dir: boolean }[] };
+/** `truncated`: GitHub returned only part of the tree (its recursive listing has a size cap). */
+export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; paths: { path: string; dir: boolean }[]; truncated: boolean };
 
 /** An org's repos as the user sees them. */
 export type ReposState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; repos: GhRepo[] };
@@ -73,7 +74,7 @@ export class LiveFiles implements Files {
       this.trees.set(k, sig);
       this.client
         .listTree(owner, repo, ref, true)
-        .then((t) => (sig.value = t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree' })) } : { kind: 'absent' }))
+        .then((t) => (sig.value = t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree' })), truncated: t.truncated === true } : { kind: 'absent' }))
         .catch(() => (sig.value = { kind: 'absent' }));
     }
     return s.value;
@@ -164,7 +165,7 @@ export class StaticFiles implements Files {
     if (!t) return { kind: 'absent' };
     const dirs = new Set<string>();
     for (const p of t) p.split('/').slice(0, -1).forEach((_, i, a) => dirs.add(a.slice(0, i + 1).join('/')));
-    return { kind: 'ready', paths: [...[...dirs].map((path) => ({ path, dir: true })), ...t.map((path) => ({ path, dir: false }))] };
+    return { kind: 'ready', paths: [...[...dirs].map((path) => ({ path, dir: true })), ...t.map((path) => ({ path, dir: false }))], truncated: false };
   }
   put(owner: string, repo: string, path: string, _ref: string | undefined, text: string | null): void {
     if (text === null) delete this.map[`${owner}/${repo}/${path}`];
