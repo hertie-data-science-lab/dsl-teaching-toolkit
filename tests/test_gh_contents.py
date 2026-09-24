@@ -651,3 +651,93 @@ def test_an_empty_repo_has_no_last_committer(monkeypatch):
 def test_a_newest_commit_from_an_unlinked_email_names_nobody(monkeypatch):
     monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: [{"author": None}])
     assert gh_contents.last_committer("Org", "course-materials-f2026") is None
+
+
+# ------------------------------------------------ move_files: the migration's one commit
+
+
+def _git(monkeypatch, tree: dict[str, tuple[str, str]], fail: str = ""):
+    """A git data API over `tree` ({path: (sha, mode)}); `fail` names the write leg that
+    answers an error. Returns the calls made, with their bodies."""
+    calls = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append((args, kwargs.get("stdin")))
+        url = args[1] if args[1] != "--method" else args[3]
+        if url == "repos/org/repo":
+            return 0, _REPO_OBJECT
+        if "git/trees/main" in url:
+            rows = [f"{p}\t{sha}\t{mode}" for p, (sha, mode) in tree.items()]
+            return 0, "\n".join(["false", *rows])
+        if url == "repos/org/repo/commits/main":
+            return 0, "head-sha\tbase-tree-sha\n"
+        leg = url.rsplit("/", 1)[-1] if "git/refs" not in url else "refs"
+        if fail and fail in url:
+            return 1, "HTTP 422"
+        return 0, f"{leg}-sha\n"
+
+    _stub_gh(monkeypatch, fake_gh)
+    return calls
+
+
+def _posted(calls) -> list[dict]:
+    return [json.loads(stdin) for _, stdin in calls if stdin]
+
+
+def test_a_move_carries_the_blob_and_its_mode_and_deletes_the_source(monkeypatch):
+    calls = _git(
+        monkeypatch,
+        {
+            "autograde/a1/_graded.json": ("marker-sha", "100644"),
+            "tests/run.sh": ("script-sha", "100755"),
+        },
+    )
+    moved = {
+        "autograde/a1/_graded.json": ".system/autograde/a1/_graded.json",
+        "tests/run.sh": ".system/run.sh",
+    }
+    assert gh_contents.move_files("org", "repo", moved, "migrate: layout") is True
+    tree = _posted(calls)[0]["tree"]
+    assert {
+        "path": ".system/autograde/a1/_graded.json",
+        "mode": "100644",
+        "type": "blob",
+        "sha": "marker-sha",
+    } in tree
+    assert {
+        "path": ".system/run.sh",
+        "mode": "100755",
+        "type": "blob",
+        "sha": "script-sha",
+    } in tree
+    gone = {e["path"] for e in tree if e["sha"] is None}
+    assert gone == {"autograde/a1/_graded.json", "tests/run.sh"}
+    # ONE commit: one tree, one commit object, one ref move.
+    assert len(_posted(calls)) == 2
+    assert sum(1 for args, _ in calls if "PATCH" in args) == 1
+
+
+def test_a_move_whose_target_exists_only_removes_the_source(monkeypatch):
+    calls = _git(
+        monkeypatch,
+        {"old.json": ("a-sha", "100644"), ".system/old.json": ("b-sha", "100644")},
+    )
+    assert gh_contents.move_files("org", "repo", {"old.json": ".system/old.json"}, "m")
+    tree = _posted(calls)[0]["tree"]
+    assert tree == [{"path": "old.json", "mode": "100644", "type": "blob", "sha": None}]
+
+
+def test_nothing_to_move_is_no_commit(monkeypatch):
+    calls = _git(monkeypatch, {".system/x": ("s", "100644")})
+    assert gh_contents.move_files("org", "repo", {"x": ".system/x"}, "m") is True
+    assert _posted(calls) == []
+
+
+@pytest.mark.parametrize("leg", ["git/trees", "git/commits", "git/refs"])
+def test_a_failed_write_leg_moves_no_branch(monkeypatch, leg):
+    calls = _git(monkeypatch, {"a": ("s", "100644")}, fail=leg)
+    assert gh_contents.move_files("org", "repo", {"a": ".system/a"}, "m") is False
+    # The branch only ever moves last and only on success: a failed tree or commit never
+    # reaches the ref, and a refused ref move leaves the branch where it was.
+    ref_moves = [args for args, _ in calls if "PATCH" in args]
+    assert len(ref_moves) == (1 if leg == "git/refs" else 0)
