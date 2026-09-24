@@ -24,11 +24,11 @@ Accompanies the e2e [worked example](../example-course/).
 | | Step | Org Level | Where | Input | Output |
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the semester org | semester | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-f/sYYYY`; invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
-| `[required]` | 2. Bootstrap | course → semester | course `.github` → **Bootstrap semester** | `semester_org` | `welcome` (Join course / Join team issues) + `classroom-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
-| `[do this first]` | 3. The semester plan | semester | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole semester; site dates; grading deadlines |
-| `[required]` | 4. Roster | semester | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
-| *(optional)* | 5. Instructors | semester | edit [`classroom-config/instructors.yml`](#instructorsyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
-| `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
+| `[required]` | 2. Bootstrap | course → semester | course `.github` → **Bootstrap semester** | `semester_org` | `join` (Join course / Join team issues) + `semester-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
+| `[do this first]` | 3. The semester plan | semester | edit [`semester-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole semester; site dates; grading deadlines |
+| `[required]` | 4. Roster | semester | edit [`semester-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
+| *(optional)* | 5. Instructors | semester | edit [`semester-config/instructors.yml`](#instructorsyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
+| `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `join` **Join course** issue |
 | *(optional)* | 7. Ad-hoc release | course workflow, per semester | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
 | *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
 | *(optional)* | 9. Check semester setup | course workflow, per semester | course `.github` → **Check semester setup** | `semester_org` | what's configured, what's missing, an edit link per gap |
@@ -41,7 +41,7 @@ Accompanies the e2e [worked example](../example-course/).
 
 ## Inputs by file
 
-> NB: all these `classroom-config/` files are kept in a private repo (PII stays there; not leaked publicly).
+> NB: all these `semester-config/` files are kept in a private repo (PII stays there; not leaked publicly).
 
 ### `dsl-course.yml`
 
@@ -101,10 +101,10 @@ linked from nowhere. That site always lists each session folder's root files.
 
 ### `students.csv`
 
-Live example: [`example-course/cohort-org/students.csv`](../example-course/cohort-org/students.csv).
+Live example: [`example-course/semester-org/students.csv`](../example-course/semester-org/students.csv).
 
-`classroom-config/students.csv` - one row per student, straight from the registrar (seeded
-header-only, with a filled `students.csv.sample` next to it). Leave the onboarding-owned
+`semester-config/students.csv` - one row per student, straight from the registrar (seeded
+header-only; a filled one is in the [worked example](../example-course/semester-org/students.csv)). Leave the onboarding-owned
 columns blank (`github_handle`, `github_id`, `enrol_code`). Deleting a row off-boards that student on the next push.
 
 ```csv
@@ -126,9 +126,9 @@ Add any other column you want (a registrar id, a lecture section, notes) - the e
 
 ### `instructors.yml`
 
-Live example: [`example-course/cohort-org/instructors.yml`](../example-course/cohort-org/instructors.yml).
+Live example: [`example-course/semester-org/instructors.yml`](../example-course/semester-org/instructors.yml).
 
-`classroom-config/instructors.yml` - this semester's instructors, one list. Grants the semester's `instructors`
+`semester-config/instructors.yml` - this semester's instructors, one list. Grants the semester's `instructors`
 team necessary access permissions at both the course- and semester-org levels, including push
 from the course org into that year's content repos (`instructors-<semester>`), and supplies the
 semester site's cards. `github_handle`, `role` (`instructor` or `teaching_assistant`) and
@@ -175,10 +175,10 @@ cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 
 ### `teams.csv`
 
-Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
+Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).
 
-`classroom-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
-1. Students self-select via the `welcome` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `classroom-config/assignments.lock.yml`,
+`semester-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
+1. Students self-select via the `join` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/.system/assignments.lock.yml`,
 2. you edit it directly;
 either way a push materialises a GitHub team per group, and releasing a group assignment grants each team one shared repo.
 
@@ -190,9 +190,9 @@ assignment-4-project,team-x,ben-baker
 
 ### `grading_sheets/<slug>.yml`
 
-Live example: [`example-course/cohort-org/grading_sheets/assignment-1.yml`](../example-course/cohort-org/grading_sheets/assignment-1.yml).
+Live example: [`example-course/semester-org/grading_sheets/assignment-1.yml`](../example-course/semester-org/grading_sheets/assignment-1.yml).
 
-`classroom-config/grading_sheets/<slug>.yml` - one per assignment, created at handout with
+`semester-config/grading_sheets/<slug>.yml` - one per assignment, created at handout with
 every row in it. Everything under `info:` is the toolkit's and refreshes until the cutoff;
 everything else is yours and is never touched. Field-by-field reference:
 [the grading runbook](10-grade-and-return-assignments.md).
@@ -256,9 +256,9 @@ bottom.
 
 ### `schedule.yml`
 
-Live example: [`example-course/cohort-org/schedule.yml`](../example-course/cohort-org/schedule.yml).
+Live example: [`example-course/semester-org/schedule.yml`](../example-course/semester-org/schedule.yml).
 
-`classroom-config/schedule.yml` - the semester plan: the **auto-release plan** the scheduler
+`semester-config/schedule.yml` - the semester plan: the **auto-release plan** the scheduler
 runs, and the **dates** that drive the website and grading. Times are read in `timezone`
 (default `Europe/Berlin`) unless given an offset; a bare **release** date = 00:00, a bare
 **due_datetime**/`grading_datetime` date = 23:59:59, a bare **events** date shows as 09:00. Times are
@@ -465,7 +465,7 @@ week with both a lecture and a lab renders two rows.
 **A malformed entry is dropped - and every drop is reported.** The parser never raises, so
 the rest of the semester still runs, but nothing is silent: each drop is named in the run log,
 counted by **Check semester setup**, and makes `--validate` exit non-zero. A push to
-`schedule.yml` runs **Validate schedule** in `classroom-config`; a file the scheduler cannot
+`schedule.yml` runs **Validate schedule** in `semester-config`; a file the scheduler cannot
 fully read goes red and opens an issue naming the bad entry.
 
 | Mistake | What happens |
@@ -484,10 +484,10 @@ Verify with `python3 -m dsl_course.schedule --semester-org <SEMESTER> --validate
 [Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).
 
 **What happens at the grading deadline.** The scheduler freezes each submission repo's
-commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
+commit into `semester-config/.system/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
 then examines it **once** - the hidden tests where the `<slug>-<semester>` template's
 `grading_config.yml` says `autograde: true`, the completion check where it asks for one (the
-`_graded.json` / `_skipped.json` record in `classroom-config/autograde/<slug>/` is the fired
+`_graded.json` / `_skipped.json` record in `semester-config/.system/autograde/<slug>/` is the fired
 marker - delete it, or the whole folder, to re-grade). All of this happens whether or not the
 semester uses `releases`.
 

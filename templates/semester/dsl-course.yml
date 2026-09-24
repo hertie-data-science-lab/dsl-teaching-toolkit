@@ -1,0 +1,8 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten.
+#
+# This semester org points back to its persistent course org. Read by this repo's
+# dispatchers to find where to fire Sync membership, Sync site, Scheduled release and
+# Send codes. Identity lives in the course org's .github/dsl-course.yml, the schedule
+# in this repo's schedule.yml.
+course: {course}
+org: {org}

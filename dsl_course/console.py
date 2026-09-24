@@ -49,7 +49,7 @@ _REFRESH_FAILED = {
     "text": "Done, but the buttons were not all refreshed; the nightly refresh adds them.",
 }
 
-# The op that archives the semester's classroom-config, where its own record would go.
+# The op that archives the semester's semester-config, where its own record would go.
 _ARCHIVE_OP = "cohort.archive"
 
 _FALLBACK = {
@@ -246,7 +246,7 @@ def _loose(text: str) -> dict:
 
 def _sealed(outcome: Outcome, request: Request) -> bool:
     """Whether the op has just made the private record unwritable: a real archive seals
-    `classroom-config` as its last step, so there is nowhere left to write to."""
+    `semester-config` as its last step, so there is nowhere left to write to."""
     return (
         request.op == _ARCHIVE_OP
         and not request.preview

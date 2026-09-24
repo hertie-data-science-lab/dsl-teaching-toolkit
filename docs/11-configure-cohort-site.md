@@ -11,12 +11,12 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | Course blurb under the title | course org `.github/dsl-course.yml` | `course_description` |
 | Course title + code | course org `.github/dsl-course.yml` | `course_name`, `course_code` - **not** `org_name` |
 | Semester + year | *nothing to set* | inferred from the semester org's `fYYYY`/`sYYYY` semester (`hertie-dsl-demo-f2026` → "Fall 2026") |
-| Instructor / TA cards | semester `classroom-config/instructors.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
+| Instructor / TA cards | semester `semester-config/instructors.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
 | Instructor photos | site repo `<semester-org>.github.io` | commit the image under `_images/pp/`, then `photo: /_images/pp/jane.jpg`. Can also use a URL that allows hotlinking |
-| Schedule rows, exams, assignment due dates | semester `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `releases`, `events`, `assignments` (there is no `exams:` key - an exam is an `events:` entry with `kind: exam`) |
+| Schedule rows, exams, assignment due dates | semester `semester-config/schedule.yml` ([07](07-schedule-releases.md)) | `releases`, `events`, `assignments` (there is no `exams:` key - an exam is an `events:` entry with `kind: exam`) |
 | A hand-written entry in the **Updates** box | site repo | add a file under `_announcements/` with `date:` + `details:` front matter (the file's body works too). The box shows the newest 7 items (releases feed it automatically, and only once they have actually shipped); older ones roll off as new ones arrive - delete the file to pull one early |
 | Materials links | *nothing to set* | the row appears as soon as `schedule.yml` names the session, marked "not released yet"; the links fill in as you [release](08-release-materials-to-cohort.md) |
-| A session's name + blurb | semester `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `details` on the `releases:` entry - the Hertie syllabus's session title and learning objectives. `details` may run to several paragraphs, and shows in the schedule's Details column as well as on the session's tab |
+| A session's name + blurb | semester `semester-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `details` on the `releases:` entry - the Hertie syllabus's session title and learning objectives. `details` may run to several paragraphs, and shows in the schedule's Details column as well as on the session's tab |
 | Readings on the **Readings** tab | course materials repo | drop the readings into `readings/NN_.../` and **every file is listed and linked automatically** for enrolled students - nothing to write. `READINGS.md` (or `.txt`/`.bib`) beside them is OPTIONAL, for what a file cannot say: a URL, pointers for what to focus on, or clean citation-style metadata. It is published as written (this site is public, so it never hosts a reading itself directly, rather links to the GH-hosted files (with their permission restrictions enforced there))|
 | The **All Materials** tab | *nothing to set* | every file released to the semester, grouped by section and nested exactly as its repo has it - a folder opens in the page itself, at any depth, rather than only counting its contents. The only page not keyed on a session ordinal, so a released `SYLLABUS.md` or a flat `datasets/` appears here rather than on a session tab. A released syllabus is *also* pinned on the home page (found by name at the repo root, in any format) |
 | Rendered decks (an HTML deck opening in the browser instead of showing as source) | course materials repo `publish.yml` | patterns, `.gitignore` syntax, of what the site may host publicly - seeded by the **New materials repo** form and yours to edit afterwards. They are matched against the path in the semester's copy, which is the path in this repo unless a release renamed it with `semester_dest_path`. A matched `<name>.html` brings its `<name>_files/` bundle; the file's name then opens the hosted copy, with `source` and `render` buttons beside it, and everything unmatched is unchanged. `solution/`, `tests/`, grading files and `.env` are never hosted. Remove a pattern and the copy goes on the next sync (the site repo's git history keeps the old bytes - purge by hand) |
@@ -33,7 +33,7 @@ commit still holds the change, to be copied back out and made at the source.
 | In the site repo | What happens |
 |---|---|
 | `_lectures/`, `_assignments/`, `_events/` | each directory is **deleted and rebuilt** every sync - a file you drop in here vanishes |
-| `_data/people.yml` | overwritten from `classroom-config/instructors.yml` |
+| `_data/people.yml` | overwritten from `semester-config/instructors.yml` |
 | `lectures.md`, `labs.md`, `readings.md`, `materials.md`, `assignments.md`, `profile.md` | front-matter stubs pointing at the layouts below - generated wrappers, so put your own words in `index.md` |
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
 | `_data/materials.yml` | the All Materials index, rebuilt from what each semester repo actually holds |
@@ -60,7 +60,7 @@ every site pins at a fixed ref.
 
 | Trigger | Latency |
 |---|---|
-| Push to `classroom-config/schedule.yml` or `instructors.yml` | immediate |
+| Push to `semester-config/schedule.yml` or `instructors.yml` | immediate |
 | **Release materials** / **Release assignment** workflow | immediate, in the same run |
 | A scheduled release firing | within that tick ([about every 15 minutes](07-schedule-releases.md#what-drives-the-scheduler)) |
 | Push to course org `.github/dsl-course.yml` | immediate - and re-syncs **every** semester site |
@@ -76,4 +76,4 @@ every site pins at a fixed ref.
 ---
 **Demo:** [`hertie-dsl-demo-f2026.github.io`](https://hertie-dsl-demo-f2026.github.io/), fed by
 [`hertie-dsl-demo-course-e1234/.github/dsl-course.yml`](https://github.com/hertie-dsl-demo-course-e1234/.github/blob/main/dsl-course.yml)
-and [`hertie-dsl-demo-f2026/classroom-config`](https://github.com/hertie-dsl-demo-f2026/classroom-config).
+and [`hertie-dsl-demo-f2026/semester-config`](https://github.com/hertie-dsl-demo-f2026/semester-config).

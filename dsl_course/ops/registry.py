@@ -43,9 +43,8 @@ STATUS_SCHEMA = "dsl.status/1"
 
 DISPATCH = "dispatch"
 COURSE = "course"
-# The op scope and the `cohort.*` op ids are what the console matches on; they are renamed
-# together with the console (WP-A3), not here.
-SEMESTER = "cohort"
+# The op scope and the `semester.*` op ids are what the console matches on (ops.json).
+SEMESTER = "semester"
 BOOTSTRAP_OP = "cohort.bootstrap"
 INLINE = "inline"
 VIA_WORKFLOW = "workflow:"

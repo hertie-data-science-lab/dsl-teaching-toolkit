@@ -5,7 +5,7 @@ Same operational properties the renderers are held to in test_renderers.py, enfo
 the files rather than on the functions - so a hand-written workflow can't quietly take the
 default token scopes, run unbounded, interpolate an expression into a shell, or float an
 action on a movable tag. Ownership is deliberate: anything asserted about a shipped .yml
-lives here, and the per-template behaviour tests (test_welcome_templates.py) assert only
+lives here, and the per-template behaviour tests (test_join_templates.py) assert only
 what is unique to that template.
 """
 

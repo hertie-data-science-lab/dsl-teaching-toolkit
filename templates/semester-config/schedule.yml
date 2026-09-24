@@ -3,7 +3,7 @@
 # This semester's schedule + auto-release plan. Instructors edit it directly.
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/docs/07-schedule-releases.md
-# - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
+# - worked example: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/semester-org/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
 # Times are Europe/Berlin unless you set `timezone:`. Scheduled release ticks about every
@@ -31,8 +31,8 @@
 # release already shipped stays shipped - unshipping it means rewriting the repo's git
 # history.
 #
-# What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
-# a real release plan, a group project, exams - see `schedule.yml.sample`.
+# What follows is a SKELETON: uncomment and fill what you want. For a full worked semester -
+# a real release plan, a group project, exams - see the worked example above.
 
 # timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin
 # semester_start:                   # OPTIONAL - default: inferred from the semester tag (f2026 -> 1 Sep 2026)

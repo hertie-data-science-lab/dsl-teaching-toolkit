@@ -29,6 +29,7 @@ from . import mailer
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
+    CONFIG_REPO,
     COURSE_DEFAULT_CHOICE,
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
@@ -1042,14 +1043,14 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
     Faculty always reconciles - split by role: course_admins (from THIS org's
     declared `people:` block) into the course org + every semester's own course-admin
     team; and, for whichever semester is in scope, that semester's own instructors/TAs
-    (from its classroom-config/instructors.yml) into its own instructors team + a
+    (from its semester-config/instructors.yml) into its own instructors team + a
     course-org instructors-<tag> team. Roster (students.csv) + project teams
     (teams.csv) additionally reconcile for whichever semester is in scope. Fully
     automatic, including removals (no --prune flag - config is the live truth):
 
     - push to this file's own dsl-course.yml -> course_admins only (no single semester
       implied - but still applied to every semester's own course-admin team)
-    - repository_dispatch (from a semester's classroom-config dispatcher on push to its
+    - repository_dispatch (from a semester's semester-config dispatcher on push to its
       students.csv/teams.csv/instructors.yml) -> course_admins + that one semester's
       instructors/TAs; one whose payload says `all_semesters: true` and names no semester
       (the ds01 timer's hourly dispatch) -> EVERY registered semester, like the cron
@@ -1145,21 +1146,21 @@ def render_distribute_grades(semester_orgs: list[str]) -> str:
     """Send every mark a grader has written where it has to go."""
     return f"""name: Distribute grades
 
-# Reads the grading sheets in classroom-config and sends what they hold: each student's
+# Reads the grading sheets in semester-config and sends what they hold: each student's
 # private grades-<handle> repo, the registrar export, and (unless silenced) an email saying
 # there is something new to read. Nothing is posted into a submission repo, and nothing is
 # said twice - a re-run after one correction reaches one student.
 # There is no assignment to pick: every run rebuilds every gradebook from every sheet,
 # which is what keeps a gradebook the whole of a student's marks.
 # Preview first; it writes no grades, sends no mail, and posts who gets what as a
-# "Distribute grades preview" issue in classroom-config. Needs the GRAPH_* secrets to mail.
+# "Distribute grades preview" issue in semester-config. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
 {_semester_dropdown(semester_orgs)}
       preview:
-        description: "Preview who gets what, as an issue in classroom-config - push no grades, send nothing"
+        description: "Preview who gets what, as an issue in semester-config - push no grades, send nothing"
         type: boolean
         default: true
       notify:
@@ -1221,8 +1222,8 @@ def render_open_team_formation(semester_orgs: list[str]) -> str:
 # semester's Join team form. It is the same message the scheduler sends by itself when a
 # window opens - this is how you send it again on your own say-so, after announcing the
 # assignment in class or once a semester's mail secrets are finally set.
-# NOTHING IS SAID TWICE: every message is recorded in classroom-config's
-# team-formation/mailed.csv, so a second press reaches only the students a first press did
+# NOTHING IS SAID TWICE: every message is recorded in semester-config's
+# .system/team-formation/mailed.csv, so a second press reaches only the students a first press did
 # not - a newcomer who has since joined GitHub, and nobody else.
 # Leave `assignment` empty for every window that is open. Filling it in narrows the run to
 # ONE schedule.yml assignment key and leaves the other windows alone; a key with no open
@@ -1316,9 +1317,9 @@ def render_archive_semester(semester_orgs: list[str]) -> str:
 # opt-in, so this button closes a semester out early - and is the only way to close out one
 # that wrote no block. It offers the semester's edits back to this org as a pull request
 # first, closes the toolkit's open notices, syncs the website one last time, then ARCHIVES
-# every repo in the semester org - students' work, `welcome` so a finished term cannot still
+# every repo in the semester org - students' work, `join` so a finished term cannot still
 # be joined, the released materials, the website, `.github` - writes the teardown record
-# into the private classroom-config and archives that last, which is what tells every
+# into the private semester-config and archives that last, which is what tells every
 # nightly sweep the semester is finished.
 # NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
 # students keep read access to their own work, and un-archiving a repo from its own
@@ -1372,7 +1373,7 @@ def render_send_codes() -> str:
     """Generate a non-PII enrolment code per student and email each their code.
 
     One way in, and it is not a person: a push to a semester's students.csv, which its
-    classroom-config dispatcher turns into a `send-codes` repository_dispatch. So the job
+    semester-config dispatcher turns into a `send-codes` repository_dispatch. So the job
     is UNGATED - a dispatch has no actor to check - and it sends for real, because the
     whole point is that a roster edit reaches the new students' inboxes without a click.
     Same routing as Sync membership's automatic path.
@@ -1391,13 +1392,13 @@ def render_send_codes() -> str:
     """
     return f"""name: Send enrolment codes
 
-# Generates a random enrolment code per student (into classroom-config/students.csv) and
+# Generates a random enrolment code per student (into semester-config/students.csv) and
 # emails each not-yet-onboarded student their code to their Hertie email address. Students
-# paste the code into the welcome Join course issue - no personal data in the public repo.
+# paste the code into the Join course issue - no personal data in the public repo.
 # Needs the GRAPH_* secrets.
 #
 # There is no button: a push to a semester's students.csv is what fires this (its
-# classroom-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
+# semester-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
 # only thing anyone edits. Re-running is safe - a row is mailed only while its
 # `code_sent_at` is blank - which is also why pushing again does not re-send: to send a
 # row a second time, clear its `code_sent_at` and push that.
@@ -1430,8 +1431,8 @@ on:
 
 
 def render_bootstrap_semester() -> str:
-    """Configure a (pre-created, empty) semester org from the course org: welcome +
-    classroom-config + tightened perms, register it, and refresh the dropdowns."""
+    """Configure a (pre-created, empty) semester org from the course org: join +
+    semester-config + tightened perms, register it, and refresh the dropdowns."""
     return f"""name: Bootstrap semester
 
 # You create the empty semester org in the web UI first (GitHub has no org-creation API)
@@ -1464,8 +1465,8 @@ on:
 """
 
 
-# The semester a run is SCOPED to, or ''. Only a classroom-config dispatcher's push names one
-# (`templates/classroom-config/dispatch-scheduled-release.yml` sends driver=classroom-config
+# The semester a run is SCOPED to, or ''. Only a semester-config dispatcher's push names one
+# (`templates/semester-config/dispatch-scheduled-release.yml` sends driver=semester-config
 # and its own org as semester_org). The run releases into the one semester that changed and
 # hands any site render to Sync site's queue - which a schedule.yml / instructors.yml / teams.csv
 # push has usually just started as well - rather than racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
@@ -1474,7 +1475,7 @@ on:
 # the course's own registry before it touches anything.
 _SCOPED_SEMESTER = (
     "(github.event_name == 'repository_dispatch' "
-    "&& github.event.client_payload.driver == 'classroom-config' "
+    f"&& github.event.client_payload.driver == '{CONFIG_REPO}' "
     f"&& {_PAYLOAD_SEMESTER} || '')"
 )
 
@@ -1487,10 +1488,10 @@ def render_scheduler() -> str:
     write)."""
     return f"""name: Scheduled release
 
-# Reads each semester's classroom-config/schedule.yml and, on every tick: freezes the submission
+# Reads each semester's semester-config/schedule.yml and, on every tick: freezes the submission
 # snapshot for each assignment whose grading deadline has passed, fires every `releases:`
 # release whose `when` datetime has arrived, and autogrades each frozen assignment ONCE
-# (marker: classroom-config/autograde/<slug>/ - delete it to re-grade). Releases are
+# (marker: semester-config/.system/autograde/<slug>/ - delete it to re-grade). Releases are
 # idempotent, so re-releasing on the next tick is a no-op; grading is not re-run. Unattended
 # it releases for real; manual runs default to dry-run.
 #
@@ -1503,7 +1504,7 @@ def render_scheduler() -> str:
 # times a day, not 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is
 # negligible.
 #
-# ONE SEMESTER, when a semester's classroom-config push fired this run (driver=classroom-config):
+# ONE SEMESTER, when a semester's semester-config push fired this run (driver=semester-config):
 # this run releases into that semester alone and asks Sync site - by dispatch, into its own
 # queue, which the same push may already have started - for any render its releases need,
 # instead of pushing the site repo alongside it. The cron and the ds01 timer still walk every semester.
@@ -1768,9 +1769,9 @@ def render_generate_syllabus(source_repos: list[str], semester_orgs: list[str]) 
 
 # Writes the "Course sessions and readings" section of a syllabus - one block per session,
 # with its title, its learning objectives and its reading list - from the semester's
-# classroom-config/schedule.yml and this repo's readings/ folders.
+# semester-config/schedule.yml and this repo's readings/ folders.
 #
-# It lands in SYLLABUS.sessions.md beside your syllabus, and is NEVER released to students.
+# It lands in .system/SYLLABUS.sessions.md, and is NEVER released to students.
 # Paste what you want into SYLLABUS.md; a re-run overwrites the companion file, never your
 # syllabus. Dropdowns are refreshed by the 'Refresh actions' workflow.
 
@@ -1780,7 +1781,7 @@ on:
 {_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos)}
 {_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
       preview:
-        description: "Preview - print the block, commit nothing to SYLLABUS.sessions.md"
+        description: "Preview - print the block, commit nothing to .system/SYLLABUS.sessions.md"
         type: boolean
         default: true
 
@@ -2059,7 +2060,7 @@ def render_sync_site(semester_orgs: list[str]) -> str:
 
     - push to this .github repo's dsl-course.yml -> re-sync EVERY semester (the course name /
       instructor cards feed every semester site).
-    - repository_dispatch `sync-site` (fired by the semester's classroom-config dispatcher on
+    - repository_dispatch `sync-site` (fired by the semester's semester-config dispatcher on
       push to schedule.yml/instructors.yml) -> re-sync that one semester (or all, if the payload
       names none).
     - daily cron -> re-sync every semester (the catch-all: a direct edit to a released

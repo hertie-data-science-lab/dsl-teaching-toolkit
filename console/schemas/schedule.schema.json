@@ -176,6 +176,6 @@
       "type": "string"
     }
   },
-  "title": "classroom-config/schedule.yml",
+  "title": "semester-config/schedule.yml",
   "type": "object"
 }

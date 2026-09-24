@@ -16,7 +16,7 @@ Once each year; the [course org](01-new-course-org.md) it hangs off is permanent
 
 ## Steps
 
-Live example of every file below: [`example-course/cohort-org/`](../example-course/cohort-org).
+Live example of every file below: [`example-course/semester-org/`](../example-course/semester-org).
 
 1. **Create the semester org** in the [web UI](https://github.com/account/organizations/new?plan=free&ref_cta=Create%2520a%2520free%2520organization&ref_loc=cards&ref_page=%2Forganizations%2Fplan), 
     - Named **`hertie-<course-slug>-<termtag>`**, termtag `fYYYY`/`sYYYY` - lowercase-kebab (e.g. `hertie-dsl-demo-f2026`). 
@@ -29,22 +29,22 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
     - From the **course** org's `.github` Actions tab: `Bootstrap semester`.
     - `semester_org` = select the newly created `hertie-<course-slug>-<termtag>`. 
     - This seeds: 
-      - **`welcome`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
+      - **`join`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
       - its **`README.md`**, telling them how to join - public like the rest of the repo, yours to reword, and never overwritten
-      - **`classroom-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `instructors.yml`
+      - **`semester-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `instructors.yml`
       - **`students` + `auditors` teams** (empty) - do not edit directly these, these will be populated by the workflow, 
       - **`course-admin` team** for this semester
       - **`hertie-dsl-demo-f2026.github.io`** auto-deployed website - what it shows, and what you must not hand-edit: [11](11-configure-cohort-site.md)
-    - It also **registers the semester** in the course org's `.github/cohort-courses-pages.yml`. That file is the registry every semester dropdown reads, so an unregistered semester is invisible to every workflow; a registered org that is later deleted is pruned from it automatically by the nightly refresh.
+    - It also **registers the semester** in the course org's `.github/semesters.yml`. That file is the registry every semester dropdown reads, so an unregistered semester is invisible to every workflow; a registered org that is later deleted is pruned from it automatically by the nightly refresh.
 
 ---
 
-4. **Fill in `classroom-config/schedule.yml` for the whole semester** (edit locally or in the web UI → commit to `main`).
+4. **Fill in `semester-config/schedule.yml` for the whole semester** (edit locally or in the web UI → commit to `main`).
     - Full guide for doing so covered in [07-schedule-releases.md](07-schedule-releases.md)
     - Full schema for the schedule [here](DEPLOYMENT-CHECKLIST.md#scheduleyml)
 
 
-5. *(optional)* **Declare this semester's instructors/TAs** in `classroom-config/instructors.yml`.
+5. *(optional)* **Declare this semester's instructors/TAs** in `semester-config/instructors.yml`.
     - This grants them push on this semester and on this year's course content repos, and supplies the semester site's cards.
 
    ```yaml
@@ -65,10 +65,10 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
       - Full guide, including removing people and how quickly changes land: [05 Manage the instructors](05-manage-teaching-team.md).
 
 6. **Load the student roster.** 
-  - Fill `classroom-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
+  - Fill `semester-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
   - Leave `github_handle, github_id` blank - onboarding fills them. 
   - Add `role: auditor` for anyone who should get the released materials but no assignments and no grades. 
-  - The seeded `students.csv.sample` shows a filled row of each kind, and that repo's `README.md` documents every column.
+  - The [worked example](../example-course/semester-org/students.csv) shows a filled row of each kind, and that repo's `README.md` documents every column.
   - Full details found in [06-enrol-students-to-cohort.md](06-enrol-students-to-cohort.md)
 
 7. *(only for `visibility: student_choice` assignments)* **Set the org's member privileges.**

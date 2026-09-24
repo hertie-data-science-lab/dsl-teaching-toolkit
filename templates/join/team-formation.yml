@@ -2,17 +2,17 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Form team
 
-# Seed this into a semester's public `welcome` repo as
+# Seed this into a semester's public `join` repo as
 # .github/workflows/team-formation.yml. Students open a "Join team" issue here; the issue
 # AUTHOR is the authenticated GitHub handle (unspoofable). We verify they are an onboarded
 # ENROLLED student - auditors are read-only (released materials, no assignment repos) so they
-# are refused - then append a row to the PRIVATE classroom-config/teams.csv - the only writer
+# are refused - then append a row to the PRIVATE semester-config/teams.csv - the only writer
 # surface for team membership. A GitHub Team is materialised FROM that CSV later (one-way, by
 # dsl_course.sync_teams), so the Team is a downstream projection that can't drift the way a
 # Classroom-managed team does. Group-assignment provisioning grants that team its shared repo.
 #
 # WHETHER a team may form at all, and how big, is answered by
-# classroom-config/assignments.lock.yml - written by the toolkit from each assignment's
+# semester-config/.system/assignments.lock.yml - written by the toolkit from each assignment's
 # grading_config.yml, because that file lives in the course org and this token cannot
 # reach it. An assignment the lock does not carry, or one it marks `assigned` or `none`,
 # is refused here.
@@ -22,7 +22,7 @@ name: Form team
 # carries that page's URL (`team_formation_page:`) for the refusals below to link.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
-# classroom-config, Issues R/W on welcome.
+# semester-config, Issues R/W on join.
 
 on:
   issues:
@@ -40,7 +40,7 @@ concurrency:
   cancel-in-progress: false
 
 # The ambient GITHUB_TOKEN comments on, labels and closes the issue in THIS repo. It gets
-# nothing else: teams.csv lives in another repo (classroom-config), which only
+# nothing else: teams.csv lives in another repo (semester-config), which only
 # DSL_BOT_TOKEN can reach, so `contents:` here would be scope with no purpose.
 permissions:
   issues: write
@@ -61,7 +61,7 @@ jobs:
             const org    = context.repo.owner;            // the semester org
             const issue  = context.payload.issue;
             const handle = issue.user.login;              // authenticated identity
-            const CONFIG = 'classroom-config';
+            const CONFIG = '__CONFIG_REPO__';
             const TEAMS  = 'teams.csv', ROSTER = 'students.csv';
 
             // {shared_script}
@@ -112,7 +112,7 @@ jobs:
               const tMatch = (issue.body || '').match(/###\s*Team\s*[\r\n]+\s*([^\r\n]+)/i);
 
               // What this assignment allows, read from the machine-written mirror the
-              // toolkit keeps at classroom-config/assignments.lock.yml - THIS FILE AND
+              // toolkit keeps at semester-config/.system/assignments.lock.yml - THIS FILE AND
               // NOTHING ELSE. The answer lives in the template's grading_config.yml, in
               // the course org, which this token deliberately cannot reach; the
               // schedule.yml scrape that stood here before let a slug with no `type:`
@@ -131,7 +131,7 @@ jobs:
               // `page` is the assignment's page on the semester site, which lists the teams
               // that exist - "" where the lock carries none, and the refusal then names
               // the page without linking it.
-              const LOCK = 'assignments.lock.yml';
+              const LOCK = '__LOCK__';
               const lockEntry = async (slug) => {
                 let text;
                 try {
@@ -271,7 +271,7 @@ jobs:
               const lock = await lockEntry(assignment);
               if (lock === undefined) return fail(
                 `Thanks @${handle} - I can't read this semester's assignment list ` +
-                `(\`classroom-config/${LOCK}\` isn't there). A maintainer will action this.`,
+                `(\`${CONFIG}/${LOCK}\` isn't there). A maintainer will action this.`,
                 'needs-review');
               if (lock === null) return refuse(
                 `Thanks @${handle} - \`${assignment}\` isn't an assignment in this semester. ` +

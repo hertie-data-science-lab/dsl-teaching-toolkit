@@ -22,12 +22,14 @@ from datetime import datetime, timezone
 
 import yaml
 
+from . import records
 from .central import resolve_central_ref
 from .course import (
     CONFIG_REPO,
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
+    JOIN_REPO,
     OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
     session_dirs,
@@ -36,7 +38,7 @@ from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log, log_err, log_ok
-from .repos import default_branch, repo_exists, repo_is_archived
+from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
 
 # The standalone semester registry in the course org's .github repo.
 SEMESTERS_PATH = "semesters.yml"
@@ -44,7 +46,7 @@ SEMESTERS_PATH = "semesters.yml"
 # and not the new one, or the old `cohorts:` key, is refused as NOT_MIGRATED.
 OLD_SEMESTERS_PATH = "cohort-courses-pages.yml"
 
-INFRA_REPOS = {"welcome", "classroom-config", ".github"}
+INFRA_REPOS = {JOIN_REPO, CONFIG_REPO, ".github"}
 # The topic assign.py stamps on the frozen semester-side template it creates before
 # provisioning a single student repo (ensure_semester_template). Named here, and imported by
 # the one writer and the one reader, so the string cannot drift between them.
@@ -55,17 +57,17 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 # The repos only a semester org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
-SEMESTER_ONLY_REPOS = {"welcome", "classroom-config"}
+SEMESTER_ONLY_REPOS = {JOIN_REPO, CONFIG_REPO}
 
 
-def welcome_issue_url(semester_org: str) -> str:
+def join_issue_url(semester_org: str) -> str:
     """Where a student opens a Join course or a Join team issue.
 
     ONE spelling, because four surfaces point at it - the org profile, the semester site's
     callout, the enrolment-code mail and the team-formation mail - and a semester whose
-    welcome repo moved with one of them left behind is a semester told to go somewhere that
+    join repo moved with one of them left behind is a semester told to go somewhere that
     is not there."""
-    return f"https://github.com/{semester_org}/welcome/issues/new/choose"
+    return f"https://github.com/{semester_org}/{JOIN_REPO}/issues/new/choose"
 
 
 def carries_old_semester_topic(repos: list[dict]) -> bool:
@@ -81,7 +83,7 @@ def org_tier(repos: list[dict]) -> str | None:
 
     The `.github` repo's topic is authoritative; the semester-only infra repos are the
     fallback. None is a real answer, not "course": a legacy semester (`hertie-dl-f2025`:
-    `.github` + student repos, no `welcome`, no topics) looks exactly like a course org by
+    `.github` + student repos, no `join`, no topics) looks exactly like a course org by
     elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
     dotgithub = next((r for r in repos if r["name"] == ".github"), None)
     topics = set((dotgithub or {}).get("topics") or [])
@@ -295,7 +297,7 @@ def _registry_fault(what: str) -> ConfigFault:
     list of org names, so what goes wrong with it is its SHAPE, and the whole course pays
     the same price either way (see `faults.CONSEQUENCE`). `in_repo` is the COURSE org's
     public `.github`, which is what makes the citation and the digest's deep link point at
-    the file somebody has to edit rather than at a semester's classroom-config."""
+    the file somebody has to edit rather than at a semester's semester-config."""
     return ConfigFault(
         SEMESTERS_PATH,
         what,
@@ -413,10 +415,17 @@ def org_meta(org: str) -> dict:
     return load_yaml_config(org, ".github", COURSE_CONFIG) or {}
 
 
+def semester_pointer(semester_org: str) -> dict:
+    """A semester's pointer to its course org (`semester-config/.system/dsl-course.yml`),
+    or `{}` when there is none. Moved in from the semester's `.github` (decision 0010):
+    its only readers are this repo's dispatchers and the engine, and `.github` is public."""
+    return load_yaml_config(semester_org, CONFIG_REPO, records.path("pointer")) or {}
+
+
 def course_name_for_semester(semester_org: str) -> str:
     """This semester's course name, for student-facing prose ("your grades for X").
 
-    Follows the semester's own `.github/dsl-course.yml` `course:` pointer to its course
+    Follows the semester's own `course:` pointer (`semester_pointer`) to its course
     org, then reads that org's identity file - the same two hops status.collect makes,
     but starting from the semester, which is all an emailer is given.
 
@@ -428,12 +437,12 @@ def course_name_for_semester(semester_org: str) -> str:
 
 
 def course_org_for_semester(semester_org: str) -> str:
-    """The COURSE org this semester belongs to, from its own `.github/dsl-course.yml`
-    `course:` pointer. "" when the pointer is missing or unreadable.
+    """The COURSE org this semester belongs to, from its own `course:` pointer
+    (`semester_pointer`). "" when the pointer is missing or unreadable.
 
     A semester-side CLI is given only the semester; anything it needs from the course side -
     an assignment's `grading_config.yml`, say - has to start here."""
-    return str(org_meta(semester_org).get("course") or "")
+    return str(semester_pointer(semester_org).get("course") or "")
 
 
 def course_name_of(course_org: str) -> str:
@@ -453,15 +462,15 @@ def central_ref_for(org: str) -> str:
     """Which ref of the central toolkit this org's seeded workflows run the engine from.
 
     Declared as `central_ref:` in the COURSE org's `.github/dsl-course.yml`, so one edit
-    moves a course and every semester under it between tiers together. A semester org's own
-    file is only a pointer (`course:`), so this follows it - a `central_ref:` written into
-    a semester's file is ignored, because a semester running a different engine from the course
-    org that releases into it is not a state anyone wants to debug.
+    moves a course and every semester under it between tiers together. A semester org has
+    no `dsl-course.yml` of its own, only the pointer (`semester_pointer`), so this follows
+    it - a semester running a different engine from the course org that releases into it
+    is not a state anyone wants to debug.
 
     Absent means `central.CENTRAL_REF`; a value that is neither a tier nor a full SHA
     raises `central.MissingCentralRef` - see resolve_central_ref."""
     meta = org_meta(org)
-    course = str(meta.get("course") or "")
+    course = "" if meta else course_org_for_semester(org)
     if course:
         org, meta = course, org_meta(course)
     return resolve_central_ref(
@@ -478,7 +487,7 @@ def discover_semesters(course_org: str) -> list[str]:
 def semester_is_live(semester_org: str) -> bool:
     """Whether `semester_org` is still running, rather than closed out and left frozen.
 
-    An archived `classroom-config` IS the "this semester is finished" marker - it is the last
+    An archived `semester-config` IS the "this semester is finished" marker - it is the last
     thing `teardown` freezes, for exactly that reason - and everything a course-side sweep
     would do to a finished semester is a write into a read-only org: every one of them 403s,
     every night, for the rest of the course's life. A finished term is a state somebody
@@ -488,10 +497,25 @@ def semester_is_live(semester_org: str) -> bool:
     `repos.repo_is_archived` fails OPEN, so "could not tell" reads as LIVE: guessing that
     way costs one failed write that says so out loud, and guessing the other way silently
     stops syncing a semester mid-term."""
-    if not repo_is_archived(semester_org, CONFIG_REPO):
-        return True
-    log(f"  [skip] {semester_org} (archived semester - left frozen)")
-    return False
+    if repo_is_archived(semester_org, CONFIG_REPO):
+        log(f"  [skip] {semester_org} (archived semester - left frozen)")
+        return False
+    # No config repo under its name at all, and the old topic: a semester archived before
+    # decision 0010 (never migrated, never touched) or one the migration has not reached.
+    # Either way nothing may be written into it.
+    if repo_missing(semester_org, CONFIG_REPO) and not_migrated_org(semester_org):
+        log(f"  [skip] {semester_org} (not migrated - archived, or run the migration)")
+        return False
+    return True
+
+
+def not_migrated_org(org: str) -> bool:
+    """Whether `org`'s `.github` carries the OLD semester topic and not the new one, read
+    from its topics. The listing form, for a caller that already holds one, is
+    `carries_old_semester_topic`."""
+    code, out = gh("api", f"repos/{org}/.github/topics", "--jq", ".names[]")
+    topics = set(out.split()) if code == 0 else set()
+    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
 
 
 def live_semesters(course_org: str) -> list[str]:

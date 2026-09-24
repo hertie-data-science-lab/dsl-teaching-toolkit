@@ -452,7 +452,7 @@ def _configure(run_id: str) -> Stage:
 
 
 def _sheet(slug: str) -> str:
-    """This assignment's grading sheet, as classroom-config holds it right now."""
+    """This assignment's grading sheet, as semester-config holds it right now."""
     return (
         gh_contents.get_file_content(
             SEMESTER_ORG, course.CONFIG_REPO, grades.sheet_path(slug)
@@ -628,7 +628,7 @@ def _lock_state() -> bytes | None:
 def _config_restore(
     lock: bytes | None, recorded: Stage | None
 ) -> dict[str, bytes | None]:
-    """Every `classroom-config` file the walk moves that no run id owns, keyed by path -
+    """Every `semester-config` file the walk moves that no run id owns, keyed by path -
     what the teardown hands back in one commit.
 
     Two recordings, because the two move at different points: the lock before the walk
@@ -830,7 +830,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     )
     stages["grading"] = _dispatch_scheduler("grading")
 
-    # 11. What the freeze left in classroom-config, and what the org looks like after it.
+    # 11. What the freeze left in semester-config, and what the org looks like after it.
     stages["artefacts"] = Stage(
         "artefacts",
         detail={
@@ -896,7 +896,7 @@ def pipeline():
 
     Teardown is not optional and not conditional: it runs whether the walk finished or
     died halfway, and it asserts that the estate came back byte for byte - the repos, their
-    visibility and topics, every blob in classroom-config, and the org-level workflow set,
+    visibility and topics, every blob in semester-config, and the org-level workflow set,
     which the run's own templates rewrote and cleanup re-renders."""
     run_id = cleanup.new_run_id()
     _preflight(run_id)
@@ -1087,7 +1087,7 @@ def test_the_freeze_timed_the_submission_by_githubs_own_push_record(pipeline):
 
 
 def test_the_autograde_marker_was_written(pipeline):
-    # `_graded.json`, not the bare `autograde/<slug>/` directory: that is the fire-once
+    # `_graded.json`, not the bare `.system/autograde/<slug>/` directory: that is the fire-once
     # sentinel the next tick reads to decide it has nothing to do. Only the shape that
     # asked New assignment for hidden tests has one.
     markers = pipeline.stages["artefacts"].detail["markers"]
@@ -1167,7 +1167,7 @@ def test_only_a_shape_with_a_thread_gets_a_receipt(pipeline):
 
 def test_collect_submissions_over_an_unchanged_semester_writes_nothing(pipeline):
     # The button is the refresh on demand. Pressing it must be free - byte for byte - or
-    # nobody can lean on it, and every press would churn a commit in classroom-config.
+    # nobody can lean on it, and every press would churn a commit in semester-config.
     stage = pipeline.stages["collect_button"]
     assert stage.conclusion == "success"
     assert stage.detail["after"] == stage.detail["before"], (
@@ -1427,7 +1427,7 @@ def test_distribute_says_nothing_twice(pipeline):
 
 def test_the_private_note_reaches_nobody(pipeline):
     # `notes_not_shared_with_students` is the one field that must never leave
-    # classroom-config. It is written into all five sheets on purpose above, so its
+    # semester-config. It is written into all five sheets on purpose above, so its
     # absence here is a measurement rather than an assumption.
     stage = pipeline.stages["distribute"]
     after = stage.detail["after"]

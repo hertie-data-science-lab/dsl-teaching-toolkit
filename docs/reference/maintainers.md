@@ -49,9 +49,9 @@ breaks a live link that faculty click:
 |---|---|
 | `docs/01-new-course-org.md` | `config_digest.COURSE` |
 | `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
-| `docs/05-manage-teaching-team.md` | `templates/classroom-config/instructors.yml`, `config_digest.PEOPLE` |
+| `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
-| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/classroom-config/schedule.yml`, `templates/classroom-config/validate-schedule.yml` |
+| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/validate-schedule.yml` |
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
 | `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS` |
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
@@ -73,16 +73,17 @@ Things whose *literal spelling* is depended on from outside Python:
   `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
   `sync_teams`, `team_formation`, `teardown`, `archive` (the documented name of `teardown`),
   `console`, `schemas` (the last two:
-  [The Instructor Console](#the-instructor-console)).
+  [The Instructor Console](#the-instructor-console)), and `migrate` (a maintainer's
+  laptop only, never a workflow: [Migration](#migration)).
   A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
   parser rather than a subcommand, for the same reason: `--patch-path` switches it from
   handing an assignment out to patching one that is already out, and every org's Release
   assignment workflow spells the bare form.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
-  shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
+  shipped JavaScript (`templates/join/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
-- **`grades.team_lock_text`'s LAYOUT.** `classroom-config/assignments.lock.yml` is parsed by
-  line scanners - one in `templates/welcome/team-formation.yml` (github-script has no YAML
+- **`grades.team_lock_text`'s LAYOUT.** `semester-config/.system/assignments.lock.yml` is parsed by
+  line scanners - one in `templates/join/team-formation.yml` (github-script has no YAML
   library), one in `grades.parse_team_lock` - which match a two-space assignment key
   and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
   `team_formation_closes:` / `team_formation_page:` under it. Re-indenting the writer, or
@@ -92,7 +93,7 @@ Things whose *literal spelling* is depended on from outside Python:
   shape the scanners see is constant, and a line that comes and goes is a second shape. A
   MISSING `team_formation_window:` reads as open, never as closed, so a semester whose lock
   predates the window keeps forming teams.
-  `tests/test_welcome_templates.py` runs the SHIPPED scanner over the writer's real output;
+  `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, ordinal
   from `schedule.assignment_pages`) names the site's `_assignments/` file AND every link to
@@ -119,7 +120,7 @@ Things whose *literal spelling* is depended on from outside Python:
   refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
-- **An ARCHIVED `classroom-config`** is a semester's "finished" marker. `archive` (`teardown`) archives it
+- **An ARCHIVED `semester-config`** is a semester's "finished" marker. `archive` (`teardown`) archives it
   last, after everything else it archives; `discovery.semester_is_live` is what every
   course-side sweep that WRITES asks (the scheduler, the faculty and membership syncs, the
   enrolment codes, the site build), and `seed.refresh` and `grades.sync_team_lock` read the
@@ -127,8 +128,14 @@ Things whose *literal spelling* is depended on from outside Python:
   that or not, and anything that archives a semester must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
 - **`.github/semesters.yml`** is the semester registry every dropdown reads, and
-  **`.github/.last-refresh`** is the heartbeat that keeps an org's crons from GitHub's 60-day
-  inactivity disable.
+  **`.github/.system/last-refresh`** is the heartbeat that keeps an org's crons from GitHub's
+  60-day inactivity disable.
+- **The repo names `semester-config` and `join`** (`course.CONFIG_REPO`, `course.JOIN_REPO`)
+  and **everything under `.system/`** (`records.path`, exported to
+  `console/schemas/names.json`). `join` is in every enrolment mail; the old names
+  (`course.RETIRED_REPO_NAMES`) are live redirects, and `repos.create_repo` refuses them -
+  a repo created at one ends the redirect. The shipped JavaScript reads the config repo
+  and the lock path substituted, never spelt.
 - **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is a filename faculty type into their
   own content repos. A rename silently stops withholding whatever the old name held back -
   worse than an outage, because the release still goes green. Nothing re-spells it: the
@@ -188,7 +195,7 @@ and left alone.
 - **The completion check** executes the pinned notebook with `nbconvert --execute
   --allow-errors` and records `ran-clean` / `errors:N` / `not-attempted` / `no-notebook` /
   `timed-out` / `did-not-run` into `info.completion`, archiving the executed copy at
-  `autograde/<slug>/<key>.ipynb` under a 5 MiB cap. It needs **`ipykernel`** as well as
+  `.system/autograde/<slug>/<key>.ipynb` under a 5 MiB cap. It needs **`ipykernel`** as well as
   `nbconvert` (nbconvert converts without a kernel and cannot execute without one) - both
   pinned in `requirements-autograde.txt`, which every grading job installs; a runner without them
   records the decision once and stays green rather than reporting a semester of failures.
@@ -300,7 +307,7 @@ its annotation instead of emailing them
 (`tests/test_validate_schedule_template.py` enforces it).
 
 Nothing converges a semester's addresses either. `email:` is required on every instructor and
-TA entry in a semester's `classroom-config/instructors.yml`, and that file is INSTRUCTOR-OWNED, so
+TA entry in a semester's `semester-config/instructors.yml`, and that file is INSTRUCTOR-OWNED, so
 no refresh can fill it in: until somebody edits it by hand the whole feature is inert on
 that semester - every fault still opens its digest issue and still @mentions the instructors
 team, and no email goes anywhere. `Check semester setup`'s C7 row counts the entries without
@@ -315,7 +322,7 @@ never propagated:
 Seeded files carry their owner on the first line, and the write site enforces it:
 
 - **SYSTEM-OWNED** - written unconditionally on every bootstrap and refresh, so fixes reach
-  running courses. Workflows, generated docs, `*.sample`.
+  running courses. Workflows, generated docs, everything under `.system/`.
 - **INSTRUCTOR-OWNED** - `gh_contents.seed_if_absent` only. Rewriting one destroys live state (roster
   rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
@@ -332,9 +339,9 @@ The full rule is the ownership note at the top of `bootstrap_course.py`.
 
 ### The one SYSTEM-OWNED file that is not a template
 
-`classroom-config/assignments.lock.yml` is SYSTEM-OWNED like the dispatchers, but it is
+`semester-config/.system/assignments.lock.yml` is SYSTEM-OWNED like the dispatchers, but it is
 DERIVED - rendered per semester from that semester's `schedule.yml` and each named template's
-`grading_config.yml` - so it cannot join `welcome.CLASSROOM_SYSTEM_FILES`, which maps a
+`grading_config.yml` - so it cannot join `welcome.CONFIG_SYSTEM_FILES`, which maps a
 repo path to a file under `templates/`. Adding a file like this is four places:
 
 1. the renderer and the writer, beside what owns the subject (`grades.team_lock_text` /
@@ -349,13 +356,13 @@ repo path to a file under `templates/`. Adding a file like this is four places:
 4. a test that the nightly loop reaches every live semester, beside the pointer's
    (`tests/test_bootstrap_seeding.py`).
 
-It carries no `.sample` twin and is absent from `example-course/cohort-org/`: nobody edits
-it, so there is nothing in it for a person to copy.
+It is absent from `example-course/semester-org/`: nobody edits it, so there is nothing in it
+for a person to copy.
 
-`.dsl/status.json` (`dsl.status/1`, built by `status_json`, written by `status.write`) is the
-same kind of file, twice: in each semester's private `classroom-config`, and in the course org's
+`.system/status.json` (`dsl.status/1`, built by `status_json`, written by `status.write`) is the
+same kind of file, twice: in each semester's private `semester-config`, and in the course org's
 public `.github` (counts only, never a handle or an email). `seed.refresh` rewrites every live
-semester's and the course's; the single-semester run of each of the four classroom-config dispatch
+semester's and the course's; the single-semester run of each of the four semester-config dispatch
 targets (scheduler, Sync membership, Send enrolment codes, Sync site) rewrites that semester's;
 every Console run rewrites its semester's and the course's (`status.write_after_op`). It records
 the git shas of its inputs, never a timestamp, so an unchanged render makes no commit.
@@ -378,11 +385,11 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `schedule_plan` (the session rows a plan declares), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `welcome`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `schedule_plan` (the session rows a plan declares), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 
 Two placements are not where they read: `access` sits above `discovery`, because the
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
-`welcome`, whose seeding it reuses.
+`join`, whose seeding it reuses.
 
 A write that can follow a create or a visibility flip goes through `repos.gh_settled`,
 which retries for ~60 s while GitHub answers that the repo is still busy or locked, and
@@ -462,12 +469,12 @@ with the faults would never match and every run would open a new issue, so these
 
 | issue title | file | where it lives |
 | --- | --- | --- |
-| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | semester `classroom-config` |
-| `people.yml has entries the sync cannot use` | `instructors.yml` | semester `classroom-config` |
-| `students.csv has rows the toolkit cannot use` | `students.csv` | semester `classroom-config` |
-| `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `classroom-config` |
-| `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `classroom-config` |
-| `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `classroom-config` |
+| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | semester `semester-config` |
+| `people.yml has entries the sync cannot use` | `instructors.yml` | semester `semester-config` |
+| `students.csv has rows the toolkit cannot use` | `students.csv` | semester `semester-config` |
+| `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
+| `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
+| `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `semester-config` |
 | `dsl-course.yml / cohort registry has entries the sync cannot use` | both course files | course `.github` |
 
 The body is rewritten every tick (GitHub does not email about that); a comment - which it
@@ -551,7 +558,7 @@ systemd timer on the lab server ds01 - `dsl-scheduled-release.timer` running
 `scripts/maintenance/dsl-scheduled-release.sh`, both in `hertie-data-science-lab/ds01-infra` - which
 POSTs `repository_dispatch: scheduled-release` to the `.github` repo of every `dsl-course-hub`
 org at :00/:15/:30/:45. A push to a semester's `schedule.yml`, `instructors.yml`, `students.csv` or
-`teams.csv` dispatches the same event with `driver: classroom-config`, and that run releases
+`teams.csv` dispatches the same event with `driver: semester-config`, and that run releases
 into **that semester only** (checked against the registry) and asks Sync site for any render
 instead of pushing the site itself. Each driver guards the other; the cron and ds01 runs
 always walk every semester. All of them share the one `scheduled-release` group, which holds a
@@ -566,7 +573,7 @@ offsets deliberately interleave GitHub's :07/:22/:37/:52, so a lost fire costs a
 
 `cadence.py` reads the workflow's own run history on every real all-semesters run (never on a
 preview) and files two self-closing issues. A due moment that shipped more than **60 min** late
-opens *Scheduled release: late delivery* in that semester's private `classroom-config`, which
+opens *Scheduled release: late delivery* in that semester's private `semester-config`, which
 closes once the last **8** qualifying gaps are all 20 min or less. A dispatch-driven run more
 than **2h** old means ds01 is down and opens *Scheduled release: driver health* in the course
 org's `.github`; the last GitHub cron fire is printed there as information and never alarms.
@@ -657,7 +664,7 @@ org's whole `.github/workflows` set with `seed.github_workflow_files` (the same 
 Refresh actions makes, at the tier the org declares) and compares each blob sha with the
 org's tree. Every input to that render is discovered from the org, so nothing is hardcoded
 and no file is excused. A named file means run **Refresh actions** and start again. The
-`.last-refresh` heartbeat is only checked for existence - its content is the date, so it
+`.system/last-refresh` heartbeat is only checked for existence - its content is the date, so it
 moves at most once a day and could never show a promotion made an hour ago.
 
 Everything a run creates is namespaced `assignment-90-<run id>`, each shape under a
@@ -700,7 +707,7 @@ Promote.
 | `.github/cohort-courses-pages.yml`, key `cohorts:` | `.github/semesters.yml`, key `semesters:` | course org |
 | `cohort_dest_repo:`, `cohort_dest_path:` | `semester_dest_repo:`, `semester_dest_path:` | `schedule.yml` assignment and `deploy:` entries |
 | `cohort_defaults:` | `semester_defaults:` | course org `dsl-course.yml` |
-| `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `classroom-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
+| `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `semester-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
 | `format:` (one word) | `formats:` (a list; the first is the runnable one) | `grading_config.yml` on a template's `solution` branch; `assignment_defaults:` in `dsl-course.yml` |
 | dispatch payload `cohort_org` | `semester_org` | the semester dispatchers (re-rendered by Refresh actions) |
 | dispatch payload `all_cohorts` | `all_semesters` | **ds01-infra's membership timer must switch at Promote.** Until then Sync membership reads `all_cohorts` as a deprecated alias (a log line, no fault) - the one dispatch exception |
@@ -723,19 +730,77 @@ Promote.
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
 | CLI entry `python3 -m dsl_course.teardown` | `python3 -m dsl_course.archive` (the documented entry point; `teardown` stays as the frozen module name) | the Archive semester workflow and the console op |
 | copy "teardown", "close out", "freeze" (a semester) | "archive" | logs, the archive record and notices, forms, docs |
-| archive notice title `Cohort archives on <date>` | `Semester archives on <date>` | semester `classroom-config` issues. The prefix is an append-only chain (`teardown.ARCHIVE_NOTICE_PREFIXES`): an open notice under the old prefix is still found and edited, never duplicated - nothing to migrate |
+| archive notice title `Cohort archives on <date>` | `Semester archives on <date>` | semester `semester-config` issues. The prefix is an append-only chain (`teardown.ARCHIVE_NOTICE_PREFIXES`): an open notice under the old prefix is still found and edited, never duplicated - nothing to migrate |
 | console schema `people.schema.json` | `instructors.schema.json` | `console/schemas/` (the console follows in WP-A3) |
 | workflow env `COHORT_ORG` | `SEMESTER_ORG` | rendered workflows |
 | semester template description `<slug> - cohort assignment template` | `<slug> - semester assignment template` | converged by `repos.SUPERSEDED_DESCRIPTION_ENDINGS` |
 | doc anchors `#closing-the-cohort-out`, `#peopleyml`, `#write-your-terms-plan`, `#carrying-cohort-edits-back`, `#cohort-setup-per-year`, `#only-staff-in-these-teams`, `#what-instructors-tag-reaches`, `#end-of-term` | `#archiving-the-semester`, `#instructorsyml`, `#write-your-semesters-plan`, `#carrying-semester-edits-back`, `#semester-setup-per-year`, `#only-instructors-in-these-teams`, `#what-instructors-semester-reaches`, `#end-of-semester` | docs; each old anchor is kept as an HTML alias above its heading, so a link already posted still lands |
-| paths KEPT, not renamed: `.github/.missing-cohorts`, `classroom-config/cohort-gradebook.csv`, `classroom-config/archive/teardown.md` | unchanged here (WP-A2 moves the records) | the tool must NOT rename them |
+| repo `classroom-config` | `semester-config` (`course.CONFIG_REPO`) | semester org; renamed by the tool, the old name redirects |
+| repo `welcome` | `join` (`course.JOIN_REPO`); `join/README.md` is now a pointer to the org profile (new semesters; live ones keep theirs) | semester org; renamed by the tool - every sent enrolment mail links the old URL, which redirects |
+| `.dsl/` | `.system/` | `semester-config` and the course `.github` |
+| `semester-config/assignments.lock.yml`, `snapshots/`, `autograde/` (with the `_graded.json` / `_skipped.json` markers), `solutions/`, `gradebook/` (with `distributed.csv`), `team-formation/` | the same under `semester-config/.system/` (`records.path`) | MOVED by the tool, by blob sha, in one commit: each fire-once marker exists exactly once |
+| `semester-config/cohort-gradebook.csv`, `semester-config/archive/teardown.md` | `semester-config/.system/semester-gradebook.csv`, `semester-config/.system/archive.md` | semester org (the archive record is only ever written into a live semester) |
+| semester `.github/dsl-course.yml` (the course pointer) | `semester-config/.system/dsl-course.yml` | semester org; the four dispatchers read it there |
+| `semester-config/*.sample`, `grading_sheets/*.yml.sample` | none - the scaffolds and docs link `example-course/semester-org/` | deleted by the tool |
+| course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
+| materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
+| semester topic `dsl-cohort` on an ARCHIVED semester | kept for ever: archived semesters are never migrated, and every sweep skips them (`discovery.semester_is_live`, `seed.refresh`) | - |
+| console op ids `cohort.check`, `cohort.preview_automation`, `cohort.archive`, `cohort.bootstrap`; op scope `cohort` | `semester.*`; scope `semester` | `console/schemas/ops.json` |
+| status `fix.screen: staff` | `instructors` | `dsl.status/1` |
+| status `inputs` key `assignments.lock.yml` | `.system/assignments.lock.yml` | `dsl.status/1` |
+| toolkit `templates/classroom-config/`, `templates/welcome/`, `templates/cohort/` | `templates/semester-config/`, `templates/join/`, `templates/semester/` | this repo only |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,
 `check-cohort-setup.yml`), the digest issue titles (so `people.yml has entries the sync
 cannot use` keeps its old word), the site's `_data/people.yml` the pinned theme reads, the
-`SCOPED_RUN_TITLE` run-name the cadence check reads back, and the console's op ids and op
-scope (`cohort.*`, renamed with the console source).
+`SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
+name (not a CLI), and the site's `files/materials/` dest.
+
+**The cut-off.** Real orgs stay on the OLD engine until the Promote to `release` that
+carries this change; the old engine must never see a migrated org, and the new one never an
+unmigrated one (a hard `NOT_MIGRATED` everywhere). So: migrate the demo course and its live
+semester on `main`, run the e2e there, then - on the user's go-ahead, outside teaching
+hours - migrate every live real org and Promote in the same window (with ds01's switch to
+`all_semesters`). `.project/build/migration-runbook.md` holds the order.
+
+**The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, nothing
+written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
+step: do, verify, stop on the first failure naming the rollback. A step already done says
+"already migrated"; a second run writes nothing, not even status.json. A missing repo or
+file reads as "not migrated yet", never as an error.
+
+The pause is GitHub's own switch: `PUT repos/{org}/{repo}/actions/permissions enabled=false`
+on every repo that carries a workflow - for a semester its config and join repos, its site
+and the COURSE's workflow repos (whose scheduler acts on it); for a course `.github` and
+every content repo and template with a release workflow. Before anything is switched, each
+repo's own setting (`enabled`, `allowed_actions`) is recorded in
+`<org>/.github/.system/migration-pause.json`; the unpause restores exactly that (a repo that
+was off stays off), reads it back and deletes the record. Verified by reading the setting
+back and by no run having started since, nor being queued or running. From the pause to
+the verified unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded
+repos and the record. A semester waits until its course's migration is complete (no course
+record left, its Actions on) - or resumes its own stopped run (its record is there) - so no
+run re-enables a course mid-migration and two semesters of one course never overlap.
+
+Preflight names, by file, where the checkout differs from the ref the course pins (`git
+diff --name-only origin/<ref> -- dsl_course templates`, as of the last fetch): the
+re-render writes what the checkout says, and the org's next Refresh writes what its ref
+says.
+
+Semester steps: preflight (topic, not archived, course complete, no run queued or running),
+pause, rename repos, layout (records into `.system/`, `people.yml` -> `instructors.yml`
+checked against the old file before anything is committed, the seeded skeleton replaced by
+the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
+(`schedule.yml`, re-read with this engine: zero `NOT_MIGRATED`), topic, re-render (drift
+checked over the dispatchers, README, pointer, lock, join files and org READMEs), unpause,
+status. Course steps: preflight (not archived), pause, registry (also a `semesters.yml`
+still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, template keys
+(`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
+re-read with `parse_grading_spec` - course-owned, so here rather than per semester),
+materials files, re-render (Refresh actions from the checkout), unpause, status.
+`grading_datetime` is left for B2. Tested only against a stubbed GitHub
+(`tests/test_migrate.py`).
 
 ## Working conventions
 

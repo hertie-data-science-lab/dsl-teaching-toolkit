@@ -1,6 +1,6 @@
-"""dsl-course teams -- per-assignment group membership from classroom-config/teams.csv.
+"""dsl-course teams -- per-assignment group membership from semester-config/teams.csv.
 
-`teams.csv` (private, in the semester's `classroom-config` repo) is the single source of
+`teams.csv` (private, in the semester's `semester-config` repo) is the single source of
 truth for who is in which team for which assignment:
 
     assignment,team,github_handle
@@ -8,7 +8,7 @@ truth for who is in which team for which assignment:
     assignment-4-project,team-x,ben-baker
     assignment-4-project,team-y,carla-cohen
 
-Students self-select by opening a "Join team" issue in `welcome` (the workflow appends a
+Students self-select by opening a "Join team" issue in `join` (the workflow appends a
 row - authenticated author, size-capped); faculty & instructors override by editing the CSV directly. This
 CSV is the only writer surface for membership. `sync_teams` then materialises a GitHub Team
 `<assignment>-<team>` from it (one-way, idempotent), and group-assignment provisioning grants
@@ -176,7 +176,7 @@ def _teams_text(semester_org: str) -> str | None:
     """teams.csv's text, read ONCE per semester per process.
 
     A single run asks for it repeatedly - the handout, the collection and the off-boarding
-    revoke each want the same file - and only the welcome workflow writes it, in a process
+    revoke each want the same file - and only the Join-team workflow writes it, in a process
     of its own. The TEXT is memoised rather than `load`'s map, so each caller still parses
     its own copy and cannot mutate another's. Cleared between tests (tests/conftest.py)."""
     return get_file_content(semester_org, CONFIG_REPO, TEAMS_PATH)
@@ -187,7 +187,7 @@ def load(
     faults: list[ConfigFault] | None = None,
     known_handles: set[str] | None = None,
 ) -> dict[str, dict[str, list[str]]]:
-    """Fetch + parse teams.csv from the semester's PRIVATE classroom-config repo.
+    """Fetch + parse teams.csv from the semester's PRIVATE semester-config repo.
 
     A pure loader: a missing CSV returns {} silently. Whether that is benign (a
     semester with no group assignments yet) or an error (group provisioning/grading

@@ -1,17 +1,17 @@
 """dsl-course roster -- read the per-semester students.csv.
 
 The single durable roster artifact is a PRIVATE per-semester `students.csv`, kept in
-the semester org's `classroom-config` repo. Columns:
+the semester org's `semester-config` repo. Columns:
 
     hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at
 
 These are the columns the engine READS; a roster may carry any others faculty want
 (a registrar id, a lecture section, a notes column) and they are carried through
 untouched - every write path here addresses cells by column NAME, never by position
-(`enrol_codes.fill_enrol_codes_in_csv` and the welcome repo's Join handler both), so an
+(`enrol_codes.fill_enrol_codes_in_csv` and the join repo's Join handler both), so an
 extra column is neither read nor lost.
 
-`github_handle` / `github_id` are blank until the student onboards (the `welcome` Join
+`github_handle` / `github_id` are blank until the student onboards (the `join` Join
 issue fills them); a row with a blank handle is enrolled-but-not-yet-onboarded and is
 skipped by provisioning.
 
@@ -210,7 +210,7 @@ def reread() -> None:
 def load(
     semester_org: str, faults: list[ConfigFault] | None = None
 ) -> list[Student] | None:
-    """Fetch + parse students.csv from the semester's PRIVATE classroom-config repo.
+    """Fetch + parse students.csv from the semester's PRIVATE semester-config repo.
 
     Returns None (after logging why) when the file can't be fetched at all - callers
     can then distinguish "roster missing/unreadable" (an error) from a roster that

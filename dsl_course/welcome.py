@@ -1,7 +1,7 @@
 """The SYSTEM-owned semester-repo seeding, and the template reader it shares.
 
 Split out of bootstrap_course so `seed.refresh` can re-push a live semester's onboarding
-workflows, config samples and classroom-config system files on its nightly run:
+workflows and semester-config system files on its nightly run:
 bootstrap_course imports seed, so seed cannot import bootstrap_course back - this module
 is what both sides may import.
 
@@ -17,7 +17,9 @@ from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 
+from . import records
 from .central import CENTRAL, pin_central_ref
+from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
 from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
@@ -26,37 +28,17 @@ from .roster import CONFIG_REPO
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
-EXAMPLE_COHORT = ROOT / "example-course" / "cohort-org"
 EXAMPLE_COURSE = ROOT / "example-course" / "course-org"
 
-# Every user-editable file in classroom-config ships as a PAIR under one rule: `<file>` is
-# a minimal commented scaffold, seeded once and never rewritten; `<file>.sample` is a
-# filled, realistic example, always converged.
-#
-# The SCAFFOLD half - the file faculty fill in. `{tag}`/`{year}`/`{year_next}` are
+# Every user-editable file in semester-config is seeded as a minimal commented scaffold,
+# once, and never rewritten. Filled examples are not seeded (decision 0010): each scaffold
+# links the worked example semester in `example-course/semester-org/` instead. `{tag}`/`{year}`/`{year_next}` are
 # rendered for this semester, so every example in a scaffold is copy-paste-correct.
-CLASSROOM_SCAFFOLDS = {
-    "students.csv": "classroom-config/students.csv",
-    "teams.csv": "classroom-config/teams.csv",
-    "schedule.yml": "classroom-config/schedule.yml",
-    "instructors.yml": "classroom-config/instructors.yml",
-}
-
-# The SAMPLE half - DERIVED, not enumerated: every regular file in the worked example
-# semester ships as `<its path>.sample`. Deriving is what makes example-course/README.md's
-# "every file in cohort-org/ is seeded" claim true by construction; enumerating it once
-# silently dropped the team-graded grades table. The samples are therefore not authored
-# twice - they ARE the worked example the docs link to, and tests/test_bootstrap_seeding.py
-# parses each one with the real parser so none can go schema-stale.
-CLASSROOM_SAMPLES = {
-    f"{rel}.sample": rel
-    for rel in sorted(
-        p.relative_to(EXAMPLE_COHORT).as_posix()
-        for p in EXAMPLE_COHORT.rglob("*")
-        if p.is_file()
-    )
-    # dotfiles are plumbing (.gitkeep and friends), never reference material
-    if not any(part.startswith(".") for part in rel.split("/"))
+CONFIG_SCAFFOLDS = {
+    "students.csv": "semester-config/students.csv",
+    "teams.csv": "semester-config/teams.csv",
+    "schedule.yml": "semester-config/schedule.yml",
+    "instructors.yml": "semester-config/instructors.yml",
 }
 
 
@@ -78,16 +60,17 @@ def template(rel: str) -> str:
 # is spliced in at this marker, which is a JS comment so an un-spliced template is still
 # valid YAML and still valid JavaScript.
 SHARED_SCRIPT_MARK = "// {shared_script}"
-SHARED_SCRIPT = "welcome/_shared-script.js"
+SHARED_SCRIPT = "join/_shared-script.js"
 
 
-def welcome_workflow(rel: str) -> str:
-    """A welcome-repo workflow template, with the shared github-script helpers spliced in.
+def join_workflow(rel: str) -> str:
+    """A join-repo workflow template, with the shared github-script helpers spliced in.
 
     THE reader for these two files: seeding, refreshing and the tests all go through here,
     so nothing can ship (or assert about) a workflow whose script is only half written.
     Indentation comes from the marker's own line, because the script is a YAML block scalar
-    and a helper at the wrong column is a parse error in every semester at once."""
+    and a helper at the wrong column is a parse error in every semester at once. The
+    config repo's name is substituted, never spelt in the script."""
     out = []
     for line in template(rel).splitlines(keepends=True):
         if line.strip() != SHARED_SCRIPT_MARK:
@@ -98,24 +81,19 @@ def welcome_workflow(rel: str) -> str:
             f"{pad}{shared}\n" if shared.strip() else "\n"
             for shared in template(SHARED_SCRIPT).rstrip("\n").split("\n")
         ]
-    return "".join(out)
-
-
-@cache
-def example_semester_file(rel: str) -> str:
-    """Read a file from the worked example semester (example-course/cohort-org/<rel>).
-
-    Seeded verbatim as a `.sample`: never str.format-rendered, because a worked example is
-    a real semester's file (hertie-dsl-demo-f2026), not a scaffold to fill in."""
-    return (EXAMPLE_COHORT / rel).read_text(encoding="utf-8")
+    return (
+        "".join(out)
+        .replace("__CONFIG_REPO__", CONFIG_REPO)
+        .replace("__LOCK__", TEAM_LOCK_PATH)
+    )
 
 
 @cache
 def example_course_file(rel: str) -> str:
     """Read a file from the worked example COURSE org (example-course/course-org/<rel>).
 
-    The course tier of the same rule, for the one file that is a seeded scaffold/sample
-    pair rather than pure reference material: `scaffold` derives SYLLABUS.md.sample from
+    The one file of the worked example that is seeded rather than only linked:
+    `scaffold` derives `.system/SYLLABUS.md.sample` from
     this tree's SYLLABUS.md, so the syllabus faculty receive IS the one the docs link to.
     The rest of course-org/ is documentation - linked from docs/, never seeded - but it is
     parsed by the real readers in tests/test_bootstrap_seeding.py all the same, so it
@@ -127,9 +105,9 @@ def example_course_file(rel: str) -> str:
 # the matching workflow gates on it (`if: contains(github.event.issue.labels.*.name, ...)`).
 # GitHub silently DROPS a form-declared label the repo doesn't have, and nothing else ever
 # created these - so every Join issue skipped both workflows: no redaction, no comment, no
-# needs-review, a green "skipped" run. Seeded by refresh_welcome_workflows below; the
-# names are pinned to the forms and the workflow guards by tests/test_welcome_templates.py.
-WELCOME_LABELS = (
+# needs-review, a green "skipped" run. Seeded by refresh_join_workflows below; the
+# names are pinned to the forms and the workflow guards by tests/test_join_templates.py.
+JOIN_LABELS = (
     ("onboarding", "0e8a16", "Join course issue - routes the Onboard student workflow"),
     ("team-formation", "1d76db", "Join team issue - routes the Form team workflow"),
     # Not a routing label: what the Form team workflow closes a Join team issue with when
@@ -150,7 +128,7 @@ WELCOME_LABELS = (
 # form as reviewed; everything between them is regenerated per semester, the same idiom (and
 # the same "an instructor who deleted the markers meant it" rule) as
 # `profile_readme.splice_repo_table`.
-JOIN_TEAM_FORM = "welcome/ISSUE_TEMPLATE/02-join-team.yml"
+JOIN_TEAM_FORM = "join/ISSUE_TEMPLATE/02-join-team.yml"
 ASSIGNMENT_FIELD_START = "# dsl:assignment-field:start"
 ASSIGNMENT_FIELD_END = "# dsl:assignment-field:end"
 
@@ -232,7 +210,7 @@ def join_team_form(opened: Mapping[str, str]) -> str:
     options = "\n".join(f"        - {slug}" for slug in opened)
     block = (
         f"{ASSIGNMENT_FIELD_START} - AUTO-GENERATED from this semester's\n"
-        "  # `classroom-config/assignments.lock.yml`: the assignments open for team\n"
+        "  # `semester-config/.system/assignments.lock.yml`: the assignments open for team\n"
         "  # formation right now. Edits between these markers are overwritten.\n"
         "  - type: dropdown\n"
         "    id: assignment\n"
@@ -279,7 +257,7 @@ def refresh_join_team_form(org: str) -> int:
     offers the slug. Left to the nightly refresh, that is up to 24 hours during which the
     site shows a callout and the mail links a chooser that refuses them.
 
-    ONE file, deliberately, where `refresh_welcome_workflows` pushes six and ensures three
+    ONE file, deliberately, where `refresh_join_workflows` pushes six and ensures three
     labels: nothing else here moves with the calendar, and this runs on a semester's clock
     rather than on a deploy. `put_file` compares blob shas, so a window whose options have
     not actually changed is written nothing and commits nothing.
@@ -288,7 +266,7 @@ def refresh_join_team_form(org: str) -> int:
     whole set, this one keeps the dropdown honest between them."""
     if put_file(
         org,
-        "welcome",
+        JOIN_REPO,
         JOIN_TEAM_FORM_PATH,
         join_team_form(_open_formations(org)).encode(),
         "ci: refresh the Join-team form's open assignments",
@@ -302,8 +280,27 @@ def refresh_join_team_form(org: str) -> int:
     return 1
 
 
-def refresh_welcome_workflows(org: str) -> int:
-    """Re-push a semester's welcome-repo machinery (onboarding workflows + the issue forms
+def join_files(org: str) -> dict[str, bytes]:
+    """The join repo's SYSTEM-owned files for one semester, exactly as
+    `refresh_join_workflows` writes them - so "is this semester current?" can be asked
+    without writing (the migration's drift check)."""
+    return {
+        ".github/workflows/onboard.yml": join_workflow("join/onboard.yml").encode(),
+        ".github/ISSUE_TEMPLATE/01-join-course.yml": template(
+            "join/ISSUE_TEMPLATE/01-join-course.yml"
+        ).encode(),
+        ".github/workflows/team-formation.yml": join_workflow(
+            "join/team-formation.yml"
+        ).encode(),
+        JOIN_TEAM_FORM_PATH: join_team_form(_open_formations(org)).encode(),
+        ".github/ISSUE_TEMPLATE/config.yml": template(
+            "join/ISSUE_TEMPLATE/config.yml"
+        ).encode(),
+    }
+
+
+def refresh_join_workflows(org: str) -> int:
+    """Re-push a semester's join-repo machinery (onboarding workflows + the issue forms
     they parse) from the current templates, as ONE commit - and ensure the routing labels
     those forms declare exist in the repo. Called both at bootstrap and on every refresh,
     so a fix reaches running semesters; put_files skips whatever is already identical and
@@ -327,22 +324,8 @@ def refresh_welcome_workflows(org: str) -> int:
     # these refresh on every run.
     if not put_files(
         org,
-        "welcome",
-        {
-            ".github/workflows/onboard.yml": welcome_workflow(
-                "welcome/onboard.yml"
-            ).encode(),
-            ".github/ISSUE_TEMPLATE/01-join-course.yml": template(
-                "welcome/ISSUE_TEMPLATE/01-join-course.yml"
-            ).encode(),
-            ".github/workflows/team-formation.yml": welcome_workflow(
-                "welcome/team-formation.yml"
-            ).encode(),
-            JOIN_TEAM_FORM_PATH: join_team_form(_open_formations(org)).encode(),
-            ".github/ISSUE_TEMPLATE/config.yml": template(
-                "welcome/ISSUE_TEMPLATE/config.yml"
-            ).encode(),
-        },
+        JOIN_REPO,
+        join_files(org),
         "ci: refresh onboarding workflows + Join forms",
         # The forms were renamed to control the issue-chooser ordering (01-/02- prefix);
         # retire the old filenames on live semesters or the chooser shows both generations.
@@ -351,52 +334,23 @@ def refresh_welcome_workflows(org: str) -> int:
             ".github/ISSUE_TEMPLATE/join-team.yml",
         ),
     ):
-        log_err(f"welcome-repo files not written in {org}")
+        log_err(f"join-repo files not written in {org}")
         failures = 1
     else:
         failures = 0
     # The labels are as load-bearing as the files: without them both workflows are
     # `skipped` on every Join issue. ensure_label is create-only and idempotent, so a
     # semester that has them is written nothing.
-    for name, color, description in WELCOME_LABELS:
-        if not ensure_label(org, "welcome", name, color=color, description=description):
+    for name, color, description in JOIN_LABELS:
+        if not ensure_label(org, JOIN_REPO, name, color=color, description=description):
             failures += 1
     if failures:
         return failures
-    log_ok("welcome repo workflows + Join forms + routing labels up to date")
+    log_ok("join repo workflows + Join forms + routing labels up to date")
     return 0
 
 
-def refresh_classroom_samples(org: str) -> int:
-    """Converge a semester's classroom-config `*.sample` files on the worked example.
-
-    Samples are machine-owned reference material - the engine never ingests them (only the
-    un-suffixed names), and activation is copying rows across - so unlike the scaffolds
-    they are written unconditionally rather than seed-if-absent. `put_files` compares blob
-    shas, so an already-current semester is written nothing. Called both at bootstrap and on
-    the nightly refresh, so a semester seeded last semester picks up today's examples.
-
-    All of them in ONE commit: they are regenerated from a single worked example, so an
-    update to that example moves the whole set at once.
-
-    Returns 1 if that commit didn't land, so seed.refresh can go red rather than report an
-    org it never converged."""
-    if not put_files(
-        org,
-        CONFIG_REPO,
-        {
-            path: example_semester_file(source).encode()
-            for path, source in CLASSROOM_SAMPLES.items()
-        },
-        "docs: refresh classroom-config samples from the worked example course",
-    ):
-        log_err(f"classroom-config samples not written in {org}")
-        return 1
-    log_ok("classroom-config samples up to date")
-    return 0
-
-
-# The SYSTEM-owned half of a semester's classroom-config: the schema contract faculty read,
+# The SYSTEM-owned half of a semester's semester-config: the schema contract faculty read,
 # and the workflows that make the repo act on what they put in it, as
 # `(path in the repo, template file)`.
 #
@@ -405,30 +359,30 @@ def refresh_classroom_samples(org: str) -> int:
 # handles); they are seeded create-if-missing by bootstrap_course and stay that way.
 # Adding one here would have the nightly refresh overwrite it every night.
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.
-CLASSROOM_SYSTEM_FILES = (
-    ("README.md", "classroom-config/README.md"),
-    (".github/workflows/dispatch-sync.yml", "classroom-config/dispatch-sync.yml"),
+CONFIG_SYSTEM_FILES = (
+    ("README.md", "semester-config/README.md"),
+    (".github/workflows/dispatch-sync.yml", "semester-config/dispatch-sync.yml"),
     (
         ".github/workflows/dispatch-sync-site.yml",
-        "classroom-config/dispatch-sync-site.yml",
+        "semester-config/dispatch-sync-site.yml",
     ),
     (
         ".github/workflows/dispatch-scheduled-release.yml",
-        "classroom-config/dispatch-scheduled-release.yml",
+        "semester-config/dispatch-scheduled-release.yml",
     ),
     (
         ".github/workflows/dispatch-send-codes.yml",
-        "classroom-config/dispatch-send-codes.yml",
+        "semester-config/dispatch-send-codes.yml",
     ),
     (
         ".github/workflows/validate-schedule.yml",
-        "classroom-config/validate-schedule.yml",
+        "semester-config/validate-schedule.yml",
     ),
 )
 
 
-def classroom_system_files(central_ref: str) -> dict[str, bytes]:
-    """CLASSROOM_SYSTEM_FILES rendered for one semester, read at call time so importing this
+def config_system_files(central_ref: str) -> dict[str, bytes]:
+    """CONFIG_SYSTEM_FILES rendered for one semester, read at call time so importing this
     module never touches the filesystem.
 
     Placeholders rather than `str.format`, because these files are full of `${{ }}` GitHub
@@ -439,13 +393,15 @@ def classroom_system_files(central_ref: str) -> dict[str, bytes]:
     return {
         path: pin_central_ref(template(rel), central_ref)
         .replace("__CENTRAL__", CENTRAL)
+        .replace("__CONFIG_REPO__", CONFIG_REPO)
+        .replace("__POINTER__", records.path("pointer"))
         .encode()
-        for path, rel in CLASSROOM_SYSTEM_FILES
+        for path, rel in CONFIG_SYSTEM_FILES
     }
 
 
 def refresh_semester_pointer(org: str, course_org: str) -> int:
-    """Re-push a semester's `.github/dsl-course.yml` - the pointer its classroom-config
+    """Re-push a semester's `semester-config/.system/dsl-course.yml` - the pointer its
     dispatchers read to find which course org to fire Sync membership / Sync site at.
 
     SYSTEM-owned, but it used to be written ONLY by Bootstrap semester's own wiring, so it
@@ -458,21 +414,21 @@ def refresh_semester_pointer(org: str, course_org: str) -> int:
     cannot find the course org, and the semester's syncs stop firing."""
     if not put_files(
         org,
-        ".github",
+        CONFIG_REPO,
         {
-            "dsl-course.yml": template("cohort/dsl-course.yml")
+            records.path("pointer"): template("semester/dsl-course.yml")
             .format(course=course_org, org=org)
             .encode()
         },
         "ci: refresh semester -> course pointer",
     ):
-        log_err(f"semester -> course pointer not written to {org}/.github")
+        log_err(f"semester -> course pointer not written to {org}/{CONFIG_REPO}")
         return 1
     return 0
 
 
-def refresh_classroom_system_files(org: str, central_ref: str) -> int:
-    """Re-push a semester's SYSTEM-owned classroom-config files (CLASSROOM_SYSTEM_FILES).
+def refresh_config_system_files(org: str, central_ref: str) -> int:
+    """Re-push a semester's SYSTEM-owned semester-config files (CONFIG_SYSTEM_FILES).
 
     Called both at bootstrap and on the nightly refresh, so a fix to a dispatcher or to
     the schema contract reaches running semesters. It used to run only inside "Bootstrap
@@ -486,10 +442,10 @@ def refresh_classroom_system_files(org: str, central_ref: str) -> int:
     if not put_files(
         org,
         CONFIG_REPO,
-        classroom_system_files(central_ref),
-        "ci: refresh classroom-config contract + dispatchers",
+        config_system_files(central_ref),
+        "ci: refresh semester-config contract + dispatchers",
     ):
-        log_err(f"classroom-config system files not written in {org}")
+        log_err(f"semester-config system files not written in {org}")
         return 1
-    log_ok("classroom-config ready (config preserved, dispatchers refreshed)")
+    log_ok("semester-config ready (config preserved, dispatchers refreshed)")
     return 0

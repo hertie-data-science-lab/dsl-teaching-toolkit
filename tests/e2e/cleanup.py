@@ -130,7 +130,7 @@ def _clean_repos(org: str, run_id: str, dry_run: bool, left: list[str]) -> int:
 def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
     """Take the fenced block out of schedule.yml and drop this run's artefacts.
 
-    Skipped for an org with no classroom-config, which is every course org."""
+    Skipped for an org with no semester-config, which is every course org."""
     config = course.CONFIG_REPO
     if config not in {row["name"] for row in discovery.list_org_repos(org)}:
         return 0
@@ -160,7 +160,7 @@ def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
 
 
 def _is_artefact(path: str, run_id: str) -> bool:
-    """A classroom-config path inside this run's namespace - `snapshots/<slug>.csv`,
+    """A semester-config path inside this run's namespace - `snapshots/<slug>.csv`,
     `autograde/<slug>/...`, `grading_sheets/<slug>.yml`, for each of the run's per-shape
     slugs.
 
@@ -168,9 +168,10 @@ def _is_artefact(path: str, run_id: str) -> bool:
     the namespace: `-` starts a shape name, `.` an extension, `/` a directory. A prefix
     rule rather than a list of shapes, so a shape added to `shapes.SHAPES` cannot leave
     its artefacts behind."""
-    head, _, rest = path.partition("/")
-    if head not in ARTEFACT_DIRS:
+    head = next((d for d in ARTEFACT_DIRS if path.startswith(f"{d}/")), None)
+    if head is None:
         return False
+    rest = path[len(head) + 1 :]
     mine = slug(run_id)
     return rest == mine or rest.startswith((f"{mine}/", f"{mine}.", f"{mine}-"))
 

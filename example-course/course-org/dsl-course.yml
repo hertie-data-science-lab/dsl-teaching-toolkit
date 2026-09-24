@@ -18,8 +18,8 @@ assignment_defaults:
 # mirrored into every semester org's own course-admin team by sync_faculty).
 # instructors/teaching_assistants below are DISPLAY ONLY at this level - website
 # cards (institutional headshots + bio links), not access. Their real, per-semester
-# push access is declared in the semester's own classroom-config/instructors.yml instead
-# (see ../cohort-org/instructors.yml) - most semesters have different lecturers/TAs, so
+# push access is declared in the semester's own semester-config/instructors.yml instead
+# (see ../semester-org/instructors.yml) - most semesters have different lecturers/TAs, so
 # that's where it's actually reconciled.
 #
 # `photo` takes EITHER an absolute URL on a host that ALLOWS HOTLINKING, OR a
@@ -50,7 +50,7 @@ people:
       end: "2027-07-31"
   # NB: the public course site renders INSTRUCTOR cards only (`include_tas=False` in
   # site.sync_public_site) - TAs are semester-scoped, so their cards come from the
-  # semester's own classroom-config/instructors.yml (../cohort-org/instructors.yml). The two
+  # semester's own semester-config/instructors.yml (../semester-org/instructors.yml). The two
   # entries below are therefore inert here; they are kept only to show the key is
   # accepted and to keep the two files' shapes comparable.
   teaching_assistants:
@@ -70,5 +70,5 @@ people:
       url: "https://www.hertie-school.org/en/who-we-are/profile/person/baker"
 
 # The schedule (release calendar, due dates, exams) is semester-specific - it lives in
-# the SEMESTER org's classroom-config/schedule.yml instead, not here. See
-# ../cohort-org/schedule.yml.
+# the SEMESTER org's semester-config/schedule.yml instead, not here. See
+# ../semester-org/schedule.yml.

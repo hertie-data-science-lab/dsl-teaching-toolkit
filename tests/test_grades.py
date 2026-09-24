@@ -256,7 +256,7 @@ def test_no_topic_stamp_or_offboarding_failure_names_a_student_repo(
 
 def test_the_verbose_log_still_says_which_repo_it_was(monkeypatch, capsys):
     # The name is not thrown away, it is moved: a maintainer running the CLI locally with
-    # DSL_VERBOSE=1 still gets the repo, and so does the private classroom-config archive.
+    # DSL_VERBOSE=1 still gets the repo, and so does the private semester-config archive.
     monkeypatch.setenv("DSL_VERBOSE", "1")
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
     assert not repos.add_collaborator(
@@ -642,7 +642,7 @@ def _fake_issues(monkeypatch, store: list[dict]) -> None:
                     "comments": [],
                 }
             )
-            return 0, f"https://github.com/SEMESTER/classroom-config/issues/{number}"
+            return 0, f"https://github.com/SEMESTER/semester-config/issues/{number}"
         issue = next(i for i in store if str(i["number"]) == args[2])
         rest = dict(zip(args[3::2], args[4::2], strict=False))
         if verb == "edit":
@@ -678,16 +678,16 @@ def _distribute(
     exported: str | None = None,
     preview_issues: list[dict] | None = None,
 ) -> dict:
-    """`distribute` over a local classroom-config clone, writing to nothing.
+    """`distribute` over a local semester-config clone, writing to nothing.
 
-    Returns every effect it had: the gradebook commits, the classroom-config commit and
+    Returns every effect it had: the gradebook commits, the semester-config commit and
     the mail batches - which between them are every channel a mark reaches a student by -
     plus `comments` and `issues`, which are TRIPWIRES. Nothing is posted into a submission
     repo any more, so those two stay empty in every test here; `issue` and `found_issue`
     are what a lookup WOULD answer, so a run that went near a thread would show up rather
     than pass for want of a stub.
 
-    `preview` is classroom-config's issue list as GitHub would hold it after the run - pass
+    `preview` is semester-config's issue list as GitHub would hold it after the run - pass
     `preview_issues` to start from one, or to share it between two runs. `exported` is the
     registrar export the last real run left behind."""
     cfg = tmp_path / "cfg"
@@ -705,6 +705,7 @@ def _distribute(
         (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / grades.GRADEBOOK_DIR / name).write_text("student: someone\n")
     if exported is not None:
+        (cfg / grades.SEMESTER_CSV_NAME).parent.mkdir(parents=True, exist_ok=True)
         (cfg / grades.SEMESTER_CSV_NAME).write_text(exported)
     store = [] if preview_issues is None else preview_issues
     _fake_issues(monkeypatch, store)
@@ -805,7 +806,7 @@ def test_a_real_run_reaches_every_channel_and_posts_no_comment(tmp_path, monkeyp
     assert set(files) == {"grades.yml", "README.md"}
     assert "student: ada-l" in files["grades.yml"]
     assert "| Assignment 1 · Neural networks | 43 |" in files["README.md"]
-    # the registrar export and the record, in one classroom-config commit
+    # the registrar export and the record, in one semester-config commit
     ((_cfg, cfg_files, _d),) = out["config"]
     assert set(cfg_files) == {grades.SEMESTER_CSV_NAME, grades.DISTRIBUTED_PATH}
     assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[grades.SEMESTER_CSV_NAME]
@@ -1068,7 +1069,7 @@ def test_an_unreadable_course_name_still_previews_the_email(tmp_path, monkeypatc
 def test_the_dry_run_says_who_gets_what_in_a_private_issue_and_logs_none_of_it(
     tmp_path, monkeypatch, capsys
 ):
-    # The log is a PUBLIC repo's; the issue is in the private classroom-config. So the
+    # The log is a PUBLIC repo's; the issue is in the private semester-config. So the
     # names and marks go to the one, and only counts and the issue's address to the other.
     monkeypatch.setenv("DSL_VERBOSE", "")
     rows = ROSTER_ADA + "bob@uni.edu,Bob Byte,enrolled,bob-b,43,dsl-def\n"
@@ -1110,8 +1111,7 @@ def test_the_dry_run_says_who_gets_what_in_a_private_issue_and_logs_none_of_it(
     )
     printed = "".join(capsys.readouterr())
     assert (
-        "Who gets what: https://github.com/SEMESTER/classroom-config/issues/1"
-        in printed
+        "Who gets what: https://github.com/SEMESTER/semester-config/issues/1" in printed
     )
     for private in ("ada-l", "bob-b", "Ada", "Bob", "38", "36"):
         assert private not in printed
@@ -1737,7 +1737,7 @@ def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
     tmp_path, monkeypatch
 ):
     # A semester that reached `distributed.csv` without ever having had a `notified.csv` was
-    # never on the migration path, so its `gradebook/*.yml` was left in place for the rest
+    # never on the migration path, so its `.system/gradebook/*.yml` was left in place for the rest
     # of the term - a stale copy of a grade beside the repo that holds the real one.
     out = _distribute(
         monkeypatch,
@@ -2441,7 +2441,7 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "COURSE", "SEMESTER", _sched(project="assignment-4-project-f2026")
     ).ok
     (put,) = puts
-    assert (put["org"], put["path"]) == ("SEMESTER", "assignments.lock.yml")
+    assert (put["org"], put["path"]) == ("SEMESTER", ".system/assignments.lock.yml")
     assert yaml.safe_load(put["content"])["assignments"]["project"] == {
         "team_formation": "self_select",
         "max_team_size": 5,
@@ -2512,11 +2512,11 @@ def test_a_lock_file_that_could_not_be_written_says_what_that_costs(
 
 
 def test_a_closed_out_semester_is_left_alone(monkeypatch, capsys):
-    # `teardown` archives classroom-config last, and an archived repo is read-only. The
+    # `teardown` archives semester-config last, and an archived repo is read-only. The
     # membership sync fans out over the semester REGISTRY, which teardown does not touch, so
     # without this every finished semester would 403 the daily sync red for good.
     def boom(*args, **kwargs):
-        raise AssertionError("a sealed classroom-config takes no write")
+        raise AssertionError("a sealed semester-config takes no write")
 
     monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: True)
     monkeypatch.setattr(grades, "put_file", boom)

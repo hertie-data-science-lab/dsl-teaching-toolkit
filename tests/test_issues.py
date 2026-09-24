@@ -14,7 +14,7 @@ from conftest import CREATED_ISSUE_URL, issue_row
 
 from dsl_course import issues
 
-REPO = "Semester-f2026/classroom-config"
+REPO = "Semester-f2026/semester-config"
 TITLE = "Scheduled release: late delivery"
 
 

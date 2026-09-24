@@ -54,10 +54,10 @@ def test_make_code_shape():
 def test_code_message_contains_code_and_targets_university_email():
     s = _student(email="ada@uni.edu", name="Ada", code="dsl-xyz123")
     to, _subject, body = enrol_codes.code_message(
-        s, "https://github.com/org/welcome/issues"
+        s, "https://github.com/org/join/issues"
     )
     assert to == "ada@uni.edu"
-    assert "dsl-xyz123" in body and "welcome" in body
+    assert "dsl-xyz123" in body and "join" in body
 
 
 def test_code_message_names_the_course_and_falls_back_when_unnamed():
@@ -65,7 +65,7 @@ def test_code_message_names_the_course_and_falls_back_when_unnamed():
     # line names this one - but a course org with no name yet must read as plain English,
     # never as a blank or a literal placeholder.
     s = _student(email="ada@uni.edu", name="Ada", code="dsl-xyz123")
-    url = "https://github.com/org/welcome/issues"
+    url = "https://github.com/org/join/issues"
     _to, subject, named = enrol_codes.code_message(s, url, "Deep Learning")
     assert "To join the Deep Learning course on GitHub" in named
     assert subject == "Your enrolment code for Deep Learning"
@@ -544,7 +544,7 @@ def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
 ):
     # THE invariant, and the bug that motivated it. `write_column` reports a refused write
     # by RETURNING - it never raises - so under send-then-stamp a roster that could not be
-    # written (an archived classroom-config, a new branch ruleset, a token that lost write
+    # written (an archived semester-config, a new branch ruleset, a token that lost write
     # scope) meant the batch went out with `code_sent_at` still blank - and the next push
     # to the roster, which the send's own write-back provokes, mailed them all again.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
@@ -789,7 +789,7 @@ def test_a_hand_run_without_dispatched_by_never_consults_the_registry(monkeypatc
 
 
 def test_a_closed_out_semester_is_sent_no_codes(monkeypatch):
-    # Registered, so the trust-boundary check passes - but its classroom-config is
+    # Registered, so the trust-boundary check passes - but its semester-config is
     # read-only, so the `code_sent_at` write-back could not land, and nobody is being
     # enrolled into a term that is over.
     monkeypatch.setattr(enrol_codes, "semester_is_live", lambda org: False)

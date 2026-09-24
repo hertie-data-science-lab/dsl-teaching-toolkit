@@ -14,7 +14,7 @@
       "preview": false,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -31,7 +31,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -76,7 +76,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -121,7 +121,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -166,7 +166,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -207,7 +207,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -224,7 +224,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -256,7 +256,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -296,7 +296,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -326,7 +326,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "workflow:collect-submissions.yml"
     },
     {
@@ -356,7 +356,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -373,7 +373,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -390,7 +390,7 @@
       "preview": false,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -415,7 +415,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -432,7 +432,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -454,7 +454,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -541,7 +541,7 @@
       "preview": true,
       "required_team": "instructors",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     },
     {
@@ -685,7 +685,7 @@
       "preview": false,
       "required_team": "course-admin",
       "runs_as": "dispatch",
-      "scope": "cohort",
+      "scope": "semester",
       "via": "inline"
     }
   ]

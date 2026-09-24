@@ -99,7 +99,7 @@ def test_a_fault_cites_its_own_file_and_links_the_line():
     assert fault.at == "students.csv:4"
     assert (
         fault.link("Semester-f2026")
-        == "https://github.com/Semester-f2026/classroom-config/blob/main/students.csv#L4"
+        == "https://github.com/Semester-f2026/semester-config/blob/main/students.csv#L4"
     )
     assert fault.cite("Semester-f2026").startswith("[`students.csv:4`](https://")
 

@@ -36,6 +36,7 @@ from .course import (
     DEFAULT_MAX_TEAM_SIZE,
     FACULTY_ONLY_HEADING,
     FORMATS,
+    MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
     NOTHING_PUBLIC,
@@ -100,8 +101,8 @@ _SYLLABUS_STUB = """\
 
      FACULTY & INSTRUCTORS: this is the students' syllabus - the headings below are the
      standard Hertie shape, so delete what your course does not use.
-     Release it by naming this file in the release path (see MAINTAINING.md).
-     A filled example sits beside this file in SYLLABUS.md.sample. -->
+     Release it by naming this file in the release path (see .system/MAINTAINING.md).
+     A filled example is in .system/SYLLABUS.md.sample. -->
 
 ## 1. General information
 
@@ -134,14 +135,14 @@ _SYLLABUS_STUB = """\
 ## 5. Course sessions and readings
 
 <!-- Alternatively, the course website can publish this session by session, built from
-     `classroom-config/schedule.yml` (each session's title and learning objectives) and
+     `semester-config/schedule.yml` (each session's title and learning objectives) and
      each session's `readings/NN_.../` folder (its reading list). -->
 """
 
 # The filled syllabus faculty copy from, seeded beside their own SYLLABUS.md as
 # SYLLABUS.md.sample. Its BODY is the worked example course's real syllabus
 # (example-course/course-org/course-materials-f2026/SYLLABUS.md) rather than a second copy
-# authored here - the same rule the classroom-config samples follow, so the syllabus the
+# authored here - the one worked example the semester scaffolds link too, so the syllabus the
 # docs link to as the live example is the one faculty actually receive. Only the ownership
 # notice is added here, at the write site: the example file is a course team's own
 # INSTRUCTOR-OWNED syllabus in its own org, and must not claim otherwise.
@@ -912,7 +913,7 @@ def materials_system_files(org: str, repo: str) -> dict[str, bytes]:
     the SYSTEM-owned half of the ownership split; the skeleton above is the other."""
     return {
         SYLLABUS_SAMPLE_FILE: _syllabus_sample().encode(),
-        "MAINTAINING.md": _maintaining(org, repo).encode(),
+        MAINTAINING_FILE: _maintaining(org, repo).encode(),
     }
 
 
@@ -980,7 +981,7 @@ def materials_readme(org: str) -> str:
         "> organised, and anything students should read first.\n\n"
         "---\n\n"
         f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n\n"
-        "- **How to populate & operate this repo:** see [`MAINTAINING.md`](MAINTAINING.md) - "
+        "- **How to populate & operate this repo:** see [`MAINTAINING.md`](.system/MAINTAINING.md) - "
         "it explains what to edit, what gets released to students, and what to leave alone. "
         "`MAINTAINING.md` is **not** deployed to the semester org; leave it here as a persistent "
         "reference.\n"
@@ -1487,7 +1488,7 @@ def scaffold_assignment(
             f"# Assignment {number} - model solution\n\n"
             "Goes out to students after the deadline, two ways:\n\n"
             "- **On a clock** - set `solution_datetime:` on this assignment in the "
-            "semester's `classroom-config/schedule.yml`, beside its `due_datetime`. The "
+            "semester's `semester-config/schedule.yml`, beside its `due_datetime`. The "
             "hourly cron pushes this folder into every student/team repo at that "
             "moment. Needs `handout_datetime:` set too - the schedule can only push a "
             "solution into repos it provisioned. There is no default: leave it out and "
@@ -1782,8 +1783,8 @@ def main() -> int:
         dest="team_formation",
         choices=[*TEAM_FORMATIONS, COURSE_DEFAULT_CHOICE],
         default=COURSE_DEFAULT_CHOICE,
-        help="Group assignments only: self_select = students use the welcome repo's "
-        "'Join team' form; assigned = you write classroom-config/teams.csv",
+        help="Group assignments only: self_select = students use the join repo's "
+        "'Join team' form; assigned = you write semester-config/teams.csv",
     )
     pa.add_argument(
         "--submit-via",

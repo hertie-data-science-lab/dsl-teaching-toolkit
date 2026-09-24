@@ -75,7 +75,7 @@ CONTRACT_EXAMPLE = {
         "teams.csv": "...",
         "grading_sheets": "<sha of the directory tree>",
         "course/dsl-course.yml": "...",
-        "assignments.lock.yml": "...",
+        ".system/assignments.lock.yml": "...",
     },
     "course": {
         "org": "hertie-dsl-demo-course-e1234",
@@ -124,7 +124,7 @@ CONTRACT_EXAMPLE = {
             "course-materials-f2026.",
             "stops": "The release on Thu 8 Oct will be skipped.",
             "fix": {
-                "repo": "hertie-dsl-demo-f2026/classroom-config",
+                "repo": "hertie-dsl-demo-f2026/semester-config",
                 "path": "schedule.yml",
                 "line": 41,
                 "screen": "schedule",
@@ -238,8 +238,7 @@ def _course(**over) -> status_json.CourseFacts:
 def _semester(**over) -> status_json.SemesterFacts:
     site = f"{SEMESTER}.github.io"
     listing = {
-        name: repo_row(name)
-        for name in ("classroom-config", "welcome", site, "materials")
+        name: repo_row(name) for name in ("semester-config", "join", site, "materials")
     }
     facts = status_json.SemesterFacts(
         org=SEMESTER,
@@ -250,7 +249,7 @@ def _semester(**over) -> status_json.SemesterFacts:
             "students.csv": "57ude",
             "teams.csv": "7ea45",
             "grading_sheets": "5hee7",
-            "assignments.lock.yml": "10c4",
+            ".system/assignments.lock.yml": "10c4",
         },
         sched=_sched(),
         people=_people(),
@@ -371,7 +370,7 @@ def test_the_contract_example_marks_k4_k5_and_c5_and_lists_three_problems():
     source, _, template = doc["problems"]
     assert source["stops"] == "The release on Thu 8 Oct will be skipped."
     assert source["fix"] == {
-        "repo": f"{SEMESTER}/classroom-config",
+        "repo": f"{SEMESTER}/semester-config",
         "path": "schedule.yml",
         "line": 41,
         "screen": "schedule",
@@ -422,7 +421,7 @@ def test_release_states_follow_the_destination():
 
 def test_an_archived_semester_is_not_live_and_k7_is_done():
     semester = _semester()
-    semester.listing["classroom-config"] = repo_row("classroom-config", archived=True)
+    semester.listing["semester-config"] = repo_row("semester-config", archived=True)
     doc = _render(semester=semester)
     assert doc["semester"]["live"] is False
     assert doc["semester"]["stages"]["K7"] == "done"
@@ -564,7 +563,7 @@ def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
         "teams.csv": "7ea45",
         "grading_sheets": "5hee7",
         "course/dsl-course.yml": "c0ffee",
-        "assignments.lock.yml": "10c4",
+        ".system/assignments.lock.yml": "10c4",
     }
     stamp = re.compile(
         r"generated|written|timestamp|updated_at|rendered|as_of", re.IGNORECASE
@@ -626,12 +625,12 @@ def _stub_write(monkeypatch, doc: dict, results=(True,)):
     return puts
 
 
-def test_write_puts_the_semester_file_into_classroom_config(monkeypatch):
+def test_write_puts_the_semester_file_into_semester_config(monkeypatch):
     doc = _render()
     puts = _stub_write(monkeypatch, doc)
     assert status.write(COURSE, SEMESTER) == 0
     assert puts == [
-        (SEMESTER, "classroom-config", ".dsl/status.json", status_json.dumps(doc))
+        (SEMESTER, "semester-config", ".system/status.json", status_json.dumps(doc))
     ]
 
 
@@ -640,7 +639,7 @@ def test_write_puts_the_course_file_into_dot_github(monkeypatch):
     puts = _stub_write(monkeypatch, doc)
     assert status.write(COURSE) == 0
     assert [(o, r, p) for o, r, p, _ in puts] == [
-        (COURSE, ".github", ".dsl/status.json")
+        (COURSE, ".github", ".system/status.json")
     ]
 
 
@@ -658,7 +657,7 @@ def test_write_refuses_a_semester_the_registry_does_not_list(monkeypatch):
 
 def test_write_leaves_an_archived_semester_frozen(monkeypatch):
     semester = _semester()
-    semester.listing["classroom-config"] = repo_row("classroom-config", archived=True)
+    semester.listing["semester-config"] = repo_row("semester-config", archived=True)
     puts = _stub_write(monkeypatch, _render(semester=semester))
     assert status.write(COURSE, SEMESTER) == 0
     assert puts == []
@@ -713,11 +712,11 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     # The wiring between the loaders and the facts: every read answered from memory, the
     # rest of the pipeline real. `conftest._no_live_gh` catches any read this misses.
     files = {
-        (SEMESTER, "classroom-config", "schedule.yml"): SCHEDULE,
-        (SEMESTER, "classroom-config", "grading_sheets/assignment-2.yml"): (
+        (SEMESTER, "semester-config", "schedule.yml"): SCHEDULE,
+        (SEMESTER, "semester-config", "grading_sheets/assignment-2.yml"): (
             "submissions:\n  ada:\n    score_individual: 7\n"
         ),
-        (SEMESTER, "classroom-config", ".dsl/outcomes/release.now.json"): json.dumps(
+        (SEMESTER, "semester-config", ".system/outcomes/release.now.json"): json.dumps(
             CONTRACT_EXAMPLE["operations"][0]
         ),
         (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
@@ -739,8 +738,8 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         SEMESTER: [
             repo_row(n)
             for n in (
-                "classroom-config",
-                "welcome",
+                "semester-config",
+                "join",
                 f"{SEMESTER}.github.io",
                 "materials",
             )
@@ -757,7 +756,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo, branch: (
             {"dsl-course.yml": "c0ffee"}
             if repo == ".github"
-            else {"schedule.yml": "5c4ed", ".dsl/outcomes/release.now.json": "0u7"}
+            else {"schedule.yml": "5c4ed", ".system/outcomes/release.now.json": "0u7"}
         ),
     )
     monkeypatch.setattr(
@@ -811,7 +810,7 @@ def test_every_render_validates_against_the_exported_schema():
     # WP1's `console/schemas/status.schema.json` is what the console reads the file by.
     healthy = _render(semester=_semester(students=[_student("ada"), _student("bob")]))
     archived = _semester(sched=_sched("timezone: Europe/Berlin\n"), people=None)
-    archived.listing["classroom-config"] = repo_row("classroom-config", archived=True)
+    archived.listing["semester-config"] = repo_row("semester-config", archived=True)
     for doc in (
         _render(*_contract_scenario()),
         healthy,
@@ -987,7 +986,7 @@ def test_the_org_settings_problem_is_the_semesters_setup(monkeypatch):
     assert problem["fix"]["url"] == (
         f"https://github.com/organizations/{SEMESTER}/settings/member_privileges"
     )
-    assert problem["fix"]["repo"] == f"{SEMESTER}/classroom-config"
+    assert problem["fix"]["repo"] == f"{SEMESTER}/semester-config"
     assert doc["semester"]["stages"]["K2"] == "problem"
     assert doc["course"]["stages"]["C5"] == "done"
     assert validate(doc, schemas.status_schema()) == []
@@ -1048,9 +1047,9 @@ def test_a_problem_or_a_prerequisite_is_the_why():
     doc = _render(*_contract_scenario())
     assert doc["semester"]["stage_why"]["K4"] == "1 problem needs fixing."
     half = _semester(people=None)
-    del half.listing["welcome"]
+    del half.listing["join"]
     doc = _render(semester=half)
-    assert doc["semester"]["stage_why"]["K2"] == "The semester has no welcome repo yet."
+    assert doc["semester"]["stage_why"]["K2"] == "The semester has no join repo yet."
     assert doc["semester"]["stages"]["K3"] == "blocked"
     assert (
         doc["semester"]["stage_why"]["K3"] == "Waiting for the semester to be set up."

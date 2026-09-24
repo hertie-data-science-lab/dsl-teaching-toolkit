@@ -83,7 +83,7 @@ def test_the_registry_is_every_dispatch_op_the_contract_lists():
 def test_every_op_targets_a_cli_with_a_main(name):
     op = REGISTRY[name]
     assert op.runs_as == "dispatch"
-    assert op.scope in ("course", "cohort")
+    assert op.scope in ("course", "semester")
     assert callable(importlib.import_module(f"dsl_course.{op.module}").main)
 
 
@@ -430,8 +430,8 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
     (org, repo, path, content, _msg), _ = engine[0]
     assert (org, repo, path) == (
         SEMESTER,
-        "classroom-config",
-        ".dsl/outcomes/grades.return.json",
+        "semester-config",
+        ".system/outcomes/grades.return.json",
     )
     assert json.loads(content)["schema"] == "dsl.outcome/1"
 
@@ -585,7 +585,7 @@ def test_a_real_archive_is_not_a_broken_run(monkeypatch, capsys, engine):
     monkeypatch.setattr(teardown, "main", lambda: 0)
     monkeypatch.setattr(
         outcome_mod, "put_file", lambda *a, **k: False
-    )  # classroom-config is read-only now
+    )  # semester-config is read-only now
     rc, body, _ = _main(
         monkeypatch, capsys, _request(op="cohort.archive", args={}, preview=False)
     )

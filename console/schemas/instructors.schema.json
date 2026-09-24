@@ -51,6 +51,6 @@
       "type": "array"
     }
   },
-  "title": "classroom-config/instructors.yml",
+  "title": "semester-config/instructors.yml",
   "type": "object"
 }

@@ -127,7 +127,7 @@ def _grading_spec_defaults(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_open_notices(monkeypatch):
-    """Every tick asks the semester's `classroom-config` which archive notices are open, so
+    """Every tick asks the semester's `semester-config` which archive notices are open, so
     it can close one whose date has moved or been taken away
     (`scheduler._stale_archive_notices`) - real gh I/O, on a path these tests are not
     about. Answered with "none open", which is the ordinary case; the tests that ARE
@@ -196,7 +196,7 @@ def open_windows(monkeypatch):
 @pytest.fixture(autouse=True)
 def formation_mail(monkeypatch):
     """The mail an open window sends its unteamed students
-    (`team_formation.notify_windows`): a record file in classroom-config and a Graph
+    (`team_formation.notify_windows`): a record file in semester-config and a Graph
     batch, on a path most of these tests are not about. Answered "nothing owed", and the
     calls are what the tests that ARE about the wiring assert on."""
     calls: list[tuple] = []
@@ -529,7 +529,7 @@ def test_the_site_render_sees_the_lock_this_tick_just_wrote(monkeypatch):
 
 
 def test_a_config_push_run_queues_its_site_render_behind_sync_site(monkeypatch):
-    # The classroom-config push that fires this run fires Sync site too. Pushing the site
+    # The semester-config push that fires this run fires Sync site too. Pushing the site
     # repo from here as well raced it ("site push failed"); asking Sync site by dispatch
     # queues the render behind that run instead, so it still lands after this release.
     _formation_tick(monkeypatch, lambda *a, **k: LockWrite(True, True))
@@ -1318,7 +1318,7 @@ def test_deploy_many_releases_the_whole_repo_from_a_root_source_path(monkeypatch
                 "labs/01.md": "lab one",
                 "labs/.github/keep.yml": "faculty's own, not plumbing",
                 "SYLLABUS.md": "syllabus",
-                "MAINTAINING.md": "faculty notes - never released",
+                ".system/MAINTAINING.md": "faculty notes - never released",
                 ".git/config": "SOURCE-REMOTE",
                 ".github/workflows/release-materials.yml": "BUTTON",
             }
@@ -3563,7 +3563,7 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
 
 # ------------------------------------------------ config pre-flight (unattended)
 #
-# The hourly floor under the push fast path: every hand-edited file in classroom-config,
+# The hourly floor under the push fast path: every hand-edited file in semester-config,
 # one digest issue each. What matters is that it cannot red the run, that one unreadable
 # file does not stop the next, and that "we could not look" never reports a file as fixed.
 

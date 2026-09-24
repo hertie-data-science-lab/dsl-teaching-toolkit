@@ -1,10 +1,10 @@
 """dsl-course enrol-codes -- generate per-student enrolment codes and email them.
 
-Students enrol by pasting a random, **non-PII** code (not their email) into the welcome
+Students enrol by pasting a random, **non-PII** code (not their email) into the join
 Join issue, so no personal data ever touches the public repo - and because the code is
 unguessable, a classmate can't bind your roster row to their account. This one action:
 
-    1. fills blank `enrol_code` cells in classroom-config/students.csv (idempotent), then
+    1. fills blank `enrol_code` cells in semester-config/students.csv (idempotent), then
     2. emails each not-yet-onboarded student their code.
 
 Email reaches the student's UNIVERSITY inbox (the roster `hertie_email`), replacing the
@@ -14,7 +14,7 @@ Every roster row gets a code, auditors included - the code is how anyone onboard
 their `role` column is what routes them to the read-only `auditors` team on the way in.
 
 The ordinary caller is not a person: a push to a semester's own students.csv, which its
-classroom-config dispatcher turns into a `send-codes` repository_dispatch at the course
+semester-config dispatcher turns into a `send-codes` repository_dispatch at the course
 org. That path passes `--dispatched-by`, because its semester name is untrusted input (see
 `refuse_unregistered`), and it is unattended and for real - there is no preview mode.
 
@@ -49,8 +49,8 @@ from .discovery import (
     SEMESTERS_PATH,
     course_name_for_semester,
     discover_semesters,
+    join_issue_url,
     semester_is_live,
-    welcome_issue_url,
 )
 from .faults import Unusable
 from .gh_contents import get_file_with_sha, put_file, read_csv
@@ -213,7 +213,7 @@ def assign_codes(students: list[roster.Student], gen=make_code) -> int:
 
 def code_message(
     student: roster.Student,
-    welcome_url: str,
+    join_url: str,
     course_name: str = "",
     replaces: bool = False,
 ) -> mailer.Message:
@@ -234,7 +234,7 @@ def code_message(
     body = (
         f"Hello {student.name or 'there'},\n\n"
         f"To join {course} on GitHub, open a 'Join course' issue here:\n"
-        f"  {welcome_url}\n\n"
+        f"  {join_url}\n\n"
         f"and paste this enrolment code when asked:\n\n"
         f"    {student.enrol_code}\n\n"
         f"Whichever GitHub account opens the issue is linked to your Hertie email "
@@ -326,7 +326,7 @@ def run(semester_org: str) -> Outcome:
         # is - so the in-memory code for that student is one nobody can enrol with.
         students = roster.parse(written)
 
-    welcome_url = welcome_issue_url(semester_org)
+    join_url = join_issue_url(semester_org)
     # One set, two jobs: `code_sent_at` keeps a re-run from re-mailing students who already
     # have their code, and adding each address as we go collapses a duplicated roster row,
     # which would otherwise get two emails carrying two different codes.
@@ -361,11 +361,11 @@ def run(semester_org: str) -> Outcome:
     except Exception as exc:  # a name is never worth losing the codes email over
         log_err(f"could not read the course name ({exc}) - mailing without it")
         course_name = ""
-    messages = [code_message(s, welcome_url, course_name) for s in targets]
+    messages = [code_message(s, join_url, course_name) for s in targets]
     recipients = [s.hertie_email for s in targets]
     # CLAIM, then send. `write_column` reports a refused write by RETURNING - it never
     # raises - so send-then-stamp left the one ordering an unattended caller cannot
-    # survive: a roster that cannot be written (an archived classroom-config, a new branch
+    # survive: a roster that cannot be written (an archived semester-config, a new branch
     # ruleset, a token that lost write scope, a run of 5xx) meant the batch went out with
     # `code_sent_at` still blank, so the next push to the roster - and the send fills its
     # own blank cells, so it triggers one - mailed the very same students again. Stamping
@@ -495,7 +495,7 @@ def resend_unjoined(
     except Exception as exc:  # a name is never worth losing the codes email over
         log_err(f"could not read the course name ({exc}) - mailing without it")
         course_name = ""
-    welcome_url = welcome_issue_url(semester_org)
+    join_url = join_issue_url(semester_org)
     recipients = [s.hertie_email for s in to_mail]
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     if not _claim_sent(semester_org, recipients, stamp, replacing=None):
@@ -507,7 +507,7 @@ def resend_unjoined(
         return Outcome.FAILED, counts
     try:
         sent = mailer.send_bulk(
-            [code_message(s, welcome_url, course_name, replaces=True) for s in to_mail]
+            [code_message(s, join_url, course_name, replaces=True) for s in to_mail]
         )
     except Exception:
         _release_unsent(semester_org, recipients, stamp)
@@ -730,7 +730,7 @@ def main() -> int:
             args.semester_org, args.dispatched_by
         ):
             return 1
-        # A closed-out semester's classroom-config is read-only, so the `code_sent_at` stamp
+        # A closed-out semester's semester-config is read-only, so the `code_sent_at` stamp
         # this write-back depends on could not land - and nobody is being enrolled into a
         # term that is over anyway.
         if not semester_is_live(args.semester_org):

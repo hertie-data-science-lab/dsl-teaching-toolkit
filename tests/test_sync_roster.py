@@ -172,7 +172,7 @@ def test_submission_repo_suffixes_splits_on_the_semester_template_name():
         "assignment-1-ada-l",
         "assignment-1-bob-b",
         "assignment-4-project-team-x",
-        "welcome",
+        "join",
         "grades-ada-l",
         templates=("assignment-1", "assignment-4-project"),
     )

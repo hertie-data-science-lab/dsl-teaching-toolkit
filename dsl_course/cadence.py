@@ -20,7 +20,7 @@ Two alarms, in two places, because they have two audiences:
   cron is left. This is the dead-man's switch, and the dispatcher is the ONLY thing it is
   about - GitHub's own cron is listed for information and never alarms, because dropping
   most of its fires is its measured normal state.
-- LATE DELIVERY, in each semester's private `classroom-config`, for that semester's instructors:
+- LATE DELIVERY, in each semester's private `semester-config`, for that semester's instructors:
   these named moments passed more than GAP_SLO before the tick that shipped them. This is
   the SLO, and it is per semester because the plan that was late is theirs.
 
@@ -47,7 +47,7 @@ Two things neither alarm can see. Lateness is measured from the last run that EX
 success or failure, so a streak of red runs that finally ships a moment is not reported
 here; the `<workflow> is failing` issue covers that case from the first red run. And any
 `repository_dispatch` run counts as the dispatcher, because the runs listing does not carry
-`client_payload.driver` - except a run a semester's classroom-config push SCOPED to that one
+`client_payload.driver` - except a run a semester's semester-config push SCOPED to that one
 semester, which says so in its title (`SCOPED_RUN_TITLE`) and is read as no tick at all: it
 released into one semester, so it can neither date the dispatcher nor close a gap for the rest.
 
@@ -99,7 +99,7 @@ HEALTHY_GAP = timedelta(minutes=20)
 # check reads a 404 - loudly (the read raises), but only in the logs.
 WORKFLOW_FILE = "scheduled-release.yml"
 # The API's largest page - up to ~25 hours of quarter-hourly ticks - in ONE request. It has
-# to be that large because the runs a classroom-config push SCOPED to one semester are skipped
+# to be that large because the runs a semester-config push SCOPED to one semester are skipped
 # (`SCOPED_RUN_TITLE`) but still take rows: at 20, one busy evening of pushes filled the
 # window and disarmed both alarms. EVERYTHING this module says is bounded by this window,
 # which is why the bodies say "in the last N runs" rather than implying knowledge of

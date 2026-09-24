@@ -490,18 +490,20 @@ def test_sync_membership_is_a_consolidated_reconcile():
     }
 
 
-def test_the_two_student_landing_pages_invite_a_pull_request():
+def test_the_student_landing_page_invites_a_pull_request():
     # Students cannot push to the materials; forking and opening a pull request is how
-    # they fix a typo, and it has to be said where they actually land. Both files are
-    # instructor-owned and seeded ONCE, so this text only ever reaches a semester
-    # bootstrapped after it shipped - docs/08 says to paste it into the older ones.
+    # they fix a typo, and it has to be said where they actually land: the org profile.
+    # The join repo's README is only a pointer to it (decision 0010), so the landing text
+    # is written once. Both files are seeded ONCE: live semesters keep what they have.
     invitation = "open a pull request"
     page = profile_readme.render_profile_readme(
         "My-Course-f2026", "My-Course-f2026", "My Course", [], True, central_ref="main"
     )
     assert invitation in page
     assert "fork" in page.lower()
-    assert invitation in welcome.template("welcome/README.md")
+    pointer = welcome.template("join/README.md")
+    assert invitation not in pointer
+    assert "(https://github.com/{org})" in pointer
 
 
 def test_dotgithub_readme_orients_faculty():
@@ -838,12 +840,12 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
     assert jobs["sync"]["needs"] == "check-team"
 
 
-def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
+def test_semester_config_membership_dispatcher_fires_on_a_schedule_change():
     # Sync membership also rewrites `assignments.lock.yml`, the mirror the Join-team form
     # reads. Without schedule.yml here a new assignment woke NOTHING - the form went on
     # answering off the previous list until the 06:13 cron, and a group project handed out
     # in between could not have a team formed for it.
-    tmpl = (ROOT / "templates" / "classroom-config" / "dispatch-sync.yml").read_text()
+    tmpl = (ROOT / "templates" / "semester-config" / "dispatch-sync.yml").read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
@@ -854,7 +856,7 @@ def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
     ]
 
 
-def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_change():
+def test_semester_config_site_dispatcher_fires_on_schedule_people_or_teams_change():
     # All three feed the site: schedule.yml its dates, instructors.yml its staff cards, and
     # teams.csv the teams an assignment inside its formation window lists. None of them may
     # have to wait for the daily cron - least of all teams.csv, which the Join-team workflow
@@ -862,7 +864,7 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_chan
     # (instructors.yml and teams.csv also fire dispatch-sync.yml - a different workflow, event
     # type sync-membership - which is fine.)
     tmpl = (
-        ROOT / "templates" / "classroom-config" / "dispatch-sync-site.yml"
+        ROOT / "templates" / "semester-config" / "dispatch-sync-site.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
@@ -874,14 +876,14 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_chan
     assert "sync-site" in tmpl  # dispatches the sync-site event
 
 
-def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
+def test_semester_config_scheduler_dispatcher_fires_on_a_schedule_change():
     # GitHub delivers only a fraction of `schedule:` cron fires, so the promise that a
     # schedule.yml edit takes effect within minutes holds only if the edit itself starts a
     # run. The other three are the hand-edited files the same run checks: a push that
     # leaves one of them unreadable is mailed within the minute rather than at the hour.
     # Grading sheets are deliberately absent - a grader saves one all day.
     tmpl = (
-        ROOT / "templates" / "classroom-config" / "dispatch-scheduled-release.yml"
+        ROOT / "templates" / "semester-config" / "dispatch-scheduled-release.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
@@ -899,7 +901,7 @@ def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     # The event type the course org's Scheduled release filters `types:` on.
     assert "event_type=scheduled-release" in tmpl
     # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
-    assert "contents/dsl-course.yml" in tmpl
+    assert "__CONFIG_REPO__/contents/__POINTER__" in tmpl
     assert tmpl.splitlines()[0].startswith("# SYSTEM-OWNED")
 
 
@@ -937,13 +939,13 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
     )
 
 
-def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
+def test_semester_config_roster_dispatcher_fires_send_codes_on_students_csv():
     # students.csv is the only file that feeds the codes email, and this dispatcher is the
     # only thing that fires it. It dispatches the same event type the rendered workflow
     # listens for; loop-safety is the send's own `code_sent_at` idempotence, documented in
     # the template.
     tmpl = (
-        ROOT / "templates" / "classroom-config" / "dispatch-send-codes.yml"
+        ROOT / "templates" / "semester-config" / "dispatch-send-codes.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
@@ -952,7 +954,7 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert doc["permissions"] == {}
     assert "event_type=send-codes" in tmpl
     # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
-    assert "contents/dsl-course.yml" in tmpl
+    assert "__CONFIG_REPO__/contents/__POINTER__" in tmpl
 
 
 # The whole assignment, in the order the ten boxes are numbered. Pinned as a LIST: the
@@ -1109,12 +1111,12 @@ def test_seed_refresh_steps_carry_dsl_bot_token(name):
 
 
 def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
-    # Seeded into a semester's classroom-config, so it must carry the central repo and ref
+    # Seeded into a semester's semester-config, so it must carry the central repo and ref
     # baked in - the semester repo has no other way to reach the parser.
     from dsl_course.central import CENTRAL, CENTRAL_REF
-    from dsl_course.welcome import classroom_system_files
+    from dsl_course.welcome import config_system_files
 
-    raw = classroom_system_files(CENTRAL_REF)[
+    raw = config_system_files(CENTRAL_REF)[
         ".github/workflows/validate-schedule.yml"
     ].decode()
     assert "__CENTRAL__" not in raw and "__CENTRAL_REF__" not in raw
@@ -1159,7 +1161,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
         P,
         "list_org_repos",
         lambda org: [
-            {"name": "welcome", "url": "u", "visibility": "private", "description": ""}
+            {"name": "join", "url": "u", "visibility": "private", "description": ""}
         ],
     )
     monkeypatch.setattr(P, "discover_semesters", lambda org: [])
@@ -1180,7 +1182,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
 # its repo table. These pin the three ways a refresh can meet an existing page.
 
 _REPOS = [
-    {"name": "welcome", "url": "u", "visibility": "PUBLIC", "description": "front door"}
+    {"name": "join", "url": "u", "visibility": "PUBLIC", "description": "front door"}
 ]
 
 
@@ -1192,7 +1194,7 @@ def test_repo_table_drops_submission_and_gradebook_repos():
     rows = _repo_table(
         [
             {
-                "name": "welcome",
+                "name": "join",
                 "url": "u",
                 "visibility": "PUBLIC",
                 "description": "d",
@@ -1236,7 +1238,7 @@ def test_repo_table_drops_submission_and_gradebook_repos():
             },
         ]
     )
-    assert "welcome" in rows and "materials" in rows and "org.github.io" in rows
+    assert "join" in rows and "materials" in rows and "org.github.io" in rows
     assert "assignment-1-ada" not in rows
     assert "grades-ada" not in rows
     assert "| [assignment-1]" not in rows
@@ -1247,11 +1249,11 @@ def _semester_org_repos():
     return [
         {"name": n, "url": "u", "visibility": v, "description": "d", "topics": []}
         for n, v in (
-            ("classroom-config", "PRIVATE"),
+            ("semester-config", "PRIVATE"),
             (f"{org}.github.io", "PUBLIC"),
             ("labs", "PRIVATE"),
             ("materials", "PRIVATE"),
-            ("welcome", "PUBLIC"),
+            ("join", "PUBLIC"),
         )
     ]
 
@@ -1282,10 +1284,10 @@ def test_semester_table_runs_students_first_then_config_then_the_site():
         for row in _semester_repo_table(_semester_org_repos()).splitlines()
     ]
     assert names == [
-        "welcome",
+        "join",
         "materials",
         "labs",
-        "classroom-config",
+        "semester-config",
         "semester-f2026.github.io",
     ]
 
@@ -1304,6 +1306,7 @@ def _readme_run(monkeypatch, put_ok):
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(P, "org_meta", lambda org: {})
+    monkeypatch.setattr(P, "course_name_for_semester", lambda org: "")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_semesters", lambda org: [])
@@ -1332,10 +1335,14 @@ def test_a_written_readme_reports_no_failures(monkeypatch):
 def test_semester_page_title_follows_the_course_pointer(monkeypatch):
     from dsl_course import profile_readme as P
 
-    # A semester's dsl-course.yml is a pointer with no course_name, so this used to title
+    # A semester has no dsl-course.yml of its own, only its pointer, so this used to title
     # the students' landing page with the org slug.
-    monkeypatch.setattr(P, "org_meta", lambda org: {"course": "Course-Org"})
-    monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
+    monkeypatch.setattr(P, "org_meta", lambda org: {})
+    monkeypatch.setattr(
+        P,
+        "course_name_for_semester",
+        lambda org: "Deep Learning" if org == "Semester-f2026" else "",
+    )
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_semesters", lambda org: [])
@@ -2107,7 +2114,7 @@ def test_the_core_requirements_carry_no_autograder():
 
 _SCOPED = (
     "(github.event_name == 'repository_dispatch' "
-    "&& github.event.client_payload.driver == 'classroom-config' "
+    "&& github.event.client_payload.driver == 'semester-config' "
     "&& github.event.client_payload.semester_org || '')"
 )
 
@@ -2132,7 +2139,7 @@ def _args_under_bash(script: str, env: dict) -> list[str]:
 
 
 def test_a_config_push_run_releases_into_its_own_semester_only():
-    # A classroom-config push (driver=classroom-config, semester_org=<its org>) also fires
+    # A semester-config push (driver=semester-config, semester_org=<its org>) also fires
     # Sync site, so its run takes that one semester and leaves the site to Sync site's queue.
     # The GitHub cron and the ds01 timer (no semester) still walk every semester.
     release = _jobs_of(ALL_RENDERED["scheduler"])["release"]
@@ -2242,7 +2249,7 @@ def test_a_renamed_orgs_profile_page_stops_naming_the_dead_org():
         "Welcome! This is the course organisation for **hertie-nlp-e1282-f2026**.\n\n"
         "**[hertie-nlp-e1282-f2026 - course website]"
         "(https://hertie-nlp-e1282-f2026.github.io/)** - schedule,\n"
-        "[`welcome`](https://github.com/hertie-nlp-e1282-f2026/welcome/issues/new/choose)"
+        "[`join`](https://github.com/hertie-nlp-e1282-f2026/join/issues/new/choose)"
         " to enrol\n"
     )
     out, was = profile_readme.retitle_renamed_org(page, "hertie-nlp-f2026")

@@ -369,7 +369,7 @@ def test_the_fault_points_at_the_line_that_decides_when_the_window_shuts(semeste
         12,
     )
     assert fault.at == "schedule.yml:12"
-    assert fault.in_repo == "classroom-config"
+    assert fault.in_repo == "semester-config"
 
     pinned = _sched(
         **{"assignment-2": _entry(grading_datetime=SHUTS - timedelta(days=1))}
@@ -393,7 +393,7 @@ def test_the_fault_carries_its_own_consequence_and_fix(semester):
         "team cannot hand anything in"
     )
     assert fault.fix() == (
-        "write the missing rows into classroom-config/teams.csv yourself, or move the "
+        "write the missing rows into semester-config/teams.csv yourself, or move the "
         "date on the line above to keep team formation open for longer."
     )
 
@@ -527,7 +527,7 @@ NEAR_CLOSE = SHUTS - timedelta(hours=10)
 
 
 class Record:
-    """The semester's `team-formation/mailed.csv`, as a file that remembers its sha.
+    """The semester's `.system/team-formation/mailed.csv`, as a file that remembers its sha.
 
     `refuse` is how many writes GitHub turns down, which is what another tick's commit
     looks like from here; `on_refuse` is that other tick's content landing. `refuse_from`
@@ -921,7 +921,7 @@ def test_quiet_hours_hold_the_mail_and_claim_nothing(semester, post, capsys):
 
 
 def test_an_archived_semester_mails_nobody(semester, post, monkeypatch):
-    # Its classroom-config is frozen, so the claim could not land anyway - and nobody is
+    # Its semester-config is frozen, so the claim could not land anyway - and nobody is
     # forming a team in a term that is over.
     semester()
     rec, sender = post()
@@ -1083,7 +1083,7 @@ def test_the_message_carries_what_a_student_needs_in_order_to_act(semester, post
     assert "the Deep Learning course" in body
     assert "up to 4 people" in body, "the cap the Join-team form enforces"
     assert "closes on 4th Oct" in body, "the day, in the semester's own zone"
-    assert f"https://github.com/{SEMESTER}/welcome/issues/new/choose" in body
+    assert f"https://github.com/{SEMESTER}/join/issues/new/choose" in body
     assert (
         "https://semester-f2026.github.io/assignments/02-assignment-2.html" in body
     ), "the assignment's page, which lists the teams"
@@ -1185,7 +1185,7 @@ def test_the_sample_is_placeholders_and_the_same_template_as_the_send(semester, 
     assert "<n>" in body and "<date>" in body and "<assignment page>" in body
     # The NAME is a placeholder too: the preview is printed in a public run log.
     assert body.startswith("Dear <first name>,")
-    assert f"https://github.com/{SEMESTER}/welcome/issues/new/choose" in body
+    assert f"https://github.com/{SEMESTER}/join/issues/new/choose" in body
 
 
 def test_the_dry_run_prints_the_sample_claims_nothing_and_sends_nothing(
@@ -1422,7 +1422,7 @@ def pressed(monkeypatch):
 
 
 def test_the_cli_refuses_an_archived_semester(pressed, monkeypatch):
-    # Its classroom-config is frozen, so the claim could not land - and nobody is forming
+    # Its semester-config is frozen, so the claim could not land - and nobody is forming
     # a team in a term that is over. Green, as every other sweep treats one, and refused
     # BEFORE the semester is read.
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)

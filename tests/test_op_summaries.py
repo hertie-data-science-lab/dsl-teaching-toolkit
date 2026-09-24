@@ -517,7 +517,7 @@ def test_archiving_an_archived_semester_had_nothing_to_do(monkeypatch):
     monkeypatch.setattr(
         teardown,
         "list_org_repos",
-        lambda org: [{"name": "classroom-config", "archived": True}],
+        lambda org: [{"name": "semester-config", "archived": True}],
     )
     out = teardown.close_out(COURSE, SEMESTER, dry_run=False)
     assert out == 0 and out.conclusion == "nothing_to_do"
@@ -545,7 +545,7 @@ def _open_window_request(preview: bool) -> request_mod.Request:
 
 def test_open_window_spells_the_open_team_formation_flags():
     op = REGISTRY["teams.open_window"]
-    assert (op.scope, op.required_team, op.via) == ("cohort", "instructors", "inline")
+    assert (op.scope, op.required_team, op.via) == ("semester", "instructors", "inline")
     base = [
         "--course-org",
         COURSE,

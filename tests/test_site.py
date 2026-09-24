@@ -619,7 +619,7 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
     assert out.count("repo_url:") == 2
     assert out.count('repo_name: "assignment-3-<your-team>"') == 2
     assert (
-        'team_join_url: "https://github.com/Semester-f2026/welcome/issues/new/choose"'
+        'team_join_url: "https://github.com/Semester-f2026/join/issues/new/choose"'
         in out
     )
     # The cap the Join-team form enforces, and the day it stops accepting - the same date
@@ -1873,13 +1873,13 @@ def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
         site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
     )
     with pytest.raises(yaml.YAMLError):
-        site_repo.yaml_file("Semester-f2026", "classroom-config", "instructors.yml")
+        site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
     monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
     assert (
-        site_repo.yaml_file("Semester-f2026", "classroom-config", "instructors.yml")
+        site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
         == {}
     )
 

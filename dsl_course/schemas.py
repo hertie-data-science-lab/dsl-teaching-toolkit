@@ -17,16 +17,21 @@ import json
 import sys
 from pathlib import Path
 
+from . import records
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
+    ASSIGNMENTS_FILE,
+    CONFIG_REPO,
     FORMATS,
     INSTRUCTOR_ROLES,
     INSTRUCTORS_FILE,
+    JOIN_REPO,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
 )
+from .discovery import SEMESTERS_PATH
 from .grades import COURSE_DEFAULT_KEYS, SPEC_KEYS
 from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
@@ -401,7 +406,7 @@ def schedule_schema() -> dict:
             "enrolment": {"description": "Deprecated and ignored."},
         },
     )
-    return _doc("classroom-config/schedule.yml", _obj(top))
+    return _doc(f"{CONFIG_REPO}/schedule.yml", _obj(top))
 
 
 def instructors_schema() -> dict:
@@ -416,7 +421,7 @@ def instructors_schema() -> dict:
         PEOPLE_REQUIRED,
     )
     return _doc(
-        f"classroom-config/{INSTRUCTORS_FILE}",
+        f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
         _obj({"instructors": {"type": "array", "items": entry}}),
     )
 
@@ -430,7 +435,7 @@ def _csv_schema(title: str, fields, required, overrides: dict | None = None) -> 
 
 def students_schema() -> dict:
     return _csv_schema(
-        "classroom-config/students.csv",
+        f"{CONFIG_REPO}/students.csv",
         ROSTER_FIELDS,
         ROSTER_REQUIRED,
         {"role": _enum(("", ROLE_ENROLLED, ROLE_AUDITOR))},
@@ -438,7 +443,7 @@ def students_schema() -> dict:
 
 
 def teams_schema() -> dict:
-    return _csv_schema("classroom-config/teams.csv", TEAMS_FIELDS, TEAMS_FIELDS)
+    return _csv_schema(f"{CONFIG_REPO}/teams.csv", TEAMS_FIELDS, TEAMS_FIELDS)
 
 
 _SPEC_TYPES = {
@@ -509,6 +514,21 @@ def dsl_course_schema() -> dict:
     return _doc(".github/dsl-course.yml", _obj(top, ("org",)))
 
 
+def names_json() -> dict:
+    """The repo names and paths the console must spell exactly as the engine does, so it
+    holds no literal of its own: the config and join repos, the `.system/` folder and every
+    record in it (`records.path`), and the instructor files."""
+    return {
+        "config_repo": CONFIG_REPO,
+        "join_repo": JOIN_REPO,
+        "system_dir": records.SYSTEM_DIR,
+        "instructors_file": INSTRUCTORS_FILE,
+        "assignments_file": ASSIGNMENTS_FILE,
+        "registry_file": SEMESTERS_PATH,
+        "records": {kind: records.path(kind) for kind in records.RECORDS},
+    }
+
+
 def all_schemas() -> dict[str, dict]:
     """Every exported file, by its name under the output directory."""
     return {
@@ -516,6 +536,7 @@ def all_schemas() -> dict[str, dict]:
         "outcome.schema.json": outcome_schema(),
         "status.schema.json": status_schema(),
         "ops.json": ops_json(),
+        "names.json": names_json(),
         "schedule.schema.json": schedule_schema(),
         "instructors.schema.json": instructors_schema(),
         "students.schema.json": students_schema(),

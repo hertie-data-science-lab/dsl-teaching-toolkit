@@ -39,7 +39,7 @@ The workflow's inputs are **the same fields as a `schedule.yml` `deploy` entry**
 - **Everything in one press:** `course_source_path` = `/` (or `.`) releases the whole repo, minus the faculty side of it: 
   - `.git` (copying it would repoint the semester repo at the course repo), 
   - `.github` (the Release workflows and their token wiring) 
-  - and `MAINTAINING.md` (your operating notes - the scaffold marks it never released). 
+  - and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released). 
 
 Re-releasing is safe - copies are additive and idempotent.
 
@@ -48,7 +48,7 @@ Re-releasing is safe - copies are additive and idempotent.
 The same workflow releases **code**, because code is just another path. Keep a growing package in a course-org repo (e.g. `lecture-code-f2026`) and disclose it topic by topic as you teach: 
 - `course_source_path` = `mlpkg/simulation` (a subpackage folder) or `mlpkg/train/warmup.py` (a single module). 
 - Copies are additive, so each release extends what students already have 
-- release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/cohort-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
+- release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/semester-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
 
 ## Fixing something you have already released
 
@@ -114,7 +114,7 @@ request - which is how they report a typo in a lab, and how both of the courses 
 grew out of have always worked. A pull request lands on the branch students read like any
 other, so a merged one is live immediately and survives the next release.
 
-The invitation is in the semester's home page and in `welcome`. It reaches only semesters
+The invitation is in the semester's home page and in `join`. It reaches only semesters
 bootstrapped after it shipped: both files are instructor-owned and seeded once, so an
 existing semester needs the paragraph pasted in by hand.
 
@@ -168,7 +168,7 @@ writing about that session and always ships.
 ## Live updates to the deployed `<course>.github.io` site
 
 Released materials appear on the site automatically: a release triggers **Sync site**, as
-does a push to `classroom-config/schedule.yml` or `instructors.yml`, and there is a daily sync
+does a push to `semester-config/schedule.yml` or `instructors.yml`, and there is a daily sync
 besides. Run [Sync site](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/sync-site.yml)
 by hand only when you don't want to wait - e.g. after editing a file inside an already-released repo.
 

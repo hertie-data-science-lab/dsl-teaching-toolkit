@@ -40,8 +40,6 @@ from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_read_teams
 from .course import (
     FACULTY_ONLY_HEADING,
     INSTRUCTORS_TEAM,
-    SYLLABUS_SAMPLE_FILE,
-    SYLLABUS_SESSIONS_FILE,
     UPSTREAM_BRANCH,
     is_repo_root,
 )
@@ -59,6 +57,7 @@ from .log import (
     log_withheld,
     plural,
 )
+from .records import SYSTEM_DIR
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
 from .repos import (
     allow_forking,
@@ -79,15 +78,12 @@ NEVER_COPIED = frozenset({".git"})
 
 # Additionally skipped when the WHOLE repo is released (`course_source_path: /`), and only
 # at the repo root: `.github` holds the Release workflows and their bot-token wiring,
-# MAINTAINING.md is the maintainer guide, the syllabus sample is the filled example faculty
-# copy from, and the sessions block is what the Generate syllabus workflow builds for them to
-# paste. Each is written by this toolkit describing itself as never released, so each is
-# named here - and named FROM `course`, not re-spelled, so the exclusion cannot lapse the
-# next time one is renamed. Naming any of these paths explicitly still releases it: that is
+# `.system/` holds the maintainer guide, the filled syllabus example faculty copy from, and
+# the sessions block the Generate syllabus workflow builds for them to paste - the toolkit
+# describing itself, never released. Excluded as a folder, so a file added there later is
+# withheld too. Naming any of these paths explicitly still releases it: that is
 # what "give me everything" means, not a ban.
-ROOT_RELEASE_EXCLUDED = frozenset(
-    {".github", "MAINTAINING.md", SYLLABUS_SAMPLE_FILE, SYLLABUS_SESSIONS_FILE}
-)
+ROOT_RELEASE_EXCLUDED = frozenset({".github", SYSTEM_DIR})
 
 # Root documents this toolkit seeds as stubs for faculty to write over. Released once
 # written; withheld while still ours, because shipping either as-is publishes faculty
@@ -110,7 +106,7 @@ def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
     rewrote its README. A permanently red cron is how real failures stop being noticed.
 
     So it takes the channel this codebase already uses for "true, worth seeing, not a
-    failure" (see `templates/classroom-config/validate-schedule.yml`): a `::warning::`
+    failure" (see `templates/semester-config/validate-schedule.yml`): a `::warning::`
     annotation on a green run, which touches no exit code."""
     log_withheld(
         f"{course_org}/{repo}/{path} was NOT released - it is still the scaffold stub, "

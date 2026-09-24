@@ -16,11 +16,11 @@ sheet created  sheet        sheet refreshed   sheet         gradebook + CSV
 Marking can start the moment anything is in. The sheet exists from handout; only the
 machine facts move during the late window.
 
-## `classroom-config/grading_sheets/<slug>.yml`
+## `semester-config/grading_sheets/<slug>.yml`
 
 The one place a grader types. It arrives with every row present and a header saying which
 fields the toolkit fills and when. Two shapes - individual and group - and worked examples
-of both ship as `grading_sheets/*.yml.sample` in your `classroom-config`.
+of both are in the [worked example semester](../example-course/semester-org/grading_sheets).
 
 ```yaml
 teams:
@@ -67,7 +67,7 @@ comments you add do not survive a rewrite when one happens.
 The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
 parse, a key written twice, a mark or an adjustment that is not a number, a question
 `grading_config.yml` does not declare, a handle in two submission units - opens **one**
-issue in `classroom-config` (*grading sheets have entries the grader cannot read*) listing
+issue in `semester-config` (*grading sheets have entries the grader cannot read*) listing
 each by file and line, and emails whoever committed that line. Nothing is refreshed or sent
 for that unit until it is settled. The issue rewrites itself on every tick and closes when
 the last one goes.
@@ -86,7 +86,7 @@ before the marking does, not after. For the whole set of these, see
 A git committer date is written by the student's own client, so a submission dated before
 the deadline is a claim, not an observation. At the **cutoff** the freeze therefore asks
 GitHub when it saw the push that delivered the pinned commit, and records which rung
-answered in `snapshots/<slug>.csv`:
+answered in `.system/snapshots/<slug>.csv`:
 
 | `submitted_source` | what `info.submitted` is | `info.submitted_note` |
 |---|---|---|
@@ -137,7 +137,7 @@ repo's, so it would accuse the entire semester of one student's late push), and
 6. **Distribute grades** (button), `preview` first. The preview writes no grades and sends
    no mail. It prints the counts, and posts who gets what - each changed grade, who is
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
-   grades preview* issue in `classroom-config`. Each preview rewrites that issue; the real
+   grades preview* issue in `semester-config`. Each preview rewrites that issue; the real
    run closes it. There is no assignment to pick: every gradebook and the registrar's
    export are rebuilt from every sheet in the semester on every run, so a student's
    gradebook always shows everything they have been marked on. A half-typed sheet is
@@ -152,11 +152,11 @@ could change is not it.
 - **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
   one commit. The student sees their final grade, never the sum behind it. Each member of
   a team reads the team's shared feedback here, in their own repo, beside their own grade.
-- **`cohort-gradebook.csv`** in `classroom-config` - the registrar export, one row per
+- **`.system/semester-gradebook.csv`** in `semester-config` - the registrar export, one row per
   enrolled student including the ungraded. Private, never logged.
 - **An email** with a link and no marks in it.
 
-Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so a re-run
+Nothing is said twice: every send is recorded in `.system/gradebook/distributed.csv`, so a re-run
 after one correction reaches one student. Untick `notify` to skip the email.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
@@ -179,8 +179,8 @@ if you have one.
 Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
 hidden tests from its `solution` branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
-itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
-To regrade, delete `autograde/<slug>/`.
+itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
+To regrade, delete `.system/autograde/<slug>/`.
 
 ### Tests in another language: `tests/run.sh`
 
@@ -228,14 +228,14 @@ one word into `info.completion`:
 | `info.completion` | Means |
 |---|---|
 | `ran-clean` | every cell executed and none raised |
-| `errors:3` | three cells raised - read the executed copy in `autograde/<slug>/` to see which |
+| `errors:3` | three cells raised - read the executed copy in `.system/autograde/<slug>/` to see which |
 | `not-attempted` | the notebook is byte-for-byte the starter you handed out, or nothing was pushed |
 | `no-notebook` | the submission holds no `.ipynb` |
 | `timed-out` | the notebook never finished inside the time limit |
 | `did-not-run` | our runner could not execute it at all - tell the maintainer |
 
 Like `info.autograde` it is **information, never a mark**, and a student never sees it. The
-executed notebook is archived beside the result JSON as `autograde/<slug>/<key>.ipynb`.
+executed notebook is archived beside the result JSON as `.system/autograde/<slug>/<key>.ipynb`.
 
 It is **on by default when `formats:` starts with `ipynb`** and off for everything else; `completion_check:
 true` / `false` in `grading_config.yml` overrides either way. It is independent of
@@ -268,7 +268,7 @@ fences - `<!-- BEGIN QUESTION -->` and `<!-- END QUESTION -->` in a markdown cel
 their own line in an Rmd/qmd) - and set `grader_pdf: true` in the template's
 `grading_config.yml`. At the cutoff every submission is filtered down to just those
 questions and archived beside the autograde detail, as
-`classroom-config/autograde/<slug>/<key>.pdf`. Setup cells, imports and machine-marked
+`semester-config/.system/autograde/<slug>/<key>.pdf`. Setup cells, imports and machine-marked
 work are left out, so you read the answers rather than the repo.
 
 It is **not** behind `autograde:`, deliberately: the fences delimit what a *person* marks,
@@ -299,7 +299,7 @@ The block is the switch: `archive:` on its own is enough, and means sixty days a
 `semester_end`. **Without the block, nothing is ever archived** - the semester stays live and
 writable, and its digest issue says so, semester after semester.
 
-**A fortnight before**, the semester gets one issue in `classroom-config` and one email to
+**A fortnight before**, the semester gets one issue in `semester-config` and one email to
 the instructors saying what is about to happen. That is the moment to move the date if
 you need longer - move it inside the fortnight and a notice for the new date opens and
 mails again. Students see it too, in the site's Updates box and on its schedule.
@@ -308,12 +308,12 @@ mails again. Students see it too, in the site's Updates box and on its schedule.
 
 1. the semester's edits to released material are offered back to the course org as a pull
    request (see [Carrying semester edits back](08-release-materials-to-cohort.md#carrying-semester-edits-back));
-2. the toolkit's own open notices in `classroom-config` are closed;
+2. the toolkit's own open notices in `semester-config` are closed;
 3. the website is synced one last time, so it ships the archived state;
 4. **every repository in the org is archived** - students' work, the released materials,
-   `welcome` (so nobody can still Join a semester that is over), the website, `.github`;
-5. `archive/teardown.md` (the archive record) is written into `classroom-config`, recording what was archived;
-6. `classroom-config` is archived last, which is what tells every nightly sync this semester
+   `join` (so nobody can still Join a semester that is over), the website, `.github`;
+5. `.system/archive.md` (the archive record) is written into `semester-config`, recording what was archived;
+6. `semester-config` is archived last, which is what tells every nightly sync this semester
    is finished and to leave it alone.
 
 **Nobody is removed and nothing is deleted.** An archived repository is read-only for
@@ -331,8 +331,8 @@ arrived, and `force` overrides that - which is how a semester with no `archive:`
 so no date, is archived. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.
 
-`classroom-config` is now the semester's whole record of assessment - roster, teams, schedule,
-grading sheets, autograde detail, what was sent to whom, and `cohort-gradebook.csv`. Delete
+`semester-config` is now the semester's whole record of assessment - roster, teams, schedule,
+grading sheets, autograde detail, what was sent to whom, and `.system/semester-gradebook.csv`. Delete
 the repository, and the archived student repos with it, when your institution's retention
 period for that record expires.
 

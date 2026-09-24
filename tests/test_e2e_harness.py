@@ -83,9 +83,7 @@ def _fp(repos: dict, config: dict) -> dict:
 
 
 def test_an_untouched_estate_diffs_to_nothing():
-    fp = _fp(
-        {"welcome": {"private": False, "topics": [], "archived": False}}, {"a": "1"}
-    )
+    fp = _fp({"join": {"private": False, "topics": [], "archived": False}}, {"a": "1"})
     assert estate.diff(fp, fp) == {}
 
 
@@ -103,24 +101,25 @@ def test_a_repo_left_behind_shows_up():
 def test_a_changed_topic_and_a_deleted_repo_both_show_up():
     before = _fp(
         {
-            "welcome": {"private": False, "topics": ["dsl-welcome"], "archived": False},
+            "join": {"private": False, "topics": ["dsl-welcome"], "archived": False},
             "gone": {"private": True, "topics": [], "archived": False},
         },
         {},
     )
-    after = _fp({"welcome": {"private": False, "topics": [], "archived": False}}, {})
+    after = _fp({"join": {"private": False, "topics": [], "archived": False}}, {})
     changed = estate.diff(before, after)
-    assert set(changed) == {"repos/welcome", "repos/gone"}
+    assert set(changed) == {"repos/join", "repos/gone"}
     assert changed["repos/gone"][1] is None
 
 
-def test_a_snapshot_left_in_classroom_config_shows_up():
+def test_a_snapshot_left_in_semester_config_shows_up():
     before = _fp({}, {"schedule.yml": "aaa"})
     after = _fp(
-        {}, {"schedule.yml": "aaa", "snapshots/assignment-90-e2eab12.csv": "bbb"}
+        {},
+        {"schedule.yml": "aaa", ".system/snapshots/assignment-90-e2eab12.csv": "bbb"},
     )
     assert estate.diff(before, after) == {
-        "classroom-config/snapshots/assignment-90-e2eab12.csv": (None, "bbb")
+        "semester-config/.system/snapshots/assignment-90-e2eab12.csv": (None, "bbb")
     }
 
 
@@ -130,12 +129,12 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
         "list_org_repos",
         lambda org: [
             {
-                "name": "welcome",
+                "name": "join",
                 "visibility": "public",
                 "topics": ["x"],
                 "archived": False,
             },
-            {"name": "classroom-config", "visibility": "private", "archived": True},
+            {"name": "semester-config", "visibility": "private", "archived": True},
         ],
     )
     monkeypatch.setattr(estate.repos, "default_branch", lambda *a, **k: "main")
@@ -143,12 +142,12 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
         estate.gh_contents, "repo_blob_shas", lambda *a: {"schedule.yml": "s"}
     )
     fp = estate.fingerprint(SEMESTER)
-    assert fp["repos"]["welcome"] == {
+    assert fp["repos"]["join"] == {
         "private": False,
         "topics": ["x"],
         "archived": False,
     }
-    assert fp["repos"]["classroom-config"] == {
+    assert fp["repos"]["semester-config"] == {
         "private": True,
         "topics": [],
         "archived": True,
@@ -157,7 +156,7 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
 
 
 def test_a_config_repo_that_is_not_there_is_not_an_error(monkeypatch):
-    # The course org has no classroom-config; only semesters do.
+    # The course org has no semester-config; only semesters do.
     monkeypatch.setattr(estate.discovery, "list_org_repos", lambda org: [])
     assert estate.fingerprint(COURSE) == {
         "repos": {},
@@ -169,7 +168,7 @@ def test_a_config_repo_that_is_not_there_is_not_an_error(monkeypatch):
 def test_the_fingerprint_photographs_the_org_level_workflows(monkeypatch):
     # The run's own template repopulates four of the buttons' dropdowns, and a teardown
     # that deleted the template without re-rendering them left the org in a state no
-    # refresh produces - invisible to a fingerprint of repos and classroom-config alone.
+    # refresh produces - invisible to a fingerprint of repos and semester-config alone.
     monkeypatch.setattr(
         estate.discovery,
         "list_org_repos",
@@ -193,7 +192,7 @@ def test_the_fingerprint_photographs_the_org_level_workflows(monkeypatch):
 
 
 def test_a_semester_org_is_not_asked_for_org_level_workflows(monkeypatch):
-    # It holds none - its own workflows live in `welcome` and `classroom-config` - and a
+    # It holds none - its own workflows live in `join` and `semester-config` - and a
     # tree fetch of a directory that is not there raises rather than coming back empty.
     monkeypatch.setattr(
         estate.discovery,
@@ -422,7 +421,7 @@ RUN = "e2eab12cd"
         ("assignment-90-e2effffff", False),  # another run
         ("assignment-9-e2eab12cd", False),  # a real assignment that starts the same way
         ("assignment-1-regression-henrycgbaker", False),
-        ("classroom-config", False),
+        ("semester-config", False),
     ],
 )
 def test_only_this_runs_repos_are_deletable(name, mine):
@@ -432,25 +431,25 @@ def test_only_this_runs_repos_are_deletable(name, mine):
 def test_another_runs_leavings_are_reported_not_deleted():
     assert cleanup.is_drift("assignment-90-e2effffff-jane", RUN)
     assert not cleanup.is_drift("assignment-90-e2eab12cd-jane", RUN)
-    assert not cleanup.is_drift("classroom-config", RUN)
+    assert not cleanup.is_drift("semester-config", RUN)
 
 
 @pytest.mark.parametrize(
     "path,mine",
     [
-        ("snapshots/assignment-90-e2eab12cd.csv", True),
-        ("autograde/assignment-90-e2eab12cd/_graded.json", True),
+        (".system/snapshots/assignment-90-e2eab12cd.csv", True),
+        (".system/autograde/assignment-90-e2eab12cd/_graded.json", True),
         ("grading_sheets/assignment-90-e2eab12cd.yml", True),
         # One assignment per shape, so every artefact this run writes is named after the
         # NAMESPACE plus a shape - `-` is as much a boundary here as `/` and `.`.
-        ("snapshots/assignment-90-e2eab12cd-shared.csv", True),
+        (".system/snapshots/assignment-90-e2eab12cd-shared.csv", True),
         ("grading_sheets/assignment-90-e2eab12cd-student-choice.yml", True),
-        ("autograde/assignment-90-e2eab12cd-private/_graded.json", True),
-        ("snapshots/assignment-1.csv", False),
+        (".system/autograde/assignment-90-e2eab12cd-private/_graded.json", True),
+        (".system/snapshots/assignment-1.csv", False),
         ("schedule.yml", False),
-        ("autograde/assignment-90-e2effffff/_graded.json", False),
+        (".system/autograde/assignment-90-e2effffff/_graded.json", False),
         # A longer run id, not a shape of ours.
-        ("snapshots/assignment-90-e2eab12cd2-private.csv", False),
+        (".system/snapshots/assignment-90-e2eab12cd2-private.csv", False),
     ],
 )
 def test_only_this_runs_artefacts_are_dropped(path, mine):
@@ -569,7 +568,7 @@ def test_a_semester_org_has_no_buttons_to_re_render(monkeypatch):
     monkeypatch.setattr(
         cleanup.discovery,
         "list_org_repos",
-        lambda org: [{"name": "welcome", "visibility": "public"}],
+        lambda org: [{"name": "join", "visibility": "public"}],
     )
     assert cleanup.cleanup(RUN) == 0
     assert written == []
@@ -611,7 +610,7 @@ def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
 
 # ------------------------------------------------- putting the shared files back exactly
 
-# `csv.writer` writes CRLF, so this is the shape `cohort-gradebook.csv` really has on
+# `csv.writer` writes CRLF, so this is the shape `.system/semester-gradebook.csv` really has on
 # disk - trailing newline and all. Every byte of it has to survive the round trip.
 CRLF_CSV = b"hertie_email,name\r\nada@x,Ada\r\n"
 
@@ -637,16 +636,16 @@ def test_a_recorded_file_keeps_every_byte_it_had(monkeypatch):
     # a different blob, and the estate check at teardown - which compares blob shas -
     # called it drift on every single run.
     encoded = base64.b64encode(CRLF_CSV).decode()
-    _reads(monkeypatch, {"cohort-gradebook.csv": (0, encoded)})
-    assert cleanup.file_bytes(SEMESTER, "classroom-config", "cohort-gradebook.csv") == (
-        CRLF_CSV
-    )
+    _reads(monkeypatch, {".system/semester-gradebook.csv": (0, encoded)})
+    assert cleanup.file_bytes(
+        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+    ) == (CRLF_CSV)
 
 
 def test_a_file_that_is_not_there_is_recorded_as_absent(monkeypatch):
     _reads(monkeypatch, {})
     assert (
-        cleanup.file_bytes(SEMESTER, "classroom-config", "gradebook/nothing.csv")
+        cleanup.file_bytes(SEMESTER, "semester-config", ".system/gradebook/nothing.csv")
         is None
     )
 
@@ -654,9 +653,14 @@ def test_a_file_that_is_not_there_is_recorded_as_absent(monkeypatch):
 def test_a_read_that_failed_is_not_read_as_absent(monkeypatch):
     # An absent file is DELETED by the restore. A rate limit read as absence would take a
     # real file out of a real org.
-    _reads(monkeypatch, {"cohort-gradebook.csv": (1, "gh: API rate limit exceeded")})
+    _reads(
+        monkeypatch,
+        {".system/semester-gradebook.csv": (1, "gh: API rate limit exceeded")},
+    )
     with pytest.raises(RuntimeError, match="could not read"):
-        cleanup.file_bytes(SEMESTER, "classroom-config", "cohort-gradebook.csv")
+        cleanup.file_bytes(
+            SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+        )
 
 
 def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
@@ -671,15 +675,18 @@ def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
     assert (
         cleanup.restore_files(
             SEMESTER,
-            "classroom-config",
-            {"cohort-gradebook.csv": CRLF_CSV, "gradebook/distributed.csv": None},
+            "semester-config",
+            {
+                ".system/semester-gradebook.csv": CRLF_CSV,
+                ".system/gradebook/distributed.csv": None,
+            },
         )
         == 0
     )
     ((org, repo, files, delete),) = written
-    assert (org, repo) == (SEMESTER, "classroom-config")
-    assert files == {"cohort-gradebook.csv": CRLF_CSV}
-    assert delete == ("gradebook/distributed.csv",)
+    assert (org, repo) == (SEMESTER, "semester-config")
+    assert files == {".system/semester-gradebook.csv": CRLF_CSV}
+    assert delete == (".system/gradebook/distributed.csv",)
 
 
 def test_what_was_read_is_what_is_written_back(monkeypatch):
@@ -688,9 +695,11 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
     # file makes no commit at all.
     _reads(
         monkeypatch,
-        {"cohort-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
+        {".system/semester-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
     )
-    recorded = cleanup.file_bytes(SEMESTER, "classroom-config", "cohort-gradebook.csv")
+    recorded = cleanup.file_bytes(
+        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+    )
     written: list[dict] = []
     monkeypatch.setattr(
         cleanup.gh_contents,
@@ -700,9 +709,9 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
         ),
     )
     cleanup.restore_files(
-        SEMESTER, "classroom-config", {"cohort-gradebook.csv": recorded}
+        SEMESTER, "semester-config", {".system/semester-gradebook.csv": recorded}
     )
-    assert written == [{"cohort-gradebook.csv": CRLF_CSV}]
+    assert written == [{".system/semester-gradebook.csv": CRLF_CSV}]
 
 
 def _pipeline_module(monkeypatch):

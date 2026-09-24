@@ -1,6 +1,6 @@
 """What the demo orgs look like, before and after - the harness's "left no trace" proof.
 
-A pipeline run creates repos, flips topics, writes into `classroom-config` and re-renders
+A pipeline run creates repos, flips topics, writes into `semester-config` and re-renders
 the org's buttons. Cleanup is meant to undo all of it; the only way to know it did is to
 photograph the estate first and compare afterwards. The fingerprint is deliberately cheap
 (one repo listing per org, one recursive tree per config repo, one workflows tree per
@@ -21,14 +21,14 @@ from dsl_course import course, discovery, gh_contents, ghcli, repos
 # Where the seeded org-level workflows live in the course org's `.github` repo.
 WORKFLOWS_DIR = ".github/workflows"
 
-# Whatever a run touches inside classroom-config - the schedule it edits, and the
+# Whatever a run touches inside semester-config - the schedule it edits, and the
 # snapshots/, autograde/ and grading_sheets/ artefacts the scheduler writes - shows up as
 # a blob sha that was not there before.
 CONFIG_REPO = course.CONFIG_REPO
 
 
 def fingerprint(org: str) -> dict[str, dict]:
-    """`{"repos": ..., "classroom-config": ..., ".github/workflows": ...}` for one org.
+    """`{"repos": ..., "semester-config": ..., ".github/workflows": ...}` for one org.
 
     `private`, `topics` and `archived` are the three fields the pipeline can change
     without adding or removing a repo: a submission repo that came back public, a lost
@@ -38,9 +38,9 @@ def fingerprint(org: str) -> dict[str, dict]:
     The workflow blob shas are here for the same reason, one layer up: creating this run's
     assignment template repopulates the assignment dropdowns of four of the org's buttons,
     so a teardown that deleted the template without re-rendering them left the org in a
-    state no refresh produces - and nothing in the repo listing or in classroom-config
+    state no refresh produces - and nothing in the repo listing or in semester-config
     says so. Course orgs only; a semester org holds no org-level workflows (its own live in
-    `welcome` and `classroom-config`), and asking for a directory that is not there
+    `join` and `semester-config`), and asking for a directory that is not there
     raises."""
     listing = discovery.list_org_repos(org)
     fp: dict[str, dict] = {
@@ -76,7 +76,7 @@ def diff(before: dict[str, dict], after: dict[str, dict]) -> dict[str, tuple]:
     """`{what: (before, after)}` for everything that changed - `None` where it was absent.
 
     Flattened to one key space so a repo that appeared, a topic that moved and a file that
-    was left behind in classroom-config all read the same way in the failure message."""
+    was left behind in semester-config all read the same way in the failure message."""
     a, b = _flat(before), _flat(after)
     return {
         key: (a.get(key), b.get(key))

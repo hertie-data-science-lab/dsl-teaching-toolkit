@@ -323,11 +323,9 @@ def test_the_json_form_still_prints_what_it_could_read(monkeypatch, capsys):
     # Promote parses this. It has to get the listing even when the run is partial, so the
     # verdict rides on the exit code rather than on withholding the output.
     monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad"])
-    monkeypatch.setattr(
-        list_orgs,
-        "org_meta",
-        lambda org: (_ for _ in ()).throw(RuntimeError("nope")),
-    )
+    nope = lambda org: (_ for _ in ()).throw(RuntimeError("nope"))
+    monkeypatch.setattr(list_orgs, "org_meta", nope)
+    monkeypatch.setattr(list_orgs, "semester_pointer", nope)
     monkeypatch.setattr("sys.argv", ["list_orgs"])
 
     assert list_orgs.main() == 1

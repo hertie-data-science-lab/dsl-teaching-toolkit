@@ -122,7 +122,7 @@ def test_a_pdf_only_session_is_not_invisible(monkeypatch, wired):
 
 
 def test_the_generated_block_is_never_released_to_students():
-    assert syllabus.SYLLABUS_SESSIONS_FILE in deploy.ROOT_RELEASE_EXCLUDED
+    assert syllabus.SYLLABUS_SESSIONS_FILE.split("/")[0] in deploy.ROOT_RELEASE_EXCLUDED
 
 
 def test_the_cli_succeeds_on_a_real_schedule(monkeypatch, capsys, wired):
@@ -182,7 +182,8 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
     assert wrote == 0 and wrote.block == preview.block
     assert wrote.block in written[syllabus.SYLLABUS_SESSIONS_FILE]
     assert (
-        wrote.text == "Wrote the session list (2 sessions) to cm/SYLLABUS.sessions.md."
+        wrote.text
+        == "Wrote the session list (2 sessions) to cm/.system/SYLLABUS.sessions.md."
     )
 
 

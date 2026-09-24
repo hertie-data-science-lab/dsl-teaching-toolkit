@@ -21,7 +21,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 | Role | You want them to… | Declare them in | Level | They get |
 |--- |---|---|---|---|
 | Faculty, FAs | Administer the **whole course**, every semester, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every semester org |
-| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `classroom-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo named `*-<semester>` |
+| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `semester-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo named `*-<semester>` |
 
 **Prefer the semester file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's instructor cards.
 
@@ -31,7 +31,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 1. **Edit the file.**
 
-   **Semester org**: → `classroom-config` → `instructors.yml` (this year's instructors):
+   **Semester org**: → `semester-config` → `instructors.yml` (this year's instructors):
 
    ```yaml
    instructors:
@@ -93,7 +93,7 @@ instructors:
 
 >Because every sync is a full reconcile, a lapsed `end` prunes them exactly as a deleted entry would - no manual removal step needed. Leave the entry in the file afterwards: it doubles as the record of who taught what, and re-granting next year is a date edit.
 
-Worked example: [`example-course/cohort-org/instructors.yml`](../example-course/cohort-org/instructors.yml).
+Worked example: [`example-course/semester-org/instructors.yml`](../example-course/semester-org/instructors.yml).
 
 ## Remove someone / end access early
 
@@ -106,7 +106,7 @@ Worked example: [`example-course/cohort-org/instructors.yml`](../example-course/
 `instructors-<semester>` gets:
 1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check semester setup…) visible and runnable for them
 2. every course-org repo whose **name ends their associated `-<semester>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
-3. Semester-side they also get write on `classroom-config`, `welcome` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the semester: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
+3. Semester-side they also get write on `semester-config`, `join` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the semester: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
 
 So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the semester org ([08](08-release-materials-to-cohort.md)) themselves.
 
@@ -126,7 +126,7 @@ materials gets read on that one repo, by hand. This is rotation between trusted 
 not a security boundary.
 
 > The `students` / `auditors` teams are `secret`, so a non-owner instructor reads enrolment
-> from `classroom-config/students.csv`, not from GitHub's members view.
+> from `semester-config/students.csv`, not from GitHub's members view.
 
 ## Next
 
@@ -135,5 +135,5 @@ not a security boundary.
 - Field-by-field schemas: [DEPLOYMENT-CHECKLIST](DEPLOYMENT-CHECKLIST.md#instructorsyml).
 
 ---
-**Demo:** [`hertie-dsl-demo-f2026/classroom-config/instructors.yml`](https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/instructors.yml)
+**Demo:** [`hertie-dsl-demo-f2026/semester-config/instructors.yml`](https://github.com/hertie-dsl-demo-f2026/semester-config/blob/main/instructors.yml)
 → [`hertie-dsl-demo-course-e1234` teams](https://github.com/orgs/hertie-dsl-demo-course-e1234/teams).

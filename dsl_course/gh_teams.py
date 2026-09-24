@@ -462,7 +462,7 @@ def get_org_owners(org: str) -> frozenset[str] | None:
 
 # Every membership change `reconcile_team_members` has made in this process - or, on a
 # dry run, would have made. A tally rather than a return value because every caller sums
-# the function's ERROR count, and changes are what Check staff access reports: the
+# the function's ERROR count, and changes are what Check instructor access reports: the
 # console reads it off `membership_changes()` around one run (`sync_membership.main`).
 _CHANGES = {"added": 0, "removed": 0}
 
@@ -574,7 +574,7 @@ def reconcile_team_members(
             if handle.casefold() in protected:
                 # Same person, new login: the config still names the old one. Leave them
                 # in; the roster's handle cell is re-linked when they next open a Join
-                # issue (templates/welcome/onboard.yml matches on the id too).
+                # issue (templates/join/onboard.yml matches on the id too).
                 log_person(
                     f"  [keep] {handle} in {org}/{team} - renamed, same GitHub id"
                 )

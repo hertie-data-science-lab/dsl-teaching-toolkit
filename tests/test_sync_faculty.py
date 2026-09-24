@@ -217,11 +217,11 @@ def test_matches_tag_requires_exact_suffix_with_hyphen():
     assert sync_faculty._matches_tag("course-materials-f2025", "f2026") is False
     # no hyphen before the tag-like substring - must not false-positive
     assert sync_faculty._matches_tag("course-materials-sf2026", "f2026") is False
-    assert sync_faculty._matches_tag("welcome", "f2026") is False
+    assert sync_faculty._matches_tag("join", "f2026") is False
 
 
 def test_tag_repos_filters_and_always_includes_dotgithub():
-    content_repos = ["course-materials-f2026", "course-materials-f2025", "welcome"]
+    content_repos = ["course-materials-f2026", "course-materials-f2025", "join"]
     assignments = ["assignment-1-f2026", "assignment-2-s2026"]
     repos = sync_faculty._tag_repos(content_repos, assignments, "f2026")
     assert repos == [".github", "course-materials-f2026", "assignment-1-f2026"]
@@ -514,7 +514,7 @@ def test_a_course_admin_handle_no_team_can_be_given_is_a_fault(monkeypatch):
         6,
     )
     # The COURSE org's own .github, so the citation and the deep link land on the file a
-    # course admin actually edits - not on some semester's classroom-config.
+    # course admin actually edits - not on some semester's semester-config.
     assert (fault.file, fault.in_repo) == ("dsl-course.yml", ".github")
     assert fault.link("Course-Org") == (
         "https://github.com/Course-Org/.github/blob/main/dsl-course.yml#L6"

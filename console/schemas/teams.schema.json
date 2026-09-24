@@ -25,6 +25,6 @@
     ],
     "type": "object"
   },
-  "title": "classroom-config/teams.csv",
+  "title": "semester-config/teams.csv",
   "type": "array"
 }

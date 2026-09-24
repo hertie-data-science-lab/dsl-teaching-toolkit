@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Dispatch site sync
 
-# Seeded into a semester's private classroom-config repo as
+# Seeded into a semester's private semester-config repo as
 # .github/workflows/dispatch-sync-site.yml (companion to dispatch-sync.yml, which handles
 # membership). Its only job: fire the course org's Sync site whenever schedule.yml,
 # instructors.yml or teams.csv changes here, so the semester website - which reads its release
@@ -19,10 +19,10 @@ name: Dispatch site sync
 # independent: different workflows, different event types, different targets (teams vs the
 # site repo), so both running on one push is expected and harmless.
 #
-# Reads the course org from THIS semester's own .github/dsl-course.yml `course:` pointer
+# Reads the course org from THIS semester's own .system/dsl-course.yml `course:` pointer
 # (single source of truth). Fires a repository_dispatch (not workflow_dispatch) so Sync
 # site's ungated automatic path picks it up. Runs under secrets.DSL_BOT_TOKEN, which
-# classroom-config already carries (an infra repo) - unlike the content repos, so a direct
+# semester-config already carries (an infra repo) - unlike the content repos, so a direct
 # edit to a released content repo is instead caught by Sync site's daily cron.
 
 on:
@@ -48,10 +48,10 @@ jobs:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           SEMESTER_ORG: ${{ github.repository_owner }}
         run: |
-          course_org=$(gh api "repos/$SEMESTER_ORG/.github/contents/dsl-course.yml" \
+          course_org=$(gh api "repos/$SEMESTER_ORG/__CONFIG_REPO__/contents/__POINTER__" \
             --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
           if [ -z "$course_org" ]; then
-            echo "::error::no 'course:' line in $SEMESTER_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            echo "::error::no 'course:' line in $SEMESTER_ORG/__CONFIG_REPO__/__POINTER__ - can't find the course org to dispatch to."
             exit 1
           fi
           gh api "repos/$course_org/.github/dispatches" \

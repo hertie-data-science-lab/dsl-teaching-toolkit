@@ -27,7 +27,7 @@ BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 7, 12, 0, tzinfo=BERLIN)
 SEMESTER = "Semester-f2026"
 COURSE = "Course-Org"
-ISSUE = "https://github.com/Semester-f2026/classroom-config/issues/7"
+ISSUE = "https://github.com/Semester-f2026/semester-config/issues/7"
 # The real `send_bulk`, kept before the `wired` fixture replaces it, so one test can put
 # it back and exercise the log lines the transport itself prints.
 _REAL_SEND_BULK = mailer.send_bulk
@@ -409,7 +409,7 @@ def test_the_body_names_the_line_the_content_the_deadline_and_both_links(wired):
     # The intro links the course org the materials belong in.
     assert f'<a href="https://github.com/{COURSE}">course org</a> yet.' in body
     # The line reference IS the deep link, then the entry and the field it names.
-    line = f"https://github.com/{SEMESTER}/classroom-config/blob/main/schedule.yml#L131"
+    line = f"https://github.com/{SEMESTER}/semester-config/blob/main/schedule.yml#L131"
     assert (
         f'<b>error line:</b></td><td style="padding:0 0 0.25em 0">'
         f'<a href="{line}">schedule.yml:131</a> - releases.lecture_02 -&gt; '
@@ -715,7 +715,7 @@ def test_with_no_maintainer_address_the_failure_issue_is_the_only_channel(
 # clock the digest keeps - and the file it is about is full of personal data, so what the
 # mail may say about a row is the row number and the column.
 
-CSV_ISSUE = "https://github.com/Semester-f2026/classroom-config/issues/12"
+CSV_ISSUE = "https://github.com/Semester-f2026/semester-config/issues/12"
 
 
 def _row_fault(lineno: int = 4, field: str = "role") -> notify.ConfigFault:
@@ -1021,7 +1021,7 @@ def test_a_grading_sheet_fault_links_the_sheet_it_is_in_not_the_folder(wired):
         "[Course Name f2026] grading_sheets/ has 1 entry the toolkit cannot use"
     )
     assert "that sheet is not refreshed, and nothing on it is sent" in sent.one["body"]
-    assert "classroom-config/blob/main/grading_sheets/a3.yml#L5" in sent.one["body"]
+    assert "semester-config/blob/main/grading_sheets/a3.yml#L5" in sent.one["body"]
     assert "a3 line 5 -&gt; score_individual" in sent.one["body"]
 
 
@@ -1053,7 +1053,7 @@ def _grading_config_fault() -> notify.ConfigFault:
 def test_a_grading_config_fault_asks_the_template_who_wrote_the_line(
     wired, monkeypatch
 ):
-    # Blaming the semester's classroom-config for a file in the course org would name
+    # Blaming the semester's semester-config for a file in the course org would name
     # nobody, and the semester would be told by its instructors team instead of by the
     # person who typed it.
     wired()
@@ -1400,16 +1400,16 @@ def test_the_archive_notice_links_the_file_that_moves_the_date(wired):
     _, sent = _archiving(wired)
     body = sent.one["body"]
     assert '<a href="https://github.com/Semester-f2026">Semester-f2026</a>' in body
-    assert "Semester-f2026/classroom-config/edit/main/schedule.yml" in body
+    assert "Semester-f2026/semester-config/edit/main/schedule.yml" in body
     assert "all read access permissions remain as they are" in body
     # In the ONE sentence the notice issue beside it also ends on, so the two surfaces
     # do not hand the reader two different recipes for the same edit. The mail says
     # WHICH repo, because it is read outside the repo the issue lives in.
     assert (
         "To move this archiving date or remove it altogether, edit "
-        '<a href="https://github.com/Semester-f2026/classroom-config/edit/main/'
+        '<a href="https://github.com/Semester-f2026/semester-config/edit/main/'
         'schedule.yml">schedule.yml</a> in the '
-        "<code>classroom-config</code> repo." in body
+        "<code>semester-config</code> repo." in body
     )
 
 

@@ -62,7 +62,7 @@ def _state(body: str) -> dict:
 
 def test_the_body_names_the_file_and_its_own_docs():
     body = cd.render_body(ROSTER, [_fault()], NOW, SEMESTER)
-    assert "`classroom-config/students.csv` has broken entries" in body
+    assert "`semester-config/students.csv` has broken entries" in body
     assert "/docs/06-enrol-students-to-cohort.md" in body
     assert "**Do not close or edit this issue by hand.**" in body
 
@@ -219,7 +219,7 @@ def test_the_clock_resets_when_the_issue_closes_itself(gh):
     cd.sync(ROSTER, "Semester", "Course", [], NOW)
     body = fake.body_of("issue", "edit")
     assert cd._read_marker(body, cd._CLOCK, {}) == {}
-    assert "Every entry in `classroom-config/students.csv` was usable" in body
+    assert "Every entry in `semester-config/students.csv` was usable" in body
     (close,) = fake.did("issue", "close")
     assert (
         "Every entry in students.csv is now usable"
@@ -289,7 +289,7 @@ def test_every_grading_sheet_is_one_issue_and_each_line_links_its_own_sheet():
     body = cd.render_body(
         cd.GRADING_SHEETS, [_sheet("a1", 5), _sheet("a2", 9)], NOW, SEMESTER
     )
-    assert "`classroom-config/grading_sheets/` has broken entries" in body
+    assert "`semester-config/grading_sheets/` has broken entries" in body
     assert "/grading_sheets/a1.yml#L5" in body
     assert "/grading_sheets/a2.yml#L9" in body
     assert "### needs fixing" in body  # no deadline: it is a line nobody can read
@@ -317,7 +317,7 @@ def _spec_fault(fires) -> ConfigFault:
 
 def test_the_grading_config_issue_names_the_file_without_claiming_it_is_here():
     # The issue is the SEMESTER's and the file is in the course org, on a template's
-    # solution branch: `classroom-config/grading_config.yml` is a path that does not exist.
+    # solution branch: `semester-config/grading_config.yml` is a path that does not exist.
     body = cd.render_body(cd.GRADING_CONFIG, [_spec_fault(NOW)], NOW, SEMESTER)
     assert "`<assignment template>/grading_config.yml` has broken entries" in body
 
@@ -377,7 +377,7 @@ def _course_fault(file: str = "dsl-course.yml", field: str = "central_ref"):
 
 
 def test_the_course_digest_is_written_in_the_course_orgs_own_github(gh):
-    # The repo is the DIGEST's answer, not the engine's: hard-wired to classroom-config
+    # The repo is the DIGEST's answer, not the engine's: hard-wired to semester-config
     # this issue would open in a repo the course org does not have.
     fake = gh([])
     cd.sync(COURSE, "Course", "Course", [_course_fault()], NOW)

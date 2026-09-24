@@ -182,7 +182,7 @@ a first visit, mostly free 304s after).
   archived when that `.github` repo is archived. A semester known only from a course's
   registry has its `.github` read when its student screens open. Org names compare
   case-insensitively.
-- Status: `classroom-config/.dsl/status.json` (semester) and `.github/.dsl/status.json`
+- Status: `semester-config/.system/status.json` (semester) and `.github/.system/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
   `inputs` with one tree read. An absent file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
@@ -218,7 +218,9 @@ a first visit, mostly free 304s after).
 ## Schemas
 
 `schemas/` holds the JSON Schemas the engine exports with `python -m dsl_course.schemas`;
-a Python test fails when they drift. Never edit them by hand.
+a Python test fails when they drift. Never edit them by hand. `names.json` is every repo name
+and path the console must spell as the engine does (the config and join repos, `.system/` and
+each record in it); read it rather than writing a literal.
 
 ## Routes
 

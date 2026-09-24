@@ -101,7 +101,7 @@ CONTRACT_OUTCOME = {
             "code": "SOURCE_MISSING",
             "text": "Folder lectures/05_trees was not found in course-materials-f2026.",
             "fix": {
-                "repo": "hertie-dsl-demo-f2026/classroom-config",
+                "repo": "hertie-dsl-demo-f2026/semester-config",
                 "path": "schedule.yml",
                 "line": 41,
                 "screen": "schedule",
@@ -123,7 +123,7 @@ CONTRACT_STATUS = {
         "teams.csv": "d",
         "grading_sheets": "e",
         "course/dsl-course.yml": "f",
-        "assignments.lock.yml": "g",
+        ".system/assignments.lock.yml": "g",
     },
     "course": {
         "org": "hertie-dsl-demo-course-e1234",
@@ -171,7 +171,7 @@ CONTRACT_STATUS = {
             "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
             "stops": "The release on Thu 8 Oct will be skipped.",
             "fix": {
-                "repo": "hertie-dsl-demo-f2026/classroom-config",
+                "repo": "hertie-dsl-demo-f2026/semester-config",
                 "path": "schedule.yml",
                 "line": 41,
                 "screen": "schedule",
@@ -249,3 +249,22 @@ def test_the_validator_catches_what_the_schemas_forbid():
     assert any("conclusion" in p for p in problems) and any(
         "extra" in p for p in problems
     )
+
+
+def test_names_json_is_the_engines_own_names():
+    # The console spells no repo name or path of its own: it reads this file.
+    names = schemas.names_json()
+    assert set(names) == {
+        "config_repo", "join_repo", "system_dir", "instructors_file",
+        "assignments_file", "registry_file", "records",
+    }  # fmt: skip
+    assert (names["config_repo"], names["join_repo"]) == (
+        course.CONFIG_REPO,
+        course.JOIN_REPO,
+    )
+    assert names["records"]["status"] == ".system/status.json"
+    assert names["records"]["distributed"] == grades.DISTRIBUTED_PATH
+    assert names["records"]["lock"] == grades.TEAM_LOCK_PATH
+    for kind in ("outcomes", "pointer", "snapshots", "autograde", "solutions",
+                 "team_formation", "archive", "semester_gradebook"):  # fmt: skip
+        assert names["records"][kind].startswith(names["system_dir"] + "/"), kind

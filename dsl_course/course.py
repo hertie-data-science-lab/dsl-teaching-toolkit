@@ -13,12 +13,26 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
 
+from . import records
+
 # The per-org identity/config file, at the root of every org's `.github` repo: a course
 # org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
 COURSE_CONFIG = "dsl-course.yml"
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
 # Every semester org has exactly one, under exactly this name.
-CONFIG_REPO = "classroom-config"
+CONFIG_REPO = "semester-config"
+# Its name before decision 0010. Spelt here and in `migrate` only: the engine never reads a
+# repo under it, and `repos.create_repo` refuses to create one - a migrated semester's old
+# name is a live redirect (every clone, API read and sent link resolves through it) for as
+# long as nothing else takes the name.
+OLD_CONFIG_REPO = "classroom-config"
+# The semester's public front door: the Join course and Join team issue forms and the two
+# workflows that act on them. Its URL is in every enrolment mail (`discovery.join_issue_url`
+# builds it); the ones sent before decision 0010 name `welcome`, which GitHub redirects here
+# for as long as no repo takes that name again.
+JOIN_REPO = "join"
+OLD_JOIN_REPO = "welcome"
+RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO, OLD_JOIN_REPO})
 # The per-student gradebook repo: grades-<handle> (grades.py creates them, discovery reads
 # them back). Named here so the reader and the writer cannot drift.
 GRADEBOOK_PREFIX = "grades-"
@@ -40,8 +54,10 @@ MATERIALS_REPO_PREFIX = "course-materials-"
 # Generated faculty-side files, named where every module that has to know about them can
 # see it: `scaffold` writes them, `deploy` refuses to release them, `syllabus` builds one.
 # Named rather than re-spelled per module, so the exclusion cannot lapse when one is renamed.
-SYLLABUS_SAMPLE_FILE = "SYLLABUS.md.sample"
-SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
+# All three live under `.system/` (decision 0010), out of the root faculty edit.
+SYLLABUS_SAMPLE_FILE = records.path("syllabus_sample")
+SYLLABUS_SESSIONS_FILE = records.path("syllabus_sessions")
+MAINTAINING_FILE = records.path("maintaining")
 # The faculty-only heading in the materials README that `scaffold` seeds. `deploy` refuses
 # to release a README still containing it, so the sentinel is declared ONCE here - the
 # writer and the guard both import it, and neither can lapse when the wording is edited.
@@ -132,7 +148,7 @@ ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
 # outright, and it is not a value an instructor ever writes.
-SELF_SELECT = "self_select"  # students use the Join-team form in `welcome`
+SELF_SELECT = "self_select"  # students use the Join-team form in `join`
 ASSIGNED = "assigned"  # the teaching team writes teams.csv; the form refuses
 TEAM_FORMATIONS = (SELF_SELECT, ASSIGNED)
 NO_TEAMS = "none"
@@ -676,6 +692,10 @@ def coerce_date(value: object) -> date | None:
 # a required `role:`. `OLD_PEOPLE_FILE` - a `people:` mapping of role -> list - is never
 # read: a semester that still has it is refused as NOT_MIGRATED (`sync_faculty`).
 INSTRUCTORS_FILE = "instructors.yml"
+# The semester layer of the assignment settings (decision 0010: a `defaults:` block and an
+# `assignments:` map of per-slug deviations), at the root of semester-config beside the
+# schedule. Named now so the console has no literal; the engine reads it from B2.
+ASSIGNMENTS_FILE = "assignments.yml"
 OLD_PEOPLE_FILE = "people.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
 INSTRUCTOR_ROLES = {

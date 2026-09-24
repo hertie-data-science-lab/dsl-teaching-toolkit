@@ -43,7 +43,7 @@ Both gate on repo permission, which is also why GitHub only shows "Run workflow"
 
 Every workflow runs under **`secrets.DSL_BOT_TOKEN`**. On the **GitHub Free plan, org secrets
 don't reach private repos** - so bootstrap propagates it as an *org* secret (for the public
-`.github`/`welcome`) plus a *repo* secret on each private infra repo, **and** Refresh sets it as
+`.github`/`join`) plus a *repo* secret on each private infra repo, **and** Refresh sets it as
 a *repo* secret on every content repo. On Team/Enterprise that propagation is unnecessary.
 
 Consequences worth holding onto: every content repo holds a copy of an org-admin PAT (that is

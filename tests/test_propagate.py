@@ -241,7 +241,10 @@ def test_a_whole_repo_carry_leaves_the_root_excluded_paths_alone(world):
     # repo?" is between resolved paths, so a temp dir behind a symlink must not break it.
     world.commit(
         "cm",
-        {".github/workflows/release.yml": "course", "MAINTAINING.md": "the course org"},
+        {
+            ".github/workflows/release.yml": "course",
+            ".system/MAINTAINING.md": "the course org",
+        },
     )
     world.commit(
         "materials",
@@ -256,7 +259,7 @@ def test_a_whole_repo_carry_leaves_the_root_excluded_paths_alone(world):
     assert world.read(".github/workflows/release.yml") == "course"
     assert world.read("lectures/01/lab.md") == "corrected"
     (call,) = world.pulls.calls
-    assert ".github" not in call["body"] and "MAINTAINING.md" not in call["body"]
+    assert ".github" not in call["body"] and ".system" not in call["body"]
 
 
 def test_the_body_names_paths_and_says_the_branch_is_regenerated(world):

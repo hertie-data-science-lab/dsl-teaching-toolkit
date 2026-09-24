@@ -1,5 +1,5 @@
-"""The seeded welcome workflows/forms must be valid YAML - a typo breaks a semester's
-bootstrap (they're put_file'd verbatim into the welcome repo). github-script bodies are
+"""The seeded join workflows/forms must be valid YAML - a typo breaks a semester's
+bootstrap (they're put_file'd verbatim into the join repo). github-script bodies are
 YAML literal-block strings, so safe_load parses the workflow without running any JS.
 
 The JS itself can't be executed here (no node in CI, and github-script has no npm
@@ -21,7 +21,7 @@ import yaml
 
 from dsl_course import course, roster, teams, welcome
 
-WELCOME = Path(__file__).resolve().parents[1] / "templates" / "welcome"
+WELCOME = Path(__file__).resolve().parents[1] / "templates" / "join"
 TEMPLATES = [
     "onboard.yml",
     "team-formation.yml",
@@ -36,7 +36,7 @@ def script_of(rel: str, job: str) -> str:
     """The github-script body of a workflow's single step, AS SEEDED - through the same
     reader the seeding uses, so the shared helper block is spliced in the way a semester
     receives it rather than left as its marker."""
-    doc = yaml.safe_load(welcome.welcome_workflow(f"welcome/{rel}"))
+    doc = yaml.safe_load(welcome.join_workflow(f"join/{rel}"))
     (step,) = doc["jobs"][job]["steps"]
     return step["with"]["script"]
 
@@ -89,7 +89,7 @@ def test_workflows_are_gated_on_the_forms_labels():
     assert form["labels"] == ["onboarding"]
     assert team_form["labels"] == ["team-formation"]
     # writes to the private roster repo, not a public one
-    assert "classroom-config" in (WELCOME / "team-formation.yml").read_text()
+    assert "semester-config" in (WELCOME / "team-formation.yml").read_text()
 
 
 @pytest.mark.parametrize("rel,job", sorted(CSV_WORKFLOWS.items()))
@@ -264,7 +264,7 @@ def test_onboarding_workflows_are_minimally_scoped(rel):
     # Bounded jobs and sha-pinned actions are swept over every shipped workflow in
     # test_shipped_workflows.py; what is UNIQUE to these two is the exact scope. The
     # ambient token comments on, labels and closes the issue in THIS repo and gets nothing
-    # else: the CSV they write lives in classroom-config, which only DSL_BOT_TOKEN reaches,
+    # else: the CSV they write lives in semester-config, which only DSL_BOT_TOKEN reaches,
     # so `contents:` here would be scope with no purpose.
     doc = yaml.safe_load((WELCOME / rel).read_text())
     assert doc["permissions"] == {"issues": "write"}
@@ -342,7 +342,7 @@ def test_the_form_reads_the_lock_file_and_nothing_else():
     # used to scrape them out of the semester's schedule.yml, which no longer carries them
     # at all: every request would be accepted, at a default cap, for any slug.
     script = script_of("team-formation.yml", "form-team")
-    assert "assignments.lock.yml" in script and "path: LOCK" in script
+    assert ".system/assignments.lock.yml" in script and "path: LOCK" in script
     # Nothing reads the semester's schedule any more, and nothing interprets a `type:`.
     assert "path: 'schedule.yml'" not in script
     assert "declaredType" not in script
@@ -552,7 +552,7 @@ def test_blank_issues_are_disabled_so_every_issue_carries_a_routing_label(monkey
     )
     monkeypatch.setattr(welcome, "ensure_label", lambda *a, **k: True)
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
-    welcome.refresh_welcome_workflows("Org")
+    welcome.refresh_join_workflows("Org")
     assert ".github/ISSUE_TEMPLATE/config.yml" in seen
 
 
@@ -568,7 +568,7 @@ def test_refresh_seeds_exactly_the_routing_labels_the_forms_declare(monkeypatch)
         declared.update(
             yaml.safe_load((WELCOME / "ISSUE_TEMPLATE" / rel).read_text())["labels"]
         )
-    seeded = {name for name, _, _ in welcome.WELCOME_LABELS}
+    seeded = {name for name, _, _ in welcome.JOIN_LABELS}
     # Every label a form declares must be seeded, or that form's issues are skipped - and
     # `team-refused`, which no form declares, is seeded so a refusal the student can fix
     # reads as that rather than as a staff queue.
@@ -583,10 +583,8 @@ def test_refresh_seeds_exactly_the_routing_labels_the_forms_declare(monkeypatch)
         "ensure_label",
         lambda org, repo, name, **k: created.append((org, repo, name)) or True,
     )
-    assert welcome.refresh_welcome_workflows("Org") == 0
-    assert created == [
-        ("Org", "welcome", name) for name, _, _ in welcome.WELCOME_LABELS
-    ]
+    assert welcome.refresh_join_workflows("Org") == 0
+    assert created == [("Org", "join", name) for name, _, _ in welcome.JOIN_LABELS]
 
 
 def test_refresh_reds_when_a_routing_label_cannot_be_created(monkeypatch, capsys):
@@ -597,12 +595,12 @@ def test_refresh_reds_when_a_routing_label_cannot_be_created(monkeypatch, capsys
     monkeypatch.setattr(welcome, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(welcome, "ensure_label", lambda *a, **k: False)
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
-    assert welcome.refresh_welcome_workflows("Org") == len(welcome.WELCOME_LABELS)
+    assert welcome.refresh_join_workflows("Org") == len(welcome.JOIN_LABELS)
     assert "up to date" not in capsys.readouterr().out
 
 
 def test_onboard_throttles_a_student_before_it_touches_the_roster():
-    # `welcome` is public and anyone can open an issue in it, and each one costs a private
+    # `join` is public and anyone can open an issue in it, and each one costs a private
     # roster read plus an org invite and a team write on the bot token. A student who keeps
     # opening new Join issues instead of reading the reply on the last one pays that on
     # repeat. The count must therefore happen BEFORE the roster read and before the bot
@@ -682,7 +680,7 @@ def _run_form(
         re.sub(r"\bawait\s+", "", script_of("team-formation.yml", "form-team")),
     )
     files = {
-        "assignments.lock.yml": lock,
+        ".system/assignments.lock.yml": lock,
         "teams.csv": teams_csv,
         "students.csv": _roster_of(*(roster or ("ann", "bob", handle))),
     }
@@ -696,7 +694,7 @@ def _run_form(
         "const process = { env: { HAS_BOT: 'true' } };\n"
         "const setTimeout = (fn, ms) => fn();\n"
         "const core = { setFailed: (m) => {}, warning: (m) => {} };\n"
-        "const context = { repo: { owner: 'semester', repo: 'welcome' },"
+        "const context = { repo: { owner: 'semester', repo: 'join' },"
         " payload: { issue: ISSUE } };\n"
         "const github = {\n"
         "  rest: {\n"
@@ -874,7 +872,7 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     said = out["comments"][0]
     assert f"spelt exactly as on [the assignment page]({_PAGE})" in said
     assert (
-        "(https://github.com/semester/welcome/issues/new?template=02-join-team.yml"
+        "(https://github.com/semester/join/issues/new?template=02-join-team.yml"
         "&team=team-zeta)" in said
     )
     assert out["labels"] == ["team-refused"]
@@ -1101,7 +1099,7 @@ def test_a_student_not_on_the_roster_stays_open_for_staff():
 
 def test_nothing_opens_or_names_a_team_list_issue_any_more():
     # The assignment's page on the semester site is the one list of teams. A second list in
-    # the public welcome repo was a second writer to keep in step, and a second place a
+    # the public join repo was a second writer to keep in step, and a second place a
     # student could be sent to that disagreed with the first.
     form = (WELCOME / "ISSUE_TEMPLATE/02-join-team.yml").read_text()
     script = script_of("team-formation.yml", "form-team")
@@ -1227,7 +1225,7 @@ def test_a_semester_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatc
 
 def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
     # The tick that moves the lock calls this, and it must not turn into the whole seeding
-    # pass: `refresh_welcome_workflows` writes six files and ensures three labels, none of
+    # pass: `refresh_join_workflows` writes six files and ensures three labels, none of
     # which moves with the calendar. One file, one commit, one blob compare.
     from dsl_course import grades, welcome
 
@@ -1253,7 +1251,7 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
     )
     assert welcome.refresh_join_team_form("Org") == 0
     (org, repo, path, content) = written[0]
-    assert (org, repo, path) == ("Org", "welcome", welcome.JOIN_TEAM_FORM_PATH)
+    assert (org, repo, path) == ("Org", "join", welcome.JOIN_TEAM_FORM_PATH)
     assert len(written) == 1
     # And it carries THIS semester's open slug, which is the whole reason the tick calls it.
     field = yaml.safe_load(content.decode())["body"]

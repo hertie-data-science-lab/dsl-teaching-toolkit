@@ -542,7 +542,7 @@ def test_parse_snapshots_skips_rows_without_a_repo():
 
 
 def test_snapshot_path_lives_under_snapshots():
-    assert collect.snapshot_path("assignment-1") == "snapshots/assignment-1.csv"
+    assert collect.snapshot_path("assignment-1") == ".system/snapshots/assignment-1.csv"
 
 
 @pytest.mark.parametrize(
@@ -1130,7 +1130,7 @@ def test_snapshot_assignment_records_one_row_per_repo(monkeypatch):
         is collect.SnapshotResult.WRITTEN
     )
     ((path, text),) = written
-    assert path == "snapshots/assignment-1.csv"
+    assert path == ".system/snapshots/assignment-1.csv"
     assert collect.parse_snapshots(text) == {
         "assignment-1-anna": SHA,
         "assignment-1-ben": "",
@@ -1420,7 +1420,7 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     # The grading sheet has its own tests below; here it is a no-op, so an autograding
-    # test does not have to stand up a roster, a snapshot and a classroom-config read.
+    # test does not have to stand up a roster, a snapshot and a semester-config read.
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
 
 
@@ -1428,7 +1428,7 @@ def _recorded_sheet_writes(
     monkeypatch, order: list | None = None, ok: bool = True
 ) -> list[dict]:
     """The `sync_sheet` calls collect makes, in order, and with which autograde counts.
-    `order` interleaves them with the classroom-config writes, which is what the
+    `order` interleaves them with the semester-config writes, which is what the
     sentinel-ordering tests are actually about; `ok` is what each call answers, so a test
     can refuse the freeze."""
     calls: list[dict] = []
@@ -1444,7 +1444,7 @@ def _recorded_sheet_writes(
 
 
 def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
-    """The (path, text) writes collect makes into classroom-config."""
+    """The (path, text) writes collect makes into semester-config."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(
         collect,
@@ -1635,7 +1635,7 @@ def test_collect_looks_teams_up_by_the_schedule_key_not_the_semester_name(monkey
 
 def test_the_log_tag_cannot_be_recomputed_from_outside_the_run(monkeypatch):
     # The salt is what stops anyone recomputing the tag: both halves of a submission repo
-    # name are public (the slug on the semester site, the handle in the welcome repo's Join
+    # name are public (the slug on the semester site, the handle in the join repo's Join
     # issue titles), so an unsalted sha1 would read the student straight back off the log.
     repo = "assignment-1-ada-l"
     unsalted = hashlib.sha1(repo.encode()).hexdigest()[:7]
@@ -1664,7 +1664,7 @@ def test_collect_without_a_snapshot_grades_on_dates_and_says_so(monkeypatch, cap
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     assert set(seen.values()) == {None}
     err = capsys.readouterr().err
-    assert "snapshots/assignment-1.csv" in err and "students control" in err
+    assert ".system/snapshots/assignment-1.csv" in err and "students control" in err
 
 
 def test_collect_resolves_the_semester_type_from_the_entry_not_the_semester_name(
@@ -1701,7 +1701,7 @@ def test_collect_resolves_the_semester_type_from_the_entry_not_the_semester_name
     assert kinds == [True]  # graded per TEAM, as the semester declared
     # every semester-side artefact keys on the semester name, and the per-target archive on the
     # target's own key (the loop variable no longer shadows the schedule key)
-    assert ("autograde/group-project/team-x.json") in [p for p, _t in written]
+    assert (".system/autograde/group-project/team-x.json") in [p for p, _t in written]
     # The team's count reaches the grading sheet keyed on the TEAM, once - not once per
     # member. It is information for the marker, never a mark, and never a student's field.
     ((sheet,),) = (sheets,)
@@ -1719,7 +1719,7 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     ((path, text),) = written
-    assert path == "autograde/assignment-1/_skipped.json"
+    assert path == ".system/autograde/assignment-1/_skipped.json"
     assert collect.SOLUTION_BRANCH in text  # the record says why
     # The deadline passed whether or not anything machine-grades, so the sheet is still
     # sealed - a hand-marked assignment left OPEN tells its grader marks can still move.
@@ -1752,7 +1752,9 @@ def test_the_next_run_after_a_failed_freeze_seals_and_then_records(monkeypatch):
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     assert len(sheets) == 1
-    assert [path for path, _text in written] == ["autograde/assignment-1/_skipped.json"]
+    assert [path for path, _text in written] == [
+        ".system/autograde/assignment-1/_skipped.json"
+    ]
 
 
 def test_autograde_is_off_unless_the_assignment_asks_for_it():
@@ -1768,7 +1770,7 @@ def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     ((path, text),) = written
-    assert path == "autograde/assignment-1/_skipped.json"
+    assert path == ".system/autograde/assignment-1/_skipped.json"
     assert "autograde: false" in text
 
 
@@ -1795,7 +1797,7 @@ def test_no_unit_of_a_shared_drop_box_is_ever_machine_marked(monkeypatch):
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     ((path, text),) = written
-    assert path == "autograde/assignment-1/_skipped.json"
+    assert path == ".system/autograde/assignment-1/_skipped.json"
     assert "submit_via: shared_dropbox_repo" in text and "hand-marked" in text
 
 
@@ -1818,7 +1820,7 @@ def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatc
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     ((path, text),) = written
-    assert path == "autograde/assignment-1/_skipped.json"
+    assert path == ".system/autograde/assignment-1/_skipped.json"
     assert "no `tests/` on the solution branch - hand-marked" in text
     assert len(sheets) == 1 and sheets[0]["slug"] == "assignment-1"
 
@@ -1850,7 +1852,7 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     (skip,) = [(p, t) for p, t in written if p.endswith(collect.SKIP_RECORD)]
-    assert skip[0] == "autograde/assignment-1/_skipped.json"
+    assert skip[0] == ".system/autograde/assignment-1/_skipped.json"
     assert "nothing gradable" in skip[1]
     assert "nothing gradable" in capsys.readouterr().out  # and it is not silent
 
@@ -1906,7 +1908,7 @@ def test_collect_records_a_semester_of_genuine_non_submissions(monkeypatch):
     )
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
-    assert "autograde/assignment-1/_graded.json" in [p for p, _t in written]
+    assert ".system/autograde/assignment-1/_graded.json" in [p for p, _t in written]
 
 
 def test_the_shape_is_read_off_the_solution_branch_grading_config(monkeypatch):
@@ -2086,7 +2088,7 @@ def test_collect_holds_the_marker_when_some_repos_are_unreachable(monkeypatch):
     # Nothing permanent: the sheet is not sealed and the marker is held back, so the next
     # tick re-grades and picks up the repo that could not be read.
     assert sheets == []
-    assert not any(p.startswith("autograde/") for p in paths)
+    assert not any(p.startswith(".system/autograde/") for p in paths)
 
 
 # ---------------------------------------------------------------- the run.sh escape hatch
@@ -3114,9 +3116,9 @@ def test_a_hand_marked_notebook_assignment_is_still_completion_checked(monkeypat
 
     paths = [p for p, _t in written]
     assert (
-        "autograde/assignment-1/_skipped.json" not in paths
+        ".system/autograde/assignment-1/_skipped.json" not in paths
     )  # NOT hand-marked-and-done
-    assert "autograde/assignment-1/_graded.json" in paths  # fire-once, as usual
+    assert ".system/autograde/assignment-1/_graded.json" in paths  # fire-once, as usual
     # No hidden tests ran, so there is no count - only the state.
     assert sheets[-1]["autograde"] == {}
     assert sheets[-1]["completion"] == {h: "ran-clean" for h in ("anna", "ben", "cara")}
@@ -3137,14 +3139,14 @@ def test_the_executed_notebook_is_archived_beside_the_result(monkeypatch):
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
 
     paths = [p for p, _t in written]
-    assert "autograde/assignment-1/anna.json" in paths
-    assert "autograde/assignment-1/anna.ipynb" in paths
+    assert ".system/autograde/assignment-1/anna.json" in paths
+    assert ".system/autograde/assignment-1/anna.ipynb" in paths
 
 
 def test_an_oversized_executed_notebook_is_recorded_but_not_archived(
     monkeypatch, capsys
 ):
-    # A notebook of plots is base64 all the way down, and classroom-config is a repo
+    # A notebook of plots is base64 all the way down, and semester-config is a repo
     # somebody has to clone. The STATE is the record; the copy is a convenience.
     _stub_collect(monkeypatch, None, grading="formats: [ipynb]\nautograde: false\n")
     monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
@@ -3180,7 +3182,7 @@ def test_a_runner_without_the_kernel_records_a_skip_rather_than_a_red_cron(
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
 
     ((path, text),) = written
-    assert path == "autograde/assignment-1/_skipped.json"
+    assert path == ".system/autograde/assignment-1/_skipped.json"
     assert "ipykernel" in text
     err = capsys.readouterr().err
     # BOTH are named, not just the first one probed: a runner missing both should have to
@@ -3206,7 +3208,7 @@ def test_the_hidden_tests_still_run_when_the_kernel_is_missing(monkeypatch):
 
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
 
-    assert "autograde/assignment-1/_graded.json" in [p for p, _t in written]
+    assert ".system/autograde/assignment-1/_graded.json" in [p for p, _t in written]
     assert sheets[-1]["autograde"] == {h: "1/2" for h in ("anna", "ben", "cara")}
     assert sheets[-1]["completion"] == {}
 
@@ -3487,10 +3489,10 @@ def test_collect_writes_the_graded_sentinel_as_the_last_autograde_write(monkeypa
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 0
     paths = [p for p, _ in written]
-    assert "autograde/assignment-1/_graded.json" in paths
-    autograde = [p for p in paths if p.startswith("autograde/")]
+    assert ".system/autograde/assignment-1/_graded.json" in paths
+    autograde = [p for p in paths if p.startswith(".system/autograde/")]
     assert (
-        autograde[-1] == "autograde/assignment-1/_graded.json"
+        autograde[-1] == ".system/autograde/assignment-1/_graded.json"
     )  # the LAST marker write
 
 
@@ -3507,8 +3509,12 @@ def test_collect_withholds_the_sentinel_when_an_archive_write_fails(monkeypatch)
 
     monkeypatch.setattr(collect, "put_file", failing_put)
     assert collect.collect("Course", "assignment-1-f2026", "Semester") == 1
-    assert "autograde/assignment-1/anna.json" in written  # the run did examine them
-    assert "autograde/assignment-1/_graded.json" not in written  # marker withheld
+    assert (
+        ".system/autograde/assignment-1/anna.json" in written
+    )  # the run did examine them
+    assert (
+        ".system/autograde/assignment-1/_graded.json" not in written
+    )  # marker withheld
 
 
 def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
@@ -3987,7 +3993,7 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
 
 def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
     # The cron runs four times an hour for the length of the late window. A rewrite per
-    # tick would be a commit per tick in every semester's classroom-config.
+    # tick would be a commit per tick in every semester's semester-config.
     written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
     args = (
         "Course",
@@ -5540,8 +5546,8 @@ def test_the_grader_copy_is_the_marked_questions_and_nothing_else(
 
     collect.export_grader_documents("Semester", "a1", "a1", False, "2026-10-13", False)
 
-    assert list(written) == ["autograde/a1/alice.ipynb"]
-    body = written["autograde/a1/alice.ipynb"].decode()
+    assert list(written) == [".system/autograde/a1/alice.ipynb"]
+    body = written[".system/autograde/a1/alice.ipynb"].decode()
     assert "answer = 1" in body and "## Q1 (5 points)" in body
     assert "import numpy" not in body  # setup, not a marked question
     assert "BEGIN QUESTION" not in body
@@ -5577,7 +5583,7 @@ def test_a_grader_copy_from_a_drop_box_is_taken_from_the_units_own_folder(monkey
     )
 
     assert picked == ["alice"]
-    assert list(written) == ["autograde/a1/alice.ipynb"]
+    assert list(written) == [".system/autograde/a1/alice.ipynb"]
 
 
 def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, capsys):
@@ -5595,7 +5601,7 @@ def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, 
     monkeypatch.setattr(collect, "_pdf_engine_present", lambda: True)
     collect.export_grader_documents("Semester", "a1", "a1", False, "2026-10-13", False)
 
-    assert tried == ["pdf"] and list(written) == ["autograde/a1/alice.pdf"]
+    assert tried == ["pdf"] and list(written) == [".system/autograde/a1/alice.pdf"]
     assert "1 pdf" in capsys.readouterr().out
 
 
@@ -5637,7 +5643,7 @@ def test_an_export_that_never_started_costs_one_copy_not_the_whole_pass(
     collect.export_grader_documents("Semester", "a1", "a1", False, "2026-10-13", False)
 
     # The second submission was still exported and archived.
-    assert list(written) == ["autograde/a1/ben.html"]
+    assert list(written) == [".system/autograde/a1/ben.html"]
     out, err = capsys.readouterr()
     assert "1 html" in out and f"1 {collect.GRADER_UNREADABLE}" in out
     # Not silent either: a runner fault counted only as `not readable` reads like a fault
@@ -5665,7 +5671,7 @@ def test_a_runner_without_latex_never_tries_to_make_a_pdf(monkeypatch, capsys):
     collect.export_grader_documents("Semester", "a1", "a1", False, "2026-10-13", False)
 
     assert tried == ["html"]  # not one doomed pdf render per submission
-    assert list(written) == ["autograde/a1/alice.html"]
+    assert list(written) == [".system/autograde/a1/alice.html"]
     # Counts only, and the log says which path the runner took.
     assert "1 html" in capsys.readouterr().out
 
@@ -5767,15 +5773,18 @@ def test_a_jupyter_autosave_never_wins_the_grader_copy(monkeypatch):
 
     collect.export_grader_documents("Semester", "a1", "a1", False, "2026-10-13", False)
 
-    assert list(written) == ["autograde/a1/alice.ipynb"]
-    assert written["autograde/a1/alice.ipynb"].decode().count("## Q1 (5 points)") == 1
+    assert list(written) == [".system/autograde/a1/alice.ipynb"]
+    assert (
+        written[".system/autograde/a1/alice.ipynb"].decode().count("## Q1 (5 points)")
+        == 1
+    )
 
 
 def test_a_grader_copy_past_the_archive_cap_is_counted_not_committed(
     monkeypatch, capsys
 ):
     # The same rule the executed notebook follows: an HTML export of a plot-heavy notebook
-    # is base64 PNG all the way down, and one per student makes classroom-config a repo
+    # is base64 PNG all the way down, and one per student makes semester-config a repo
     # nobody can clone. The SOURCE here is small - it is what nbconvert makes of it that
     # blows the cap, so this is the post-render guard, not the pre-read one.
     _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
@@ -5812,7 +5821,7 @@ def test_an_export_that_is_not_a_file_is_not_read_as_one(monkeypatch, capsys):
 
     collect.export_grader_documents("Semester", "a1", "a1", False, "2026-10-13", False)
 
-    assert list(written) == ["autograde/a1/alice.ipynb"]
+    assert list(written) == [".system/autograde/a1/alice.ipynb"]
     assert "not a regular file" in capsys.readouterr().err
 
 

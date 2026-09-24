@@ -1,0 +1,28 @@
+{
+  "assignments_file": "assignments.yml",
+  "config_repo": "semester-config",
+  "instructors_file": "instructors.yml",
+  "join_repo": "join",
+  "records": {
+    "archive": ".system/archive.md",
+    "autograde": ".system/autograde",
+    "distributed": ".system/gradebook/distributed.csv",
+    "gradebook": ".system/gradebook",
+    "heartbeat": ".system/last-refresh",
+    "lock": ".system/assignments.lock.yml",
+    "maintaining": ".system/MAINTAINING.md",
+    "migration_pause": ".system/migration-pause.json",
+    "missing_semesters": ".system/missing-semesters",
+    "outcomes": ".system/outcomes",
+    "pointer": ".system/dsl-course.yml",
+    "semester_gradebook": ".system/semester-gradebook.csv",
+    "snapshots": ".system/snapshots",
+    "solutions": ".system/solutions",
+    "status": ".system/status.json",
+    "syllabus_sample": ".system/SYLLABUS.md.sample",
+    "syllabus_sessions": ".system/SYLLABUS.sessions.md",
+    "team_formation": ".system/team-formation"
+  },
+  "registry_file": "semesters.yml",
+  "system_dir": ".system"
+}

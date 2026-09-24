@@ -1,6 +1,6 @@
 # Schedule releases
 
-Write the semester's plan into the semester's `classroom-config/schedule.yml` once, and the scheduler runs the semester for you - every materials release, every assignment hand-out, every autograde run. 
+Write the semester's plan into the semester's `semester-config/schedule.yml` once, and the scheduler runs the semester for you - every materials release, every assignment hand-out, every autograde run. 
 
 The schedule file can be updated throughout the semester.
 
@@ -14,7 +14,7 @@ The schedule file can be updated throughout the semester.
 
 ## Write your semester's plan
 
-> For a fully worked example schedule.yml (a full semester) see [here](../example-course/cohort-org/schedule.yml).
+> For a fully worked example schedule.yml (a full semester) see [here](../example-course/semester-org/schedule.yml).
 
 > An example of the automatically generated schedule on the deployed `.github.io` site can also be seen live [here](https://hertie-dsl-demo-f2026.github.io/schedule/). 
 
@@ -93,7 +93,7 @@ Nested under `deploy:` we have the following:
 
 NB: `semester_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `semester_dest_repo` and `semester_dest_path` is created on release if non-exist.
 
-NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally.
+NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `.system/` (the toolkit's files: your operating notes `MAINTAINING.md`, the syllabus example and the generated sessions block). Nested copies - a `labs/.github/` of your own - travel normally.
 
 NB: a root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** from the release, with a warning on the run summary and everything else shipped - see [08 -> The unwritten root stubs](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
 
@@ -188,7 +188,7 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 
 **This file is timing only.** `type:` and `max_team_size:` used to be accepted here and are not any more: what an assignment IS - its shape, its team cap, how it is handed in, its question maxima, its late policy, whether it is autograded - lives in that assignment's own `grading_config.yml`, on the course template's `solution` branch (see [Add an assignment](03-add-assignment-to-course.md)). Written here they are flagged by **Validate schedule**, which names the file they moved to, and ignored.
 
-Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `classroom-config/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be, and re-renders the form's Assignment drop-down from it. So a new group assignment is joinable - and selectable on the form - within a minute or so of the push, provided its template already declares `team_formation: self_select` and its team-formation window is open - it runs from `handout_datetime` to the grading pin ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
+Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `semester-config/.system/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be, and re-renders the form's Assignment drop-down from it. So a new group assignment is joinable - and selectable on the form - within a minute or so of the push, provided its template already declares `team_formation: self_select` and its team-formation window is open - it runs from `handout_datetime` to the grading pin ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
 
 ```yaml
 assignments:
@@ -288,28 +288,28 @@ Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 
 - a timer on the DSL lab server, which dispatches every course org roughly every 15 minutes - the primary driver;
 - GitHub's own cron at :07/:22/:37/:52, which GitHub delivers only some of the time - a backstop, not the clock;
-- a push to `classroom-config/schedule.yml`, which fires a tick straight away.
+- a push to `semester-config/schedule.yml`, which fires a tick straight away.
 
 The two drivers guard each other, so a time in the plan is honoured to within about 15 minutes: **pin a release ahead of the class that needs it**, not at its start time. The button is there too, for a run on demand. Releasing and grading are separate jobs, grading one per semester, so a long autograding pass never holds up anyone's release.
 
 If a driver stops, or something due ships late, the scheduler files an issue and closes it again once things recover:
 
 - **Scheduled release: driver health**, in the course org's `.github` - the lab server has stopped dispatching, so only GitHub's unreliable cron is left; tell whoever runs the infrastructure. It ccs your `course-admin` team.
-- **Scheduled release: late delivery**, in the semester's private `classroom-config` - something due shipped more than an hour late, naming the schedule entries and by how many minutes. It ccs the semester's `instructors`.
+- **Scheduled release: late delivery**, in the semester's private `semester-config` - something due shipped more than an hour late, naming the schedule entries and by how many minutes. It ccs the semester's `instructors`.
 
 A newly bootstrapped org raises neither until it has seen its first dispatched run. Thresholds and timing: [maintainers.md](reference/maintainers.md#the-schedulers-two-drivers).
 
 ## Changing dates mid-term
 
-Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The push fires the scheduler itself, so the change takes effect within minutes; there is nothing to re-arm or re-deploy. 
+Just commit the edit to `semester-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The push fires the scheduler itself, so the change takes effect within minutes; there is nothing to re-arm or re-deploy. 
 
-The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `snapshots/<slug>.csv`, `solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
+The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `.system/snapshots/<slug>.csv`, `.system/solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `.system/autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
 
 Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself. A release already shipped stays shipped, because unshipping it would mean rewriting the semester repo's git history.
 
 ## Verifying your schedule
 
-**It checks itself.** Every commit touching `schedule.yml` runs **Validate schedule** in `classroom-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `classroom-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
+**It checks itself.** Every commit touching `schedule.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
 
 > The run happens *after* the push: Actions cannot gate a commit, so the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
 
@@ -336,12 +336,12 @@ So the sources are checked against the course org in two places: **Validate sche
 | Distance to the deploy | Severity | What you see |
 |---|---|---|
 | more than 24 hours | advisory | a line in the run summary and a yellow annotation on the offending line of `schedule.yml` in the commit. Nobody is emailed |
-| 24 hours or less | warning | the **digest issue** in `classroom-config` opens (or updates), comments, and **you are emailed** |
+| 24 hours or less | warning | the **digest issue** in `semester-config` opens (or updates), comments, and **you are emailed** |
 | 12 hours or less | **urgent** | the issue comments to say it escalated, and a second email goes out |
 | 6 hours or less | **critical** | it comments again, one rung louder, and the email copies the toolkit maintainer |
 | the moment has passed | **missed** | the copy did not ship. A last comment and a last email, and the fault stays listed until the source is staged |
 
-**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the semester's instructors. If git can name nobody in `instructors.yml` - the line was never edited by instructors, or the blame could not be read - every instructor is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/instructors.yml`; the digest issue `cc`s the same people by handle. If nobody in `instructors.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
+**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the semester's instructors. If git can name nobody in `instructors.yml` - the line was never edited by instructors, or the blame could not be read - every instructor is emailed instead. Addresses come from the `email:` field on each entry in `semester-config/instructors.yml`; the digest issue `cc`s the same people by handle. If nobody in `instructors.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
 
 **Nothing is emailed between 23:00 and 07:00** in the semester's own timezone. The issue still updates and comments immediately; the email is held and sent on the first tick after 07:00, as one message at the loudest rung it reached overnight.
 
@@ -401,11 +401,11 @@ An empty `deploy:` - the key written with nothing under it - is flagged too. It 
 
 Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-return-assignments.md); below is as it pertains to the `schedule.yml`.
 
-> **Marked ≠ released to students.** Everything lands in the private `classroom-config` and nothing reaches a student until you run **Distribute grades**: [Grade and return assignments](10-grade-and-return-assignments.md).
+> **Marked ≠ released to students.** Everything lands in the private `semester-config` and nothing reaches a student until you run **Distribute grades**: [Grade and return assignments](10-grade-and-return-assignments.md).
 
 Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_datetime` plus the template's `late_window_days`. From the **due date** the cron refreshes the grading sheet (and posts submission receipts) every quarter of an hour; at the cutoff it does three things, once each:
 
-1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock, and records against it when GitHub saw the push that delivered that commit.
+1. **Freezes** each submission repo's HEAD into `semester-config/.system/snapshots/<slug>.csv`, using the **server's** clock, and records against it when GitHub saw the push that delivered that commit.
 2. **Freezes** the grading sheet - its `info:` never moves again.
 3. **Autogrades** it (optional).
 
@@ -434,5 +434,5 @@ It needs `handout_datetime` set: the schedule can only push a solution into repo
 
 ---
 
-**Demo:** `classroom-config/schedule.yml` in [`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026),
+**Demo:** `semester-config/schedule.yml` in [`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026),
 run by [Scheduled release](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/scheduled-release.yml).

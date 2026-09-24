@@ -14,7 +14,7 @@ Idempotent: existing repos are left alone.
     where <slug> is the template name minus a trailing -fYYYY / -sYYYY.
 
 For a `type: group` assignment it instead makes ONE repo per team, `semester/<slug>-<team>`, and grants the
-GitHub Team materialised from classroom-config/teams.csv (see dsl_course.sync_teams) - so
+GitHub Team materialised from semester-config/teams.csv (see dsl_course.sync_teams) - so
 membership changes propagate to access. Grades are never written here; they go to each
 student's private gradebook repo (see dsl_course.grades), so a possibly-public team repo
 never carries marks.
@@ -60,7 +60,7 @@ from pathlib import Path
 
 import yaml
 
-from . import grades, roster, schedule, site, sync_teams, teams
+from . import grades, records, roster, schedule, site, sync_teams, teams
 from .access import (
     FACULTY_READ_ACCESS,
     grant_faculty,
@@ -135,7 +135,7 @@ from .repos import (
 )
 from .workflows_place import NEVER_IN_STUDENT_REPOS
 
-# Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
+# Fire-once sentinel for the SCHEDULED solution push, in semester-config. Needed because
 # `due_releases` is cumulative by design - a handout release re-fires every tick so a late
 # onboarder still gets their repo - and while re-probing a repo is cheap, push_solution
 # CLONES every student repo. Without this marker a passed `solution_datetime` means a clone
@@ -144,7 +144,7 @@ from .workflows_place import NEVER_IN_STUDENT_REPOS
 # A marker rather than a time window (`solution_datetime <= now < +1h`): a missed tick -
 # an outage, a queued runner, a rate limit - would silently mean the solution never ships
 # at all, and nothing would ever notice. Deleting the file re-releases it.
-SOLUTION_RECORD_DIR = "solutions"
+SOLUTION_RECORD_DIR = records.path("solutions")
 
 
 def _wait_for_content(
@@ -995,7 +995,7 @@ def provision_one(
     # every path that reaches this line.
     #
     # READ, not write. Marking happens in
-    # `classroom-config/grading_sheets/<slug>.yml` (docs/10),
+    # `semester-config/grading_sheets/<slug>.yml` (docs/10),
     # and by the time anyone marks, the deadline snapshot has already frozen this repo's
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
@@ -1215,7 +1215,7 @@ def ensure_drop_box(
             listing[repo] = listing_row(semester_org, repo)
         _tag_submission(semester_org, repo, slug, set())
         # READ, for the same reason every other repo a semester receives gets read: the work
-        # is marked in `classroom-config/grading_sheets/`, so a commit here would reach no
+        # is marked in `semester-config/grading_sheets/`, so a commit here would reach no
         # gradebook. At CREATION only - the nightly sweep owns the floor after that.
         grant_faculty(semester_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     made, granted_ok = _grant_drop_box(semester_org, repo, units, key, group=group)
@@ -1240,7 +1240,7 @@ def main() -> int:
     parser.add_argument(
         "--roster",
         default=None,
-        help="Local students.csv (default: semester classroom-config)",
+        help="Local students.csv (default: semester semester-config)",
     )
     parser.add_argument(
         "--solution-datetime",
@@ -1652,7 +1652,7 @@ def provision_all(
     #   `slug`: the semester-side NAME - `semester_dest_repo`, else the schedule key, else (for
     #     a handout of an unscheduled template) the template name minus its tag. Every repo
     #     made here, and every snapshot/autograde/grades artefact, is named after it.
-    #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the welcome Join-team form
+    #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the Join-team form
     #     validates the assignment against `assignments:` in schedule.yml and writes that
     #     key - and `sync_teams.desired_teams` derives its GitHub team slugs from it.
     # They differ exactly when `semester_dest_repo` is set. Keying the lookup or the team slug
@@ -1702,7 +1702,7 @@ def provision_all(
             # WHO fills teams.csv is the assignment's own declaration, and the two answers
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
-            # refuses every request (see templates/welcome/team-formation.yml).
+            # refuses every request (see templates/join/team-formation.yml).
             # The RAW declaration, not `team_formation_resolved`: a template that
             # declares nothing self-selects.
             self_select = gspec.team_formation != ASSIGNED
@@ -1739,16 +1739,16 @@ def provision_all(
                 )
                 return 0, False
             how = (
-                "students self-select via the welcome 'Join team' issue, or seed the CSV"
+                "students self-select via the 'Join team' issue, or seed the CSV"
                 if self_select
                 else "this assignment allocates teams (`team_formation: assigned`), so "
                 "the instructors fill the CSV - the Join-team form refuses it"
             )
             log_err(
-                f"no teams for `{key}` in {semester_org}/classroom-config/teams.csv - {how}."
+                f"no teams for `{key}` in {semester_org}/semester-config/teams.csv - {how}."
             )
             return 1, False
-        # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
+        # teams.csv is student-writable (the "Join team" issue appends rows), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
         # into the private semester org (and granted `maintain` on a repo) by ensure_team.
@@ -1975,7 +1975,7 @@ def provision_all(
     if solution_pushed and not record_solution_released(semester_org, slug, len(units)):
         log_err(
             f"the solution for {slug} shipped, but its fire-once record could not be "
-            f"written to {semester_org}/classroom-config - until it is, every hourly tick "
+            f"written to {semester_org}/semester-config - until it is, every hourly tick "
             f"re-clones every submission repo to push a solution they already have"
         )
         failed = True

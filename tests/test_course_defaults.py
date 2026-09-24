@@ -158,7 +158,7 @@ def test_unusable_semester_defaults_are_dropped_with_a_warning(capsys):
 def _seeded(defaults: dict) -> str:
     """The schedule.yml Bootstrap semester writes, through the real render path."""
     return bootstrap_course._scaffold_text(
-        "schedule.yml", "classroom-config/schedule.yml", "main", "f2026", 2026, defaults
+        "schedule.yml", "semester-config/schedule.yml", "main", "f2026", 2026, defaults
     ).decode()
 
 
@@ -169,7 +169,7 @@ def _parsed(text: str, **extra) -> schedule.Schedule:
 
 
 def test_no_semester_defaults_seed_todays_skeleton():
-    plain = pin_central_ref(template("classroom-config/schedule.yml"), "main").format(
+    plain = pin_central_ref(template("semester-config/schedule.yml"), "main").format(
         tag="f2026", year=2026, year_next=2027
     )
     assert _seeded({}) == plain

@@ -54,7 +54,7 @@ def log_err_person(public: str, detail: str) -> None:
     on a bad day publishes the roster one student at a time.
 
     A faculty member who needs the name re-runs the CLI locally with `DSL_VERBOSE=1`, or
-    reads the private classroom-config; a count of what failed is in the run's summary."""
+    reads the private semester-config; a count of what failed is in the run's summary."""
     log_err(public)
     log_person(f"  ! {detail}")
 
