@@ -277,7 +277,7 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
         </div>
       ) : null}
       <Help title="How teams form" doc="09-release-assignment-to-cohort.md">
-        <p>Students form their own teams on the student site until the window closes; you can assign the rest here. Teams are fixed at hand out. Students without a team get no repo at hand-out. Assign them here or they are left out.</p>
+        <p>Students form their own teams on the student site until the window closes; you can assign the rest here. Students without a team get no repo at hand out. Assign them here or they are left out.</p>
       </Help>
       <div class="stack">
         <div class="grid-2">
@@ -296,8 +296,8 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
           </section>
           <section class="panel section">
             <h2>Team size</h2>
-            <dl class="kv"><dt>Max team size</dt><dd>{maxSize} <span class="footnote">{cfg.max_team_size ? 'from the template' : 'the course default'}</span></dd><dt>How teams form</dt><dd>{formation}</dd></dl>
-            <a class="textlink" href={`?course=${p.course.org}#template-${a.slug}`}>Change on the template</a>
+            <dl class="kv"><dt>Max team size</dt><dd>{maxSize} <span class="footnote">{cfg.max_team_size ? 'from the assignment template' : 'the course default'}</span></dd><dt>How teams form</dt><dd>{formation}</dd></dl>
+            <a class="textlink" href={`?course=${p.course.org}#template-${a.slug}`}>Change on the assignment template</a>
           </section>
         </div>
         <section class="panel section">

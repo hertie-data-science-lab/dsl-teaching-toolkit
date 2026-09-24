@@ -50,7 +50,7 @@ export function AsgRows({ status, now }: { status: Status; now: number }) {
             <span class="a-sub">{asgSummary(a, tz, year)}</span>
             <span class="a-side">
               <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
-              {a.problem ? <span class="a-flag">Template has a problem</span> : null}
+              {a.problem ? <span class="a-flag">Assignment template has a problem</span> : null}
             </span>
           </a>
         </li>

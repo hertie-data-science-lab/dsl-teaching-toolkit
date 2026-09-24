@@ -43,7 +43,7 @@ function Index(p: ReadyProps) {
         <div class="actions"><a class="btn" href={`?course=${p.course.org}#new-assignment-1`}>New assignment</a></div>
       </div>
       <Help title="How assignments move" doc="09-release-assignment-to-cohort.md">
-        <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; settings live on the template.</p>
+        <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; settings live on the assignment template.</p>
       </Help>
       <div class="table-wrap">
         <table class="grid" style="min-width:720px">
@@ -58,7 +58,7 @@ function Index(p: ReadyProps) {
                 <td><span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span></td>
                 <td class="num">{nextDate(a, tz, year)}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
-                <td>{a.problem ? <span class="chip bad">Template has a problem</span> : <span class="footnote">None</span>}</td>
+                <td>{a.problem ? <span class="chip bad">Assignment template has a problem</span> : <span class="footnote">None</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -169,13 +169,13 @@ function Detail(p: ReadyProps & { a: Assignment }) {
             </p>
           </section>
           <section class="panel section">
-            <h2>Template</h2>
+            <h2>Assignment template</h2>
             {tplProblems.length ? (
               <ProblemCards list={tplProblems} />
             ) : (
-              <div class="check-line ok"><Check /><span><b>Template ready.</b> Brief written; settings check out.</span></div>
+              <div class="check-line ok"><Check /><span><b>Assignment template ready.</b> Brief written; settings check out.</span></div>
             )}
-            <a class="textlink" href={`#template-${a.slug}`}>Template settings</a>
+            <a class="textlink" href={`#template-${a.slug}`}>Assignment template settings</a>
           </section>
         </div>
         <section class="panel section">
@@ -185,7 +185,7 @@ function Detail(p: ReadyProps & { a: Assignment }) {
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
             {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={`#teams-${a.slug}`}>Open teams</a></div>) : null}
             {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
-              cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.late_until, tz, year)}.` : 'Update every copy pushes a template file to every student and posts a note on each receipts thread. Collect now pulls the latest work.',
+              cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.late_until, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each receipts thread. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (
                 <>
                   <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>

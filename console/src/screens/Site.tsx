@@ -121,7 +121,7 @@ function Site(p: ReadyProps) {
         </section>
         <section class="panel section">
           <div class="section-head"><h2>Announcements</h2><span class="meta">Shown in the Updates box with released sessions and hand outs</span></div>
-          <p style="color:var(--ink-2)">Announcements for releases and hand-outs are posted automatically from the schedule. Add anything else here.</p>
+          <p style="color:var(--ink-2)">Announcements for releases and hand outs are posted automatically from the schedule. Add anything else here.</p>
           {ann.kind === 'ready' && ann.entries.length ? (
             <ul class="rows">{ann.entries.filter((e) => e.type === 'file').map((e) => <Announcement p={p} repo={repo} path={e.path} sha={e.sha} />)}</ul>
           ) : ann.kind === 'loading' ? <Loading /> : <p class="footnote">No announcements.</p>}

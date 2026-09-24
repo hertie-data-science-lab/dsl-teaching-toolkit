@@ -81,7 +81,7 @@ export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
       tier: 'conditional', under: 'type', when: (v) => v.type === 'group', label: 'How teams form', widget: 'radio', default: 'self_select', defaultLabel: 'default: students choose',
       options: [
         opt('self_select', 'Students form their own', 'On the student site. The default.'),
-        { ...opt('assigned', 'You assign them', 'You assign them on the cohort’s Teams page once hand-out is scheduled.'), href: teamsHref },
+        { ...opt('assigned', 'You assign them', 'You assign them on the cohort’s Teams page once hand out is scheduled.'), href: teamsHref },
       ],
     },
     max_team_size: {

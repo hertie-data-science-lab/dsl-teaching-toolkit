@@ -189,17 +189,17 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
   return (
     <>
       <div class="field">
-        <label for="e-tpl">Template</label>
+        <label for="e-tpl">Assignment template</label>
         <select id="e-tpl" onChange={(e) => set({ template: (e.target as HTMLSelectElement).value })}>
           {!d.template ? <option value="" selected>Choose an assignment template</option> : null}
           {opts.map((o) => <option value={o.value} selected={o.value === d.template}>{o.label}</option>)}
         </select>
         {errors.template ? <Invalid>{errors.template}</Invalid>
-          : tpl && tpl.state !== 'ready' ? <Invalid>This template has a problem. <a href={`#template-${tpl.slug}`}>Fix it on the template</a></Invalid>
-          : d.template ? <span class="valid-msg"><Check />Template ready</span> : null}
+          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.slug}`}>Fix it on the assignment template</a></Invalid>
+          : d.template ? <span class="valid-msg"><Check />Assignment template ready</span> : null}
         <p class="why">Must exist and be ready.</p>
       </div>
-      <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the template', reason: 'The name after the assignment’s number. Also feeds repo names.' }} />
+      <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the assignment template', reason: 'The name after the assignment’s number. Also feeds repo names.' }} />
       <div class="field">
         <span class="label">Hand out</span>
         <div class="choices">
@@ -224,7 +224,7 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
       {vis !== 'private' ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">Not available: student repos are not private, so the solution cannot be pushed automatically.</div></div>
       ) : d.manual ? (
-        <div class="field"><span class="label">Solution shown</span><div class="readonly">Needs a hand-out time; the solution must follow it.</div></div>
+        <div class="field"><span class="label">Solution shown</span><div class="readonly">Needs a hand out time; the solution must follow it.</div></div>
       ) : (
         <>
           <F id="e-solon" k="solutionOn" d={d} set={set} t={{ tier: 'default', label: 'Show the solution', widget: 'checkbox', defaultLabel: 'default: off' }} />
@@ -428,7 +428,7 @@ function View(p: ReadyProps) {
           <div class="entry-head"><div><div class="eyebrow">New entry</div><h2 id="entry-title">What kind of entry?</h2></div>{close}</div>
           <div class="entry-body">
             <div class="type-pick">{NEW_TYPES.map(([t, label, cls]) => <button type="button" class={`trow ${cls}`} style="display:block;min-height:44px" onClick={() => setDraft('new', blankDraft(t, { repo: repos[0] ?? '' }))}>{label}</button>)}</div>
-            <p class="footnote">A hand out is an assignment entry: template, hand out, due and late work together.</p>
+            <p class="footnote">A hand out is an assignment entry: assignment template, hand out, due and late work together.</p>
           </div>
         </div>
       );

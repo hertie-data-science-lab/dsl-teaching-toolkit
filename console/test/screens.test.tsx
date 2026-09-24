@@ -161,7 +161,7 @@ describe('S16 and S10 assignments', () => {
     expect(out).toContain('Late work until');
     expect(out).toContain('Update every copy');
     expect(out).toContain('Collect now');
-    expect(out).toContain('Template ready.');
+    expect(out).toContain('Assignment template ready.');
   });
   it('says when an assignment is not in the status', () => {
     expect(text(<AssignmentScreen {...props({ entry: 'assignment-9' })} />)).toContain('No assignment called assignment-9');

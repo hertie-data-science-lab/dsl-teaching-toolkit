@@ -120,7 +120,7 @@ export async function checkTemplate(client: GitHubClient, org: string, repo: str
       checks: [
         { text: `Assignment template ${repo} created`, ok: true },
         { text: 'Brief and solution branches present', ok: !!main && !!sol },
-        { text: 'Settings check out (grading_config.yml parses)', ok: parses, hint: cfg && !parses ? 'grading_config.yml does not parse; fix it on the template’s settings.' : undefined },
+        { text: 'Settings check out (grading_config.yml parses)', ok: parses, hint: cfg && !parses ? 'grading_config.yml does not parse; fix it on the assignment template’s settings.' : undefined },
       ],
       config: cfg ? { text: cfg.text, sha: cfg.sha } : null,
     };
