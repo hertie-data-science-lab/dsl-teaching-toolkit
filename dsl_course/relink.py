@@ -1,32 +1,18 @@
 """Relink a student who switched to a different GitHub account.
 
-A new account is a new immutable id, so nothing the toolkit keys on follows the student
-by itself: their Join course is refused (the code is bound to the old id), and every repo,
-grading-sheet row and team row still names the old login. The fix faculty make is the
-natural one - re-point the row's `github_handle` in `students.csv` at the new account - and
-the push-triggered Sync membership moves the rest, here, before the roster reconcile.
+Faculty re-point the row's `github_handle` at the new account; Sync membership then moves
+the student's handle-keyed state here, before the roster reconcile. A row qualifies only
+on definite answers: the handle names a different account from the stored `github_id`,
+that id still exists under another login, neither is on another row, and onboard never
+linked this (handle, id) pair itself - the squat guard, since that pair means a renamed
+account whose old login a stranger took. More than `MAX_PER_PASS` rows reads as a bad
+paste and none is acted on.
 
-A row qualifies only when GitHub says, definitely, that the handle names a DIFFERENT
-account from the stored `github_id`, and that stored id still exists under another login;
-the new account is on no other row, the handle on no other row, and onboard never linked
-this exact (handle, id) pair itself. That last one is the squat guard: onboard wrote the
-pair, so the student renamed away and a stranger has since taken the login - a faculty
-edit never produces it. Anything uncertain is left alone and said, and more than
-`MAX_PER_PASS` qualifying rows in one pass reads as a bad paste, so none is acted on.
-
-The stored `github_id` is the pending marker and is written LAST. Every step re-derives the
-old login from it and is idempotent on (old, new), so a run that stops anywhere is finished
-by the next one. Nothing is ever deleted: a new-name repo in the way is renamed aside and
-archived when nobody but the toolkit ever committed to it, and anything a person wrote on
-both sides holds the relink (a REFUSAL - logged, naming the handle, never a red run) until
-faculty settle it. The classroom-config commit is a compare-and-set on the commit its
-files were read at, so an edit that lands mid-relink fails the commit (the next run
-retries) instead of being overwritten. Once the grants have moved, the old account leaves
-the org - only a plain member in no faculty team and on no other row; staff are never
-touched.
-
-Not moved: a shared drop box's `<handle>/` folder (a bot commit there would read as a late
-submission), `snapshots/` (frozen history) and the receipts issue's text.
+The stored `github_id` is the pending marker, written LAST; every step is idempotent on
+(old, new), so a run that stops anywhere is finished by the next. Nothing is deleted:
+anything a person wrote on both sides is a REFUSAL, held until faculty settle it. The
+config commit is compare-and-set, and the old account leaves the org only as a plain
+member in no faculty team. Not moved: drop-box folders, `snapshots/`, receipts text.
 """
 
 from __future__ import annotations
@@ -34,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -75,13 +61,14 @@ from .grades import (
     INFO_KEY,
     SHEETS_DIR,
     SheetUnreadable,
+    _blank,
     dump_distributed,
     key_lines,
     parse_distributed,
     parse_sheet,
 )
 from .issues import close_by_creator
-from .log import log_err, log_err_person, log_ok, log_person, log_step
+from .log import log, log_err, log_err_person, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
     archive_repo,
@@ -129,9 +116,9 @@ class Pending:
         return self.index + 2
 
 
-def _skip(index: int, why: str) -> None:
+def _skip(line: int, why: str) -> None:
     """A row this pass leaves alone, by LINE only: the reason is what faculty act on."""
-    log_err(f"  students.csv line {index + 2}: {why} - not relinked")
+    log_err(f"  students.csv line {line}: {why} - not relinked")
 
 
 def pending(org: str, students: list[roster.Student]) -> list[Pending]:
@@ -145,33 +132,34 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
     unanswered = 0
     subjects: tuple[str, ...] | None = None
     for i, s in enumerate(students):
+        line = i + 2
         stored = s.github_id.strip()
         if not s.onboarded or not stored.isdigit():
             continue
         new_id = id_of_login(s.github_handle)
         if not new_id:
             unanswered += 1
-            log_person(f"    no definite answer for @{s.github_handle} (line {i + 2})")
+            log_person(f"    no definite answer for @{s.github_handle} (line {line})")
             continue
         if new_id == stored:
             continue
         if handles[s.github_handle.casefold()] > 1:
-            _skip(i, "this handle is on another row too")
+            _skip(line, "this handle is on another row too")
             continue
         if any(o.github_id.strip() == new_id for o in students if o is not s):
-            _skip(i, "the account this handle names is linked on another row")
+            _skip(line, "the account this handle names is linked on another row")
             continue
         old = login_of_id(stored)
         if old == "":
             log_err_person(
-                f"  students.csv line {i + 2}: the GitHub account this row was first "
+                f"  students.csv line {line}: the GitHub account this row was first "
                 f"linked to has been deleted - not relinked",
                 f"    the row now names @{s.github_handle}; its stored id {stored} is gone",
             )
             continue
         if old is None or old.casefold() == s.github_handle.casefold():
             unanswered += 1
-            log_person(f"    no definite answer for id {stored} (line {i + 2})")
+            log_person(f"    no definite answer for id {stored} (line {line})")
             continue
         if subjects is None:
             try:
@@ -187,7 +175,7 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
         linked = LINK_MESSAGE.format(handle=s.github_handle, user_id=stored).casefold()
         if any(subject.casefold().startswith(linked) for subject in subjects):
             _skip(
-                i,
+                line,
                 "the student renamed their account and someone else now holds the old "
                 "name - put their CURRENT login in the row",
             )
@@ -216,10 +204,11 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
 # ------------------------------------------------------------------------------ repos
 
 
-def _named(existing: dict[str, dict], name: str) -> str | None:
-    """The listing's own spelling of `name`, which GitHub matches case-insensitively."""
+def _named(names: Iterable[str], name: str) -> str | None:
+    """The spelling `names` has for `name` - GitHub matches logins and repos
+    case-insensitively."""
     fold = name.casefold()
-    return next((n for n in existing if n.casefold() == fold), None)
+    return next((n for n in names if n.casefold() == fold), None)
 
 
 def _team_repos(org: str) -> set[str]:
@@ -246,8 +235,15 @@ def _repos_of(existing: dict[str, dict], login: str, team_repos: set[str]) -> li
     return [n for n in names if not existing[n].get("archived")]
 
 
-def _renamed(name: str, old: str, new: str) -> str:
-    return name[: len(name) - len(old)] + new
+def _moves(
+    existing: dict[str, dict], p: Pending, team_repos: set[str]
+) -> list[tuple[str, str, str | None]]:
+    """`(repo, its name for the new login, the repo already under that name or None)`."""
+    out = []
+    for name in _repos_of(existing, p.old, team_repos):
+        to = name[: len(name) - len(p.old)] + p.new
+        out.append((name, to, _named(existing, to)))
+    return out
 
 
 def _only_bot_commits(org: str, repo: str) -> bool | None:
@@ -274,8 +270,7 @@ def _only_bot_commits(org: str, repo: str) -> bool | None:
 def _check_repos(
     org: str, p: Pending, existing: dict[str, dict], team_repos: set[str]
 ) -> None:
-    for name in _repos_of(existing, p.old, team_repos):
-        target = _named(existing, _renamed(name, p.old, p.new))
+    for _name, _to, target in _moves(existing, p, team_repos):
         if target is None:
             continue
         untouched = _only_bot_commits(org, target)
@@ -311,9 +306,7 @@ def _move_repos(
     """Step 1: rename every repo named after the old login to the new one, setting an
     untouched new-name repo aside first. `existing` is updated in place, so the prune and
     the gradebooks that follow in this pass see the new names."""
-    for name in _repos_of(existing, p.old, team_repos):
-        to = _renamed(name, p.old, p.new)
-        target = _named(existing, to)
+    for name, to, target in _moves(existing, p, team_repos):
         if target is not None:
             aside = _aside_name(org, existing)
             if aside is None or not rename_repo(org, target, aside, person=True):
@@ -361,16 +354,11 @@ def _move_grants(
 # ---------------------------------------------------------------------- config files
 
 
-def _blank(value: object) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    if isinstance(value, dict):
-        return all(_blank(v) for k, v in value.items() if k != INFO_KEY)
-    if isinstance(value, list):
-        return all(_blank(v) for v in value)
-    return False
+def _unmarked(entry: object) -> bool:
+    """Nothing a person typed: blank apart from the toolkit's own `info:`."""
+    if isinstance(entry, dict):
+        entry = {k: v for k, v in entry.items() if k != INFO_KEY}
+    return _blank(entry)
 
 
 _KEY_LINE = re.compile(r"^(\s*)(['\"]?)(.+?)\2:(\s|$)")
@@ -395,21 +383,18 @@ def _rekey_sheet(text: str, old: str, new: str) -> str | None:
     renames: list[tuple[tuple[str, ...], object]] = []
     drops: list[tuple[str, ...]] = []
     for path, mapping in parents:
-        old_key = next(
-            (k for k in mapping if str(k).casefold() == old.casefold()), None
-        )
+        old_key = _named(mapping, old)
         if old_key is None:
             continue
-        new_key = next(
-            (k for k in mapping if str(k).casefold() == new.casefold()), None
-        )
+        new_key = _named(mapping, new)
         if new_key is not None:
-            if not _blank(mapping[new_key]):
+            if not _unmarked(mapping[new_key]):
                 raise Refused("both accounts have marks on a grading sheet")
-            drops.append(path + (str(new_key),))
-        renames.append((path + (str(old_key),), mapping[old_key]))
+            drops.append(path + (new_key,))
+        renames.append((path + (old_key,), mapping[old_key]))
     if not renames:
         return None
+    unsafe = "a grading sheet is laid out in a way the relink cannot edit"
     where = {
         tuple(k.casefold() for k in path): n for path, n in key_lines(text).items()
     }
@@ -418,14 +403,14 @@ def _rekey_sheet(text: str, old: str, new: str) -> str | None:
     def line_of(path: tuple[str, ...]) -> int:
         n = where.get(tuple(k.casefold() for k in path))
         if n is None:
-            raise Refused("a grading sheet is laid out in a way the relink cannot edit")
+            raise Refused(unsafe)
         return n - 1
 
     for path, _value in renames:
         at = line_of(path)
         m = _KEY_LINE.match(lines[at])
         if not m or m.group(3).casefold() != old.casefold():
-            raise Refused("a grading sheet is laid out in a way the relink cannot edit")
+            raise Refused(unsafe)
         lines[at] = lines[at][: m.start(3)] + new + lines[at][m.end(3) :]
     for at in sorted((line_of(path) for path in drops), reverse=True):
         indent = len(lines[at]) - len(lines[at].lstrip())
@@ -452,35 +437,29 @@ def _rekey_teams(text: str, old: str, new: str) -> str | None:
     already has is dropped; the new login in a DIFFERENT team for the same assignment
     refuses."""
     reader = read_csv(text, teams.FIELDS, teams.TEAMS_PATH)
-    fields = list(reader.fieldnames or [])
     rows = list(reader)
 
     def cell(row: dict, name: str) -> str:
         return (row.get(name) or "").strip().casefold()
 
+    theirs = [r for r in rows if cell(r, "github_handle") == old.casefold()]
+    if not theirs:
+        return None
     new_teams = {
         cell(r, "assignment"): cell(r, "team")
         for r in rows
         if cell(r, "github_handle") == new.casefold()
     }
-    kept = []
-    changed = False
-    for row in rows:
-        if cell(row, "github_handle") != old.casefold():
-            kept.append(row)
-            continue
-        changed = True
-        assignment = cell(row, "assignment")
-        if assignment in new_teams:
-            if new_teams[assignment] != cell(row, "team"):
-                raise Refused(
-                    "the two accounts are in different teams for one assignment"
-                )
-            continue
+    dropped = set()
+    for row in theirs:
+        team = new_teams.get(cell(row, "assignment"))
+        if team is not None and team != cell(row, "team"):
+            raise Refused("the two accounts are in different teams for one assignment")
+        if team is not None:
+            dropped.add(id(row))  # the new login already has this exact row
         row["github_handle"] = new
-        kept.append(row)
-    if not changed:
-        return None
+    kept = [r for r in rows if id(r) not in dropped]
+    fields = list(reader.fieldnames or [])
     return dump_csv(fields, ([row.get(f) or "" for f in fields] for row in kept))
 
 
@@ -489,17 +468,11 @@ def _rekey_distributed(text: str, old: str, new: str) -> str | None:
     twice. The gradebook rows stay, so the next distribute rewrites the renamed gradebook
     for the new login."""
     records = parse_distributed(text)
-    moved = [
-        k
-        for k in records
-        if k[2] == CHANNEL_EMAIL and k[0].casefold() == old.casefold()
-    ]
-    if not moved:
-        return None
+    fold = old.casefold()
+    moved = [k for k in records if k[2] == CHANNEL_EMAIL and k[0].casefold() == fold]
     for key in moved:
-        value = records.pop(key)
-        records.setdefault((new, key[1], key[2]), value)
-    return dump_distributed(records)
+        records.setdefault((new, key[1], key[2]), records.pop(key))
+    return dump_distributed(records) if moved else None
 
 
 def _config_changes(
@@ -523,18 +496,10 @@ def _config_changes(
 
     files: dict[str, bytes] = {}
     delete: list[str] = []
-    rewrites: list[tuple[str, Callable[[str, str, str], str | None]]] = [
-        (teams.TEAMS_PATH, _rekey_teams)
-    ]
-    rewrites += [
-        (path, _rekey_sheet)
-        for path in sorted(live)
-        if path.startswith(f"{SHEETS_DIR}/")
-        and path.endswith(".yml")
-        and path.count("/") == 1
-    ]
-    rewrites.append((DISTRIBUTED_PATH, _rekey_distributed))
-    for path, rewrite in rewrites:
+    sheets = [p for p in sorted(live) if re.fullmatch(rf"{SHEETS_DIR}/[^/]+\.yml", p)]
+    rewrites = {teams.TEAMS_PATH: _rekey_teams, DISTRIBUTED_PATH: _rekey_distributed}
+    rewrites |= dict.fromkeys(sheets, _rekey_sheet)
+    for path, rewrite in rewrites.items():
         if path not in live:
             continue
         try:
@@ -627,22 +592,27 @@ def _write_id(org: str, p: Pending) -> bool:
     return written is not None
 
 
+DONE, FAILED, RACED = "done", "failed", "raced"
+
+
 def relink_row(
     org: str, p: Pending, existing: dict[str, dict], dry_run: bool = False
-) -> bool:
-    """Move one student to their new account. False when a step's write failed (the id is
-    untouched, so the next run resumes); raises `Refused` for a collision - checked before
-    anything moves, so a refused relink moves nothing."""
+) -> str:
+    """Move one student to their new account: `DONE`, `FAILED` when a step's write failed,
+    or `RACED` when another commit landed in classroom-config between the read and the
+    write. Either way the id is untouched and the next run resumes. Raises `Refused` for a
+    collision - checked before anything moves, so a refused relink moves nothing."""
     team_repos = _team_repos(org)
     _check_repos(org, p, existing, team_repos)
     _config_changes(org, p)
     if dry_run:
         log_person(f"    DRY-RUN relink @{p.old} -> @{p.new} in {org}")
-        return True
-    if not _move_repos(org, p, existing, team_repos):
-        return False
-    if not _move_grants(org, p, existing, team_repos):
-        return False
+        return DONE
+    if not (
+        _move_repos(org, p, existing, team_repos)
+        and _move_grants(org, p, existing, team_repos)
+    ):
+        return FAILED
     files, delete, base = _config_changes(org, p)
     if (files or delete) and not put_files(
         org,
@@ -653,18 +623,18 @@ def relink_row(
         person=True,
         base=base,
     ):
-        return False
+        return RACED if head_commit(org, roster.CONFIG_REPO) != base else FAILED
     closed, failed = close_by_creator(
         f"{org}/{WELCOME_REPO}", p.new, THROTTLE_LABEL, _CLOSE_COMMENT
     )
-    if failed:
-        return False
     log_person(f"  [ok] closed {closed} unresolved Join issue(s) from @{p.new}")
-    if not _remove_old_member(org, p):
-        return False
-    if not _record(org, p, _repos_of(existing, p.new, team_repos)):
-        return False
-    return _write_id(org, p)
+    done = (
+        not failed
+        and _remove_old_member(org, p)
+        and _record(org, p, _repos_of(existing, p.new, team_repos))
+        and _write_id(org, p)
+    )
+    return DONE if done else FAILED
 
 
 def sync(org: str, existing: dict[str, dict] | None, dry_run: bool = False) -> int:
@@ -684,13 +654,14 @@ def sync(org: str, existing: dict[str, dict] | None, dry_run: bool = False) -> i
         log_err(f"{len(found)} relink(s) in {org} wait for a repo listing - next run")
         return 0
     log_step(f"Relinking {len(found)} student(s) who switched GitHub account in {org}")
-    done = errors = 0
+    done = raced = errors = 0
     for p in found:
         log_person(f"  relink @{p.old} (id {p.old_id}) -> @{p.new} (id {p.new_id})")
         try:
-            if relink_row(org, p, existing, dry_run=dry_run):
-                done += 1
-            else:
+            outcome = relink_row(org, p, existing, dry_run=dry_run)
+            done += outcome == DONE
+            raced += outcome == RACED
+            if outcome == FAILED:
                 log_err(
                     f"  students.csv line {p.line}: relink stopped part-way - the next "
                     f"run resumes it"
@@ -709,6 +680,13 @@ def sync(org: str, existing: dict[str, dict] | None, dry_run: bool = False) -> i
                 f"({exc}) - the next run tries again"
             )
             errors += 1
+    if raced:
+        # Transient, so not an error: somebody edited classroom-config mid-relink, the
+        # commit was refused rather than written over them, and the next sync retries.
+        log(
+            f"  ({raced} relink(s) in {org} met a concurrent classroom-config edit - "
+            f"nothing was overwritten; the next sync retries)"
+        )
     if done:
         suffix = " (dry run)" if dry_run else ""
         log_ok(f"relinked {done} student(s) to their new GitHub account{suffix}")

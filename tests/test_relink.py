@@ -522,7 +522,7 @@ def test_the_squat_guard_matches_the_message_onboard_commits():
 # ------------------------------------------------------------ racing writes
 
 
-def test_a_config_edit_that_lands_mid_relink_is_never_overwritten(world):
+def test_a_config_edit_that_lands_mid_relink_is_never_overwritten(world, capsys):
     # The classroom-config commit is built on the commit its files were READ at, so a
     # write that landed in between makes it fail rather than be silently reverted.
     def faculty_edit():
@@ -530,9 +530,10 @@ def test_a_config_edit_that_lands_mid_relink_is_never_overwritten(world):
         world.head += 1
 
     world.race = faculty_edit
-    assert run(world)[0] == 1
+    assert run(world)[0] == 0, "a lost race is transient, not a red run"
     assert world.stored_id() == OLD_ID
     assert OLD in world.config[teams.TEAMS_PATH].decode()
+    assert "met a concurrent classroom-config edit" in capsys.readouterr().out
     assert run(world)[0] == 0
     text = world.config[teams.TEAMS_PATH].decode()
     assert "cy" in text and "newacct" in text and OLD not in text
