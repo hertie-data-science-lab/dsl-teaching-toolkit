@@ -46,6 +46,7 @@ class Outcome:
     run_id: int | None = None
     counts: dict = field(default_factory=dict)
     reasons: list[dict] = field(default_factory=list)
+    details: list[str] = field(default_factory=list)
     people: list[dict] = field(default_factory=list)
     started: str = ""
     finished: str = ""

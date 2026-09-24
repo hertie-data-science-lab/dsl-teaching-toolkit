@@ -20,6 +20,7 @@ from dsl_course import (
     assign,
     console,
     deploy,
+    derive,
     enrol_codes,
     gh_teams,
     grades,
@@ -71,13 +72,14 @@ def test_run_cli_with_a_bare_exit_code_has_no_summary(monkeypatch):
 
 
 def test_combine_adds_counts_and_joins_different_sentences():
-    text, counts, reasons, conclusion = console.combine(
+    text, counts, reasons, details, conclusion = console.combine(
         [
             Summary("Released 2 items from a to materials.", {"items": 2}),
             Summary(
                 "Released 1 item from b to materials.",
                 {"items": 1},
                 [{"code": "X", "text": "y"}],
+                details=["b/x.md"],
             ),
         ]
     )
@@ -86,14 +88,15 @@ def test_combine_adds_counts_and_joins_different_sentences():
     )
     assert counts == {"items": 3}
     assert reasons == [{"code": "X", "text": "y"}]
+    assert details == ["b/x.md"]
     assert conclusion is None
 
 
 def test_combine_keeps_a_conclusion_only_when_every_call_agrees():
     quiet = Summary("Nothing new.", conclusion="nothing_to_do")
     busy = Summary("Released 1 item.")
-    assert console.combine([quiet, quiet])[3] == "nothing_to_do"
-    assert console.combine([quiet, busy])[3] is None
+    assert console.combine([quiet, quiet])[4] == "nothing_to_do"
+    assert console.combine([quiet, busy])[4] is None
 
 
 # ------------------------------------------------------------------ end to end
@@ -115,16 +118,25 @@ def engine(monkeypatch):
     return hooked
 
 
-def _run(monkeypatch, capsys, op: str, preview: bool = False) -> dict:
+def _run(
+    monkeypatch,
+    capsys,
+    op: str,
+    preview: bool = False,
+    args: dict | None = None,
+    cohort: str | None = COHORT,
+) -> dict:
     raw = {
         "schema": "dsl.request/1",
         "op": op,
         "actor": "prof",
         "course_org": COURSE,
-        "cohort_org": COHORT,
-        "args": {},
+        "cohort_org": cohort,
+        "args": args or {},
         "preview": preview,
     }
+    if cohort is None:
+        del raw["cohort_org"]
     monkeypatch.setattr(
         sys, "argv", ["dsl_course.console", "--request", json.dumps(raw)]
     )
@@ -147,6 +159,33 @@ def test_a_summary_becomes_the_outcome(monkeypatch, capsys, engine):
     assert body["conclusion"] == "done"
     assert body["summary"] == "Staff access checked: 2 team memberships changed."
     assert body["counts"] == {"a": 2}
+
+
+def test_a_refused_derive_carries_its_reasons_and_file_list(
+    monkeypatch, capsys, engine
+):
+    monkeypatch.setattr(
+        derive,
+        "main",
+        lambda: Summary(
+            "Would derive 1 file onto main; 1 file could not be derived.",
+            {"files": 1, "refused": 1},
+            [{"code": "NO_SOLUTION_REGION", "text": "solution/solution.py has no ..."}],
+            code=1,
+            details=["solution/starter.py -> starter.py: 1 region(s)"],
+        ),
+    )
+    body = _run(
+        monkeypatch,
+        capsys,
+        "assignment.derive_starter",
+        preview=True,
+        args={"course_source_repo": "assignment-1-f2026"},
+        cohort=None,
+    )
+    assert body["conclusion"] == "failed"
+    assert [r["code"] for r in body["reasons"]] == ["NO_SOLUTION_REGION"]
+    assert body["details"] == ["solution/starter.py -> starter.py: 1 region(s)"]
 
 
 def test_a_summary_can_say_a_run_had_nothing_to_do(monkeypatch, capsys, engine):
