@@ -29,12 +29,14 @@ and the token stays in `sessionStorage`: it is gone when the tab closes.
   the console refreshes the 8-hour token five minutes before it runs out. Shown only when the
   build sets both `VITE_GH_APP_CLIENT_ID` and `VITE_AUTH_RELAY_URL`; the App's callback URL
   must be the console's URL (for Hertie
-  `https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/`), and the App must be
-  installed on each course and cohort organisation.
+  `https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/`), the App must be
+  installed on each course and cohort organisation, and its permissions must include the
+  organisation permission Members: read (discovery reads the person's memberships).
 - **Fine-grained token** (`PatAuth`): the no-server fallback, for an institution that runs no
   relay or when the App sign-in is blocked. It is owned by one organisation and reaches only
   that one; the sign-in probes the organisations it can check and names those the token
-  cannot see. The organisation must not require approval of fine-grained tokens (decision 0011
+  cannot see. It needs the organisation permission Members: read, since both the probe and
+  discovery read `GET /user/memberships/orgs/{org}`. The organisation must not require approval of fine-grained tokens (decision 0011
   has the cohort set-up turn that off). Discovery finds its organisations another way (below).
 - **Classic token** (`PatAuth`): `repo` and `workflow` scopes, checked from the
   `X-OAuth-Scopes` header. Works everywhere the account does; the widest grant of the three.
@@ -50,9 +52,11 @@ The deployed console gets them in `.github/workflows/console-pages.yml`, as an `
 
 The build writes a Content-Security-Policy meta into `index.html` (`src/csp.ts`): scripts from
 the console's own origin, calls to `api.github.com`, `github.com` and the relay's origin,
-images from GitHub's avatars, fonts from Google Fonts, no frames. It allows `'unsafe-eval'`
-because Ajv compiles each schema with `new Function`; precompiled validators would let that
-go. `npm run dev` leaves the policy out.
+images from GitHub's avatars, fonts from Google Fonts, no frames, and no `'unsafe-eval'`: the
+schema validators are compiled at build time (`virtual:validators` in `vite.config.ts`, Ajv
+standalone, from every schema under `schemas/` and each op's `args_schema`), so a schema the
+console validates against must live there. The relay URL must be https. `npm run dev` leaves
+the policy out.
 
 ## Roles and modes
 
@@ -87,12 +91,16 @@ who teaches somewhere, and in student mode otherwise.
 
   A candidate not already known as a membership is kept only if
   `GET /user/memberships/orgs/{org}` says active. A fine-grained token that reaches none says
-  so on Home: add the organisations under Resource owner when creating it.
+  so on Home: add the organisations under Resource owner and grant Members: read when creating
+  it. When every listing fails (GitHub not answering), Home says the courses could not be
+  listed rather than showing an empty list.
 - Courses: organisations whose `.github` repo carries the `dsl-course-hub` topic; cohorts from
   `.github/cohort-courses-pages.yml`; write access = push on `.github`.
 - Semesters: organisations whose `.github` carries `dsl-cohort` or `dsl-semester`; the course
   from that repo's `dsl-course.yml` (`course:`), its name from the course's public `.github`;
-  archived when that `.github` repo is archived.
+  archived when that `.github` repo is archived. A semester known only from a course's
+  registry has its `.github` read when its student screens open. Org names compare
+  case-insensitively.
 - Status: `classroom-config/.dsl/status.json` (cohort) and `.github/.dsl/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
   `inputs` with one tree read. An absent file shows "Status not computed yet".
