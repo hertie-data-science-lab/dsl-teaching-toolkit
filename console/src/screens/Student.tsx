@@ -14,7 +14,7 @@ import { semesterName, type Semester } from '../model/discovery';
 import { dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
 import { gradebookUrl, isMarked, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { lastVisit } from '../model/prefs';
-import { DEFAULT_TZ, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
+import { DEFAULT_TZ, IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
 import { weekItems, type WeekItem } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import { CheckLine, Crumbs, Loading, Md, ghUrl } from '../ui/bits';
@@ -547,34 +547,12 @@ const initials = (name: string) => {
   return (n.length > 1 ? n[0][0] + n[n.length - 1][0] : (n[0] ?? name).slice(0, 2)).toUpperCase();
 };
 
-/** Hosts the console's image policy (`img-src`) loads from directly. */
-const IMG_HOSTS = /^https:\/\/(avatars\.githubusercontent\.com|github\.com)\//;
-
-/** A picture hosted on the semester's own site, as `[repo, path]` in its site repo; null for anything else. */
-export function sitePicture(url: string, org: string): [string, string] | null {
-  const site = `${org.toLowerCase()}.github.io`;
-  const m = /^https:\/\/([^/]+)\/(.+)$/.exec(url);
-  return m && m[1].toLowerCase() === site ? [site, decodeURIComponent(m[2])] : null;
-}
-
-const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
-
-function bytesToBase64(b: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000));
-  return btoa(bin);
-}
-
-/** A card's picture: a GitHub avatar straight, one on the semester's site read through the API as a data: URL (the policy allows data:), else initials. */
+/** A card's picture: a GitHub avatar straight, else whatever `StudentData` can show (a site-hosted one as data:), else initials. */
 function CardPicture({ card, org }: { card: InstructorCard; org: string }) {
   const env = useEnv();
-  const at = card.picture && !IMG_HOSTS.test(card.picture) ? sitePicture(card.picture, org) : null;
-  const ext = at?.[1].split('.').pop()?.toLowerCase() ?? '';
-  const load = useLoad(env && at && MIME[ext] ? async () => {
-    const b = await env.client.getSmallBytes(org, at[0], at[1]);
-    return b ? `data:${MIME[ext]};base64,${bytesToBase64(b)}` : '';
-  } : null, [card.picture]);
-  const src = IMG_HOSTS.test(card.picture) ? card.picture : load.kind === 'ready' ? load.value : '';
+  const direct = IMG_HOSTS.test(card.picture);
+  const load = useLoad(env && card.picture && !direct ? () => studentData(env.client).picture(org, card.picture) : null, [card.picture]);
+  const src = direct ? card.picture : load.kind === 'ready' ? load.value : '';
   return <span class="p-avatar" aria-hidden="true">{src ? <img src={src} alt="" /> : initials(card.name)}</span>;
 }
 

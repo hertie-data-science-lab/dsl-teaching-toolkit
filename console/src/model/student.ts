@@ -141,6 +141,31 @@ export interface SemesterFacts {
 export interface StudentData {
   /** The semester's facts, or null when the source has nothing for it. */
   facts(org: string): Promise<SemesterFacts | null>;
+  /** An instructor card's picture as a URL the image policy lets through (a `data:` URL for one the source hosts), or '' for initials. */
+  picture(org: string, url: string): Promise<string>;
+}
+
+/** Hosts the console's image policy (`img-src`) loads from directly. */
+export const IMG_HOSTS = /^https:\/\/(avatars\.githubusercontent\.com|github\.com)\//;
+
+/** A picture hosted on the semester's own site, as `[repo, path]` in its site repo; null for anything else (or a path that does not decode). */
+export function sitePicture(url: string, org: string): [string, string] | null {
+  const site = `${org.toLowerCase()}.github.io`;
+  const m = /^https:\/\/([^/]+)\/(.+)$/.exec(url);
+  if (!m || m[1].toLowerCase() !== site) return null;
+  try {
+    return [site, decodeURIComponent(m[2])];
+  } catch {
+    return null;
+  }
+}
+
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+
+function bytesToBase64(b: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 export const DEFAULT_TZ = 'Europe/Berlin';
@@ -347,6 +372,16 @@ export class SiteSource implements StudentData {
     private readonly client: GitHubClient,
     private readonly clock: () => number = Date.now,
   ) {}
+
+  /** A picture on the semester's site, read from its site repo through the API (the page may not load github.io) as a data: URL; '' otherwise. */
+  async picture(org: string, url: string): Promise<string> {
+    if (IMG_HOSTS.test(url)) return url;
+    const at = sitePicture(url, org);
+    const mime = MIME[at?.[1].split('.').pop()?.toLowerCase() ?? ''];
+    if (!at || !mime) return '';
+    const b = await this.client.getSmallBytes(org, at[0], at[1]);
+    return b ? `data:${mime};base64,${bytesToBase64(b)}` : '';
+  }
 
   /** Read once per semester and kept for FRESH_MS, so moving between screens costs nothing. */
   facts(org: string): Promise<SemesterFacts | null> {

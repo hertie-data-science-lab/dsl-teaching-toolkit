@@ -10,9 +10,9 @@ import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
 import { parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
 import { lastVisit, localPaths, resetVisits, saveLocalPaths, type PrefStore } from '../src/model/prefs';
-import { SiteSource, homeText, pictureOf, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
+import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
-import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList, sitePicture } from '../src/screens/Student';
+import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList } from '../src/screens/Student';
 import { AskedList, JoinScreen, TeamList, joinTeamUrl } from '../src/screens/StudentJoin';
 import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
 import { SetupView, cloneCommand, forkOf, joinPath, vscodeFolder } from '../src/screens/StudentSetup';
@@ -350,10 +350,15 @@ describe('11. the instructors', () => {
     expect(sitePicture('https://example.org/x.jpg', ORG)).toBeNull();
   });
 
-  it('reads a site picture’s bytes through the API, which the image policy then shows as data:', async () => {
+  it('reads a site picture through StudentData, from the site repo only, as data:', async () => {
     const fake = new FakeGitHub().on('GET', `/repos/${ORG}/${SITE}/contents/_images/pp/henrycgbaker.jpg`, { type: 'file', content: btoa('JPEG') });
-    const b = await client(fake).getSmallBytes(ORG, SITE, '_images/pp/henrycgbaker.jpg');
-    expect(new TextDecoder().decode(b!)).toBe('JPEG');
+    const src = new SiteSource(client(fake));
+    expect(await src.picture(ORG, `https://${ORG}.github.io/_images/pp/henrycgbaker.jpg`)).toBe(`data:image/jpeg;base64,${btoa('JPEG')}`);
+    expect(await src.picture(ORG, 'https://github.com/a.png')).toBe('https://github.com/a.png');
+    expect(await src.picture(ORG, 'https://example.org/x.jpg')).toBe('');
+    expect(await src.picture(ORG, `https://${ORG}.github.io/x.svg`)).toBe('');
+    expect(fake.seen.map((s) => s.url)).toEqual([`https://api.github.com/repos/${ORG}/${SITE}/contents/_images/pp/henrycgbaker.jpg`]);
+    expect(sitePicture(`https://${ORG}.github.io/%E0%A4%A.jpg`, ORG)).toBeNull();
   });
 });
 
