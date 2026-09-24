@@ -3,7 +3,7 @@
 
 import { useState } from 'preact/hooks';
 import type { ConsoleAuth } from '../auth/console';
-import { NEW_TOKEN_URL } from '../auth/pat';
+import { NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '../auth/pat';
 import type { GhUser } from '../github/client';
 import { cohortName, type Course, type CohortRef } from '../model/discovery';
 import { fmtWhen } from '../model/format';
@@ -143,8 +143,7 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
         <label for="pat">GitHub token</label>
         <input type="password" id="pat" autocomplete="off" spellcheck={false} value={token} onInput={(e) => setToken((e.target as HTMLInputElement).value)} aria-invalid={error ? 'true' : undefined} />
         <p class="hint">
-          A classic personal access token with the <code>repo</code> and <code>workflow</code> scopes.{' '}
-          <a href={NEW_TOKEN_URL} target="_blank" rel="noopener">Create one on GitHub <Ext /></a>
+          A fine-grained token owned by your course’s organisation, with Contents, Actions and Issues read and write and Members read (<a href={NEW_FINE_GRAINED_URL} target="_blank" rel="noopener">create one <Ext /></a>), or a classic token with the <code>repo</code> and <code>workflow</code> scopes (<a href={NEW_TOKEN_URL} target="_blank" rel="noopener">create one <Ext /></a>).
         </p>
       </div>
       <div class="actions"><button class={auth.app ? 'btn outline' : 'btn'} type="submit" disabled={busy !== null}>{busy === 'token' ? 'Checking…' : 'Sign in with the token'}</button></div>
@@ -158,6 +157,7 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
       {who ? (
         <section class="panel section">
           <div class="who-card"><img src={who.avatar_url} alt="" /><div><b>{who.name || who.login}</b><div class="footnote">Signed in as {who.login}</div></div></div>
+          <Reach reach={auth.pat.reach()} />
           <div class="actions"><button class="btn" type="button" onClick={() => onSignedIn(who)}>Continue</button></div>
         </section>
       ) : auth.app ? (
@@ -176,6 +176,20 @@ export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSigned
           {tokenForm}
         </section>
       )}
+    </div>
+  );
+}
+
+/** What a fine-grained token cannot see; nothing for a classic token or the App. */
+function Reach({ reach }: { reach: { seen: string[]; unseen: string[] } | null }) {
+  if (!reach) return null;
+  return (
+    <div class="check-line warn">
+      <span>
+        {reach.unseen.length ? <>This token cannot see {reach.unseen.join(', ')}. </> : null}
+        {reach.seen.length ? <>It can see {reach.seen.join(', ')}. </> : null}
+        A fine-grained token reaches only the one organisation that owns it, and GitHub lists only your public memberships to it, so an organisation missing here may still be out of its reach.
+      </span>
     </div>
   );
 }

@@ -93,6 +93,7 @@ describe('S0 sign in', () => {
     expect(t).toContain('GitHub token');
     expect(t).not.toContain('Sign in with GitHub');
     expect(t).toMatch(/repo .*workflow/);
+    expect(t).toContain('fine-grained token');
     expect(t).toContain('without a sign-in relay');
     expect(html(<SignInScreen auth={auth} onSignedIn={() => {}} />)).toContain('scopes=repo,workflow');
   });
