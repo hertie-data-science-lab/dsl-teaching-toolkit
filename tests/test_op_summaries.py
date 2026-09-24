@@ -437,6 +437,7 @@ def _deploy_main(monkeypatch, *extra) -> Summary:
             SEMESTER,
             "--course-source-path",
             "lectures/05,labs/05",
+            "--no-preview",
             *extra,
         ],
     )
@@ -444,7 +445,7 @@ def _deploy_main(monkeypatch, *extra) -> Summary:
 
 
 def test_a_release_preview_counts_what_would_go(monkeypatch):
-    out = _deploy_main(monkeypatch, "--dry-run")
+    out = _deploy_main(monkeypatch, "--preview")
     assert out == 0
     assert out.text == (
         "Preview: 2 items from course-materials-f2026 would be released to materials."
@@ -553,8 +554,8 @@ def test_open_window_spells_the_open_team_formation_flags():
         "--assignment",
         "assignment-3-project",
     ]
-    assert command(op, _open_window_request(True)) == [*base, "--dry-run"]
-    assert command(op, _open_window_request(False)) == [*base, "--no-dry-run"]
+    assert command(op, _open_window_request(True)) == [*base, "--preview"]
+    assert command(op, _open_window_request(False)) == [*base, "--no-preview"]
 
 
 def test_open_window_needs_the_assignment():

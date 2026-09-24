@@ -39,7 +39,7 @@ Nothing here ever writes to `solution`. `main` is the only destination, through 
 
 Usage:
     python3 -m dsl_course.derive --course-org hertie-dsl-demo-course-e1234 \\
-        --course-source-repo assignment-1-f2026 [--no-dry-run]
+        --course-source-repo assignment-1-f2026 [--no-preview]
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from .course import SOLUTION_BRANCH, SOLUTION_DIR
 from .gh_contents import get_file_content, put_files, repo_tree
-from .log import Summary, log, log_err, log_ok, log_step, plural
+from .log import Summary, add_preview_flag, log, log_err, log_ok, log_step, plural
 
 # ------------------------------------------------------------------ the fence vocabulary
 
@@ -470,7 +470,7 @@ def derive_student_version(
     org's own template - so everything here is an ordinary log line."""
     log_step(
         f"Deriving the student version of {course_org}/{template} from "
-        f"`{SOLUTION_BRANCH}`{' (dry run)' if dry_run else ''}"
+        f"`{SOLUTION_BRANCH}`{' (preview)' if dry_run else ''}"
     )
     try:
         tree = repo_tree(course_org, template, SOLUTION_BRANCH, "blob")
@@ -554,7 +554,7 @@ def derive_student_version(
     if dry_run:
         # The file LIST and the counts, never a line of the content: this log is the course
         # org's public `.github` Actions tab, and the content is the model answer.
-        log_ok(f"dry run: would write {summary_line} onto main")
+        log_ok(f"preview: would write {summary_line} onto main")
         return summary(f"Would derive {derived} onto main{refused}.")
     if files and not put_files(course_org, template, files, COMMIT_MESSAGE):
         log_err(
@@ -583,20 +583,17 @@ def main() -> int:
         required=True,
         help="Assignment template repo (e.g. assignment-1-f2026)",
     )
-    # Default ON, like every other write button: the rendered workflow passes --dry-run /
-    # --no-dry-run explicitly, so a bare local invocation cannot overwrite a starter.
-    parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="List the files and the counts; write nothing to main (default).",
+    # Default ON, like every other write button: the rendered workflow passes --preview /
+    # --no-preview explicitly, so a bare local invocation cannot overwrite a starter.
+    add_preview_flag(
+        parser, "List the files and the counts; write nothing to main (default)."
     )
     args = parser.parse_args()
     # A read helper that could not reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
         return derive_student_version(
-            args.course_org, args.template, dry_run=args.dry_run
+            args.course_org, args.template, dry_run=args.preview
         )
     except RuntimeError as exc:
         log_err(str(exc))

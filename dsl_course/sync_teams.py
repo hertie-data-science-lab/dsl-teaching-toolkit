@@ -34,7 +34,7 @@ from .gh_teams import (
     list_teams,
     reconcile_team_members,
 )
-from .log import log_err, log_ok, log_person, log_step
+from .log import add_preview_flag, log_err, log_ok, log_person, log_step
 
 # The naming rules live with the file's parser, which is the only thing that can refuse a
 # row for breaking them. Imported for this module's own reconcile below, not re-exported:
@@ -183,7 +183,7 @@ def _empty_the_emptied(
     errors = 0
     for slug in emptied_teams(existing, wanted, keys):
         if dry_run:
-            log_person(f"    DRY-RUN team {slug}: now empty - would remove its members")
+            log_person(f"    PREVIEW team {slug}: now empty - would remove its members")
             continue
         errors += reconcile_team_members(semester_org, slug, set(), prune=True)
     return errors
@@ -236,7 +236,7 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
         members = set(accepted)
         if dry_run:
             log_person(
-                f"    DRY-RUN team {slug}: {', '.join('@' + m for m in sorted(members))}"
+                f"    PREVIEW team {slug}: {', '.join('@' + m for m in sorted(members))}"
             )
         elif not ensure_team(semester_org, slug, members, prune):
             errors += 1
@@ -253,10 +253,10 @@ def main() -> int:
         action="store_true",
         help="Remove team members no longer in teams.csv.",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report the team changes; make none (default).")
     args = parser.parse_args()
 
-    errors = sync(args.semester_org, prune=args.prune, dry_run=args.dry_run)
+    errors = sync(args.semester_org, prune=args.prune, dry_run=args.preview)
     if errors:
         log_err(f"{errors} errors during sync")
         return 1

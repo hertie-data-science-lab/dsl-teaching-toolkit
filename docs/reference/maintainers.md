@@ -562,7 +562,7 @@ scheduler dropping the contended ones. A REST POST is served like any other API 
 offsets deliberately interleave GitHub's :07/:22/:37/:52, so a lost fire costs at most 8 minutes.
 
 `cadence.py` reads the workflow's own run history on every real all-semesters run (never on a
-dry-run) and files two self-closing issues. A due moment that shipped more than **60 min** late
+preview) and files two self-closing issues. A due moment that shipped more than **60 min** late
 opens *Scheduled release: late delivery* in that semester's private `classroom-config`, which
 closes once the last **8** qualifying gaps are all 20 min or less. A dispatch-driven run more
 than **2h** old means ds01 is down and opens *Scheduled release: driver health* in the course
@@ -577,8 +577,8 @@ scroll out of the window re-disarms unless its driver-health issue is already op
 
 **Break-glass.** If both drivers are down, or Actions itself is out, drive a course org from a
 laptop with a `repo`-scoped token: `GH_TOKEN=<token> python3 -m dsl_course.scheduler
---course-org <org> --all-semesters`. Add `--dry-run` first: it prints what would fire, writes
-nothing, and then prints one `Decision: <ref> not released: <CODE> <sentence>` line per due
+--course-org <org> --all-semesters`. Bare, it PREVIEWS - like every CLI, it acts only with
+`--no-preview` - and a preview prints what would fire, writes nothing, and then prints one `Decision: <ref> not released: <CODE> <sentence>` line per due
 item it would hold back (`SOURCE_MISSING`, `SOURCE_UNWRITTEN`, `WITHHELD`, `SEMESTER_ARCHIVED`,
 `TEAMS_INCOMPLETE`, `ALREADY_DONE`) - the reasons a Console preview shows. It is the code path
 the workflow runs, and the one-shot markers are what make repeating it safe.
@@ -590,7 +590,7 @@ single job. The scheduler, refresh and Send enrolment codes are **ungated**: nei
 a `repository_dispatch` has an actor to check, and each only re-calls idempotent work. Send
 enrolment codes has no `workflow_dispatch` at all: a push to a semester's `students.csv` is its
 only trigger. The one other way codes go out is the Console's *send new codes*
-(`enrol_codes --resend-unjoined`, with a `--dry-run`), which replaces every unjoined row's code.
+(`enrol_codes --resend-unjoined`, which previews unless given `--no-preview`), which replaces every unjoined row's code.
 
 `seed refresh` is serialised against itself (`concurrency: seed-refresh`) and **deliberately not
 shared** with the click workflows that end in a refresh. Actions concurrency has no queue - a group
@@ -705,6 +705,10 @@ an already-open issue carries.
 | `status.json` `cohort`, `cohorts`, `cohort.term`, `cohort.term_label`, assignment `late_until` | `semester`, `semesters`, `semester.key`, `semester.label`, `grading_cutoff_datetime` | `dsl.status/1` (rewritten by the engine; the console follows) |
 | config repo description "...configure for this cohort ... term schedule..." | "...configure for this semester ... schedule..." | converged by the existing `SUPERSEDED_SEMESTER_DESCRIPTIONS` chain |
 | copy "cohort", "term", "tag"; "staff", "teaching team"; "grading cutoff", "the cutoff" | "semester"; "instructors"; "late cutoff" | logs, mails, forms, docs |
+| workflow inputs `dry_run` (mixed defaults), `write` (Generate syllabus) | `preview`, default `true` on every button; only an explicit `false` acts | rendered workflows |
+| workflow input `silent` (Distribute grades) | `notify`, default `true` | rendered workflow |
+| CLI `--dry-run` / `--no-dry-run`, `syllabus --write` | `--preview` / `--no-preview`, preview ON by default on every CLI | every CLI; rendered workflows and console ops spell one explicitly |
+| log copy `DRY-RUN`, `[dry-run]`, "dry run" | `PREVIEW`, `[preview]`, "preview" | logs, the Distribute preview issue |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

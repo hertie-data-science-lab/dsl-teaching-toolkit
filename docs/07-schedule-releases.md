@@ -323,7 +323,7 @@ Three other ways to check, none of them required:
 
 1. **Read the counts.** **Check semester setup** reports the release plan and term dates, and flags `N entry/ies DROPPED`.
 2. **Validate by hand.** `python3 -m dsl_course.schedule --semester-org hertie-dsl-demo-f2026 --validate`, or `--file schedule.yml --validate` against a local copy. Without `--validate` it prints the schedule *as parsed*, as JSON.
-3. **Dry-run it.** Run **Scheduled release** by hand; `dry_run` defaults to **`true`**, so it lists what *would* open and releases nothing.
+3. **Preview it.** Run **Scheduled release** by hand; `preview` defaults to **`true`**, so it lists what *would* open and releases nothing.
 
 ## Sources that do not exist yet
 

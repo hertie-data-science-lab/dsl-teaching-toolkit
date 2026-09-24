@@ -333,7 +333,7 @@ RELEASE_ASSIGNMENT_INPUTS = [
     "course_source_repo",
     "semester_org",
     "solution_datetime",
-    "dry_run",
+    "preview",
 ]
 
 
@@ -351,7 +351,7 @@ def test_the_hand_out_button_asks_what_where_and_two_switches():
     assert inp["course_source_repo"]["default"] == ASSIGNMENTS_2[0]
     assert inp["solution_datetime"]["default"] == ""
     assert course.SOLUTION_WARNING in inp["solution_datetime"]["description"]
-    assert inp["dry_run"]["default"] is False
+    assert inp["preview"]["default"] is True
 
 
 def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
@@ -373,8 +373,8 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
         ["Semester-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org", "course_source_repo", "slug", "dry_run"}
-    assert inp["dry_run"]["default"] is False
+    assert set(inp) == {"semester_org", "course_source_repo", "slug", "preview"}
+    assert inp["preview"]["default"] is True
     assert "dsl_course.collect" in rendered and "--refresh-only" in rendered
     assert "--deadline" not in rendered
 
@@ -408,14 +408,14 @@ def test_the_hand_out_button_never_picks_between_two_schedule_entries():
 def test_archive_semester_previews_by_default_and_never_deletes():
     # The end-of-term button. It is the one WRITE in the set that a second click cannot
     # take back, so it fails closed like Distribute grades: only an explicit `false`
-    # reaches the CLI as --no-dry-run, and `force` is the separate, deliberate override of
+    # reaches the CLI as --no-preview, and `force` is the separate, deliberate override of
     # the term-not-over refusal.
     rendered = workflows_render.render_archive_semester(["Semester-f2026"])
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org", "dry_run", "force"}
-    assert inp["dry_run"]["default"] is True
+    assert set(inp) == {"semester_org", "preview", "force"}
+    assert inp["preview"]["default"] is True
     assert inp["force"]["default"] is False
-    assert workflows_render._DRY_RUN_GATE in rendered
+    assert workflows_render._PREVIEW_GATE in rendered
     assert "python3 -m dsl_course.teardown" in rendered
     # Faculty read the header before they click a button whose name sounds final: it has
     # to say there, in the file, that this freezes and never destroys.
@@ -425,12 +425,12 @@ def test_archive_semester_previews_by_default_and_never_deletes():
 def test_propagate_semester_previews_by_default():
     # It force-pushes a branch and opens pull requests in the course org, so it fails
     # closed like the other cross-org buttons: only an explicit `false` reaches the CLI
-    # as --no-dry-run. The course org is the repo this runs in.
+    # as --no-preview. The course org is the repo this runs in.
     rendered = workflows_render.render_propagate_semester(["Semester-f2026"])
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org", "dry_run"}
-    assert inp["dry_run"]["default"] is True
-    assert workflows_render._DRY_RUN_GATE in rendered
+    assert set(inp) == {"semester_org", "preview"}
+    assert inp["preview"]["default"] is True
+    assert workflows_render._PREVIEW_GATE in rendered
     assert "python3 -m dsl_course.propagate" in rendered
     assert "COURSE_ORG: ${{ github.repository_owner }}" in rendered
     # Faculty read the header before they press it: it has to say there that a deletion
@@ -445,14 +445,14 @@ def test_open_team_formation_asks_for_a_semester_a_free_text_key_and_previews():
     # rendered once for the whole course org would offer one semester's keys to another.
     rendered = workflows_render.render_open_team_formation(["Semester-f2026"])
     inp = workflow_inputs(rendered)
-    assert list(inp) == ["semester_org", "assignment", "dry_run"]
+    assert list(inp) == ["semester_org", "assignment", "preview"]
     assert "options" not in inp["assignment"]
     assert inp["assignment"]["required"] is False
     assert inp["assignment"]["default"] == ""
     # It mails a whole semester, so it fails closed like Distribute grades: only an explicit
-    # `false` reaches the CLI as --no-dry-run.
-    assert inp["dry_run"]["default"] is True
-    assert workflows_render._DRY_RUN_GATE in rendered
+    # `false` reaches the CLI as --no-preview.
+    assert inp["preview"]["default"] is True
+    assert workflows_render._PREVIEW_GATE in rendered
     assert 'args+=(--assignment "$ASSIGNMENT")' in rendered
     assert "python3 -m dsl_course.team_formation" in rendered
 
@@ -923,7 +923,8 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
     assert step["env"]["DISPATCH_SEMESTER"] == (
         "${{ github.event.client_payload.semester_org }}"
     )
-    assert "dry-run" not in rendered and "dry_run" not in rendered
+    # No box to preview with: the push is the send, so it says so explicitly.
+    assert "inputs.preview" not in rendered and "--no-preview" in step["run"]
     # The trust boundary: a client_payload is written by whoever holds a SEMESTER's bot
     # token, so the semester it names is checked against this course org's registry.
     assert '--dispatched-by "$COURSE"' in step["run"]
@@ -1948,10 +1949,10 @@ def test_the_scheduler_serialises_each_job_and_nothing_more():
     assert "concurrency" not in doc
     jobs = doc["jobs"]
     # Releases are fire-once, so a tick arriving mid-pass still queues behind one - but a
-    # manual DRY-RUN writes nothing, and joining that queue is how an operator's preview
+    # manual PREVIEW writes nothing, and joining that queue is how an operator's preview
     # gets silently dropped (a group holds one pending run; a third arrival cancels it).
     assert jobs["release"]["concurrency"] == {
-        "group": "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}",
+        "group": "${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && github.run_id || 'scheduled-release' }}",
         "cancel-in-progress": False,
     }
     # Grading queues PER SEMESTER: the fire-once marker is a semester-side file, and a pass
@@ -1959,7 +1960,8 @@ def test_the_scheduler_serialises_each_job_and_nothing_more():
     # for the same reason the release job's is.
     assert jobs["autograde"]["concurrency"] == {
         "group": (
-            "${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, "
+            "${{ github.event_name == 'workflow_dispatch' && inputs.preview != false "
+            "&& format('{0}-{1}', github.run_id, "
             "matrix.semester) || format('scheduled-autograde-{0}', matrix.semester) }}"
         ),
         "cancel-in-progress": False,
@@ -2165,7 +2167,7 @@ def test_a_config_push_run_releases_into_its_own_semester_only():
         + " {0}', github.event.client_payload.semester_org) || 'Scheduled release' }}"
     )  # fmt: skip
     assert release["concurrency"]["group"] == (
-        "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}"
+        "${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && github.run_id || 'scheduled-release' }}"
     )
 
 
@@ -2312,7 +2314,7 @@ MAIL_BUTTONS = ("distribute_grades", "open_team_formation")
 def test_every_mail_button_defaults_to_a_dry_run(name):
     # The entire safety rail on a button that emails a whole semester, and until now it was
     # asserted nowhere: a renderer edit flipping it would have been green.
-    dry_run = workflow_inputs(ALL_RENDERED[name])["dry_run"]
+    dry_run = workflow_inputs(ALL_RENDERED[name])["preview"]
     assert dry_run["type"] == "boolean"
     assert dry_run["default"] is True
 
@@ -2322,23 +2324,23 @@ def test_every_mail_button_defaults_to_a_dry_run(name):
     "value", ["", "true", "True", "TRUE", "yes", "1", " false", "false"]
 )
 def test_the_dry_run_gate_is_fail_closed_under_bash(name, value, tmp_path):
-    # Executed, not string-matched: `[ "$DRY_RUN" = "true" ] && args+=(--dry-run)` sent for
+    # Executed, not string-matched: `[ "$DRY_RUN" = "true" ] && args+=(--preview)` sent for
     # real on ANY value that was not the exact lowercase string - "True", "1", a blank from
     # a renamed input. Only an explicit `false` may send.
     gate = next(
         line.strip()
         for line in ALL_RENDERED[name].splitlines()
-        if "--no-dry-run" in line
+        if "--no-preview" in line
     )
     script = f'args=()\n{gate}\nprintf "%s\\n" "${{args[@]}}"'
     out = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", script],
-        env={"DRY_RUN": value, "PATH": os.environ["PATH"]},
+        env={"PREVIEW": value, "PATH": os.environ["PATH"]},
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    expected = "--no-dry-run" if value == "false" else "--dry-run"
+    expected = "--no-preview" if value == "false" else "--preview"
     assert out.strip() == expected
 
 

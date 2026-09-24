@@ -156,14 +156,16 @@ def test_a_workflow_op_dispatches_inputs_its_workflow_declares():
     assert op_inputs(op, command(op, req)) == {
         "semester_org": SEMESTER,
         "course_source_repo": "assignment-1-f2026",
-        "dry_run": "true",
+        "preview": "true",
     }
+    real = Request(op.name, "prof", COURSE, SEMESTER, req.args, False)
+    assert op_inputs(op, command(op, real))["preview"] == "false"
 
 
 def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
     op = REGISTRY["grades.return"]
     real = command(op, Request(op.name, "prof", COURSE, SEMESTER, {}, False))
-    assert real[-1] == "--no-dry-run" and "--dry-run" not in real
+    assert real[-1] == "--no-preview" and "--preview" not in real
 
 
 # ------------------------------------------------------------------ request
@@ -194,7 +196,7 @@ def test_the_contract_example_parses():
         (_request(op="site.update", args={}), "NO_PREVIEW"),
         (_request(op="release.later"), "UNKNOWN_OP"),
         (_request(args={"entry": "s5", "surprise": 1}), "BAD_ARGS"),
-        (_request(args={"entry": "--no-dry-run"}), "BAD_ARGS"),
+        (_request(args={"entry": "--no-preview"}), "BAD_ARGS"),
         (_request(semester_org=None), "BAD_REQUEST"),
     ],
 )
@@ -420,7 +422,7 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
         "--semester-org",
         SEMESTER,
         "--no-notify",
-        "--no-dry-run",
+        "--no-preview",
     ]
     assert body["conclusion"] == "done"
     assert body["summary"] == "Marks returned: 3 marks repos updated, 3 emails sent."
@@ -511,7 +513,7 @@ def test_a_named_entry_is_released_from_its_schedule_row(monkeypatch, capsys, en
     argv = seen[0]
     assert argv[argv.index("--course-source-path") + 1] == "lectures/05,labs/05"
     assert argv[argv.index("--semester-dest-path") + 1] == "lectures/05,labs/5"
-    assert argv[-1] == "--dry-run"
+    assert argv[-1] == "--preview"
 
 
 def test_an_unknown_entry_is_a_reason(monkeypatch, capsys, engine):

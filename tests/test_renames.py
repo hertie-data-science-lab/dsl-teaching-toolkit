@@ -8,9 +8,12 @@ from __future__ import annotations
 import json
 import sys
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 import yaml
+from conftest import workflow_inputs
+from test_renderers import ALL_RENDERED
 
 from dsl_course import (
     assign,
@@ -403,3 +406,81 @@ def test_the_old_format_key_is_refused_and_not_read():
 def test_a_course_default_under_the_old_format_key_is_not_read():
     assert grades.parse_assignment_defaults({"format": "py"}) == {}
     assert grades.parse_assignment_defaults({"formats": "py"}) == {"formats": "py"}
+
+
+# ------------------------------------------------ preview (dry_run, write) and notify
+
+
+def _preview_clis() -> set[str]:
+    root = Path(__file__).resolve().parents[1] / "dsl_course"
+    return {p.stem for p in root.glob("*.py") if "add_preview_flag(" in p.read_text()}
+
+
+def test_every_cli_previews_unless_told_otherwise(monkeypatch):
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        assign, "provision_all", lambda *a, dry_run, **k: seen.append(dry_run) or (0, 0)
+    )
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    base = [
+        "assign",
+        "--master-org",
+        "C",
+        "--course-source-repo",
+        "a1",
+        "--semester-org",
+        "S",
+    ]
+    for extra, want in (((), True), (("--no-preview",), False)):
+        monkeypatch.setattr(sys, "argv", [*base, *extra])
+        assign.main()
+        assert seen.pop() is want
+    monkeypatch.setattr(sys, "argv", [*base, "--dry-run"])
+    with pytest.raises(SystemExit):
+        assign.main()
+
+
+def test_every_rendered_run_of_a_previewing_cli_says_which_it_is():
+    # The CLI default is preview, so a rendered step that spelt neither flag would preview
+    # for ever on a green run - a cron that released nothing, a roster push that sent no
+    # codes. Every step that runs one of those CLIs spells `--preview` or `--no-preview`.
+    clis = _preview_clis()
+    assert {"scheduler", "assign", "enrol_codes", "sync_membership"} <= clis
+    for name, rendered in ALL_RENDERED.items():
+        for job in (yaml.safe_load(rendered).get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                run = str(step.get("run") or "")
+                for cli in clis:
+                    if (
+                        f"-m dsl_course.{cli} " in run
+                        or f"-m dsl_course.{cli}\n" in run
+                    ):
+                        assert "--no-preview" in run or "--preview" in run, (name, cli)
+
+
+def test_every_button_previews_by_default_and_no_old_box_is_left():
+    boxed = 0
+    for name, rendered in ALL_RENDERED.items():
+        doc = yaml.safe_load(rendered)
+        if "workflow_dispatch" not in (doc.get("on", doc.get(True)) or {}):
+            continue
+        inputs = workflow_inputs(rendered)
+        assert not {"dry_run", "write", "silent"} & set(inputs), name
+        if "preview" in inputs:
+            boxed += 1
+            assert inputs["preview"]["default"] is True, name
+    assert boxed >= 10
+
+
+def test_every_op_with_a_preview_acts_only_when_told_no_preview():
+    for op in REGISTRY.values():
+        if op.preview_flag:
+            assert op.preview_flag == "--preview", op.name
+            assert op.real_flag in ("--no-preview", None), op.name
+    assert REGISTRY["cohort.preview_automation"].real_flag is None
+
+
+def test_distribute_says_notify_and_only_false_holds_the_mail():
+    rendered = ALL_RENDERED["distribute_grades"]
+    assert workflow_inputs(rendered)["notify"]["default"] is True
+    assert '[ "$NOTIFY" = "false" ] && args+=(--no-notify)' in rendered

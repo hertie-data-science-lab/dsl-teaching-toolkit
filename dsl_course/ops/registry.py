@@ -5,9 +5,9 @@ seeded workflow for the same job does (`workflows_render`), so the console and t
 tab cannot drift into two meanings for one button. `args_schema` is built from the course
 vocabulary in `course`, so a new enum value reaches the console's form with no second edit.
 
-The preview gate mirrors `workflows_render._DRY_RUN_GATE`: a CLI whose dry run DEFAULTS ON
-is handed `--no-dry-run` explicitly for a real run (`real_flag`), so an argv that lost a
-flag previews rather than acts. An op whose CLI has no dry run has `preview_flag=None`, and
+The preview gate mirrors `workflows_render._PREVIEW_GATE`: every CLI previews by default
+(`log.add_preview_flag`) and is handed `--no-preview` explicitly for a real run
+(`real_flag`), so an argv that lost a flag previews rather than acts. An op whose CLI has no dry run has `preview_flag=None`, and
 the request parser refuses `preview: true` for it (`NO_PREVIEW`).
 
 `via` says where the CLI runs. `inline` runs it inside the Console job. `workflow:<file>`
@@ -128,12 +128,16 @@ def command(op: Operation, request: Request) -> list[str]:
 def workflow_inputs(op: Operation, argv: list[str]) -> dict[str, str]:
     """The dispatch inputs of a `workflow:` op, read off the argv its workflow would build:
     `--name value` fills input `name` (dashes to underscores), a bare `--name` switch is
-    "true", and an input the argv does not spell is left to the workflow's own default."""
+    "true", its `--no-name` form is "false", and an input the argv does not spell is left
+    to the workflow's own default."""
     out: dict[str, str] = {}
     for i, token in enumerate(argv):
         if not token.startswith("--"):
             continue
         name = token[2:].replace("-", "_")
+        if name.startswith("no_") and name[3:] in op.inputs:
+            out[name[3:]] = "false"
+            continue
         if name not in op.inputs:
             continue
         nxt = argv[i + 1] if i + 1 < len(argv) else None
@@ -204,7 +208,7 @@ def _status_write(request: Request) -> list[str]:
 
 
 def _scheduler(request: Request) -> list[str]:
-    return [*_course_semester(request), "--skip-autograde", "--dry-run"]
+    return [*_course_semester(request), "--skip-autograde", "--preview"]
 
 
 def _deploy(request: Request) -> list[str]:
@@ -405,7 +409,8 @@ def _release(name: str, help_text: str, args_schema: dict) -> Operation:
         doc="docs/08-release-materials-to-cohort.md",
         module="deploy",
         argv=_deploy,
-        preview_flag="--dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc=_RELEASE_COUNTS,
         done_text="Materials released.",
     )
@@ -434,7 +439,8 @@ _OPS = (
         doc="docs/07-schedule-releases.md",
         module="scheduler",
         argv=_scheduler,
-        preview_flag="--dry-run",
+        # Preview-only: its argv always carries `--preview`, and no real run exists.
+        preview_flag="--preview",
         counts_doc="Reasons carry one entry per release that is due and would not go out.",
     ),
     _release(
@@ -468,8 +474,8 @@ _OPS = (
         doc="docs/08-release-materials-to-cohort.md",
         module="propagate",
         argv=_course_semester,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.handout_now",
@@ -491,8 +497,8 @@ _OPS = (
         doc="docs/09-release-assignment-to-cohort.md",
         module="assign",
         argv=_handout,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Repos by what happened to them (created, skipped, ...).",
     ),
     Operation(
@@ -514,8 +520,8 @@ _OPS = (
         doc="docs/09-release-assignment-to-cohort.md",
         module="assign",
         argv=_patch,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.collect_now",
@@ -530,9 +536,10 @@ _OPS = (
         doc="docs/10-grade-and-return-assignments.md",
         module="collect",
         argv=_collect,
-        preview_flag="--dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         via=f"{VIA_WORKFLOW}collect-submissions.yml",
-        inputs=("semester_org", "course_source_repo", "slug", "dry_run"),
+        inputs=("semester_org", "course_source_repo", "slug", "preview"),
     ),
     Operation(
         name="grades.return",
@@ -551,8 +558,8 @@ _OPS = (
         doc="docs/10-grade-and-return-assignments.md",
         module="grades",
         argv=_grades,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Gradebooks written and emails sent, as distribute reports them.",
     ),
     Operation(
@@ -566,7 +573,8 @@ _OPS = (
         doc="docs/06-enrol-students-to-cohort.md",
         module="enrol_codes",
         argv=_send_codes,
-        preview_flag="--dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Codes sent and rows skipped; never an address.",
     ),
     Operation(
@@ -596,8 +604,8 @@ _OPS = (
         doc="docs/09-release-assignment-to-cohort.md",
         module="team_formation",
         argv=_open_window,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Team-formation emails sent, previewed or held; never an address.",
     ),
     Operation(
@@ -611,7 +619,8 @@ _OPS = (
         doc="docs/05-manage-teaching-team.md",
         module="sync_membership",
         argv=_course_semester,
-        preview_flag="--dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="cohort.archive",
@@ -626,8 +635,8 @@ _OPS = (
         doc="docs/10-grade-and-return-assignments.md",
         module="teardown",
         argv=_teardown,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="course.publish_website",
@@ -663,8 +672,8 @@ _OPS = (
         doc="docs/03-add-assignment-to-course.md",
         module="derive",
         argv=_derive,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.generate_syllabus",
@@ -680,9 +689,8 @@ _OPS = (
         doc="docs/07-schedule-releases.md",
         module="syllabus",
         argv=_syllabus,
-        # The CLI previews unless told to write: a preview passes nothing.
-        preview_flag="",
-        real_flag="--write",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="materials.create",

@@ -524,8 +524,11 @@ def test_a_dispatch_from_a_closed_out_semester_reconciles_nothing(monkeypatch):
 @pytest.mark.parametrize(
     ("extra", "expected"),
     [
-        (["--semester-org", "Semester-f2026"], [("Course", "Semester-f2026")]),
-        (["--semester-org", "Semester-f2026", "--dry-run"], []),
+        (
+            ["--semester-org", "Semester-f2026", "--no-preview"],
+            [("Course", "Semester-f2026")],
+        ),
+        (["--semester-org", "Semester-f2026", "--preview"], []),
         (["--all-semesters"], []),
     ],
 )

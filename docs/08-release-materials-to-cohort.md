@@ -89,7 +89,7 @@ A fix typed into the semester's copy is not in the course org, so it is not in n
 **Propagate semester edits** (course org → Actions) copies each released path back from the
 semester repo over its source in the course org, on a branch named for the semester, and opens
 one pull request per source repo for faculty to merge, cherry-pick or close. Run it with
-`dry_run` first to see the pairs.
+`preview` first to see the pairs.
 
 What it does and does not carry:
 

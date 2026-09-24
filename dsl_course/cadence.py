@@ -558,7 +558,7 @@ def report_course(course_org: str, verdict: Verdict, dry_run: bool = False) -> i
             changed = (read_state(existing[1]) if existing else {}) != state
             if dry_run:
                 log(
-                    f"    DRY-RUN  would {'update' if existing else 'open'} "
+                    f"    PREVIEW  would {'update' if existing else 'open'} "
                     f"`{DRIVER_TITLE}` in {repo}"
                 )
                 return 0
@@ -575,7 +575,7 @@ def report_course(course_org: str, verdict: Verdict, dry_run: bool = False) -> i
             # recovery) - so leave whatever stands, standing.
             return 0
         if dry_run:
-            log(f"    DRY-RUN  would close `{DRIVER_TITLE}` in {repo} if it is open")
+            log(f"    PREVIEW  would close `{DRIVER_TITLE}` in {repo} if it is open")
             return 0
         return close_issues_titled(
             repo, DRIVER_TITLE, _driver_comment(course_org, verdict)
@@ -609,7 +609,7 @@ def report_semester(
                 # the problem is over. Leave whatever is open, open.
                 return 0
             if dry_run:
-                log(f"    DRY-RUN  would close `{LATE_TITLE}` in {repo} if it is open")
+                log(f"    PREVIEW  would close `{LATE_TITLE}` in {repo} if it is open")
                 return 0
             return close_issues_titled(
                 repo,
@@ -622,7 +622,7 @@ def report_semester(
         new = [item for item in items if item.label not in known]
         if dry_run:
             log(
-                f"    DRY-RUN  would {'update' if existing else 'open'} `{LATE_TITLE}` in "
+                f"    PREVIEW  would {'update' if existing else 'open'} `{LATE_TITLE}` in "
                 f"{repo} ({len(items)} late item(s), {len(new)} new)"
             )
             return 0

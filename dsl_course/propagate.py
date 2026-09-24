@@ -38,7 +38,7 @@ history has student pull requests in it; what is propagated is a path, and the p
 request says so in paths.
 
 Usage:
-    python3 -m dsl_course.propagate --course-org COURSE --semester-org SEMESTER [--dry-run]
+    python3 -m dsl_course.propagate --course-org COURSE --semester-org SEMESTER [--preview]
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ from .course import PROPOSAL_BRANCH_PREFIX, UPSTREAM_BRANCH, is_repo_root
 from .deploy import _copy_ignore, _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
-from .log import Summary, log, log_err, log_ok, log_step, plural
+from .log import Summary, add_preview_flag, log, log_err, log_ok, log_step, plural
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
@@ -350,7 +350,7 @@ def propagate(
     deploys = due_deploys(semester_org, now)
     log_step(
         f"Propagating {semester_org} -> {course_org}"
-        f"{' (dry run)' if dry_run else ''}: {len(deploys)} released path(s)"
+        f"{' (preview)' if dry_run else ''}: {len(deploys)} released path(s)"
     )
     if not deploys:
         log_ok(
@@ -360,7 +360,7 @@ def propagate(
     if dry_run:
         for d in deploys:
             log(
-                f"  DRY-RUN  {semester_org}/{d.semester_dest_repo}/"
+                f"  PREVIEW  {semester_org}/{d.semester_dest_repo}/"
                 f"{_rel(deploy_dest(d)) or '(repo root)'} -> {course_org}/"
                 f"{d.course_source_repo}/{_rel(d.course_source_path) or '(repo root)'}"
             )
@@ -502,25 +502,23 @@ def main() -> int:
         help="Semester org (the source)",
     )
     # Default ON, like every other button whose real run reaches into another org:
-    # the rendered workflow passes --dry-run / --no-dry-run explicitly, so a bare local
+    # the rendered workflow passes --preview / --no-preview explicitly, so a bare local
     # invocation cannot force-push a branch and open pull requests by accident.
-    parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Print the semester -> course path pairs and exit, cloning nothing (default).",
+    add_preview_flag(
+        parser,
+        "Print the semester -> course path pairs and exit, cloning nothing (default).",
     )
     args = parser.parse_args()
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        done = propagate(args.course_org, args.semester_org, dry_run=args.dry_run)
+        done = propagate(args.course_org, args.semester_org, dry_run=args.preview)
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
     if done.errors:
         return 1
-    return propagate_summary(done, args.dry_run)
+    return propagate_summary(done, args.preview)
 
 
 if __name__ == "__main__":

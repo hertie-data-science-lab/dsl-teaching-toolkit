@@ -714,7 +714,14 @@ def _dispatched(monkeypatch, semester, registered, course="Course-Org"):
     monkeypatch.setattr(enrol_codes.status, "refresh", lambda course, semester=None: 0)
     monkeypatch.setattr(
         "sys.argv",
-        ["enrol_codes", "--semester-org", semester, "--dispatched-by", course],
+        [
+            "enrol_codes",
+            "--semester-org",
+            semester,
+            "--dispatched-by",
+            course,
+            "--no-preview",
+        ],
     )
     return enrol_codes.main(), ran
 
@@ -775,7 +782,9 @@ def test_a_hand_run_without_dispatched_by_never_consults_the_registry(monkeypatc
     monkeypatch.setattr(
         enrol_codes, "run", lambda org: ran.append(org) or enrol_codes.Outcome.SENT
     )
-    monkeypatch.setattr("sys.argv", ["enrol_codes", "--semester-org", "Semester-f2026"])
+    monkeypatch.setattr(
+        "sys.argv", ["enrol_codes", "--semester-org", "Semester-f2026", "--no-preview"]
+    )
     assert (enrol_codes.main(), ran) == (0, ["Semester-f2026"])
 
 
@@ -800,6 +809,7 @@ def test_a_closed_out_semester_is_sent_no_codes(monkeypatch):
             "Semester-f2026",
             "--dispatched-by",
             "Course-Org",
+            "--no-preview",
         ],
     )
     assert enrol_codes.main() == 0

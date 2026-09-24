@@ -30,7 +30,7 @@ from . import roster, teams
 from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_repo, submission_suffix
 from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
-from .log import log_err, log_ok, log_person, log_step
+from .log import add_preview_flag, log_err, log_ok, log_person, log_step
 from .repos import (
     cancel_invitation,
     is_collaborator,
@@ -104,7 +104,7 @@ def revoke_repo_grants(
         return 0, 1
     if present:
         if dry_run:
-            log_person(f"    DRY-RUN revoke {login} <- {semester_org}/{repo}")
+            log_person(f"    PREVIEW revoke {login} <- {semester_org}/{repo}")
             withdrawn += 1
         elif remove_collaborator(semester_org, repo, login, person=True):
             log_person(f"  [ok] revoked {login} from {semester_org}/{repo}")
@@ -119,7 +119,7 @@ def revoke_repo_grants(
         return withdrawn, errors + 1
     for invitation_id in invitations:
         if dry_run:
-            log_person(f"    DRY-RUN cancel invite {login} <- {semester_org}/{repo}")
+            log_person(f"    PREVIEW cancel invite {login} <- {semester_org}/{repo}")
             withdrawn += 1
         elif cancel_invitation(semester_org, repo, invitation_id, person=True):
             log_person(f"  [ok] cancelled {login}'s invite to {semester_org}/{repo}")
@@ -185,7 +185,7 @@ def revoke_offboarded_access(
         # suffix merely matches somebody with team or owner access is never one of these.
         log_ok(
             f"{revoked} direct submission-repo grant(s)/invite(s) revoked for handle(s) "
-            f"no longer on the roster{' (dry run)' if dry_run else ''}"
+            f"no longer on the roster{' (preview)' if dry_run else ''}"
         )
     return errors
 
@@ -229,7 +229,7 @@ def sync(
         handles = {s.github_handle for s in rows}
         for handle in sorted(handles):
             if dry_run:
-                log_person(f"    DRY-RUN enrol: {handle} -> org member")
+                log_person(f"    PREVIEW enrol: {handle} -> org member")
             elif not set_org_membership(semester_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:
@@ -264,10 +264,10 @@ def main() -> int:
         action="store_true",
         help="Remove team members no longer on the roster.",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report the membership changes; make none (default).")
     args = parser.parse_args()
 
-    errors = sync(args.semester_org, prune=args.prune, dry_run=args.dry_run)
+    errors = sync(args.semester_org, prune=args.prune, dry_run=args.preview)
     if errors:
         log_err(f"{errors} errors during sync")
         return 1

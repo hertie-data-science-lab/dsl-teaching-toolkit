@@ -64,7 +64,7 @@ Usage (the workflow's two jobs are the first two lines; --now is for testing):
     python3 -m dsl_course.scheduler --course-org COURSE --list-semesters
     python3 -m dsl_course.scheduler --course-org COURSE --check-course-config
     python3 -m dsl_course.scheduler --course-org COURSE --all-semesters
-    python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER --dry-run
+    python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER --preview
     python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER --now 2026-09-15T14:00
 """
 
@@ -119,7 +119,16 @@ from .grades import (
     sheet_path,
     sync_team_lock,
 )
-from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
+from .log import (
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_step,
+    plural,
+)
 from .repos import listed_is_private, set_visibility
 from .schedule import Release, grading_cutoff_datetime
 from .schedule_plan import deploy_dest
@@ -463,7 +472,7 @@ def _snapshot_passed_deadlines(
             # already frozen - never re-snapshot, a late push must not move it
             continue
         if dry_run:
-            log(f"    DRY-RUN  snapshot {snapshot_path(name)} (deadline {deadline})")
+            log(f"    PREVIEW  snapshot {snapshot_path(name)} (deadline {deadline})")
             continue
         log_step(f"  snapshot {name} (deadline {deadline})")
         # Resolve group-ness the SAME way grading does, off the template's own
@@ -562,7 +571,7 @@ def _autograde_passed_deadlines(
             log(f"  [wait] autograde {slug} - no completed snapshot yet, not grading")
             continue
         if dry_run:
-            log(f"    DRY-RUN  autograde {slug} via {template} (deadline {deadline})")
+            log(f"    PREVIEW  autograde {slug} via {template} (deadline {deadline})")
             continue
         log_step(f"  autograde {slug} via {template} (deadline {deadline})")
         # `slug` here is the schedule KEY (`due_snapshots` yields keys), which is exactly
@@ -1099,7 +1108,7 @@ def _refresh_sheets(
         if not template:
             continue  # no template to read the assignment's definition from
         if dry_run:
-            log(f"    DRY-RUN  refresh {sheet_path(name)}")
+            log(f"    PREVIEW  refresh {sheet_path(name)}")
             continue
         log_step(f"  grading sheet {name}")
         # Spelt exactly as the snapshot pass above spells it, off the one memoised read
@@ -1256,7 +1265,7 @@ def _stale_archive_notices(semester_org: str, keep: str, dry_run: bool) -> int:
     if not stale:
         return 0
     if dry_run:
-        log(f"    DRY-RUN close {len(stale)} stale archive notice(s) in {repo}")
+        log(f"    PREVIEW close {len(stale)} stale archive notice(s) in {repo}")
         return 0
     return sum(
         issues.close_issues_titled(repo, title, _CALLED_OFF_COMMENT) for title in stale
@@ -1275,7 +1284,7 @@ def _archive_notice(
     repo = f"{semester_org}/{schedule.CONFIG_REPO}"
     title = teardown.archive_notice_title(when)
     if dry_run:
-        log(f"    DRY-RUN  open `{title}` in {repo} and mail the instructors")
+        log(f"    PREVIEW  open `{title}` in {repo} and mail the instructors")
         return 0
     try:
         found = issues.find_issue(repo, title)
@@ -1331,7 +1340,7 @@ def _archive_phase(
     today = now.date()
     if today >= archives:
         if dry_run:
-            log(f"    DRY-RUN  archive {semester_org} (due {archives})")
+            log(f"    PREVIEW  archive {semester_org} (due {archives})")
             return 0
         # `today`, not its own clock: this tick has just decided the semester is due, and
         # a `--now` past the archive date would otherwise fire a close-out that refused.
@@ -1409,7 +1418,7 @@ def _reprivatise_student_repos(
         )
         for repo in public:
             if dry_run:
-                log_person(f"    DRY-RUN  {semester_org}/{repo} -> private")
+                log_person(f"    PREVIEW  {semester_org}/{repo} -> private")
                 continue
             if set_visibility(semester_org, repo, "private", person=True):
                 log_person(f"  [ok] {semester_org}/{repo} is private again")
@@ -1612,7 +1621,7 @@ def _release_phase(
     if dry_run:
         for release in due:
             for line in describe(release, now):
-                log(f"    DRY-RUN  [{release.label}] {line}")
+                log(f"    PREVIEW  [{release.label}] {line}")
         decisions = dry_run_decisions(
             course_org, semester_org, sched, due, now, listing
         )
@@ -1715,7 +1724,7 @@ def run(
     # release is failing` issue every six, mailing the maintainer about a typo in a semester's
     # plan. (Individually DROPPED entries were always advisory - the rest of the plan runs.)
     errors = 0
-    # The release pass's preview, on a dry run: what the console shows of it.
+    # The release pass's preview, on a preview: what the console shows of it.
     preview: Summary | None = None
     if release:
         # ONE listing of the semester for the whole tick, taken here at the start of it and
@@ -1877,7 +1886,9 @@ def main() -> int:
     parser.add_argument(
         "--now", default=None, help="Override 'now' (ISO date/datetime) - for testing."
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(
+        parser, "Print what would fire; release, grade and write nothing (default)."
+    )
     args = parser.parse_args()
     now = _parse_now(args.now)
 
@@ -1890,7 +1901,7 @@ def main() -> int:
     if args.check_course_config:
         # Always 0: a config faculty have to fix is a CONTENT fault, and Sync membership -
         # which is what runs this - must not go red for one (see FINAL DECISIONS).
-        return _preflight_course(args.course_org, now, args.dry_run)
+        return _preflight_course(args.course_org, now, args.preview)
 
     if args.list_semesters:
         # The grading job's matrix, and the ONLY thing that may reach stdout: the workflow
@@ -1923,7 +1934,7 @@ def main() -> int:
         # never. Once per tick, on a real release pass only; the grading matrix's
         # per-semester legs and a laptop's single-semester run are not the course's tick.
         if phases["release"]:
-            _preflight_course(args.course_org, now, args.dry_run)
+            _preflight_course(args.course_org, now, args.preview)
         semesters = _registered_semesters(args.course_org)
         if semesters is None:
             # A listing that could not be READ is not "no semesters": go red so the failure
@@ -1944,7 +1955,7 @@ def main() -> int:
         # the manual button defaults to a dry run, and a single `--semester-org` invocation
         # is a laptop, so neither may arm an alarm, comment on one, or close one.
         verdict = None
-        if phases["release"] and not args.dry_run:
+        if phases["release"] and not args.preview:
             try:
                 verdict = cadence.evaluate(
                     now, cadence.fetch_runs(args.course_org), cadence.own_run_id()
@@ -1964,7 +1975,7 @@ def main() -> int:
                     args.course_org,
                     semester,
                     now,
-                    dry_run=args.dry_run,
+                    dry_run=args.preview,
                     verdict=verdict,
                     **phases,
                 )
@@ -1974,7 +1985,7 @@ def main() -> int:
         # Last, so a driver-health alarm can never delay a release: the drivers being down
         # is not this run's problem to fix, only to report.
         if verdict is not None:
-            rc |= cadence.report_course(args.course_org, verdict, args.dry_run)
+            rc |= cadence.report_course(args.course_org, verdict, args.preview)
         return rc
 
     if not args.semester_org:
@@ -1985,7 +1996,7 @@ def main() -> int:
     # frozen, and running it would only spend a tick on 403s.
     semesters, rc = _one_semester(args.course_org, args.semester_org)
     if not semesters:
-        if args.dry_run and rc == 0:
+        if args.preview and rc == 0:
             # Registered but archived: the preview still says what would have been due.
             decisions = archived_decisions(schedule.load(args.semester_org), now)
             for decision in decisions:
@@ -2000,7 +2011,7 @@ def main() -> int:
         args.course_org,
         semesters[0],
         now,
-        dry_run=args.dry_run,
+        dry_run=args.preview,
         defer_site_sync=args.defer_site_sync,
         **phases,
     )
@@ -2008,7 +2019,7 @@ def main() -> int:
     # every digest was just brought in line with the files - so the semester's status.json
     # follows here, after it. Never on a dry run (a preview writes nothing), and never
     # counted: the release's exit code is the release's.
-    if phases["release"] and not args.dry_run:
+    if phases["release"] and not args.preview:
         status.refresh(args.course_org, semesters[0])
     return rc
 

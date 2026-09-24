@@ -92,6 +92,7 @@ def test_cli_rejects_a_count_mismatch_with_a_nonzero_exit(monkeypatch, capsys):
             "a,b,c",
             "--semester-dest-path",
             "x,y",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 1
@@ -126,6 +127,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
             "lectures/02,labs/02",
             "--semester-dest-path",
             "week02/lecture,",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 1  # unpaired counts (2 sources, 1 dest)
@@ -142,6 +144,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
             "Semester-f2026",
             "--course-source-path",
             "lectures/02,labs/02",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 0
@@ -183,6 +186,7 @@ def test_semester_dest_repo_defaults_to_materials(monkeypatch):
             "   ",  # a blank text box must not create a repo named ""
             "--course-source-path",
             "lectures/02",
+            "--no-preview",
         ],
     )
     assert deploy.main() == 0
@@ -212,7 +216,7 @@ def test_dry_run_prints_the_resolved_pairs_without_deploying(monkeypatch, capsys
             "lectures/02,labs/02",
             "--semester-dest-path",
             "week02/lecture,week02/lab",
-            "--dry-run",
+            "--preview",
         ],
     )
     assert deploy.main() == 0
@@ -232,7 +236,7 @@ def _dry_run_argv(source_path):
         "Semester-f2026",
         "--course-source-path",
         source_path,
-        "--dry-run",
+        "--preview",
     ]
 
 

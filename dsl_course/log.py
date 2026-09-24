@@ -4,6 +4,7 @@ read through, plus the channel that keeps per-person lines out of a public log.
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 
@@ -124,3 +125,13 @@ class Summary(int):
 def plural(n: int, one: str, many: str | None = None) -> str:
     """`1 file`, `3 files`: a count with its noun, for a Summary's sentence."""
     return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def add_preview_flag(parser: argparse.ArgumentParser, help: str) -> None:
+    """`--preview/--no-preview` on a CLI, ON by default (decision 0012): trying an
+    operation without changing anything is what a bare invocation does, and acting takes
+    the explicit `--no-preview`. Every rendered workflow and every console op spells one of
+    the two, so no caller depends on the default (`tests/test_renderers.py`)."""
+    parser.add_argument(
+        "--preview", action=argparse.BooleanOptionalAction, default=True, help=help
+    )

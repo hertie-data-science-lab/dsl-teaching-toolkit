@@ -55,7 +55,7 @@ teams:
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A
 non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic - unless a
 late penalty applies to it, which no arithmetic can do: that mark is **held**. Nothing is
-posted, written or emailed for it, the dry run and the run both count it (`held`), and it
+posted, written or emailed for it, the preview and the run both count it (`held`), and it
 goes out as soon as you put a number (or waive the penalty with `adjustment_individual`). The question names, the `# /N` maxima and the whole
 header come from `grading_config.yml` and `schedule.yml` and are re-emitted on every write - so
 edit them **there**, never in the sheet. The toolkit writes the file only when the data or
@@ -134,10 +134,10 @@ repo's, so it would accuse the entire semester of one student's late push), and
    rows for students who have left. Delete a key and it stays deleted.
 5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
-6. **Distribute grades** (button), `dry_run` first. The dry run writes no grades and sends
+6. **Distribute grades** (button), `preview` first. The preview writes no grades and sends
    no mail. It prints the counts, and posts who gets what - each changed grade, who is
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
-   grades preview* issue in `classroom-config`. Each dry run rewrites that issue; the real
+   grades preview* issue in `classroom-config`. Each preview rewrites that issue; the real
    run closes it. There is no assignment to pick: every gradebook and the registrar's
    export are rebuilt from every sheet in the semester on every run, so a student's
    gradebook always shows everything they have been marked on. A half-typed sheet is
@@ -157,7 +157,7 @@ could change is not it.
 - **An email** with a link and no marks in it.
 
 Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so a re-run
-after one correction reaches one student. `silent` skips the email.
+after one correction reaches one student. Untick `notify` to skip the email.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email. `receipt_note` posts one line, "Marks returned: see your marks repo.", on each
@@ -323,7 +323,7 @@ project teams are untouched.
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive semester** is the button for closing a semester out early, or at all. `dry_run` is on
+**Archive semester** is the button for closing a semester out early, or at all. `preview` is on
 by default and prints the counts; the real run **refuses** until the archive date has
 arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
 so no date, is closed out. Run it again if it fails part-way - it picks up where it stopped,

@@ -1225,14 +1225,14 @@ def test_the_preview_opens_by_saying_nothing_was_sent_and_when(tmp_path, monkeyp
     body = _distribute(monkeypatch, tmp_path, dry_run=True)["preview"][0]["body"]
     first, second, third = body.splitlines()[:3]
     assert re.fullmatch(
-        r"\*\*Nothing has been sent\.\*\* Dry run: \d{1,2} [A-Z][a-z]{2} \d\d:\d\d UTC\.",
+        r"\*\*Nothing has been sent\.\*\* Preview: \d{1,2} [A-Z][a-z]{2} \d\d:\d\d UTC\.",
         first,
     )
     assert second == (
-        "This is what running Distribute grades for real (with `dry_run` unticked) "
+        "This is what running Distribute grades for real (with `preview` unticked) "
         "would do now."
     )
-    assert third == "Each dry run replaces this text; the real run closes this issue."
+    assert third == "Each preview replaces this text; the real run closes this issue."
 
 
 def test_a_preview_with_nothing_to_report_keeps_every_heading(tmp_path, monkeypatch):
@@ -1260,7 +1260,7 @@ def test_a_silent_preview_says_why_nobody_is_emailed(tmp_path, monkeypatch):
     out = _distribute(monkeypatch, tmp_path, dry_run=True, notify=False)
     assert (
         "### Students who would be emailed (0)\n"
-        "Nothing - `silent` is ticked, so nobody is emailed."
+        "Nothing - `notify` is unticked, so nobody is emailed."
     ) in out["preview"][0]["body"]
 
 

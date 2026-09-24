@@ -39,7 +39,7 @@ NOTHING IS EVER DELETED. The bot holds no `delete_repo` scope, and every step he
 reversible by hand: un-archiving a repo from its own Settings page brings it back exactly
 as it was.
 
-`--dry-run` is the default and prints counts only - always, whatever the date, because
+`--preview` is the default and prints counts only - always, whatever the date, because
 the counts are how somebody decides whether to ask for a close-out. Only a REAL run
 refuses until the semester's archive date has arrived; `--force` is a person saying it in
 as many words, which is what an early close-out - and a semester that never asked to be
@@ -47,7 +47,7 @@ archived - needs.
 
 Usage:
     python3 -m dsl_course.teardown --semester-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.teardown --course-org COURSE --semester-org SEMESTER --no-dry-run
+    python3 -m dsl_course.teardown --course-org COURSE --semester-org SEMESTER --no-preview
 """
 
 from __future__ import annotations
@@ -68,7 +68,16 @@ from .discovery import (
 from .gh_contents import get_file_content, put_file, read_csv
 from .grades import PREVIEW_TITLE, SEMESTER_CSV_NAME
 from .issues import close_issues_titled, open_titles
-from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
+from .log import (
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_step,
+    plural,
+)
 from .repos import archive_repo
 
 # The record itself, in the private repo it describes. Its own directory rather than a root
@@ -339,7 +348,7 @@ def _close_notices(semester_org: str, dry_run: bool) -> int:
     ]
     if dry_run:
         log(
-            f"    DRY-RUN close any of {len(titles)} toolkit notice(s) still open, and "
+            f"    PREVIEW close any of {len(titles)} toolkit notice(s) still open, and "
             f"every `{ARCHIVE_NOTICE_PREFIX.strip()} <date>` notice with them"
         )
         return 0
@@ -366,7 +375,7 @@ def _final_sync(course_org: str, semester_org: str, dry_run: bool) -> int:
     if not course_org:
         return 0
     if dry_run:
-        log(f"    DRY-RUN sync {semester_org}'s website one last time")
+        log(f"    PREVIEW sync {semester_org}'s website one last time")
         return 0
     try:
         if site.sync_site(course_org, semester_org) != 0:
@@ -393,7 +402,7 @@ def _freeze(semester_org: str, listing: list[dict], dry_run: bool) -> Closed:
             already.append(name)
             continue
         if dry_run:
-            log_person(f"    DRY-RUN archive {semester_org}/{name}")
+            log_person(f"    PREVIEW archive {semester_org}/{name}")
             frozen.append(name)
         elif archive_repo(semester_org, name, person=True):
             log_person(f"  [ok] archived {semester_org}/{name}")
@@ -430,7 +439,7 @@ def close_out(
     Counts only in the log: every faculty workflow runs in the course org's PUBLIC
     `.github`, and one `<slug>-<handle>` line there publishes who was in the semester. The
     per-repo detail goes through `log_person` and into the private record."""
-    log_step(f"Closing out {semester_org}{' (dry run)' if dry_run else ''}")
+    log_step(f"Closing out {semester_org}{' (preview)' if dry_run else ''}")
     listing = list_org_repos(semester_org)
     config = next((r for r in listing if r["name"] == CONFIG_REPO), None)
     if config is None:
@@ -483,7 +492,7 @@ def close_out(
         return 1
     if dry_run:
         log_ok(
-            f"dry run: {len(closed.frozen)} repo(s) would be frozen "
+            f"preview: {len(closed.frozen)} repo(s) would be frozen "
             f"({len(closed.already)} already are), then {CONFIG_REPO} sealed"
         )
         if errors:
@@ -542,14 +551,9 @@ def main() -> int:
         "frozen, and where its website is synced from. Omit and both are skipped.",
     )
     parser.add_argument("--semester-org", required=True)
-    # Default ON, like every other write button: the rendered workflow passes --dry-run /
-    # --no-dry-run explicitly, so a bare local invocation cannot freeze a semester by accident.
-    parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Print the counts; freeze nothing (default).",
-    )
+    # Default ON, like every other write button: the rendered workflow passes --preview /
+    # --no-preview explicitly, so a bare local invocation cannot freeze a semester by accident.
+    add_preview_flag(parser, "Print the counts; freeze nothing (default).")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -563,7 +567,7 @@ def main() -> int:
         return close_out(
             args.course_org,
             args.semester_org,
-            dry_run=args.dry_run,
+            dry_run=args.preview,
             force=args.force,
         )
     except RuntimeError as exc:

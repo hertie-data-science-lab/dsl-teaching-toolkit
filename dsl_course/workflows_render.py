@@ -110,12 +110,12 @@ _SEED_REFRESH_CONCURRENCY = """concurrency:
 #
 # Releases are fire-once, guarded by markers written as they complete, so two concurrent
 # passes can double-release whatever the first has not yet marked - hence still a queue of
-# one. A manual DRY-RUN writes nothing and therefore needs no serialisation, and joining the
+# one. A manual PREVIEW writes nothing and therefore needs no serialisation, and joining the
 # queue is exactly how an operator's preview gets silently dropped (Actions holds ONE
 # pending run per group, so a third arrival cancels the second whatever
 # `cancel-in-progress` says): it gets a group of its own, per run.
 _RELEASE_CONCURRENCY = """    concurrency:
-      group: ${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}
+      group: ${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && github.run_id || 'scheduled-release' }}
       cancel-in-progress: false
 """
 
@@ -125,7 +125,7 @@ _RELEASE_CONCURRENCY = """    concurrency:
 # reason the release job's is: it writes nothing, so it needs no queue, and a queue is what
 # would silently drop an operator's preview.
 _AUTOGRADE_CONCURRENCY = """    concurrency:
-      group: ${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, matrix.semester) || format('scheduled-autograde-{0}', matrix.semester) }}
+      group: ${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && format('{0}-{1}', github.run_id, matrix.semester) || format('scheduled-autograde-{0}', matrix.semester) }}
       cancel-in-progress: false
 """
 
@@ -349,17 +349,19 @@ _MAIL_ENV = _secret_env(*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
 _COURSE_ADMIN_ENV = _secret_env(mailer.COURSE_ADMIN_ENV)
 
 # Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
-# renamed input - previews. Shared by the buttons whose `dry_run` DEFAULTS TO TRUE, which is
-# the set whose real run reaches further than a second click can take back: Distribute
-# grades emails a whole semester, Archive semester freezes one, Derive student version
-# overwrites instructor-written files on a template's `main`, and Patch released
-# assignment commits into every student's repo. Their CLIs spell the flag
-# `--dry-run/--no-dry-run` and default it ON, so the gate has to pass one of the two
-# EXPLICITLY - "add nothing when the box is unticked" would preview for ever. The other
-# dry-run gates in this module guard convergent work and keep the simpler spelling.
-_DRY_RUN_GATE = (
-    '          if [ "$DRY_RUN" = "false" ]; '
-    "then args+=(--no-dry-run); else args+=(--dry-run); fi"
+# renamed input - previews. EVERY button with a `preview` box carries it (decision 0012),
+# and every CLI previews by default (`log.add_preview_flag`), so the gate passes one of the
+# two EXPLICITLY - "add nothing when the box is unticked" would preview for ever, and a
+# caller that relied on the default could not be told from one that forgot.
+_PREVIEW_GATE = (
+    '          if [ "$PREVIEW" = "false" ]; '
+    "then args+=(--no-preview); else args+=(--preview); fi"
+)
+# The scheduler's two jobs also run unattended: a cron or a repository_dispatch has no
+# `preview` box, and is a real run. Only a button press previews, unless told `false`.
+_SCHEDULED_PREVIEW_GATE = (
+    '          if [ "$EVENT" = "workflow_dispatch" ] && [ "$PREVIEW" != "false" ]; '
+    "then args+=(--preview); else args+=(--no-preview); fi"
 )
 
 
@@ -827,7 +829,7 @@ on:
           python3 -m dsl_course.deploy --source-org "$SRC_ORG" \\
             --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" \\
             --course-source-path "$COURSE_SOURCE_PATH" --semester-dest-repo "$SEMESTER_DEST_REPO" \\
-            --semester-dest-path "$SEMESTER_DEST_PATH"
+            --semester-dest-path "$SEMESTER_DEST_PATH" --no-preview
 """
 
 
@@ -943,10 +945,10 @@ on:
         description: "3. Type {SOLUTION_NOW} to also push the model solution from the template's solution branch. {SOLUTION_WARNING} Leave empty otherwise; a later moment belongs in schedule.yml"
         required: false
         default: ""
-      dry_run:
-        description: "4. Preview only - list the repos that would be created, create nothing"
+      preview:
+        description: "4. Preview - list the repos that would be created, create nothing"
         type: boolean
-        default: false
+        default: true
 
 {_concurrency("release-assignment")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -958,12 +960,12 @@ on:
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           SOLUTION_DATETIME: ${{{{ inputs.solution_datetime }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG")
           [ -n "$SOLUTION_DATETIME" ] && args+=(--solution-datetime "$SOLUTION_DATETIME")
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+{_PREVIEW_GATE}
           python3 -m dsl_course.assign "${{args[@]}}"
 """
 
@@ -991,10 +993,10 @@ on:
         description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
         required: false
         default: ""
-      dry_run:
-        description: "Preview only - show what WOULD be refreshed"
+      preview:
+        description: "Preview - show what WOULD be refreshed"
         type: boolean
-        default: false
+        default: true
 
 {_concurrency("collect-submissions")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -1006,11 +1008,11 @@ on:
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           SLUG: ${{{{ inputs.slug }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --refresh-only)
           [ -n "$SLUG" ] && args+=(--slug "$SLUG")
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+{_PREVIEW_GATE}
           python3 -m dsl_course.collect "${{args[@]}}"
 """
 
@@ -1071,7 +1073,7 @@ on:
           COURSE: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
         run: |
-          args=(--course-org "$COURSE")
+          args=(--course-org "$COURSE" --no-preview)
           [ "$SEMESTER_ORG" != "{_FACULTY_ONLY}" ] && args+=(--semester-org "$SEMESTER_ORG")
           python3 -m dsl_course.sync_membership "${{args[@]}}"
 {_CRON_CLOSE}
@@ -1095,8 +1097,8 @@ on:
 {_OLD_PAYLOAD_CHECK}          # First, and never fatal: a push to either of the course's own config files is
           # what this job is here for, and the reconcile below is what SKIPS the course
           # when one of them cannot be read. Its own digest issue and mail are the report.
-          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config
-          args=(--course-org "$COURSE")
+          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview
+          args=(--course-org "$COURSE" --no-preview)
           case "$EVENT" in
             schedule) args+=(--all-semesters) ;;
             repository_dispatch)
@@ -1134,21 +1136,21 @@ def render_distribute_grades(semester_orgs: list[str]) -> str:
 # said twice - a re-run after one correction reaches one student.
 # There is no assignment to pick: every run rebuilds every gradebook from every sheet,
 # which is what keeps a gradebook the whole of a student's marks.
-# Dry run first; it writes no grades, sends no mail, and posts who gets what as a
+# Preview first; it writes no grades, sends no mail, and posts who gets what as a
 # "Distribute grades preview" issue in classroom-config. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
 {_semester_dropdown(semester_orgs)}
-      dry_run:
+      preview:
         description: "Preview who gets what, as an issue in classroom-config - push no grades, send nothing"
         type: boolean
         default: true
-      silent:
-        description: "Skip the email notification (just push the grades)"
+      notify:
+        description: "Email each student that their marks are in (off = just push the grades)"
         type: boolean
-        default: false
+        default: true
       receipt_note:
         description: "Also post 'Marks returned: see your marks repo.' once on each student's receipts issue"
         type: boolean
@@ -1165,15 +1167,15 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
-          SILENT: ${{{{ inputs.silent }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
+          NOTIFY: ${{{{ inputs.notify }}}}
           RECEIPT_NOTE: ${{{{ inputs.receipt_note }}}}
           INCLUDE_FEEDBACK: ${{{{ inputs.include_feedback }}}}
 {_MAIL_ENV}
         run: |
           args=(--semester-org "$SEMESTER_ORG")
-{_DRY_RUN_GATE}
-          [ "$SILENT" = "true" ] && args+=(--no-notify)
+{_PREVIEW_GATE}
+          [ "$NOTIFY" = "false" ] && args+=(--no-notify)
           [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
           [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
@@ -1213,7 +1215,7 @@ def render_open_team_formation(semester_orgs: list[str]) -> str:
 # Overnight (23:00-07:00 in the semester's own timezone) the message is HELD, pressed or not
 # - the students' night is the same night either way - and nothing is claimed, so the next
 # quarter-hourly tick sends it in the morning.
-# Dry run first; it claims nothing, sends nothing, and prints the counts with a sample of
+# Preview first; it claims nothing, sends nothing, and prints the counts with a sample of
 # the wording. Needs the GRAPH_* secrets to mail.
 
 on:
@@ -1224,7 +1226,7 @@ on:
         description: "Only this schedule.yml assignment key (leave empty for every open window)"
         required: false
         default: ""
-      dry_run:
+      preview:
         description: "Preview the messages - claim nothing, send nothing"
         type: boolean
         default: true
@@ -1238,12 +1240,12 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           ASSIGNMENT: ${{{{ inputs.assignment }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
 {_MAIL_ENV}
         run: |
           args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
           [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           python3 -m dsl_course.team_formation "${{args[@]}}"
 """
 
@@ -1261,14 +1263,14 @@ def render_propagate_semester(semester_orgs: list[str]) -> str:
 # and left where it is.
 # The branch is cut fresh from the source repo's default branch and force-pushed on every
 # run, so each run proposes what the semester has then; the pull request is reused.
-# Dry run first; it clones nothing and prints the path pairs.
+# Preview first; it clones nothing and prints the path pairs.
 # Also runs as the first step of Archive semester - see docs/10.
 
 on:
   workflow_dispatch:
     inputs:
 {_semester_dropdown(semester_orgs)}
-      dry_run:
+      preview:
         description: "Preview the paths - clone nothing, push nothing, open nothing"
         type: boolean
         default: true
@@ -1281,11 +1283,11 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
           args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           python3 -m dsl_course.propagate "${{args[@]}}"
 """
 
@@ -1306,7 +1308,7 @@ def render_archive_semester(semester_orgs: list[str]) -> str:
 # NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
 # students keep read access to their own work, and un-archiving a repo from its own
 # Settings page brings it back exactly as it was. Membership and teams are untouched.
-# `dry_run` defaults to true and prints counts only. A real run refuses until the semester's
+# `preview` defaults to true and prints counts only. A real run refuses until the semester's
 # archive date has arrived; `force` says so by hand, which is how a semester with no
 # `archive:` block - and so no date - is closed out.
 # A run that dies half way is resumed by running it again - see docs/10.
@@ -1315,7 +1317,7 @@ on:
   workflow_dispatch:
     inputs:
 {_semester_dropdown(semester_orgs)}
-      dry_run:
+      preview:
         description: "Preview the teardown - freeze nothing, open no pull request"
         type: boolean
         default: true
@@ -1332,12 +1334,12 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
           FORCE: ${{{{ inputs.force }}}}
         run: |
           gh auth setup-git
           args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           [ "$FORCE" = "true" ] && args+=(--force)
           python3 -m dsl_course.teardown "${{args[@]}}"
 """
@@ -1408,7 +1410,7 @@ on:
           # the payload comes from a semester's bot token, so the semester it names is
           # untrusted input.
           python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\
-            --dispatched-by "$COURSE"{_TEE_RUN_LOG}
+            --dispatched-by "$COURSE" --no-preview{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -1510,8 +1512,8 @@ on:
     types: [scheduled-release]
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Preview only - list what WOULD open, release nothing"
+      preview:
+        description: "Preview - list what WOULD open, release nothing"
         type: boolean
         default: true
 
@@ -1533,7 +1535,7 @@ on:
           # cancel grading in the others. Assigned, not echoed inline: under `bash -e` a
           # failed substitution inside an echo would write an empty output on a GREEN step,
           # and grading would then be skipped for the whole course, silently.
-          args=(--course-org "$COURSE" --list-semesters)
+          args=(--course-org "$COURSE" --list-semesters --no-preview)
           [ -n "$SCOPED" ] && args+=(--semester-org "$SCOPED")
           semesters=$(python3 -m dsl_course.scheduler "${{args[@]}}")
           echo "semesters=$semesters" >> "$GITHUB_OUTPUT"
@@ -1541,7 +1543,7 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
           EVENT: ${{{{ github.event_name }}}}
           DRIVER: ${{{{ github.event.client_payload.driver }}}}
 {_OLD_PAYLOAD_ENV}# A source the plan cites and the org has not got is emailed to the people git names for
@@ -1563,7 +1565,7 @@ on:
           else
             args=(--course-org "$COURSE" --all-semesters --skip-autograde)
           fi
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+{_SCHEDULED_PREVIEW_GATE}
           python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_RELEASE_NOTICE}  autograde:
     # Named, because `autograde-report` below looks its legs up by name through the jobs
@@ -1591,11 +1593,12 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           SEMESTER: ${{{{ matrix.semester }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
+          EVENT: ${{{{ github.event_name }}}}
         run: |
           gh auth setup-git
           args=(--course-org "$COURSE" --semester-org "$SEMESTER" --autograde-only)
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+{_SCHEDULED_PREVIEW_GATE}
           python3 -m dsl_course.scheduler "${{args[@]}}"
   autograde-report:
     # What the grading job may not do for itself. One leg per semester, exactly like the
@@ -1761,8 +1764,8 @@ on:
     inputs:
 {_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos)}
 {_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
-      write:
-        description: "Commit the block to SYLLABUS.sessions.md (off = just print it)"
+      preview:
+        description: "Preview - print the block, commit nothing to SYLLABUS.sessions.md"
         type: boolean
         default: true
 
@@ -1774,10 +1777,10 @@ on:
           COURSE: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          WRITE: ${{{{ inputs.write }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           args=(--course-org "$COURSE" --semester-org "$SEMESTER_ORG" --course-source-repo "$SOURCE_REPO")
-          [ "$WRITE" = "true" ] && args+=(--write)
+{_PREVIEW_GATE}
           python3 -m dsl_course.syllabus "${{args[@]}}"
 """
 
@@ -1945,7 +1948,7 @@ def render_patch_assignment(
 # unless `overwrite` says so - their version is kept and counted instead.
 # The frozen semester-side hand-out is patched too, so a student who onboards tomorrow is
 # given the corrected file rather than the one everyone else was just patched off.
-# `dry_run` defaults to true. See docs/09-release-assignment-to-cohort.md.
+# `preview` defaults to true. See docs/09-release-assignment-to-cohort.md.
 
 on:
   workflow_dispatch:
@@ -1963,8 +1966,8 @@ on:
         description: "Replace the file even where the student has already changed it (their work on that file is lost)"
         type: boolean
         default: false
-      dry_run:
-        description: "Preview only - count the repos that would be patched, write nothing"
+      preview:
+        description: "Preview - count the repos that would be patched, write nothing"
         type: boolean
         default: true
 
@@ -1980,13 +1983,13 @@ on:
           PATH_INPUT: ${{{{ inputs.path }}}}
           SLUG: ${{{{ inputs.slug }}}}
           OVERWRITE: ${{{{ inputs.overwrite }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --patch-path "$PATH_INPUT")
           [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           python3 -m dsl_course.assign "${{args[@]}}"
 """
 
@@ -2006,15 +2009,15 @@ def render_derive_student_version(assignments: list[str] | None = None) -> str:
 # repo - so the starter is never maintained by hand beside the answer it is meant to be
 # missing. It never writes to `solution`, and a file with nothing fenced in it is never
 # written at all: the "starter" derived from that would be the model answer.
-# `dry_run` defaults to true and prints the file list and the counts, never the content.
+# `preview` defaults to true and prints the file list and the counts, never the content.
 # See docs/03-add-assignment-to-course.md.
 
 on:
   workflow_dispatch:
     inputs:
 {_assignment_input(assignments or [], "Assignment template to derive the student starter for")}
-      dry_run:
-        description: "Preview only - list the files and how much would be stripped out of each"
+      preview:
+        description: "Preview - list the files and how much would be stripped out of each"
         type: boolean
         default: true
 
@@ -2026,10 +2029,10 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO")
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           python3 -m dsl_course.derive "${{args[@]}}"
 """
 

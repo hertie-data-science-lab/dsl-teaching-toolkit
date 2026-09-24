@@ -16,7 +16,7 @@ Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so
 after one correction reaches one student.
 
 Usage:
-    python3 -m dsl_course.grades distribute --semester-org hertie-dsl-demo-f2026 [--dry-run]
+    python3 -m dsl_course.grades distribute --semester-org hertie-dsl-demo-f2026 [--preview]
 """
 
 from __future__ import annotations
@@ -103,7 +103,16 @@ from .gh_contents import (
 )
 from .ghcli import bot_login, clone, gh, is_missing_resource
 from .issues import close_issues_titled, upsert_issue
-from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
+from .log import (
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_step,
+    plural,
+)
 from .repos import (
     add_collaborator,
     create_repo,
@@ -2257,7 +2266,7 @@ def sync_team_lock(
     if dry_run:
         # Above the render, not below it: resolving the entries reads every template's
         # `grading_config.yml`, and a preview that never writes has nothing to do with them.
-        log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
+        log(f"    PREVIEW  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
         return LockWrite(True, False)
     content = team_lock_text(
         team_lock_entries(
@@ -2576,7 +2585,7 @@ def ensure_receipts_issue(
     if not create:
         return None
     if dry_run:
-        log("    DRY-RUN  would open the receipts issue")
+        log("    PREVIEW  would open the receipts issue")
         return None
     # The label first: GitHub silently drops a label the repo does not have, and the label
     # is the cheapest rung of the lookup above.
@@ -2639,7 +2648,7 @@ def post_marked_comment(
     if marker in out:
         return True  # already said, on this commit, for this event
     if dry_run:
-        log("    DRY-RUN  would post a submission receipt")
+        log("    PREVIEW  would post a submission receipt")
         return True
     code, out = gh(
         "api",
@@ -3644,7 +3653,7 @@ def ensure_gradebooks(
     for done, s in enumerate(onboarded):
         if dry_run:
             log_person(
-                f"    DRY-RUN  {semester_org}/{GRADEBOOK_PREFIX}{s.github_handle}"
+                f"    PREVIEW  {semester_org}/{GRADEBOOK_PREFIX}{s.github_handle}"
             )
             continue
         if budget_minutes is not None and (
@@ -4209,7 +4218,7 @@ def distribute(
     sheet is what silently deleted every other assignment from every gradebook it touched.
     The registrar's export is the same file for the same reason.
 
-    Dry run - the default - writes no grades and sends nothing: it prints the counts a
+    A preview - the default - writes no grades and sends nothing: it prints the counts a
     grader checks before pressing it for real, and posts the per-student detail as an
     issue in the private classroom-config (`_preview`).
 
@@ -4585,7 +4594,7 @@ def _preview(
     )
     if not wrote.errors:
         log(f"  Who gets what: {wrote.url or f'{PREVIEW_TITLE} in {repo}'}")
-    log_ok("DRY-RUN - no grades written, no mail sent")
+    log_ok("PREVIEW - no grades written, no mail sent")
     return not wrote.errors
 
 
@@ -4704,18 +4713,18 @@ def _preview_body(
         (
             f"### Students who would be emailed ({len(mails)})",
             mails,
-            "Nothing - `silent` is ticked, so nobody is emailed."
+            "Nothing - `notify` is unticked, so nobody is emailed."
             if not notify
             else "Nothing - nobody has a new mark to be told about.",
         ),
     ]
     head = [
-        f"**Nothing has been sent.** Dry run: {moment.day} {moment:%b %H:%M} UTC.",
+        f"**Nothing has been sent.** Preview: {moment.day} {moment:%b %H:%M} UTC.",
         (
-            "This is what running Distribute grades for real (with `dry_run` "
+            "This is what running Distribute grades for real (with `preview` "
             "unticked) would do now."
         ),
-        "Each dry run replaces this text; the real run closes this issue.",
+        "Each preview replaces this text; the real run closes this issue.",
     ]
     tail = []
     if emailed:
@@ -4924,14 +4933,11 @@ def main() -> int:
         action="store_true",
         help="Put the markers' feedback text into each student's email.",
     )
-    # Default ON: the rendered workflow passes --dry-run / --no-dry-run explicitly, so a
+    # Default ON: the rendered workflow passes --preview / --no-preview explicitly, so a
     # bare local invocation cannot send by accident.
-    p.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Post who gets what as an issue in classroom-config; push no grades, "
-        "send nothing (default).",
+    add_preview_flag(
+        p,
+        "Post who gets what as an issue in classroom-config; push no grades, send nothing (default).",
     )
     args = parser.parse_args()
 
@@ -4941,7 +4947,7 @@ def main() -> int:
         return distribute(
             args.semester_org,
             notify=not args.no_notify,
-            dry_run=args.dry_run,
+            dry_run=args.preview,
             receipt_note=args.receipt_note,
             include_feedback=args.include_feedback,
         )

@@ -1413,8 +1413,8 @@ def test_the_walk_drives_the_ticks_in_the_order_the_passes_need(monkeypatch):
     # A live run must never put a real message in a real inbox.
     for workflow, inputs in dispatched:
         if workflow == module.DISTRIBUTE_GRADES:
-            assert inputs["silent"] is True
-    assert [i["dry_run"] for w, i in dispatched if w == module.DISTRIBUTE_GRADES] == [
+            assert inputs["notify"] is False
+    assert [i["preview"] for w, i in dispatched if w == module.DISTRIBUTE_GRADES] == [
         True,
         False,
         False,

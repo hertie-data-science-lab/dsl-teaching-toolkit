@@ -70,7 +70,7 @@ from .gh_teams import (
     is_valid_github_username,
     reconcile_team_members,
 )
-from .log import log, log_err, log_ok, log_step
+from .log import add_preview_flag, log, log_err, log_ok, log_step
 
 ROLE_TEAM = {
     "instructors": INSTRUCTORS_TEAM,
@@ -760,10 +760,10 @@ def sync(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report the team changes; make none (default).")
     args = parser.parse_args()
 
-    errors = sync(args.course_org, dry_run=args.dry_run)
+    errors = sync(args.course_org, dry_run=args.preview)
     if errors:
         log_err(f"{errors} errors during sync")
         return 1

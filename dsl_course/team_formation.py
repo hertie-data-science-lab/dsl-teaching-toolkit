@@ -53,7 +53,7 @@ per-person detail and goes nowhere but `log.log_person`.
 
 Usage:
     python3 -m dsl_course.team_formation --course-org Course-Org \\
-        --semester-org hertie-dsl-demo-f2026 [--assignment assignment-2] [--no-dry-run]
+        --semester-org hertie-dsl-demo-f2026 [--assignment assignment-2] [--no-preview]
 """
 
 from __future__ import annotations
@@ -71,7 +71,16 @@ from .discovery import course_name_of, semester_is_live, welcome_issue_url
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
 from .grades import self_select_keys
-from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
+from .log import (
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_step,
+    plural,
+)
 
 # What the semester LOSES while somebody is still unteamed, and what would put it right -
 # this fault's own two sentences, in the voice of `faults.CONSEQUENCE` and `faults._FIX`.
@@ -842,7 +851,7 @@ def _preview(
         dry_run=True,
         sample=sample_message(semester_org, course_name)[1],
     )
-    log_ok("DRY-RUN - nothing claimed")
+    log_ok("PREVIEW - nothing claimed")
 
 
 def notify_windows(
@@ -1127,13 +1136,10 @@ def main() -> int:
         ),
     )
     # Default ON, as Distribute grades' flag is and for its reason: the rendered workflow
-    # passes --dry-run / --no-dry-run explicitly, so a bare local invocation cannot mail a
+    # passes --preview / --no-preview explicitly, so a bare local invocation cannot mail a
     # semester by accident.
-    parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Preview the messages; claim nothing, send nothing (default).",
+    add_preview_flag(
+        parser, "Preview the messages; claim nothing, send nothing (default)."
     )
     args = parser.parse_args()
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
@@ -1151,7 +1157,7 @@ def main() -> int:
             args.semester_org,
             datetime.now(UTC),
             only=args.assignment,
-            dry_run=args.dry_run,
+            dry_run=args.preview,
         )
     except RuntimeError as exc:
         log_err(str(exc))

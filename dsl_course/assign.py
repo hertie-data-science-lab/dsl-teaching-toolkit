@@ -110,6 +110,7 @@ from .gh_contents import (
 from .ghcli import GIT_ENV, bot_login, clone, gh, git
 from .log import (
     Summary,
+    add_preview_flag,
     log,
     log_err,
     log_err_person,
@@ -695,7 +696,7 @@ def patch_released(
     _key, semester_slug = target
     log_step(
         f"Patching {semester_slug} in {semester_org} from {master_org}/{template}:{path}"
-        f"{' (dry run)' if dry_run else ''}"
+        f"{' (preview)' if dry_run else ''}"
     )
     corrected = template_files(master_org, template, path)
     # The second outbound copy from a course template, and the one with no
@@ -766,7 +767,7 @@ def patch_released(
         log(f"  {len(corrected)} file(s) -> {len(targets)} submission repo(s)")
     if dry_run:
         log_ok(
-            f"dry run: {len(corrected)} file(s) would be patched into {len(targets)} "
+            f"preview: {len(corrected)} file(s) would be patched into {len(targets)} "
             f"submission repo(s) and into {semester_slug}; overwrite is "
             f"{'ON' if overwrite else 'OFF'}"
         )
@@ -1270,12 +1271,11 @@ def main() -> int:
         action="store_true",
         help="Patch mode: replace the file even where the student has changed it.",
     )
-    # Tri-state on purpose. Provisioning has always defaulted to a REAL run (an operator
-    # who pressed Release assignment meant it), and patching defaults to a preview like
-    # every other button that writes into student repos. `None` is "the caller said
-    # nothing", so each mode keeps its own default and `--no-dry-run` reaches both.
-    parser.add_argument(
-        "--dry-run", action=argparse.BooleanOptionalAction, default=None
+    # Both modes preview unless told `--no-preview` (decision 0012): handing out creates a
+    # repo per student, and patching commits into every one of them.
+    add_preview_flag(
+        parser,
+        "List the repos that would be created or patched; change nothing (default).",
     )
     args = parser.parse_args()
     when = args.solution_datetime.strip().lower()
@@ -1296,7 +1296,7 @@ def main() -> int:
                 args.patch_path,
                 slug=args.slug,
                 overwrite=args.overwrite,
-                dry_run=True if args.dry_run is None else args.dry_run,
+                dry_run=args.preview,
             )
         rc, _changed = provision_all(
             args.master_org,
@@ -1304,7 +1304,7 @@ def main() -> int:
             args.semester_org,
             roster_path=args.roster,
             solution=when == SOLUTION_NOW,
-            dry_run=bool(args.dry_run),
+            dry_run=args.preview,
             slug=args.slug,
             # ONE listing of the semester for this press, taken here because there is no
             # tick above to have taken it: every repo question below is answered off it,
@@ -1367,10 +1367,10 @@ _Released = tuple[dict[str, int], bool, list[tuple[str, list[str], str | None]],
 
 
 def _dry_run_semester_template(semester_org: str, slug: str) -> None:
-    """The line every arm that CREATES repos prints first in a dry run: whatever shape
+    """The line every arm that CREATES repos prints first in a preview: whatever shape
     follows, the semester-side template is frozen before it. One spelling, so the two arms
     cannot describe the same step differently."""
-    log(f"    DRY-RUN  semester template {semester_org}/{slug}")
+    log(f"    PREVIEW  semester template {semester_org}/{slug}")
 
 
 def _release_external(
@@ -1389,7 +1389,7 @@ def _release_external(
         # which is where the teaching team reads it from anyway.
         log(f"  (no model solution to push - {slug} creates no submission repos)")
     if dry_run:
-        log(f"    DRY-RUN  no repos; record the handout and the sheet for {what}")
+        log(f"    PREVIEW  no repos; record the handout and the sheet for {what}")
         return None
     # There is no new repo here to mark a late onboarder's tick as having done something,
     # so the sheet in the tail decides it instead.
@@ -1430,7 +1430,7 @@ def _release_shared(
         )
     if dry_run:
         _dry_run_semester_template(semester_org, slug)
-        log(f"    DRY-RUN  {semester_org}/{drop_box}  <- push for {what}")
+        log(f"    PREVIEW  {semester_org}/{drop_box}  <- push for {what}")
         return None
     drop_box_ok, changed = ensure_drop_box(
         semester_template,
@@ -1522,7 +1522,7 @@ def _release_units(
         for repo, handles, team in units:
             via = f" (team {team})" if team else ""
             log_person(
-                f"    DRY-RUN  {semester_org}/{repo}{via}  <- "
+                f"    PREVIEW  {semester_org}/{repo}{via}  <- "
                 f"{', '.join('@' + h for h in handles)}"
             )
         return None
@@ -1835,7 +1835,7 @@ def provision_all(
             listing=listing,
         )
     if released is None:
-        # A dry run: it has said what it would create, and created none.
+        # A preview: it has said what it would create, and created none.
         units_phrase = plural(len(sheet_units), "team" if group else "student")
         return Summary(
             f"Preview: {slug} would be handed out to {units_phrase}.",

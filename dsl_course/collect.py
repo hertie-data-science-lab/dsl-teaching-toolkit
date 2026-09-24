@@ -85,7 +85,7 @@ with `testthat` (see docs/10) without this module learning a word of R.
 Usage:
     python3 -m dsl_course.collect \\
         --master-org COURSE --course-source-repo assignment-1-f2026 \\
-        --semester-org SEMESTER --deadline 2026-10-15 [--group] [--dry-run]
+        --semester-org SEMESTER --deadline 2026-10-15 [--group] [--preview]
 """
 
 from __future__ import annotations
@@ -149,7 +149,7 @@ from .grades import (
     parse_grading_spec,  # noqa: F401 - re-exported; `collect` no longer parses it itself
     sheet_spec,
 )
-from .log import log, log_err, log_ok, log_person, log_skip, log_step
+from .log import add_preview_flag, log, log_err, log_ok, log_person, log_skip, log_step
 from .repos import default_branch, repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
@@ -1909,7 +1909,7 @@ def sync_sheet(
                 f"derived from the due date on; nothing to refresh yet"
             )
     elif dry_run:
-        log(f"    DRY-RUN  {path} ({status})")
+        log(f"    PREVIEW  {path} ({status})")
     else:
         # The message carries counts, never a handle or a team name: classroom-config is
         # private, but its commit messages are quoted back in public run logs.
@@ -3028,7 +3028,7 @@ def export_grader_documents(
     if not targets:
         return
     if dry_run:
-        log(f"    DRY-RUN would archive {len(targets)} grader copy/copies for {slug}")
+        log(f"    PREVIEW would archive {len(targets)} grader copy/copies for {slug}")
         return
     log_step(f"Grader copies for {slug}: {len(targets)} target(s)")
     snapshots = load_snapshots(semester_org, slug)
@@ -3473,7 +3473,7 @@ def collect(
                     pin = f"snapshot {(snapshots[frozen_at] or 'none')[:8]}"
                 else:
                     pin = "no snapshot row -> zero"
-                log(f"    DRY-RUN would grade {target_ref(repo)} (pin {pin})")
+                log(f"    PREVIEW would grade {target_ref(repo)} (pin {pin})")
                 continue
             if snapshots is not None and frozen_at not in snapshots:
                 # The snapshot file exists but never recorded THIS repo (provisioned after the
@@ -3675,7 +3675,7 @@ def main() -> int:
         default="",
         help="Which assignment in the semester's schedule.yml this is, when two of them hand out from the same template (each with its own semester_dest_repo). Leave empty otherwise.",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report what would be collected; write nothing (default).")
     args = parser.parse_args()
     if args.refresh_only:
         return refresh_assignment_sheet(
@@ -3683,7 +3683,7 @@ def main() -> int:
             args.template,
             args.semester_org,
             group=args.group,
-            dry_run=args.dry_run,
+            dry_run=args.preview,
             slug=args.slug,
         )
     return collect(
@@ -3692,7 +3692,7 @@ def main() -> int:
         args.semester_org,
         args.deadline,
         group=args.group,
-        dry_run=args.dry_run,
+        dry_run=args.preview,
         slug=args.slug,
     )
 

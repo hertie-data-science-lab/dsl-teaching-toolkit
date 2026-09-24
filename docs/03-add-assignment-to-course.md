@@ -135,7 +135,7 @@ Three ways to say it, and you can mix them in one file:
 | `solution=TRUE` | an Rmd/qmd chunk option | the chunk, its name and its other options, with `# YOUR CODE HERE` for a body |
 
 Then run **Derive student version** (course org → `.github` → Actions), pick the template,
-and untick `dry_run`. It reads `solution/` on the `solution` branch, strips the fences, and
+and untick `preview`. It reads `solution/` on the `solution` branch, strips the fences, and
 writes the result onto `main` - `solution/starter.ipynb` becomes `starter.ipynb`, which is
 what template-generate hands each student. It never writes to `solution`.
 
@@ -149,7 +149,7 @@ Three things it refuses to do, because each one publishes the answer:
   notebook, and its outputs are the answers in print. Cells it did not change keep theirs,
   so a worked example in the brief still shows its output.
 
-`dry_run` is on by default and prints the file list and the counts, never a line of the
+`preview` is on by default and prints the file list and the counts, never a line of the
 content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are derived; anything else under
 `solution/` stays where it is.
 

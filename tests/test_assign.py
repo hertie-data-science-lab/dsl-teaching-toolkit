@@ -1064,7 +1064,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     )
     captured = capsys.readouterr()
     assert rc == 0
-    # The DRY-RUN provisioning lines name their members as `@handle`.
+    # The PREVIEW provisioning lines name their members as `@handle`.
     assert "@ada-l" in captured.out  # the one valid, enrolled, onboarded handle
     assert "@stranger-x" not in captured.out  # never provisioned
     assert "@eve-e" not in captured.out  # the auditor's handle is not a team member
@@ -2487,13 +2487,10 @@ def _cli(monkeypatch, *argv: str) -> dict:
     return seen
 
 
-def test_each_mode_keeps_its_own_default_when_the_flag_is_not_given(monkeypatch):
-    # `--dry-run` is tri-state (BooleanOptionalAction, default None) so the two modes can
-    # disagree about what "the caller said nothing" means. Provisioning has always run FOR
-    # REAL - an operator who pressed Release assignment meant it - and a `None` reaching
-    # `dry_run=` as a truthy "unset" would turn every handout into a no-op that reports
-    # success. Patching writes into repos students already hold, so it previews.
-    assert _cli(monkeypatch)["dry_run"] is False
+def test_both_modes_preview_when_the_flag_is_not_given(monkeypatch):
+    # Preview is the default everywhere (decision 0012): handing out creates a repo per
+    # student and patching commits into every one of them, so acting takes --no-preview.
+    assert _cli(monkeypatch)["dry_run"] is True
     assert _cli(monkeypatch, "--patch-path", "starter.py")["dry_run"] is True
 
 
@@ -2503,7 +2500,7 @@ def test_the_release_button_lists_the_semester_once_for_itself(monkeypatch):
     assert _cli(monkeypatch)["listing"] == {"listed": "SEMESTER"}
 
 
-@pytest.mark.parametrize("flag, want", [("--dry-run", True), ("--no-dry-run", False)])
+@pytest.mark.parametrize("flag, want", [("--preview", True), ("--no-preview", False)])
 def test_an_explicit_flag_reaches_both_modes(monkeypatch, flag, want):
     assert _cli(monkeypatch, flag)["dry_run"] is want
     assert _cli(monkeypatch, flag, "--patch-path", "starter.py")["dry_run"] is want

@@ -49,7 +49,16 @@ from .course import (
 from .fs import copy_tree, union_deny
 from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
-from .log import Summary, log, log_err, log_ok, log_step, log_withheld, plural
+from .log import (
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_step,
+    log_withheld,
+    plural,
+)
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
 from .repos import (
     allow_forking,
@@ -757,11 +766,9 @@ def main() -> int:
         help="Destination path(s), paired with --course-source-path by index "
         "(default: mirror each --course-source-path)",
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the resolved source -> dest path pairs and exit without cloning or "
-        "copying anything (the cheapest check that a release will land where you expect).",
+    add_preview_flag(
+        parser,
+        "Print the resolved source -> dest path pairs and exit without cloning or copying anything (default).",
     )
     args = parser.parse_args()
 
@@ -775,9 +782,9 @@ def main() -> int:
         log_err(f"{e}.")
         return 1
 
-    if args.dry_run:
+    if args.preview:
         log_step(
-            f"DRY-RUN release {len(pairs)} path(s) from "
+            f"PREVIEW release {len(pairs)} path(s) from "
             f"{args.source_org}/{args.course_source_repo} -> {args.semester_org}/{dest_repo}"
         )
         # The cheap structural checks need no clone, so catch them here: a source path that
@@ -800,7 +807,7 @@ def main() -> int:
             # release differently from the release is worse than no dry-run.
             landing = (dest or src).strip("/")
             log(
-                f"  DRY-RUN  {args.course_source_repo}/{src} -> "
+                f"  PREVIEW  {args.course_source_repo}/{src} -> "
                 f"{dest_repo}/{landing or '(repo root)'}"
             )
         if unsafe:

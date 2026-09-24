@@ -526,7 +526,7 @@ def send_bulk(
         if sample:
             log(SAMPLE_HEADER)
             log(sample)
-        log_ok(f"DRY-RUN previewed {len(batch)} message(s) - nothing sent")
+        log_ok(f"PREVIEW previewed {len(batch)} message(s) - nothing sent")
         preflight()
         return [a for msg in batch for a in msg.recipients]
     return [a for i in send_indexed(batch, html) for a in batch[i].recipients]

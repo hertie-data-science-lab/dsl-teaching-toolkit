@@ -563,7 +563,7 @@ def test_a_dry_run_previews_and_sends_nothing(wired, capsys):
         notify.Unsent()
     )
     assert sent.batches == []
-    assert "[dry-run] would mail 1 recipient(s)" in capsys.readouterr().out
+    assert "[preview] would mail 1 recipient(s)" in capsys.readouterr().out
 
 
 def test_a_transport_that_raised_is_counted_not_propagated(monkeypatch, wired, capsys):

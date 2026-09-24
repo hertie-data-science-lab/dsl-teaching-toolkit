@@ -113,11 +113,15 @@ def test_without_a_transport_no_code_changes(monkeypatch):
     assert sent == [] and written == []
 
 
-def test_the_cli_refuses_a_preview_of_the_ordinary_send(monkeypatch, capsys):
-    monkeypatch.setattr("sys.argv", ["enrol_codes", "--semester-org", "C", "--dry-run"])
-    with pytest.raises(SystemExit) as refused:
-        enrol_codes.main()
-    assert refused.value.code == 2
+def test_a_preview_of_the_ordinary_send_sends_nothing(monkeypatch, capsys):
+    # The roster send has no preview of its own, so previewing it (the default) sends
+    # nothing at all: only --no-preview acts.
+    monkeypatch.setattr(
+        enrol_codes, "run", lambda org: pytest.fail("a preview must not send")
+    )
+    monkeypatch.setattr("sys.argv", ["enrol_codes", "--semester-org", "C", "--preview"])
+    assert enrol_codes.main() == 0
+    assert "nothing sent" in capsys.readouterr().out
 
 
 def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):

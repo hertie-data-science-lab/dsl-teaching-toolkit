@@ -17,7 +17,7 @@ syllabus is written before the term starts, when nothing has shipped yet.
 
 Usage:
     python3 -m dsl_course.syllabus --course-org COURSE --semester-org SEMESTER \\
-        --course-source-repo course-materials-f2026 [--write]
+        --course-source-repo course-materials-f2026 [--no-preview]
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import sys
 from . import schedule
 from .course import SYLLABUS_SESSIONS_FILE, session_dirs
 from .gh_contents import get_file_content, put_file, repo_tree
-from .log import Summary, log, log_err, log_ok, log_step, plural
+from .log import Summary, add_preview_flag, log, log_err, log_ok, log_step, plural
 from .readings import demote_headings, readings_block
 from .repos import default_branch
 from .schedule_plan import READINGS_SECTION, planned_sessions
@@ -114,10 +114,8 @@ def main() -> int:
     ap.add_argument("--course-org", required=True)
     ap.add_argument("--semester-org", required=True)
     ap.add_argument("--course-source-repo", required=True)
-    ap.add_argument(
-        "--write",
-        action="store_true",
-        help=f"also commit the block to {SYLLABUS_SESSIONS_FILE} in the source repo",
+    add_preview_flag(
+        ap, "Print the block; commit nothing to the source repo (default)."
     )
     a = ap.parse_args()
 
@@ -135,8 +133,10 @@ def main() -> int:
     log(f"\n{body}")
     counts = {"sessions": sessions}
     listed = plural(sessions, "session")
-    if not a.write:
-        log_ok(f"{sessions} session(s) - paste the block above, or re-run with --write")
+    if a.preview:
+        log_ok(
+            f"{sessions} session(s) - paste the block above, or re-run with --no-preview"
+        )
         return Summary(
             f"Built the session list: {listed}; nothing was written.",
             counts,

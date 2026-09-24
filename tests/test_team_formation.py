@@ -1374,7 +1374,7 @@ def test_the_press_previews_by_default(semester, post, plan, capsys):
     plan()
     assert team_formation.run(COURSE, SEMESTER, INSIDE) == 0
     assert rec.attempts == [] and sender.batches == []
-    assert "DRY-RUN" in capsys.readouterr().out
+    assert "PREVIEW" in capsys.readouterr().out
 
 
 def test_the_overnight_hold_applies_to_a_press_too(semester, post, plan, capsys):
@@ -1426,7 +1426,7 @@ def test_the_cli_refuses_an_archived_semester(pressed, monkeypatch):
     # a team in a term that is over. Green, as every other sweep treats one, and refused
     # BEFORE the semester is read.
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)
-    _argv(monkeypatch, "--no-dry-run")
+    _argv(monkeypatch, "--no-preview")
     assert team_formation.main() == 0
     assert pressed == []
 
@@ -1443,7 +1443,7 @@ def test_the_cli_previews_unless_it_is_told_not_to(pressed, monkeypatch):
 
 def test_the_cli_sends_for_real_and_narrows_only_when_asked(pressed, monkeypatch):
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: False)
-    _argv(monkeypatch, "--assignment", "assignment-2", "--no-dry-run")
+    _argv(monkeypatch, "--assignment", "assignment-2", "--no-preview")
     assert team_formation.main() == 0
     assert pressed == [
         {"course": COURSE, "semester": SEMESTER, "only": "assignment-2", "dry": False}

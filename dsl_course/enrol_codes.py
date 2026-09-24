@@ -20,12 +20,12 @@ org. That path passes `--dispatched-by`, because its semester name is untrusted 
 
 The other caller is the console's "send new codes": `--resend-unjoined` mints a NEW code
 for every roster row without a `github_handle`, so the old codes stop working, and emails
-them. It previews with `--dry-run`, which counts and changes nothing (`resend_unjoined`).
+them. It previews with `--preview`, which counts and changes nothing (`resend_unjoined`).
 
 Usage:
     python3 -m dsl_course.enrol_codes --semester-org hertie-dsl-demo-f2026
     python3 -m dsl_course.enrol_codes --semester-org hertie-dsl-demo-f2026 \\
-        --resend-unjoined [--dry-run]
+        --resend-unjoined [--preview]
     python3 -m dsl_course.enrol_codes --semester-org hertie-dsl-demo-f2026 \\
         --dispatched-by hertie-dsl-demo-course-e1234
 """
@@ -53,7 +53,16 @@ from .discovery import (
 )
 from .faults import Unusable
 from .gh_contents import get_file_with_sha, put_file, read_csv
-from .log import Summary, log_err, log_ok, log_person, log_step, plural
+from .log import (
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_step,
+    plural,
+)
 
 # No ambiguous characters (0/O, 1/l/I) so a student can read the code off an email.
 _ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -703,14 +712,15 @@ def main() -> int:
         help="Send a NEW code to every row without a github_handle; the old codes stop "
         "working. See resend_unjoined.",
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="With --resend-unjoined: count who would get a new code, change nothing.",
+    add_preview_flag(
+        parser,
+        "With --resend-unjoined: count who would get a new code, change nothing (default).",
     )
     args = parser.parse_args()
-    if args.dry_run and not args.resend_unjoined:
-        parser.error("--dry-run previews --resend-unjoined only")
+    if args.preview and not args.resend_unjoined:
+        # The roster send has no preview of its own: a preview of it sends nothing.
+        log("  [preview] nothing sent - sending codes acts only with --no-preview")
+        return 0
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
     # Actions log a one-line error beats a traceback, and the run still goes red.
     try:
@@ -725,15 +735,15 @@ def main() -> int:
             return 0
         counts = None
         if args.resend_unjoined:
-            outcome, counts = resend_unjoined(args.semester_org, dry_run=args.dry_run)
+            outcome, counts = resend_unjoined(args.semester_org, dry_run=args.preview)
         else:
             outcome = run(args.semester_org)
         rc = int(reds_the_run(outcome))
         if counts is not None:
-            rc = new_codes_summary(counts, args.dry_run, rc)
+            rc = new_codes_summary(counts, args.preview, rc)
         # Dispatched by a roster push: the codes just sent change the semester's status.
         # The course org is known only on that path, and the write is not counted.
-        if args.dispatched_by and not args.dry_run:
+        if args.dispatched_by and not args.preview:
             status.refresh(args.dispatched_by, args.semester_org)
         return rc
     except RuntimeError as exc:

@@ -2272,7 +2272,9 @@ def test_main_all_semesters_with_none_registered_is_a_noop(monkeypatch):
     # email to the bot owner) every hour.
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", lambda org: [])
     monkeypatch.setattr(
-        sys, "argv", ["scheduler", "--course-org", "Course-Org", "--all-semesters"]
+        sys,
+        "argv",
+        ["scheduler", "--course-org", "Course-Org", "--all-semesters", "--no-preview"],
     )
     assert scheduler.main() == 0
 
@@ -2571,7 +2573,7 @@ def test_all_semesters_loop_survives_one_semesters_raised_failure(monkeypatch, c
     monkeypatch.setattr(scheduler, "run", fake_run)
     monkeypatch.setattr(
         "sys.argv",
-        ["scheduler", "--course-org", "Course-Org", "--all-semesters"],
+        ["scheduler", "--course-org", "Course-Org", "--all-semesters", "--no-preview"],
     )
     # Semester-A raises, Semester-B must still run, and the batch reports failure.
     assert scheduler.main() == 1
@@ -2633,6 +2635,7 @@ def test_skip_autograde_releases_without_grading(monkeypatch):
             "--skip-autograde",
             "--now",
             WHEN.isoformat(),
+            "--no-preview",
         ],
     )
     assert scheduler.main() == 0
@@ -2658,6 +2661,7 @@ def test_autograde_only_grades_without_releasing_anything(monkeypatch):
             "--autograde-only",
             "--now",
             WHEN.isoformat(),
+            "--no-preview",
         ],
     )
     assert scheduler.main() == 0
@@ -2689,6 +2693,7 @@ def test_autograde_only_waits_for_the_snapshot_file(monkeypatch):
             "--autograde-only",
             "--now",
             "2026-11-01",
+            "--no-preview",
         ],
     )
     monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
@@ -2712,6 +2717,7 @@ def test_the_two_phase_flags_are_refused_together(monkeypatch):
             "--all-semesters",
             "--skip-autograde",
             "--autograde-only",
+            "--no-preview",
         ],
     )
     assert scheduler.main() == 1
@@ -2736,6 +2742,7 @@ def _all_semesters_argv(monkeypatch, *extra: str, now: datetime = WHEN) -> None:
             "--skip-autograde",
             "--now",
             now.isoformat(),
+            "--no-preview",
             *extra,
         ],
     )
@@ -2771,7 +2778,7 @@ def test_a_dry_run_never_reads_or_writes_the_cadence(monkeypatch, cadence_calls)
     monkeypatch.setattr(
         scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
-    _all_semesters_argv(monkeypatch, "--dry-run")
+    _all_semesters_argv(monkeypatch, "--preview")
     assert scheduler.main() == 0
     assert cadence_calls["fetch_runs"] == []
     assert cadence_calls["report_course"] == cadence_calls["report_semester"] == []
@@ -2796,6 +2803,7 @@ def test_the_autograde_job_never_touches_the_cadence(monkeypatch, cadence_calls)
             "--autograde-only",
             "--now",
             WHEN.isoformat(),
+            "--no-preview",
         ],
     )
     assert scheduler.main() == 0
@@ -2824,6 +2832,7 @@ def test_a_single_semester_invocation_never_touches_the_cadence(
             "Semester-A",
             "--now",
             WHEN.isoformat(),
+            "--no-preview",
         ],
     )
     assert scheduler.main() == 0
@@ -2919,7 +2928,7 @@ def test_list_semesters_prints_json_and_nothing_else(monkeypatch, capsys):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["scheduler", "--course-org", "Course-Org", "--list-semesters"],
+        ["scheduler", "--course-org", "Course-Org", "--list-semesters", "--no-preview"],
     )
     assert scheduler.main() == 0
     assert json.loads(capsys.readouterr().out) == ["Semester-A", "Semester-B"]
@@ -2936,7 +2945,9 @@ def test_list_semesters_keeps_a_retry_notice_off_stdout(monkeypatch, capsys):
 
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", noisy)
     monkeypatch.setattr(
-        sys, "argv", ["scheduler", "--course-org", "Course-Org", "--list-semesters"]
+        sys,
+        "argv",
+        ["scheduler", "--course-org", "Course-Org", "--list-semesters", "--no-preview"],
     )
     assert scheduler.main() == 0
     out = capsys.readouterr()
@@ -2955,7 +2966,9 @@ def test_a_semester_listing_that_cannot_be_read_says_so_and_goes_red(
         raise RuntimeError("gh: Internal Server Error (HTTP 500)")
 
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", boom)
-    monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
+    monkeypatch.setattr(
+        sys, "argv", ["scheduler", "--course-org", "Course-Org", flag, "--no-preview"]
+    )
     assert scheduler.main() == 1
     out = capsys.readouterr()
     assert "[err] could not list semesters for Course-Org" in out.err
@@ -2977,7 +2990,9 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
 
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", boom)
     monkeypatch.setattr(scheduler, "_preflight_course", lambda *a: 0)
-    monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
+    monkeypatch.setattr(
+        sys, "argv", ["scheduler", "--course-org", "Course-Org", flag, "--no-preview"]
+    )
     assert scheduler.main() == 0
     out = capsys.readouterr()
     assert "malformed semester registry" in out.err
@@ -3830,6 +3845,7 @@ def test_the_course_config_is_checked_before_the_semester_listing(monkeypatch):
             "Course-Org",
             "--all-semesters",
             "--skip-autograde",
+            "--no-preview",
         ],
     )
     assert scheduler.main() == 1
@@ -3856,6 +3872,7 @@ def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
             "Course-Org",
             "--all-semesters",
             "--autograde-only",
+            "--no-preview",
         ],
     )
     assert scheduler.main() == 0
@@ -3871,7 +3888,13 @@ def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
     )
     monkeypatch.setattr(
         "sys.argv",
-        ["scheduler", "--course-org", "Course-Org", "--check-course-config"],
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--check-course-config",
+            "--no-preview",
+        ],
     )
     assert scheduler.main() == 0
     assert [a[0] for a in called] == ["Course-Org"]
@@ -3897,7 +3920,8 @@ def test_a_closed_out_semester_is_not_released_into(monkeypatch, capsys):
         scheduler, "run", lambda course, semester, now, **k: seen.append(semester) or 0
     )
     monkeypatch.setattr(
-        "sys.argv", ["scheduler", "--course-org", "Course-Org", "--all-semesters"]
+        "sys.argv",
+        ["scheduler", "--course-org", "Course-Org", "--all-semesters", "--no-preview"],
     )
     assert scheduler.main() == 0
     assert seen == ["Semester-B"]
@@ -3918,7 +3942,14 @@ def test_the_break_glass_single_semester_run_skips_a_closed_out_semester(monkeyp
     )
     monkeypatch.setattr(
         "sys.argv",
-        ["scheduler", "--course-org", "Course-Org", "--semester-org", "Semester-A"],
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--semester-org",
+            "Semester-A",
+            "--no-preview",
+        ],
     )
     assert scheduler.main() == 0
 
@@ -3926,7 +3957,15 @@ def test_the_break_glass_single_semester_run_skips_a_closed_out_semester(monkeyp
 def _one_semester_argv(monkeypatch, semester, *extra):
     monkeypatch.setattr(
         "sys.argv",
-        ["scheduler", "--course-org", "Course-Org", "--semester-org", semester, *extra],
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--semester-org",
+            semester,
+            "--no-preview",
+            *extra,
+        ],
     )
 
 
@@ -4536,6 +4575,6 @@ def test_the_dry_run_ends_with_its_decisions_and_a_real_run_takes_none(
     out = capsys.readouterr().out
     line = "Decision: w1 not released: ALREADY_DONE Every copy is out."
     assert line in out
-    assert out.rindex("DRY-RUN  [") < out.index(line)
+    assert out.rindex("PREVIEW  [") < out.index(line)
     scheduler.run("Course-Org", "Semester-Org", now, dry_run=False, autograde=False)
     assert asked == [True]

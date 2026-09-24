@@ -656,7 +656,7 @@ def _deliver(
         ):
             copies.append(maintainer)
         if dry_run:
-            log(f"  [dry-run] would mail {len(routed.to)} recipient(s): {subject}")
+            log(f"  [preview] would mail {len(routed.to)} recipient(s): {subject}")
             for to in routed.to:
                 log_person(f"    would mail {mailer.mask_email(to)}")
             continue

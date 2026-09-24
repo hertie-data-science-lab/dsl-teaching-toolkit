@@ -912,7 +912,7 @@ def sync(
     if not faults:
         if open_issue:
             if dry_run:
-                log_step(f"[dry-run] would close the {digest.file} digest in {repo}")
+                log_step(f"[preview] would close the {digest.file} digest in {repo}")
                 return DigestResult(issue_url=url)
             # The body first, and with an empty state marker: see `cleared_body`. A write
             # that failed leaves the issue open with its old body, which is the state this
@@ -1012,7 +1012,7 @@ def sync(
     if dry_run:
         moved = changed.appeared + changed.escalated + changed.cleared
         log_step(
-            f"[dry-run] would {'update' if open_issue else 'open'} the {digest.file} "
+            f"[preview] would {'update' if open_issue else 'open'} the {digest.file} "
             f"digest in {repo} ({len(faults)} fault(s)"
             + (f"; comment: {len(moved)} transition(s))" if note else ")")
         )

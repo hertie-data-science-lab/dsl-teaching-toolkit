@@ -395,7 +395,7 @@ def _dispatch_scheduler(name: str) -> Stage:
     passes. Each dispatch reaches both of the workflow's jobs: the release job walks every
     semester, the autograde job one matrix leg per semester."""
     drive.wait_for_idle(CONTROL_REPO, SCHEDULED_RELEASE)
-    run_id = drive.dispatch(CONTROL_REPO, SCHEDULED_RELEASE, {"dry_run": False})
+    run_id = drive.dispatch(CONTROL_REPO, SCHEDULED_RELEASE, {"preview": False})
     conclusion = drive.wait_for_run(CONTROL_REPO, run_id)
     return Stage(
         name,
@@ -670,7 +670,7 @@ def _distribute(name: str, dry_run: bool) -> Stage:
     run_id = drive.dispatch(
         CONTROL_REPO,
         DISTRIBUTE_GRADES,
-        {"semester_org": SEMESTER_ORG, "dry_run": dry_run, "silent": True},
+        {"semester_org": SEMESTER_ORG, "preview": dry_run, "notify": False},
     )
     return Stage(
         name,
@@ -804,7 +804,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
         {
             "semester_org": SEMESTER_ORG,
             "course_source_repo": private_slug,
-            "dry_run": False,
+            "preview": False,
         },
     )
     stages["collect_button"] = Stage(
@@ -879,7 +879,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
         },
     )
 
-    # 13. Distribute, dry run: it must read everything and change nothing. The shared
+    # 13. Distribute, preview: it must read everything and change nothing. The shared
     #     state is recorded FIRST, both to compare against and to hand back at teardown.
     stages["shared_before"] = Stage("shared_before", detail=_shared_state(who))
     stages["distribute_dry"] = _distributed("distribute_dry", True, run_id, who)

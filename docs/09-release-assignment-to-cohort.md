@@ -33,7 +33,7 @@ Four boxes, in the order you answer them: `course_source_repo`, `semester_org`, 
 branch into each student repo - the model answer and rubric, which is not returning marks
 and cannot be undone for reuse). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
-- `dry_run` (**off** by default; list the repos that *would* be created).
+- `preview` (**on** by default; list the repos that *would* be created - untick it to hand out).
 
 It asks nothing about the assignment itself: individual or group is the template's own
 `grading_config.yml` - see [Group or individual?](#group-or-individual).
@@ -139,7 +139,7 @@ Which of the two an assignment uses is its own declaration - `team_formation` in
 
 **The students are emailed** - the only mail the toolkit sends off a clock rather than off something you did. When the window opens, every enrolled, onboarded student with no team for that assignment gets one plain message, addressed to them by name and naming the assignment as the site does (`Assignment 3: Project`): the cap, the day formation closes, the link to the form and the link to the assignment's page. Anyone still without a team 48 hours before it shuts gets one more, and a student who onboards mid-window is asked on the next tick. Nothing goes out between 23:00 and 07:00 in the semester's timezone - the message waits for the morning, while the lock, the form and the site still turn at the window's own minute - nothing is said twice (`team-formation/mailed.csv` in `classroom-config` is the record), and a semester whose course org has no `GRAPH_*` mail secrets is sent nothing and has nothing recorded against it. It does not say whether working alone is allowed - that is yours to tell them.
 
-**Open team formation** (the course org's Actions tab) sends that same message on your own say-so - useful right after you announce the assignment in class, or once a semester's `GRAPH_*` secrets are finally set. Pick a semester, and optionally one `schedule.yml` assignment key; left empty it asks about every window open right now, and a key with no open window is an error rather than a quiet no-op. Same message on the same record, so a second press reaches only the students the first could not, and the overnight hold applies to a press exactly as it does to the clock. Dry run first.
+**Open team formation** (the course org's Actions tab) sends that same message on your own say-so - useful right after you announce the assignment in class, or once a semester's `GRAPH_*` secrets are finally set. Pick a semester, and optionally one `schedule.yml` assignment key; left empty it asks about every window open right now, and a key with no open window is an error rather than a quiet no-op. Same message on the same record, so a second press reaches only the students the first could not, and the overnight hold applies to a press exactly as it does to the clock. Preview first.
 
 **You hear about it too.** While anybody is still without a team, the semester's *schedule.yml* [digest issue](07-schedule-releases.md#the-digest-issue) carries a line on that assignment - counts only, never a name - and it gets louder as the window runs out, exactly like a source nobody has staged. A window that has stood open for a week with anybody still waiting is at least a warning, so you hear about it well before the last day. It does **not** go away when the window shuts: that is the moment the problem becomes permanent, so the line stays at its loudest rung until you fill the gaps in `teams.csv`, move the closing date to give the semester longer, or take the entry out of the plan. Standing there it says nothing new - no further comment, no further email - it simply does not report itself as fixed while those students still have no repo to hand into.
 
@@ -184,8 +184,8 @@ is what distributes the fix.
 2. Course org → `.github` → **Actions** → **Patch released assignment**. Inputs:
    `semester_org`, `course_source_repo` (the template), `path` (a file, or a folder to push
    whole), `slug` (only when two schedule entries hand out from this one template),
-   `overwrite` (default **off**) and `dry_run` (default **on**).
-3. Dry run first: it counts the repos it would touch and writes nothing.
+   `overwrite` (default **off**) and `preview` (default **on**).
+3. Preview first: it counts the repos it would touch and writes nothing.
 
 What a real run does:
 

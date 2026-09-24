@@ -145,7 +145,7 @@ def test_the_cli_succeeds_on_a_real_schedule(monkeypatch, capsys, wired):
             "H",
             "--course-source-repo",
             "cm",
-            "--write",
+            "--no-preview",
         ],
     )
     assert syllabus.main() == 0
@@ -177,7 +177,7 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
     assert preview.block.startswith("## Course sessions and readings")
     assert preview.counts == {"sessions": 2}
     assert preview.text == "Built the session list: 2 sessions; nothing was written."
-    _argv(monkeypatch, "--write")
+    _argv(monkeypatch, "--no-preview")
     wrote = syllabus.main()
     assert wrote == 0 and wrote.block == preview.block
     assert wrote.block in written[syllabus.SYLLABUS_SESSIONS_FILE]
@@ -188,7 +188,7 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
 
 def test_a_failed_write_still_shows_the_block(monkeypatch, wired):
     monkeypatch.setattr(syllabus, "put_file", lambda *a: False)
-    _argv(monkeypatch, "--write")
+    _argv(monkeypatch, "--no-preview")
     out = syllabus.main()
     assert out == 1 and out.block
     assert [r["code"] for r in out.reasons] == ["WRITE_FAILED"]

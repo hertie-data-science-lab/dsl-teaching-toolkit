@@ -54,7 +54,7 @@ from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login, membership_changes, reset_membership_changes
 from .grades import ensure_gradebooks, sync_team_lock
-from .log import Summary, log_err, log_ok, plural
+from .log import Summary, add_preview_flag, log_err, log_ok, plural
 from .welcome import refresh_join_team_form
 
 # What a semester's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -239,7 +239,7 @@ def main() -> int:
         action="store_true",
         help="Also reconcile roster/teams for every registered semester (not just --semester-org).",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report the team changes; make none (default).")
     args = parser.parse_args()
 
     # Fail fast on a missing/invalid token. Every gh failure below degrades to an
@@ -260,19 +260,19 @@ def main() -> int:
         args.course_org,
         semester_org=args.semester_org,
         all_semesters=args.all_semesters,
-        dry_run=args.dry_run,
+        dry_run=args.preview,
     )
     # A push to one semester's roster, teams or instructors.yml dispatches exactly this: the
     # semester's status.json follows the membership it just reconciled. Not counted - the
     # sync's exit code is the sync's - and `status.write` refuses a semester the course's
     # registry does not list, whatever the payload named.
-    if args.semester_org and not args.all_semesters and not args.dry_run:
+    if args.semester_org and not args.all_semesters and not args.preview:
         status.refresh(args.course_org, args.semester_org)
     if errors:
         log_err(f"{errors} errors during sync")
         return 1
     log_ok("Sync complete")
-    return access_summary(membership_changes(), args.dry_run)
+    return access_summary(membership_changes(), args.preview)
 
 
 def access_summary(changes: dict[str, int], dry_run: bool) -> Summary:

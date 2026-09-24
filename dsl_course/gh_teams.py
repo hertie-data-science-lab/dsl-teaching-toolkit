@@ -541,7 +541,7 @@ def reconcile_team_members(
     current_by_fold = {h.casefold(): h for h in current}
     for handle in sorted(_fold_diff(wanted_by_fold, current_by_fold)):
         if dry_run:
-            log_person(f"    DRY-RUN add {handle} -> {org}/{team}")
+            log_person(f"    PREVIEW add {handle} -> {org}/{team}")
             _CHANGES["added"] += 1
         elif add_team_member(org, team, handle):
             log_person(f"  [ok] {handle} -> {org}/{team}")
@@ -580,7 +580,7 @@ def reconcile_team_members(
                 )
                 continue
             if dry_run:
-                log_person(f"    DRY-RUN remove {handle} <- {org}/{team}")
+                log_person(f"    PREVIEW remove {handle} <- {org}/{team}")
                 _CHANGES["removed"] += 1
             elif remove_team_member(org, team, handle):
                 log_person(f"  [ok] removed {handle} from {org}/{team}")
