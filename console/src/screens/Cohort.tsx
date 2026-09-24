@@ -105,13 +105,13 @@ export function TermStrip({ status, rows, start, now }: { status: Status; rows: 
   );
 }
 
-/** A release as an operation names it; null while nothing is staged (no deploy block, so no source). */
+/** A release as an operation names it; null while there is nothing to release (no deploy block, so no source). */
 export function releaseRef(r: Release, all: Release[], tz: string, year: number): ReleaseRef | null {
   return r.source ? { id: r.id, ident: releaseIdent(r, all), title: r.title, when: fmtWhen(r.when, tz, year), source: r.source } : null;
 }
 
 /** The line a release with no deploy block shows instead of its actions. */
-export const NOTHING_STAGED = 'Nothing staged yet: this entry has no deploy block';
+export const NOTHING_TO_RELEASE = 'Nothing to release yet: this entry has no deploy block';
 
 function WeekItems({ status, p }: { status: Status; p: CohortProps }) {
   const tz = tzOf(status), releases = status.releases ?? [];
@@ -128,7 +128,7 @@ function WeekItems({ status, p }: { status: Status; p: CohortProps }) {
           chip = 'Release';
           cls = TYPE_CLASS[rel ? rel.type ?? 'release' : 'lecture'];
           const ident = rel ? releaseIdent(rel, releases) : it.title.split(':')[0];
-          detail = rel && !rel.source ? `${NOTHING_STAGED}.` : rel?.state === 'will_be_skipped' ? 'Will be skipped: its folder was not found.' : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
+          detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? 'Will be skipped: its folder was not found.' : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
           buttons = (
             <>
               {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${ident} early`} /> : null}

@@ -22,7 +22,7 @@ import { TIMEZONES } from '../tiers/course';
 import { Crumbs, EditFile, Help, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { Check } from '../ui/icons';
-import { NOTHING_STAGED, releaseRef } from './Cohort';
+import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -404,7 +404,7 @@ function View(p: ReadyProps) {
     const st = gone ? (
       <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
     ) : r.fault && r.block === 'releases' ? <><span class="st-chip skip">will be skipped</span><span class="st-note">Fix the folder first</span></>
-      : rel && !ref ? <><span class="st-note">{NOTHING_STAGED}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
+      : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
@@ -471,7 +471,7 @@ function View(p: ReadyProps) {
           </div>
           <div class="entry-foot">
             {rel ? (
-              !ref ? <div class="savebar"><span class="st-note">{NOTHING_STAGED}. Add a deploy above.</span></div>
+              !ref ? <div class="savebar"><span class="st-note">{NOTHING_TO_RELEASE}. Add a deploy above.</span></div>
               : rel.state === 'planned' ? <div class="savebar"><span class="footnote">Goes out at its time without you.</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small outline" label="Release early…" /></div>
               : rel.state === 'will_be_skipped' ? <div class="savebar"><span class="st-note">Fix the folder first; it cannot be released until it exists.</span></div>
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
@@ -573,7 +573,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <div class="page-head">
           <div>
             <h1><b>{ident}</b>: {rel.title}</h1>
-            <p class="lede">{NOTHING_STAGED}.</p>
+            <p class="lede">{NOTHING_TO_RELEASE}.</p>
           </div>
           <div class="actions"><a class="btn" href={`#schedule-${rel.id}`}>Edit entry</a></div>
         </div>

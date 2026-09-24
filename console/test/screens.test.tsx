@@ -202,17 +202,17 @@ describe('S6 schedule and S11 release', () => {
     kind: 'ready', sha: 's', stale: [],
     status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', type: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
   };
-  it('renders a release with no deploy block as nothing staged, with no Release early', () => {
+  it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
     expect(out).toContain('<b>Session 12</b>: Review');
     expect(out).toMatch(/<li class="trow term" data-entry="lecture-12"><span class="k">release<\/span>/);
-    expect(out).toContain('Nothing staged yet: this entry has no deploy block');
+    expect(out).toContain('Nothing to release yet: this entry has no deploy block');
     expect(out).toContain('href="#schedule-lecture-12"');
     expect(out).not.toContain('Release early');
   });
-  it('shows the nothing-staged page for a release with no source', () => {
+  it('shows the nothing-to-release page for a release with no source', () => {
     const t = text(<ReleaseScreen {...props({ loaded: unstaged, entry: 'lecture-12' })} />);
-    expect(t).toContain('Nothing staged yet: this entry has no deploy block.');
+    expect(t).toContain('Nothing to release yet: this entry has no deploy block.');
     expect(t).toContain('Edit entry');
     expect(t).not.toContain('Release early');
   });
