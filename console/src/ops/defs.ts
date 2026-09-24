@@ -2,7 +2,7 @@
 // the def for the thing on it (a release, an assignment, the cohort) and hands it to the
 // panel; the op name and args follow the registry (schemas/ops.json).
 
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ALWAYS, publishWebsite as publishTiers, releaseAdhoc as adhocTiers, releaseDest, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ALWAYS, publishWebsite as publishTiers, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
 import type { OpDef } from './session';
 
 export interface Scope {
@@ -53,8 +53,10 @@ export interface ReleaseRef {
   source: { repo: string; path: string };
 }
 
+// No Options: the engine rebuilds a schedule entry's source and destination from
+// schedule.yml (`console.entry_requests`), so a destination typed here would be dropped.
 function releaseDef(s: Scope, op: string, r: ReleaseRef, copy: Pick<OpDef, 'name' | 'intro' | 'verb' | 'running' | 'cancel' | 'where'>): OpDef {
-  return { ...base(s, op, r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, options: releaseDest(r.source.path), previewProposed: false };
+  return { ...base(s, op, r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, previewProposed: false };
 }
 
 export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {

@@ -11,6 +11,7 @@ import { AssignmentScreen, AssignmentsScreen, defaultTab } from '../src/screens/
 import { MarksOverviewScreen } from '../src/screens/Marking';
 import { gradebookWrites, readSheet, returnedOn } from '../src/model/marks';
 import type { CohortProps } from '../src/screens/types';
+import { releaseAdhoc, releaseAgain, releaseEarly, releaseNow } from '../src/ops/defs';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
@@ -132,5 +133,17 @@ describe('the Assignments index', () => {
     expect(out).toContain('1 formed<br/><span class="footnote">1 without a team</span>');
     expect(out).toContain('<td class="num">40 / 48</td>');
     expect(out).toContain('<span class="chip ok">Yes</span>');
+  });
+});
+
+describe('entry releases', () => {
+  it('offer no destination: the engine takes it from the schedule', () => {
+    const scope = { courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' };
+    const r = { id: 's5', ident: 'Session 5', title: 'Trees', when: 'Thu 8 Oct 10:00', source: { repo: 'course-materials-f2026', path: 'lectures/05' } };
+    for (const def of [releaseNow(scope, r), releaseEarly(scope, r), releaseAgain(scope, r)]) {
+      expect(def.args).toEqual({ entry: 's5' });
+      expect(Object.keys(def.options ?? {})).toEqual([]);
+    }
+    expect(Object.keys(releaseAdhoc(scope, ['course-materials-f2026']).options ?? {})).toContain('cohort_dest_repo');
   });
 });

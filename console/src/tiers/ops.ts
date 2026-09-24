@@ -4,8 +4,8 @@
 
 import { opt, type Tiers } from './types';
 
-/** A release's destination: Advanced, defaulting to materials and the source path. */
-export function releaseDest(sourcePath: string): Tiers {
+/** An unscheduled release's destination: Advanced, defaulting to materials and the source path. */
+function releaseDest(sourcePath: string): Tiers {
   return {
     cohort_dest_repo: { tier: 'advanced', label: 'To repo', default: 'materials', defaultLabel: 'default: materials', reason: 'In the cohort. Blank means materials.', placeholder: 'materials' },
     cohort_dest_path: { tier: 'advanced', label: 'To path', defaultLabel: 'default: same as the folder', placeholder: sourcePath },
