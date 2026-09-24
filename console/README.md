@@ -1,7 +1,8 @@
 # Instructor Console
 
 A static web app (Vite + TypeScript + Preact) that shows an instructor their courses and
-cohorts as the lifecycle model describes them, reading GitHub with the instructor's own token.
+cohorts as the lifecycle model describes them, and a student their semesters, reading GitHub
+with the person's own token.
 Deployed by `.github/workflows/console-pages.yml` to
 https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/.
 
@@ -34,9 +35,7 @@ and the token stays in `sessionStorage`: it is gone when the tab closes.
   relay or when the App sign-in is blocked. It is owned by one organisation and reaches only
   that one; the sign-in probes the organisations it can check and names those the token
   cannot see. The organisation must not require approval of fine-grained tokens (decision 0011
-  has the cohort set-up turn that off). GitHub lists no organisations to a fine-grained token
-  (`GET /user/orgs` is empty), so the course list finds nothing through it until discovery
-  learns another source.
+  has the cohort set-up turn that off). Discovery finds its organisations another way (below).
 - **Classic token** (`PatAuth`): `repo` and `workflow` scopes, checked from the
   `X-OAuth-Scopes` header. Works everywhere the account does; the widest grant of the three.
 
@@ -46,17 +45,54 @@ Build-time settings, for `npm run build` or `npm run dev`:
     VITE_AUTH_RELAY_URL=https://dsl-console-auth.<subdomain>.workers.dev
 
 The deployed console gets them in `.github/workflows/console-pages.yml`, as an `env:` on the
-`npm run build` step (not wired yet; D2 adds it), from repository variables:
+`npm run build` step, from the repository variables `GH_APP_CLIENT_ID` and `AUTH_RELAY_URL`
+(either may be empty).
 
-    - run: npm run build
-      env:
-        VITE_GH_APP_CLIENT_ID: ${{ vars.GH_APP_CLIENT_ID }}
-        VITE_AUTH_RELAY_URL: ${{ vars.AUTH_RELAY_URL }}
+The build writes a Content-Security-Policy meta into `index.html` (`src/csp.ts`): scripts from
+the console's own origin, calls to `api.github.com`, `github.com` and the relay's origin,
+images from GitHub's avatars, fonts from Google Fonts, no frames. It allows `'unsafe-eval'`
+because Ajv compiles each schema with `new Function`; precompiled validators would let that
+go. `npm run dev` leaves the policy out.
+
+## Roles and modes
+
+Role is per organisation, from the signed-in account (decision 0011 rule 2), and one person
+may hold both across organisations:
+
+- **instructor** of an org: push on its `.github` repo, or the org is a semester registered by a
+  course the person can write to;
+- **student** of a semester org: an active member with no push on its `.github`;
+- anything else is not shown (a course the person can read but not change still shows read only).
+
+Home shows **Your courses** (the instructor's course and cohort cards) and **Your semesters**
+(one card per semester the person is a student of, archived ones greyed), with a **Show these
+semesters** choice kept in this browser (`localStorage`, per account). A student-only account
+lands on Your semesters.
+
+The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
+week, Schedule, Assignments, Marks, Materials, Instructors; placeholders until D3). For a
+semester the person teaches, that is the **Student view** (the Student view link in the
+cohort nav): the same screens with the instructor's own identity and a banner, never a
+student's repos or marks (rule 7). Anywhere else the console is in instructor mode for anyone
+who teaches somewhere, and in student mode otherwise.
 
 ## What it reads
 
-- Courses: orgs from `GET /user/orgs` whose `.github` repo carries the `dsl-course-hub`
-  topic; cohorts from `.github/cohort-courses-pages.yml`; write access = push on `.github`.
+- Organisations (`src/model/discovery.ts`), by token kind, merged without duplicates:
+  - classic token: `GET /user/orgs` and `GET /user/memberships/orgs?state=active`;
+  - GitHub App: those two, plus the organisation accounts of `GET /user/installations`;
+  - fine-grained token: GitHub answers neither organisation listing for it (`/user/orgs` is an
+    empty list, `/user/memberships/orgs` is closed to it), so the owners of `GET /user/repos`
+    and the public memberships (`GET /users/{login}/orgs`) are the candidates.
+
+  A candidate not already known as a membership is kept only if
+  `GET /user/memberships/orgs/{org}` says active. A fine-grained token that reaches none says
+  so on Home: add the organisations under Resource owner when creating it.
+- Courses: organisations whose `.github` repo carries the `dsl-course-hub` topic; cohorts from
+  `.github/cohort-courses-pages.yml`; write access = push on `.github`.
+- Semesters: organisations whose `.github` carries `dsl-cohort` or `dsl-semester`; the course
+  from that repo's `dsl-course.yml` (`course:`), its name from the course's public `.github`;
+  archived when that `.github` repo is archived.
 - Status: `classroom-config/.dsl/status.json` (cohort) and `.github/.dsl/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
   `inputs` with one tree read. An absent file shows "Status not computed yet".
