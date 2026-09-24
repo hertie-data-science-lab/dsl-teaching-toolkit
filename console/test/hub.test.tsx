@@ -8,7 +8,7 @@ import { LiveFiles, StaticFiles } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
 import { hashOf, movedHash, parseHash, replaceHash } from '../src/router';
-import { AssignmentScreen, AssignmentsScreen, defaultTab } from '../src/screens/Assignments';
+import { AssignmentScreen, AssignmentsScreen, defaultTab, misrouted } from '../src/screens/Assignments';
 import { MarksOverviewScreen } from '../src/screens/Marking';
 import { gradebookWrites, readSheet, returnedOn } from '../src/model/marks';
 import type { CohortProps } from '../src/screens/types';
@@ -79,9 +79,12 @@ describe('the assignment hub', () => {
     expect(s).toContain('href="#assignment-assignment-2/marks"');
   });
 
-  it('a Teams link to an assignment done alone lands on its Overview', () => {
+  it('a Teams link to an assignment done alone lands on its Overview, and says so in the address', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'teams' })} />);
     expect(current(out)).toBe('Overview');
+    expect(misrouted(solo, 'teams')).toBe('#assignment-assignment-2/overview');
+    expect(misrouted(team, 'teams')).toBeNull();
+    expect(misrouted(solo, 'marks')).toBeNull();
   });
 
   it('renders the named tab over the default one', () => {

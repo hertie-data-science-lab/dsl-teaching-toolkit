@@ -8,7 +8,8 @@ import type { Assignment, AssignmentState, Status } from '../model/types';
 import { Check } from '../ui/icons';
 import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
-import { tabHref, type AssignmentTab } from '../router';
+import { useEffect } from 'preact/hooks';
+import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { Crumbs, Help, ProblemCards } from '../ui/bits';
 import { asgSummary } from './Cohort';
 import { MarksTab, TeamsTab } from './Marking';
@@ -119,6 +120,17 @@ export function defaultTab(a: Assignment): AssignmentTab {
   if ((a.state === 'teams_forming' || a.state === 'blocked') && isGroup(a)) return 'teams';
   if (a.state === 'marking' || a.state === 'returned') return 'marks';
   return 'overview';
+}
+
+/** The hash to show instead, when a link asks for the Teams tab of an assignment done alone. */
+export function misrouted(a: Assignment, tab: AssignmentTab | undefined): string | null {
+  return tab === 'teams' && !isGroup(a) ? tabHref(a.slug, 'overview') : null;
+}
+
+/** Writes `to` into the address bar once rendered, so the address names the tab shown. */
+function Rehash({ to }: { to: string }) {
+  useEffect(() => replaceHash(to), [to]);
+  return null;
 }
 
 const TAB_NAME: Record<AssignmentTab, string> = { overview: 'Overview', teams: 'Teams', marks: 'Marks' };
@@ -271,10 +283,12 @@ export function AssignmentScreen(p: CohortProps) {
       {(r) => {
         const a = (r.status.assignments ?? []).find((x) => x.slug === p.entry);
         if (!a) return <NotFound {...r} what={`No assignment called ${p.entry} in ${cohortName(p)}.`} back="#assignments" />;
-        const tab = p.tab === 'teams' && !isGroup(a) ? 'overview' : p.tab ?? defaultTab(a);
+        const moved = misrouted(a, p.tab);
+        const tab = moved ? 'overview' : p.tab ?? defaultTab(a);
         const tp: TabProps = { ...r, a, tabs: <TabBar a={a} cur={tab} /> };
         return (
           <>
+            {moved ? <Rehash to={moved} /> : null}
             <Crumbs items={cohortCrumbs(p, tab === 'overview' ? assignmentIdent(a.slug) : TAB_NAME[tab], [{ t: 'Assignments', href: '#assignments' }, ...(tab === 'overview' ? [] : [{ t: assignmentIdent(a.slug), href: tabHref(a.slug, 'overview') }])])} />
             {tab === 'teams' ? <TeamsTab {...tp} /> : tab === 'marks' ? <MarksTab {...tp} /> : <Overview {...tp} />}
           </>
