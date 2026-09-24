@@ -379,7 +379,9 @@ function MarksOverview(p: ReadyProps) {
       <Help title="Where marks are entered" doc="10-grade-and-return-assignments.md">
         <p>This page only reads. Open an assignment to enter its marks and return them to students.</p>
       </Help>
-      {dir.kind === 'loading' ? <Loading what="Reading the mark sheets" /> : !sheets.size ? (
+      {dir.kind === 'loading' ? <Loading what="Reading the mark sheets" /> : dir.kind === 'error' ? (
+        <CheckLine cls="bad">Could not list the mark sheets in classroom-config/{SHEETS}: {dir.message}</CheckLine>
+      ) : !sheets.size ? (
         <section class="panel section stub">
           <h2>No mark sheets yet</h2>
           <p>A mark sheet appears when an assignment is handed out, with a row for every student or team.</p>

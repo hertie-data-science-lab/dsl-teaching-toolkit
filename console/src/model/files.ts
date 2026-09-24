@@ -11,7 +11,7 @@ export type FileState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; text: string; sha: string };
 
-export type DirState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; entries: DirEntry[] };
+export type DirState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'error'; message: string } | { kind: 'ready'; entries: DirEntry[] };
 
 /** A repo's whole tree at a ref: every path, with `dir` for folders. */
 /** `truncated`: GitHub returned only part of the tree (its recursive listing has a size cap). */
@@ -127,7 +127,7 @@ export class LiveFiles implements Files {
       this.client
         .listDir(owner, repo, path)
         .then((d) => (sig.value = d ? { kind: 'ready', entries: d } : { kind: 'absent' }))
-        .catch(() => (sig.value = { kind: 'absent' }));
+        .catch((e: unknown) => (sig.value = { kind: 'error', message: e instanceof Error ? e.message : String(e) }));
     }
     return s.value;
   }
@@ -180,7 +180,8 @@ export class LiveFiles implements Files {
 export class StaticFiles implements Files {
   constructor(
     private readonly map: Record<string, string> = {},
-    private readonly dirMap: Record<string, string[]> = {},
+    /** A listing, or an Error for one that could not be read. */
+    private readonly dirMap: Record<string, string[] | Error> = {},
     private readonly treeMap: Record<string, string[]> = {},
     private readonly repoMap: Record<string, Partial<GhRepo>[]> = {},
     private readonly changeMap: Record<string, string> = {},
@@ -210,6 +211,7 @@ export class StaticFiles implements Files {
   }
   dir(owner: string, repo: string, path: string): DirState {
     const d = this.dirMap[`${owner}/${repo}/${path}`];
+    if (d instanceof Error) return { kind: 'error', message: d.message };
     return d ? { kind: 'ready', entries: d.map((name) => ({ name, path: `${path}/${name}`, sha: 'static', type: 'file' })) } : { kind: 'absent' };
   }
   member(): boolean | null {

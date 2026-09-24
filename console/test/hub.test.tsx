@@ -110,6 +110,13 @@ describe('the Marks overview', () => {
     expect(out).toContain('No mark sheets yet');
     expect(out).not.toContain('<table');
   });
+
+  it('says the listing failed, rather than that there are no sheets', () => {
+    const broken = new StaticFiles({}, { [`${COHORT_ORG}/classroom-config/grading_sheets`]: new Error('Bad credentials') });
+    const out = render(<MarksOverviewScreen {...props({ files: broken })} />);
+    expect(out).toContain('Could not list the mark sheets in classroom-config/grading_sheets: Bad credentials');
+    expect(out).not.toContain('No mark sheets yet');
+  });
 });
 
 describe('the cohort nav', () => {
