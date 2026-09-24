@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from .course import SOLUTION_BRANCH, SOLUTION_DIR
 from .gh_contents import get_file_content, put_files, repo_tree
-from .log import log, log_err, log_ok, log_step
+from .log import Summary, log, log_err, log_ok, log_step, plural
 
 # ------------------------------------------------------------------ the fence vocabulary
 
@@ -450,13 +450,21 @@ def derivable_sources(tree: tuple[str, ...] | list[str]) -> list[str]:
 # -------------------------------------------------------------------------- the button
 
 
-def derive_student_version(course_org: str, template: str, dry_run: bool = True) -> int:
+def _refused(code: str, text: str) -> dict:
+    return {"code": code, "text": text}
+
+
+def derive_student_version(
+    course_org: str, template: str, dry_run: bool = True
+) -> Summary:
     """Write `template`'s student starter onto `main` from its `solution` branch.
 
     0 when every derivable file was derived (and written, on a real run); 1 if any of them
     could not be, which includes the "nothing was fenced" refusal. Partial success is still
     a failure: a starter set where one file kept its answers is not a starter set, and the
-    faculty member has to be told which file rather than left to notice.
+    faculty member has to be told which file rather than left to notice - so every file
+    that was not derived is a reason on the outcome, and every one that was is a detail,
+    on a dry run and a real one alike.
 
     No student, repo or person is named anywhere in this run's output - it walks a COURSE
     org's own template - so everything here is an ordinary log line."""
@@ -468,7 +476,8 @@ def derive_student_version(course_org: str, template: str, dry_run: bool = True)
         tree = repo_tree(course_org, template, SOLUTION_BRANCH, "blob")
     except RuntimeError as exc:
         log_err(f"could not read {template}'s `{SOLUTION_BRANCH}` branch: {exc}")
-        return 1
+        text = f"The {SOLUTION_BRANCH} branch of {template} could not be read."
+        return Summary(text, reasons=[_refused("BRANCH_UNREADABLE", text)], code=1)
     sources = derivable_sources(tree)
     if not sources:
         log_err(
@@ -476,23 +485,36 @@ def derive_student_version(course_org: str, template: str, dry_run: bool = True)
             f"`{SOLUTION_DIR}/` on its `{SOLUTION_BRANCH}` branch - there is nothing to "
             f"derive a starter from. Put the notebook you teach from there first."
         )
-        return 1
+        text = (
+            f"There is nothing to derive: no {', '.join(DERIVABLE)} file under "
+            f"{SOLUTION_DIR}/ on the {SOLUTION_BRANCH} branch."
+        )
+        return Summary(text, reasons=[_refused("NOTHING_TO_DERIVE", text)], code=1)
 
     files: dict[str, bytes] = {}
-    regions = cells = failures = 0
+    reasons: list[dict] = []
+    details: list[str] = []
+    regions = cells = 0
     for path in sources:
-        text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
+        try:
+            text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
+        except RuntimeError as exc:
+            # GitHub refused the read (permission, rate limit, network). Its answer names
+            # the file and says why; it is the course's own template, so it may be shown.
+            log_err(f"  ! {exc}")
+            reasons.append(_refused("READ_FAILED", f"{path} could not be read: {exc}."))
+            continue
         if text is None:
             # The tree listed it a moment ago, so this is a race or a permission fault
             # rather than an absence - either way the derived set is incomplete.
             log_err(f"  ! {path} could not be read - not derived")
-            failures += 1
+            reasons.append(_refused("SOURCE_UNREADABLE", f"{path} could not be read."))
             continue
         try:
             stripped = strip_source(path, text)
         except DeriveError as exc:
             log_err(f"  ! {exc}")
-            failures += 1
+            reasons.append(_refused("SOLUTION_REGION_BROKEN", f"{exc}."))
             continue
         if not stripped.replaced:
             log_err(
@@ -500,36 +522,56 @@ def derive_student_version(course_org: str, template: str, dry_run: bool = True)
                 f"and no `solution=TRUE` chunk - NOT written, because the starter derived "
                 f"from it would be the model answer itself"
             )
-            failures += 1
+            reasons.append(
+                _refused(
+                    "NO_SOLUTION_REGION",
+                    f"{path} has no BEGIN SOLUTION region, no {SOLUTION_TAG} cell tag "
+                    f"and no solution=TRUE chunk, so the starter would be the model "
+                    f"answer.",
+                )
+            )
             continue
         files[student_path(path)] = stripped.text.encode()
         regions += stripped.regions
         cells += stripped.cells
-        log(
-            f"  {path} -> {student_path(path)}: {stripped.regions} region(s), "
+        line = (
+            f"{path} -> {student_path(path)}: {stripped.regions} region(s), "
             f"{stripped.cells} cell(s)/chunk(s) replaced"
         )
+        log(f"  {line}")
+        details.append(line)
 
-    summary = f"{len(files)} file(s), {regions} region(s) and {cells} cell(s)/chunk(s) replaced"
+    failures = len(reasons)
+    code = 1 if failures else 0
+    counts = {"files": len(files), "refused": failures}
+    derived = plural(len(files), "file")
+    refused = f"; {plural(failures, 'file')} could not be derived" if failures else ""
+
+    def summary(text: str, code: int = code) -> Summary:
+        return Summary(text, counts, reasons, code=code, details=details)
+
+    summary_line = f"{len(files)} file(s), {regions} region(s) and {cells} cell(s)/chunk(s) replaced"
     if dry_run:
         # The file LIST and the counts, never a line of the content: this log is the course
         # org's public `.github` Actions tab, and the content is the model answer.
-        log_ok(f"dry run: would write {summary} onto main")
-        return 1 if failures else 0
+        log_ok(f"dry run: would write {summary_line} onto main")
+        return summary(f"Would derive {derived} onto main{refused}.")
     if files and not put_files(course_org, template, files, COMMIT_MESSAGE):
         log_err(
             f"the derived starter was NOT written to {course_org}/{template} - main still "
             f"holds whatever it held before; re-run once the cause is fixed"
         )
-        return 1
+        text = "The starter was not written; main still holds what it held before."
+        reasons.append(_refused("WRITE_FAILED", text))
+        return summary(text, code=1)
     if failures:
         log_err(
-            f"{failures} file(s) could not be derived (named above) - main has {summary}, "
-            f"and the rest of the starter is still whatever was already there"
+            f"{failures} file(s) could not be derived (named above) - main has "
+            f"{summary_line}, and the rest of the starter is still whatever was already there"
         )
-        return 1
-    log_ok(f"{course_org}/{template} main <- {summary}")
-    return 0
+        return summary(f"Derived {derived} onto main{refused}.")
+    log_ok(f"{course_org}/{template} main <- {summary_line}")
+    return summary(f"Derived {derived} onto main.")
 
 
 def main() -> int:
@@ -558,7 +600,8 @@ def main() -> int:
         )
     except RuntimeError as exc:
         log_err(str(exc))
-        return 1
+        text = f"The derive stopped: {exc}."
+        return Summary(text, reasons=[_refused("DERIVE_STOPPED", text)], code=1)
 
 
 if __name__ == "__main__":

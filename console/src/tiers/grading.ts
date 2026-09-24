@@ -95,11 +95,13 @@ export function settingsTiers(d: CourseDefaults): Tiers {
       check: (x) => (!x ? 'Needed when students submit elsewhere.' : /^https:\/\/\S+$/.test(String(x)) ? null : 'The link must start with https://.'),
     },
     visibility: {
-      tier: 'default', label: 'Who can see each student’s repo',
+      tier: 'default', label: 'Who can see each student’s repo', widget: 'radio', default: 'private', defaultLabel: 'default: private',
+      reason: 'Applies to copies handed out after this change; existing copies keep theirs.',
+      options: Object.entries(VISIBILITY).map(([v, l]) => opt(v, l)),
       forced: (v) =>
         v.submit_via === 'shared_dropbox_repo' ? { value: 'private', reason: 'Private: a shared drop box is always private.' }
         : v.submit_via === 'external' ? { value: 'private', reason: 'Private: the repo holds the brief only.' }
-        : { value: v.visibility, reason: `${VISIBILITY[String(v.visibility)] ?? v.visibility}. Set when the template was created; cannot be changed.` },
+        : null,
     },
     format: {
       tier: 'default', label: 'What students hand in', widget: 'radio', default: 'ipynb', defaultLabel: 'default: Jupyter notebook', reason: 'Seeds the starter files and decides how markers see submissions.',

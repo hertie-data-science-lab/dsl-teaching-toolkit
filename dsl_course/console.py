@@ -127,8 +127,10 @@ def entry_requests(request: Request) -> list[Request]:
     ]
 
 
-def combine(summaries: list[Summary]) -> tuple[str, dict, list[dict], str | None]:
-    """`(text, counts, reasons, conclusion)` of the op, from the Summary of each CLI call
+def combine(
+    summaries: list[Summary],
+) -> tuple[str, dict, list[dict], list[str], str, str | None]:
+    """`(text, counts, reasons, details, block, conclusion)` of the op, from the Summary of each CLI call
     it made - one, except for a release entry drawn from several source repos. Counts
     add up; different sentences are joined into one; the conclusion override stands
     only when every call agreed on it."""
@@ -144,9 +146,11 @@ def combine(summaries: list[Summary]) -> tuple[str, dict, list[dict], str | None
             if isinstance(value, int) and not isinstance(value, bool):
                 counts[key] = counts.get(key, 0) + value
     reasons = [r for s in summaries for r in s.reasons]
+    details = [d for s in summaries for d in s.details]
+    block = "\n".join(s.block for s in summaries if s.block)
     overrides = {s.conclusion for s in summaries}
     conclusion = overrides.pop() if len(overrides) == 1 else None
-    return text, counts, reasons, conclusion
+    return text, counts, reasons, details, block, conclusion
 
 
 class Broken(RuntimeError):
@@ -292,7 +296,7 @@ def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bo
         rc, summaries, crashed = execute(op, requests)
         conclusion = "failed" if rc else ("previewed" if request.preview else "done")
         summary = ""
-    text, counts, reasons, override = combine(summaries)
+    text, counts, reasons, details, block, override = combine(summaries)
     if conclusion == "done" and override:
         conclusion = override
     fallback = op.done_text if conclusion == "done" and op.done_text else None
@@ -305,6 +309,8 @@ def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bo
         run_id=_run_id(),
         counts=counts,
         reasons=reasons,
+        details=details,
+        block=block,
         started=started,
         finished=_now(),
     ), crashed

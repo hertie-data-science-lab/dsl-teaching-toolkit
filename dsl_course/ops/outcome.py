@@ -24,6 +24,9 @@ CONCLUSIONS = ("done", "nothing_to_do", "skipped", "previewed", "failed")
 OUTCOMES_DIR = ".dsl/outcomes"
 ANNOTATION_TITLE = "dsl-outcome"
 HANDLE_MARK = "<handle>"
+# Under the Checks API's 64 KB cap on an annotation message, with room to spare.
+ANNOTATION_CAP = 60_000
+TRUNCATED = "(truncated; the full text is in the outcome file)"
 
 # `grades-<anything>` is always a person's gradebook. `assignment-N-<suffix>` is a
 # submission repo unless the suffix is a term tag (the template itself), `submissions`
@@ -46,6 +49,8 @@ class Outcome:
     run_id: int | None = None
     counts: dict = field(default_factory=dict)
     reasons: list[dict] = field(default_factory=list)
+    details: list[str] = field(default_factory=list)
+    block: str = ""
     people: list[dict] = field(default_factory=list)
     started: str = ""
     finished: str = ""
@@ -93,9 +98,37 @@ def _escape_command(data: str) -> str:
     return data.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
+def _message(data: dict) -> str:
+    return _escape_command(json.dumps(data, sort_keys=True, separators=(",", ":")))
+
+
+def _capped(data: dict) -> str:
+    """The annotation's message, at most `ANNOTATION_CAP` bytes. The Checks API cuts an
+    annotation message at 64 KB, and a cut JSON body does not parse, so an outcome too
+    big for it loses the end of its `block` first, then its last `details` lines, and says
+    so inside `block`. The outcome file keeps everything."""
+    message = _message(data)
+    if len(message.encode()) <= ANNOTATION_CAP:
+        return message
+    block, details = str(data.get("block", "")), list(data.get("details", []))
+    while True:
+        note = f"{block}\n{TRUNCATED}" if block else TRUNCATED
+        message = _message({**data, "block": note, "details": details})
+        over = len(message.encode()) - ANNOTATION_CAP
+        if over <= 0:
+            return message
+        if block:
+            # Every character is at least one byte of the message, so this always fits
+            # or empties the block.
+            block = block[: max(0, len(block) - over)]
+        elif details:
+            details.pop()
+        else:
+            return message
+
+
 def annotation(outcome: Outcome) -> str:
-    body = json.dumps(public_dict(outcome), sort_keys=True, separators=(",", ":"))
-    return f"::notice title={ANNOTATION_TITLE}::{_escape_command(body)}"
+    return f"::notice title={ANNOTATION_TITLE}::{_capped(public_dict(outcome))}"
 
 
 def private_path(op: str) -> str:

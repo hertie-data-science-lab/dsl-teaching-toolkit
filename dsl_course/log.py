@@ -85,12 +85,16 @@ class Summary(int):
     the design vocabulary and names nobody: it lands in a public annotation.
 
     `counts` are integers only, `reasons` are `{"code", "text"}` pairs (a code in
-    UPPER_SNAKE, always with its sentence), and `conclusion` is set only to say a run
-    that exited 0 did nothing (`nothing_to_do`) or was passed over (`skipped`)."""
+    UPPER_SNAKE, always with its sentence), `details` are one line per thing the run
+    touched (a file derived), for the console to list, `block` is generated text the
+    console shows verbatim (the syllabus session list), and `conclusion` is set only to say
+    a run that exited 0 did nothing (`nothing_to_do`) or was passed over (`skipped`)."""
 
     text: str
     counts: dict[str, int]
     reasons: list[dict]
+    details: list[str]
+    block: str
     conclusion: str | None
 
     def __new__(
@@ -101,11 +105,15 @@ class Summary(int):
         *,
         code: int = 0,
         conclusion: str | None = None,
+        details: list[str] | None = None,
+        block: str = "",
     ):
         obj = super().__new__(cls, int(code))
         obj.text = text
         obj.counts = dict(counts or {})
         obj.reasons = list(reasons or [])
+        obj.details = list(details or [])
+        obj.block = block
         obj.conclusion = conclusion
         return obj
 

@@ -5,6 +5,9 @@
     "actor": {
       "type": "string"
     },
+    "block": {
+      "type": "string"
+    },
     "conclusion": {
       "enum": [
         "done",
@@ -20,6 +23,12 @@
         "type": "integer"
       },
       "type": "object"
+    },
+    "details": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "finished": {
       "type": "string"

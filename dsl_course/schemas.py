@@ -171,6 +171,8 @@ def outcome_schema() -> dict:
                     "additionalProperties": {"type": "integer"},
                 },
                 "reasons": {"type": "array", "items": reason},
+                "details": {"type": "array", "items": _str()},
+                "block": _str(),
                 "people": {"type": "array", "items": person},
                 "started": _str(),
                 "finished": _str(),

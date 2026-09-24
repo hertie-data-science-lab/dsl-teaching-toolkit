@@ -346,6 +346,75 @@ def test_a_template_with_no_derivable_source_says_so(monkeypatch, capsys):
     assert "nothing to derive" in capsys.readouterr().err
 
 
+def test_every_refusal_is_a_reason_and_every_derived_file_a_detail(monkeypatch):
+    # AS12: the console panel said only "the run log says where". The outcome itself
+    # now names the file and why, on a preview as on a real run.
+    for dry_run in (True, False):
+        _Repo(
+            {
+                "solution/starter.py": FENCED_PY,
+                "solution/solution.py": "def fit():\n    return 1\n",
+            }
+        ).install(monkeypatch)
+        out = derive.derive_student_version("Course", "assignment-1-f2026", dry_run)
+        assert out == 1
+        assert [r["code"] for r in out.reasons] == ["NO_SOLUTION_REGION"]
+        assert out.reasons[0]["text"].startswith("solution/solution.py has no BEGIN")
+        assert out.details == [
+            "solution/starter.py -> starter.py: 1 region(s), 0 cell(s)/chunk(s) replaced"
+        ]
+        assert out.counts == {"files": 1, "refused": 1}
+        assert out.text.endswith("1 file onto main; 1 file could not be derived.")
+
+
+def test_a_clean_run_has_no_reasons(monkeypatch):
+    _Repo({"solution/starter.py": FENCED_PY}).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", False)
+    assert out == 0 and out.reasons == []
+    assert out.text == "Derived 1 file onto main."
+
+
+def test_a_failed_write_is_a_reason(monkeypatch):
+    _Repo({"solution/starter.py": FENCED_PY}).install(monkeypatch)
+    monkeypatch.setattr(derive, "put_files", lambda *a: False)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", False)
+    assert out == 1
+    assert [r["code"] for r in out.reasons] == ["WRITE_FAILED"]
+
+
+def test_a_file_github_will_not_serve_is_a_reason_naming_it(monkeypatch):
+    _Repo({"solution/starter.py": FENCED_PY, "solution/b.py": FENCED_PY}).install(
+        monkeypatch
+    )
+
+    def read(org, repo, path, ref=""):
+        if path == "solution/b.py":
+            raise RuntimeError(f"could not read {org}/{repo}/{path}: HTTP 403")
+        return FENCED_PY
+
+    monkeypatch.setattr(derive, "get_file_content", read)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert out == 1
+    assert out.reasons == [
+        {
+            "code": "READ_FAILED",
+            "text": "solution/b.py could not be read: could not read "
+            "Course/assignment-1-f2026/solution/b.py: HTTP 403.",
+        }
+    ]
+    assert len(out.details) == 1
+
+
+def test_a_broken_region_and_an_empty_template_are_reasons(monkeypatch):
+    _Repo({"solution/broken.py": "### BEGIN SOLUTION\nx = 1\n"}).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert [r["code"] for r in out.reasons] == ["SOLUTION_REGION_BROKEN"]
+    assert "solution/broken.py" in out.reasons[0]["text"]
+    _Repo({"grading_config.yml": "x: 1\n"}).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert out == 1 and [r["code"] for r in out.reasons] == ["NOTHING_TO_DERIVE"]
+
+
 # ---------------------------------------------- filtering to the hand-marked questions
 
 QUESTION_NB = {
