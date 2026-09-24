@@ -48,7 +48,7 @@ describe('Home groups', () => {
 
   it('a fine-grained token that sees no org says to add the orgs under Resource owner', () => {
     const t = text(<HomeScreen courses={[]} semesters={[]} kind="fine-grained" cohortStates={{}} now={0} user={user} />);
-    expect(t).toContain('This token can see no course or semester orgs; when creating it, add the orgs under Resource owner');
+    expect(t).toContain('This token can see no course or semester orgs; when creating it, add the orgs under Resource owner and grant the organisation permission Members: read');
     expect(render(<HomeScreen courses={[]} semesters={[]} kind="fine-grained" cohortStates={{}} now={0} user={user} />)).toContain('https://github.com/settings/personal-access-tokens');
     expect(text(<HomeScreen courses={[]} semesters={[]} kind="classic" cohortStates={{}} now={0} user={user} />)).toContain('No courses found');
   });
@@ -85,6 +85,20 @@ describe('mode and the student shell', () => {
     const view = studentContext(both, parseSearch(`?semester=${cohort.org}`));
     expect(view).toMatchObject({ studentView: true, semester: { org: cohort.org, courseName: 'Machine Learning', termLabel: 'Fall 2026' } });
     expect(studentContext(both, parseSearch('?semester=not-mine'))).toBeNull();
+  });
+
+  it('compares org names whatever their case', () => {
+    expect(studentContext(both, parseSearch(`?semester=${NLP.org.toUpperCase()}`))?.semester.org).toBe(NLP.org);
+    const mixed = estate([], [sem('Hertie-Maths-f2026')], [['hertie-maths-f2026', 'student']]);
+    expect(studentContext(mixed, parseSearch('?semester=hertie-maths-f2026'))?.semester.org).toBe('Hertie-Maths-f2026');
+  });
+
+  it('a semester known only from a course registry waits for its .github before saying whether it is archived', () => {
+    const q = parseSearch(`?semester=${cohort.org}`);
+    expect(studentContext(both, q)).toMatchObject({ pending: true, semester: { archived: false } });
+    expect(studentContext(both, q, () => true)).toMatchObject({ pending: false, semester: { archived: true } });
+    expect(studentContext(both, q, () => false)).toMatchObject({ pending: false, semester: { archived: false } });
+    expect(studentContext(both, parseSearch(`?semester=${NLP.org}`))).toMatchObject({ pending: false });
   });
 
   it('mode is student in a semester’s student screens, else instructor for anyone who teaches anywhere', () => {

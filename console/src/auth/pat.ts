@@ -1,4 +1,5 @@
 import { GitHubError, type Fetch, type GhUser, API } from '../github/client';
+import { PROBE_LIMIT } from '../model/discovery';
 import { SignInError, browserStore, type Auth, type TokenStore } from './types';
 
 export const TOKEN_KEY = 'dsl-console-token';
@@ -7,8 +8,6 @@ export const NEW_TOKEN_URL =
   'https://github.com/settings/tokens/new?scopes=repo,workflow&description=DSL%20Instructor%20Console';
 export const NEW_FINE_GRAINED_URL = 'https://github.com/settings/personal-access-tokens/new';
 export const FINE_GRAINED_SETTINGS_URL = 'https://github.com/settings/personal-access-tokens';
-/** At most this many organisations are probed for a fine-grained token. */
-const PROBE_LIMIT = 50;
 
 /** Which of the account's organisations a fine-grained token can reach. */
 export interface Reach {

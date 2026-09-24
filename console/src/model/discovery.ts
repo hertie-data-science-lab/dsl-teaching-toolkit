@@ -117,7 +117,11 @@ export interface Estate {
   courses: Course[];
   /** Semester orgs the person is a member of, newest first. */
   semesters: Semester[];
-  /** The person's role per org; an org absent here is not theirs. Instructor wins over student. */
+  /**
+   * The person's role per org, keyed by the lower-cased login (read it with roleOf). Instructor
+   * wins over student. An org absent here carries no role: a course the person can read but not
+   * change is still in `courses`, shown read only.
+   */
   roles: Map<string, Role>;
   kind: TokenKind;
 }
@@ -125,8 +129,11 @@ export interface Estate {
 /** "Machine Learning, Fall 2026". */
 export const semesterName = (s: Pick<Semester, 'courseName' | 'termLabel' | 'org'>) => (s.courseName ? `${s.courseName}, ${s.termLabel}` : s.termLabel);
 
-/** Most orgs whose membership is checked one by one: a runaway guard. */
-const PROBE_LIMIT = 100;
+/** Most orgs whose membership is checked one by one, here and by PatAuth: a runaway guard. */
+export const PROBE_LIMIT = 50;
+
+/** The person's role in `org`, whatever its case. */
+export const roleOf = (e: Pick<Estate, 'roles'>, org: string): Role | undefined => e.roles.get(org.toLowerCase());
 
 /**
  * The orgs the person is an active member of, from every listing their token kind answers.
@@ -134,18 +141,29 @@ const PROBE_LIMIT = 100;
  * `/user/installations`. Fine-grained: GitHub answers neither org listing (`/user/orgs` is an
  * empty 200, `/user/memberships/orgs` is not open to it), so the candidates are the owners of
  * `/user/repos` and the public memberships, each checked with `/user/memberships/orgs/{org}`,
- * which such a token may read for an org it reaches. A listing that fails counts as empty.
+ * which such a token may read for an org it reaches. A listing that fails counts as empty,
+ * unless every one failed: that is GitHub not answering, not an account with no orgs.
  */
 export async function memberOrgs(client: GitHubClient, kind: TokenKind, login: string): Promise<string[]> {
-  const soft = <T>(p: () => Promise<T[]>): Promise<T[]> => p().catch(() => []);
+  let asked = 0;
+  const failures: unknown[] = [];
+  const soft = <T>(use: boolean, p: () => Promise<T[]>): Promise<T[]> | T[] => {
+    if (!use) return [];
+    asked++;
+    return p().catch((e: unknown) => {
+      failures.push(e);
+      return [];
+    });
+  };
   const fine = kind === 'fine-grained';
   const [orgs, memberships, installs, owners, open] = await Promise.all([
-    fine ? [] : soft(() => client.listUserOrgs()),
-    fine ? [] : soft(() => client.listOrgMemberships()),
-    kind === 'app' ? soft(() => client.listInstallationAccounts()) : [],
-    fine ? soft(() => client.listRepoOwners()) : [],
-    fine ? soft(() => client.listPublicOrgs(login)) : [],
+    soft(!fine, () => client.listUserOrgs()),
+    soft(!fine, () => client.listOrgMemberships()),
+    soft(kind === 'app', () => client.listInstallationAccounts()),
+    soft(fine, () => client.listRepoOwners()),
+    soft(fine, () => client.listPublicOrgs(login)),
   ]);
+  if (failures.length === asked) throw failures[0];
   const byKey = new Map<string, string>(); // lower-cased login -> as GitHub spells it
   const add = (l: string) => byKey.has(l.toLowerCase()) || byKey.set(l.toLowerCase(), l);
   const members = new Set<string>();
@@ -205,10 +223,10 @@ export async function discoverEstate(client: GitHubClient, who: { kind: TokenKin
   );
   const roles = new Map<string, Role>();
   // A writable course makes the person an instructor of every semester it registers.
-  for (const c of courses) if (c.write) for (const o of [c.org, ...c.cohorts.map((k) => k.org)]) roles.set(o, 'instructor');
+  for (const c of courses) if (c.write) for (const o of [c.org, ...c.cohorts.map((k) => k.org)]) roles.set(o.toLowerCase(), 'instructor');
   const semesters: Semester[] = bare.map((s) => {
-    const role: Role = roles.get(s.org) ?? s.role;
-    roles.set(s.org, role);
+    const role: Role = roles.get(s.org.toLowerCase()) ?? s.role;
+    roles.set(s.org.toLowerCase(), role);
     return { ...s, role, courseName: byOrg.get(s.courseOrg.toLowerCase())?.name ?? names.get(s.courseOrg) ?? '' };
   });
   semesters.sort((a, b) => Number(a.archived) - Number(b.archived) || b.term.slice(1).localeCompare(a.term.slice(1)) || a.org.localeCompare(b.org));

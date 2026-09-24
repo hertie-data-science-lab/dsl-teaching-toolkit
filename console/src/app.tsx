@@ -125,7 +125,16 @@ export function App({ state: s }: { state: AppState }) {
   const sel = parseSearch(s.search.value);
   const title = s.mode.value === 'student' ? 'Student Console' : 'Instructor Console';
 
-  const stu = studentContext(estate, sel);
+  const stu = studentContext(estate, sel, s.archivedOf);
+  if (stu?.pending) {
+    return (
+      <>
+        <Topbar user={user} title={title} navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
+        <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main><Loading what="Opening the semester" /></main></div>
+        <Footer />
+      </>
+    );
+  }
   if (stu) {
     const key = studentScreen(route.screen);
     return (
@@ -226,6 +235,7 @@ export function createState({ auth, client }: AppDeps) {
   const statuses = new StatusStore(client);
   const files = new LiveFiles(client);
   const beats = new Map<string, ReturnType<typeof signal<Heartbeat | null | undefined>>>();
+  const archived = new Map<string, ReturnType<typeof signal<boolean | undefined>>>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
     onFinished: (def) => {
@@ -272,6 +282,17 @@ export function createState({ auth, client }: AppDeps) {
     discover(): Promise<Estate> {
       return discoverEstate(client, { kind: auth.kind() ?? 'classic', login: st.user.value?.login ?? '' });
     },
+    /** Whether a semester's `.github` is archived, read once on first ask; undefined until it answers. */
+    archivedOf(org: string): boolean | undefined {
+      let a = archived.get(org);
+      if (!a) {
+        const sig = signal<boolean | undefined>(undefined);
+        a = sig;
+        archived.set(org, sig);
+        void client.getRepo(org, '.github').then((r) => (sig.value = r?.archived === true), () => (sig.value = false));
+      }
+      return a.value;
+    },
     async rediscover() {
       try {
         st.estate.value = await st.discover();
@@ -293,6 +314,7 @@ export function createState({ auth, client }: AppDeps) {
       files.forget();
       statuses.forget();
       beats.clear();
+      archived.clear();
       ops.current.value = null;
       env = null;
       st.user.value = null;

@@ -6,7 +6,7 @@
 // from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view.
 
-import { isInstructor, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
+import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 
 export interface Route {
   screen: string;
@@ -141,22 +141,31 @@ export const studentHref = (org: string, screen = 'week') => `?semester=${org}#$
 /**
  * The semester whose student screens the URL asks for, when the person holds a role there: a
  * student sees their own; an instructor gets the Student view, the same screens with no
- * student's data (decision 0011 rule 7). A semester known only from a writable course's
- * registry is an instructor's.
+ * student's data (decision 0011 rule 7). Org names compare whatever their case. A semester
+ * known only from a writable course's registry is an instructor's, and whether it is archived
+ * comes from `archivedOf` (its `.github` read on opening); `pending` while that is unknown.
  */
-export function studentContext(estate: Estate, sel: Selection): { semester: Semester; studentView: boolean } | null {
-  const org = sel.semester;
+export function studentContext(
+  estate: Estate,
+  sel: Selection,
+  archivedOf: (org: string) => boolean | undefined = () => undefined,
+): { semester: Semester; studentView: boolean; pending: boolean } | null {
+  const org = sel.semester?.toLowerCase();
   if (!org) return null;
-  const role = estate.roles.get(org);
+  const role = roleOf(estate, org);
   if (!role) return null;
-  let semester = estate.semesters.find((s) => s.org === org);
-  if (!semester) {
-    const course = estate.courses.find((c) => c.cohorts.some((k) => k.org === org));
-    const k = course?.cohorts.find((x) => x.org === org);
-    if (!course || !k) return null;
-    semester = { ...k, courseOrg: course.org, courseName: course.name, archived: false, role };
-  }
-  return { semester, studentView: role === 'instructor' };
+  const same = (x: { org: string }) => x.org.toLowerCase() === org;
+  const known = estate.semesters.find(same);
+  if (known) return { semester: known, studentView: role === 'instructor', pending: false };
+  const course = estate.courses.find((c) => c.cohorts.some(same));
+  const k = course?.cohorts.find(same);
+  if (!course || !k) return null;
+  const archived = archivedOf(k.org);
+  return {
+    semester: { ...k, courseOrg: course.org, courseName: course.name, archived: archived === true, role },
+    studentView: role === 'instructor',
+    pending: archived === undefined,
+  };
 }
 
 /** Which shell the URL renders: a semester's student screens, else instructor screens for anyone who is an instructor anywhere. */

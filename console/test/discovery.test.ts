@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GitHubClient } from '../src/github/client';
-import { discoverEstate, parseRegistry, termOf, type TokenKind } from '../src/model/discovery';
+import { discoverEstate, parseRegistry, roleOf, termOf, type TokenKind } from '../src/model/discovery';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const discover = (gh: FakeGitHub, kind: TokenKind = 'classic') => discoverEstate(new GitHubClient({ token: () => 't', fetch: gh.fetch }), { kind, login: 'octo' });
@@ -141,6 +141,13 @@ describe('discovery per token kind', () => {
     expect(e.roles.size).toBe(0);
   });
 
+  it('when every listing fails, discovery fails instead of finding nothing', async () => {
+    const gh = new FakeGitHub()
+      .on('GET', '/user/orgs?per_page=100&page=1', () => json({ message: 'Server Error' }, 502))
+      .on('GET', MEMBERSHIPS, () => json({ message: 'Server Error' }, 502));
+    await expect(discover(gh)).rejects.toThrow('Server Error');
+  });
+
   it('a listing that fails counts as empty', async () => {
     const gh = orgs(new FakeGitHub())
       .on('GET', '/user/orgs?per_page=100&page=1', () => json({ message: 'boom' }, 500))
@@ -181,6 +188,18 @@ describe('roles', () => {
       [OTHER_SEM, 'Natural Language Processing', 'Fall 2026', false],
       [OLD, 'Machine Learning', 'Fall 2025', true],
     ]);
+  });
+
+  it('keys roles case-insensitively', async () => {
+    // The first matching route answers, so this registry (the semester in capitals) wins.
+    const gh = orgs(new FakeGitHub().on('GET', `/repos/${COURSE}/.github/contents/cohort-courses-pages.yml`, fileBody('x', `cohorts:\n  - ${SEM.toUpperCase()}\n`)), [COURSE])
+      .on('GET', MEMBERSHIPS, member([COURSE, SEM]));
+    const e = await discover(gh);
+    expect(e.courses[0].cohorts.map((k) => k.org)).toEqual([SEM.toUpperCase()]);
+    expect(roleOf(e, SEM)).toBe('instructor');
+    expect(roleOf(e, COURSE.toUpperCase())).toBe('instructor');
+    expect(e.semesters.map((s) => s.role)).toEqual(['instructor']);
+    expect([...e.roles.keys()].every((k) => k === k.toLowerCase())).toBe(true);
   });
 
   it('an org whose .github carries neither topic is not shown', async () => {

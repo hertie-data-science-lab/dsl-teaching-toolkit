@@ -109,7 +109,7 @@ function NothingFound({ kind }: { kind?: TokenKind }) {
     return (
       <section class="panel section stub">
         <h2>No courses or semesters found</h2>
-        <p>This token can see no course or semester orgs; when creating it, add the orgs under Resource owner (<a href={FINE_GRAINED_SETTINGS_URL} target="_blank" rel="noopener">your tokens <Ext /></a>).</p>
+        <p>This token can see no course or semester orgs; when creating it, add the orgs under Resource owner and grant the organisation permission Members: read (<a href={FINE_GRAINED_SETTINGS_URL} target="_blank" rel="noopener">your tokens <Ext /></a>).</p>
       </section>
     );
   }
