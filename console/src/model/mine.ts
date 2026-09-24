@@ -1,7 +1,7 @@
 // A student's own facts in one semester, read from GitHub with their own token: which
 // assignment repos they hold (their own `<slug>-<handle>`, their team's `<slug>-<team>`, the
 // shared drop box), their team (from the repo, or from their GitHub teams where the shape
-// makes no team repo) and its members, whether they audit, the Submission receipts thread in
+// makes no team repo) and its members, whether they audit, the Submission receipts issue in
 // each repo, and their gradebook `grades-<handle>/grades.yml`. Nothing here reads another student's data:
 // GitHub shows a student only the repos they were granted, and a team repo counts as theirs
 // only where they can push to it (a demo org's public repos are readable by anyone).
@@ -12,7 +12,7 @@ import type { GhIssue, GhRepo, GhTeam, GitHubClient } from '../github/client';
 import type { SemesterAssignment } from './student';
 import type { PatchLine } from './week';
 
-/** The receipts issue's labels, newest first: `dsl-receipts` since the rename, `dsl-feedback` on older issues (course.RECEIPTS_ISSUE_LABELS). */
+/** The receipts issue's labels, newest first: `dsl-receipts` since the rename, the old label on older issues (course.RECEIPTS_ISSUE_LABELS). */
 export const RECEIPTS_LABELS = ['dsl-receipts', 'dsl-feedback'];
 export const RECEIPTS_TITLE = 'Submission receipts';
 /** The semester's read-only role team (course.AUDITORS_TEAM). Secret, but a member may read their own membership. */

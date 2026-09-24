@@ -12,12 +12,11 @@ import { DECIDED, EXPORTED, NAMES } from '../src/model/names';
 import { buildRequest } from '../src/ops/adapter';
 import { hashOf, movedHash, parseHash, wizardOf } from '../src/router';
 import { NotMigratedScreen } from '../src/screens/NotMigrated';
-import { FakeGitHub, json } from './fake';
+import { formatsAfter } from '../src/screens/CourseEdit';
+import { FakeGitHub, fileBody, json } from './fake';
 
 const SRC = new URL('../src/', import.meta.url).pathname;
 
-/** The student screens' own files (WP-D3) are theirs to follow. */
-const THEIRS = /^(screens\/Student[^/]*\.tsx|model\/(student|mine|week|viewer|materials)\.ts)$/;
 /** The one module allowed to spell a retired name: it looks for them to say so. */
 const RETIRED_HOME = new Set(['model/migration.ts']);
 
@@ -27,12 +26,16 @@ function sources(dir = SRC): string[] {
     return statSync(p).isDirectory() ? sources(p) : /\.tsx?$/.test(f) ? [p] : [];
   });
 }
-const ours = () => sources().map((p) => ({ rel: relative(SRC, p), text: readFileSync(p, 'utf8') })).filter((f) => !THEIRS.test(f.rel));
+const ours = () => sources().map((p) => ({ rel: relative(SRC, p), text: readFileSync(p, 'utf8') }));
+
+/** Lines that must keep a retired spelling: the receipts label chain recognises the old label (0012 exception a). */
+const ALLOWED: { file: string; line: RegExp }[] = [{ file: 'model/mine.ts', line: /^export const RECEIPTS_LABELS = \['dsl-receipts', 'dsl-feedback'\];$/ }];
+const allowed = (file: string, line: string) => ALLOWED.some((a) => a.file === file && a.line.test(line.trim()));
 
 const RETIRED: [string, RegExp][] = [
   ['the old config repo', /classroom-config/],
   ['the old join repo', /['"`]welcome['"`]/],
-  ['the old system folder', /\.dsl\//],
+  ['the old system folder', /\.dsl\b/],
   ['the old instructors file', /(?<!_data\/)people\.yml/],
   ['the old registry', /cohort-courses-pages/],
   ['the old semester topic', /dsl-cohort/],
@@ -45,6 +48,11 @@ const RETIRED: [string, RegExp][] = [
   ['dry_run', /\bdry_run\b/],
   ['the old receipts label', /dsl-feedback/],
   ['receipts thread', /receipts thread/i],
+  ['tag (the semester key)', /\btag\s*:|['"]tag['"]|\.tag\b/],
+  ['semester_tag', /\bsemester_tag\b/],
+  ['term_tag', /\bterm_tag\b/],
+  ['format as a key', /\bformat\s*:|['"]format['"]|\.format\b(?!\()/],
+  ['silent', /\bsilent\b/],
 ];
 
 describe('names', () => {
@@ -54,7 +62,10 @@ describe('names', () => {
     expect(NAMES.records.status.startsWith(`${NAMES.system_dir}/`)).toBe(true);
   });
 
-  it('agrees with schemas/names.json when the engine has exported it', () => {
+  // TODO(WP-A2): A2 exports console/schemas/names.json. Once it has merged, turn this into a
+  // plain `it`: the file must exist (no early return) and agree with the decided names.
+  it.todo('agrees with schemas/names.json, which WP-A2 exports', () => {
+    expect(EXPORTED, 'schemas/names.json is missing').toBeDefined();
     if (!EXPORTED) return;
     for (const k of ['config_repo', 'join_repo', 'system_dir', 'instructors_file', 'assignments_file', 'registry_file'] as const)
       expect(String(EXPORTED[k]).replace(/\/$/, ''), k).toBe(DECIDED[k].replace(/\/$/, ''));
@@ -64,7 +75,7 @@ describe('names', () => {
   it('leaves no retired spelling in src/, outside the migration check', () => {
     const hits = ours()
       .filter((f) => !RETIRED_HOME.has(f.rel))
-      .flatMap((f) => RETIRED.filter(([, re]) => re.test(f.text)).map(([what]) => `${f.rel}: ${what}`));
+      .flatMap((f) => f.text.split('\n').flatMap((line, i) => (allowed(f.rel, line) ? [] : RETIRED.filter(([, re]) => re.test(line)).map(([what]) => `${f.rel}:${i + 1}: ${what}`))));
     expect(hits).toEqual([]);
   });
 
@@ -108,11 +119,36 @@ describe('an org on old names', () => {
     expect(await courseLeftovers(client(done), 'c')).toEqual([]);
   });
 
+  it('reads the course files too: a cohorts: registry key or cohort_defaults: is not migrated', async () => {
+    const gh = new FakeGitHub()
+      .on('GET', '/repos/c/.github/git/trees/HEAD', { tree: [{ path: 'semesters.yml', type: 'blob', sha: 'a' }, { path: 'dsl-course.yml', type: 'blob', sha: 'b' }] })
+      .on('GET', '/repos/c/.github/contents/semesters.yml', fileBody('semesters.yml', 'cohorts:\n  - s\n'))
+      .on('GET', '/repos/c/.github/contents/dsl-course.yml', fileBody('dsl-course.yml', 'course_name: X\ncohort_defaults:\n  timezone: UTC\n'));
+    expect((await courseLeftovers(client(gh), 'c')).map((l) => l.old)).toEqual(['cohorts:', 'cohort_defaults:']);
+  });
+
+  it('a check GitHub does not answer fails, rather than passing as migrated', async () => {
+    const down = new FakeGitHub().on('GET', /.*/, () => json({ message: 'boom' }, 500));
+    await expect(courseLeftovers(client(down), 'c')).rejects.toThrow();
+    await expect(semesterLeftovers(client(down), ORG)).rejects.toThrow();
+    const noTree = new FakeGitHub().on('GET', `/repos/${ORG}/semester-config`, { name: 'semester-config' }).on('GET', `/repos/${ORG}/.github`, { name: '.github', topics: ['dsl-semester'] });
+    await expect(semesterLeftovers(client(noTree), ORG)).rejects.toThrow();
+  });
+
   it('shows one screen with the NOT_MIGRATED sentence and nothing else', () => {
     const out = render(<NotMigratedScreen what="semester" org={ORG} leftovers={[{ old: 'classroom-config', new: 'semester-config' }]} />);
     expect(out).toContain('This semester has not been migrated yet');
     expect(out).toContain('NOT_MIGRATED: `classroom-config` is the old name of `semester-config` - run the migration');
     expect(out).not.toContain('Check now');
+  });
+});
+
+describe('the course default format', () => {
+  it('replaces only the first entry and keeps the others', () => {
+    expect(formatsAfter({ assignment_defaults: { formats: ['ipynb', 'py'] } }, 'rmd')).toEqual(['rmd', 'py']);
+    expect(formatsAfter({ assignment_defaults: { formats: 'ipynb,py' } }, 'py')).toEqual(['py']);
+    expect(formatsAfter({}, 'qmd')).toEqual(['qmd']);
+    expect(formatsAfter({ assignment_defaults: { formats: ['ipynb', 'py'] } }, '')).toBeUndefined();
   });
 });
 

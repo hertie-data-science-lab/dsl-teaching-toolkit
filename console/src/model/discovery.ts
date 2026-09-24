@@ -18,7 +18,7 @@ export const COURSE_META_PATH = 'dsl-course.yml';
 
 export interface CohortRef {
   org: string;
-  term: string; // the tag, e.g. f2026
+  term: string; // the semester key, e.g. f2026
   termLabel: string; // "Fall 2026"
 }
 

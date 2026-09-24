@@ -5,7 +5,7 @@
 // change: today it is the public site repo's generated files (`SiteSource`); once the engine
 // writes `.github/.system/student-status.json` (WP-D4), a source reading that one file
 // replaces it and no screen changes. The semester's own `status.json` is private
-// (`classroom-config`), so a student can never read it.
+// (the semester's config repo), so a student can never read it.
 //
 // A student's own facts (their repos, team, receipts, gradebook) do not come from here:
 // they come from GitHub directly, with the student's token (`model/mine.ts`).
