@@ -326,9 +326,9 @@ def _grading_config(
             "visibility",
             visibility,
             "private (the student and the instructors) | public (the whole internet: "
-            "portfolio work, no receipts issue) | student_choice (private, and the "
+            "portfolio work, no Submission receipts issue) | student_choice (private, and the "
             "student is its admin: theirs to publish after the late cutoff, and no "
-            "receipts issue) - read at hand-out only",
+            "Submission receipts issue) - read at hand-out only",
             live=creates_unit_repos(submit_via),
         ),
         # EVERY starter seeded, in the order it was named: the FIRST is the runnable one
@@ -637,7 +637,7 @@ def _brief_stub(
     `submit_via` decides what "What to submit" asks for, and an `external` assignment
     drops the artefact sentences the rest of the stub carries: the repo collects nothing,
     so "commit the notebook with its outputs saved" would tell a semester to hand in where
-    nothing is ever read from. That shape opens no receipts issue either, so the brief is
+    nothing is ever read from. That shape opens no Submission receipts issue either, so the brief is
     the one place that can say where the work really goes."""
     external = submit_via == "external"
     artefacts = (
@@ -1802,7 +1802,7 @@ def main() -> int:
         choices=[*VISIBILITIES, COURSE_DEFAULT_CHOICE],
         default=COURSE_DEFAULT_CHOICE,
         help="public = every student's repo is world-readable from hand-out (portfolio "
-        "work); there is then no receipts issue. Read when the repo is created - editing "
+        "work); there is then no Submission receipts issue. Read when the repo is created - editing "
         "it later changes nothing",
     )
     pa.add_argument(

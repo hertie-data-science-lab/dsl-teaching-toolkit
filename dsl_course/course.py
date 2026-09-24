@@ -116,7 +116,7 @@ def canonical_submit_via(value: object) -> str:
 # THE `shared_dropbox_repo` rationale, written down once so the five places that act on it
 # can point here instead of arguing it out again and drifting: a drop box is ONE repo that
 # the whole semester reads, and no student can opt out of being in it. Everything that would
-# otherwise be written per unit therefore has nowhere private to go - no receipts issue
+# otherwise be written per unit therefore has nowhere private to go - no Submission receipts issue
 # at all (`has_receipts_issue`), no model solution (`can_hold_solution`), and no
 # `visibility:` to choose (v1 keeps it private, because `public` would publish every
 # student's submission on the strength of one instructor's line). It is hand-marked for a
@@ -197,7 +197,7 @@ def github_visibility(visibility: str) -> str:
 
 
 def has_receipts_issue(submit_via: str, visibility: str) -> bool:
-    """Whether this shape has a receipts issue at all.
+    """Whether this shape has a Submission receipts issue at all.
 
     DERIVED from the shape, never configured: the issue lives in the unit's own repo, so it
     exists exactly where there is one that only that unit can read. A shape without one
@@ -408,7 +408,7 @@ SEMESTER_TEAMS = (
 ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *SEMESTER_TEAMS))
 
 
-# ------------------------------------------------------------------ the receipts issue
+# ------------------------------------------------------------------ the Submission receipts issue
 
 # Every submission repo carries ONE issue, opened at handout, where the student's
 # submission receipts appear. Marks and feedback are not posted here and never reach a
@@ -417,16 +417,21 @@ ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *SEMESTER_TEAMS))
 # issue and `collect` posts into it, and the two must agree on the spelling or the second
 # one opens a duplicate.
 RECEIPTS_ISSUE_TITLE = "Submission receipts"
-# The label and the marks keep the word `feedback` on purpose. They are not read by anyone:
-# they are what the lookup MATCHES against live issues, so changing either makes every
-# thread opened under the old one invisible and a second one appears over it. The lookup is
-# label, then mark, then title - the title is the weakest rung, which is what lets it be
-# renamed at all.
-RECEIPTS_ISSUE_LABEL = "dsl-feedback"
+# The label a new issue is opened with. The lookup is label, then mark, then title - the
+# title is the weakest rung, which is what lets it be renamed at all.
+RECEIPTS_ISSUE_LABEL = "dsl-receipts"
+# Every label an issue has ever been opened under, the written one first. A CHAIN, like
+# `RECEIPTS_ISSUE_MARKS` below: these are what the lookup MATCHES against live issues, so a
+# label is added, never removed - dropping `dsl-feedback` would make every thread opened
+# before the rename invisible, and a second one would appear over it.
+RECEIPTS_ISSUE_LABELS = (RECEIPTS_ISSUE_LABEL, "dsl-feedback")
 # A tuple, like `gh_contents.STUB_MARKS`: an issue opened under an older wording must still
 # be RECOGNISED, so a mark is added to the chain, never edited. Recognition is what stops a
-# second receipts issue appearing in a repo that already has one.
-RECEIPTS_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
+# second Submission receipts issue appearing in a repo that already has one. The first is written.
+RECEIPTS_ISSUE_MARKS = (
+    "<!-- dsl-course: receipts -->",
+    "<!-- dsl-course: feedback -->",
+)
 
 _SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
@@ -450,7 +455,7 @@ def receipts_issue_body(
     late_policy_line: str = "",
     team_line: str = "",
 ) -> str:
-    """The body of a submission repo's receipts issue - what the thread is FOR.
+    """The body of a submission repo's Submission receipts issue - what the thread is FOR.
 
     It says where the work goes and what will be posted here, and nothing about marks: a
     student has one address for those, their private gradebook, and a repo they may be
@@ -460,7 +465,7 @@ def receipts_issue_body(
     and its members; every word of boilerplate is here, so the two variants cannot drift
     apart in two call sites.
 
-    There is no variant for an assignment handed in off GitHub: a receipts issue exists
+    There is no variant for an assignment handed in off GitHub: a Submission receipts issue exists
     only where the shape HAS one (`has_receipts_issue`), and no run ever opens one for any
     other shape (`grades.receipts_thread_policy`), so a body describing one would be words
     nobody could reach."""
@@ -481,7 +486,7 @@ def receipt_marker(sha: str, event: str) -> str:
     return f"<!-- dsl-receipt:{sha or 'none'}:{event} -->"
 
 
-# What `Distribute grades --receipt-note` posts on a unit's receipts issue, and the hidden
+# What `Distribute grades --receipt-note` posts on a unit's Submission receipts issue, and the hidden
 # mark that makes a re-run post it once per assignment. Deliberately NOT a `dsl-receipt:`
 # mark: a receipt records a submission, and this records nothing about one.
 MARKS_RETURNED_NOTE = "Marks returned: see your marks repo."

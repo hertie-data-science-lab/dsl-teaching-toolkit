@@ -549,7 +549,9 @@ _OPS = (
         args_schema=_args(
             {
                 "notify": _boolean("Email students that there are new marks"),
-                "receipt_note": _boolean("Post a note on each receipts thread"),
+                "receipt_note": _boolean(
+                    "Post a note on each Submission receipts issue"
+                ),
                 "include_feedback": _boolean("Put the feedback text in the email"),
             }
         ),

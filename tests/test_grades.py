@@ -202,7 +202,7 @@ def _endpoint(args) -> str:
 def test_a_failed_label_or_collaborator_grant_names_nobody_publicly(
     monkeypatch, capsys
 ):
-    # Both are called once per SUBMISSION repo now (the receipts issue's label, and the
+    # Both are called once per SUBMISSION repo now (the Submission receipts issue's label, and the
     # student's own grant), so both name a `<slug>-<handle>` repo on failure.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
@@ -1755,7 +1755,7 @@ def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
 
 _EXTERNAL_GRADING = _GRADING_YML + "submit_via: external\n"
 
-# The four shapes with no receipts issue of their own. They used to be the interesting
+# The four shapes with no Submission receipts issue of their own. They used to be the interesting
 # half of distribute - each one a thread it must not post into - and they are ordinary
 # now: a mark goes to the gradebook whatever the shape, so there is one thing to prove.
 _NO_THREAD_SHAPES = (
@@ -1906,13 +1906,13 @@ def test_an_assignment_that_collects_nothing_is_never_warned_about(
         # We could not look at all: find the thread the student was told to read, open
         # nothing on an org nobody could list.
         ({}, None, grades.THREAD_FIND),
-        # There, and private: the one case a receipts issue may be OPENED in.
+        # There, and private: the one case a Submission receipts issue may be OPENED in.
         ({}, {"assignment-1-ada": "private"}, grades.THREAD_CREATE),
         # There, and not private. Nothing about a student's marking goes where the world
         # can read it - not even into a thread we used while it was still private.
         ({}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
         ({"visibility": "public"}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
-        # There and private, but a shape with no receipts issue of its own: the thread a
+        # There and private, but a shape with no Submission receipts issue of its own: the thread a
         # semester handed out before these shapes existed still gets its comment.
         ({"visibility": "public"}, {"assignment-1-ada": "private"}, grades.THREAD_FIND),
         (

@@ -1,5 +1,5 @@
 """Distribute grades' two optional return-marks channels: `--receipt-note` posts one line
-on each returned unit's receipts issue, and `--include-feedback` puts the feedback text
+on each returned unit's Submission receipts issue, and `--include-feedback` puts the feedback text
 into the email. Both off by default."""
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def test_an_unmarked_unit_or_an_off_github_shape_gets_no_note():
 
 
 class _Thread:
-    """One receipts issue's comments, behind the `gh` calls `post_marked_comment` makes."""
+    """One Submission receipts issue's comments, behind the `gh` calls `post_marked_comment` makes."""
 
     def __init__(self, bodies: list[str]):
         self.bodies = bodies

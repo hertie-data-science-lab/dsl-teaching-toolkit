@@ -62,7 +62,7 @@ def listed(monkeypatch):
 
 
 def test_every_live_semesters_sync_provisions_its_gradebooks(monkeypatch, gradebooks):
-    # The gradebook is where feedback goes for every shape that has no receipts issue, and
+    # The gradebook is where feedback goes for every shape that has no Submission receipts issue, and
     # the assignment brief points at it from the day it is published - so it exists from
     # the moment a student onboards, not from the first distribute.
     _stub_course_admins(monkeypatch)

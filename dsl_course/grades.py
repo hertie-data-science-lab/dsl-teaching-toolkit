@@ -55,6 +55,7 @@ from .course import (
     NO_STARTER,
     NO_TEAMS,
     RECEIPTS_ISSUE_LABEL,
+    RECEIPTS_ISSUE_LABELS,
     RECEIPTS_ISSUE_MARKS,
     RECEIPTS_ISSUE_TITLE,
     SELF_SELECT,
@@ -237,15 +238,15 @@ class _Shape:
 
     @property
     def has_receipts_issue(self) -> bool:
-        """Whether this assignment's units have a receipts issue to post into."""
+        """Whether this assignment's units have a Submission receipts issue to post into."""
         return has_receipts_issue(self.submit_via, self.visibility)
 
     @property
     def may_open_receipts_issue(self) -> bool:
-        """Whether this run may OPEN a receipts issue in a unit's repo.
+        """Whether this run may OPEN a Submission receipts issue in a unit's repo.
 
         Two conditions, and the second is the one easily lost: the shape must HAVE a
-        receipts issue, and the shape must have been read from a real definition. A sheet
+        Submission receipts issue, and the shape must have been read from a real definition. A sheet
         whose assignment the schedule no longer declares falls back to the defaults -
         `assignment_repo` + `private` - and a guess may keep writing in the thread a
         student was told to read, but must never open a second one over it."""
@@ -297,7 +298,7 @@ class SheetSpec(_Shape):
     visibility: str = "private"
     # False for a sheet whose assignment the schedule no longer declares
     # (`_spec_from_sheet`): the shape above is then a guess, and the one thing a guess may
-    # never do is open a receipts issue in a student's repo (`may_open_receipts_issue`).
+    # never do is open a Submission receipts issue in a student's repo (`may_open_receipts_issue`).
     shape_known: bool = True
     questions: dict[str, str] | None = None
     late_window_days: int | None = None
@@ -307,7 +308,7 @@ class SheetSpec(_Shape):
     due_display: str = ""
     cutoff_display: str = ""
     # The same two moments spelt out in full - `Sunday 4 October 2026, 23:59
-    # (Europe/Berlin)`. The receipts issue uses these: a student reads that line once and
+    # (Europe/Berlin)`. The Submission receipts issue uses these: a student reads that line once and
     # has to act on it, where a grader scans the sheet's header and wants it short.
     due_long: str = ""
     cutoff_long: str = ""
@@ -2353,7 +2354,7 @@ def sheet_spec(
     )
 
 
-# ----------------------------------------------------------- the receipts issue, in situ
+# ----------------------------------------------------------- the Submission receipts issue, in situ
 
 # Reading and writing the issue whose CONTRACT lives in `course`. Everything that decides
 # WHAT is said is there; everything that decides whether a call is made is here.
@@ -2365,7 +2366,7 @@ def late_policy(spec) -> str:
     """`accepted until Sunday 11 October 2026, 23:59 (Europe/Berlin), at 10% of your grade
     per day started.` - or "" when nothing is accepted after the deadline.
 
-    ONE sentence for both places a student meets the policy - the receipts issue at handout
+    ONE sentence for both places a student meets the policy - the Submission receipts issue at handout
     and every receipt after it. Two spellings of the same rule is how a student ends up
     reading two different deadlines.
 
@@ -2384,7 +2385,7 @@ def late_policy(spec) -> str:
 def receipts_thread_body(
     spec, unit: str = "", members: tuple[str, ...] | list[str] = ()
 ) -> str:
-    """The receipts issue's body for one submission repo, from the assignment's own spec.
+    """The Submission receipts issue's body for one submission repo, from the assignment's own spec.
 
     `unit` is the row that repo belongs to - a team name on a group assignment, the
     student's handle on an individual one - and WHICH VARIANT to write is read off the
@@ -2441,7 +2442,7 @@ class IssueLookupFailed:
     """The receipts-issue lookup could not be READ - as against finding nothing there.
 
     A 5xx or a secondary limit that outlived the retry ladder used to come back as "this
-    repo has no receipts issue", and the very next thing that happens is a SECOND issue
+    repo has no Submission receipts issue", and the very next thing that happens is a SECOND issue
     opened over the thread the student was told to read. Falsy, so `if not found` still
     reads naturally; distinguished from None by identity, never by truth."""
 
@@ -2453,7 +2454,7 @@ class IssueLookupFailed:
 
 LOOKUP_FAILED = IssueLookupFailed()
 
-# Oldest first, and the author with it. The toolkit opens the receipts issue at handout,
+# Oldest first, and the author with it. The toolkit opens the Submission receipts issue at handout,
 # so ours is the oldest one carrying the label - but a student holds `maintain` on their
 # own submission repo and can open and label their own, and GitHub's default ordering is
 # newest first, which handed it theirs.
@@ -2465,7 +2466,7 @@ def _receipts_issues(
 ) -> list[str] | None:
     """The issues this query matches, or None when the question could not be ANSWERED.
 
-    A 404 IS an answer: there is no such repo, so it has no receipts issue. Every shape
+    A 404 IS an answer: there is no such repo, so it has no Submission receipts issue. Every shape
     can reach one - a student who never onboarded, a team formed after the handout, an
     assignment handed in off GitHub whose repos were never created - and answering "could
     not read it" for them turned a semester of absent repos into a red run and a `[wait]`
@@ -2499,7 +2500,7 @@ def _ours(rows: list[list[str]], login_at: int) -> list[str]:
 def find_receipts_issue(
     semester_org: str, repo: str
 ) -> tuple[int, str] | IssueLookupFailed | None:
-    """`(number, state)` of this repo's receipts issue, None if it has none, or
+    """`(number, state)` of this repo's Submission receipts issue, None if it has none, or
     `LOOKUP_FAILED` if the question could not be answered.
 
     Three rungs, cheapest first: the LABEL, then a body carrying one of the marks, then the
@@ -2509,18 +2510,20 @@ def find_receipts_issue(
 
     Pull requests are issues to this endpoint, so they are filtered out: a PR titled
     A pull request titled like the issue would otherwise be commented on instead."""
-    by_label = _receipts_issues(
-        semester_org,
-        repo,
-        f"labels={RECEIPTS_ISSUE_LABEL}&state=all&per_page=5&{_ISSUE_ORDER}",
-        ".[] | select(.pull_request == null) | "
-        '"\\(.number)\\t\\(.state)\\t\\(.user.login // "")"',
-    )
-    if by_label is None:
-        return LOOKUP_FAILED
-    if by_label:
-        row = _ours([line.split("\t") for line in by_label], 2)
-        return int(row[0]), row[1]
+    # One query per label in the chain: `labels=a,b` means BOTH, not either.
+    for label in RECEIPTS_ISSUE_LABELS:
+        by_label = _receipts_issues(
+            semester_org,
+            repo,
+            f"labels={label}&state=all&per_page=5&{_ISSUE_ORDER}",
+            ".[] | select(.pull_request == null) | "
+            '"\\(.number)\\t\\(.state)\\t\\(.user.login // "")"',
+        )
+        if by_label is None:
+            return LOOKUP_FAILED
+        if by_label:
+            row = _ours([line.split("\t") for line in by_label], 2)
+            return int(row[0]), row[1]
     marks = " or ".join(f'contains("{mark}")' for mark in RECEIPTS_ISSUE_MARKS)
     listed = _receipts_issues(
         semester_org,
@@ -2547,7 +2550,7 @@ def find_receipts_issue(
 def ensure_receipts_issue(
     semester_org: str, repo: str, body: str, dry_run: bool = False, create: bool = True
 ) -> int | IssueLookupFailed | None:
-    """This repo's receipts issue number, opening one if it has none.
+    """This repo's Submission receipts issue number, opening one if it has none.
 
     A CLOSED issue is reopened: a student who closes theirs must still receive their
     receipts and their grade, and a second issue would split the thread they were told to
@@ -2563,7 +2566,7 @@ def ensure_receipts_issue(
     found = find_receipts_issue(semester_org, repo)
     if isinstance(found, IssueLookupFailed):
         log_err(
-            f"  ! could not read the receipts issues in {semester_org} - opening none, "
+            f"  ! could not read the Submission receipts issues in {semester_org} - opening none, "
             f"posting none; the next run tries again"
         )
         return LOOKUP_FAILED
@@ -2580,12 +2583,14 @@ def ensure_receipts_issue(
                 "state=open",
             )
             if code != 0:
-                log_err(f"  ! could not reopen the receipts issue: {out[:160]}")
+                log_err(
+                    f"  ! could not reopen the Submission receipts issue: {out[:160]}"
+                )
         return number
     if not create:
         return None
     if dry_run:
-        log("    PREVIEW  would open the receipts issue")
+        log("    PREVIEW  would open the Submission receipts issue")
         return None
     # The label first: GitHub silently drops a label the repo does not have, and the label
     # is the cheapest rung of the lookup above.
@@ -2612,7 +2617,7 @@ def ensure_receipts_issue(
         ".number",
     )
     if code != 0:
-        log_err(f"  ! could not open the receipts issue: {out[:160]}")
+        log_err(f"  ! could not open the Submission receipts issue: {out[:160]}")
         return None
     return int(out.strip()) if out.strip().isdigit() else None
 
@@ -2625,7 +2630,7 @@ def post_marked_comment(
     marker: str,
     dry_run: bool = False,
 ) -> bool:
-    """Post one comment on the receipts issue, unless it already carries `marker`.
+    """Post one comment on the Submission receipts issue, unless it already carries `marker`.
 
     The marker is the whole idempotence story, and it is why both callers share this: the
     refresh pass runs four times an hour for the length of the late window, and Patch
@@ -2643,7 +2648,9 @@ def post_marked_comment(
         ".[].body",
     )
     if code != 0:
-        log_err(f"  ! could not read the receipts issue's comments: {out[:160]}")
+        log_err(
+            f"  ! could not read the Submission receipts issue's comments: {out[:160]}"
+        )
         return False
     if marker in out:
         return True  # already said, on this commit, for this event
@@ -2659,7 +2666,7 @@ def post_marked_comment(
         f"body={body}\n{marker}\n",
     )
     if code != 0:
-        log_err(f"  ! could not comment on the receipts issue: {out[:160]}")
+        log_err(f"  ! could not comment on the Submission receipts issue: {out[:160]}")
         return False
     return True
 
@@ -3814,7 +3821,7 @@ def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
     are simply unknown, and nothing is derived from them.
 
     `shape_known=False` says the rest is a guess: there is no definition to read
-    `submit_via` or `visibility` from, so this spec may use a receipts issue it finds and
+    `submit_via` or `visibility` from, so this spec may use a Submission receipts issue it finds and
     may never open one (`may_open_receipts_issue`)."""
     return SheetSpec(
         slug=slug,
@@ -3917,7 +3924,7 @@ def _undue_marks(
     )
 
 
-# What a run may do about one unit's receipts issue. THREE answers and one function that
+# What a run may do about one unit's Submission receipts issue. THREE answers and one function that
 # gives them (`receipts_thread_policy`), asked by the submission receipts and by nothing
 # else now that no mark is posted into a thread at all. THREE and not a boolean because
 # the answers are about the REPO: `find` is "there may be a thread here, but do not open
@@ -3931,10 +3938,10 @@ THREAD_NONE = "none"  # do not look, do not post
 def receipts_thread_policy(
     spec: SheetSpec, listed: dict[str, dict] | None, repo: str
 ) -> str:
-    """May this run touch `repo`'s receipts issue, and may it OPEN one?
+    """May this run touch `repo`'s Submission receipts issue, and may it OPEN one?
 
     Everything the toolkit knows about that, in one place: the assignment's SHAPE (does it
-    have a receipts issue at all?) and the org LISTING's word on the repo (is it there,
+    have a Submission receipts issue at all?) and the org LISTING's word on the repo (is it there,
     and is it still private?). Both are needed - the file says what was handed out and the
     listing says what is there now - and each answer here is deliberately narrow in the
     direction that cannot hurt a student: a listing is a snapshot, and answering "no
@@ -3942,7 +3949,7 @@ def receipts_thread_policy(
 
     - `listed is None` - we could not look at all: FIND. The thread a student was told to
       read is still the right place for their receipts; opening one on an org nobody could
-      list is how a second receipts issue appears over it.
+      list is how a second Submission receipts issue appears over it.
     - the repo is NOT in the listing: FIND where the shape creates a repo per unit (it may
       have been created since the listing was taken), NONE where it does not - an external
       assignment has no repos, and probing each would be an issues call per student for an
@@ -3950,7 +3957,7 @@ def receipts_thread_policy(
     - the listing says the repo is not private: NONE. A hand-in time is a fact about a
       student, and it does not go where the world can read it - which is what a
       `visibility:` edited after handout leaves behind.
-    - otherwise: CREATE for an assignment whose shape HAS a receipts issue and whose shape
+    - otherwise: CREATE for an assignment whose shape HAS a Submission receipts issue and whose shape
       was read from a real definition; FIND for every other one, which is what keeps a
       semester handed out before these shapes existed (Maths a1) getting its receipts in the
       thread it was told to read."""
@@ -3976,12 +3983,12 @@ def receipts_thread(
     *,
     dry_run: bool = False,
 ) -> int | IssueLookupFailed | None:
-    """The receipts issue this unit's receipt goes on: its number, None where there is none
+    """The Submission receipts issue this unit's receipt goes on: its number, None where there is none
     this run may use, or `LOOKUP_FAILED` where the question could not be answered.
 
     THE entry point, and the only consumer of `receipts_thread_policy`. It takes the
     STRONGEST answer the policy gives and nothing weaker - the repo is in the listing, the
-    listing says it is private, and the shape has a receipts issue - because a receipt is
+    listing says it is private, and the shape has a Submission receipts issue - because a receipt is
     the one thing that would OPEN a thread nobody has asked for yet. A repo the listing
     does not carry, or a listing that could not be read at all, waits for a tick that can
     say so: the grading sheet is the record and the receipt is a courtesy."""
@@ -4119,7 +4126,7 @@ def _returned_units(
 ) -> list[tuple[SheetSpec, str]]:
     """`(spec, unit repo)` for every unit whose marks this run's gradebooks now hold: a
     member's book is live and carries a final grade for that assignment. Only shapes with
-    a receipts issue of their own, since the note goes there."""
+    a Submission receipts issue of their own, since the note goes there."""
     out: list[tuple[SheetSpec, str]] = []
     held = {h.casefold() for h in live}
     by_fold = {h.casefold(): h for h in books}
@@ -4146,9 +4153,9 @@ def _post_returned_notes(
     units: list[tuple[SheetSpec, str]],
     listed: dict[str, dict] | None,
 ) -> int:
-    """Post `MARKS_RETURNED_NOTE` on each unit's receipts issue, once per assignment
+    """Post `MARKS_RETURNED_NOTE` on each unit's Submission receipts issue, once per assignment
     (`marks_returned_marker`). Only on an issue that already exists and a repo the listing
-    still says is private - the same guard every write into a receipts thread takes.
+    still says is private - the same guard every write into a Submission receipts issue takes.
     Returns how many units now carry the note. Never fatal: the gradebook is the record."""
     posted = 0
     for spec, repo in units:
@@ -4157,7 +4164,7 @@ def _post_returned_notes(
         found = find_receipts_issue(semester_org, repo)
         if isinstance(found, IssueLookupFailed) or found is None:
             log_person(
-                f"    [skip] {semester_org}/{repo}: no receipts issue for the note"
+                f"    [skip] {semester_org}/{repo}: no Submission receipts issue for the note"
             )
             continue
         if post_marked_comment(
@@ -4223,7 +4230,7 @@ def distribute(
     issue in the private classroom-config (`_preview`).
 
     `receipt_note` also posts `MARKS_RETURNED_NOTE` once per assignment on each returned
-    unit's receipts issue; `include_feedback` puts the feedback text into the email. Both
+    unit's Submission receipts issue; `include_feedback` puts the feedback text into the email. Both
     off by default."""
     # ONE listing of the semester for the whole run: it answers "does this student already
     # have a gradebook?". A dry run writes nothing and needs none.
@@ -4385,7 +4392,7 @@ def distribute(
     if dry_run and receipt_note:
         log(
             f"  would post the marks-returned note on up to "
-            f"{len(_returned_units(specs, sheets, books, live))} receipts issue(s)"
+            f"{len(_returned_units(specs, sheets, books, live))} Submission receipts issue(s)"
         )
     if dry_run:
         previewed = _preview(
@@ -4926,7 +4933,7 @@ def main() -> int:
         "--receipt-note",
         action="store_true",
         help="Also post 'Marks returned: see your marks repo.' once on each returned "
-        "unit's receipts issue.",
+        "unit's Submission receipts issue.",
     )
     p.add_argument(
         "--include-feedback",

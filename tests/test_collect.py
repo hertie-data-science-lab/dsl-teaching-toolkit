@@ -113,7 +113,7 @@ def test_the_group_shape_reads_off_type_and_team_formation():
 
 def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
     # `submit_via` + `visibility` are the whole of the shape, and everything that follows
-    # from it - the receipts issue, the submission arithmetic, whether there is a repo per
+    # from it - the Submission receipts issue, the submission arithmetic, whether there is a repo per
     # unit at all - is DERIVED, never declared.
     spec = collect.parse_grading_spec("")
     assert (spec.submit_via, spec.visibility) == ("assignment_repo", "private")
@@ -145,7 +145,7 @@ def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
 def test_student_choice_is_read_back_and_hands_the_flag_to_the_student(capsys):
     # The repo is created private like any other; what is different is WHO owns the flag
     # afterwards. One predicate answers that, in `course.py` and nowhere else, so every
-    # exemption `student_choice` earns asks the same question. No receipts issue either:
+    # exemption `student_choice` earns asks the same question. No Submission receipts issue either:
     # a thread in a repo the student may publish tomorrow is a publishable mark.
     spec = collect.parse_grading_spec("visibility: student_choice\n")
     assert spec.visibility == "student_choice"
@@ -188,7 +188,7 @@ def test_shared_collects_commits_without_a_repo_per_unit(capsys):
     assert spec.collects_commits
     assert not spec.creates_unit_repos
     assert spec.creates_repos
-    # No receipts issue: the drop box is the whole semester's, so nothing about one
+    # No Submission receipts issue: the drop box is the whole semester's, so nothing about one
     # student's marking may be written in it.
     assert not spec.has_receipts_issue
     assert spec.submit_shape == "shared-dropbox-repo"
@@ -5287,7 +5287,7 @@ def test_a_receipt_is_not_posted_when_the_sheet_write_was_refused(monkeypatch):
 
 def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
     # `visibility:` edited back to `private` after hand-out leaves the FILE saying there is
-    # a private receipts thread in each repo and the repos themselves world-readable. A
+    # a private Submission receipts issue in each repo and the repos themselves world-readable. A
     # receipt says when a student submitted; posting it there publishes it. The repo wins,
     # per repo - the student whose repo really is private is still told.
     _sheet_env(
@@ -5304,7 +5304,7 @@ def test_a_repo_the_listing_says_is_public_gets_no_receipt(monkeypatch, capsys):
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     assert [repo for repo, _body, _dry in posted] == ["assignment-1-ben-k"]
     assert (
-        "assignment-1-ada-l - no receipts thread this run may post in"
+        "assignment-1-ada-l - no Submission receipts issue this run may post in"
         in capsys.readouterr().out
     )
 
@@ -6770,7 +6770,9 @@ def test_a_shared_assignment_posts_no_receipts(monkeypatch):
     monkeypatch.setattr(
         collect.grades,
         "ensure_receipts_issue",
-        lambda *a, **k: pytest.fail("a shared drop box has no receipts issue"),
+        lambda *a, **k: pytest.fail(
+            "a shared drop box has no Submission receipts issue"
+        ),
     )
     monkeypatch.setattr(
         collect.grades,

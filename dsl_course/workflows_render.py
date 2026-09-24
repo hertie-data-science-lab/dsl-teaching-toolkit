@@ -1152,7 +1152,7 @@ on:
         type: boolean
         default: true
       receipt_note:
-        description: "Also post 'Marks returned: see your marks repo.' once on each student's receipts issue"
+        description: "Also post 'Marks returned: see your marks repo.' once on each student's Submission receipts issue"
         type: boolean
         default: false
       include_feedback:
@@ -1943,7 +1943,7 @@ def render_patch_assignment(
 # A broken cell, a wrong path, a dataset that moved - after the assignment went out.
 # Commit the fix to the TEMPLATE's default branch first, then run this: it pushes that
 # file (or folder) into every submission repo of the assignment, as a NEW COMMIT on each
-# student's own branch, and posts a note on each receipts issue telling them to pull.
+# student's own branch, and posts a note on each Submission receipts issue telling them to pull.
 # It never force-pushes, and it never replaces a file a student has already changed
 # unless `overwrite` says so - their version is kept and counted instead.
 # The frozen semester-side hand-out is patched too, so a student who onboards tomorrow is

@@ -103,15 +103,17 @@ Things whose *literal spelling* is depended on from outside Python:
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the
   oldest string must still reach the newest in one pass; for `STUB_MARKS`, a repo seeded with an
   older wording must still be recognised as unwritten, or its placeholder syllabus ships.
-- **`course.RECEIPTS_ISSUE_TITLE` / `RECEIPTS_ISSUE_LABEL` / `RECEIPTS_ISSUE_MARKS`** identify
-  the one issue in each submission repo. It carries **submission receipts only** - `assign` opens
-  it, `collect` posts the receipts and `assign` the patch notes; no mark or feedback line is ever
-  posted into a repo, they go to `grades-<handle>` alone. The lookup (label -> body mark -> exact
-  title) is what stops a second one appearing over a thread a student is already reading, and it
-  is why the TITLE could be renamed to `Submission receipts` while the label `dsl-feedback` and
-  the marks keep the older word: those two are matched against live issues and a student never
-  reads either. `RECEIPTS_ISSUE_MARKS` is a chain like `STUB_MARKS`: add a wording, never edit
-  one, or every issue opened under the old one becomes invisible. The hidden
+- **`course.RECEIPTS_ISSUE_TITLE` / `RECEIPTS_ISSUE_LABELS` / `RECEIPTS_ISSUE_MARKS`** identify
+  the one issue in each submission repo, *Submission receipts*. It carries **submission receipts
+  only** - `assign` opens it, `collect` posts the receipts and `assign` the patch notes; no mark
+  or feedback line is ever posted into a repo, they go to `grades-<handle>` alone. The lookup
+  (label -> body mark -> exact title) is what stops a second one appearing over a thread a
+  student is already reading. A new issue is opened with the first label (`dsl-receipts`) and
+  the first mark; `RECEIPTS_ISSUE_LABELS` and `RECEIPTS_ISSUE_MARKS` are chains like
+  `STUB_MARKS`, matched against live issues: add a spelling, never edit or drop one
+  (`dsl-feedback` and the `feedback` mark stay for every issue opened before the rename), or
+  every issue opened under the old one becomes invisible. This chain is the one place an old
+  spelling is still recognised. The hidden
   `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
   refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
@@ -622,7 +624,7 @@ this section.
 ONE ASSIGNMENT PER SUBMISSION SHAPE (`tests/e2e/shapes.py`): github/private,
 github/public, github/student_choice, external and shared, handed out under
 `<namespace>-<shape>` and driven serially through the same ticks. The shapes differ in what
-the handout creates, where the student pushes, whether there is a receipts issue and what
+the handout creates, where the student pushes, whether there is a Submission receipts issue and what
 the site page says, so a run that drove one of them proved the wiring for one of them. The
 student really publishes their `student_choice` repo - once before the grading cutoff,
 which the next tick undoes, and once after it, which stands.
@@ -709,6 +711,8 @@ an already-open issue carries.
 | workflow input `silent` (Distribute grades) | `notify`, default `true` | rendered workflow |
 | CLI `--dry-run` / `--no-dry-run`, `syllabus --write` | `--preview` / `--no-preview`, preview ON by default on every CLI | every CLI; rendered workflows and console ops spell one explicitly |
 | log copy `DRY-RUN`, `[dry-run]`, "dry run" | `PREVIEW`, `[preview]`, "preview" | logs, the Distribute preview issue |
+| receipts issue label `dsl-feedback`, mark `<!-- dsl-course: feedback -->` | `dsl-receipts`, `<!-- dsl-course: receipts -->` on new issues; the old label and mark stay RECOGNISED (append-only chain) - nothing to migrate | submission repos |
+| copy "receipts issue", "receipts thread" | "Submission receipts" issue | logs, forms, docs |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

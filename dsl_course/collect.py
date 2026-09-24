@@ -1562,11 +1562,11 @@ def _post_receipts(
     dry_run: bool,
     changed: bool = True,
 ) -> None:
-    """Tell each student what we recorded for them, in their own repo's receipts issue.
+    """Tell each student what we recorded for them, in their own repo's Submission receipts issue.
 
     Never fatal: a receipt is a courtesy, and a repo whose issue cannot be opened must not
     stop the sheet - which is the record - from being written. Nothing at all where the
-    assignment has no receipts issue to post into: work handed in off GitHub has no push to
+    assignment has no Submission receipts issue to post into: work handed in off GitHub has no push to
     acknowledge, and a shape whose repo is not the student's own has nowhere private to say
     it. No mark is lost either way - marks go to the gradebook and never to a repo.
 
@@ -1608,7 +1608,7 @@ def _post_receipts(
         )
         if issue is None:
             log_person(
-                f"    [skip] receipt on {semester_org}/{repo} - no receipts thread this "
+                f"    [skip] receipt on {semester_org}/{repo} - no Submission receipts issue this "
                 f"run may post in"
             )
             continue

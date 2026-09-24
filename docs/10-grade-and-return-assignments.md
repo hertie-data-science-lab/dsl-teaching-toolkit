@@ -161,7 +161,7 @@ after one correction reaches one student. Untick `notify` to skip the email.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email. `receipt_note` posts one line, "Marks returned: see your marks repo.", on each
-returned student's or team's receipts issue - once per assignment, however often you run
+returned student's or team's Submission receipts issue - once per assignment, however often you run
 it. The note carries no mark.
 
 The gradebook and the email are decided separately, on purpose. The **commit** is made

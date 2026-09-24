@@ -96,7 +96,7 @@ def test_an_individual_body_never_names_a_team_even_when_handed_one():
 
 def test_no_run_ever_opens_a_feedback_issue_for_work_handed_in_off_github():
     # There is no body for that shape, because there is no issue to put one in: the policy
-    # never answers CREATE where the shape has no receipts issue, whatever the listing
+    # never answers CREATE where the shape has no Submission receipts issue, whatever the listing
     # says. This is what the deleted `external=` variant of the body used to be for.
     for listed in ({"assignment-1-ada-l": {"visibility": "private"}}, {}, None):
         assert (
@@ -134,7 +134,7 @@ def test_the_handout_body_says_nothing_about_where_a_mark_goes():
 
 
 def test_the_body_always_opens_with_a_mark_the_lookup_can_find():
-    # The mark is how a second receipts issue is prevented in a repo whose label was
+    # The mark is how a second Submission receipts issue is prevented in a repo whose label was
     # removed by hand. It is a chain, never edited - so the FIRST is what we write.
     for body in (
         grades.receipts_thread_body(spec()),
@@ -226,9 +226,28 @@ def _gh(monkeypatch, answers):
 
 
 def test_the_issue_is_found_by_its_label_in_one_call(monkeypatch):
-    calls = _gh(monkeypatch, {"labels=dsl-feedback": (0, "7\topen")})
+    calls = _gh(monkeypatch, {"labels=dsl-receipts": (0, "7\topen")})
     assert grades.find_receipts_issue("Semester", "assignment-1-ada-l") == (7, "open")
     assert len(calls) == 1  # the cheapest rung answered; no listing, no search
+
+
+def test_an_issue_opened_under_the_old_label_is_still_found(monkeypatch):
+    # The label chain is append-only: every thread opened as `dsl-feedback` before the
+    # rename is still this repo's one Submission receipts issue, never a reason to open a second.
+    calls = _gh(
+        monkeypatch,
+        {"labels=dsl-receipts": (0, ""), "labels=dsl-feedback": (0, "7\topen")},
+    )
+    assert grades.find_receipts_issue("Semester", "assignment-1-ada-l") == (7, "open")
+    assert len(calls) == 2
+
+
+def test_a_new_issue_is_opened_under_the_new_label_and_mark():
+    assert course.RECEIPTS_ISSUE_LABEL == "dsl-receipts"
+    assert course.RECEIPTS_ISSUE_LABELS[-1] == "dsl-feedback"
+    assert course.RECEIPTS_ISSUE_MARKS[-1] == "<!-- dsl-course: feedback -->"
+    body = course.receipts_issue_body(due_display="Tue 13 Oct 18:00")
+    assert body.startswith(course.RECEIPTS_ISSUE_MARKS[0])
 
 
 def test_an_unlabelled_issue_is_still_found_by_its_body_mark(monkeypatch):
@@ -237,6 +256,7 @@ def test_an_unlabelled_issue_is_still_found_by_its_body_mark(monkeypatch):
     _gh(
         monkeypatch,
         {
+            "labels=dsl-receipts": (0, ""),
             "labels=dsl-feedback": (0, ""),
             "state=all&per_page=50": (
                 0,
@@ -251,6 +271,7 @@ def test_an_issue_with_neither_label_nor_mark_is_found_by_its_exact_title(monkey
     _gh(
         monkeypatch,
         {
+            "labels=dsl-receipts": (0, ""),
             "labels=dsl-feedback": (0, ""),
             "state=all&per_page=50": (
                 0,
@@ -282,7 +303,7 @@ def test_the_lookup_uses_the_list_endpoint_never_the_search_index(monkeypatch):
 
 def test_a_lookup_that_failed_opens_nothing(monkeypatch, capsys):
     # A 5xx or a secondary limit that outlived the retry ladder used to read as "this repo
-    # has no receipts issue", and the next thing that happens is a SECOND issue opened over
+    # has no Submission receipts issue", and the next thing that happens is a SECOND issue opened over
     # the thread the student was told to read.
     monkeypatch.setattr(grades, "gh", lambda *a, **k: (1, "gh: Internal Server Error"))
     found = grades.find_receipts_issue("Semester", "assignment-1-ada-l")
@@ -297,7 +318,7 @@ def test_a_lookup_that_failed_opens_nothing(monkeypatch, capsys):
 
 
 def test_a_repo_that_is_not_there_has_no_issue_rather_than_no_answer(monkeypatch):
-    # A 404 IS an answer: no repo, no receipts issue. Every shape reaches one - a student
+    # A 404 IS an answer: no repo, no Submission receipts issue. Every shape reaches one - a student
     # who never onboarded, a team formed after the handout, an assignment handed in off
     # GitHub whose repos were never created - and reading it as "could not look" made a
     # semester of absent repos a red run with a `[wait]` line per student. Nothing is OPENED
@@ -365,9 +386,9 @@ def test_the_issue_is_opened_once_with_its_label(monkeypatch):
 
 def test_an_existing_issue_is_never_opened_again(monkeypatch):
     def boom(*a, **k):
-        raise AssertionError("a repo must never get a second receipts issue")
+        raise AssertionError("a repo must never get a second Submission receipts issue")
 
-    _gh(monkeypatch, {"labels=dsl-feedback": (0, "7\topen")})
+    _gh(monkeypatch, {"labels=dsl-receipts": (0, "7\topen")})
     monkeypatch.setattr(grades, "ensure_label", boom)
     assert grades.ensure_receipts_issue("Semester", "assignment-1-ada-l", "body") == 7
 
@@ -377,7 +398,7 @@ def test_a_closed_issue_is_reopened_rather_than_replaced(monkeypatch):
     # thread they were pointed at.
     calls = _gh(
         monkeypatch,
-        {"labels=dsl-feedback": (0, "7\tclosed"), "--method PATCH": (0, "")},
+        {"labels=dsl-receipts": (0, "7\tclosed"), "--method PATCH": (0, "")},
     )
     assert grades.ensure_receipts_issue("Semester", "assignment-1-ada-l", "body") == 7
     ((patch,),) = ([c for c in calls if "PATCH" in c],)

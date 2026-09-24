@@ -50,7 +50,7 @@ MATERIALS = "course-materials"
 EXTERNAL = "assignment-3-f2026"
 EXTERNAL_URL = "https://moodle.example.edu/mod/assign/view.php?id=EXAMPLE"
 # Portfolio work (`visibility: public`): the same repo per student, world-readable from
-# hand-out, and no receipts issue - so its page and its due row have to say so before a
+# hand-out, and no Submission receipts issue - so its page and its due row have to say so before a
 # student pushes anything into it.
 PUBLIC = "assignment-4-f2026"
 # External AND still pending, which is the pair of states that reaches no reader: the

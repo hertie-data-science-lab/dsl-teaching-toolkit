@@ -43,7 +43,7 @@ Auditors (`role=auditor`) are skipped. The assignment's brief appears on the sem
 ### An assignment handed in somewhere else
 
 `submit_via: external` in the template's `grading_config.yml` (Moodle, Kaggle, in class)
-creates **nothing**: no semester template, no repo per student, no receipts issue, no
+creates **nothing**: no semester template, no repo per student, no Submission receipts issue, no
 solution push. The handout still records the moment in `schedule.yml`, publishes the brief
 and a **Submit on \<host\>** button (from `submit_url`) on the semester site, writes the
 grading sheet with every student or team in it, and makes sure each student has their
@@ -59,14 +59,14 @@ Education upgrade lands, so until then the drop box is left unprotected and the 
 says so. Each unit pushes into its own `<handle>/` or `<team>/` folder and can read
 everyone else's.
 
-There is no receipts issue and no model solution push - one repo the whole semester reads
+There is no Submission receipts issue and no model solution push - one repo the whole semester reads
 is not a place for either. The handout re-fires every quarter of an hour
 like any other, and a student who onboards later is granted push on the next tick.
 
 ### An assignment whose repos are public
 
 `visibility: public` in the template's `grading_config.yml` hands out the same repos
-world-readable - portfolio work such as a hackathon. There is then **no receipts issue**
+world-readable - portfolio work such as a hackathon. There is then **no Submission receipts issue**
 (a hand-in time is a fact about a student, and it does not go where the internet can read
 it; the marks were never going here anyway), and the
 assignment's page on the semester site - and the repo's own About line - says the repo is
@@ -87,7 +87,7 @@ credential rather than bypass the block.
 `visibility: student_choice` in the template's `grading_config.yml` hands out the same
 **private** repos, but makes the student - or every member of a team - **admin** of their
 own, which is the only permission that carries GitHub's visibility switch. There is no
-receipts issue (the repo may be public tomorrow).
+Submission receipts issue (the repo may be public tomorrow).
 
 No model solution is pushed into these repos either, for the same reason: the student may
 publish the repo the day after the cutoff, and the answers would go with it.

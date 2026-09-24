@@ -20,7 +20,7 @@ student's private gradebook repo (see dsl_course.grades), so a possibly-public t
 never carries marks.
 
 For `submit_via: external` - handed in off GitHub (Moodle, Kaggle, in class) - it creates
-NOTHING: no semester template, no repo, no receipts issue, no solution push. It still records
+NOTHING: no semester template, no repo, no Submission receipts issue, no solution push. It still records
 the handout and writes the grading sheet, the gradebooks and the site, which is everything
 a handout owes the semester around the work itself.
 
@@ -33,14 +33,14 @@ private repo, so until then it is left unprotected and the run log says so. No r
 issue and no model solution: one repo the whole semester reads is not a place to put either.
 
 For `visibility: public` it creates the same repos world-readable - portfolio work - and
-opens no receipts issue: a hand-in time is a fact about a student and does not go where
+opens no Submission receipts issue: a hand-in time is a fact about a student and does not go where
 the internet can read it. No mark is lost with it - marks go to the private gradebook for
 every shape alike. The semester template stays private either way.
 
 For `visibility: student_choice` it creates the same PRIVATE repos and makes each unit
 `admin` of its own - the one permission that carries GitHub's visibility switch - so the
 student, or every member of a team, can publish their own work once it has been marked.
-No receipts issue there either: the repo may be public tomorrow. Until the grading cutoff
+No Submission receipts issue there either: the repo may be public tomorrow. Until the grading cutoff
 the scheduler puts any of them back that has gone public early.
 
 Usage:
@@ -487,7 +487,7 @@ def patch_marker(digests: dict[str, str]) -> str:
 
 
 def patch_note(paths: list[str], on: date) -> str:
-    """The line each receipts issue gets. It names the FILES, never the student, and says
+    """The line each Submission receipts issue gets. It names the FILES, never the student, and says
     the one thing a student has to do about it."""
     listed = ", ".join(f"`{path}`" for path in sorted(paths))
     what = (
@@ -631,7 +631,7 @@ def note_the_patch(
     on: date,
     row: dict | None,
 ) -> bool:
-    """Tell one student, on the receipts issue they were pointed at when the repo appeared.
+    """Tell one student, on the Submission receipts issue they were pointed at when the repo appeared.
 
     Only where that issue already EXISTS: `assign` opens it at hand-out with the assignment's
     due date and brief in the body, and a patch has neither to hand - opening one here would
@@ -640,7 +640,7 @@ def note_the_patch(
 
     And only where the LISTING says the repo is still private. `row` is this repo's row of
     the listing `patch_released` already holds, and the same guard every other write into
-    a receipts thread takes (`grades.receipts_thread_policy`): a thread in a public repo
+    a Submission receipts issue takes (`grades.receipts_thread_policy`): a thread in a public repo
     is a thread the internet reads, and this one names the files a student was handed
     wrong. Optimistic like `repos.listed_is_private` - a row nobody could read answers
     private - because the cost of being wrong the other way is a note nobody gets."""
@@ -653,7 +653,7 @@ def note_the_patch(
     found = grades.find_receipts_issue(semester_org, repo)
     if isinstance(found, grades.IssueLookupFailed) or found is None:
         log_person(
-            f"    {semester_org}/{repo}: no receipts issue to post the patch note on"
+            f"    {semester_org}/{repo}: no Submission receipts issue to post the patch note on"
         )
         return False
     return grades.post_marked_comment(
@@ -671,7 +671,7 @@ def patch_released(
     dry_run: bool = True,
 ) -> int:
     """Push a corrected file (or folder) from `template`'s default branch into every
-    submission repo of the assignment it handed out, and say so on each receipts issue.
+    submission repo of the assignment it handed out, and say so on each Submission receipts issue.
 
     The three things it will not do, because each of them is how a fix becomes a loss:
     it never force-pushes (the commit goes on top of whatever the student has), it never
@@ -748,7 +748,7 @@ def patch_released(
     listing = list_org_repos(semester_org)
     targets = patch_targets(listing, semester_slug)
     # Kept beside the targets, which came out of the same listing: the patch NOTE goes
-    # into a receipts issue, and whether that issue is one the world can read is the
+    # into a Submission receipts issue, and whether that issue is one the world can read is the
     # listing's answer (`note_the_patch`).
     rows = {row["name"]: row for row in listing}
     if load_grading_spec(master_org, template).submit_shared:
@@ -942,7 +942,7 @@ def provision_one(
         if existing is not None:
             existing[repo] = listing_row(semester_org, repo, listed_as)
         _tag_submission(semester_org, repo, slug, set())
-        # The receipts issue, on the CREATE path only. It is where the submission
+        # The Submission receipts issue, on the CREATE path only. It is where the submission
         # receipts are posted, so the student is told at handout what the thread is for.
         # Never re-probed for a repo that already exists: that would be one listing
         # per student per hourly tick for the rest of the term, for an issue that does not
@@ -959,7 +959,7 @@ def provision_one(
             # the run, or a whole semester's handout goes green with nowhere to post into.
             feedback_failed = True
             log_err(
-                "  ! a submission repo has no receipts issue yet - the refresh pass "
+                "  ! a submission repo has no Submission receipts issue yet - the refresh pass "
                 "opens it before the first receipt"
             )
 
@@ -1352,7 +1352,7 @@ def record_solution_released(semester_org: str, slug: str, repos: int) -> bool:
 
 # provision_one statuses that mean the model solution did NOT reach that unit's repo, and
 # so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
-# push (a dead handle, an unreachable team, a receipts issue that would not open) and is
+# push (a dead handle, an unreachable team, a Submission receipts issue that would not open) and is
 # persistent, so withholding the marker for one would re-clone every submission repo every
 # hour for the rest of the term - the exact cost the marker exists to prevent.
 _SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
@@ -1483,10 +1483,10 @@ def _release_units(
         )
         solution = False
     # A provisioning unit is (repo_name, [member handles], team slug), and each carries
-    # the body its receipts issue is opened with. Both are names for a repo, so both
+    # the body its Submission receipts issue is opened with. Both are names for a repo, so both
     # belong to the only shape that creates one.
     #
-    # No body at all where the shape HAS no receipts issue - a `public` repo is not a
+    # No body at all where the shape HAS no Submission receipts issue - a `public` repo is not a
     # place to write a student's hand-in times - and `provision_one` opens one only for a
     # unit it was given a body for. The derived rule decides it, so nothing here re-states
     # which shapes have a thread and which do not.
@@ -1619,7 +1619,7 @@ def provision_all(
         log_err("master-org and semester-org must differ.")
         return 1, False
     # The assignment's own definition, read ONCE here: it answers the shape (below), and
-    # it composes both the grading sheet's header and the receipts issue's body further
+    # it composes both the grading sheet's header and the Submission receipts issue's body further
     # down. Two reads of one memoised file is not expensive, but it is two places for the
     # answer to be spelt, which is how a handout came to provision a shape the sheet did
     # not expect.
@@ -1683,12 +1683,12 @@ def provision_all(
             f"release it."
         )
         return 1, False
-    # The sheet's header and the receipts issue's body, off the definition read above.
+    # The sheet's header and the Submission receipts issue's body, off the definition read above.
     spec = sheet_spec(sched, key, slug, gspec, group)
 
     # WHAT the assignment is handed out to, in the sheet's own vocabulary and known to
     # every shape: (unit, [member handles]). Individual = one per onboarded student; group
-    # = one per team from teams.csv, keyed on `key`. The repo names and the receipts issue
+    # = one per team from teams.csv, keyed on `key`. The repo names and the Submission receipts issue
     # bodies are the github arm's, and are built there.
     if group:
         groups = teams.teams_for(teams.load(semester_org), key)
@@ -1797,7 +1797,7 @@ def provision_all(
 
     # The one place the three shapes part, and the whole of what makes them different.
     # `external` is handed in off GitHub (Moodle, Kaggle, in class), so everything the
-    # other two do - the repos, the receipts issue, the model solution - has nothing to
+    # other two do - the repos, the Submission receipts issue, the model solution - has nothing to
     # act on. `shared_dropbox_repo` makes ONE drop box for the whole semester instead of
     # a repo per unit.
     # What a handout owes the semester AROUND the work is the tail, which all three share.

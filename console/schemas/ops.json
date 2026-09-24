@@ -342,7 +342,7 @@
             "type": "boolean"
           },
           "receipt_note": {
-            "description": "Post a note on each receipts thread",
+            "description": "Post a note on each Submission receipts issue",
             "type": "boolean"
           }
         },

@@ -173,7 +173,7 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 |---|---|---|
 | `submit_via` | `assignment_repo` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
-| | `shared_dropbox_repo` | **One private repo for the whole semester**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no receipts issue. |
+| | `shared_dropbox_repo` | **One private repo for the whole semester**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Submission receipts issue. |
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
 | `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
@@ -229,7 +229,7 @@ What to know before you pick it:
   are refused, as they are for every other shape.
 - **Private only.** One repo holds the whole semester's work and no student can opt out of
   being in it, so a `visibility:` line on a shared assignment is dropped at the parse.
-- **No receipts issue, no model solution.** Both would be written where the whole semester
+- **No Submission receipts issue, no model solution.** Both would be written where the whole semester
   can read them.
 - **Hand-marked.** `autograde:`, `completion_check:` and `grader_pdf:` are dropped at the
   parse if you set them (and the notebook completion check is off here whether or not the

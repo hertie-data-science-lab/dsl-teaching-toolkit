@@ -44,7 +44,7 @@ def _empty_semester_listing(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def feedback_issues(monkeypatch):
-    """The receipts issue each new submission repo gets, recorded as `(repo, body)`.
+    """The Submission receipts issue each new submission repo gets, recorded as `(repo, body)`.
 
     Its own tests live in tests/test_grades.py; the assignment tests care only that one is
     opened, on the create path, with this assignment's facts in it."""
@@ -1906,7 +1906,7 @@ def test_a_solution_holding_a_symlink_still_pushes(tmp_path, monkeypatch):
     assert assign.push_solution("SEMESTER", "a1-ada", sol) is True
 
 
-# ---------------------------------------------------------------- the receipts issue
+# ---------------------------------------------------------------- the Submission receipts issue
 
 
 def _provision_one_env(monkeypatch):
@@ -2603,7 +2603,7 @@ def test_the_marker_changes_when_the_correction_does():
 # ------------------------------------------- an assignment handed in somewhere else
 #
 # `submit_via: external` creates NOTHING in the semester org: no frozen template, no repo per
-# student, no receipts issue. What it still owes the semester is the record of the handout,
+# student, no Submission receipts issue. What it still owes the semester is the record of the handout,
 # the grading sheet, a gradebook each and the site.
 
 
@@ -2788,7 +2788,7 @@ def test_an_unscheduled_external_release_is_refused_and_writes_nothing(
 # `visibility: public` creates the same repos world-readable. Two things follow, and both
 # are DERIVED: the generate endpoint takes `private` and nothing else, so the repo is born
 # private and flipped; and nothing about a student's marking may be written where the
-# internet can read it, so there is no receipts issue.
+# internet can read it, so there is no Submission receipts issue.
 
 
 @pytest.fixture
@@ -3022,7 +3022,7 @@ def test_a_public_handout_opens_no_feedback_issue(
 #
 # `submit_via: shared_dropbox_repo` freezes the semester template as usual - the brief lives there - and
 # then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
-# no repo per unit, so there is no receipts issue, no receipt and no model solution; and
+# no repo per unit, so there is no Submission receipts issue, no receipt and no model solution; and
 # the drop box's existence is not the record a per-unit repo's is, so the grant loop
 # re-runs every tick and asks who is granted already.
 
