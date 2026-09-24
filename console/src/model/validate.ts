@@ -1,15 +1,14 @@
-// One Ajv for the whole console: each schema object is compiled once, on first use.
+// The console's validators, compiled from schemas/ at build time (vite.config.ts,
+// `virtual:validators`): the page never compiles code at run time, so its CSP needs no
+// 'unsafe-eval'. A schema is found by its JSON text.
 
-import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
+import type { ValidateFunction } from 'ajv/dist/2020';
+import { table } from 'virtual:validators';
 
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-const compiled = new WeakMap<object, ValidateFunction>();
+const precompiled = table as Record<string, ValidateFunction>;
 
 export function validator(schema: object): ValidateFunction {
-  let fn = compiled.get(schema);
-  if (!fn) {
-    fn = ajv.compile(schema);
-    compiled.set(schema, fn);
-  }
+  const fn = precompiled[JSON.stringify(schema)];
+  if (!fn) throw new Error('No precompiled validator for this schema: it is not under console/schemas/.');
   return fn;
 }

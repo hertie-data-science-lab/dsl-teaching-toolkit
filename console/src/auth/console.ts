@@ -1,4 +1,5 @@
 import type { GhUser } from '../github/client';
+import type { TokenKind } from '../model/discovery';
 import { AppAuth } from './app';
 import { PatAuth } from './pat';
 import type { Auth } from './types';
@@ -44,6 +45,13 @@ export class ConsoleAuth implements Auth {
 
   user(): GhUser | null {
     return this.active?.user() ?? null;
+  }
+
+  /** Which kind of token is signed in, which decides where discovery looks for orgs; null when signed out. */
+  kind(): TokenKind | null {
+    if (!this.active) return null;
+    if (this.active === this.app) return 'app';
+    return this.pat.reach() ? 'fine-grained' : 'classic';
   }
 
   /** Never throws: a failed GitHub sign-in lands in `notice` and the token path is tried. */

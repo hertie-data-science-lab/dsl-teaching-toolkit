@@ -3,9 +3,10 @@
 // ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
 // `#marks-<slug>` screens parse to those tabs, so old links still land. Which course or cohort
 // the page is about rides in the query string (`?cohort=<org>` or `?course=<org>`), so a link
-// from a fault mail can name both.
+// from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
+// a student's own, or an instructor's Student view.
 
-import type { Course, CohortRef } from './model/discovery';
+import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 
 export interface Route {
   screen: string;
@@ -61,6 +62,8 @@ export function tabHref(slug: string, tab: AssignmentTab): string {
 export interface Selection {
   cohort?: string;
   course?: string;
+  /** A semester whose student screens to show. */
+  semester?: string;
   /** A wizard step to come back to from an editor it opened (`new-cohort-3`). */
   wizard?: string;
   /** A template to prefill a new schedule entry with (New assignment's last step). */
@@ -73,6 +76,7 @@ export function parseSearch(search: string): Selection {
   return {
     cohort: q.get('cohort') ?? undefined,
     course: q.get('course') ?? undefined,
+    semester: q.get('semester') ?? undefined,
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
     template: q.get('template') ?? undefined,
   };
@@ -124,4 +128,48 @@ export function resolveContext(courses: Course[], sel: Selection, route: Route):
 export function landing(courses: Course[]): string {
   const writable = courses.filter((c) => c.write && c.cohorts.length);
   return writable.length === 1 ? 'cohort' : 'home';
+}
+
+/** The student screens, in nav order, with their labels; `week` is where a semester opens. */
+export const STUDENT_SCREENS: [string, string][] = [
+  ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['instructors', 'Instructors'],
+];
+
+/** The link to a semester's student screens. */
+export const studentHref = (org: string, screen = 'week') => `?semester=${org}#${screen}`;
+
+/**
+ * The semester whose student screens the URL asks for, when the person holds a role there: a
+ * student sees their own; an instructor gets the Student view, the same screens with no
+ * student's data (decision 0011 rule 7). Org names compare whatever their case. A semester
+ * known only from a writable course's registry is an instructor's, and whether it is archived
+ * comes from `archivedOf` (its `.github` read on opening); `pending` while that is unknown.
+ */
+export function studentContext(
+  estate: Estate,
+  sel: Selection,
+  archivedOf: (org: string) => boolean | undefined = () => undefined,
+): { semester: Semester; studentView: boolean; pending: boolean } | null {
+  const org = sel.semester?.toLowerCase();
+  if (!org) return null;
+  const role = roleOf(estate, org);
+  if (!role) return null;
+  const same = (x: { org: string }) => x.org.toLowerCase() === org;
+  const known = estate.semesters.find(same);
+  if (known) return { semester: known, studentView: role === 'instructor', pending: false };
+  const course = estate.courses.find((c) => c.cohorts.some(same));
+  const k = course?.cohorts.find(same);
+  if (!course || !k) return null;
+  const archived = archivedOf(k.org);
+  return {
+    semester: { ...k, courseOrg: course.org, courseName: course.name, archived: archived === true, role },
+    studentView: role === 'instructor',
+    pending: archived === undefined,
+  };
+}
+
+/** Which shell the URL renders: a semester's student screens, else instructor screens for anyone who is an instructor anywhere. */
+export function modeOf(estate: Estate, sel: Selection): Mode {
+  if (studentContext(estate, sel)) return 'student';
+  return isInstructor(estate) ? 'instructor' : 'student';
 }

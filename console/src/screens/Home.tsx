@@ -1,13 +1,15 @@
-// S1 Home (every course and cohort, ordered by what needs you), S0 Sign in, and the
-// read-only view.
+// S1 Home (Your courses: every course and cohort, ordered by what needs you; Your
+// semesters: the semesters the person is a student of), S0 Sign in, and the read-only view.
 
 import { useState } from 'preact/hooks';
 import type { ConsoleAuth } from '../auth/console';
-import { NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '../auth/pat';
+import { FINE_GRAINED_SETTINGS_URL, NEW_FINE_GRAINED_URL, NEW_TOKEN_URL } from '../auth/pat';
 import type { GhUser } from '../github/client';
-import { cohortName, type Course, type CohortRef } from '../model/discovery';
+import { cohortName, semesterName, type Course, type CohortRef, type Semester, type TokenKind } from '../model/discovery';
 import { fmtWhen } from '../model/format';
+import { hiddenSemesters, saveHiddenSemesters } from '../model/prefs';
 import type { Loaded } from '../model/status';
+import { studentHref } from '../router';
 import { Crumbs, Help, Probs, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import type { HomeProps } from './types';
@@ -62,7 +64,73 @@ function CardRow({ c }: { c: Card }) {
   );
 }
 
-export function HomeScreen({ courses, cohortStates, user }: HomeProps) {
+function semesterCard(s: Semester): Card {
+  return {
+    key: s.org,
+    name: semesterName(s),
+    sub: s.archived ? 'Archived; your work stays yours to read' : 'You are a student',
+    week: '',
+    status: <span class="chip">{s.archived ? 'Archived' : 'Current'}</span>,
+    next: [['', 'Open the semester']],
+    href: studentHref(s.org),
+    ro: false,
+    past: s.archived,
+    urgency: 0,
+  };
+}
+
+/** Your semesters, and the per-viewer choice of which of them show. */
+function SemestersGroup({ semesters, login, lead }: { semesters: Semester[]; login: string; lead: boolean }) {
+  const [hidden, setHidden] = useState(() => hiddenSemesters(login));
+  const flip = (org: string) => {
+    const next = new Set(hidden);
+    if (!next.delete(org)) next.add(org);
+    saveHiddenSemesters(login, next);
+    setHidden(next);
+  };
+  const shown = semesters.filter((s) => !hidden.has(s.org));
+  return (
+    <section class="section" aria-labelledby="h-semesters">
+      {lead ? null : <h2 id="h-semesters">Your semesters</h2>}
+      {shown.length ? <ul class="cohort-list">{shown.map((s) => <CardRow c={semesterCard(s)} />)}</ul> : <p class="footnote">Every semester is hidden; choose which to show below.</p>}
+      <details class="fold" style="margin-top:12px">
+        <summary>Show these semesters</summary>
+        {semesters.map((s) => (
+          <label class="check"><input type="checkbox" checked={!hidden.has(s.org)} onChange={() => flip(s.org)} /><span>{semesterName(s)}</span></label>
+        ))}
+        <p class="footnote">Kept in this browser only.</p>
+      </details>
+    </section>
+  );
+}
+
+function NothingFound({ kind }: { kind?: TokenKind }) {
+  if (kind === 'fine-grained') {
+    return (
+      <section class="panel section stub">
+        <h2>No courses or semesters found</h2>
+        <p>This token can see no course or semester orgs; when creating it, add the orgs under Resource owner and grant the organisation permission Members: read (<a href={FINE_GRAINED_SETTINGS_URL} target="_blank" rel="noopener">your tokens <Ext /></a>).</p>
+      </section>
+    );
+  }
+  return (
+    <section class="panel section stub">
+      <h2>No courses found</h2>
+      <p>None of the GitHub organisations your account belongs to is a course or a semester. A course is an organisation whose <code>.github</code> repo carries the <code>dsl-course-hub</code> topic.</p>
+    </section>
+  );
+}
+
+export function HomeScreen({ courses, semesters = [], kind, cohortStates, user }: HomeProps) {
+  if (!courses.length && semesters.length) {
+    return (
+      <>
+        <Crumbs items={[{ t: 'Your semesters' }]} />
+        <div class="page-head"><div><h1>Your semesters</h1><p class="lede">Every semester you are a student of; archived ones stay here as history</p></div></div>
+        <SemestersGroup semesters={semesters} login={user.login} lead />
+      </>
+    );
+  }
   const cards = courses.flatMap((course) => course.cohorts.map((c) => cardOf(course, c, cohortStates[c.org], user)));
   const live = cards.filter((c) => !c.past).sort((a, b) => b.urgency - a.urgency);
   const past = cards.filter((c) => c.past);
@@ -78,10 +146,7 @@ export function HomeScreen({ courses, cohortStates, user }: HomeProps) {
         <p>A course holds your materials and assignment templates for every term. Each term runs as its own cohort, which students join. What you can change follows GitHub: the console only offers what your account can do.</p>
       </Help>
       {!courses.length ? (
-        <section class="panel section stub">
-          <h2>No courses found</h2>
-          <p>None of the GitHub organisations your account belongs to is a course. A course is an organisation whose <code>.github</code> repo carries the <code>dsl-course-hub</code> topic.</p>
-        </section>
+        <NothingFound kind={kind} />
       ) : (
         <div class="stack">
           <section class="section" aria-labelledby="h-live">
@@ -104,6 +169,7 @@ export function HomeScreen({ courses, cohortStates, user }: HomeProps) {
               </ul>
             </section>
           ) : null}
+          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead={false} /> : null}
         </div>
       )}
     </>
