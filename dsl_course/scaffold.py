@@ -318,7 +318,7 @@ def _grading_config(
             visibility,
             "private (the student and the instructors) | public (the whole internet: "
             "portfolio work, no receipts issue) | student_choice (private, and the "
-            "student is its admin: theirs to publish after the grading cutoff, and no "
+            "student is its admin: theirs to publish after the late cutoff, and no "
             "receipts issue) - read at hand-out only",
             live=creates_unit_repos(submit_via),
         ),
@@ -358,21 +358,21 @@ def _grading_config(
             "true" if autograde and not marked_by_hand else "false",
             _HAND_MARKED
             if marked_by_hand
-            else "true: run tests/ at the cutoff and show the count to graders",
+            else "true: run tests/ at the late cutoff and show the count to graders",
         ),
         _setting(
             "completion_check",
             "true" if "ipynb" in formats and not marked_by_hand else "false",
             _HAND_MARKED
             if marked_by_hand
-            else "true: execute the notebook at the cutoff, record whether it runs clean",
+            else "true: execute the notebook at the late cutoff, record whether it runs clean",
         ),
         _setting(
             "grader_pdf",
             "false",
             _HAND_MARKED
             if marked_by_hand
-            else "true: at the cutoff, archive each submission filtered to its marked "
+            else "true: at the late cutoff, archive each submission filtered to its marked "
             "questions as a PDF for graders",
         ),
     ]
@@ -380,7 +380,7 @@ def _grading_config(
 
 
 _HIDDEN_TEST_PY = """\
-# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
+# HIDDEN tests - run faculty-side at the late cutoff, never shipped to students.
 # They import the student's submission (the repo root) and check it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -391,7 +391,7 @@ def test_solve_runs():
 """
 
 _HIDDEN_TEST_NOTEBOOK = """\
-# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
+# HIDDEN tests - run faculty-side at the late cutoff, never shipped to students.
 # The submitted notebook is nbconvert'd to starter.py first; this imports it and checks it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -1272,7 +1272,7 @@ def _collision(named: list[str], autograde: bool) -> str:
         )
     if autograde and "ipynb" in named and "py" in named:
         return (
-            "with autograde on, the cutoff converts the submitted starter.ipynb over "
+            "with autograde on, the late cutoff converts the submitted starter.ipynb over "
             "starter.py before the hidden tests import it, so only the notebook would "
             "be marked"
         )
@@ -1808,7 +1808,7 @@ def main() -> int:
         "--autograde",
         choices=["false", "true"],
         default="false",
-        help="true = seed a tests/ stub on the solution branch and run it at the "
+        help="true = seed a tests/ stub on the solution branch and run it at the late "
         "cutoff; the count is shown to graders and never to a student",
     )
     pa.add_argument(

@@ -716,7 +716,7 @@ _OPS = (
                 "team_formation": _enum(TEAM_FORMATIONS),
                 "submit_via": _enum(SUBMIT_VIA),
                 "visibility": _enum(VISIBILITIES),
-                "autograde": _boolean("Seed tests and run them at the cutoff"),
+                "autograde": _boolean("Seed tests and run them at the late cutoff"),
             },
             required=("number", "semester"),
         ),

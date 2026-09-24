@@ -1154,7 +1154,7 @@ def _assignment_entry(
     # row's worth of information arriving at hand-out.
     details = found[1].details if found else ""
     # Display-only, and it reaches nothing but the two rows: `due` above is already
-    # resolved, and the freeze, the late window and the cutoff are `grades.cutoff_at`'s
+    # resolved, and the freeze, the late window and the cutoff are `schedule.grading_cutoff_datetime`'s
     # business off `due_datetime`. A deadline that says "(TBC)" still closes when it says.
     tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
     tbc_due = indent(tbc_fm, "    ")

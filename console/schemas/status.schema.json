@@ -12,13 +12,13 @@
               "null"
             ]
           },
-          "handout": {
+          "grading_cutoff_datetime": {
             "type": [
               "string",
               "null"
             ]
           },
-          "late_until": {
+          "handout": {
             "type": [
               "string",
               "null"
@@ -93,7 +93,7 @@
           "state",
           "handout",
           "due",
-          "late_until",
+          "grading_cutoff_datetime",
           "solution_shown"
         ],
         "type": "object"

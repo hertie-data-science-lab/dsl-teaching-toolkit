@@ -67,7 +67,7 @@ it is what stops a re-run repeating itself and what lets a failed notification b
 ## `teams.csv` - group membership (optional, for group assignments)
 
 2 possible ways this is populated:
-1. Students self-select via the welcome "Join team" issue, which appends rows to this file - but only for an assignment whose `grading_config.yml` says `team_formation: self_select`, only up to its `max_team_size`, and only between its hand-out and its grading cutoff,
+1. Students self-select via the welcome "Join team" issue, which appends rows to this file - but only for an assignment whose `grading_config.yml` says `team_formation: self_select`, only up to its `max_team_size`, and only between its hand-out and its late cutoff,
 2. Instructors edit directly - a push here also triggers **Sync membership**. This is the route for `team_formation: assigned`, where the form refuses every request.
 
 ## `assignments.lock.yml` - what the Join-team form is allowed to do (generated)

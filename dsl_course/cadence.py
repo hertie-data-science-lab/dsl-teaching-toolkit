@@ -74,7 +74,7 @@ from .schedule import (
     HANDOUT_SUFFIX,
     Release,
     Schedule,
-    grading_datetime_at,
+    grading_cutoff_datetime,
 )
 
 # How late one dated moment may ship before its semester is told. A tick arrives every 15
@@ -353,7 +353,7 @@ def late_items(
     for slug, entry in sched.assignments.items():
         # The freeze moment: late here means submissions kept arriving past the deadline the
         # snapshot was supposed to pin. It needs no template repo, so it is always asked.
-        at = grading_datetime_at(sched, slug)
+        at = grading_cutoff_datetime(sched, slug)
         if at is not None:
             moments.append((f"assignments.{slug} snapshot", at))
         if (

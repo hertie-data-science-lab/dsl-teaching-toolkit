@@ -113,7 +113,6 @@ from .faults import ConfigFault, FaultKind, Severity, Unusable
 from .gh_contents import get_file_content
 from .ghcli import gh
 from .grades import (
-    cutoff_at,
     grading_config_faults,
     load_grading_spec,
     semester_sheet_faults,
@@ -122,7 +121,7 @@ from .grades import (
 )
 from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
 from .repos import listed_is_private, set_visibility
-from .schedule import Release
+from .schedule import Release, grading_cutoff_datetime
 from .schedule_plan import deploy_dest
 
 # --------------------------------------------------------------------------- pure core
@@ -160,7 +159,7 @@ def due_snapshots(
     the assignments whose submissions are ready to be frozen and then graded.
     Deadline-ordered, so the run log is deterministic.
 
-    The cutoff is `grades.cutoff_at`: an explicit `grading_datetime`, else the due date plus
+    The cutoff is `schedule.grading_cutoff_datetime`: an explicit `grading_datetime`, else the due date plus
     the template's `late_window_days`. Reading the template is what puts the freeze at the
     END of the late window rather than at the deadline the window is measured from - the
     sheet's header and every receipt promise work is accepted until then, and a snapshot
@@ -177,7 +176,7 @@ def due_snapshots(
     passed = []
     for slug, entry in sched.assignments.items():
         gspec = load_grading_spec(course_org, entry.course_source_repo)
-        at = cutoff_at(sched, slug, gspec)
+        at = grading_cutoff_datetime(sched, slug, gspec.late_window_days)
         if at is not None and at <= now:
             passed.append((slug, at))
     return [(slug, at.isoformat()) for slug, at in sorted(passed, key=lambda p: p[1])]
@@ -1382,7 +1381,7 @@ def _reprivatise_student_repos(
         gspec = load_grading_spec(course_org, entry.course_source_repo)
         if not gspec.visibility_is_students:
             continue
-        at = cutoff_at(sched, slug, gspec)
+        at = grading_cutoff_datetime(sched, slug, gspec.late_window_days)
         if at is None or at <= now:
             continue
         # Sorting the org's repos into the assignments they came out of is not free, and
@@ -1404,7 +1403,7 @@ def _reprivatise_student_repos(
         # handle, and this line is written into a PUBLIC workflow log. The names go to
         # `log_person`, which prints only under DSL_VERBOSE on a local run.
         log_step(
-            f"{slug}: {len(public)} repo(s) published before the cutoff - "
+            f"{slug}: {len(public)} repo(s) published before the late cutoff - "
             f"{'would be made' if dry_run else 'making them'} private again until "
             f"{at.isoformat()}"
         )

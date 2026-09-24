@@ -210,7 +210,7 @@ CONTRACT_STATUS = {
             "state": "open",
             "handout": "2026-09-15T10:00:00+02:00",
             "due": "2026-09-27T23:59:00+02:00",
-            "late_until": "2026-10-07T23:59:00+02:00",
+            "grading_cutoff_datetime": "2026-10-07T23:59:00+02:00",
             "solution_shown": None,
             "units": 48,
             "submissions": 37,

@@ -307,7 +307,7 @@ SHAPE_NOTES = {
         "keep private."
     ),
     "assignment-repo-student-choice": (
-        "NB: this repo is private-by-default; you are its admin - after the grading "
+        "NB: this repo is private-by-default; you are its admin - after the late "
         "cutoff you may make it public from Settings > Danger zone if you want it in "
         "your portfolio."
     ),
@@ -320,7 +320,7 @@ SHAPE_NOTES = {
 # the assignment's page (`site._assignment_entry`, then the layout) and the About line of
 # every submission repo (`assign._about`). ONE constant, because the two are read minutes
 # apart by the same student, and a cutoff worded twice is a cutoff with two answers.
-CUTOFF_SENTENCE = "What is on main at the grading cutoff is what is marked."
+CUTOFF_SENTENCE = "What is on main at the late cutoff is what is marked."
 # GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
 # the cutoff sentence plus the note, so a note that grew past this would be TRUNCATED by
 # GitHub rather than refused, and the warning would lose its second half silently.
@@ -425,7 +425,7 @@ RECEIPTS_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
 _SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
     "deadline is what we grade. This thread is your receipt for that: one at the deadline "
-    "saying what was recorded, one after any late push, and one at the cutoff when the "
+    "saying what was recorded, one after any late push, and one at the late cutoff when the "
     "commit we grade is fixed."
 )
 _CONTRIBUTIONS_ASK = "fill in CONTRIBUTIONS.md before the deadline."

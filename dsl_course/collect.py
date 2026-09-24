@@ -1647,7 +1647,7 @@ def _status_line(
     unit = "teams" if spec.is_group else "students"
     line = f"OPEN - {submitted} of {total} {unit} have submitted"
     if derived:
-        line += "; late pushes still update `info:` until the cutoff."
+        line += "; late pushes still update `info:` until the late cutoff."
     return line
 
 
@@ -1763,7 +1763,11 @@ def sync_sheet(
         return SheetWrite(False)
     old_text, old_sha = found if found else ("", "")
     phase = _sheet_phase(
-        semester_org, slug, old_text, now, grades.cutoff_at(sched, key, gspec)
+        semester_org,
+        slug,
+        old_text,
+        now,
+        schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days),
     )
     try:
         on_disk = grades.parse_sheet(old_text) if old_text else {}
@@ -1831,7 +1835,10 @@ def sync_sheet(
             semester_org,
             listing or {},
             targets,
-            (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
+            (
+                schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days)
+                or now
+            ).isoformat(),
             previous,
             due,
         )
@@ -3229,7 +3236,7 @@ def collect(
     # `grading_datetime`, else the due date plus the template's late window. An explicit
     # `deadline` (CLI override) wins; fall back to today - in the semester's own timezone,
     # like every other date here - only if unscheduled.
-    at = grades.cutoff_at(sched, key, gspec)
+    at = schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days)
     deadline = (
         deadline or (at.isoformat() if at else None) or _today_in_semester_tz(sched)
     )
@@ -3654,7 +3661,7 @@ def main() -> int:
     parser.add_argument(
         "--deadline",
         default=None,
-        help="ISO date override; default = the semester schedule's grading deadline, else today",
+        help="ISO date override; default = the assignment's late cutoff, else today",
     )
     parser.add_argument(
         "--group", action="store_true", help="Group assignment (one repo per team)"

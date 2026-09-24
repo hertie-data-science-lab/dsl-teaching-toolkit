@@ -307,7 +307,7 @@ def status_schema() -> dict:
             "state": _enum(ASSIGNMENT_STATES),
             "handout": nullable,
             "due": nullable,
-            "late_until": nullable,
+            "grading_cutoff_datetime": nullable,
             "solution_shown": nullable,
             "units": {"type": ["integer", "null"]},
             "submissions": {"type": ["integer", "null"]},
@@ -320,7 +320,14 @@ def status_schema() -> dict:
         },
         # The four moments are always present (null when unset), so the console can move
         # an assignment from open to late window to marking on its own clock.
-        ("slug", "state", "handout", "due", "late_until", "solution_shown"),
+        (
+            "slug",
+            "state",
+            "handout",
+            "due",
+            "grading_cutoff_datetime",
+            "solution_shown",
+        ),
     )
     count = {"type": "integer"}
     return _doc(

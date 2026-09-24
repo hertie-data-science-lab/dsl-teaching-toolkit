@@ -702,6 +702,8 @@ hand migration of the live orgs' files). Nothing may write an old spelling again
 | `status.json` `cohort`, `cohorts`, `cohort.term`, `cohort.term_label` | `semester`, `semesters`, `semester.key`, `semester.label` | `dsl.status/1` (the console follows in WP-A3) | now |
 | `classroom-config/people.yml` (`people:` -> `instructors:`/`teaching_assistants:` lists) | `classroom-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` required) | every reader (`sync_faculty`, the site); a fault names the move; the dispatchers watch both | next release |
 | copy "staff", "teaching team" | "instructors" | logs, mails, forms, docs | now |
+| `status.json` `late_until`; `schedule.grading_datetime_at` + `grades.cutoff_at` | `grading_cutoff_datetime`; one resolver, `schedule.grading_cutoff_datetime` | `dsl.status/1` (the console follows in WP-A3); engine | now |
+| copy "grading cutoff", "grading deadline", "the cutoff" | "late cutoff" | logs, mails, receipts, forms | now |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

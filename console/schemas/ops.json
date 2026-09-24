@@ -593,7 +593,7 @@
         "additionalProperties": false,
         "properties": {
           "autograde": {
-            "description": "Seed tests and run them at the cutoff",
+            "description": "Seed tests and run them at the late cutoff",
             "type": "boolean"
           },
           "copy_from": {

@@ -162,7 +162,7 @@ CONTRACT_EXAMPLE = {
             "state": "open",
             "handout": "2026-09-15T10:00:00+02:00",
             "due": "2026-09-27T23:59:00+02:00",
-            "late_until": "2026-10-07T23:59:00+02:00",
+            "grading_cutoff_datetime": "2026-10-07T23:59:00+02:00",
             "solution_shown": None,
             "units": 48,
             "submissions": 37,
@@ -483,7 +483,7 @@ def test_an_assignment_moves_through_due_and_the_late_cutoff(now, units, expecte
     doc = _render(semester=_semester(listing=listing), now=now)
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert (row["state"], row["units"]) == (expected, units)
-    assert row["late_until"] == "2026-10-07T23:59:00+02:00"
+    assert row["grading_cutoff_datetime"] == "2026-10-07T23:59:00+02:00"
 
 
 def test_a_group_assignment_with_no_copies_after_hand_out_is_forming_teams():
@@ -1083,7 +1083,7 @@ def _client_state(row: dict, now: datetime) -> str:
     if row["state"] not in ("open", "late_window", "marking"):
         return row["state"]
     due = datetime.fromisoformat(row["due"])
-    late_until = datetime.fromisoformat(row["late_until"])
+    late_until = datetime.fromisoformat(row["grading_cutoff_datetime"])
     if now >= late_until:
         return "marking"
     return "late_window" if now >= due else "open"
@@ -1092,16 +1092,16 @@ def _client_state(row: dict, now: datetime) -> str:
 def test_every_assignment_and_release_carries_the_moments_the_console_needs():
     doc = _render(*_contract_scenario())
     for row in doc["assignments"]:
-        for key in ("handout", "due", "late_until", "solution_shown"):
+        for key in ("handout", "due", "grading_cutoff_datetime", "solution_shown"):
             assert key in row, (row["slug"], key)
-        for key in ("handout", "due", "late_until"):
+        for key in ("handout", "due", "grading_cutoff_datetime"):
             if row[key] is not None:
                 assert datetime.fromisoformat(row[key]).tzinfo is not None
     assert all("when" in r for r in doc["releases"])
     assert validate(doc, schemas.status_schema()) == []
     # The exported schema holds the writer to it: a row without them does not validate.
     bare = json.loads(json.dumps(doc))
-    del bare["assignments"][0]["late_until"]
+    del bare["assignments"][0]["grading_cutoff_datetime"]
     del bare["releases"][0]["when"]
     assert len(validate(bare, schemas.status_schema())) == 2
 
@@ -1122,7 +1122,7 @@ def test_the_console_can_move_open_to_late_window_without_a_rewrite():
     )
     assert written["state"] == "open"
     due = datetime.fromisoformat(written["due"])
-    late_until = datetime.fromisoformat(written["late_until"])
+    late_until = datetime.fromisoformat(written["grading_cutoff_datetime"])
     assert due < late_until
     for later in (due - timedelta(minutes=1), due, late_until):
         engine = next(

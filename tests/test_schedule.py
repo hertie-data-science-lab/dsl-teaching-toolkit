@@ -1250,10 +1250,10 @@ def test_an_unparseable_grading_datetime_is_flagged_not_silently_the_due_date():
         }
     )
     # the documented fallback still applies - the schedule's own, spec-free answer is the
-    # due date, and `grades.cutoff_at` then adds the template's late window to it, which
+    # due date, and `grading_cutoff_datetime` given the window adds the template's late window to it, which
     # is what the flag has to name: that is the moment the snapshot actually freezes.
     assert (
-        schedule.grading_datetime_at(sched, "a1")
+        schedule.grading_cutoff_datetime(sched, "a1")
         == sched.assignments["a1"].due_datetime
     )
     (line,) = sched.dropped
@@ -1275,7 +1275,7 @@ def test_the_formation_window_runs_from_the_handout_to_the_grading_pin():
     )
     assert schedule.formation_window(sched, "a1") == (
         sched.assignments["a1"].handout_datetime,
-        schedule.grading_datetime_at(sched, "a1"),
+        schedule.grading_cutoff_datetime(sched, "a1"),
     )
     # A slug this schedule does not carry gets no window at all, rather than half of one.
     assert schedule.formation_window(sched, "nope") == (None, None)

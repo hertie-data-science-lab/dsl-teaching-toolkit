@@ -374,7 +374,7 @@ class AssignmentEntry:
     # `semester_dest_repo`: source names the course side, dest names the semester side.
     semester_dest_repo: str | None = None
     # An explicit freeze. Left unset the cutoff is the due date plus the template's
-    # `late_window_days` - resolved by `grades.cutoff_at`, which holds the spec this file
+    # `late_window_days` - resolved by `grading_cutoff_datetime`, given the spec this file
     # cannot read, and NOT here: answering it in the parser would shut the door on the due
     # date and refuse every late push the receipts had just promised to accept.
     grading_datetime: datetime | None = None
@@ -1736,27 +1736,29 @@ def resolve_target(
     return found[0][0], semester_name(*found[0])
 
 
-def grading_datetime_at(sched: Schedule, slug: str) -> datetime | None:
-    """The grading pin as far as THIS FILE can tell: an explicit `grading_datetime`, else
-    `due_datetime`. None if unscheduled.
+def grading_cutoff_datetime(
+    sched: Schedule, slug: str, late_window_days: int = 0
+) -> datetime | None:
+    """THE late cutoff: when this assignment stops accepting work. An explicit
+    `grading_datetime`, else the due date plus `late_window_days`, else the due date. None
+    if unscheduled.
 
-    The spec-less fallback, and only correct for an assignment with no late window. The
-    window lives in the template's `grading_config.yml`, which `schedule` cannot read, so
-    everything that freezes or grades goes through `grades.cutoff_at` instead - answering
-    this question here would shut the door on the due date and refuse every late push the
-    receipts had just promised to accept."""
+    The one resolver of that instant (decision 0012). Everything that has to agree about
+    when the door shuts reads it - the sheet's header and its late-policy line, the receipts
+    that quote that policy to a student, the snapshot that freezes and the autograder that
+    fires off it, status.json. The window lives in the template's `grading_config.yml`,
+    which this module cannot read, so a caller that holds the spec passes its
+    `late_window_days`; a caller that does not (the team-formation door, the cadence
+    check) gets the window-less instant, which errs EARLY - the safe direction for a door
+    that should be shut by the time anything is graded."""
     entry = sched.assignments.get(slug)
     if entry is None:
         return None
     if entry.grading_datetime is not None:
         return entry.grading_datetime
+    if late_window_days:
+        return entry.due_datetime + timedelta(days=late_window_days)
     return entry.due_datetime
-
-
-def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
-    """`grading_datetime_at` as an ISO string, or None if unscheduled."""
-    at = grading_datetime_at(sched, slug)
-    return at.isoformat() if at is not None else None
 
 
 def formation_window(
@@ -1776,13 +1778,13 @@ def formation_window(
 
     Deliberately no spec read and no I/O - this answers off the parsed schedule alone, so
     `grades` (which imports this module) can ask without the import turning back on
-    itself. The cost is `grading_datetime_at`'s spec-less pin, which ignores the template's
+    itself. The cost is `grading_cutoff_datetime`'s window-less instant, which ignores the template's
     late window; erring EARLY is the safe direction for a door that should be shut by the
     time anything is graded."""
     entry = sched.assignments.get(slug)
     if entry is None:
         return (None, None)
-    return (entry.handout_datetime, grading_datetime_at(sched, slug))
+    return (entry.handout_datetime, grading_cutoff_datetime(sched, slug))
 
 
 def formation_state(

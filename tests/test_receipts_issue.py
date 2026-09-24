@@ -24,7 +24,7 @@ SHA = "a1b2c3d4e5f6" + "0" * 28
 SUBMIT_PARAGRAPH = (
     "Push your work to this repository as normal; the last commit to `main` before the "
     "deadline is what we grade. This thread is your receipt for that: one at the deadline "
-    "saying what was recorded, one after any late push, and one at the cutoff when the "
+    "saying what was recorded, one after any late push, and one at the late cutoff when the "
     "commit we grade is fixed."
 )
 

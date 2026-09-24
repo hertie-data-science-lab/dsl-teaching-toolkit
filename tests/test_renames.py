@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import timedelta
 
 import pytest
 import yaml
@@ -13,6 +14,7 @@ import yaml
 from dsl_course import (
     bootstrap_course,
     discovery,
+    grades,
     list_orgs,
     schedule,
     schemas,
@@ -292,3 +294,30 @@ def test_the_exported_instructors_schema_requires_a_role():
     entry = schemas.instructors_schema()["properties"]["instructors"]["items"]
     assert "role" in entry["required"]
     assert entry["properties"]["role"]["enum"] == list(INSTRUCTOR_ROLES)
+
+
+# ------------------------------------------- grading_cutoff_datetime (late_until, pins)
+
+
+def _one_assignment(**extra) -> schedule.Schedule:
+    entry = {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13T18:00"}
+    return schedule.parse({"assignments": {"a1": {**entry, **extra}}})
+
+
+def test_the_one_cutoff_resolver_adds_the_late_window_to_the_due_date():
+    sched = _one_assignment()
+    due = sched.assignments["a1"].due_datetime
+    assert schedule.grading_cutoff_datetime(sched, "a1") == due
+    assert schedule.grading_cutoff_datetime(sched, "a1", 3) == due + timedelta(days=3)
+    assert schedule.grading_cutoff_datetime(sched, "nope", 3) is None
+
+
+def test_the_old_resolvers_are_gone():
+    assert not hasattr(schedule, "grading_datetime_at")
+    assert not hasattr(grades, "cutoff_at")
+
+
+def test_status_json_names_the_cutoff_grading_cutoff_datetime():
+    row = schemas.status_schema()["properties"]["assignments"]["items"]
+    assert "grading_cutoff_datetime" in row["required"]
+    assert "late_until" not in row["properties"]

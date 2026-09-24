@@ -4353,7 +4353,7 @@ def test_the_public_log_counts_the_repos_and_never_names_one(monkeypatch, capsys
     # log, so the count is what is printed and the names go to `log_person`.
     _reprivatise(monkeypatch, _choice_rows(("assignment-1-ada-l", "public")))
     out = capsys.readouterr().out
-    assert "1 repo(s) published before the cutoff" in out
+    assert "1 repo(s) published before the late cutoff" in out
     assert "ada-l" not in out
 
 

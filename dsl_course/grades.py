@@ -31,7 +31,7 @@ import time
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
@@ -713,11 +713,11 @@ def _auto_filled_sentence(spec: SheetSpec) -> str:
             "`contributions` is read from CONTRIBUTIONS.md at the same moments"
         )
     if spec.autograde:
-        clauses.append("`autograde` fills once at the cutoff")
+        clauses.append("`autograde` fills once at the late cutoff")
     return (
         "Auto-filled by the toolkit (you never type these): every `info:` block. "
         + "; ".join(clauses)
-        + ". All of them freeze at the cutoff."
+        + ". All of them freeze at the late cutoff."
     )
 
 
@@ -1712,7 +1712,7 @@ def grading_config_faults(
     will not grade as written.
 
     `fires` is the moment the value is USED: the assignment's `grading_datetime`, and its
-    due date where it declares none (which is what `cutoff_at` resolves the freeze to
+    due date where it declares none (which is what `schedule.grading_cutoff_datetime` resolves the freeze to
     anyway). An assignment with neither has no moment, and its faults simply sit in the
     issue.
 
@@ -2249,27 +2249,6 @@ def _display_long(at: datetime | None, tz_name: str = "") -> str:
     return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
 
 
-def cutoff_at(
-    sched: schedule.Schedule, key: str, gspec: GradingSpec
-) -> datetime | None:
-    """When this assignment stops accepting work: an explicit `grading_datetime`, else the
-    due date plus the template's late window, else the due date.
-
-    THE cutoff. Everything that has to agree about when the door shuts reads it here - the
-    sheet's header and its late-policy line, the receipts that quote that policy to a
-    student, the snapshot that freezes the pin and the autograder that fires off it. It
-    needs the template's `grading_config.yml` to know the window, which is why it lives
-    beside the spec reader rather than in `schedule`; `schedule.grading_datetime_at` is the
-    same question answered without one, and is only right when there is no window at all."""
-    entry = sched.assignments.get(key)
-    if entry is None:
-        return None
-    if entry.grading_datetime is not None:
-        return entry.grading_datetime
-    days = gspec.late_window_days
-    return entry.due_datetime + timedelta(days=days) if days else entry.due_datetime
-
-
 def sheet_spec(
     sched: schedule.Schedule, key: str, slug: str, gspec: GradingSpec, is_group: bool
 ) -> SheetSpec:
@@ -2290,9 +2269,14 @@ def sheet_spec(
         autograde=gspec.autograde,
         completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(cutoff_at(sched, key, gspec)),
+        cutoff_display=_display_moment(
+            schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days)
+        ),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
-        cutoff_long=_display_long(cutoff_at(sched, key, gspec), sched.timezone),
+        cutoff_long=_display_long(
+            schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days),
+            sched.timezone,
+        ),
         due_at=entry.due_datetime if entry else None,
     )
 

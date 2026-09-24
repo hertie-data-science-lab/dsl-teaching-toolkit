@@ -851,7 +851,7 @@ def test_a_student_choice_page_says_when_the_repo_may_be_published(generated):
     note = page["shape_note"]
     assert "you are its admin" in note
     assert (
-        "after the grading cutoff you may make it public from Settings > Danger zone"
+        "after the late cutoff you may make it public from Settings > Danger zone"
         in note
     )
     # And the due row says at a glance that the flag is the student's.

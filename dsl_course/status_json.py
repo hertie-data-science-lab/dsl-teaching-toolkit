@@ -852,7 +852,9 @@ def render_assignments(
     for slug, entry in facts.sched.assignments.items():
         spec = facts.specs.get(slug, grades.GradingSpec())
         name = schedule.semester_name(slug, entry)
-        cutoff = grades.cutoff_at(facts.sched, slug, spec)
+        cutoff = schedule.grading_cutoff_datetime(
+            facts.sched, slug, spec.late_window_days
+        )
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
         sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
         filled, on_sheet, submitted = sheet_counts(sheet, sspec)
@@ -876,7 +878,7 @@ def render_assignments(
                 "state": assignment_state(now, entry, cutoff, spec, units, returned),
                 "handout": _iso(entry.handout_datetime),
                 "due": _iso(entry.due_datetime),
-                "late_until": _iso(cutoff),
+                "grading_cutoff_datetime": _iso(cutoff),
                 "solution_shown": _iso(solution),
                 "units": units,
                 "submissions": submitted,

@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from dsl_course.schedule import Schedule, grading_datetime_iso, parse
+from dsl_course.schedule import Schedule, grading_cutoff_datetime, parse
+
+
+def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
+    at = grading_cutoff_datetime(sched, slug)
+    return at.isoformat() if at is not None else None
 
 
 def test_due_datetime_closes_end_of_day():
