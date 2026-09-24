@@ -166,9 +166,33 @@ jobs:
               const boundElsewhere = (r) =>
                 r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase() &&
                 (r[iId] || '').trim() !== String(userId);
+              // The public reply cannot say WHY (above), so the teaching team is told
+              // privately: one new file per issue in classroom-config, so no sha to race.
+              // Who asked and who the row is bound to - never the code. Best-effort: a
+              // record that cannot be written must not cost the student their reply.
+              const recordRefusal = async (r) => {
+                try {
+                  const record = {
+                    issue: issue.number,
+                    claimant: { login: handle, id: userId },
+                    bound: { handle: r[iHandle], id: (r[iId] || '').trim() },
+                    at: new Date().toISOString(),
+                  };
+                  await github.rest.repos.createOrUpdateFileContents({
+                    owner: org, repo: CONFIG, path: `enrolment/refusals/${issue.number}.json`,
+                    message: `enrolment: record why Join #${issue.number} was refused`,
+                    content: Buffer.from(JSON.stringify(record, null, 2) + '\n', 'utf8').toString('base64'),
+                  });
+                } catch (e) {
+                  core.warning(`could not record why this Join was refused (${e.status || e.name})`);
+                }
+              };
               const row = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
               if (!row) return fail(NO_MATCH, 'needs-review');
-              if (boundElsewhere(row)) return fail(NO_MATCH, 'needs-review');
+              if (boundElsewhere(row)) {
+                await recordRefusal(row);
+                return fail(NO_MATCH, 'needs-review');
+              }
 
               // Write the authenticated handle + immutable id back (idempotent).
               //
@@ -201,7 +225,10 @@ jobs:
                   // Re-check the single-use binding on the FRESH row, not only before the loop:
                   // two issues quoting the same code race here, and the loser must not overwrite
                   // the winner's handle when it re-applies its edit.
-                  if (boundElsewhere(matched)) return fail(NO_MATCH, 'needs-review');
+                  if (boundElsewhere(matched)) {
+                    await recordRefusal(matched);
+                    return fail(NO_MATCH, 'needs-review');
+                  }
                   matched[iHandle] = handle; matched[iId] = String(userId);
                   const body = serialiseCsv([header, ...rows]);
                   try {
