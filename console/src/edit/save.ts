@@ -28,7 +28,7 @@ export interface Verdict {
 }
 
 /** Why a save was refused: the first two things `validate` found wrong with `what`. */
-export function invalidText(what: string, validate: ValidateFunction): string {
+export function invalidText(what: string, validate: Pick<ValidateFunction, 'errors'>): string {
   return `Not saved: ${what} would not be valid (${(validate.errors ?? []).map((e) => `${e.instancePath} ${e.message}`).slice(0, 2).join('; ')}).`;
 }
 

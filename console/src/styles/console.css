@@ -350,7 +350,7 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .entry-body { padding: 16px 18px; display: grid; gap: 14px; overflow-y: auto; }
 .entry-foot { padding: 12px 18px 14px; display: grid; gap: 10px; border-top: 1px solid var(--rule); background: var(--surface-2); border-radius: 0 0 12px 12px; }
 .check-line { font-size: 13.5px; display: flex; gap: 8px; align-items: center; }
-.check-line.ok { color: var(--ok); } .check-line.bad { color: var(--bad-ink); } .check-line.busy { color: var(--muted); }
+.check-line.ok { color: var(--ok); } .check-line.bad { color: var(--bad-ink); } .check-line.busy { color: var(--muted); } .check-line.warn { color: var(--amber-ink); }
 .check-line svg { width: 13px; height: 13px; flex: none; }
 .spin { width: 13px; height: 13px; border: 2px solid var(--rule-strong); border-top-color: var(--ink-2); border-radius: 50%; animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -10,7 +10,7 @@ import { fmtShort } from '../model/format';
 import { ROSTER_HEADER, parsePeople, type Person } from '../model/people';
 import { checkAccess, sendCodes } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
-import { PERSON } from '../tiers/people';
+import { PERSON, displayOnly } from '../tiers/people';
 import { CheckLine, Crumbs, EditFile, Help, Lives, Loading, ProblemCards } from '../ui/bits';
 import { SaveBar, SaveLine } from '../ui/edit';
 import { Lock } from '../ui/icons';
@@ -227,17 +227,15 @@ function Staff(p: ReadyProps) {
   const people = file.kind === 'ready' ? parsePeople(file.text) : [];
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
   const doc = (y && !y.errors.length ? y.toJS() : null) as { people?: Record<string, Record<string, unknown>[]> } | null;
-  const rawOf = (x: Person) => {
-    const list = doc?.people?.[LIST[x.role]] ?? [];
-    return (list.find((e) => String(e?.github_handle ?? '') === x.handle) ?? {}) as Record<string, unknown>;
-  };
+  const indexIn = (x: Person) => people.filter((q) => q.role === x.role).indexOf(x);
+  // By position, not handle: display-only entries have none.
+  const rawOf = (x: Person) => ((doc?.people?.[LIST[x.role]] ?? [])[indexIn(x)] ?? {}) as Record<string, unknown>;
   const st = status.staff;
   const ins = people.filter((x) => x.role === 'instructor').length || st?.instructors || 0;
   const tas = people.filter((x) => x.role === 'ta').length || st?.tas || 0;
   const admins = p.course.admins;
   const scope = cohortScope(p);
   const target = { owner: p.cohort.org, repo: 'classroom-config', path: 'people.yml' };
-  const indexIn = (x: Person) => people.filter((q) => q.role === x.role).indexOf(x);
 
   const write = async (mutate: (t: YamlText) => void, what: string) => {
     if (!y || file.kind !== 'ready') return false;
@@ -250,9 +248,9 @@ function Staff(p: ReadyProps) {
     const v = editing.values;
     const errs = fieldErrors(null, PERSON, v);
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const handle = String(v.github_handle);
+    const handle = String(v.github_handle ?? '').trim();
     const before = editing.idx === 'new' ? null : people[editing.idx];
-    if (!before || before.handle.toLowerCase() !== handle.toLowerCase()) {
+    if (handle && (!before || before.handle.toLowerCase() !== handle.toLowerCase())) {
       setSave({ kind: 'busy', text: `Checking that ${handle} exists on GitHub…` });
       let ok = false;
       try {
@@ -270,7 +268,7 @@ function Staff(p: ReadyProps) {
         const len = people.filter((q) => q.role === role).length - (before && before.role === role ? 1 : 0);
         t.set(['people', LIST[role], len], entryOf(v, before ? rawOf(before) : {}));
       }
-    }, before ? `edit ${handle}` : `add ${handle}`);
+    }, `${before ? 'edit' : 'add'} ${handle || String(v.name).trim()}`);
     if (done) setEditing(null);
   };
   const saveRemovals = async () => {
@@ -278,7 +276,7 @@ function Staff(p: ReadyProps) {
     const done = await write((t) => {
       for (const role of ['instructor', 'ta'] as const)
         gone.filter((x) => x.role === role).map(indexIn).sort((a, b) => b - a).forEach((i) => t.delete(['people', LIST[role], i]));
-    }, `remove ${gone.map((x) => x.handle).join(', ')}`);
+    }, `remove ${gone.map((x) => x.handle || x.name).join(', ')}`);
     if (done) setRemoved([]);
   };
   return (
@@ -337,6 +335,7 @@ function Staff(p: ReadyProps) {
           <div class="person-form">
             <h3>{editing.idx === 'new' ? 'Add a person' : `Edit ${people[editing.idx]?.name || people[editing.idx]?.handle}`}</h3>
             <SchemaForm id="p" schema={null} tiers={PERSON} values={editing.values} onChange={(v) => setEditing({ ...editing, values: v })} />
+            {displayOnly(editing.values) ? <CheckLine cls="warn">Display only: this person gets a card on the student site, no GitHub access and no problem emails.</CheckLine> : null}
             <SaveBar state={save} onSave={() => void saveForm()} file={{ org: p.cohort.org, repo: 'classroom-config', path: 'people.yml' }}>
               <button class="btn quiet" type="button" onClick={() => setEditing(null)}>Cancel</button>
             </SaveBar>
