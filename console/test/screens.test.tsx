@@ -2,7 +2,7 @@
 
 import { options } from 'preact';
 import { render } from 'preact-render-to-string';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
@@ -232,17 +232,36 @@ describe('operation outcome', () => {
 });
 
 describe('screen error boundary', () => {
+  const Boom = (): preact.VNode => {
+    throw new Error('kaboom');
+  };
   // The string renderer honours boundaries only when asked; the browser always does.
-  (options as { errorBoundaries?: boolean }).errorBoundaries = true;
-  it('shows the error instead of the screen that threw', () => {
-    const Boom = (): preact.VNode => {
-      throw new Error('kaboom');
-    };
+  const withBoundaries = (fn: () => void) => {
+    const o = options as { errorBoundaries?: boolean };
+    const was = o.errorBoundaries;
+    o.errorBoundaries = true;
+    try {
+      fn();
+    } finally {
+      o.errorBoundaries = was;
+    }
+  };
+  it('shows the error instead of the screen that threw', () => withBoundaries(() => {
     const t = text(<ScreenBoundary><Boom /></ScreenBoundary>);
     expect(t).toContain('This screen hit an error');
     expect(t).toContain('kaboom');
     expect(html(<ScreenBoundary><Boom /></ScreenBoundary>)).toContain('href="#cohort"');
-  });
+  }));
+  it('links Home when This week itself threw, so the route key changes', () => withBoundaries(() => {
+    vi.stubGlobal('location', { hash: '#cohort' });
+    try {
+      const out = html(<ScreenBoundary><Boom /></ScreenBoundary>);
+      expect(out).toContain('href="#">Back to Home');
+      expect(out).not.toContain('href="#cohort"');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }));
 });
 
 describe('S8 students', () => {
