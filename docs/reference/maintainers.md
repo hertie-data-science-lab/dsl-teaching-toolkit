@@ -136,9 +136,11 @@ Things whose *literal spelling* is depended on from outside Python:
   (`course.RETIRED_REPO_NAMES`) are live redirects, and `repos.create_repo` refuses them -
   a repo created at one ends the redirect. The shipped JavaScript reads the config repo
   and the lock path substituted, never spelt.
-- **The pause variable `DSL_PAUSED`** (`central.PAUSE_VARIABLE`): every job of every seeded
-  workflow is gated on it (`central.pausable`, applied at the write site), and only
-  `migrate` sets it.
+- **The gate variable `DSL_PAUSED`** (`central.PAUSE_VARIABLE`): every job of every seeded
+  workflow is gated on it (`central.pausable`, applied at the write site). A belt and
+  braces only: org variables do not reach private repos on GitHub Free, and a workflow
+  rendered before the gate has none. Nothing relies on it - `migrate` pauses an org by
+  disabling Actions in each repo.
 - **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is a filename faculty type into their
   own content repos. A rename silently stops withholding whatever the old name held back -
   worse than an outage, because the release still goes green. Nothing re-spells it: the
@@ -770,17 +772,32 @@ hours - migrate every live real org and Promote in the same window (with ds01's 
 **The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, nothing
 written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
 step: do, verify, stop on the first failure naming the rollback. A step already done says
-"already migrated"; with no work left, the pause is not even set. Semester steps: preflight
-(topic, not archived, course already migrated, no run queued or running), pause
-(`DSL_PAUSED` in the semester AND its course org), rename repos, layout (records into
-`.system/`, `people.yml` -> `instructors.yml`, the pointer moved in, samples deleted - one
-`migrate: layout` commit), keys (`schedule.yml`), topic, re-render, unpause, status (zero
-`NOT_MIGRATED`). Course steps: preflight, pause, registry, `.system/` in `.github`,
-`dsl-course.yml` keys, template keys (`grading_config.yml` `format:` -> `formats:` on each
-template's `solution` branch - course-owned, so here rather than per semester), materials
-files, re-render (Refresh actions from the checkout), unpause, status. `grading_datetime` is
-left for B2. Tested only against
-a stubbed GitHub (`tests/test_migrate.py`).
+"already migrated"; a second run writes nothing, not even status.json. A missing repo or
+file reads as "not migrated yet", never as an error.
+
+The pause is GitHub's own switch: `PUT repos/{org}/{repo}/actions/permissions enabled=false`
+on every repo that carries a workflow - for a semester its config and join repos, its site
+and the COURSE's workflow repos (whose scheduler acts on it); for a course `.github` and
+every content repo and template with a release workflow. Verified by reading the setting
+back and by no run having started since, nor being queued or running. The unpause sets
+`enabled=true` on the same repos and reads it back; a stop or a crash in between says which
+repos are still disabled and how to enable them. A semester waits until its course's
+migration is complete and its Actions are on (or off only because this semester's own run
+stopped), so no run re-enables a course mid-migration.
+
+Semester steps: preflight (topic, not archived, course complete, no run queued or running),
+pause, rename repos, layout (records into `.system/`, `people.yml` -> `instructors.yml`
+checked against the old file before anything is committed, the seeded skeleton replaced by
+the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
+(`schedule.yml`, re-read with this engine: zero `NOT_MIGRATED`), topic, re-render (drift
+checked over the dispatchers, README, pointer, lock, join files and org READMEs), unpause,
+status. Course steps: preflight (not archived), pause, registry (also a `semesters.yml`
+still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, template keys
+(`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
+re-read with `parse_grading_spec` - course-owned, so here rather than per semester),
+materials files, re-render (Refresh actions from the checkout), unpause, status.
+`grading_datetime` is left for B2. Tested only against a stubbed GitHub
+(`tests/test_migrate.py`).
 
 ## Working conventions
 
