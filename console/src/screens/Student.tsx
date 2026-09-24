@@ -62,7 +62,7 @@ export function StudentViewBanner({ semester }: { semester: Semester }) {
     <div class="ro-banner" role="status">
       <b>Student view.</b>
       <span>What a student of {semesterName(semester)} sees, shown with your own account: no student’s repos or marks.</span>
-      <a href={`?cohort=${semester.org}#cohort`}>Back to the instructor screens</a>
+      <a href={`?cohort=${semester.org}#semester`}>Back to the instructor screens</a>
     </div>
   );
 }

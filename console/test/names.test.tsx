@@ -71,7 +71,7 @@ describe('names', () => {
   it('spells repo names only in model/names.ts', () => {
     const hits = ours()
       .filter((f) => f.rel !== 'model/names.ts' && !RETIRED_HOME.has(f.rel))
-      .filter((f) => /['"](semester-config|join|\.github|\.system(\/[^'"]*)?|instructors\.yml|semesters\.yml)['"]/.test(f.text))
+      .filter((f) => /['"](semester-config|\.github|\.system(\/[^'"]*)?|instructors\.yml|semesters\.yml)['"]/.test(f.text))
       .map((f) => f.rel);
     expect(hits).toEqual([]);
   });

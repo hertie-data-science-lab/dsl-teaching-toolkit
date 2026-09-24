@@ -581,7 +581,7 @@ export class GitHubClient {
     return (await this.getOrNull<GhIssue[]>(`/repos/${owner}/${repo}/issues?${query}&per_page=30`)) ?? [];
   }
 
-  /** An issue's comments, oldest first (up to 100: a receipts thread stays well under). */
+  /** An issue's comments, oldest first (up to 100: a Submission receipts issue stays well under). */
   async listIssueComments(owner: string, repo: string, issue: number): Promise<GhComment[]> {
     return (await this.getOrNull<GhComment[]>(`/repos/${owner}/${repo}/issues/${issue}/comments?per_page=100`)) ?? [];
   }

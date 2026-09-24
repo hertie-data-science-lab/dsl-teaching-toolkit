@@ -15,12 +15,13 @@ import type { GhComment, GhIssue } from '../github/client';
 import { invitationUrl } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
+import { JOIN_REPO } from '../model/names';
 import type { SemesterFacts } from '../model/student';
 import { ORG_RE } from '../router';
 import { Crumbs, Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 
-export const WELCOME = 'welcome';
+export const WELCOME = JOIN_REPO;
 export const TEAM_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 export const ENROL_CODE = /^dsl-[a-z0-9]{6}$/i;
 
