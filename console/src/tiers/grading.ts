@@ -101,7 +101,7 @@ export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
     visibility: {
       tier: 'default', label: 'Who can see each student’s repo', widget: 'radio', default: 'private', defaultLabel: 'default: private',
       reason: 'Applies to copies handed out after this change; existing copies keep theirs.',
-      options: Object.entries(VISIBILITY).map(([v, l]) => opt(v, l)),
+      options: Object.entries(VISIBILITY).map(([v, l]) => opt(v, l, v === 'private' ? 'The default.' : undefined)),
       forced: (v) =>
         v.submit_via === 'shared_dropbox_repo' ? { value: 'private', reason: 'Private: a shared drop box is always private.' }
         : v.submit_via === 'external' ? { value: 'private', reason: 'Private: the repo holds the brief only.' }
