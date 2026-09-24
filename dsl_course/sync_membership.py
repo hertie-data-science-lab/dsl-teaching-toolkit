@@ -36,7 +36,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 import yaml
@@ -54,7 +53,7 @@ from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login, membership_changes, reset_membership_changes
 from .grades import ensure_gradebooks, sync_team_lock
-from .log import Summary, add_preview_flag, log_err, log_ok, plural
+from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, plural
 from .welcome import refresh_join_team_form
 
 # What a semester's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -231,7 +230,7 @@ def sync(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
     parser.add_argument("--semester-org", default=None)
     parser.add_argument(

@@ -17,7 +17,6 @@ conclusion, never as a traceback in the public log.
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import importlib
 import json
@@ -29,7 +28,7 @@ from datetime import datetime, timezone
 from . import schedule, status
 from .gh_teams import acting_login
 from .ghcli import gh
-from .log import Summary, log, log_err
+from .log import CLIParser, Summary, log, log_err
 from .ops.outcome import Outcome, annotation, write_private
 from .ops.registry import (
     REGISTRY,
@@ -350,7 +349,7 @@ def run(text: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--request", required=True, help="A dsl.request/1 JSON document"
     )

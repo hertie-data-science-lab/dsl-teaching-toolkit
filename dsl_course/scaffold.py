@@ -20,7 +20,6 @@ copies every branch of it, history and all, and rewrites only the SYSTEM-owned f
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import tempfile
@@ -67,7 +66,7 @@ from .discovery import central_ref_for, discover_assignments, discover_semesters
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .grades import course_assignment_defaults
-from .log import log, log_err, log_ok, log_skip, log_step
+from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
 from .repos import (
@@ -1719,7 +1718,7 @@ def scaffold_site(org: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     pm = sub.add_parser("materials")
     pm.add_argument("--org", required=True)

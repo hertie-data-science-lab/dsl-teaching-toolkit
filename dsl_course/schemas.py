@@ -13,7 +13,6 @@ the engine's own check runs, which remain the verdict.
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -29,7 +28,7 @@ from .course import (
     VISIBILITIES,
 )
 from .grades import COURSE_DEFAULT_KEYS, SPEC_KEYS
-from .log import log_ok
+from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
     HANDLE_PATTERN,
@@ -541,7 +540,7 @@ def write(out: Path) -> list[Path]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--out", type=Path, default=DEFAULT_OUT, help="Output directory"
     )

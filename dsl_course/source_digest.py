@@ -21,7 +21,6 @@ that issue reads its state into this one and closes it.
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from .config_digest import (
@@ -40,6 +39,7 @@ from .config_digest import (
 )
 from .config_digest import sync as _sync
 from .faults import NOTIFY_FROM, Severity
+from .log import CLIParser
 from .schedule import SCHEDULE_PATH, SourceFault
 
 # What this module IS: schedule.yml's digest, its two frozen titles, its key migration and
@@ -147,7 +147,7 @@ def main() -> int:
     validate-schedule template - and every lookup of this issue matches the title
     EXACTLY (see `issues.find_issues`), so a copy stops finding the issue the day the
     wording changes, silently, on the one line that was meant to point at it."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--title",
         action="store_true",

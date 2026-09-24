@@ -79,7 +79,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
@@ -125,7 +124,7 @@ from .gh_contents import (
     take_lines,
     yaml_mark_line,
 )
-from .log import log, log_err, log_step
+from .log import CLIParser, log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
@@ -2506,7 +2505,7 @@ def _write_output(line: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--semester-org", help="fetch schedule.yml from a semester org")
     source.add_argument(

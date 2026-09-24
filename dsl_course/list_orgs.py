@@ -17,7 +17,6 @@ to its own job summary - the inventory is a report, never a committed page.
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 
@@ -33,7 +32,7 @@ from .course import (
 from .discovery import discover_semesters, org_meta
 from .faults import not_migrated_text
 from .ghcli import gh_json
-from .log import log_err
+from .log import CLIParser, log_err
 from .repos import org_exists
 
 # How many results one `gh search repos` page returns. Reading only the first page would
@@ -262,7 +261,7 @@ def render_tree(orgs: list[dict], semesters: list[dict]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--format",
         choices=["json", "markdown", "yaml"],

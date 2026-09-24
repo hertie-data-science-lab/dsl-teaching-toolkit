@@ -36,7 +36,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 from datetime import date
 from functools import cache
@@ -70,7 +69,7 @@ from .gh_teams import (
     is_valid_github_username,
     reconcile_team_members,
 )
-from .log import add_preview_flag, log, log_err, log_ok, log_step
+from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 
 ROLE_TEAM = {
     "instructors": INSTRUCTORS_TEAM,
@@ -787,7 +786,7 @@ def sync(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
     add_preview_flag(parser, "Report the team changes; make none (default).")
     args = parser.parse_args()

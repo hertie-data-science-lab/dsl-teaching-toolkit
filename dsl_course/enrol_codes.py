@@ -32,7 +32,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import csv
 import enum
 import io
@@ -54,6 +53,7 @@ from .discovery import (
 from .faults import Unusable
 from .gh_contents import get_file_with_sha, put_file, read_csv
 from .log import (
+    CLIParser,
     Summary,
     add_preview_flag,
     log,
@@ -694,7 +694,7 @@ def refuse_unregistered(semester_org: str, course_org: str) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--dispatched-by",

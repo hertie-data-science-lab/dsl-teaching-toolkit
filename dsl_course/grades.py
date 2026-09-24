@@ -21,7 +21,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sys
@@ -105,6 +104,7 @@ from .gh_contents import (
 from .ghcli import bot_login, clone, gh, is_missing_resource
 from .issues import close_issues_titled, upsert_issue
 from .log import (
+    CLIParser,
     Summary,
     add_preview_flag,
     log,
@@ -4920,7 +4920,7 @@ def _email_updates(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     p = sub.add_parser("distribute")
     p.add_argument("--semester-org", required=True)

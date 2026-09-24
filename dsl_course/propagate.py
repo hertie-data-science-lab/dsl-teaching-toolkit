@@ -43,7 +43,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import shutil
 import sys
 import tempfile
@@ -57,7 +56,16 @@ from .course import PROPOSAL_BRANCH_PREFIX, UPSTREAM_BRANCH, is_repo_root
 from .deploy import _copy_ignore, _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
-from .log import Summary, add_preview_flag, log, log_err, log_ok, log_step, plural
+from .log import (
+    CLIParser,
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_step,
+    plural,
+)
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
@@ -494,7 +502,7 @@ def propagate_summary(done: Propagated, dry_run: bool) -> Summary:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (the target)")
     parser.add_argument(
         "--semester-org",

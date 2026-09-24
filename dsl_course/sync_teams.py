@@ -24,7 +24,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from . import roster, schedule, teams
@@ -34,7 +33,7 @@ from .gh_teams import (
     list_teams,
     reconcile_team_members,
 )
-from .log import add_preview_flag, log_err, log_ok, log_person, log_step
+from .log import CLIParser, add_preview_flag, log_err, log_ok, log_person, log_step
 
 # The naming rules live with the file's parser, which is the only thing that can refuse a
 # row for breaking them. Imported for this module's own reconcile below, not re-exported:
@@ -246,7 +245,7 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--prune",

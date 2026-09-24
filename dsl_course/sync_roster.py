@@ -23,14 +23,13 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from . import roster, teams
 from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_repo, submission_suffix
 from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
-from .log import add_preview_flag, log_err, log_ok, log_person, log_step
+from .log import CLIParser, add_preview_flag, log_err, log_ok, log_person, log_step
 from .repos import (
     cancel_invitation,
     is_collaborator,
@@ -257,7 +256,7 @@ def sync(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--prune",

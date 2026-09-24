@@ -29,7 +29,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import shutil
 import sys
 import tempfile
@@ -50,6 +49,7 @@ from .fs import copy_tree, union_deny
 from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
 from .log import (
+    CLIParser,
     Summary,
     add_preview_flag,
     log,
@@ -744,7 +744,7 @@ def parse_path_pairs(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (source)")
     parser.add_argument(
         "--course-source-repo", required=True, help="Source repo holding the path(s)"

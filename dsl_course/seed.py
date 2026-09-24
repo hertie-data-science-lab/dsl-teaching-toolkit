@@ -33,7 +33,6 @@ CLI:
 
 from __future__ import annotations
 
-import argparse
 import sys
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -66,7 +65,7 @@ from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
 from .grades import sync_team_lock
-from .log import log, log_err, log_ok, log_step
+from .log import CLIParser, log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .repos import converge_descriptions, org_exists
 from .status import refresh as refresh_status
@@ -651,7 +650,7 @@ def refresh(course_org: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     pr = sub.add_parser("refresh")
     pr.add_argument("--course-org", required=True)

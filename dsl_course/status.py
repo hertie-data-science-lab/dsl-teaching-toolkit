@@ -23,7 +23,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import io
 import json
@@ -48,7 +47,7 @@ from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
 from .gh_contents import put_file
 from .issues import open_titles
-from .log import Summary, log_err, log_ok, log_step, plural
+from .log import CLIParser, Summary, log_err, log_ok, log_step, plural
 from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
@@ -549,7 +548,7 @@ def write_after_op(request: dict) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
     parser.add_argument(
         "--semester-org",

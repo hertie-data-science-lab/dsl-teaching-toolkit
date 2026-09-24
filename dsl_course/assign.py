@@ -51,7 +51,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import tempfile
@@ -109,6 +108,7 @@ from .gh_contents import (
 )
 from .ghcli import GIT_ENV, bot_login, clone, gh, git
 from .log import (
+    CLIParser,
     Summary,
     add_preview_flag,
     log,
@@ -1226,7 +1226,7 @@ def ensure_drop_box(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--course-org", required=True, help="Course org (template source)"
     )

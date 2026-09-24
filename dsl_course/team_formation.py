@@ -58,7 +58,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import re
 import sys
 from dataclasses import dataclass
@@ -72,6 +71,7 @@ from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
 from .grades import self_select_keys
 from .log import (
+    CLIParser,
     Summary,
     add_preview_flag,
     log,
@@ -1123,7 +1123,7 @@ def run(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
     parser.add_argument("--semester-org", required=True)
     parser.add_argument(

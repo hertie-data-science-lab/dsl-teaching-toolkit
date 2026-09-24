@@ -209,7 +209,7 @@ def test_an_old_request_arg_is_refused_as_not_migrated(op, args):
 
 
 @pytest.mark.parametrize("flag", ["--semester-org", "--cohort-org"])
-def test_a_cli_takes_only_the_new_flag(monkeypatch, flag):
+def test_a_cli_takes_only_the_new_flag(monkeypatch, capsys, flag):
     seen: list[tuple] = []
     monkeypatch.setattr(status, "refresh", lambda *a: seen.append(a) or 0)
     monkeypatch.setattr(
@@ -218,6 +218,11 @@ def test_a_cli_takes_only_the_new_flag(monkeypatch, flag):
     if flag == "--cohort-org":
         with pytest.raises(SystemExit):
             status.main()
+        err = capsys.readouterr().err
+        assert (
+            f"{NOT_MIGRATED}: `--cohort-org` is the old name of `--semester-org`" in err
+        )
+        assert seen == []
     else:
         assert status.main() == 0
         assert seen == [("C", "Sem")]
@@ -431,9 +436,15 @@ def test_the_manual_hand_out_includes_the_solution_only_when_asked(
 @pytest.mark.parametrize(
     "flags", [("--solution-datetime", "2026-12-01"), ("--solution",)]
 )
-def test_a_later_moment_or_the_old_switch_is_refused(monkeypatch, flags):
+def test_a_later_moment_or_the_old_switch_is_refused(monkeypatch, capsys, flags):
     with pytest.raises(SystemExit):
         _hand_out(monkeypatch, *flags)
+    err = capsys.readouterr().err
+    if flags == ("--solution",):
+        # Not prefix-matched onto --solution-datetime (allow_abbrev=False): refused.
+        assert f"{NOT_MIGRATED}: `--solution` is the old name of" in err
+    else:
+        assert "takes `now` on a manual hand out" in err
 
 
 def test_the_hand_out_op_passes_solution_datetime_now():
@@ -477,7 +488,7 @@ def _preview_clis() -> set[str]:
     return {p.stem for p in root.glob("*.py") if "add_preview_flag(" in p.read_text()}
 
 
-def test_every_cli_previews_unless_told_otherwise(monkeypatch):
+def test_every_cli_previews_unless_told_otherwise(monkeypatch, capsys):
     seen: list[bool] = []
     monkeypatch.setattr(
         assign, "provision_all", lambda *a, dry_run, **k: seen.append(dry_run) or (0, 0)
@@ -499,6 +510,9 @@ def test_every_cli_previews_unless_told_otherwise(monkeypatch):
     monkeypatch.setattr(sys, "argv", [*base, "--dry-run"])
     with pytest.raises(SystemExit):
         assign.main()
+    assert f"{NOT_MIGRATED}: `--dry-run` is the old name of `--preview`" in (
+        capsys.readouterr().err
+    )
 
 
 def test_every_rendered_run_of_a_previewing_cli_says_which_it_is():
@@ -594,12 +608,51 @@ def test_status_json_rows_say_kind():
     [(assign, "--master-org"), (collect, "--master-org"), (deploy, "--source-org")],
 )
 def test_the_course_org_flag_is_course_org_and_the_old_one_is_refused(
-    monkeypatch, module, old
+    monkeypatch, capsys, module, old
 ):
-    base = ["--course-source-repo", "r", "--semester-org", "S"]
-    monkeypatch.setattr(sys, "argv", ["cli", old, "C", *base])
+    # Every required flag given, so the refusal is for the old spelling and nothing else.
+    base = ["--course-org", "C", "--course-source-repo", "r", "--semester-org", "S"]
+    monkeypatch.setattr(sys, "argv", ["cli", *base, old, "C"])
     with pytest.raises(SystemExit):
         module.main()
+    assert f"{NOT_MIGRATED}: `{old}` is the old name of `--course-org`" in (
+        capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [
+            "scaffold",
+            "assignment",
+            "--org",
+            "O",
+            "--number",
+            "1",
+            "--semester",
+            "f2026",
+            "--format",
+            "py",
+        ],
+        ["scaffold", "materials", "--org", "O", "--tag", "f2026"],
+    ],
+)
+def test_no_old_flag_is_prefix_matched_onto_a_new_one(monkeypatch, capsys, argv):
+    from dsl_course import scaffold
+
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit):
+        scaffold.main()
+    assert NOT_MIGRATED in capsys.readouterr().err
+
+
+def test_a_cli_that_still_owns_an_old_spelling_keeps_it(monkeypatch):
+    # `status --format` and `status --write` mean what they always meant there.
+    seen: list[tuple] = []
+    monkeypatch.setattr(status, "refresh", lambda *a: seen.append(a) or 0)
+    monkeypatch.setattr(sys, "argv", ["status", "--course-org", "C", "--write"])
+    assert status.main() == 0 and seen == [("C", None)]
 
 
 def test_no_rendered_workflow_spells_an_old_course_org_flag_or_variable():

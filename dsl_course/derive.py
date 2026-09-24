@@ -44,7 +44,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sys
@@ -53,7 +52,16 @@ from typing import NamedTuple
 
 from .course import SOLUTION_BRANCH, SOLUTION_DIR
 from .gh_contents import get_file_content, put_files, repo_tree
-from .log import Summary, add_preview_flag, log, log_err, log_ok, log_step, plural
+from .log import (
+    CLIParser,
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_step,
+    plural,
+)
 
 # ------------------------------------------------------------------ the fence vocabulary
 
@@ -575,7 +583,7 @@ def derive_student_version(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (the template)")
     parser.add_argument(
         "--course-source-repo",

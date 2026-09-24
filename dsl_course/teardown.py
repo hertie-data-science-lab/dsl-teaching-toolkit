@@ -53,7 +53,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 from datetime import date, datetime, timezone
 from typing import NamedTuple
@@ -70,6 +69,7 @@ from .gh_contents import get_file_content, put_file, read_csv
 from .grades import PREVIEW_TITLE, SEMESTER_CSV_NAME
 from .issues import close_issues_titled, open_titles
 from .log import (
+    CLIParser,
     Summary,
     add_preview_flag,
     log,
@@ -559,7 +559,7 @@ def close_out(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--course-org",
         default="",

@@ -70,7 +70,6 @@ Usage (the workflow's two jobs are the first two lines; --now is for testing):
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import json
 import sys
@@ -120,6 +119,7 @@ from .grades import (
     sync_team_lock,
 )
 from .log import (
+    CLIParser,
     Summary,
     add_preview_flag,
     log,
@@ -1848,7 +1848,7 @@ def _one_semester(course_org: str, semester_org: str) -> tuple[list[str], int]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--course-org", required=True, help="Course org (source of every release)"
     )

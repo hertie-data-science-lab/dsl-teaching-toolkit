@@ -46,7 +46,6 @@ the jobs API cannot be asked which job failed.
 
 from __future__ import annotations
 
-import argparse
 import html
 import sys
 from collections.abc import Callable, Iterable
@@ -69,7 +68,7 @@ from .faults import (
     hours,
 )
 from .gh_contents import blame_logins, last_committer, path_committers, read_error
-from .log import log, log_err, log_ok, log_person
+from .log import CLIParser, log, log_err, log_ok, log_person
 from .schedule import SCHEDULE_PATH, SourceFault
 
 # How much of the deadline is left, in the subject. Formatted from the windows themselves,
@@ -1204,7 +1203,7 @@ def notify_run_failed(course_org: str, workflow: str, run_url: str, tail: str) -
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     # A subcommand rather than a flag: `--run-failed` was `required=True` and
     # `store_true`, which is a switch that can only ever be on - and a second mail here
     # would have had to be a second such switch, mutually exclusive with the first.

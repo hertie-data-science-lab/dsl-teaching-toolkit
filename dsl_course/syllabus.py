@@ -22,13 +22,21 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from . import schedule
 from .course import SYLLABUS_SESSIONS_FILE, session_dirs
 from .gh_contents import get_file_content, put_file, repo_tree
-from .log import Summary, add_preview_flag, log, log_err, log_ok, log_step, plural
+from .log import (
+    CLIParser,
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_step,
+    plural,
+)
 from .readings import demote_headings, readings_block
 from .repos import default_branch
 from .schedule_plan import READINGS_SECTION, planned_sessions
@@ -110,7 +118,7 @@ def build(course_org: str, semester_org: str, source_repo: str) -> tuple[str, in
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = CLIParser(description=__doc__)
     ap.add_argument("--course-org", required=True)
     ap.add_argument("--semester-org", required=True)
     ap.add_argument("--course-source-repo", required=True)

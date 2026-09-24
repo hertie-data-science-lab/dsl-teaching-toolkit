@@ -41,7 +41,7 @@ from .faults import NotMigrated
 from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
-from .log import log, log_err, log_ok, log_step
+from .log import CLIParser, log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .repos import create_repo, repo_exists, repo_is_private, set_repo_topics
 from .welcome import (
@@ -781,7 +781,7 @@ def preflight(org: str) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--org", required=True, help="Course org to bootstrap")
     parser.add_argument(
         "--org-name",

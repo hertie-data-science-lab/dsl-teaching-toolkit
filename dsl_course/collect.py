@@ -90,7 +90,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import csv
 import errno
 import hashlib
@@ -149,7 +148,16 @@ from .grades import (
     parse_grading_spec,  # noqa: F401 - re-exported; `collect` no longer parses it itself
     sheet_spec,
 )
-from .log import add_preview_flag, log, log_err, log_ok, log_person, log_skip, log_step
+from .log import (
+    CLIParser,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_skip,
+    log_step,
+)
 from .repos import default_branch, repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
@@ -3642,7 +3650,7 @@ def collect(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--course-org", required=True, help="Course org (template source)"
     )

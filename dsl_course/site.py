@@ -23,7 +23,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import shutil
 import stat
@@ -72,7 +71,7 @@ from .discovery import (
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .grades import load_grading_spec, spoken_day, team_cap, total_points
-from .log import log, log_err, log_step, log_withheld
+from .log import CLIParser, log, log_err, log_step, log_withheld
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
 from .releaseignore import parse as parse_patterns
@@ -1838,7 +1837,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     ps = sub.add_parser("sync")
     ps.add_argument("--course-org", required=True)
