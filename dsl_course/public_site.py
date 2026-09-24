@@ -180,7 +180,8 @@ def _public_lecture_entry(
     title = f"{ROW_NOUN[kind]} {session}"
     return (
         f"---\n"
-        f"type: {kind}\n"
+        f"kind: {kind}\n"
+        f"type: {kind}\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f'title: "{title}"\n'
         + (block("reading_list", reading_list_md) if reading_list_md else "")
