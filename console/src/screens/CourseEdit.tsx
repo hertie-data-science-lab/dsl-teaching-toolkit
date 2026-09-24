@@ -179,15 +179,19 @@ export function DetailsScreen(p: CourseProps) {
   };
   const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, ASSIGNMENT_DEFAULTS, d.defaults) };
   const doSave = async () => {
+    setWarning('');
     if (!y || file.kind !== 'ready') return;
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const after = { ...d, cohort: effective(COHORT_DEFAULTS, d.cohort) };
     const out = courseFileAfter(file.text, before, after, meta);
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-    setWarning(out.warning ?? '');
     const missing = await missingAdmin(env, before.admins, after.admins);
     if (missing) return setSave({ kind: 'bad', text: `There is no GitHub account called ${missing}.` });
-    if (await runSave({ owner: course.org, repo: '.github', path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the Instructor Console', statusRepo: [course.org, '.github'] })) setDraft(null);
+    // The note describes a file that was written, so it shows only once the save went through.
+    if (await runSave({ owner: course.org, repo: '.github', path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the Instructor Console', statusRepo: [course.org, '.github'] })) {
+      setDraft(null);
+      setWarning(out.warning ?? '');
+    }
   };
   return (
     <>
