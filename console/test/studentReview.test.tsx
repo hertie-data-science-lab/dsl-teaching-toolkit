@@ -17,7 +17,7 @@ const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&a
 const client = (f: FakeGitHub) => new GitHubClient({ token: () => 't', fetch: f.fetch });
 const repo = (name: string, push = true) => ({ name, full_name: `${ORG}/${name}`, private: true, default_branch: 'main', html_url: '', permissions: { push, pull: true } });
 const asg = (slug: string, over: Partial<SemesterAssignment> = {}): SemesterAssignment => ({
-  slug, title: slug, subtitle: '', handout: null, due: null, lateCutoff: null, lateRule: '', cutoffSentence: '', submitVia: 'assignment_repo', privateRepo: true, submitUrl: '', group: true, teamFormation: null, solutionShown: null, maxPoints: '', handedOut: true, ...over,
+  slug, title: slug, subtitle: '', handout: null, due: null, lateCutoff: null, lateRule: '', cutoffSentence: '', submitVia: 'assignment_repo', privateRepo: true, submitUrl: '', group: true, teamFormation: null, solutionShown: null, maxPoints: '', handedOut: true, brief: '', shape: 'assignment-repo-private', shapeNote: '', tbc: false, teams: [], ...over,
 });
 
 describe('team repos and own repos', () => {
@@ -73,7 +73,7 @@ describe('the renamed site', () => {
 });
 
 describe('Marks', () => {
-  const facts = { timezone: 'Europe/Berlin', rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [] } as SemesterFacts;
+  const facts: SemesterFacts = { courseName: '', timezone: 'Europe/Berlin', rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null };
 
   it('shows the semester total over an empty gradebook, and says no marks yet', () => {
     const t = text(<MarksView org={ORG} login="octo" facts={facts} gradebook={parseGradebook('total: 88\nassignments: {}\n')} studentView={false} />);

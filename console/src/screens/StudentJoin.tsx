@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GhComment, GhIssue } from '../github/client';
+import { invitationUrl } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
 import type { SemesterFacts } from '../model/student';
@@ -90,12 +91,12 @@ export function JoinRequests({ org }: { org: string }) {
   return (
     <section class="panel section" aria-labelledby="h-asked">
       <div class="a-head"><h2 id="h-asked">Your requests</h2><button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button></div>
-      <AskedList asked={asked} />
+      <AskedList asked={asked} org={org} />
     </section>
   );
 }
 
-export function AskedList({ asked }: { asked: Asked[] | null }) {
+export function AskedList({ asked, org }: { asked: Asked[] | null; org?: string }) {
   if (asked === null) return <p class="footnote">Reading…</p>;
   if (!asked.length) return <p class="footnote">You have opened no Join course or Join team request here yet. After you press Create on GitHub, it shows here within a few seconds.</p>;
   return (
@@ -104,7 +105,7 @@ export function AskedList({ asked }: { asked: Asked[] | null }) {
         const s = issueState(issue);
         return (
           <li>
-            <div class={`check-line ${s.tone}`}><span><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a></span></div>
+            <div class={`check-line ${s.tone}`}><span><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a>{org && issue.labels.some((l) => l.name === 'onboarded') ? <> <a href={invitationUrl(org)} target="_blank" rel="noopener">Accept the invitation <Ext /></a></> : null}</span></div>
             {reply ? <Md class="reply" src={readable(reply.body)} /> : null}
           </li>
         );
@@ -123,8 +124,13 @@ export function TeamForm({ org, assignments, mine }: { org: string; assignments:
   const current = mine?.units[a.slug]?.team;
   const bad = team.trim() !== '' && !TEAM_NAME.test(team.trim());
   const ready = team.trim() !== '' && !bad;
+  const pick = (name: string) => {
+    setAction('join');
+    setTeam(name);
+  };
   return (
     <form class="stack" onSubmit={(e) => e.preventDefault()}>
+      <TeamList a={a} current={current ?? null} onPick={pick} picked={action === 'join' ? team.trim() : ''} />
       <div class="field">
         <label for="j-asg">Assignment</label>
         <select id="j-asg" value={a.slug} onChange={(e) => setSlug((e.target as HTMLSelectElement).value)}>
@@ -154,12 +160,38 @@ export function TeamForm({ org, assignments, mine }: { org: string; assignments:
   );
 }
 
+/** The teams formed so far for `a`: name and headcount, those with room first; picking one fills in the form. */
+export function TeamList({ a, current, onPick, picked }: { a: SemesterFacts['assignments'][number]; current: string | null; onPick: (name: string) => void; picked: string }) {
+  if (!a.teams.length) return <p class="footnote">No team has formed for {a.title} yet: create the first one.</p>;
+  const cap = (t: { cap: number | null }) => t.cap ?? a.teamFormation?.cap ?? null;
+  const room = (t: { members: number; cap: number | null }) => cap(t) === null || t.members < cap(t)!;
+  const list = [...a.teams].sort((x, y) => Number(room(y)) - Number(room(x)) || x.name.localeCompare(y.name));
+  return (
+    <div class="field">
+      <span class="label">Teams so far</span>
+      <ul class="plain-list team-list">
+        {list.map((t) => {
+          const mine = current !== null && t.name.toLowerCase() === current.toLowerCase();
+          return (
+            <li>
+              <b>{t.name}</b> <span class="footnote">{t.members}{cap(t) !== null ? ` of ${cap(t)}` : ''} {t.members === 1 && cap(t) === null ? 'member' : 'members'}{mine ? '; your team' : ''}</span>{' '}
+              {mine ? null : room(t) ? <button class="btn outline small" type="button" aria-pressed={picked === t.name} onClick={() => onPick(t.name)}>{picked === t.name ? 'Picked' : 'Pick'}</button> : <span class="chip">full</span>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function JoinScreen({ org, facts, mine, studentView }: { org: string; facts: SemesterFacts; mine: Mine | null; studentView: boolean }) {
   return (
     <div class="stack">
       <section class="panel section" aria-labelledby="h-team">
         <h2 id="h-team">Join or create a team</h2>
-        {studentView ? <p class="footnote">A student forms teams here; the form opens the semester’s Join team issue.</p> : <TeamForm org={org} assignments={facts.assignments} mine={mine} />}
+        {studentView ? <p class="footnote">A student forms teams here; the form opens the semester’s Join team issue.</p>
+          : mine?.auditor ? <p class="footnote">As an auditor you do not join a team.</p>
+          : <TeamForm org={org} assignments={facts.assignments} mine={mine} />}
       </section>
       {studentView ? null : <JoinRequests org={org} />}
     </div>

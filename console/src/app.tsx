@@ -181,9 +181,9 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'home') {
-    body = <HomeScreen courses={courses} semesters={semesters} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
+    body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
-    body = <HomeScreen courses={courses} semesters={semesters} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
+    body = <HomeScreen courses={courses} semesters={semesters} invited={estate.invited} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course.write) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {

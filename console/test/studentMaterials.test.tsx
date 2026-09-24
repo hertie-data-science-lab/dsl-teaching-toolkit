@@ -205,7 +205,7 @@ describe('Join', () => {
   });
 
   it('offers the team form only for an assignment forming teams, with its close date and size', () => {
-    const base = { title: 'Assignment 3 Project', subtitle: 'Group project', handout: null, due: null, lateCutoff: null, lateRule: '', cutoffSentence: '', submitVia: 'assignment_repo' as const, privateRepo: true, submitUrl: '', group: true, solutionShown: null, maxPoints: '', handedOut: true };
+    const base = { title: 'Assignment 3 Project', subtitle: 'Group project', handout: null, due: null, lateCutoff: null, lateRule: '', cutoffSentence: '', submitVia: 'assignment_repo' as const, privateRepo: true, submitUrl: '', group: true, solutionShown: null, maxPoints: '', handedOut: true, brief: '', shape: 'assignment-repo-private', shapeNote: '', tbc: false, teams: [] };
     expect(text(<TeamForm org={ORG} assignments={[{ ...base, slug: 'a', teamFormation: null }]} mine={null} />)).toContain('No assignment is forming teams now.');
     const t = text(<TeamForm org={ORG} assignments={[{ ...base, slug: 'assignment-3-project', teamFormation: { closes: '26th Oct', cap: 3 } }]} mine={null} />);
     expect(t).toContain('Teams can form until 26th Oct. At most 3 in a team.');

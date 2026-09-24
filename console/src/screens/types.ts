@@ -39,6 +39,8 @@ export interface HomeProps {
   courses: Course[];
   /** The semesters the person is a student of ("Your semesters"). */
   semesters?: Semester[];
+  /** Semesters that invited the person, who has not accepted yet. */
+  invited?: Semester[];
   kind?: TokenKind;
   cohortStates: Record<string, Loaded>;
   now: number;

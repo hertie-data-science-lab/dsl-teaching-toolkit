@@ -1,24 +1,29 @@
-// The student shell's screens (decision 0011 rule 2): This week, Schedule, Assignments,
-// Marks, Materials, Join and Instructors of one semester, and This week across every
-// semester on Home. The semester's shared facts come through `StudentData` (the public site
-// today, `student-status.json` after WP-D4); the student's own repos, team, receipts and
-// marks come from GitHub with their own token (`model/mine.ts`). In an instructor's Student
-// view (rule 7) the same screens render with the instructor's own identity and never read
-// anyone's repos or marks. An archived semester is history: a link to the org, nothing read.
+// The student shell's screens (decision 0011 rule 2): This week (with the course's About
+// block), Schedule, Assignments, Marks, Materials, Set up, Join and Instructors of one
+// semester, and This week across every semester on Home. The semester's shared facts come
+// through `StudentData` (the public site today, `student-status.json` after WP-D4); the
+// student's own repos, team, role, receipts and marks come from GitHub with their own token
+// (`model/mine.ts`). In an instructor's Student view (rule 7) the same screens render with the
+// instructor's own identity and never read anyone's repos or marks. An auditor sees the
+// materials and the schedule, and nothing that promises a repo, a team or marks. An archived
+// semester is history: the student's own repos and marks, read-only, and nothing is run.
 
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
 import { semesterName, type Semester } from '../model/discovery';
 import { dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
-import { gradebookUrl, isMarked, readMine, readReceipts, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts } from '../model/mine';
-import { DEFAULT_TZ, MY_STATE_WORD, SiteSource, instant, myState, sortedRows, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
+import { gradebookUrl, isMarked, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
+import { lastVisit } from '../model/prefs';
+import { DEFAULT_TZ, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
 import { weekItems, type WeekItem } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import { CheckLine, Crumbs, Loading, Md, ghUrl } from '../ui/bits';
 import { useLoad } from '../ui/load';
 import { Ext } from '../ui/icons';
+import { GhMd, LazyFold } from '../ui/rendered';
 import { JoinScreen } from './StudentJoin';
-import { MaterialsView } from './StudentMaterials';
+import { MaterialsView, ReadingsView, materialHref } from './StudentMaterials';
+import { SetupView } from './StudentSetup';
 
 export interface StudentProps {
   semester: Semester;
@@ -65,7 +70,7 @@ export function StudentScreen({ semester, screen, studentView, entry, now = Date
       <Crumbs items={[{ t: 'Your semesters', href: '#home' }, { t: semesterName(semester), href: studentHref(semester.org) }, { t: label }]} />
       {studentView ? <StudentViewBanner semester={semester} /> : null}
       <div class="page-head"><div><h1>{label}</h1><p class="lede">{semesterName(semester)}{semester.archived ? '; archived' : ''}</p></div></div>
-      {semester.archived ? <ArchivedSemester semester={semester} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}
+      {semester.archived ? <ArchivedSemester semester={semester} studentView={studentView} /> : <SemesterBody semester={semester} screen={screen} studentView={studentView} entry={entry} now={now} />}
     </>
   );
 }
@@ -76,26 +81,47 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   const facts = useLoad(env ? () => studentData(env.client).facts(org) : null, [org]);
   const f = facts.kind === 'ready' ? facts.value : null;
   const mine = useLoad(env && f && !studentView ? () => readMine(env.client, org, env.user.login, f.assignments) : null, [org, f]);
+  const m: Mine | null = mine.kind === 'ready' ? mine.value : null;
+  // The receipts threads feed Assignments and This week's "your instructors updated files" line.
+  const threads = screen === 'week' || screen === 'assignments';
+  const receipts = useLoad<Record<string, Receipts | null>>(env && f && m && threads && !m.auditor ? () => readAllReceipts(env.client, org, f.assignments, m) : null, [org, f, m, threads]);
   if (facts.kind === 'loading') return <Loading what="Reading the semester" />;
   if (facts.kind === 'failed') return <CheckLine cls="bad">The semester’s schedule could not be read: {facts.error}</CheckLine>;
   if (!f) return <NoFacts org={org} />;
-  const m: Mine | null = mine.kind === 'ready' ? mine.value : null;
   const mineNote = studentView ? null : mine.kind === 'loading' ? <Loading what="Reading your repos and marks" /> : mine.kind === 'failed' ? <CheckLine cls="warn">Your repos and marks could not be read: {mine.error}</CheckLine> : null;
   const tz = f.timezone || DEFAULT_TZ;
   const login = env?.user.login ?? '';
+  const rc = receipts.kind === 'ready' ? receipts.value : undefined;
+  const hasThreads = !!m && f.assignments.some((a) => a.privateRepo && m.units[a.slug]?.repo);
   const body =
     screen === 'schedule' ? <ScheduleView facts={f} mine={m} now={now} org={org} />
-    : screen === 'assignments' ? <AssignmentsLoader org={org} facts={f} mine={m} now={now} studentView={studentView} />
-    : screen === 'marks' ? <MarksView org={org} login={login} facts={f} gradebook={m?.gradebook ?? null} studentView={studentView} loaded={mine.kind !== 'loading'} />
-    : screen === 'materials' ? <MaterialsView org={org} repos={f.materialsRepos} entry={entry} />
+    : screen === 'assignments' ? <AssignmentsView org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} />
+    : screen === 'marks' ? <MarksView org={org} login={login} facts={f} gradebook={m?.gradebook ?? null} studentView={studentView} loaded={mine.kind !== 'loading'} auditor={m?.auditor} />
+    : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
+    : screen === 'setup' ? <SetupView org={org} facts={f} mine={m} studentView={studentView} />
     : screen === 'join' ? <JoinScreen org={org} facts={f} mine={m} studentView={studentView} />
-    : screen === 'instructors' ? <InstructorsView facts={f} />
-    : <WeekList items={weekItems(f, m, now)} tz={tz} org={org} />;
+    : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
+    : (
+      <>
+        <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org, now))} tz={tz} org={org} />
+        <AboutView facts={f} org={org} tz={tz} now={now} />
+      </>
+    );
   return (
     <div class="stack">
       {f.archive ? <ArchiveNotice when={f.archive} tz={tz} now={now} /> : null}
+      {m?.auditor ? <AuditorNote /> : null}
       {screen !== 'instructors' && screen !== 'materials' ? mineNote : null}
       {body}
+    </div>
+  );
+}
+
+/** What an auditor gets, said once on every screen. */
+export function AuditorNote() {
+  return (
+    <div class="note" role="note">
+      <b>You audit this semester.</b> As an auditor you read the materials and follow the schedule; you hand in no work, join no team and get no marks.
     </div>
   );
 }
@@ -108,15 +134,55 @@ function NoFacts({ org }: { org: string }) {
   );
 }
 
-/** History: an archived semester is listed with a link to its org, and nothing of it is read. */
-export function ArchivedSemester({ semester }: { semester: Semester }) {
-  return (
+/**
+ * History: an archived semester shows the student's own repos and marks, read-only, from the
+ * same reads as a live one (its repos stay readable); nothing is run against it. The Student
+ * view reads no one's.
+ */
+export function ArchivedSemester({ semester, studentView = false }: { semester: Semester; studentView?: boolean }) {
+  const env = useEnv();
+  const org = semester.org;
+  const load = useLoad(
+    env && !studentView
+      ? async () => {
+          const f = await studentData(env.client).facts(org).catch(() => null);
+          return { f, m: await readMine(env.client, org, env.user.login, f?.assignments ?? []) };
+        }
+      : null,
+    [org],
+  );
+  const head = (
     <section class="panel section">
       <p>{semesterName(semester)} is archived: every repository in it is read-only, and you keep read access to what was yours.</p>
-      <p><a class="btn outline" href={ghUrl(semester.org)} target="_blank" rel="noopener">Open the semester on GitHub <Ext /></a></p>
+      <p><a class="btn outline" href={ghUrl(org)} target="_blank" rel="noopener">Open the semester on GitHub <Ext /></a></p>
     </section>
   );
+  if (!env || studentView) return head;
+  if (load.kind === 'loading') return <div class="stack">{head}<Loading what="Reading your repos and marks" /></div>;
+  if (load.kind === 'failed') return <div class="stack">{head}<CheckLine cls="warn">Your repos and marks could not be read: {load.error}</CheckLine></div>;
+  const { f, m } = load.value;
+  const facts: SemesterFacts = f ?? EMPTY_FACTS;
+  const repos = facts.assignments.flatMap((a) => (m.units[a.slug]?.repo ? [[a, m.units[a.slug].repo!] as const] : []));
+  return (
+    <div class="stack">
+      {head}
+      <section class="panel section" aria-labelledby="h-history-repos">
+        <h2 id="h-history-repos">Your repos</h2>
+        {repos.length ? (
+          <ul class="plain-list">{repos.map(([a, r]) => <li><a href={repoUrl(org, r)} target="_blank" rel="noopener">{r} <Ext /></a> <span class="footnote">{a.title}{m.units[a.slug].team ? `, team ${m.units[a.slug].team}` : ''}; read-only</span></li>)}</ul>
+        ) : <p class="footnote">No assignment repo of yours was found in this semester.</p>}
+      </section>
+      <section class="section" aria-labelledby="h-history-marks">
+        <h2 id="h-history-marks">Your marks</h2>
+        <MarksView org={org} login={env.user.login} facts={facts} gradebook={m.gradebook} studentView={false} auditor={m.auditor} />
+      </section>
+    </div>
+  );
 }
+
+const EMPTY_FACTS: SemesterFacts = {
+  courseName: '', timezone: DEFAULT_TZ, rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null,
+};
 
 export function ArchiveNotice({ when, tz, now }: { when: string; tz: string; now: number }) {
   const past = instant(when, tz) <= now;
@@ -148,7 +214,7 @@ export function WeekList({ items, tz, org, semesterOf }: { items: WeekItem[]; tz
         return (
           <li class={`trow ${i.cls}`}>
             <span class="k">{i.label}</span>
-            <span class="d">{i.when ? fmtDay(i.when, tz) : 'now'}{i.when && fmtTime(i.when, tz) && !/T00:00(:00)?$/.test(i.when) ? <span>{fmtTime(i.when, tz)}</span> : null}</span>
+            <span class="d">{i.when ? fmtDay(i.when, i.tz ?? tz) : 'now'}{i.when && fmtTime(i.when, i.tz ?? tz) && !/T00:00(:00)?$/.test(i.when) ? <span>{fmtTime(i.when, i.tz ?? tz)}</span> : null}</span>
             <span class="ttl"><a href={studentHref(target, i.screen)}>{i.text}</a>{i.note ? <span class="w-note">; {i.note}</span> : null}</span>
             <span class="st">{semesterOf ? <span class="st-chip">{semesterOf(i)}</span> : null}</span>
           </li>
@@ -170,7 +236,9 @@ export function StudentWeekHome({ semesters, now }: { semesters: Semester[]; now
             const f = await studentData(env.client).facts(s.org).catch(() => null);
             if (!f) return [];
             const m = await readMine(env.client, s.org, env.user.login, f.assignments).catch(() => null);
-            return weekItems(f, m, now).map((i) => ({ ...i, org: s.org, semester: semesterName(s) }));
+            const rc = m && !m.auditor ? await readAllReceipts(env.client, s.org, f.assignments, m).catch(() => null) : null;
+            // Each line keeps its own semester's timezone (weekItems sets it).
+            return weekItems(f, m, now, patchLines(f.assignments, m, rc), lastVisit(env.user.login, s.org, now)).map((i) => ({ ...i, org: s.org, semester: semesterName(s) }));
           }));
           return lists.flat().sort((a, b) => a.at - b.at);
         }
@@ -185,6 +253,47 @@ export function StudentWeekHome({ semesters, now }: { semesters: Semester[]; now
         <WeekList items={load.value} tz={DEFAULT_TZ} org={live[0].org} semesterOf={(i) => (i as WeekLine).semester ?? ''} />
       )}
     </section>
+  );
+}
+
+// --------------------------------------------------------------------------- About
+
+/** The course's own words on This week: its name, the syllabus pinned, the instructors' welcome text and their announcements. */
+export function AboutView({ facts, org, tz, now }: { facts: SemesterFacts; org: string; tz: string; now: number }) {
+  const { courseName, syllabus, homeMarkdown, announcements } = facts;
+  if (!courseName && !syllabus && !homeMarkdown && !announcements.length) return null;
+  const year = new Date(now).getFullYear();
+  const syl = syllabus ? fileHref(org, facts.materialsRepos, syllabus) : null;
+  return (
+    <section class="panel section" aria-labelledby="h-about">
+      <h2 id="h-about">{courseName ? `About ${courseName}` : 'About the course'}</h2>
+      {syllabus && syl ? <p><a class="btn outline small" href={syl.href} {...(syl.ext ? { target: '_blank', rel: 'noopener' } : {})}>Syllabus{syl.ext ? <> <Ext /></> : null}</a></p> : null}
+      {homeMarkdown ? <GhMd src={homeMarkdown} context={`${org}/${org}.github.io`} /> : null}
+      {announcements.length ? (
+        <div class="fb">
+          <h3>Announcements</h3>
+          <ul class="plain-list">
+            {announcements.map((n) => <li><span class="footnote">{fmtDay(n.when, tz, year)}</span> {n.title ? <b>{n.title}</b> : null}{n.details ? <Md src={n.details} /> : null}</li>)}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/** Where a released file opens: inside the console when it is in a materials repo, else on GitHub. */
+export function fileHref(org: string, repos: string[], l: FileLink): { href: string; ext: boolean } {
+  return l.repo && l.path && repos.includes(l.repo) ? { href: materialHref(org, l.repo, l.path), ext: false } : { href: l.url, ext: true };
+}
+
+function FileChips({ org, repos, links }: { org: string; repos: string[]; links: FileLink[] }) {
+  return (
+    <>
+      {links.map((l) => {
+        const h = fileHref(org, repos, l);
+        return <a class="st-chip" href={h.href} {...(h.ext ? { target: '_blank', rel: 'noopener' } : {})}>{l.name || 'file'}</a>;
+      })}
+    </>
   );
 }
 
@@ -229,20 +338,24 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
                 out.push(<li class="today-line">Today, {fmtDay(new Date(now).toISOString(), tz, year)}</li>);
               }
               const a = r.assignment ? byAssignment.get(r.assignment) : undefined;
-              const st = a ? myState(a, isMarked(mine?.gradebook ?? null, a.slug), now, tz) : null;
+              const st = a && !mine?.auditor ? myState(a, isMarked(mine?.gradebook ?? null, a.slug), now, tz) : null;
               const yours = a && mine ? mine.units[a.slug] : undefined;
+              const files = r.links.filter((l) => !r.readings.includes(l));
               out.push(
                 <li class={`trow ${ROW_CLASS[r.kind] ?? 'evt'}${yours?.repo ? ' mine' : ''}`}>
                   <span class="k">{ROW_WORD[r.kind] ?? r.kind}</span>
-                  <span class="d">{fmtDay(r.when, tz, year)}{!r.allDay && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}</span>
+                  <span class="d">{fmtDay(r.when, tz, year)}{!r.allDay && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}</span> : null}{r.tbc ? <span class="tbc">TBC</span> : null}</span>
                   <span class="ttl">
                     <b>{r.title}</b>{r.subtitle ? `: ${r.subtitle}` : ''}
                     {r.details ? <Md class="t-details" src={r.details} /> : null}
+                    {r.readings.length || r.readingList ? (
+                      <span class="t-readings">Readings: <FileChips org={org} repos={facts.materialsRepos} links={r.readings} />{r.readingList ? <a class="st-chip" href={studentHref(org, 'materials')}>reading list</a> : null}</span>
+                    ) : r.readingsPending ? <span class="t-readings footnote">Readings to come.</span> : null}
                   </span>
                   <span class="st">
                     {st ? <a class="st-chip" href={studentHref(org, 'assignments')}>{MY_STATE_WORD[st]}</a> : null}
                     {yours?.repo ? <span class="st-chip">yours</span> : null}
-                    {r.links.length ? <a class="st-chip" href={studentHref(org, 'materials')}>{r.links.length} file{r.links.length > 1 ? 's' : ''}</a> : !r.released ? <span class="st-chip">not released yet</span> : null}
+                    {files.length ? <FileChips org={org} repos={facts.materialsRepos} links={files} /> : !r.released ? <span class="st-chip">not released yet</span> : null}
                   </span>
                 </li>,
               );
@@ -256,16 +369,6 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
 }
 
 // --------------------------------------------------------------------------- Assignments
-
-function AssignmentsLoader(p: { org: string; facts: SemesterFacts; mine: Mine | null; now: number; studentView: boolean }) {
-  const env = useEnv();
-  const repos = p.mine ? p.facts.assignments.filter((a) => a.privateRepo).map((a) => p.mine!.units[a.slug]?.repo).filter((r): r is string => !!r) : [];
-  const receipts = useLoad<Record<string, Receipts | null>>(
-    env && repos.length ? async () => Object.fromEntries(await Promise.all(repos.map(async (r) => [r, await readReceipts(env.client, p.org, r).catch(() => null)] as const))) : null,
-    [p.org, repos.join(',')],
-  );
-  return <AssignmentsView {...p} receipts={receipts.kind === 'ready' ? receipts.value : undefined} />;
-}
 
 const SUBMIT_WORD: Record<string, string> = {
   assignment_repo: 'Push to your repo', shared_dropbox_repo: 'Push to your folder in the shared repo', external: 'Handed in outside GitHub',
@@ -283,29 +386,67 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts }
   return (
     <div class="stack">
       {list.map((a) => {
+        const auditor = mine?.auditor === true;
         const st = myState(a, isMarked(mine?.gradebook ?? null, a.slug), now, tz);
         const u = mine?.units[a.slug];
         const rc = u?.repo ? receipts?.[u.repo] : undefined;
+        const tbc = a.tbc ? ' (TBC)' : '';
+        const patch = patchNotes(rc).at(-1);
+        const past = st === 'marking' || st === 'returned';
         return (
           <section class="panel section a-card" aria-label={a.title}>
             <div class="a-head">
               <h2>{a.title}{a.subtitle ? <span>{a.subtitle}</span> : null}</h2>
-              <span class={`chip ${st === 'returned' ? 'ok' : st === 'late_window' ? 'amber' : st === 'open' ? 'asg' : ''}`}>{MY_STATE_WORD[st]}</span>
+              {auditor ? null : <span class={`chip ${st === 'returned' ? 'ok' : st === 'late_window' ? 'amber' : st === 'open' ? 'asg' : ''}`}>{MY_STATE_WORD[st]}</span>}
             </div>
+            {patch && !auditor ? <div class="note" role="note"><b>Pull before you continue.</b> <span class="footnote">{fmtWhen(patch.when, tz, year)}</span><Md src={patch.text} /></div> : null}
             <dl class="kv">
-              {a.handout ? <><dt>Handed out</dt><dd>{fmtWhen(a.handout, tz, year)}</dd></> : null}
-              {a.due ? <><dt>Due</dt><dd>{fmtWhen(a.due, tz, year)}</dd></> : null}
-              {a.lateCutoff && a.lateCutoff !== a.due ? <><dt>Late cutoff</dt><dd>{fmtWhen(a.lateCutoff, tz, year)}</dd></> : null}
+              {a.handout ? <><dt>Handed out</dt><dd>{fmtWhen(a.handout, tz, year)}{tbc}</dd></> : null}
+              {a.due ? <><dt>Due</dt><dd>{fmtWhen(a.due, tz, year)}{tbc}</dd></> : null}
+              {a.lateCutoff && a.lateCutoff !== a.due ? <><dt>Late cutoff</dt><dd>{fmtWhen(a.lateCutoff, tz, year)}{tbc}</dd></> : null}
               {a.lateRule ? <><dt>Late work</dt><dd>{a.lateRule}</dd></> : null}
+              {a.maxPoints ? <><dt>Out of</dt><dd>{a.maxPoints} points</dd></> : null}
               {a.solutionShown ? <><dt>Solution shown</dt><dd>{fmtWhen(a.solutionShown, tz, year)}</dd></> : null}
-              {a.submitVia ? <><dt>How to hand in</dt><dd>{SUBMIT_WORD[a.submitVia]}{a.submitVia === 'external' && a.submitUrl ? <>: <a href={a.submitUrl} target="_blank" rel="noopener">{hostOf(a.submitUrl)} <Ext /></a></> : null}</dd></> : null}
-              {studentView ? <><dt>Yours</dt><dd class="footnote">A student’s repo, team and receipts show here.</dd></> : <MyUnitRows org={org} a={a} mine={mine} receipts={rc} loading={u?.repo ? receipts === undefined : false} tz={tz} year={year} />}
+              {a.submitVia && !auditor ? <><dt>How to hand in</dt><dd>{SUBMIT_WORD[a.submitVia]}{a.submitVia === 'external' && a.submitUrl ? <>: <a href={a.submitUrl} target="_blank" rel="noopener">{hostOf(a.submitUrl)} <Ext /></a></> : null}</dd></> : null}
+              {studentView ? <><dt>Yours</dt><dd class="footnote">A student’s repo, team and receipts show here.</dd></>
+                : auditor ? <><dt>Yours</dt><dd class="footnote">As an auditor you hand in no work for this assignment.</dd></>
+                : <MyUnitRows org={org} a={a} mine={mine} receipts={rc} loading={u?.repo ? receipts === undefined : false} tz={tz} year={year} />}
             </dl>
-            {a.cutoffSentence && a.submitVia !== 'external' ? <p class="footnote">{a.cutoffSentence}</p> : null}
+            {a.shapeNote && !auditor ? <p class="footnote shape-note">{a.shapeNote}</p> : null}
+            {a.shape === STUDENT_CHOICE && past && u?.repo && !auditor ? (
+              <p class="footnote">The late cutoff has passed: you may make {u.repo} public, if you want it in your portfolio, under <a href={`${repoUrl(org, u.repo)}/settings`} target="_blank" rel="noopener">Settings, Danger zone <Ext /></a>.</p>
+            ) : null}
+            {a.cutoffSentence && a.submitVia !== 'external' && !auditor ? <p class="footnote">{a.cutoffSentence}</p> : null}
+            {a.brief ? <LazyFold summary="The brief">{() => <GhMd src={a.brief} context={u?.repo ? `${org}/${u.repo}` : undefined} />}</LazyFold> : null}
+            {rc && rc.thread.length ? <ThreadView receipts={rc} tz={tz} year={year} /> : null}
           </section>
         );
       })}
+      {facts.latePolicy.length ? (
+        <section class="section" aria-labelledby="h-late">
+          <h2 id="h-late">Late work in this course</h2>
+          <ul class="plain-list">{facts.latePolicy.map((l) => <li>{l}</li>)}</ul>
+        </section>
+      ) : null}
     </div>
+  );
+}
+
+const THREAD_WORD: Record<ThreadKind, string> = { receipt: 'Receipt', patch: 'Files updated', marks: 'Marks', comment: 'Comment' };
+
+/** All of the Submission receipts issue: its own text, then every comment. */
+export function ThreadView({ receipts, tz, year }: { receipts: Receipts; tz: string; year: number }) {
+  return (
+    <details class="fold">
+      <summary>Every comment on Submission receipts <span class="cnt">{receipts.thread.length}</span></summary>
+      <div class="fold-body">
+        {receipts.body ? <div class="receipt"><Md src={receipts.body} /></div> : null}
+        {receipts.thread.map((c) => (
+          <div class={`receipt r-${c.kind}`}><span class="footnote"><b>{THREAD_WORD[c.kind]}</b>, {fmtWhen(c.when, tz, year)}</span><Md src={c.text} /></div>
+        ))}
+        <p><a href={receipts.url} target="_blank" rel="noopener">Open Submission receipts on GitHub <Ext /></a></p>
+      </div>
+    </details>
   );
 }
 
@@ -325,6 +466,9 @@ function MyUnitRows({ org, a, mine, receipts, loading, tz, year }: { org: string
   else if (a.handedOut && !(a.group && a.teamFormation)) out.push(<><dt>Your repo</dt><dd class="footnote">Not there yet: your instructors hand it out.</dd></>);
   if (a.group) {
     out.push(<><dt>Your team</dt><dd>{u?.team ? <>{u.team}{u.members?.length ? <span class="footnote">: {u.members.join(', ')}</span> : null}</> : a.teamFormation ? <a href={studentHref(org, 'join')}>You have no team yet: join or create one</a> : <span class="footnote">No team yet.</span>}</dd></>);
+  }
+  if (a.group && u?.repo && !u.shared) {
+    out.push(<><dt>Contributions</dt><dd>Fill in <a href={`${repoUrl(org, u.repo)}/blob/HEAD/CONTRIBUTIONS.md`} target="_blank" rel="noopener">CONTRIBUTIONS.md <Ext /></a> in your team repo before the deadline.</dd></>);
   }
   if (u?.repo && a.privateRepo) {
     out.push(
@@ -348,9 +492,10 @@ function questionsOf(e: MarkEntry): string[] {
   return [...keys];
 }
 
-export function MarksView({ org, login, facts, gradebook, studentView, loaded = true }: { org: string; login: string; facts: SemesterFacts; gradebook: Gradebook | null; studentView: boolean; loaded?: boolean }) {
+export function MarksView({ org, login, facts, gradebook, studentView, loaded = true, auditor = false }: { org: string; login: string; facts: SemesterFacts; gradebook: Gradebook | null; studentView: boolean; loaded?: boolean; auditor?: boolean }) {
   if (studentView) return <p class="footnote">A student’s marks show here, from their private gradebook; your own account has none in this semester.</p>;
   if (!loaded) return null;
+  if (auditor && !gradebook) return <p class="footnote">As an auditor you get no marks in this semester.</p>;
   if (!gradebook) return <p class="footnote">No marks yet. They appear here when your instructors return them.</p>;
   const titles = new Map(facts.assignments.map((a) => [a.slug, a.subtitle ? `${a.title}: ${a.subtitle}` : a.title]));
   const slugs = Object.keys(gradebook.entries);
@@ -402,14 +547,46 @@ const initials = (name: string) => {
   return (n.length > 1 ? n[0][0] + n[n.length - 1][0] : (n[0] ?? name).slice(0, 2)).toUpperCase();
 };
 
-export function InstructorsView({ facts }: { facts: SemesterFacts }) {
+/** Hosts the console's image policy (`img-src`) loads from directly. */
+const IMG_HOSTS = /^https:\/\/(avatars\.githubusercontent\.com|github\.com)\//;
+
+/** A picture hosted on the semester's own site, as `[repo, path]` in its site repo; null for anything else. */
+export function sitePicture(url: string, org: string): [string, string] | null {
+  const site = `${org.toLowerCase()}.github.io`;
+  const m = /^https:\/\/([^/]+)\/(.+)$/.exec(url);
+  return m && m[1].toLowerCase() === site ? [site, decodeURIComponent(m[2])] : null;
+}
+
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
+
+function bytesToBase64(b: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** A card's picture: a GitHub avatar straight, one on the semester's site read through the API as a data: URL (the policy allows data:), else initials. */
+function CardPicture({ card, org }: { card: InstructorCard; org: string }) {
+  const env = useEnv();
+  const at = card.picture && !IMG_HOSTS.test(card.picture) ? sitePicture(card.picture, org) : null;
+  const ext = at?.[1].split('.').pop()?.toLowerCase() ?? '';
+  const load = useLoad(env && at && MIME[ext] ? async () => {
+    const b = await env.client.getSmallBytes(org, at[0], at[1]);
+    return b ? `data:${MIME[ext]};base64,${bytesToBase64(b)}` : '';
+  } : null, [card.picture]);
+  const src = IMG_HOSTS.test(card.picture) ? card.picture : load.kind === 'ready' ? load.value : '';
+  return <span class="p-avatar" aria-hidden="true">{src ? <img src={src} alt="" /> : initials(card.name)}</span>;
+}
+
+export function InstructorsView({ facts, org = '' }: { facts: SemesterFacts; org?: string }) {
   if (!facts.instructors.length) return <p class="footnote">No instructors are listed yet.</p>;
   const card = (c: InstructorCard) => (
     <li class="person">
-      <span class="p-avatar" aria-hidden="true">{c.picture ? <img src={c.picture} alt="" /> : initials(c.name)}</span>
+      <CardPicture card={c} org={org} />
       <div>
         <b>{c.webpage ? <a href={c.webpage} target="_blank" rel="noopener">{c.name}</a> : c.name}</b>
         <div class="footnote">{c.role === 'instructor' ? 'Instructor' : 'Teaching assistant'}{c.title ? `; ${c.title}` : ''}</div>
+        {c.email ? <div class="footnote"><a href={`mailto:${c.email}`}>{c.email}</a></div> : null}
       </div>
     </li>
   );

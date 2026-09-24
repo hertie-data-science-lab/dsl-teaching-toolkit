@@ -797,3 +797,12 @@ a.st-chip:hover { text-decoration: underline; }
 .asked { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .asked .reply { font-size: 13.5px; color: var(--ink-2); padding-left: 26px; }
 fieldset.field { border: 0; margin: 0; padding: 0; }
+.trow .tbc { margin-left: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; opacity: 0.8; }
+.trow .t-readings { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 13px; margin-top: 4px; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.plain-list .plain-list { margin-top: 4px; padding-left: 14px; gap: 2px; }
+.team-list li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.shape-note { margin: 8px 0 0; }
+.receipt.r-patch { border-left-color: var(--amber-ink); }
+.cmd { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 8px; }
+.reading-list { font-size: 13.5px; margin-top: 4px; }

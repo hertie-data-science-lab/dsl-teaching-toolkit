@@ -124,6 +124,18 @@ export interface Estate {
    */
   roles: Map<string, Role>;
   kind: TokenKind;
+  /** Semester orgs that invited the person, who has not accepted yet (classic and App sign-in only: a fine-grained token cannot list memberships). */
+  invited?: Semester[];
+}
+
+/** Where a person accepts an org's invitation on GitHub. */
+export const invitationUrl = (org: string) => `https://github.com/orgs/${org}/invitation`;
+
+/** The orgs whose invitation the person has not accepted yet; [] when the token cannot list memberships. */
+export async function pendingOrgs(client: GitHubClient, kind: TokenKind): Promise<string[]> {
+  if (kind === 'fine-grained') return [];
+  const list = await client.listPendingMemberships().catch(() => []);
+  return list.filter((m) => m.state === 'pending').map((m) => m.organization.login);
 }
 
 /** "Machine Learning, Fall 2026". */
@@ -206,17 +218,22 @@ async function classify(client: GitHubClient, org: string): Promise<Found> {
 
 /** Every course and semester the person can see, and their role in each. */
 export async function discoverEstate(client: GitHubClient, who: { kind: TokenKind; login: string }): Promise<Estate> {
-  const orgs = await memberOrgs(client, who.kind, who.login);
-  const found = await Promise.all(orgs.map((o) => classify(client, o).catch(() => null)));
+  const [orgs, pending] = await Promise.all([memberOrgs(client, who.kind, who.login), pendingOrgs(client, who.kind)]);
+  const [found, asked] = await Promise.all([
+    Promise.all(orgs.map((o) => classify(client, o).catch(() => null))),
+    // A semester's `.github` is public, so an invited person can already read what it is.
+    Promise.all(pending.slice(0, PROBE_LIMIT).map((o) => classify(client, o).catch(() => null))),
+  ]);
   const courses = found
     .flatMap((f) => (f && 'course' in f ? [f.course] : []))
     .sort((a, b) => Number(b.write) - Number(a.write) || a.name.localeCompare(b.name));
   const byOrg = new Map(courses.map((c) => [c.org.toLowerCase(), c]));
   const bare = found.flatMap((f) => (f && 'semester' in f ? [f.semester] : []));
+  const invitedBare = asked.flatMap((f) => (f && 'semester' in f && !f.semester.archived ? [f.semester] : []));
   // A semester whose course is not among the person's orgs: its name is on the course's public `.github`.
   const names = new Map<string, string>();
   await Promise.all(
-    [...new Set(bare.map((s) => s.courseOrg).filter((c) => c && !byOrg.has(c.toLowerCase())))].map(async (c) => {
+    [...new Set([...bare, ...invitedBare].map((s) => s.courseOrg).filter((c) => c && !byOrg.has(c.toLowerCase())))].map(async (c) => {
       const meta = await readMeta(client, c).catch(() => null);
       names.set(c, str(meta?.course_name) || str(meta?.org_name));
     }),
@@ -230,7 +247,8 @@ export async function discoverEstate(client: GitHubClient, who: { kind: TokenKin
     return { ...s, role, courseName: byOrg.get(s.courseOrg.toLowerCase())?.name ?? names.get(s.courseOrg) ?? '' };
   });
   semesters.sort((a, b) => Number(a.archived) - Number(b.archived) || b.term.slice(1).localeCompare(a.term.slice(1)) || a.org.localeCompare(b.org));
-  return { courses, semesters, roles, kind: who.kind };
+  const invited: Semester[] = invitedBare.map((s) => ({ ...s, role: 'student', courseName: byOrg.get(s.courseOrg.toLowerCase())?.name ?? names.get(s.courseOrg) ?? '' }));
+  return { courses, semesters, roles, kind: who.kind, invited };
 }
 
 /** The semesters the person is a student of. */
