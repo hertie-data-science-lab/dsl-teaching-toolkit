@@ -89,7 +89,7 @@ from .discovery import (
     listing_row,
     org_meta,
 )
-from .faults import NOT_MIGRATED, ConfigFault, not_migrated_text
+from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, not_migrated_text
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -1321,6 +1321,9 @@ class GradingSpec(_Shape):
     # the autograde detail. Off unless the assignment asks for it: it clones the whole
     # semester a second time at the cutoff, and most assignments are read in the browser.
     grader_pdf: bool = False
+    # The file still names its starters as `format:` (decision 0012): refused whole, and
+    # nothing hands out or grades from it until it is migrated.
+    not_migrated: bool = False
     dropped: tuple[str, ...] = ()
 
     @property
@@ -1532,6 +1535,11 @@ def parse_grading_spec(text: str) -> GradingSpec:
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
+    # A file that still names its starters under the old key alone has not migrated, and
+    # is refused WHOLE: read without them, it would grade as an assignment with no
+    # starter at all - the completion check off, the runnable format gone - and say nothing.
+    if "format" in data and "formats" not in data:
+        raise NotMigrated("format", "formats", GRADING_FILE)
     dropped: list[str] = []
     data = _refuse_renamed(data, GRADING_FILE, dropped)
     values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
@@ -1591,6 +1599,11 @@ def declared_grading_spec(course_org: str, template: str) -> GradingSpec | None:
         return None
     try:
         return parse_grading_spec(text)
+    except NotMigrated as exc:
+        # Refused, and SAYS so: the lock reads it as no definition (its Join-team form
+        # refuses), and the handout and the grader refuse to act on it.
+        log_err(f"  ! {template}/{GRADING_FILE}: {exc} - refused")
+        return GradingSpec(not_migrated=True)
     except yaml.YAMLError as exc:
         log_err(
             f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
@@ -1688,6 +1701,21 @@ def grading_spec_faults(
     (see below), and the only thing read from outside this file."""
     try:
         spec = parse_grading_spec(text)
+    except NotMigrated as exc:
+        return [
+            _spec_fault(
+                slug,
+                template,
+                course_org,
+                fires,
+                f"{exc} - the whole file is refused, so the assignment is not handed "
+                f"out or graded until it is",
+                field="format",
+                lineno=key_lines(text).get(("format",)),
+                fix="run the migration, which rewrites it to the new name",
+                code=NOT_MIGRATED,
+            )
+        ], None
     except yaml.YAMLError as exc:
         return [
             _spec_fault(
@@ -2144,7 +2172,7 @@ def team_lock_entries(
     entries: dict[str, tuple[str, int, str, str, str]] = {}
     for key, entry in sched.assignments.items():
         spec = declared_grading_spec(course_org, entry.course_source_repo)
-        if spec is None:
+        if spec is None or spec.not_migrated:
             # Named by SLUG, never by anyone in it: this runs in a public workflow.
             log_err(
                 f"  ! {key}: {entry.course_source_repo} has no {GRADING_FILE} yet - "
@@ -2186,6 +2214,7 @@ def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
         for key, entry in sched.assignments.items()
         if (spec := declared_grading_spec(course_org, entry.course_source_repo))
         is not None
+        and not spec.not_migrated
         and spec.team_formation_resolved == SELF_SELECT
     ]
 

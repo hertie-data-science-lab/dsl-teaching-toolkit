@@ -1624,6 +1624,12 @@ def provision_all(
     # answer to be spelt, which is how a handout came to provision a shape the sheet did
     # not expect.
     gspec = load_grading_spec(course_org, template)
+    if gspec.not_migrated:
+        log_err(
+            f"{template}/grading_config.yml is NOT_MIGRATED (`format:` is now "
+            f"`formats:`) - run the migration; nothing is handed out"
+        )
+        return 1, False
     # The assignment's own grading_config.yml is the only declaration there is.
     group = gspec.is_group
     if group:

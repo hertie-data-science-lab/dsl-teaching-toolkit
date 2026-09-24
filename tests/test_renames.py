@@ -469,10 +469,25 @@ def test_formats_is_a_list_and_its_first_entry_is_the_runnable_one():
     assert (spec.formats, spec.format, spec.dropped) == (("py", "ipynb"), "py", ())
 
 
-def test_the_old_format_key_is_refused_and_not_read():
-    spec = grades.parse_grading_spec("format: ipynb\n")
-    assert spec.formats == ()
+def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
+    from datetime import UTC, datetime
+
+    with pytest.raises(NotMigrated):
+        grades.parse_grading_spec("type: group\nformat: ipynb\n")
+    # Beside `formats:` the old key is only a dropped line; the file is still read.
+    spec = grades.parse_grading_spec("formats: [py]\nformat: ipynb\n")
+    assert spec.formats == ("py",)
     assert [(d.field, d.code) for d in spec.dropped] == [("format", NOT_MIGRATED)]
+    # Loaded, it is flagged rather than read as the defaults, and the handout refuses it.
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "format: ipynb\n")
+    assert grades.load_grading_spec("C", "a1").not_migrated
+    assert grades.declared_grading_spec("C", "a1").not_migrated
+    assert assign.provision_all("C", "a1", "S") == (1, False)
+    assert NOT_MIGRATED in capsys.readouterr().err
+    faults, parsed = grades.grading_spec_faults(
+        "a1", "a1", "C", "format: ipynb\n", datetime.now(UTC)
+    )
+    assert parsed is None and [f.code for f in faults] == [NOT_MIGRATED]
 
 
 def test_a_course_default_under_the_old_format_key_is_not_read():

@@ -3240,6 +3240,12 @@ def collect(
     # assignment. Both are ordinary states, not failures, and both still have a deadline.
     # It is also what the cutoff itself is measured with (`late_window_days`).
     gspec = load_grading_spec(course_org, template)
+    if gspec.not_migrated:
+        log_err(
+            f"{template}/grading_config.yml is NOT_MIGRATED (`format:` is now "
+            f"`formats:`) - run the migration; nothing is graded"
+        )
+        return 1
     # SSOT: default the grading pin to the assignment's CUTOFF - an explicit
     # `grading_datetime`, else the due date plus the template's late window. An explicit
     # `deadline` (CLI override) wins; fall back to today - in the semester's own timezone,
