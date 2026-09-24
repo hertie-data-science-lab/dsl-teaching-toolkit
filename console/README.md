@@ -101,7 +101,12 @@ Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/membe
 materials and the schedule and a note saying what auditing means; nothing offers them a repo,
 a team or marks. On Home, a semester that has **invited** the person (`GET
 /user/memberships/orgs?state=pending`, classic and App sign-in) shows as Invited with GitHub's
-accept link; a fine-grained token cannot list invitations.
+accept link; a fine-grained token cannot list invitations. If the role cannot be read, the screens say so and
+promise no repo, team or marks; an auditor's nav omits Marks and Join.
+
+The visit time behind "new since your last visit" is stored only after that semester's
+receipts were read. Signing out forgets every visit time and remembered folder of that
+login in this browser, the rendered markdown, the team list and the semester facts.
 
 The shared facts come through one interface, `StudentData` (`src/model/student.ts`). Today
 it is `SiteSource`: the public site repo's generated files, read through the API
@@ -142,16 +147,19 @@ the student's issues every 15 s for up to 5 minutes while one still waits. `?joi
 member of yet.
 
 **Rate limit** (5,000 requests an hour per person; every read is ETag-cached, and an
-unchanged 304 costs nothing): opening a semester reads its site once, about 7 + one per
-generated file (about 44 on the demo; 1 once `student-status.json` exists), then the repo
-list, the gradebook and its last commit, the auditors membership, `/user/teams` when the
-semester has a group assignment, and one call per team. This week and Assignments add two
-calls per private repo (receipts issue, comments). A brief or the home text is rendered once
-per page load (one `/markdown` call, on opening the fold). Set up adds one call per materials
-repo. A file costs one call, a markdown file or notebook
-two, an HTML page one per bundle file it uses (at most 80); file bytes are kept by blob sha
-(up to 64 MB), so reopening costs nothing. Home's This week repeats the
-semester read for each semester shown.
+unchanged 304 costs nothing). Opening a semester reads its site once: 9 fixed reads (four
+collection listings, `people.yml`, `late_policy.yml`, `materials.yml`, `_config.yml`,
+`index.md`) plus one per generated file, 44 on the demo (1 once `student-status.json` exists).
+Then the repo list, the gradebook and its last commit, the auditors membership, and one call
+per team; `/user/teams` is read once per session, not per semester. This week and Assignments
+add two calls per private repo (receipts issue, comments). A brief or the home text is
+rendered once per page load (one `/markdown` call, a brief only when its fold opens); a
+site-hosted card picture is one call. Set up adds one call per materials repo. A file costs
+one call, a markdown file or notebook two, an HTML page one per bundle file it uses (at most
+80); file bytes are kept by blob sha (up to 64 MB), so reopening costs nothing. **Home's This
+week costs all of that again for each semester shown**: its site read, the repo list,
+gradebook, role and teams, and the receipts reads (about 50 calls per semester on the demo on
+a first visit, mostly free 304s after).
 
 ## What it reads
 
