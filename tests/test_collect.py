@@ -26,7 +26,7 @@ import pytest
 import yaml
 from conftest import repo_row
 
-from dsl_course import collect, course, gh_contents, ghcli, grades
+from dsl_course import collect, course, gh_contents, ghcli, grades, settings
 from dsl_course.collect import Target
 from dsl_course.faults import Severity
 from dsl_course.roster import Student
@@ -59,6 +59,9 @@ def _clear_dep_caches() -> None:
 
 
 DEFAULT_SPEC = grades.GradingSpec()
+# What a reader is handed for a template that declares nothing: the defaults, with the
+# run settings resolved (here to the institution's, the conftest's course declaring none).
+LOADED_DEFAULT_SPEC = grades.GradingSpec(max_team_size=5)
 
 
 def test_parse_grading_spec_defaults_and_overrides():
@@ -367,12 +370,12 @@ def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into
     # `assignment_defaults:` in dsl-course.yml is what `New assignment` stamps into the
     # file it generates - at WRITE time, so a reader never merges it - and it goes through
     # the same readers, so a value the writer would emit cannot be one the reader refuses.
-    assert grades.parse_assignment_defaults(
+    assert settings.parse_assignment_defaults(
         {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
     ) == {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
     # A per-assignment key is not a course-wide one: nothing about ONE assignment belongs
     # in a block that stands behind all of them.
-    assert grades.parse_assignment_defaults({"title": "no"}) == {}
+    assert settings.parse_assignment_defaults({"title": "no"}) == {}
     assert "title" in capsys.readouterr().err
 
 
@@ -4819,12 +4822,16 @@ def test_load_grading_spec_never_raises_and_falls_back_to_the_defaults(monkeypat
         raise RuntimeError("500")
 
     monkeypatch.setattr(collect.grades, "get_file_content", unreadable)
-    assert collect.load_grading_spec("Course", "assignment-1-f2026") == DEFAULT_SPEC
+    assert (
+        collect.load_grading_spec("Course", "assignment-1-f2026") == LOADED_DEFAULT_SPEC
+    )
     collect.grades._grading_text.cache_clear()
     monkeypatch.setattr(
         collect.grades, "get_file_content", lambda *a, **k: "questions: ["
     )
-    assert collect.load_grading_spec("Course", "assignment-1-f2026") == DEFAULT_SPEC
+    assert (
+        collect.load_grading_spec("Course", "assignment-1-f2026") == LOADED_DEFAULT_SPEC
+    )
 
 
 def test_the_grading_config_is_read_once_per_template_per_process(monkeypatch):
@@ -4857,7 +4864,9 @@ def test_a_template_without_the_file_says_nothing(monkeypatch, capsys):
     # Plenty of assignments have no definition file at all; the defaults cover them, and a
     # complaint about a file nobody wrote would be noise on every tick.
     monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
-    assert collect.load_grading_spec("Course", "assignment-9-f2026") == DEFAULT_SPEC
+    assert (
+        collect.load_grading_spec("Course", "assignment-9-f2026") == LOADED_DEFAULT_SPEC
+    )
     assert capsys.readouterr().err == ""
 
 

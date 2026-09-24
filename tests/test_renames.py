@@ -26,6 +26,7 @@ from dsl_course import (
     list_orgs,
     schedule,
     schemas,
+    settings,
     site,
     status,
     status_json,
@@ -484,7 +485,7 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
     assert spec.formats == ("py",)
     assert [(d.field, d.code) for d in spec.dropped] == [("format", NOT_MIGRATED)]
     # Loaded, it is flagged rather than read as the defaults, and the handout refuses it.
-    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "format: ipynb\n")
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "format: ipynb\n")
     assert grades.load_grading_spec("C", "a1").not_migrated
     assert grades.declared_grading_spec("C", "a1").not_migrated
     assert assign.provision_all("C", "a1", "S") == (1, False)
@@ -496,8 +497,8 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
 
 
 def test_a_course_default_under_the_old_format_key_is_not_read():
-    assert grades.parse_assignment_defaults({"format": "py"}) == {}
-    assert grades.parse_assignment_defaults({"formats": "py"}) == {"formats": "py"}
+    assert settings.parse_assignment_defaults({"format": "py"}) == {}
+    assert settings.parse_assignment_defaults({"formats": "py"}) == {"formats": "py"}
 
 
 # ------------------------------------------------ preview (dry_run, write) and notify

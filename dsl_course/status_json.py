@@ -1344,7 +1344,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     )
     for slug, entry in sched.assignments.items():
         facts.specs[slug] = grades.load_grading_spec(
-            course_org, entry.course_source_repo
+            course_org, entry.course_source_repo, semester_org=semester_org, slug=slug
         )
         name = schedule.semester_name(slug, entry)
         text = sheet_texts[name]

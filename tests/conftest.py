@@ -30,6 +30,7 @@ from dsl_course import (
     repos,
     roster,
     schedule,
+    settings,
     site,
     sync_faculty,
     teams,
@@ -132,6 +133,17 @@ def _no_semester_is_closed_out(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_course_or_semester_defaults(monkeypatch):
+    """Answer the cascade's two live reads (`settings`) with "nothing declared" by default:
+    the course's `dsl-course.yml` and the semester's `assignments.yml`. Every spec read now
+    resolves its run settings through them, and the institution's policy is the
+    uninteresting answer for every test but the ones about a layer, which set their own
+    after this fixture and win."""
+    monkeypatch.setattr(settings, "org_meta", lambda org: {})
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+
+
+@pytest.fixture(autouse=True)
 def _not_on_a_runner(monkeypatch):
     """Every test runs as though it were NOT inside GitHub Actions, unless it says so.
 
@@ -163,7 +175,9 @@ def _clear_process_memos():
     schedule._schedule_text.cache_clear()
     schedule._repo_paths.cache_clear()
     grades._grading_text.cache_clear()
-    grades.course_assignment_defaults.cache_clear()
+    settings.course_defaults.cache_clear()
+    settings._assignments_text.cache_clear()
+    settings.semester_blocks.cache_clear()
     collect._starter_notebook_shas.cache_clear()
     gh_contents.last_committer.cache_clear()
     gh_contents.blame_logins.cache_clear()

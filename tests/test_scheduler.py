@@ -121,7 +121,7 @@ def _grading_spec_defaults(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: GradingSpec(late_window_days=0),
+        lambda org, template, **_: GradingSpec(late_window_days=0),
     )
 
 
@@ -1644,7 +1644,7 @@ def _window(monkeypatch, days: int | None) -> None:
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: GradingSpec(late_window_days=days),
+        lambda org, template, **_: GradingSpec(late_window_days=days),
     )
 
 
@@ -3392,7 +3392,7 @@ def test_neither_deadline_pass_touches_an_assignment_with_nothing_to_collect(
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: GradingSpec(submit_via="external"),
+        lambda org, template, **_: GradingSpec(submit_via="external"),
     )
 
     def boom(*a, **k):
@@ -4354,7 +4354,9 @@ def _reprivatise(
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: GradingSpec(visibility=visibility, late_window_days=0),
+        lambda org, template, **_: GradingSpec(
+            visibility=visibility, late_window_days=0
+        ),
     )
     monkeypatch.setattr(
         scheduler,
@@ -4456,7 +4458,7 @@ def test_a_failed_patch_is_counted(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: GradingSpec(visibility="student_choice"),
+        lambda org, template, **_: GradingSpec(visibility="student_choice"),
     )
     monkeypatch.setattr(scheduler, "set_visibility", lambda *a, **k: False)
     sched = _assignments(
@@ -4486,7 +4488,7 @@ def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: GradingSpec(visibility="student_choice"),
+        lambda org, template, **_: GradingSpec(visibility="student_choice"),
     )
     patched: list = []
     monkeypatch.setattr(
@@ -4545,7 +4547,7 @@ def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
             scheduler,
             "load_grading_spec",
             # No late window: the freeze this test is about happens at the due date.
-            lambda org, template, via=submit_via: GradingSpec(
+            lambda org, template, via=submit_via, **_: GradingSpec(
                 submit_via=via, late_window_days=0
             ),
         )

@@ -22,9 +22,11 @@ from dsl_course import (
     gh_contents,
     ghcli,
     grades,
+    policy,
     releaseignore,
     repos,
     scaffold,
+    settings,
     workflows_place,
     workflows_render,
 )
@@ -647,8 +649,8 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     # handout, the sheet and the Join-team form all read, over the course's own defaults.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(
-        scaffold,
-        "course_assignment_defaults",
+        settings,
+        "course_defaults",
         lambda org: {
             "max_team_size": 3,
             "late_window_days": 7,
@@ -879,18 +881,18 @@ def test_a_course_with_no_defaults_gets_the_toolkit_late_policy(fake, monkeypatc
     # the numbers the assignment will be graded by rather than a pair of comments and a
     # default read from somewhere else. The team cap nobody declared stays a comment.
     written = _solution_files(monkeypatch)
-    monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: {})
+    monkeypatch.setattr(settings, "course_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     text = written["grading_config.yml"]
     spec = grades.parse_grading_spec(text)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (
-        course.DEFAULT_LATE_WINDOW_DAYS,
-        course.DEFAULT_LATE_PENALTY_PER_DAY,
+        policy.defaults()["late_window_days"],
+        policy.defaults()["late_penalty_per_day"],
     )
     assert spec.max_team_size is None
     assert "# max_team_size:" in text
-    assert f"late_window_days: {course.DEFAULT_LATE_WINDOW_DAYS}" in text
-    assert f"late_penalty_per_day: {course.DEFAULT_LATE_PENALTY_PER_DAY}" in text
+    assert f"late_window_days: {policy.defaults()['late_window_days']}" in text
+    assert f"late_penalty_per_day: {policy.defaults()['late_penalty_per_day']}" in text
 
 
 @pytest.mark.parametrize(

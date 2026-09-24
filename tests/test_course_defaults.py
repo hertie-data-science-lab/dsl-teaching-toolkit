@@ -8,7 +8,7 @@ from datetime import date
 
 import yaml
 
-from dsl_course import bootstrap_course, course, grades, scaffold, schedule
+from dsl_course import bootstrap_course, course, scaffold, schedule, settings
 from dsl_course.central import pin_central_ref
 from dsl_course.welcome import template
 
@@ -25,27 +25,27 @@ def test_the_four_new_assignment_boxes_can_be_set_course_wide():
         "team_formation": "assigned",
         "visibility": "public",
     }
-    assert grades.parse_assignment_defaults(block) == block
+    assert settings.parse_assignment_defaults(block) == block
 
 
 def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
-    got = grades.parse_assignment_defaults({"visibility": "everyone"})
+    got = settings.parse_assignment_defaults({"visibility": "everyone"})
     assert got == {"visibility": "private"}
     assert "visibility" in capsys.readouterr().err
 
 
 def test_a_course_default_format_is_a_list_of_starters_as_the_box_takes(capsys):
-    got = grades.parse_assignment_defaults({"formats": "ipynb, py"})
+    got = settings.parse_assignment_defaults({"formats": "ipynb, py"})
     assert got == {"formats": "ipynb,py"}
     # An unusable answer is dropped, so the toolkit's ipynb applies - never `none`.
     for bad in ("ipnb", "none,py", ""):
-        assert grades.parse_assignment_defaults({"formats": bad}) == {}
+        assert settings.parse_assignment_defaults({"formats": bad}) == {}
         assert "format" in capsys.readouterr().err
     assert scaffold.resolve_answers({"formats": SENTINEL}, {}) == {"formats": "ipynb"}
 
 
 def test_the_legacy_submit_via_word_reads_as_its_new_name():
-    assert grades.parse_assignment_defaults({"submit_via": "github"}) == {
+    assert settings.parse_assignment_defaults({"submit_via": "github"}) == {
         "submit_via": "assignment_repo"
     }
 
@@ -88,7 +88,7 @@ def _run_new_assignment(monkeypatch, argv: list[str], defaults: dict) -> dict:
         seen.update(formats=formats, kind=kind, **kw)
         return 0
 
-    monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: defaults)
+    monkeypatch.setattr(settings, "course_defaults", lambda org: defaults)
     monkeypatch.setattr(scaffold, "scaffold_assignment", fake_scaffold)
     monkeypatch.setattr(
         "sys.argv",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import course, grades, roster, schedule, schemas, teams
+from dsl_course import course, grades, roster, schedule, schemas, settings, teams
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import validate
 
@@ -62,7 +62,7 @@ def test_file_schema_enums_are_the_engine_constants():
     defaults = schemas.dsl_course_schema()["properties"]["assignment_defaults"][
         "properties"
     ]
-    assert set(grades.COURSE_DEFAULT_KEYS) <= set(defaults)
+    assert set(settings.COURSE_DEFAULT_KEYS) <= set(defaults)
 
 
 def test_op_arg_enums_are_the_engine_constants():

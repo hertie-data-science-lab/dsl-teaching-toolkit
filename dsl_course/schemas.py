@@ -32,7 +32,6 @@ from .course import (
     VISIBILITIES,
 )
 from .discovery import SEMESTERS_PATH
-from .grades import COURSE_DEFAULT_KEYS, SPEC_KEYS
 from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
@@ -56,6 +55,7 @@ from .schedule import (
     KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
 )
+from .settings import ASSIGNMENT_DEFAULTS_KEY, COURSE_DEFAULT_KEYS, SPEC_KEYS
 from .teams import FIELDS as TEAMS_FIELDS
 
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
@@ -508,7 +508,7 @@ def dsl_course_schema() -> dict:
     )
     top |= {
         "people": people,
-        "assignment_defaults": defaults,
+        ASSIGNMENT_DEFAULTS_KEY: defaults,
         "semester_defaults": semester_defaults,
     }
     return _doc(".github/dsl-course.yml", _obj(top, ("org",)))

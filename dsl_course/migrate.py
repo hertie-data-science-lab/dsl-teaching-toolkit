@@ -84,6 +84,7 @@ from .grades import (
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .profile_readme import profile_files, update_profile_readme
 from .repos import default_branch, repo_missing, set_repo_topics
+from .settings import ASSIGNMENT_DEFAULTS_KEY
 from .welcome import (
     config_system_files,
     join_files,
@@ -218,7 +219,7 @@ def course_config_keys(text: str) -> str:
             section = top.group(1)
             if section == "cohort_defaults":
                 line = "semester_defaults:" + line[len("cohort_defaults:") :]
-        elif section == "assignment_defaults":
+        elif section == ASSIGNMENT_DEFAULTS_KEY:
             indent = re.match(r"^(\s+)format:", line)
             if indent:
                 line = formats_line(line, indent.group(1))
@@ -1078,7 +1079,7 @@ class Course:
     def meta_verified(self) -> bool:
         text, _ = self.meta_text()
         meta = _yaml(text)
-        defaults = meta.get("assignment_defaults") or {}
+        defaults = meta.get(ASSIGNMENT_DEFAULTS_KEY) or {}
         return (
             self.meta_done()
             and "cohort_defaults" not in meta

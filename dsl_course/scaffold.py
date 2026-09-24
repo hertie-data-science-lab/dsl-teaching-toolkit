@@ -26,14 +26,12 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import settings
 from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
     COURSE_DEFAULT_CHOICE,
-    DEFAULT_LATE_PENALTY_PER_DAY,
-    DEFAULT_LATE_WINDOW_DAYS,
-    DEFAULT_MAX_TEAM_SIZE,
     FACULTY_ONLY_HEADING,
     FORMATS,
     MAINTAINING_FILE,
@@ -66,7 +64,6 @@ from .derive import BEGIN_SOLUTION, END_SOLUTION, SOLUTION_CHUNK_OPT
 from .discovery import central_ref_for, discover_assignments, discover_semesters
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
-from .grades import course_assignment_defaults
 from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
@@ -195,11 +192,12 @@ _READINGS_STUB = (
 )
 
 # The assignment's own definition, written from what New assignment was asked for and
-# what the course declares in `dsl-course.yml assignment_defaults`. INSTRUCTOR-OWNED from
-# the moment it lands: nothing ever rewrites it, and every setting in it is meant to be
-# edited here afterwards. A setting the course has no default for is seeded COMMENTED OUT,
-# so the file teaches the whole vocabulary without asserting an opinion nobody expressed -
-# except the late-work pair, which the toolkit itself has an opinion about and writes live.
+# what the course's defaults resolve to (`settings`: the course's `assignment_defaults`,
+# else the institution's policy). INSTRUCTOR-OWNED from the moment it lands: nothing ever
+# rewrites it, and every setting in it is meant to be edited here afterwards. A setting the
+# course has no default for is seeded COMMENTED OUT, so the file teaches the whole
+# vocabulary without asserting an opinion nobody expressed - except the late-work pair,
+# which the institution has an opinion about and is written live.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the semester's schedule.yml."
@@ -278,9 +276,10 @@ def _grading_config(
     # `Dropped` line on every quarter-hourly tick and stood as an advisory in the semester's
     # digest issue - a fault about nothing anybody typed.
     marked_by_hand = submit_via == "shared_dropbox_repo"
-    cap = defaults.get("max_team_size")
-    window = defaults.get("late_window_days")
-    penalty = defaults.get("late_penalty_per_day")
+    stack = [("course", defaults), ("institution", settings.institution_defaults())]
+    cap, cap_from = settings.resolve("max_team_size", stack)
+    window, _ = settings.resolve("late_window_days", stack)
+    penalty, _ = settings.resolve("late_penalty_per_day", stack)
     lines = [
         _GRADING_STAMP,
         _setting(
@@ -295,9 +294,9 @@ def _grading_config(
         ),
         _setting(
             "max_team_size",
-            cap or DEFAULT_MAX_TEAM_SIZE,
+            cap,
             "group only",
-            live=group and cap is not None,
+            live=group and cap_from == "course",
         ),
         _setting(
             "submit_via",
@@ -344,17 +343,18 @@ def _grading_config(
         _QUESTIONS_STUB.rstrip(),
         "",
         # Both LIVE, whatever the course declares: these two are the one setting the
-        # toolkit has an opinion about when nobody else does (`course.DEFAULT_LATE_*`, the
+        # institution has an opinion about when nobody else does (`policy.yml`, the
         # Hertie syllabus rule), and a commented-out line carrying the numbers an
-        # assignment will actually be graded by is a file that hides its own policy.
+        # assignment will actually be graded by is a file that hides its own policy. A
+        # course default naming one half alone is its whole rule: the other half is none.
         _setting(
             "late_window_days",
-            window if window is not None else DEFAULT_LATE_WINDOW_DAYS,
+            window if window is not None else 0,
             "0 = nothing after the due date is accepted",
         ),
         _setting(
             "late_penalty_per_day",
-            penalty or DEFAULT_LATE_PENALTY_PER_DAY,
+            penalty or "0%",
             "of the EARNED grade, per day started",
         ),
         "",
@@ -1284,24 +1284,23 @@ def _collision(named: list[str], autograde: bool) -> str:
     return ""
 
 
-# What each box New assignment can leave at `COURSE_DEFAULT_CHOICE` falls back to when the
-# course's `assignment_defaults:` does not say either. `ipynb` for the starter because that
-# is what the button pre-filled before the course could choose.
-_TOOLKIT_ANSWERS = {
-    "formats": "ipynb",
-    "team_formation": "self_select",
-    "submit_via": "assignment_repo",
-    "visibility": "private",
-}
+# `submit_via` is the template's shape, not a policy default: the box left at
+# `COURSE_DEFAULT_CHOICE` with no course answer gets the ordinary repo per unit.
+_SHAPE_ANSWERS = {"submit_via": "assignment_repo"}
 
 
 def resolve_answers(answers: dict[str, str], defaults: dict) -> dict[str, str]:
-    """The New assignment answers with every box left at `COURSE_DEFAULT_CHOICE` replaced:
-    by the course's `assignment_defaults:` value when it declares one, else by the
-    toolkit's own. An answer somebody chose is kept as given."""
+    """The New assignment answers with every box left at `COURSE_DEFAULT_CHOICE` replaced
+    through the cascade's course and institution layers (`settings.resolve`): the course's
+    `assignment_defaults:` value when it declares one, else the policy's. An answer
+    somebody chose is kept as given."""
+    stack = [
+        ("course", defaults),
+        ("institution", {**_SHAPE_ANSWERS, **settings.institution_defaults()}),
+    ]
     return {
         key: (
-            str(defaults.get(key) or _TOOLKIT_ANSWERS[key])
+            str(settings.resolve(key, stack)[0])
             if value == COURSE_DEFAULT_CHOICE
             else value
         )
@@ -1413,7 +1412,7 @@ def scaffold_assignment(
         # them for read as work the course is expected to do. See `_HAND_MARKED`.
         log("  (autograde is not read for a shared drop box - it is hand-marked)")
         autograde = False
-    defaults = course_assignment_defaults(org)
+    defaults = settings.course_defaults(org)
     # main: the brief, a starter stub per format, and (group only) CONTRIBUTIONS.md -
     # what students receive on generate. No tests, no autograder - grading runs
     # faculty-side from the solution branch. ONE commit, create-only, exactly as
@@ -1769,7 +1768,8 @@ def main() -> int:
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "
         f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all; "
         "the first is the runnable one (the completion check and the autograder run "
-        "it). Default: the course's `assignment_defaults: formats`, else ipynb",
+        "it). Default: the course's `assignment_defaults: formats`, else the "
+        "institution's (policy.yml)",
     )
     pa.add_argument(
         "--type",
@@ -1832,7 +1832,7 @@ def main() -> int:
                 "submit_via": args.submit_via,
                 "visibility": args.visibility,
             },
-            course_assignment_defaults(args.org),
+            settings.course_defaults(args.org),
         )
         args.formats = answers["formats"]
         args.team_formation = answers["team_formation"]

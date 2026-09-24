@@ -1736,7 +1736,7 @@ def sync_sheet(
     is still private enough to post a receipt into. None means nobody handed one down - a
     button press, an autograde run - or the tick's own could not be read, and this takes
     its own, and only if it is going to derive anything at all."""
-    gspec = load_grading_spec(course_org, template)
+    gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     spec = sheet_spec(sched, key, slug, gspec, is_group)
     path = grades.sheet_path(slug)
     entry = sched.assignments.get(key)
@@ -3173,7 +3173,7 @@ def refresh_assignment_sheet(
         log_err(target)
         return 1
     key, slug = target
-    gspec = load_grading_spec(course_org, template)
+    gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     is_group = resolve_is_group(force=group, template_type=gspec.type)
     ok = sync_sheet(
         course_org,
@@ -3239,7 +3239,7 @@ def collect(
     # of them never reach a clone: a template with no solution branch, and an all-manual
     # assignment. Both are ordinary states, not failures, and both still have a deadline.
     # It is also what the cutoff itself is measured with (`late_window_days`).
-    gspec = load_grading_spec(course_org, template)
+    gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if gspec.not_migrated:
         log_err(
             f"{template}/grading_config.yml is NOT_MIGRATED (`format:` is now "

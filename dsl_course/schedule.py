@@ -478,6 +478,9 @@ class ArchiveRow:
 @dataclass
 class Schedule:
     timezone: str = DEFAULT_TZ
+    # The semester org it was loaded from ("" for a plan parsed from text): what an
+    # assignment's run settings resolve against (`settings`, `grades.load_grading_spec`).
+    org: str = field(default="", compare=False)
     releases: list[Release] = field(default_factory=list)
     semester_start: date | None = None
     semester_end: date | None = None
@@ -1919,6 +1922,7 @@ def load(semester_org: str) -> Schedule:
             )
         )
     sched = parse(meta if isinstance(meta, dict) else {})
+    sched.org = semester_org
     sched.unparseable = bool(unparseable)
     sched.faults.extend(unparseable)
     if sched.dropped:

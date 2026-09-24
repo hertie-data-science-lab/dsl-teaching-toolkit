@@ -44,6 +44,7 @@ from dsl_course import (
     scaffold,
     schedule,
     seed,
+    settings,
     site_repo,
     sync_faculty,
     teams,
@@ -622,11 +623,11 @@ def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys
         ),
         welcome.example_course_file("dsl-course.yml"),
     ):
-        block = yaml.safe_load(text)[grades.ASSIGNMENT_DEFAULTS_KEY]
+        block = yaml.safe_load(text)[settings.ASSIGNMENT_DEFAULTS_KEY]
         # Only what `New assignment` does not ask for: a block carrying `submit_via` or
         # `autograde` would read as policy and change nothing, since the button answers
         # both on every run.
-        assert grades.parse_assignment_defaults(block) == {
+        assert settings.parse_assignment_defaults(block) == {
             "max_team_size": 5,
             "late_window_days": 10,
             "late_penalty_per_day": "10%",

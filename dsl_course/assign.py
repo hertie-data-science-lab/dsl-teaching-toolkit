@@ -1678,6 +1678,9 @@ def provision_all(
         log_err(target)
         return 1, False
     key, slug = target
+    # The run settings (visibility, the late pair, the team rules) are this semester's
+    # for this entry, now that it is known which entry this is.
+    gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if not gspec.creates_repos and key not in sched.assignments:
         # Nothing is written at all, and this is the only shape it can happen to. An
         # assignment that creates no repo leaves the schedule entry as the one record that

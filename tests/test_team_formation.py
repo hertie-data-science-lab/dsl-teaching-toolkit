@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import ROSTER_HEADER
 
-from dsl_course import discovery, team_formation
+from dsl_course import discovery, settings, team_formation
 from dsl_course.faults import Severity
 from dsl_course.grades import GradingSpec
 from dsl_course.mailer import send_bulk as _SEND_BULK
@@ -77,14 +77,14 @@ def semester(monkeypatch):
         monkeypatch.setattr(
             team_formation.grades,
             "declared_grading_spec",
-            lambda org, template: spec,
+            lambda org, template, **_: spec,
         )
         # The cap the window carries and the mail prints: `grades.team_cap` falls back to
         # the COURSE org's assignment_defaults when the template names no size, and that
         # is a live read of its dsl-course.yml.
         monkeypatch.setattr(
-            team_formation.grades,
-            "course_assignment_defaults",
+            settings,
+            "course_defaults",
             lambda org: {"max_team_size": 4},
         )
 

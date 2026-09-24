@@ -1131,7 +1131,12 @@ def _assignment_entry(
     # handout does not create. It costs the template's grading_config.yml, memoised per
     # template per process; the semester's schedule.yml, which the site used to read it
     # from for free, no longer has a say.
-    spec = load_grading_spec(course_org, repo)
+    spec = load_grading_spec(
+        course_org,
+        repo,
+        semester_org=semester_org if found else "",
+        slug=found[0] if found else "",
+    )
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so
     # a row published as "Assignment 2" became "Assignment 1 - linear regression from
