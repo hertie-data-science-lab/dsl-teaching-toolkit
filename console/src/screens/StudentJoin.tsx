@@ -70,6 +70,7 @@ const POLLS = 20;
 export function JoinRequests({ org }: { org: string }) {
   const env = useEnv();
   const [asked, setAsked] = useState<Asked[] | null>(null);
+  const [pending, setPending] = useState(false);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!env) return;
@@ -77,9 +78,10 @@ export function JoinRequests({ org }: { org: string }) {
     let polls = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = () =>
-      readAsked(env, org).then((a) => {
+      Promise.all([readAsked(env, org), env.client.getMyMembership(org).catch(() => null)]).then(([a, ms]) => {
         if (!live) return;
         setAsked(a);
+        setPending(ms?.state === 'pending');
         if (a.some((x) => !issueState(x.issue).settled) && ++polls < POLLS) timer = setTimeout(read, POLL_MS);
       }, () => live && setAsked((x) => x ?? []));
     void read();
@@ -91,12 +93,13 @@ export function JoinRequests({ org }: { org: string }) {
   return (
     <section class="panel section" aria-labelledby="h-asked">
       <div class="a-head"><h2 id="h-asked">Your requests</h2><button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button></div>
-      <AskedList asked={asked} org={org} />
+      <AskedList asked={asked} org={org} invitePending={pending} />
     </section>
   );
 }
 
-export function AskedList({ asked, org }: { asked: Asked[] | null; org?: string }) {
+/** `invitePending`: the person's membership of `org` is still an unaccepted invitation (only then is the accept link offered). */
+export function AskedList({ asked, org, invitePending = false }: { asked: Asked[] | null; org?: string; invitePending?: boolean }) {
   if (asked === null) return <p class="footnote">Reading…</p>;
   if (!asked.length) return <p class="footnote">You have opened no Join course or Join team request here yet. After you press Create on GitHub, it shows here within a few seconds.</p>;
   return (
@@ -105,7 +108,7 @@ export function AskedList({ asked, org }: { asked: Asked[] | null; org?: string 
         const s = issueState(issue);
         return (
           <li>
-            <div class={`check-line ${s.tone}`}><span><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a>{org && issue.labels.some((l) => l.name === 'onboarded') ? <> <a href={invitationUrl(org)} target="_blank" rel="noopener">Accept the invitation <Ext /></a></> : null}</span></div>
+            <div class={`check-line ${s.tone}`}><span><b>{issue.title}</b>, {fmtWhen(issue.created_at)}: {s.word}. <a href={issue.html_url} target="_blank" rel="noopener">Open <Ext /></a>{org && invitePending && issue.labels.some((l) => l.name === 'onboarded') ? <> <a href={invitationUrl(org)} target="_blank" rel="noopener">Accept the invitation <Ext /></a></> : null}</span></div>
             {reply ? <Md class="reply" src={readable(reply.body)} /> : null}
           </li>
         );

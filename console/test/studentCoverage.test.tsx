@@ -350,7 +350,8 @@ describe('8. the pending invitation', () => {
     expect(home).toContain(`href="${invitationUrl(ORG)}"`);
     expect(home).toContain('Invited');
     const issue = { number: 3, title: 'Join course', state: 'closed', html_url: 'https://github.com/i/3', created_at: '2026-09-24T10:00:00Z', comments: 0, labels: [{ name: 'onboarding' }, { name: 'onboarded' }] };
-    expect(render(<AskedList asked={[{ issue, reply: null }]} org={ORG} />)).toContain(`href="https://github.com/orgs/${ORG}/invitation"`);
+    expect(render(<AskedList asked={[{ issue, reply: null }]} org={ORG} invitePending />)).toContain(`href="https://github.com/orgs/${ORG}/invitation"`);
+    expect(render(<AskedList asked={[{ issue, reply: null }]} org={ORG} />)).not.toContain('/invitation');
   });
 });
 
