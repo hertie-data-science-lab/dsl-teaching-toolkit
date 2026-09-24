@@ -9,7 +9,7 @@
 # - worked example: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/cohort-org/instructors.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/
 #
-# This is a SKELETON: uncomment and fill what you want. For a filled example - see `instructors.yml.sample`.
+# This is a SKELETON: uncomment and fill what you want. For a filled example - see the worked example above.
 #
 # instructors:
 #   - github_handle: "janedoe"        # REQUIRED

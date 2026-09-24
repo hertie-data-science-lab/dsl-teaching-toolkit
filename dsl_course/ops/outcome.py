@@ -5,9 +5,9 @@ run. The Console workflow runs in the course org's public `.github`, so this hal
 `people` and no repo name of the `<slug>-<handle>` / `grades-<handle>` form - the same rule
 `log.log_person` keeps for every other line of a faculty workflow's log.
 
-PRIVATE: `semester-config/.dsl/outcomes/<op>.json` in the semester org, which may carry the
+PRIVATE: `semester-config/.system/outcomes/<op>.json` in the semester org, which may carry the
 per-person lines. A course-wide op has no private repo to write to, so its file goes to the
-course org's `.github/.dsl/outcomes/<op>.json` in the public form.
+course org's `.github/.system/outcomes/<op>.json` in the public form.
 """
 
 from __future__ import annotations
@@ -16,12 +16,13 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 
+from .. import records
 from ..course import CONFIG_REPO, GRADEBOOK_PREFIX
 from ..gh_contents import put_file
 from .registry import OUTCOME_SCHEMA
 
 CONCLUSIONS = ("done", "nothing_to_do", "skipped", "previewed", "failed")
-OUTCOMES_DIR = ".dsl/outcomes"
+OUTCOMES_DIR = records.path("outcomes")
 ANNOTATION_TITLE = "dsl-outcome"
 HANDLE_MARK = "<handle>"
 # Under the Checks API's 64 KB cap on an annotation message, with room to spare.

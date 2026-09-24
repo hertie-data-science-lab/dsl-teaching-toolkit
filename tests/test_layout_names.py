@@ -17,6 +17,7 @@ from dsl_course import (
     course,
     discovery,
     profile_readme,
+    records,
     repos,
     teardown,
     welcome,
@@ -92,10 +93,76 @@ def test_a_retired_name_is_never_created(name, monkeypatch):
 
 def test_bootstrap_refuses_a_semester_the_migration_has_not_reached(monkeypatch):
     monkeypatch.setattr(
-        bootstrap_course, "gh", lambda *a, **k: (0, f"{course.OLD_SEMESTER_TOPIC}\n")
+        discovery, "gh", lambda *a, **k: (0, f"{course.OLD_SEMESTER_TOPIC}\n")
     )
     assert bootstrap_course.refuses_unmigrated("sem-f2026") is True
     monkeypatch.setattr(
-        bootstrap_course, "gh", lambda *a, **k: (0, f"{course.SEMESTER_TOPIC}\n")
+        discovery, "gh", lambda *a, **k: (0, f"{course.SEMESTER_TOPIC}\n")
     )
     assert bootstrap_course.refuses_unmigrated("sem-f2026") is False
+
+
+# ------------------------------------------------------------------ .system/ (item 3)
+
+
+def test_the_pointer_lives_in_the_config_repo_and_the_dispatchers_read_it_there():
+    files = welcome.config_system_files("main")
+    pointer = f"{CONFIG_REPO}/contents/{records.path('pointer')}"
+    for path, body in files.items():
+        if path.startswith(".github/workflows/dispatch-"):
+            assert pointer in body.decode(), path
+            assert "__POINTER__" not in body.decode(), path
+
+
+def test_a_semester_is_found_through_the_pointer_in_its_config_repo(monkeypatch):
+    reads = []
+
+    def load(org, repo, path):
+        reads.append((org, repo, path))
+        return {"course": "Course-Org", "org": org}
+
+    monkeypatch.setattr(discovery, "load_yaml_config", load)
+    assert discovery.course_org_for_semester("Sem-f2026") == "Course-Org"
+    assert reads == [("Sem-f2026", CONFIG_REPO, ".system/dsl-course.yml")]
+
+
+def test_a_semester_archived_before_the_rename_is_never_written_into(monkeypatch):
+    # No semester-config under its new name, and the old topic: frozen or unmigrated.
+    monkeypatch.setattr(discovery, "repo_missing", lambda org, name: True)
+    monkeypatch.setattr(
+        discovery, "gh", lambda *a, **k: (0, f"{course.OLD_SEMESTER_TOPIC}\n")
+    )
+    assert discovery.semester_is_live("Old-f2025") is False
+    monkeypatch.setattr(
+        discovery, "gh", lambda *a, **k: (0, f"{course.SEMESTER_TOPIC}\n")
+    )
+    assert discovery.semester_is_live("New-f2026") is True
+
+
+def test_the_refresh_skips_a_frozen_pre_rename_semester_without_a_fault(
+    monkeypatch, capsys
+):
+    from test_bootstrap_seeding import _stub_refresh
+
+    from dsl_course import seed
+
+    _stub_refresh(monkeypatch)
+    frozen = [
+        {"name": ".github", "topics": [course.OLD_SEMESTER_TOPIC], "archived": True},
+        {"name": OLD_CONFIG_REPO, "topics": [], "archived": True},
+    ]
+    monkeypatch.setattr(
+        seed, "list_org_repos", lambda org: frozen if org == "Semester-f2026" else []
+    )
+    assert seed.refresh("Course-Org") == 0
+    out = capsys.readouterr()
+    assert "Semester-f2026 (archived semester - left frozen)" in out.out
+    assert "NOT_MIGRATED" not in out.out + out.err
+
+
+def test_the_record_paths_all_sit_under_one_folder():
+    for kind in records.RECORDS:
+        assert records.path(kind).startswith(f"{records.SYSTEM_DIR}/"), kind
+    assert records.path("autograde", "a1", "_graded.json") == (
+        ".system/autograde/a1/_graded.json"
+    )

@@ -9,14 +9,13 @@ first-run guard - the guard has to be per file. These tests pin the split:
   student-facing README, and the course org's dsl-course.yml SSOT): seeded once, NEVER
   rewritten - a rewrite destroyed a live roster (enrol codes + onboarded handles) in
   hertie-dsl-demo-f2026.
-- SYSTEM-owned (welcome's onboard/team-formation workflows + the issue forms they parse,
-  semester-config's dispatch-*.yml, its README contract and `*.sample` worked
-  examples, the semester's generated dsl-course.yml pointer): re-pushed on every run so
-  fixes reach running semesters.
+- SYSTEM-owned (join's onboard/team-formation workflows + the issue forms they parse,
+  semester-config's dispatch-*.yml and README contract, the semester's generated
+  course pointer): re-pushed on every run so fixes reach running semesters.
 
-Every user-editable semester-config file is a scaffold/sample PAIR - `<file>` seeded once,
-`<file>.sample` always converged - and the samples are injected from
-example-course/cohort-org/ rather than authored twice.
+Every user-editable semester-config file is a scaffold seeded once; the filled examples
+are the worked example semester in example-course/cohort-org/, which the scaffolds link
+and these tests parse with the engine's own readers.
 
 The COURSE tier of example-course/ is validated here too. Only its SYLLABUS.md is a seeded
 pair (SYLLABUS.md.sample is derived from it); the rest is documentation, linked from docs/
@@ -57,6 +56,13 @@ from dsl_course.grades import LockWrite
 from dsl_course.repos import Converged
 from tests.conftest import repo_row, stub_bootstrap
 
+EXAMPLE_SEMESTER = Path(__file__).resolve().parents[1] / "example-course" / "cohort-org"
+
+
+def example_semester_file(rel: str) -> str:
+    return (EXAMPLE_SEMESTER / rel).read_text(encoding="utf-8")
+
+
 # Derived from the seeding table, so a fifth config file cannot silently miss the set
 # these tests police - which is the whole point of the table existing.
 USER_OWNED = set(welcome.CONFIG_SCAFFOLDS)
@@ -67,7 +73,6 @@ SYSTEM_OWNED = {
     ".github/workflows/dispatch-send-codes.yml",
     ".github/workflows/validate-schedule.yml",
     "README.md",
-    *welcome.CONFIG_SAMPLES,
 }
 WELCOME_SYSTEM_OWNED = {
     ".github/workflows/onboard.yml",
@@ -202,7 +207,6 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         "teams.csv": "assignment,team,github_handle\na1,team-1,ahandle\n",
         "schedule.yml": "timezone: Europe/Berlin\nassignments:\n  - id: a1\n",
         "instructors.yml": "people:\n  instructors:\n    - github_handle: profx\n",
-        "teams.csv.sample": "team,members\nstale,sample\n",
         "README.md": "# stale contract from an older engine\n",
         ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
     }
@@ -219,13 +223,12 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
 
     # SYSTEM-owned files: re-pushed, so the stale copies are replaced by the templates.
     assert fake.files[("semester-config", ".github/workflows/dispatch-sync.yml")] == (
-        welcome.template("semester-config/dispatch-sync.yml")
+        welcome.config_system_files("release")[
+            ".github/workflows/dispatch-sync.yml"
+        ].decode()
     )
     assert fake.files[("semester-config", "README.md")] == (
-        welcome.template("semester-config/README.md")
-    )
-    assert fake.files[("semester-config", "teams.csv.sample")] == (
-        welcome.example_semester_file("teams.csv")
+        welcome.config_system_files("release")["README.md"].decode()
     )
     assert fake.files[("join", ".github/workflows/onboard.yml")] == (
         welcome.join_workflow("join/onboard.yml")
@@ -377,56 +380,40 @@ def test_semester_tag_derivation():
     assert bc._tag_and_year("Some-Odd-Name") == ("f2026", 2026)
 
 
-def test_the_sample_set_is_the_whole_worked_example_semester():
-    # The set is DERIVED from example-course/cohort-org/, not enumerated - that is what
-    # makes "every file in cohort-org/ ships as a sample" true rather than aspirational
-    # (an enumeration once silently dropped the team-graded grades table).
-    assert set(welcome.CONFIG_SAMPLES) == {
-        "students.csv.sample",
-        "teams.csv.sample",
-        "schedule.yml.sample",
-        "instructors.yml.sample",
-        "grading_sheets/assignment-1.yml.sample",
-        "grading_sheets/assignment-4-project.yml.sample",
-    }
-    for path, source in welcome.CONFIG_SAMPLES.items():
-        assert (welcome.EXAMPLE_COHORT / source).is_file(), f"{path} <- {source}"
-
-
 def test_every_shipped_sample_parses_with_the_real_parser():
     # A sample IS the schema documentation faculty copy from, so it is validated by the
     # very code that will read their copy - never by a second, driftable checker.
-    students = roster.parse(welcome.example_semester_file("students.csv"))
+    students = roster.parse(example_semester_file("students.csv"))
     assert len(students) >= 3
     assert any(s.is_auditor for s in students), (
         "the roster sample must exercise `role: auditor`"
     )
 
-    per_assignment = teams.parse(welcome.example_semester_file("teams.csv"))
+    per_assignment = teams.parse(example_semester_file("teams.csv"))
     assert sorted(per_assignment["assignment-4-project"]) == [
         "team-alpha",
         "team-beta",
         "team-gamma",
     ]
 
-    sched, error = schedule.load_file(str(welcome.EXAMPLE_COHORT / "schedule.yml"))
+    sched, error = schedule.load_file(str(EXAMPLE_SEMESTER / "schedule.yml"))
     assert error is None, error
     assert sched.dropped == [], "\n".join(sched.dropped)
     # the current three-block schema, every block exercised
     assert sched.releases and sched.assignments and sched.events
 
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(welcome.example_semester_file("instructors.yml")) or {}
+        yaml.safe_load(example_semester_file("instructors.yml")) or {}
     )
     assert faculty["instructors"] and faculty["teaching_assistants"]
 
     # both grading sheets: the individual case, and the group one (which nests `members:`
     # inside each team). Parsed by the very function the toolkit reads a live sheet with.
     individual = grades.parse_sheet(
-        welcome.example_semester_file("grading_sheets/assignment-1.yml")
+        example_semester_file("grading_sheets/assignment-1.yml")
     )
     project = grades.parse_sheet(
-        welcome.example_semester_file("grading_sheets/assignment-4-project.yml")
+        example_semester_file("grading_sheets/assignment-4-project.yml")
     )
     assert set(individual) == {"submissions"}
     assert all(
@@ -471,7 +458,7 @@ def test_every_sample_sheet_is_what_the_toolkit_would_write(
     # headers quoted points, a late window and `autograde off` that the example course's
     # own grading_config.yml declared none of, and a status line the renderer never
     # emits. Rendering them from those files is what stops that happening twice.
-    sched, error = schedule.load_file(str(welcome.EXAMPLE_COHORT / "schedule.yml"))
+    sched, error = schedule.load_file(str(EXAMPLE_SEMESTER / "schedule.yml"))
     assert error is None, error
     entry = sched.assignments[key]
     gspec = grades.parse_grading_spec(
@@ -480,7 +467,7 @@ def test_every_sample_sheet_is_what_the_toolkit_would_write(
         )
     )
     spec = grades.sheet_spec(sched, key, slug, gspec, is_group)
-    text = welcome.example_semester_file(f"{grades.SHEETS_DIR}/{slug}.yml")
+    text = example_semester_file(f"{grades.SHEETS_DIR}/{slug}.yml")
     status = collect._status_line(spec, phase, total, submitted, derived)
     assert grades.dump_sheet(grades.parse_sheet(text), spec, status) == text
 
@@ -496,7 +483,7 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
         ("teams.csv", teams.FIELDS),
     ):
         assert header(welcome.template(f"semester-config/{name}")) == fields
-        assert header(welcome.example_semester_file(name)) == fields
+        assert header(example_semester_file(name)) == fields
     # header-only scaffolds: nobody to enrol, and no team to provision, by accident
     assert roster.parse(welcome.template("semester-config/students.csv")) == []
     assert teams.parse(welcome.template("semester-config/teams.csv")) == {}
@@ -506,8 +493,10 @@ def test_samples_carry_nothing_that_only_makes_sense_inside_this_repo():
     # example-course/cohort-org/ is SHIPPING reference material: each file is pushed into
     # every semester's private config repo, where a repo-relative `docs/...` link resolves to
     # nothing. Full URLs only, as the seeded README already does.
-    for path, source in welcome.CONFIG_SAMPLES.items():
-        for line in welcome.example_semester_file(source).splitlines():
+    for path in sorted(EXAMPLE_SEMESTER.rglob("*")):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
             assert "docs/" not in line or "https://" in line, f"{path}: {line}"
 
 
@@ -517,7 +506,7 @@ def test_the_people_sample_names_nobody_real():
     # only: either no handle at all (valid - the card is display-only) or the
     # demo-*-placeholder convention.
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(welcome.example_semester_file("instructors.yml")) or {}
+        yaml.safe_load(example_semester_file("instructors.yml")) or {}
     )
     for role, people in faculty.items():
         for person in people:
@@ -907,7 +896,6 @@ def test_bootstrap_reports_an_unreachable_api_instead_of_a_traceback(
 def _stub_refresh(
     monkeypatch,
     join_failures=lambda org: 0,
-    sample_failures=lambda org: 0,
     system_failures=lambda org, ref: 0,
     pointer_failures=lambda org, course: 0,
     lock_failures=lambda course, semester: LockWrite(True, False),
@@ -938,7 +926,6 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
     monkeypatch.setattr(seed, "refresh_join_workflows", join_failures)
-    monkeypatch.setattr(seed, "refresh_config_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_config_system_files", system_failures)
     monkeypatch.setattr(seed, "refresh_semester_pointer", pointer_failures)
     monkeypatch.setattr(seed, "sync_team_lock", lock_failures)
@@ -1036,8 +1023,8 @@ def test_refresh_leaves_an_archived_assignment_template_alone(monkeypatch):
 
 @pytest.mark.parametrize(
     "per_semester_job",
-    ["join_failures", "sample_failures", "system_failures"],
-    ids=["join-workflows", "config-samples", "config-system-files"],
+    ["join_failures", "system_failures"],
+    ids=["join-workflows", "config-system-files"],
 )
 def test_refresh_reaches_every_registered_semester(monkeypatch, per_semester_job):
     # Every per-semester job is seeded at Bootstrap semester, and then left behind by an
@@ -1215,7 +1202,6 @@ def test_refresh_leaves_an_archived_semester_frozen(monkeypatch, capsys):
     _stub_refresh(
         monkeypatch,
         join_failures=refresh_one,
-        sample_failures=refresh_one,
         system_failures=refresh_one,
     )
     # Both orgs live (org probe healthy); Semester-f2026 is a finished, archived semester.
@@ -1244,7 +1230,7 @@ def test_refresh_leaves_an_archived_semester_frozen(monkeypatch, capsys):
 
     assert seed.refresh("Course-Org") == 0
     # every job, live semester only
-    assert refreshed == ["Semester-s2027"] * 3
+    assert refreshed == ["Semester-s2027"] * 2
     # The pointer write sits in the same loop and must honour the skip too.
     assert pointed == ["Semester-s2027"]
     # The landing pages are written inside the same loop, so they have to honour the skip
@@ -1273,7 +1259,6 @@ def _missing_semester_run(monkeypatch, prior_misses=()):
     store = _stub_refresh(
         monkeypatch,
         join_failures=lambda org, *a: refreshed.append(org) or 0,
-        sample_failures=lambda org, *a: refreshed.append(org) or 0,
         system_failures=lambda org, *a: refreshed.append(org) or 0,
         prior_misses=prior_misses,
     )
@@ -1296,7 +1281,7 @@ def test_refresh_prunes_a_semester_missing_since_the_day_before(monkeypatch, cap
         monkeypatch, prior_misses=[_missed_at("Semester-f2026", 25)]
     )
 
-    assert refreshed == ["Semester-s2027"] * 3  # deleted semester skipped whole
+    assert refreshed == ["Semester-s2027"] * 2  # deleted semester skipped whole
     assert pruned == [
         ("Course-Org", "Semester-f2026")
     ]  # and unregistered, not just noted
@@ -1344,7 +1329,7 @@ def test_a_first_miss_never_unregisters_a_semester(monkeypatch, capsys):
 
     assert code == 0
     assert pruned == []
-    assert refreshed == ["Semester-s2027"] * 3  # skipped for tonight, not unregistered
+    assert refreshed == ["Semester-s2027"] * 2  # skipped for tonight, not unregistered
     # remembered for the next run, WITH the moment it was first missed
     assert store[seed.MISSES_PATH].startswith("semester-f2026 20")
     assert "Semester-f2026 did not answer" in capsys.readouterr().err
@@ -1370,7 +1355,6 @@ def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
     _stub_refresh(
         monkeypatch,
         join_failures=lambda org, *a: refreshed.append(org) or 0,
-        sample_failures=lambda org, *a: refreshed.append(org) or 0,
         system_failures=lambda org, *a: refreshed.append(org) or 0,
     )
 
@@ -1384,7 +1368,7 @@ def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
     )
 
     assert seed.refresh("Course-Org") == 0
-    assert refreshed == ["Semester-f2026"] * 3 + ["Semester-s2027"] * 3
+    assert refreshed == ["Semester-f2026"] * 2 + ["Semester-s2027"] * 2
     assert pruned == []
 
 
@@ -1636,13 +1620,11 @@ def test_semester_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, cap
     [
         ("seed_failures", 2),
         ("join_failures", 1),
-        ("sample_failures", 1),
         ("system_failures", 1),
     ],
     ids=[
         "org-workflows",
         "join-workflows",
-        "config-samples",
         "config-system-files",
     ],
 )
@@ -1679,14 +1661,13 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
     ("job", "extra_args", "message"),
     [
         ("refresh_join_workflows", (), "join-repo files not written"),
-        ("refresh_config_samples", (), "semester-config samples not written"),
         (
             "refresh_config_system_files",
             ("release",),
             "semester-config system files not written",
         ),
     ],
-    ids=["join-workflows", "config-samples", "config-system-files"],
+    ids=["join-workflows", "config-system-files"],
 )
 def test_a_per_semester_refresh_reds_on_a_failed_write_and_claims_nothing(
     monkeypatch, capsys, job, extra_args, message

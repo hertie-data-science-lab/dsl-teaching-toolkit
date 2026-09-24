@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 import yaml
 
+from . import records
 from .central import resolve_central_ref
 from .course import (
     CONFIG_REPO,
@@ -37,7 +38,7 @@ from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log, log_err, log_ok
-from .repos import default_branch, repo_exists, repo_is_archived
+from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
 
 # The standalone semester registry in the course org's .github repo.
 SEMESTERS_PATH = "semesters.yml"
@@ -414,10 +415,17 @@ def org_meta(org: str) -> dict:
     return load_yaml_config(org, ".github", COURSE_CONFIG) or {}
 
 
+def semester_pointer(semester_org: str) -> dict:
+    """A semester's pointer to its course org (`semester-config/.system/dsl-course.yml`),
+    or `{}` when there is none. Moved in from the semester's `.github` (decision 0010):
+    its only readers are this repo's dispatchers and the engine, and `.github` is public."""
+    return load_yaml_config(semester_org, CONFIG_REPO, records.path("pointer")) or {}
+
+
 def course_name_for_semester(semester_org: str) -> str:
     """This semester's course name, for student-facing prose ("your grades for X").
 
-    Follows the semester's own `.github/dsl-course.yml` `course:` pointer to its course
+    Follows the semester's own `course:` pointer (`semester_pointer`) to its course
     org, then reads that org's identity file - the same two hops status.collect makes,
     but starting from the semester, which is all an emailer is given.
 
@@ -429,12 +437,12 @@ def course_name_for_semester(semester_org: str) -> str:
 
 
 def course_org_for_semester(semester_org: str) -> str:
-    """The COURSE org this semester belongs to, from its own `.github/dsl-course.yml`
-    `course:` pointer. "" when the pointer is missing or unreadable.
+    """The COURSE org this semester belongs to, from its own `course:` pointer
+    (`semester_pointer`). "" when the pointer is missing or unreadable.
 
     A semester-side CLI is given only the semester; anything it needs from the course side -
     an assignment's `grading_config.yml`, say - has to start here."""
-    return str(org_meta(semester_org).get("course") or "")
+    return str(semester_pointer(semester_org).get("course") or "")
 
 
 def course_name_of(course_org: str) -> str:
@@ -454,15 +462,15 @@ def central_ref_for(org: str) -> str:
     """Which ref of the central toolkit this org's seeded workflows run the engine from.
 
     Declared as `central_ref:` in the COURSE org's `.github/dsl-course.yml`, so one edit
-    moves a course and every semester under it between tiers together. A semester org's own
-    file is only a pointer (`course:`), so this follows it - a `central_ref:` written into
-    a semester's file is ignored, because a semester running a different engine from the course
-    org that releases into it is not a state anyone wants to debug.
+    moves a course and every semester under it between tiers together. A semester org has
+    no `dsl-course.yml` of its own, only the pointer (`semester_pointer`), so this follows
+    it - a semester running a different engine from the course org that releases into it
+    is not a state anyone wants to debug.
 
     Absent means `central.CENTRAL_REF`; a value that is neither a tier nor a full SHA
     raises `central.MissingCentralRef` - see resolve_central_ref."""
     meta = org_meta(org)
-    course = str(meta.get("course") or "")
+    course = "" if meta else course_org_for_semester(org)
     if course:
         org, meta = course, org_meta(course)
     return resolve_central_ref(
@@ -489,10 +497,25 @@ def semester_is_live(semester_org: str) -> bool:
     `repos.repo_is_archived` fails OPEN, so "could not tell" reads as LIVE: guessing that
     way costs one failed write that says so out loud, and guessing the other way silently
     stops syncing a semester mid-term."""
-    if not repo_is_archived(semester_org, CONFIG_REPO):
-        return True
-    log(f"  [skip] {semester_org} (archived semester - left frozen)")
-    return False
+    if repo_is_archived(semester_org, CONFIG_REPO):
+        log(f"  [skip] {semester_org} (archived semester - left frozen)")
+        return False
+    # No config repo under its name at all, and the old topic: a semester archived before
+    # decision 0010 (never migrated, never touched) or one the migration has not reached.
+    # Either way nothing may be written into it.
+    if repo_missing(semester_org, CONFIG_REPO) and not_migrated_org(semester_org):
+        log(f"  [skip] {semester_org} (not migrated - archived, or run the migration)")
+        return False
+    return True
+
+
+def not_migrated_org(org: str) -> bool:
+    """Whether `org`'s `.github` carries the OLD semester topic and not the new one, read
+    from its topics. The listing form, for a caller that already holds one, is
+    `carries_old_semester_topic`."""
+    code, out = gh("api", f"repos/{org}/.github/topics", "--jq", ".names[]")
+    topics = set(out.split()) if code == 0 else set()
+    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
 
 
 def live_semesters(course_org: str) -> list[str]:

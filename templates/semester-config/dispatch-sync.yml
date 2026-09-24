@@ -14,7 +14,7 @@ name: Dispatch membership sync
 # the mirror the Join-team form reads: adding an assignment used to wake nothing at all,
 # so the form went on answering off the previous day's list until the 06:13 cron.
 #
-# Reads the course org from THIS semester's own dsl-course.yml (single source of truth -
+# Reads the course org from THIS semester's own .system/dsl-course.yml (single source of truth -
 # no course-org name baked in at bootstrap time). Fires a `repository_dispatch` (not
 # `workflow_dispatch`) so Sync membership's ungated automatic path picks it up, rather
 # than the human-only, check-team-gated manual path. Runs under secrets.DSL_BOT_TOKEN,
@@ -45,10 +45,10 @@ jobs:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           SEMESTER_ORG: ${{ github.repository_owner }}
         run: |
-          course_org=$(gh api "repos/$SEMESTER_ORG/.github/contents/dsl-course.yml" \
+          course_org=$(gh api "repos/$SEMESTER_ORG/__CONFIG_REPO__/contents/__POINTER__" \
             --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
           if [ -z "$course_org" ]; then
-            echo "::error::no 'course:' line in $SEMESTER_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            echo "::error::no 'course:' line in $SEMESTER_ORG/__CONFIG_REPO__/__POINTER__ - can't find the course org to dispatch to."
             exit 1
           fi
           gh api "repos/$course_org/.github/dispatches" \

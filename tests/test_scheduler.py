@@ -1318,7 +1318,7 @@ def test_deploy_many_releases_the_whole_repo_from_a_root_source_path(monkeypatch
                 "labs/01.md": "lab one",
                 "labs/.github/keep.yml": "faculty's own, not plumbing",
                 "SYLLABUS.md": "syllabus",
-                "MAINTAINING.md": "faculty notes - never released",
+                ".system/MAINTAINING.md": "faculty notes - never released",
                 ".git/config": "SOURCE-REMOTE",
                 ".github/workflows/release-materials.yml": "BUTTON",
             }

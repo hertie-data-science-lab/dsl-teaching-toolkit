@@ -901,7 +901,7 @@ def test_semester_config_scheduler_dispatcher_fires_on_a_schedule_change():
     # The event type the course org's Scheduled release filters `types:` on.
     assert "event_type=scheduled-release" in tmpl
     # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
-    assert "contents/dsl-course.yml" in tmpl
+    assert "__CONFIG_REPO__/contents/__POINTER__" in tmpl
     assert tmpl.splitlines()[0].startswith("# SYSTEM-OWNED")
 
 
@@ -954,7 +954,7 @@ def test_semester_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert doc["permissions"] == {}
     assert "event_type=send-codes" in tmpl
     # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
-    assert "contents/dsl-course.yml" in tmpl
+    assert "__CONFIG_REPO__/contents/__POINTER__" in tmpl
 
 
 # The whole assignment, in the order the ten boxes are numbered. Pinned as a LIST: the
@@ -1306,6 +1306,7 @@ def _readme_run(monkeypatch, put_ok):
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(P, "org_meta", lambda org: {})
+    monkeypatch.setattr(P, "course_name_for_semester", lambda org: "")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_semesters", lambda org: [])
@@ -1334,10 +1335,14 @@ def test_a_written_readme_reports_no_failures(monkeypatch):
 def test_semester_page_title_follows_the_course_pointer(monkeypatch):
     from dsl_course import profile_readme as P
 
-    # A semester's dsl-course.yml is a pointer with no course_name, so this used to title
+    # A semester has no dsl-course.yml of its own, only its pointer, so this used to title
     # the students' landing page with the org slug.
-    monkeypatch.setattr(P, "org_meta", lambda org: {"course": "Course-Org"})
-    monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
+    monkeypatch.setattr(P, "org_meta", lambda org: {})
+    monkeypatch.setattr(
+        P,
+        "course_name_for_semester",
+        lambda org: "Deep Learning" if org == "Semester-f2026" else "",
+    )
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_semesters", lambda org: [])

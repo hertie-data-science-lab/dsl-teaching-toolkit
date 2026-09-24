@@ -9,6 +9,7 @@ import json
 import re
 import sys
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 import yaml
@@ -36,6 +37,8 @@ from dsl_course.course import INSTRUCTOR_ROLES, people_by_role
 from dsl_course.faults import NOT_MIGRATED, NotMigrated
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import RequestError, parse_request
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # ------------------------------------------------------------------ semester (cohort)
 
@@ -70,7 +73,9 @@ def test_one_unmigrated_semester_does_not_stop_the_course_refresh(monkeypatch, c
         lambda org, ref, listing=None, is_semester=False: converged.append(org) or 0,
     )
     assert seed.refresh("Course-Org") == 0
-    assert converged[-2:] == ["Semester-f2026", "Semester-s2027"]
+    # Nothing is written into the unmigrated semester; the one beside it still converges.
+    assert converged[-1:] == ["Semester-s2027"]
+    assert "Semester-f2026" not in converged
     out = capsys.readouterr()
     assert f"::error::Semester-f2026: {NOT_MIGRATED}" in out.out
     assert NOT_MIGRATED in out.err
@@ -84,7 +89,7 @@ def test_the_inventory_names_an_org_on_the_old_topic_and_goes_partial(
         "_tagged_orgs",
         lambda topic: {"dsl-cohort": ["Old-Sem"], "dsl-semester": ["New-Sem"]}[topic],
     )
-    monkeypatch.setattr(list_orgs, "_metadata_or_none", lambda org: {"course": "C"})
+    monkeypatch.setattr(list_orgs, "_pointer_or_none", lambda org: {"course": "C"})
     found = {s["org"]: s["readable"] for s in list_orgs.discover_semester_orgs()}
     assert found == {"Old-Sem": False, "New-Sem": True}
     assert NOT_MIGRATED in capsys.readouterr().err
@@ -349,8 +354,8 @@ def test_the_site_cards_read_instructors_yml_only(monkeypatch):
 def test_a_new_semester_is_seeded_instructors_yml_and_never_people_yml():
     assert "instructors.yml" in welcome.CONFIG_SCAFFOLDS
     assert "people.yml" not in welcome.CONFIG_SCAFFOLDS
-    assert "people.yml.sample" not in welcome.CONFIG_SAMPLES
-    shipped = yaml.safe_load(welcome.example_semester_file("instructors.yml"))
+    example = ROOT / "example-course" / "cohort-org" / "instructors.yml"
+    shipped = yaml.safe_load(example.read_text(encoding="utf-8"))
     assert {p["role"] for p in shipped["instructors"]} == set(INSTRUCTOR_ROLES)
 
 

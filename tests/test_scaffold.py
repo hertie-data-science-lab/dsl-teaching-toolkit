@@ -95,12 +95,12 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert fake.written("course-materials-f2026") == {
         "README.md",
-        "MAINTAINING.md",
+        ".system/MAINTAINING.md",
         "SYLLABUS.md",
         # The filled example beside the stub, on the repo's `<file>.sample` convention.
         # SYSTEM-owned like MAINTAINING.md, so a repo scaffolded before it existed picks it
         # up on the next Refresh.
-        "SYLLABUS.md.sample",
+        ".system/SYLLABUS.md.sample",
         "lectures/01_session-1/.gitkeep",
         # Readings get a stub rather than a .gitkeep: the folder's files are listed
         # automatically, but an empty folder gave no sign of that, nor that this file is
@@ -143,13 +143,13 @@ def test_maintaining_refreshes_on_rerun_while_readme_stays_create_only(fake):
     # and stays create-only, so a faculty-authored README is never clobbered.
     stale = "# stale maintainer guide\n"
     overview = "# faculty overview\n"
-    fake.files[("course-materials-f2026", "MAINTAINING.md")] = stale
+    fake.files[("course-materials-f2026", ".system/MAINTAINING.md")] = stale
     fake.files[("course-materials-f2026", "README.md")] = overview
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     # MAINTAINING.md re-written (refreshed from the template), README.md left as faculty had it.
-    assert "MAINTAINING.md" in fake.written("course-materials-f2026")
-    assert fake.files[("course-materials-f2026", "MAINTAINING.md")] != stale
+    assert ".system/MAINTAINING.md" in fake.written("course-materials-f2026")
+    assert fake.files[("course-materials-f2026", ".system/MAINTAINING.md")] != stale
     assert "README.md" not in fake.written("course-materials-f2026")
     assert fake.files[("course-materials-f2026", "README.md")] == overview
     assert "course-materials-f2026/README.md" in fake.skips
@@ -1234,8 +1234,8 @@ def test_a_copied_materials_repo_is_re_seeded_with_the_system_files_only(origins
     assert scaffold.scaffold_materials("Org", "f2026", "course-materials-f2025") == 0
 
     assert fake.written("course-materials-f2026") == {
-        "MAINTAINING.md",
-        "SYLLABUS.md.sample",
+        ".system/MAINTAINING.md",
+        ".system/SYLLABUS.md.sample",
     }
 
 
@@ -1575,14 +1575,16 @@ def test_the_syllabus_stub_is_faculty_owned_and_the_sample_is_refreshed(fake):
     # scaffolded before it existed gets one.
     written = "# Real syllabus\n\nBy faculty.\n"
     fake.files[("course-materials-f2026", "SYLLABUS.md")] = written
-    fake.files[("course-materials-f2026", "SYLLABUS.md.sample")] = "# stale example\n"
+    fake.files[("course-materials-f2026", ".system/SYLLABUS.md.sample")] = (
+        "# stale example\n"
+    )
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == written
     assert "SYLLABUS.md" not in fake.written("course-materials-f2026")
-    assert "SYLLABUS.md.sample" in fake.written("course-materials-f2026")
+    assert ".system/SYLLABUS.md.sample" in fake.written("course-materials-f2026")
     assert (
-        fake.files[("course-materials-f2026", "SYLLABUS.md.sample")]
+        fake.files[("course-materials-f2026", ".system/SYLLABUS.md.sample")]
         != "# stale example\n"
     )
 
@@ -1616,7 +1618,7 @@ def test_no_system_file_is_ever_released_to_students():
     from dsl_course import deploy
 
     for path in scaffold.materials_system_files("Org", "course-materials-f2026"):
-        assert path in deploy.ROOT_RELEASE_EXCLUDED, path
+        assert path.split("/")[0] in deploy.ROOT_RELEASE_EXCLUDED, path
 
 
 def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
@@ -1650,8 +1652,8 @@ def test_refresh_backfills_the_system_files_into_a_materials_repo(monkeypatch):
     assert scaffold.refresh_materials_system_files("Org", "lecture-code-f2026") == 0
 
     assert f.written("course-materials-f2026") == {
-        "MAINTAINING.md",
-        "SYLLABUS.md.sample",
+        ".system/MAINTAINING.md",
+        ".system/SYLLABUS.md.sample",
     }
     assert f.written("lecture-code-f2026") == set()
 
@@ -1661,12 +1663,12 @@ def test_refresh_rewrites_a_stale_system_file(monkeypatch):
     # ("kept current by the toolkit - copy from it, do not edit it").
     f = FakeRepo()
     monkeypatch.setattr(scaffold, "put_files", f.put_files)
-    f.files[("course-materials-f2026", "MAINTAINING.md")] = "# stale guide\n"
+    f.files[("course-materials-f2026", ".system/MAINTAINING.md")] = "# stale guide\n"
 
     assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 0
     assert (
         "Reference for faculty & instructors"
-        in f.files[("course-materials-f2026", "MAINTAINING.md")]
+        in f.files[("course-materials-f2026", ".system/MAINTAINING.md")]
     )
 
 

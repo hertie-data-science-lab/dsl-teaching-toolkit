@@ -39,7 +39,7 @@ The workflow's inputs are **the same fields as a `schedule.yml` `deploy` entry**
 - **Everything in one press:** `course_source_path` = `/` (or `.`) releases the whole repo, minus the faculty side of it: 
   - `.git` (copying it would repoint the semester repo at the course repo), 
   - `.github` (the Release workflows and their token wiring) 
-  - and `MAINTAINING.md` (your operating notes - the scaffold marks it never released). 
+  - and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released). 
 
 Re-releasing is safe - copies are additive and idempotent.
 

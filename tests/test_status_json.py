@@ -630,7 +630,7 @@ def test_write_puts_the_semester_file_into_semester_config(monkeypatch):
     puts = _stub_write(monkeypatch, doc)
     assert status.write(COURSE, SEMESTER) == 0
     assert puts == [
-        (SEMESTER, "semester-config", ".dsl/status.json", status_json.dumps(doc))
+        (SEMESTER, "semester-config", ".system/status.json", status_json.dumps(doc))
     ]
 
 
@@ -639,7 +639,7 @@ def test_write_puts_the_course_file_into_dot_github(monkeypatch):
     puts = _stub_write(monkeypatch, doc)
     assert status.write(COURSE) == 0
     assert [(o, r, p) for o, r, p, _ in puts] == [
-        (COURSE, ".github", ".dsl/status.json")
+        (COURSE, ".github", ".system/status.json")
     ]
 
 
@@ -716,7 +716,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         (SEMESTER, "semester-config", "grading_sheets/assignment-2.yml"): (
             "submissions:\n  ada:\n    score_individual: 7\n"
         ),
-        (SEMESTER, "semester-config", ".dsl/outcomes/release.now.json"): json.dumps(
+        (SEMESTER, "semester-config", ".system/outcomes/release.now.json"): json.dumps(
             CONTRACT_EXAMPLE["operations"][0]
         ),
         (COURSE, "course-materials-f2026", "SYLLABUS.md"): "# Syllabus",
@@ -756,7 +756,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo, branch: (
             {"dsl-course.yml": "c0ffee"}
             if repo == ".github"
-            else {"schedule.yml": "5c4ed", ".dsl/outcomes/release.now.json": "0u7"}
+            else {"schedule.yml": "5c4ed", ".system/outcomes/release.now.json": "0u7"}
         ),
     )
     monkeypatch.setattr(

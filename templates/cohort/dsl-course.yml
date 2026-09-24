@@ -1,8 +1,0 @@
-# SYSTEM-OWNED - do not edit, edits here are overwritten.
-#
-# This semester org points back to its persistent course org. Read by the
-# semester-config dispatchers (dispatch-sync / dispatch-sync-site) to find where
-# to fire Sync membership / Sync site. Identity + schedule live elsewhere (the
-# course org's dsl-course.yml and this semester's semester-config/schedule.yml).
-course: {course}
-org: {org}

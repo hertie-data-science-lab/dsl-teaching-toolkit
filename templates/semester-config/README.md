@@ -9,10 +9,9 @@ This is the entire per-semester data hub - instructors manage everything from he
 Instructors/TAs edit these files; the toolkit's workflows read them and apply the changes automatically. This repo is the SSOT for all semester config.
 
 
-**Live files vs samples.**
-Every file you edit here ships as a pair:
-- `<file>` is the live file, read by the engine - INSTRUCTOR-OWNED, yours to edit freely.
-- `<file>.sample` is pure documentation: the engine never reads a `.sample`. SYSTEM-OWNED - every bootstrap and nightly refresh re-pushes them so they never go schema-stale, so any edit you make to one is overwritten.
+**Your files and the toolkit's.**
+- The files you edit (roster, teams, schedule, instructors, grading sheets) are INSTRUCTOR-OWNED - yours. A filled example of each is in the [worked example semester](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/cohort-org/).
+- `.system/` is the toolkit's: its status, its records and the markers that stop anything being sent or graded twice. Leave it alone - deleting a marker repeats what it records.
 
 ## `students.csv` - the roster (required)
 
@@ -36,8 +35,8 @@ A push to this file triggers **Sync membership** automatically, reconciling the 
 
 One file per assignment, created at handout with every row already in it. It is the ONE
 place you type: scores, feedback, an `adjustment_individual` where you need one, and notes
-that never leave this repo. Worked examples of both shapes ship as
-`grading_sheets/*.yml.sample`.
+that never leave this repo. Worked examples of both shapes are in the
+[worked example semester](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/cohort-org/grading_sheets).
 
 Everything under `info:` is the toolkit's - when the work came in, how late it was, what
 `CONTRIBUTIONS.md` said, the autograde count, and `checked`, the minute the row was last

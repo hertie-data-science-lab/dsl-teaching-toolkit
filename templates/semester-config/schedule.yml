@@ -31,8 +31,8 @@
 # release already shipped stays shipped - unshipping it means rewriting the repo's git
 # history.
 #
-# What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
-# a real release plan, a group project, exams - see `schedule.yml.sample`.
+# What follows is a SKELETON: uncomment and fill what you want. For a full worked semester -
+# a real release plan, a group project, exams - see the worked example above.
 
 # timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin
 # semester_start:                   # OPTIONAL - default: inferred from the semester tag (f2026 -> 1 Sep 2026)

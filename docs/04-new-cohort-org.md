@@ -68,7 +68,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
   - Fill `semester-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
   - Leave `github_handle, github_id` blank - onboarding fills them. 
   - Add `role: auditor` for anyone who should get the released materials but no assignments and no grades. 
-  - The seeded `students.csv.sample` shows a filled row of each kind, and that repo's `README.md` documents every column.
+  - The [worked example](../example-course/cohort-org/students.csv) shows a filled row of each kind, and that repo's `README.md` documents every column.
   - Full details found in [06-enrol-students-to-cohort.md](06-enrol-students-to-cohort.md)
 
 7. *(only for `visibility: student_choice` assignments)* **Set the org's member privileges.**

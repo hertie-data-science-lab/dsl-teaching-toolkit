@@ -184,7 +184,7 @@ SEEDED = {
             "Org", "Org Name", "Course", "CODE", admins=["adminhandle"]
         )
     ),
-    "cohort/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
+    "semester/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
         "Org", "Course"
     ),
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(

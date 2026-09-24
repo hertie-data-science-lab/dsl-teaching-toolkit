@@ -31,7 +31,7 @@ from .central import CENTRAL
 from .course import CONFIG_REPO, COURSE_CONFIG, JOIN_REPO
 from .discovery import (
     carries_old_semester_topic,
-    course_name_of,
+    course_name_for_semester,
     discover_semesters,
     join_issue_url,
     list_org_repos,
@@ -487,17 +487,14 @@ def update_profile_readme(
         # surface from mid-refresh - a non-mapping is likewise refused, not coerced to {}.
         cfg = org_meta(org)
         org_name = org_name or cfg.get("org_name") or org
-        # A SEMESTER org's dsl-course.yml is only a pointer - it carries no course_name of
-        # its own, so this used to fall all the way back to the org slug and title the
+        # A SEMESTER org has no dsl-course.yml of its own (its pointer lives in its config
+        # repo), so this used to fall all the way back to the org slug and title the
         # students' landing page "hertie-dsl-demo-f2026". Follow the pointer to the course
         # org that does hold the name; the slug stays as the last resort.
-        # `cfg` is the semester's own pointer, already read above - so resolve the second
-        # hop directly rather than calling course_name_for_semester, which would re-fetch
-        # this same file. course_name_of("") returns "", so no guard is needed here.
         course_name = (
             course_name
             or cfg.get("course_name")
-            or course_name_of(str(cfg.get("course") or ""))
+            or (course_name_for_semester(org) if not cfg else "")
             or org_name
         )
     if repos is None:

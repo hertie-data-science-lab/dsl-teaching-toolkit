@@ -20,7 +20,7 @@ machine facts move during the late window.
 
 The one place a grader types. It arrives with every row present and a header saying which
 fields the toolkit fills and when. Two shapes - individual and group - and worked examples
-of both ship as `grading_sheets/*.yml.sample` in your `semester-config`.
+of both are in the [worked example semester](../example-course/cohort-org/grading_sheets).
 
 ```yaml
 teams:

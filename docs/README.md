@@ -93,7 +93,7 @@ get a toolkit change out to live orgs, see
 - **Repo topics** (`dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`) are how discovery tells orgs and repos apart. Remove one by hand and
   the repo drops out of every sweep.
-- **`.github/.last-refresh`** is a heartbeat: GitHub disables crons after 60 quiet days, so the
+- **`.github/.system/last-refresh`** is a heartbeat: GitHub disables crons after 60 quiet days, so the
   nightly refresh commits a date. If it has stopped, run any workflow by hand to restart them.
 
 ## Example org artefacts

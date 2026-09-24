@@ -44,25 +44,20 @@ example-course/
 > Not shown, because nobody writes it: each live semester also carries
 > `assignments.lock.yml` in `semester-config` - generated from the assignments'
 > `grading_config.yml` files, and the only thing the **Join team** form reads. It is not in
-> the worked example for the same reason there is no `.sample` twin of it: there is nothing
-> in it for a person to copy.
+> the worked example because there is nothing in it for a person to copy. (It lives under
+> `.system/`, with every other file the toolkit writes.)
 
-> NB: **`cohort-org/` is shipped, not just documented.** Every file in it is seeded into each
-> semester's private `semester-config` repo as the `.sample` twin of the scaffold faculty fill
-> in - `students.csv` → `students.csv.sample`, and so on for every other file here. The set is
-> derived by walking this directory (`welcome.CONFIG_SAMPLES`), so adding a file here ships
-> it; bootstrap and the nightly Refresh both converge them, so editing one updates every
-> semester's worked example. Keep the contents fictional and self-contained: no real accounts,
-> and links written as full URLs (a repo-relative `docs/...` link resolves to nothing once the
-> file has landed in a semester org).
+> NB: **`cohort-org/` is the worked example every scaffold links.** Each file a semester's
+> `semester-config` is seeded with (a commented scaffold) points here for the filled version,
+> by absolute URL at the org's own tier. Keep the contents fictional and self-contained: no
+> real accounts, and links written as full URLs.
 
 > NB: **`course-org/` is documentation, with one exception.** Nothing here is pushed into a
 > course org - the docs link to it, faculty copy from it by hand. The exception is
 > `course-materials-f2026/SYLLABUS.md`, which is the source of the `SYLLABUS.md.sample` seeded
 > beside every materials repo's own syllabus (`scaffold._syllabus_sample`), so the syllabus the
-> docs call the live example is the one faculty actually receive. **The rule for both tiers:** a
-> file here gets a derived `.sample` when the toolkit seeds a scaffold/sample PAIR for it;
-> everything else is reference material only. Either way every file is parsed by the engine's own
+> docs call the live example is the one faculty actually receive (it lands in
+> `.system/SYLLABUS.md.sample`). Every file here is parsed by the engine's own
 > readers in `tests/test_bootstrap_seeding.py`, so nothing here can go schema-stale in silence.
 
 > NB: **Assignment layout:** each `assignment-*/` splits into `main/` (→ the repo's `main` branch,

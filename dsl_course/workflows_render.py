@@ -1771,7 +1771,7 @@ def render_generate_syllabus(source_repos: list[str], semester_orgs: list[str]) 
 # with its title, its learning objectives and its reading list - from the semester's
 # semester-config/schedule.yml and this repo's readings/ folders.
 #
-# It lands in SYLLABUS.sessions.md beside your syllabus, and is NEVER released to students.
+# It lands in .system/SYLLABUS.sessions.md, and is NEVER released to students.
 # Paste what you want into SYLLABUS.md; a re-run overwrites the companion file, never your
 # syllabus. Dropdowns are refreshed by the 'Refresh actions' workflow.
 
@@ -1781,7 +1781,7 @@ on:
 {_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos)}
 {_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
       preview:
-        description: "Preview - print the block, commit nothing to SYLLABUS.sessions.md"
+        description: "Preview - print the block, commit nothing to .system/SYLLABUS.sessions.md"
         type: boolean
         default: true
 

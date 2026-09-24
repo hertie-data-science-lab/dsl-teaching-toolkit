@@ -9,7 +9,7 @@ DELIBERATELY paste-ready output, not an edit of their document. The syllabus is 
 document - often the one submitted to the school, and for one live course a Word file
 exported to PDF - so a tool that rewrote a region of it would sooner or later overwrite work
 the day before a deadline, and could not help the PDF authors at all. This prints the block
-and writes it beside the syllabus as `SYLLABUS.sessions.md` (never released to students);
+and writes it to `.system/SYLLABUS.sessions.md` (never released to students);
 the course team pastes what they want.
 
 Readings are read from the COURSE org's staging repo, not from what has been released: a

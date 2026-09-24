@@ -36,6 +36,7 @@ from .course import (
     DEFAULT_MAX_TEAM_SIZE,
     FACULTY_ONLY_HEADING,
     FORMATS,
+    MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
     NOTHING_PUBLIC,
@@ -100,8 +101,8 @@ _SYLLABUS_STUB = """\
 
      FACULTY & INSTRUCTORS: this is the students' syllabus - the headings below are the
      standard Hertie shape, so delete what your course does not use.
-     Release it by naming this file in the release path (see MAINTAINING.md).
-     A filled example sits beside this file in SYLLABUS.md.sample. -->
+     Release it by naming this file in the release path (see .system/MAINTAINING.md).
+     A filled example is in .system/SYLLABUS.md.sample. -->
 
 ## 1. General information
 
@@ -141,7 +142,7 @@ _SYLLABUS_STUB = """\
 # The filled syllabus faculty copy from, seeded beside their own SYLLABUS.md as
 # SYLLABUS.md.sample. Its BODY is the worked example course's real syllabus
 # (example-course/course-org/course-materials-f2026/SYLLABUS.md) rather than a second copy
-# authored here - the same rule the semester-config samples follow, so the syllabus the
+# authored here - the one worked example the semester scaffolds link too, so the syllabus the
 # docs link to as the live example is the one faculty actually receive. Only the ownership
 # notice is added here, at the write site: the example file is a course team's own
 # INSTRUCTOR-OWNED syllabus in its own org, and must not claim otherwise.
@@ -912,7 +913,7 @@ def materials_system_files(org: str, repo: str) -> dict[str, bytes]:
     the SYSTEM-owned half of the ownership split; the skeleton above is the other."""
     return {
         SYLLABUS_SAMPLE_FILE: _syllabus_sample().encode(),
-        "MAINTAINING.md": _maintaining(org, repo).encode(),
+        MAINTAINING_FILE: _maintaining(org, repo).encode(),
     }
 
 
@@ -980,7 +981,7 @@ def materials_readme(org: str) -> str:
         "> organised, and anything students should read first.\n\n"
         "---\n\n"
         f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n\n"
-        "- **How to populate & operate this repo:** see [`MAINTAINING.md`](MAINTAINING.md) - "
+        "- **How to populate & operate this repo:** see [`MAINTAINING.md`](.system/MAINTAINING.md) - "
         "it explains what to edit, what gets released to students, and what to leave alone. "
         "`MAINTAINING.md` is **not** deployed to the semester org; leave it here as a persistent "
         "reference.\n"

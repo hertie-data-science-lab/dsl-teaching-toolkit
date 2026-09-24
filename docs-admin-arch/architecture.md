@@ -217,13 +217,15 @@ central action), given the empty semester org's name. It runs the same `bootstra
 `--semester`: seeds `join` + `semester-config` (roster, teams, `schedule.yml`,
 `instructors.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
 website, applies the course's current `course_admins`, registers the semester in the course's
-`cohort-courses-pages.yml`, and writes a small `.github/dsl-course.yml` **pointer** (`course:`,
-`org:`) so the semester-side dispatchers know which course org to fire at. All of this semester's
+`semesters.yml`, and writes a small **pointer** (`course:`, `org:`) to
+`semester-config/.system/dsl-course.yml` so the semester-side dispatchers know which course org
+to fire at. All of this semester's
 real config lives in `semester-config`.
 
-Every user-editable file in `semester-config` ships as a **pair**: `<file>` is a minimal
-commented scaffold, seeded once and never rewritten, so faculty edits are safe; `<file>.sample`
-is a filled worked example, re-converged on every refresh. The SYSTEM-owned half - the README
+Every user-editable file in `semester-config` is a minimal commented scaffold, seeded once and
+never rewritten, so faculty edits are safe; each links its filled twin in
+`example-course/cohort-org/`. Everything the engine writes there lives under `.system/`
+(`records.path`). The SYSTEM-owned half - the README
 contract and the workflows under `.github/` (`welcome.CONFIG_SYSTEM_FILES`) - is
 re-converged the same way, so a dispatcher fix reaches running semesters without re-bootstrapping. Partial provisioning fails the run
 loudly rather than leaving a half-built org.
@@ -239,7 +241,7 @@ the `students` and `auditors` teams. Those four fields are deliberately the same
 paths exist semester-side; everything is idempotent and additive, so re-releasing is a no-op.
 
 A source path of `/`, `.` or empty releases the **whole repo**. It skips `.git` at any depth and,
-**at the repo root only**, `.github` and `MAINTAINING.md` - naming either explicitly still ships
+**at the repo root only**, `.github` and `.system/` - naming either explicitly still ships
 it. A path escaping the clone is refused before any file is touched.
 
 **Assignment** is two stages: freeze a semester-level template from the course template's `main`
@@ -492,15 +494,15 @@ maintainer guide + syllabus example
   sr --> pr["profile READMEs + dropdowns"]
   sr --> coh["`each registered semester:
 join workflows + semester-config
-system files + config samples`"]
-  sr --> hb[".github/.last-refresh heartbeat"]
+system files`"]
+  sr --> hb[".system/last-refresh heartbeat"]
 ```
 
 - **Ungated** (no `check-team`): a scheduled run has no actor, and manual dispatch already
   requires write on the repo - which is the very thing the gate verified.
 - `put_file` is **diff-aware** (it compares the blob sha it computes locally against the one it
   already fetched), so a no-change night writes no commits in any org.
-- The **heartbeat** `.github/.last-refresh` is stamped daily for one reason: GitHub disables
+- The **heartbeat** `.github/.system/last-refresh` is stamped daily for one reason: GitHub disables
   scheduled workflows in a repo inactive for 60 days, which would silently switch off every cron
   in the estate. A failed heartbeat write counts into the exit code.
 - Serialised against **itself** (`concurrency: seed-refresh`) because one run makes dozens of
@@ -729,7 +731,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     propagate the secret.
   - `seed` - place the workflows (central + run-from-repo) and the `refresh` CLI, whose nightly
     run also loops every registered semester (orgs missing two runs running pruned with a hint, archived ones left
-    frozen) re-converging its join workflows, semester-config system files and samples; it
+    frozen) re-converging its join workflows and semester-config system files; it
     delegates to four modules and re-exports a few of their names (see `__all__`; new code
     imports from the owner):
     - `workflows_render` - the workflow YAML templates + every `render_*` function, plus the
@@ -738,7 +740,7 @@ Self-contained - workflows and their Python implementation both live in this rep
       including the shared infra-repo predicate;
     - `profile_readme` - the org landing page + the `.github` repo's own README;
     - `join` - the SYSTEM-owned semester seeding (onboarding workflows, issue forms,
-      `semester-config` scaffolds, samples and system files), split out so `seed.refresh` can
+      `semester-config` scaffolds and system files), split out so `seed.refresh` can
       re-push it without importing `bootstrap_course` back.
   - `scheduler` - each tick: freeze passed deadlines, then fire due releases; autograde runs in a
     separate per-semester job.
@@ -778,12 +780,11 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `semester-config/` - that repo's README contract, its dispatch + schedule-validation
     workflows, and the **scaffold** half of every user-editable file: header-only
     `students.csv` / `teams.csv`, tag-rendered `schedule.yml` / `instructors.yml` skeletons.
-    The **sample** half (`<file>.sample`) is not authored here - it is injected from
-    `example-course/cohort-org/` (`welcome.CONFIG_SAMPLES`), so the shipped worked
-    examples and the documented ones are the same files.
+    The filled versions are not seeded: each scaffold links its twin in
+    `example-course/cohort-org/`.
   - `course/` - the course org's `.github/dsl-course.yml` (identity + the `people:` block,
     assembled from the `people-*.yml` fragments).
-  - `semester/` - a semester org's `.github/dsl-course.yml` pointer back to its course org.
+  - `semester/` - a semester's pointer back to its course org (`semester-config/.system/dsl-course.yml`).
   - `site/` - the course-specific Jekyll layouts, includes and `_sass/_course.scss` that
     the sync writes into every `<org>.github.io` (`site_repo.site_templates`).
     Not seeded once like the rest of this directory - converged, so a rendering change

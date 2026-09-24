@@ -25,7 +25,7 @@ import argparse
 import os
 import sys
 
-from . import mailer, scaffold, schedule, seed, site, sync_faculty
+from . import mailer, records, scaffold, schedule, seed, site, sync_faculty
 from .access import COURSE_TEAM_ACCESS, SEMESTER_WRITE_REPOS, grant_team_repo_access
 from .central import pin_central_ref, resolve_central_ref
 from .course import (
@@ -39,7 +39,13 @@ from .course import (
     SEMESTER_TOPIC,
     semester_of,
 )
-from .discovery import SEMESTERS_PATH, central_ref_for, org_meta, register_semester
+from .discovery import (
+    SEMESTERS_PATH,
+    central_ref_for,
+    not_migrated_org,
+    org_meta,
+    register_semester,
+)
 from .faults import NotMigrated, not_migrated_text
 from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
@@ -49,7 +55,6 @@ from .profile_readme import update_profile_readme
 from .repos import create_repo, repo_exists, repo_is_private, set_repo_topics
 from .welcome import (
     CONFIG_SCAFFOLDS,
-    refresh_config_samples,
     refresh_config_system_files,
     refresh_join_workflows,
     template,
@@ -90,18 +95,14 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 #   in place: everything under `.github/` in the seeded repos (join/onboard.yml,
 #   join/team-formation.yml, the ISSUE_TEMPLATE join forms those workflows parse - they
 #   must stay in lockstep with them - and semester-config's dispatch-sync*.yml), a
-#   semester's `.github/dsl-course.yml` (a wholly generated course pointer with no
+#   semester's `semester-config/.system/dsl-course.yml` (a wholly generated course pointer with no
 #   faculty-authored content), semester-config's README.md (the schema contract - it went
-#   stale as USER-owned), and every `*.sample` (worked examples the engine never ingests;
-#   activation = copying rows into the real file, so refreshing them is safe).
+#   stale as USER-owned).
 #   These are written unconditionally on every run so fixes propagate, exactly like
 #   seed.seed_github_workflows.
 #
-# Every user-editable semester-config file ships as a PAIR under one rule: `<file>` is a
-# minimal commented scaffold (USER-owned, seeded once) and `<file>.sample` is a filled,
-# realistic example (SYSTEM-owned, always converged). The samples are injected from
-# example-course/cohort-org/ rather than authored a second time - see
-# welcome.CONFIG_SAMPLES.
+# Every user-editable semester-config file is a minimal commented scaffold (USER-owned,
+# seeded once). Filled examples are not seeded: the scaffolds link example-course/cohort-org/.
 # ---------------------------------------------------------------------------------------
 
 
@@ -423,7 +424,7 @@ def _semester_metadata(org: str, course: str) -> str:
     course org. This is the single source the semester's semester-config dispatchers
     (dispatch-sync / dispatch-sync-site) read to find where to fire Sync membership /
     Sync site - so without it those auto-triggers can't resolve the course org."""
-    return template("cohort/dsl-course.yml").format(course=course, org=org)
+    return template("semester/dsl-course.yml").format(course=course, org=org)
 
 
 def create_profile_repo(
@@ -442,9 +443,9 @@ def create_profile_repo(
     Also tags the repo with `dsl-course-hub` so `list_orgs.py` can discover it.
 
     The course org's dsl-course.yml carries identity + the faculty roster. A semester org
-    instead gets a tiny `.github/dsl-course.yml` pointer back to its course org (written
-    in main()'s semester wiring via _semester_metadata, once --course is known) - the
-    semester-config dispatchers read its `course:` line. Its schedule lives in
+    instead gets a tiny pointer back to its course org, in `semester-config/.system/`
+    (written in main()'s semester wiring via _semester_metadata, once --course is known) -
+    the semester-config dispatchers read its `course:` line. Its schedule lives in
     semester-config/schedule.yml. `admins` (course org only) seeds dsl-course.yml's
     people.course_admins live from the start - see _course_admins_block.
 
@@ -609,7 +610,7 @@ def setup_semester_extras(
     SYSTEM-owned workflows refresh. See the ownership note at the top of this file.
 
     Returns the number of student-facing workflow/sample writes that failed, so a semester
-    left half-seeded (onboarding workflow or config samples never landed) reds the
+    left half-seeded (onboarding workflow or config dispatchers never landed) reds the
     bootstrap rather than reporting success.
     """
     log_step("Semester setup: seed join/semester-config")
@@ -681,8 +682,8 @@ def setup_semester_extras(
         tag, year = _tag_and_year(org)
         # The scaffolds: minimal, mostly-commented skeletons faculty fill in. Header-only
         # CSVs carry the full schema (roster.FIELDS / teams.FIELDS); the YAML scaffolds
-        # carry structure + one-line field notes. Every filled example lives in the
-        # `.sample` twin seeded below, so none of these has to double as documentation.
+        # carry structure + one-line field notes. Filled examples live in the worked example
+        # semester the scaffolds link, so none of these has to double as documentation.
         # Rendering is uniform - the CSV scaffolds carry no `{placeholders}`, so one
         # `.format` over the whole table keeps the YAML examples tag-aware (this semester's
         # fYYYY/sYYYY, so they are copy-paste-correct) without a per-file special case.
@@ -703,17 +704,6 @@ def setup_semester_extras(
             create_only=True,
         ):
             failures += 1
-        # SYSTEM-owned documentation, refreshed on every run so it never goes stale: a
-        # `.sample` twin for every file in the worked example semester. Samples keep the
-        # `.sample` suffix so the engine (sync_membership, sync_teams, distribute) never
-        # ingests them - only the real names; activation = copying rows into the real file.
-        sample_failures = refresh_config_samples(org)
-        if sample_failures:
-            failures += sample_failures
-            log_err(
-                f"the semester-config samples in {org} are not fully seeded - re-run "
-                f"Bootstrap semester (or wait for the nightly Refresh)"
-            )
         # SYSTEM-owned contract + dispatchers: refreshed on every run so fixes reach
         # running semesters - and, since they live in welcome.py, on every nightly
         # seed.refresh too, so a semester no longer waits for someone to run this by hand.
@@ -790,9 +780,7 @@ def refuses_unmigrated(org: str) -> bool:
     carries the old topic). Bootstrap must not touch one: it would stamp the new topic
     over the old and create the renamed repos beside the ones the migration renames,
     ending the redirects every sent link relies on."""
-    code, out = gh("api", f"repos/{org}/.github/topics", "--jq", ".names[]")
-    topics = set(out.split()) if code == 0 else set()
-    if OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics:
+    if not_migrated_org(org):
         log_err(f"{org}: {not_migrated_text(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC)}")
         return True
     return False
@@ -982,7 +970,7 @@ def _run(args: argparse.Namespace) -> int:
             args.org, central_ref, course_semester_defaults(args.course)
         )
         if args.course:
-            # Pointer back to the course org, in this semester's .github/dsl-course.yml -
+            # Pointer back to the course org, in this semester's semester-config/.system/ -
             # the semester-config dispatchers read its `course:` line to know where to
             # fire Sync membership / Sync site. Without it those auto-triggers fail.
             #
@@ -996,14 +984,14 @@ def _run(args: argparse.Namespace) -> int:
             # course org, so Sync membership / Sync site never fire - count it into the exit.
             if not put_file(
                 args.org,
-                ".github",
-                "dsl-course.yml",
+                CONFIG_REPO,
+                records.path("pointer"),
                 _semester_metadata(args.org, args.course).encode(),
                 "ci: seed semester -> course pointer (dispatchers read this)",
             ):
                 steps.append((1, ""))
                 log_err(
-                    f"could not seed the semester -> course pointer in {args.org}/.github - "
+                    f"could not seed the semester -> course pointer in {args.org}/{CONFIG_REPO} - "
                     f"the semester-config dispatchers cannot resolve {args.course}"
                 )
             # register_semester returns False on a failed registry write. A semester that is

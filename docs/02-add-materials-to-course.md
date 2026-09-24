@@ -24,7 +24,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - `readings/01_session-1/`, 
       - `labs/01_session-1/`, 
       - a `README.md` 
-      - a `MAINTAINING.md`, 
+      - `.system/MAINTAINING.md` (your operating notes) and `.system/SYLLABUS.md.sample`, 
       - a placeholder `SYLLABUS.md` 
       - a commented-out `.releaseignore` 
       - a `publish.yml` 
@@ -38,7 +38,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
      every semester of this course ([11](11-configure-cohort-site.md)).
    - `copy_from` (optional) starts the new repo as an existing `course-materials-*` instead
      of as the skeleton - every branch, every file, the whole history. Your content arrives
-     as you left it; only `MAINTAINING.md`, `SYLLABUS.md.sample` and the workflows are
+     as you left it; only `.system/` and the workflows are
      rewritten. This is how a course carries forward from one year to the next.
    - You have push on it immediately.
 

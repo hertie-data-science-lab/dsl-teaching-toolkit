@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import access, course, deploy, ghcli, repos
+from dsl_course import access, course, deploy, ghcli, records, repos
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -409,12 +409,12 @@ def test_a_normal_subpath_still_resolves_under_the_clone(tmp_path):
 
 
 def test_a_whole_repo_release_skips_the_faculty_side_of_the_repo(tmp_path):
-    # MAINTAINING.md is written into every materials repo by scaffold as "never released";
+    # `.system/` is written into every materials repo by scaffold as "never released";
     # `.github` is the Release buttons and their bot-token wiring. Both are faculty-side, so
     # neither may ride along with "give me everything".
     ignore = deploy._copy_ignore(tmp_path)
-    names = [".git", ".github", "MAINTAINING.md", "labs", "SYLLABUS.md"]
-    assert ignore(str(tmp_path), names) == {".git", ".github", "MAINTAINING.md"}
+    names = [".git", ".github", ".system", "labs", "SYLLABUS.md"]
+    assert ignore(str(tmp_path), names) == {".git", ".github", ".system"}
 
 
 def test_the_faculty_side_is_skipped_only_at_the_repo_root(tmp_path):
@@ -542,9 +542,14 @@ def test_an_unwritten_syllabus_stub_is_withheld_too():
 
 
 def test_the_excluded_root_files_are_named_from_one_place():
-    # Re-spelling them per module is how an exclusion lapses when a file is renamed.
-    assert course.SYLLABUS_SAMPLE_FILE in deploy.ROOT_RELEASE_EXCLUDED
-    assert course.SYLLABUS_SESSIONS_FILE in deploy.ROOT_RELEASE_EXCLUDED
+    # Excluded as ONE folder, so no file the toolkit writes there can lapse out of it.
+    assert records.SYSTEM_DIR in deploy.ROOT_RELEASE_EXCLUDED
+    for path in (
+        course.SYLLABUS_SAMPLE_FILE,
+        course.SYLLABUS_SESSIONS_FILE,
+        course.MAINTAINING_FILE,
+    ):
+        assert path.split("/")[0] == records.SYSTEM_DIR
 
 
 # ----------------------------- a bad symlink is one failed copy, not a dead semester

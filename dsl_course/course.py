@@ -13,6 +13,8 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
 
+from . import records
+
 # The per-org identity/config file, at the root of every org's `.github` repo: a course
 # org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
 COURSE_CONFIG = "dsl-course.yml"
@@ -52,8 +54,10 @@ MATERIALS_REPO_PREFIX = "course-materials-"
 # Generated faculty-side files, named where every module that has to know about them can
 # see it: `scaffold` writes them, `deploy` refuses to release them, `syllabus` builds one.
 # Named rather than re-spelled per module, so the exclusion cannot lapse when one is renamed.
-SYLLABUS_SAMPLE_FILE = "SYLLABUS.md.sample"
-SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
+# All three live under `.system/` (decision 0010), out of the root faculty edit.
+SYLLABUS_SAMPLE_FILE = records.path("syllabus_sample")
+SYLLABUS_SESSIONS_FILE = records.path("syllabus_sessions")
+MAINTAINING_FILE = records.path("maintaining")
 # The faculty-only heading in the materials README that `scaffold` seeds. `deploy` refuses
 # to release a README still containing it, so the sentinel is declared ONCE here - the
 # writer and the guard both import it, and neither can lapse when the wording is edited.

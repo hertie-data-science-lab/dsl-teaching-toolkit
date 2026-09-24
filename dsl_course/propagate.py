@@ -131,7 +131,7 @@ def _deny(path: Path, clone_root: Path) -> Deny:
     repo is being copied, and nowhere for a subpath copy - the toolkit's own half of the
     release filter, run in reverse, so what a release refuses to ship is what a propagate
     refuses to carry back. The `.github` a semester repo has holds nothing but toolkit
-    workflows, and MAINTAINING.md is the course org describing itself.
+    workflows, and `.system/` is the course org describing itself.
 
     Deliberately NOT the other half: a source's `.releaseignore` (`deploy` unions
     `releaseignore.deny_for` into this) is faculty saying what students may not see, and

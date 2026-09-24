@@ -431,7 +431,7 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
     assert (org, repo, path) == (
         SEMESTER,
         "semester-config",
-        ".dsl/outcomes/grades.return.json",
+        ".system/outcomes/grades.return.json",
     )
     assert json.loads(content)["schema"] == "dsl.outcome/1"
 

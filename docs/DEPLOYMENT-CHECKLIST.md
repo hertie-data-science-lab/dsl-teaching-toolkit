@@ -104,7 +104,7 @@ linked from nowhere. That site always lists each session folder's root files.
 Live example: [`example-course/cohort-org/students.csv`](../example-course/cohort-org/students.csv).
 
 `semester-config/students.csv` - one row per student, straight from the registrar (seeded
-header-only, with a filled `students.csv.sample` next to it). Leave the onboarding-owned
+header-only; a filled one is in the [worked example](../example-course/cohort-org/students.csv)). Leave the onboarding-owned
 columns blank (`github_handle`, `github_id`, `enrol_code`). Deleting a row off-boards that student on the next push.
 
 ```csv

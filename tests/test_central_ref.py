@@ -26,10 +26,15 @@ SHA = "0" * 40
 
 
 def _configs(monkeypatch, files: dict[str, dict]) -> None:
-    """Stand in for every org's `.github/dsl-course.yml`, keyed by org."""
-    monkeypatch.setattr(
-        discovery, "load_yaml_config", lambda org, repo, path: files.get(org)
-    )
+    """Stand in for every org's `dsl-course.yml`, keyed by org: a course org's in its
+    `.github`, a semester's pointer (a mapping with `course:`) in its config repo."""
+
+    def load(org, repo, path):
+        found = files.get(org)
+        is_pointer = bool(found and "course" in found)
+        return found if is_pointer == (repo == discovery.CONFIG_REPO) else None
+
+    monkeypatch.setattr(discovery, "load_yaml_config", load)
 
 
 # ------------------------------------------------------ what a declaration resolves to
@@ -294,7 +299,6 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     monkeypatch.setattr(
         seed, "refresh_config_system_files", renders("config-system-files")
     )
-    monkeypatch.setattr(seed, "refresh_config_samples", lambda org: 0)
     monkeypatch.setattr(seed, "refresh_semester_pointer", lambda org, course: 0)
     monkeypatch.setattr(
         seed, "sync_team_lock", lambda course, semester: LockWrite(True, False)

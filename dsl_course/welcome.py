@@ -1,7 +1,7 @@
 """The SYSTEM-owned semester-repo seeding, and the template reader it shares.
 
 Split out of bootstrap_course so `seed.refresh` can re-push a live semester's onboarding
-workflows, config samples and semester-config system files on its nightly run:
+workflows and semester-config system files on its nightly run:
 bootstrap_course imports seed, so seed cannot import bootstrap_course back - this module
 is what both sides may import.
 
@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 
+from . import records
 from .central import CENTRAL, pin_central_ref
 from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
@@ -27,37 +28,17 @@ from .roster import CONFIG_REPO
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
-EXAMPLE_COHORT = ROOT / "example-course" / "cohort-org"
 EXAMPLE_COURSE = ROOT / "example-course" / "course-org"
 
-# Every user-editable file in semester-config ships as a PAIR under one rule: `<file>` is
-# a minimal commented scaffold, seeded once and never rewritten; `<file>.sample` is a
-# filled, realistic example, always converged.
-#
-# The SCAFFOLD half - the file faculty fill in. `{tag}`/`{year}`/`{year_next}` are
+# Every user-editable file in semester-config is seeded as a minimal commented scaffold,
+# once, and never rewritten. Filled examples are not seeded (decision 0010): each scaffold
+# links the worked example semester in `example-course/cohort-org/` instead. `{tag}`/`{year}`/`{year_next}` are
 # rendered for this semester, so every example in a scaffold is copy-paste-correct.
 CONFIG_SCAFFOLDS = {
     "students.csv": "semester-config/students.csv",
     "teams.csv": "semester-config/teams.csv",
     "schedule.yml": "semester-config/schedule.yml",
     "instructors.yml": "semester-config/instructors.yml",
-}
-
-# The SAMPLE half - DERIVED, not enumerated: every regular file in the worked example
-# semester ships as `<its path>.sample`. Deriving is what makes example-course/README.md's
-# "every file in cohort-org/ is seeded" claim true by construction; enumerating it once
-# silently dropped the team-graded grades table. The samples are therefore not authored
-# twice - they ARE the worked example the docs link to, and tests/test_bootstrap_seeding.py
-# parses each one with the real parser so none can go schema-stale.
-CONFIG_SAMPLES = {
-    f"{rel}.sample": rel
-    for rel in sorted(
-        p.relative_to(EXAMPLE_COHORT).as_posix()
-        for p in EXAMPLE_COHORT.rglob("*")
-        if p.is_file()
-    )
-    # dotfiles are plumbing (.gitkeep and friends), never reference material
-    if not any(part.startswith(".") for part in rel.split("/"))
 }
 
 
@@ -104,20 +85,11 @@ def join_workflow(rel: str) -> str:
 
 
 @cache
-def example_semester_file(rel: str) -> str:
-    """Read a file from the worked example semester (example-course/cohort-org/<rel>).
-
-    Seeded verbatim as a `.sample`: never str.format-rendered, because a worked example is
-    a real semester's file (hertie-dsl-demo-f2026), not a scaffold to fill in."""
-    return (EXAMPLE_COHORT / rel).read_text(encoding="utf-8")
-
-
-@cache
 def example_course_file(rel: str) -> str:
     """Read a file from the worked example COURSE org (example-course/course-org/<rel>).
 
-    The course tier of the same rule, for the one file that is a seeded scaffold/sample
-    pair rather than pure reference material: `scaffold` derives SYLLABUS.md.sample from
+    The one file of the worked example that is seeded rather than only linked:
+    `scaffold` derives `.system/SYLLABUS.md.sample` from
     this tree's SYLLABUS.md, so the syllabus faculty receive IS the one the docs link to.
     The rest of course-org/ is documentation - linked from docs/, never seeded - but it is
     parsed by the real readers in tests/test_bootstrap_seeding.py all the same, so it
@@ -367,35 +339,6 @@ def refresh_join_workflows(org: str) -> int:
     return 0
 
 
-def refresh_config_samples(org: str) -> int:
-    """Converge a semester's semester-config `*.sample` files on the worked example.
-
-    Samples are machine-owned reference material - the engine never ingests them (only the
-    un-suffixed names), and activation is copying rows across - so unlike the scaffolds
-    they are written unconditionally rather than seed-if-absent. `put_files` compares blob
-    shas, so an already-current semester is written nothing. Called both at bootstrap and on
-    the nightly refresh, so a semester seeded last semester picks up today's examples.
-
-    All of them in ONE commit: they are regenerated from a single worked example, so an
-    update to that example moves the whole set at once.
-
-    Returns 1 if that commit didn't land, so seed.refresh can go red rather than report an
-    org it never converged."""
-    if not put_files(
-        org,
-        CONFIG_REPO,
-        {
-            path: example_semester_file(source).encode()
-            for path, source in CONFIG_SAMPLES.items()
-        },
-        "docs: refresh semester-config samples from the worked example course",
-    ):
-        log_err(f"semester-config samples not written in {org}")
-        return 1
-    log_ok("semester-config samples up to date")
-    return 0
-
-
 # The SYSTEM-owned half of a semester's semester-config: the schema contract faculty read,
 # and the workflows that make the repo act on what they put in it, as
 # `(path in the repo, template file)`.
@@ -440,13 +383,14 @@ def config_system_files(central_ref: str) -> dict[str, bytes]:
         path: pin_central_ref(template(rel), central_ref)
         .replace("__CENTRAL__", CENTRAL)
         .replace("__CONFIG_REPO__", CONFIG_REPO)
+        .replace("__POINTER__", records.path("pointer"))
         .encode()
         for path, rel in CONFIG_SYSTEM_FILES
     }
 
 
 def refresh_semester_pointer(org: str, course_org: str) -> int:
-    """Re-push a semester's `.github/dsl-course.yml` - the pointer its semester-config
+    """Re-push a semester's `semester-config/.system/dsl-course.yml` - the pointer its
     dispatchers read to find which course org to fire Sync membership / Sync site at.
 
     SYSTEM-owned, but it used to be written ONLY by Bootstrap semester's own wiring, so it
@@ -459,15 +403,15 @@ def refresh_semester_pointer(org: str, course_org: str) -> int:
     cannot find the course org, and the semester's syncs stop firing."""
     if not put_files(
         org,
-        ".github",
+        CONFIG_REPO,
         {
-            "dsl-course.yml": template("cohort/dsl-course.yml")
+            records.path("pointer"): template("semester/dsl-course.yml")
             .format(course=course_org, org=org)
             .encode()
         },
         "ci: refresh semester -> course pointer",
     ):
-        log_err(f"semester -> course pointer not written to {org}/.github")
+        log_err(f"semester -> course pointer not written to {org}/{CONFIG_REPO}")
         return 1
     return 0
 

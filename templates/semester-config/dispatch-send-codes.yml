@@ -19,7 +19,7 @@ name: Dispatch enrolment codes
 # independent - different workflows, different event types, different targets (the codes
 # email vs the org teams) - so both running on one push is expected and harmless.
 #
-# Reads the course org from THIS semester's own .github/dsl-course.yml `course:` pointer
+# Reads the course org from THIS semester's own .system/dsl-course.yml `course:` pointer
 # (single source of truth - no course-org name baked in at bootstrap time). Fires a
 # repository_dispatch, the one trigger Send enrolment codes listens for, and that send is
 # FOR REAL - there is no preview mode, because there is no human here to ask. Runs under
@@ -48,10 +48,10 @@ jobs:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           SEMESTER_ORG: ${{ github.repository_owner }}
         run: |
-          course_org=$(gh api "repos/$SEMESTER_ORG/.github/contents/dsl-course.yml" \
+          course_org=$(gh api "repos/$SEMESTER_ORG/__CONFIG_REPO__/contents/__POINTER__" \
             --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
           if [ -z "$course_org" ]; then
-            echo "::error::no 'course:' line in $SEMESTER_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            echo "::error::no 'course:' line in $SEMESTER_ORG/__CONFIG_REPO__/__POINTER__ - can't find the course org to dispatch to."
             exit 1
           fi
           gh api "repos/$course_org/.github/dispatches" \

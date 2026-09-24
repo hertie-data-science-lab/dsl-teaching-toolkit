@@ -44,7 +44,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from . import grades, roster, schedule, sync_faculty, team_formation, teams
+from . import grades, records, roster, schedule, sync_faculty, team_formation, teams
 from .course import (
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
@@ -83,7 +83,7 @@ from .schedule_plan import deploy_dest, deploy_section, row_kind
 from .sync_teams import known_handles
 
 # Where each file lives, inside `semester-config` (semester) or `.github` (course).
-STATUS_PATH = ".dsl/status.json"
+STATUS_PATH = records.path("status")
 # How many recent operations the semester file lists.
 RECENT_OPERATIONS = 10
 
@@ -1390,7 +1390,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
 
 
 def collect_course(course_org: str, now: datetime | None = None) -> dict:
-    """The course document (`dsl.status/1`), for `.github/.dsl/status.json`."""
+    """The course document (`dsl.status/1`), for `.github/.system/status.json`."""
     now = now or datetime.now(UTC)
     return render_course_file(gather_course(course_org), now)
 
@@ -1398,7 +1398,7 @@ def collect_course(course_org: str, now: datetime | None = None) -> dict:
 def collect_semester(
     course_org: str, semester_org: str, now: datetime | None = None
 ) -> dict:
-    """The semester document (`dsl.status/1`), for `semester-config/.dsl/status.json`."""
+    """The semester document (`dsl.status/1`), for `semester-config/.system/status.json`."""
     now = now or datetime.now(UTC)
     return render_semester(
         gather_course(course_org), gather_semester(course_org, semester_org, now), now

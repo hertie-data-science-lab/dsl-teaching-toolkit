@@ -93,7 +93,7 @@ Nested under `deploy:` we have the following:
 
 NB: `semester_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `semester_dest_repo` and `semester_dest_path` is created on release if non-exist.
 
-NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally.
+NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `.system/` (the toolkit's files: your operating notes `MAINTAINING.md`, the syllabus example and the generated sessions block). Nested copies - a `labs/.github/` of your own - travel normally.
 
 NB: a root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** from the release, with a warning on the run summary and everything else shipped - see [08 -> The unwritten root stubs](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
 

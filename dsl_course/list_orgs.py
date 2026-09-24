@@ -29,7 +29,7 @@ from .course import (
     OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
 )
-from .discovery import discover_semesters, org_meta
+from .discovery import discover_semesters, org_meta, semester_pointer
 from .faults import not_migrated_text
 from .ghcli import gh_json
 from .log import CLIParser, log_err
@@ -154,7 +154,7 @@ def discover_semester_orgs() -> list[dict]:
             }
         )
     for owner in tagged:
-        meta = _metadata_or_none(owner)
+        meta = _pointer_or_none(owner)
         semesters.append(
             {
                 "org": owner,
@@ -184,6 +184,16 @@ def _metadata_or_none(org: str) -> dict | None:
         return org_meta(org)
     except RuntimeError as exc:
         log_err(f"{org}: could not read .github/{COURSE_CONFIG} - {exc}")
+        return None
+
+
+def _pointer_or_none(semester_org: str) -> dict | None:
+    """A semester's course pointer, or None when it could not be READ (see
+    `_metadata_or_none`: the same rule, for the file a semester keeps in its config repo)."""
+    try:
+        return semester_pointer(semester_org)
+    except RuntimeError as exc:
+        log_err(f"{semester_org}: could not read its course pointer - {exc}")
         return None
 
 

@@ -124,8 +124,11 @@ def _no_semester_is_closed_out(monkeypatch):
     Every course-side sweep now asks whether a semester's `semester-config` is archived
     before writing into it, which is a live `gh api repos/<org>/semester-config`. A
     running semester is the uninteresting answer for every test but the ones about the skip
-    itself, which set their own after this fixture and win."""
+    itself, which set their own after this fixture and win. A semester with no
+    `semester-config` at all is asked about its topic too (not migrated); "it is there"
+    is the default answer to that as well."""
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
+    monkeypatch.setattr(discovery, "repo_missing", lambda org, name: False)
 
 
 @pytest.fixture(autouse=True)
