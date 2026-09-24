@@ -773,12 +773,20 @@ file reads as "not migrated yet", never as an error.
 The pause is GitHub's own switch: `PUT repos/{org}/{repo}/actions/permissions enabled=false`
 on every repo that carries a workflow - for a semester its config and join repos, its site
 and the COURSE's workflow repos (whose scheduler acts on it); for a course `.github` and
-every content repo and template with a release workflow. Verified by reading the setting
-back and by no run having started since, nor being queued or running. The unpause sets
-`enabled=true` on the same repos and reads it back; a stop or a crash in between says which
-repos are still disabled and how to enable them. A semester waits until its course's
-migration is complete and its Actions are on (or off only because this semester's own run
-stopped), so no run re-enables a course mid-migration.
+every content repo and template with a release workflow. Before anything is switched, each
+repo's own setting (`enabled`, `allowed_actions`) is recorded in
+`<org>/.github/.system/migration-pause.json`; the unpause restores exactly that (a repo that
+was off stays off), reads it back and deletes the record. Verified by reading the setting
+back and by no run having started since, nor being queued or running. From the pause to
+the verified unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded
+repos and the record. A semester waits until its course's migration is complete (no course
+record left, its Actions on) - or resumes its own stopped run (its record is there) - so no
+run re-enables a course mid-migration and two semesters of one course never overlap.
+
+Preflight names, by file, where the checkout differs from the ref the course pins (`git
+diff --name-only origin/<ref> -- dsl_course templates`, as of the last fetch): the
+re-render writes what the checkout says, and the org's next Refresh writes what its ref
+says.
 
 Semester steps: preflight (topic, not archived, course complete, no run queued or running),
 pause, rename repos, layout (records into `.system/`, `people.yml` -> `instructors.yml`
