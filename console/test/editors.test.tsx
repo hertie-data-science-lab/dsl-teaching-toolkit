@@ -21,7 +21,7 @@ import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { ArchiveScreen } from '../src/screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from '../src/screens/CourseEdit';
-import { MarksScreen, TeamsScreen } from '../src/screens/Marking';
+import { AssignmentScreen } from '../src/screens/Assignments';
 import { StaffScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
@@ -262,16 +262,16 @@ describe('editing screens', () => {
     expect(out).toContain('>Edit<');
   });
   it('teams shows the window, the team size from the template and who has no team', () => {
-    const out = html(<TeamsScreen {...props({ entry: 'assignment-3' })} />);
-    expect(out).toContain('Teams: Assignment 3: Group project');
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
+    expect(out).toContain('<h1>Assignment 3: Group project</h1>');
     expect(out).toContain('2 of 3 joined students in 1 teams; 1 without a team.');
     expect(out).toContain('team-alpha<span>2 of 3</span>');
     expect(out).toContain('Carla Cohen');
     expect(out).toContain('Email 1 without a team');
   });
   it('marks computes the total with the penalty and adjustment', () => {
-    const out = html(<MarksScreen {...props({ entry: 'assignment-2' })} />);
-    expect(out).toContain('Marks: Assignment 2: Regression');
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
+    expect(out).toContain('<h1>Assignment 2: Regression</h1>');
     expect(out).toContain('Total / 40');
     expect(out).toContain('−20%');
     expect(out).toContain('<td class="calc">28.2</td>');

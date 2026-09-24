@@ -1,4 +1,5 @@
-// S12 Marks (the grading sheet as a grid) and S9 Teams (teams.csv for a group assignment).
+// The assignment hub's Marks tab (S12, the grading sheet as a grid) and Teams tab (S9,
+// teams.csv for a team assignment).
 
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -6,19 +7,19 @@ import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentIdent, assignmentTitle, fmtDay, str } from '../model/format';
+import { assignmentTitle, fmtDay, str } from '../model/format';
 import { cellValue, finalGrade, penaltyRate, penaltyText, readSheet, round, scoreTotal, type Unit } from '../model/marks';
 import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
+import { CheckLine, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Check, Ext, Lock } from '../ui/icons';
-import { NotFound } from './Assignments';
+import type { TabProps } from './Assignments';
 import { readSchedule } from './Cohort';
-import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
-import type { CohortProps, ReadyProps } from './types';
+import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
+import type { ReadyProps } from './types';
 
 function courseDefault(p: ReadyProps, key: string): unknown {
   return ((p.course.meta?.assignment_defaults ?? {}) as Record<string, unknown>)[key];
@@ -32,7 +33,7 @@ function asgRef(a: Assignment, group: boolean): AsgRef {
 
 const key = (path: Path) => JSON.stringify(path);
 
-function Marks(p: ReadyProps & { a: Assignment }) {
+export function MarksTab(p: TabProps) {
   const { a } = p;
   const env = useEnv();
   const [edits, setEdits] = useState<Record<string, unknown>>({});
@@ -52,20 +53,20 @@ function Marks(p: ReadyProps & { a: Assignment }) {
   const rateText = cfg.late_penalty_per_day ?? courseDefault(p, 'late_penalty_per_day') ?? '10%';
   const rate = penaltyRate(rateText);
   const max = qs.reduce((s, [, n]) => s + (Number(n) || 0), 0);
-  const crumbs = cohortCrumbs(p, 'Marks', [{ t: assignmentIdent(a.slug), href: `#assignment-${a.slug}` }]);
   const group = a.teams !== null && a.teams !== undefined;
   const scope = cohortScope(p);
   const head = (
     <div class="page-head">
-      <div><h1>Marks: {assignmentTitle(a)}</h1><p class="lede">{a.marks.filled} of {a.marks.total} marked. Totals and late penalties are worked out for you.</p></div>
+      <div><h1>{assignmentTitle(a)}</h1><p class="lede">{a.marks.filled} of {a.marks.total} marked. Totals and late penalties are worked out for you.</p></div>
       <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled)} /></div>
     </div>
   );
-  if (file.kind === 'loading') return <><Crumbs items={crumbs} />{head}<Loading what="Reading the mark sheet" /></>;
+  const top = <>{head}{p.tabs}</>;
+  if (file.kind === 'loading') return <>{top}<Loading what="Reading the mark sheet" /></>;
   if (file.kind !== 'ready')
-    return <><Crumbs items={crumbs} />{head}<section class="panel section stub"><h2>No mark sheet yet</h2><p>The mark sheet appears at hand out, with a row for every student or team.</p></section></>;
+    return <>{top}<section class="panel section stub"><h2>No mark sheet yet</h2><p>The mark sheet appears at hand out, with a row for every student or team.</p></section></>;
   if (!parsed?.sheet)
-    return <><Crumbs items={crumbs} />{head}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file.</CheckLine></>;
+    return <>{top}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file.</CheckLine></>;
   const { sheet } = parsed;
   const v = (pth: Path, orig: unknown) => (key(pth) in edits ? edits[key(pth)] : orig);
   const set = (pth: Path, raw: string, typed = false) => {
@@ -144,8 +145,7 @@ function Marks(p: ReadyProps & { a: Assignment }) {
   };
   return (
     <>
-      <Crumbs items={crumbs} />
-      {head}
+      {top}
       <Help title="How marks work" doc="10-grade-and-return-assignments.md">
         <p>Submission details come from the repos and cannot be edited. You enter {qs.length ? 'points per question' : 'one score'}, feedback that students see, an adjustment, and private notes that are never shared. {rate !== null ? `The penalty is ${round(rate * 100)}% of the total per late day.` : 'No late penalty applies.'} Nothing reaches a student until you return marks.</p>
       </Help>
@@ -179,18 +179,6 @@ function Marks(p: ReadyProps & { a: Assignment }) {
   );
 }
 
-export function MarksScreen(p: CohortProps) {
-  const title = p.entry ? `Marks: ${assignmentIdent(p.entry)}` : 'Marks';
-  return (
-    <WithStatus props={p} title={title} crumbs={cohortCrumbs(p, 'Marks', [{ t: 'Assignments', href: '#assignments' }])}>
-      {(r) => {
-        const a = (r.status.assignments ?? []).find((x) => x.slug === p.entry);
-        return a ? <Marks {...r} a={a} /> : <NotFound what={`No assignment called ${p.entry ?? '(none)'} to mark.`} back="#assignments" />;
-      }}
-    </WithStatus>
-  );
-}
-
 // --------------------------------------------------------------------------- teams
 
 const TEAM_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -200,7 +188,7 @@ interface TeamsState {
   teams: { name: string; members: string[] }[];
 }
 
-function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
+export function TeamsTab(p: TabProps) {
   const { a, status, now } = p;
   const env = useEnv();
   const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
@@ -262,20 +250,14 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
   const empty = cur.teams.filter((t) => !t.members.length);
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Teams')} />
       <div class="page-head">
         <div>
-          <h1>Teams: {assignmentTitle(a)}</h1>
+          <h1>{assignmentTitle(a)}</h1>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
         <div class="actions"><a class="btn outline" href={`https://${p.cohort.org}.github.io/assignments/`} target="_blank" rel="noopener">Assignments on the student site <Ext /></a></div>
       </div>
-      {p.groups.length > 1 ? (
-        <div class="filters" role="group" aria-label="Assignment" style="margin-bottom:12px">
-          <span class="lbl">Assignment</span>
-          {p.groups.map((g) => <a class="toggle" aria-pressed={g.slug === a.slug} href={`#teams-${g.slug}`}>{assignmentIdent(g.slug)}</a>)}
-        </div>
-      ) : null}
+      {p.tabs}
       <Help title="How teams form" doc="09-release-assignment-to-cohort.md">
         <p>Students form their own teams on the student site until the window closes; you can assign the rest here. Students without a team get no repo at hand out. Assign them here or they are left out.</p>
       </Help>
@@ -347,18 +329,5 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
         </div>
       </div>
     </>
-  );
-}
-
-export function TeamsScreen(p: CohortProps) {
-  return (
-    <WithStatus props={p} title="Teams" crumbs={cohortCrumbs(p, 'Teams')}>
-      {(r) => {
-        const groups = (r.status.assignments ?? []).filter((x) => x.teams !== null && x.teams !== undefined);
-        const a = groups.find((x) => x.slug === p.entry) ?? (p.entry ? undefined : groups[0]);
-        if (!a) return <NotFound what={p.entry ? `${p.entry} is not a group assignment in this cohort.` : 'No group assignment in this cohort: every assignment is done alone.'} back="#assignments" />;
-        return <Teams {...r} a={a} groups={groups} />;
-      }}
-    </WithStatus>
   );
 }

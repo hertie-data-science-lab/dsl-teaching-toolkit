@@ -1,12 +1,15 @@
-// S16 Assignments index and S10 Assignment detail.
+// S16 Assignments index and S10 Assignment detail: the hub, with tabs Overview | Teams |
+// Marks (decision 0008). Teams shows only when the template says teams.
 
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, AssignmentState, Status } from '../model/types';
 import { Check } from '../ui/icons';
 import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
+import { tabHref, type AssignmentTab } from '../router';
 import { Crumbs, Help, ProblemCards } from '../ui/bits';
 import { asgSummary } from './Cohort';
+import { MarksTab, TeamsTab } from './Marking';
 import { WithStatus, cohortCrumbs, cohortName, cohortScope, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
@@ -87,10 +90,35 @@ function stepOf(state: AssignmentState): number {
   return LIFE.findIndex(([, s]) => s.includes(state));
 }
 
-function Detail(p: ReadyProps & { a: Assignment }) {
+export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
+
+/** The tab an assignment opens on: Teams while teams form, Marks once marking starts. */
+export function defaultTab(a: Assignment): AssignmentTab {
+  if ((a.state === 'teams_forming' || a.state === 'blocked') && isGroup(a)) return 'teams';
+  if (a.state === 'marking' || a.state === 'returned') return 'marks';
+  return 'overview';
+}
+
+const TAB_NAME: Record<AssignmentTab, string> = { overview: 'Overview', teams: 'Teams', marks: 'Marks' };
+
+function TabBar({ a, cur }: { a: Assignment; cur: AssignmentTab }) {
+  const tabs: AssignmentTab[] = isGroup(a) ? ['overview', 'teams', 'marks'] : ['overview', 'marks'];
+  return (
+    <nav class="tabs" aria-label={`${assignmentIdent(a.slug)} pages`}>
+      {tabs.map((t) => <a href={tabHref(a.slug, t)} aria-current={t === cur ? 'page' : undefined}>{TAB_NAME[t]}</a>)}
+    </nav>
+  );
+}
+
+export interface TabProps extends ReadyProps {
+  a: Assignment;
+  tabs: preact.ComponentChildren;
+}
+
+function Overview(p: TabProps) {
   const { status, now, a } = p;
   const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
-  const cur = stepOf(a.state), group = a.teams !== null && a.teams !== undefined;
+  const cur = stepOf(a.state), group = isGroup(a);
   const handedOut = cur >= 2;
   const subs = [
     'In the schedule',
@@ -121,11 +149,11 @@ function Detail(p: ReadyProps & { a: Assignment }) {
   const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, assignmentIdent(a.slug), [{ t: 'Assignments', href: '#assignments' }])} />
       <div class="page-head">
         <div><h1>{assignmentTitle(a)}</h1><p class="lede">{lede}</p></div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${a.slug}`}>Edit dates</a></div>
       </div>
+      {p.tabs}
       <Help title="What happens now" doc="10-grade-and-return-assignments.md">
         <p>
           {a.state === 'open' || a.state === 'late_window'
@@ -183,7 +211,7 @@ function Detail(p: ReadyProps & { a: Assignment }) {
           <ul class="state-actions">
             {row(cur <= 1 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
-            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={`#teams-${a.slug}`}>Open teams</a></div>) : null}
+            {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
               cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.late_until, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each receipts thread. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (
@@ -196,14 +224,14 @@ function Detail(p: ReadyProps & { a: Assignment }) {
               cur < 4 ? `Opens after late work closes${a.late_until ? `, ${fmtDay(a.late_until, tz, year)}` : ''}.` : 'Marks and feedback go to students; your private notes do not.',
               cur === 4 ? (
                 <>
-                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={`#marks-${a.slug}`}>Open marks</a></div>
+                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
                   <div class="sa-op"><span class="opname">Return marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled)} small /></div>
                 </>
               ) : null)}
             {row(cur === 5 ? 'now' : 'later', 'Returned', cur === 5 ? 'Marks are with students. Changed marks can be returned again.' : 'Opens after marks are returned. Changed marks can then be returned again.',
               cur === 5 ? (
                 <>
-                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={`#marks-${a.slug}`}>Open marks</a></div>
+                  <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
                   <div class="sa-op"><span class="opname">Return changed marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled)} small label="Return changed marks" /></div>
                 </>
               ) : null)}
@@ -220,7 +248,15 @@ export function AssignmentScreen(p: CohortProps) {
     <WithStatus props={p} title={title} crumbs={cohortCrumbs(p, title, [{ t: 'Assignments', href: '#assignments' }])}>
       {(r) => {
         const a = (r.status.assignments ?? []).find((x) => x.slug === p.entry);
-        return a ? <Detail {...r} a={a} /> : <NotFound {...r} what={`No assignment called ${p.entry} in ${cohortName(p)}.`} back="#assignments" />;
+        if (!a) return <NotFound {...r} what={`No assignment called ${p.entry} in ${cohortName(p)}.`} back="#assignments" />;
+        const tab = p.tab === 'teams' && !isGroup(a) ? 'overview' : p.tab ?? defaultTab(a);
+        const tp: TabProps = { ...r, a, tabs: <TabBar a={a} cur={tab} /> };
+        return (
+          <>
+            <Crumbs items={cohortCrumbs(p, tab === 'overview' ? assignmentIdent(a.slug) : TAB_NAME[tab], [{ t: 'Assignments', href: '#assignments' }, ...(tab === 'overview' ? [] : [{ t: assignmentIdent(a.slug), href: tabHref(a.slug, 'overview') }])])} />
+            {tab === 'teams' ? <TeamsTab {...tp} /> : tab === 'marks' ? <MarksTab {...tp} /> : <Overview {...tp} />}
+          </>
+        );
       }}
     </WithStatus>
   );

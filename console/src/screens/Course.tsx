@@ -228,7 +228,7 @@ export function TemplateScreen(p: CourseProps) {
   }
   const defaults = courseDefaults(course.meta);
   const newest = course.cohorts[0];
-  const tiers = settingsTiers(defaults, newest ? `?cohort=${newest.org}#teams-${slug}` : undefined);
+  const tiers = settingsTiers(defaults, newest ? `?cohort=${newest.org}#assignment-${slug}/teams` : undefined);
   const base = fromConfig(cfg);
   const cur = values ?? base;
   const baseQ: [string, string][] = cfg.questions && typeof cfg.questions === 'object' ? Object.entries(cfg.questions as Record<string, unknown>).map(([q, n]) => [q, String(n ?? '')]) : [];
