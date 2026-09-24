@@ -842,3 +842,15 @@ def test_ds01s_all_cohorts_is_a_deprecated_alias_and_cohort_org_is_still_refused
     env |= {"OLD_PAYLOAD": "Sem-f2026", "DEPRECATED_ALL": "false"}
     out = subprocess.run(["bash", "-c", check], env=env, capture_output=True, text=True)
     assert out.returncode == 1 and "NOT_MIGRATED" in out.stdout
+
+
+def test_semester_cards_never_come_from_the_old_people_shape(monkeypatch):
+    from dsl_course import site_repo
+
+    monkeypatch.setattr(site_repo, "_team_people", lambda org, team: [])
+    page = site_repo.people_yaml("Sem", OLD_PEOPLE, edit_at="x", semester=True)
+    assert "old" not in page and "declared in the" not in page
+    course_page = site_repo.people_yaml(
+        "Course", {"people": {"instructors": [{"name": "Prof"}]}}, edit_at="x"
+    )
+    assert "Prof" in course_page  # a COURSE file's `people:` block is its own shape

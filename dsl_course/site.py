@@ -1770,6 +1770,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
                     semester_org,
                     instructors_meta,
                     edit_at=f"{semester_org}/classroom-config/{instructors_path}",
+                    semester=True,
                 ),
                 "_data/nav.yml": nav_yaml(semester=True),
                 # The catch-all index behind the All Materials tab: every released file,

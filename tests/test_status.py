@@ -324,3 +324,19 @@ def test_c6_says_so_when_nothing_will_ever_archive_the_semester(monkeypatch):
     )
     detail = status.collect("Course", "Semester-f2026")["C6"]["detail"]
     assert "archive not scheduled (write an archive: block)" in detail
+
+
+def test_a_semester_that_has_not_migrated_its_instructors_is_a_line_not_a_crash(
+    monkeypatch, capsys
+):
+    from dsl_course.faults import NOT_MIGRATED, NotMigrated
+
+    _stub_every_read(monkeypatch)
+
+    def refuse(org):
+        raise NotMigrated("people.yml", "instructors.yml", org)
+
+    monkeypatch.setattr(sync_faculty, "load_semester_faculty", refuse)
+    row = status.collect("Course", "Semester-f2026")["C7"]
+    assert row["status"] != "ok"
+    assert NOT_MIGRATED in capsys.readouterr().err

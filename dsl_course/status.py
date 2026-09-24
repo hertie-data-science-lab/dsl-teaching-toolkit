@@ -45,6 +45,7 @@ from . import (
 )
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
+from .faults import Unusable
 from .gh_contents import put_file
 from .issues import open_titles
 from .log import CLIParser, Summary, log_err, log_ok, log_step, plural
@@ -384,7 +385,13 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
 
     # load_semester_faculty returns None when instructors.yml is absent - an empty desired set
     # for this read-only status view (no team to count).
-    semester_faculty = sync_faculty.load_semester_faculty(semester_org) or {}
+    try:
+        semester_faculty = sync_faculty.load_semester_faculty(semester_org) or {}
+    except Unusable as exc:
+        # NOT_MIGRATED, or a file with no `instructors:` list: a line saying so, never a
+        # crash - this is a read-only checklist.
+        log_err(f"  ! {exc}")
+        semester_faculty = {}
     semester_desired = sync_faculty.desired_team_members(
         semester_faculty, date.today().isoformat()
     )

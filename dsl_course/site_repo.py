@@ -577,7 +577,9 @@ def _card(entry: dict) -> dict:
     return ordered
 
 
-def _people_from_meta(meta: dict) -> tuple[list[dict], list[dict]] | None:
+def _people_from_meta(
+    meta: dict, *, semester: bool = False
+) -> tuple[list[dict], list[dict]] | None:
     """Declared people from a `people:` block - either the COURSE org's
     `.github/dsl-course.yml` (course site: instructors only, TAs are never declared
     there) or a semester's own `classroom-config/instructors.yml` (semester site: instructors
@@ -615,7 +617,7 @@ def _people_from_meta(meta: dict) -> tuple[list[dict], list[dict]] | None:
     course chooses to add rides along verbatim, so a new field needs a theme change but no
     change here.
     """
-    people = people_by_role(meta)
+    people = people_by_role(meta, semester=semester)
     if people is None:
         return None
     today = date.today().isoformat()
@@ -634,7 +636,12 @@ def _people_from_meta(meta: dict) -> tuple[list[dict], list[dict]] | None:
 
 
 def people_yaml(
-    org: str, meta: dict | None = None, *, edit_at: str, include_tas: bool = True
+    org: str,
+    meta: dict | None = None,
+    *,
+    edit_at: str,
+    include_tas: bool = True,
+    semester: bool = False,
 ) -> str:
     """Build _data/people.yml. Prefer the declared `people:` block in the supplied meta
     (the course org's dsl-course.yml for the course site, a semester's classroom-config/
@@ -650,7 +657,7 @@ def people_yaml(
     share one GitHub team (there's no separate `teaching-assistants` team - see
     course.FACULTY_TEAMS), so the fallback can't distinguish TAs from
     instructors; declare a `people:` block to get separate TA cards."""
-    override = _people_from_meta(meta or {})
+    override = _people_from_meta(meta or {}, semester=semester)
     if override is not None:
         instructors, tas = override
         note = "declared in the `people:` block"
