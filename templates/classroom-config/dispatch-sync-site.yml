@@ -2,12 +2,12 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Dispatch site sync
 
-# Seeded into a cohort's private classroom-config repo as
+# Seeded into a semester's private classroom-config repo as
 # .github/workflows/dispatch-sync-site.yml (companion to dispatch-sync.yml, which handles
 # membership). Its only job: fire the course org's Sync site whenever schedule.yml,
-# people.yml or teams.csv changes here, so the cohort website - which reads its release
+# instructors.yml or teams.csv changes here, so the semester website - which reads its release
 # plan, session dates, due dates and exams from schedule.yml, its staff cards from
-# people.yml, and which teams have room from teams.csv - refreshes immediately without a
+# instructors.yml, and which teams have room from teams.csv - refreshes immediately without a
 # manual click.
 #
 # teams.csv is here because the Join-team workflow commits to it on every join, and an
@@ -15,11 +15,11 @@ name: Dispatch site sync
 # the daily cron, a student who has just formed a team would not see it listed until the
 # next day, by which time somebody else has opened a second team for want of one to join.
 #
-# people.yml also fires dispatch-sync.yml (event_type sync-membership). The two are
+# instructors.yml also fires dispatch-sync.yml (event_type sync-membership). The two are
 # independent: different workflows, different event types, different targets (teams vs the
 # site repo), so both running on one push is expected and harmless.
 #
-# Reads the course org from THIS cohort's own .github/dsl-course.yml `course:` pointer
+# Reads the course org from THIS semester's own .github/dsl-course.yml `course:` pointer
 # (single source of truth). Fires a repository_dispatch (not workflow_dispatch) so Sync
 # site's ungated automatic path picks it up. Runs under secrets.DSL_BOT_TOKEN, which
 # classroom-config already carries (an infra repo) - unlike the content repos, so a direct
@@ -30,7 +30,7 @@ on:
     branches: [main]
     paths:
       - schedule.yml
-      - people.yml
+      - instructors.yml
       - teams.csv
 
 # Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and
@@ -46,14 +46,14 @@ jobs:
       - name: Trigger Sync site in the course org
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          COHORT_ORG: ${{ github.repository_owner }}
+          SEMESTER_ORG: ${{ github.repository_owner }}
         run: |
-          course_org=$(gh api "repos/$COHORT_ORG/.github/contents/dsl-course.yml" \
+          course_org=$(gh api "repos/$SEMESTER_ORG/.github/contents/dsl-course.yml" \
             --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
           if [ -z "$course_org" ]; then
-            echo "::error::no 'course:' line in $COHORT_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            echo "::error::no 'course:' line in $SEMESTER_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
             exit 1
           fi
           gh api "repos/$course_org/.github/dispatches" \
             -f event_type=sync-site \
-            -f "client_payload[cohort_org]=$COHORT_ORG"
+            -f "client_payload[semester_org]=$SEMESTER_ORG"

@@ -30,9 +30,6 @@
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
-          "cohort_dest_repo": {
-            "type": "string"
-          },
           "course_source_repo": {
             "type": "string"
           },
@@ -46,6 +43,9 @@
             "type": "string"
           },
           "handout_datetime": {
+            "type": "string"
+          },
+          "semester_dest_repo": {
             "type": "string"
           },
           "show_on_site": {
@@ -82,6 +82,13 @@
           "event_datetime": {
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "exam",
+              "special_event"
+            ],
+            "type": "string"
+          },
           "show_on_site": {
             "type": "boolean"
           },
@@ -89,13 +96,6 @@
             "type": "boolean"
           },
           "title": {
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "exam",
-              "special_event"
-            ],
             "type": "string"
           }
         },
@@ -114,12 +114,6 @@
             "items": {
               "additionalProperties": false,
               "properties": {
-                "cohort_dest_path": {
-                  "type": "string"
-                },
-                "cohort_dest_repo": {
-                  "type": "string"
-                },
                 "course_source_path": {
                   "type": "string"
                 },
@@ -127,6 +121,12 @@
                   "type": "string"
                 },
                 "deploy_datetime": {
+                  "type": "string"
+                },
+                "semester_dest_path": {
+                  "type": "string"
+                },
+                "semester_dest_repo": {
                   "type": "string"
                 }
               },
@@ -144,6 +144,14 @@
           "event_datetime": {
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "lab",
+              "lecture",
+              "readings"
+            ],
+            "type": "string"
+          },
           "show_on_site": {
             "type": "boolean"
           },
@@ -151,14 +159,6 @@
             "type": "boolean"
           },
           "title": {
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "lab",
-              "lecture",
-              "readings"
-            ],
             "type": "string"
           }
         },

@@ -1,4 +1,4 @@
-"""Grading-deadline SSOT: the autograder's pin comes from the cohort schedule, not a separate
+"""Grading-deadline SSOT: the autograder's pin comes from the semester schedule, not a separate
 Grade-button input. Precedence is an explicit `assignments[slug].grading_datetime`, else
 `due_datetime`. Every value is a timezone-aware datetime; a bare date closes at end of day
 (23:59:59)."""
@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from dsl_course.schedule import Schedule, grading_datetime_iso, parse
+from dsl_course.schedule import Schedule, grading_cutoff_datetime, parse
+
+
+def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
+    at = grading_cutoff_datetime(sched, slug)
+    return at.isoformat() if at is not None else None
 
 
 def test_due_datetime_closes_end_of_day():
@@ -136,7 +141,7 @@ def test_grading_datetime_with_an_explicit_time_is_honoured():
 
 
 def test_grading_datetime_is_not_clamped_relative_to_due_datetime():
-    # Nothing clamps it - the pin is whatever the cohort states, even earlier than due.
+    # Nothing clamps it - the pin is whatever the semester states, even earlier than due.
     sched = parse(
         {
             "assignments": {

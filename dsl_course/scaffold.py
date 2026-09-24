@@ -3,8 +3,8 @@
 Replaces the old "use this template" repo: the required structure is defined here in
 code, so a new repo is always laid out the way the Release actions expect.
 
-    scaffold materials   --org X --tag f2026                 -> course-materials-f2026
-    scaffold assignment  --org X --number 1 --tag f2026      -> assignment-1-f2026
+    scaffold materials   --org X --semester f2026                 -> course-materials-f2026
+    scaffold assignment  --org X --number 1 --semester f2026      -> assignment-1-f2026
 
 Materials repos get `lectures/`, `readings/` and `labs/` `01_session-1/` skeletons (any
 top-level directory with an ordinal-prefixed subdirectory is a releasable section - add
@@ -20,7 +20,6 @@ copies every branch of it, history and all, and rewrites only the SYSTEM-owned f
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import tempfile
@@ -63,11 +62,11 @@ from .course import (
     pages_repo,
 )
 from .derive import BEGIN_SOLUTION, END_SOLUTION, SOLUTION_CHUNK_OPT
-from .discovery import central_ref_for, discover_assignments, discover_cohorts
+from .discovery import central_ref_for, discover_assignments, discover_semesters
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .grades import course_assignment_defaults
-from .log import log, log_err, log_ok, log_skip, log_step
+from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
 from .repos import (
@@ -111,7 +110,7 @@ _SYLLABUS_STUB = """\
 | Instructor | |
 | E-mail | |
 | Office hours | |
-| Term | {tag} |
+| Semester | {tag} |
 | Sessions | |
 
 ## 2. Course contents and learning objectives
@@ -202,7 +201,7 @@ _READINGS_STUB = (
 # except the late-work pair, which the toolkit itself has an opinion about and writes live.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
-    "Dates live in the cohort's schedule.yml."
+    "Dates live in the semester's schedule.yml."
 )
 _QUESTIONS_STUB = """\
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
@@ -234,11 +233,20 @@ def _yaml_scalar(value: object) -> str:
     return text
 
 
+class _Flow(list):
+    """A list `_setting` writes inline, `[a, b]`."""
+
+
 def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
     """One line of grading_config.yml: `key: value` padded to a common column, then its
     explanation. `live=False` comments the whole line out - the setting is documented and
     inert until an instructor uncomments it."""
-    line = f"{key}: {_yaml_scalar(value)}"
+    shown = (
+        f"[{', '.join(_yaml_scalar(v) for v in value)}]"
+        if isinstance(value, _Flow)
+        else _yaml_scalar(value)
+    )
+    line = f"{key}: {shown}"
     if not live:
         line = f"# {line}"
     return f"{line:<29} # {comment}".rstrip()
@@ -246,7 +254,7 @@ def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
 
 # What the three per-unit stages say on a `shared_dropbox_repo` assignment, where none of
 # them runs.
-_HAND_MARKED = "hand-marked: a drop box is one repo for the whole cohort"
+_HAND_MARKED = "hand-marked: a drop box is one repo for the whole semester"
 
 
 def _grading_config(
@@ -264,9 +272,9 @@ def _grading_config(
     group = kind == "group"
     # A drop box is hand-marked, and the parse says so: all three per-unit stages are
     # refused for `submit_via: shared_dropbox_repo` (`grades._cross_check`), because each
-    # of fifty students would have the whole cohort's work cloned, run and archived under
+    # of fifty students would have the whole semester's work cloned, run and archived under
     # their own key. Seeded true, the file the button had just written reported a
-    # `Dropped` line on every quarter-hourly tick and stood as an advisory in the cohort's
+    # `Dropped` line on every quarter-hourly tick and stood as an advisory in the semester's
     # digest issue - a fault about nothing anybody typed.
     marked_by_hand = submit_via == "shared_dropbox_repo"
     cap = defaults.get("max_team_size")
@@ -295,12 +303,12 @@ def _grading_config(
             submit_via,
             "assignment_repo (they push to their repo) | external (handed in elsewhere: "
             "Moodle, Kaggle, in class - no repo is created) | shared_dropbox_repo (one "
-            "private repo for the whole cohort, each student pushes into their own "
+            "private repo for the whole semester, each student pushes into their own "
             "folder, peers can read it)",
         ),
         # COMMENTED on every shape, `external` included. The value here is a placeholder
         # with the right shape and no meaning, and a live line carrying it would put a
-        # `Submit on moodle.hertie-school.org` button in front of a whole cohort pointing
+        # `Submit on moodle.hertie-school.org` button in front of a whole semester pointing
         # at a page that does not exist. An instructor uncomments it once they have the
         # real address; `grades._submit_url` refuses one still carrying the placeholder.
         _setting(
@@ -316,24 +324,20 @@ def _grading_config(
         _setting(
             "visibility",
             visibility,
-            "private (the student and the teaching team) | public (the whole internet: "
-            "portfolio work, no receipts issue) | student_choice (private, and the "
-            "student is its admin: theirs to publish after the grading cutoff, and no "
-            "receipts issue) - read at hand-out only",
+            "private (the student and the instructors) | public (the whole internet: "
+            "portfolio work, no Submission receipts issue) | student_choice (private, and the "
+            "student is its admin: theirs to publish after the late cutoff, and no "
+            "Submission receipts issue) - read at hand-out only",
             live=creates_unit_repos(submit_via),
         ),
-        # ONE format, because `grades` reads one: the key is the vocabulary this file
-        # teaches, and the only thing it drives - the `completion_check` default - is
-        # written out explicitly below either way. A template seeded with several starters
-        # records the one it was named first by, and the comment NAMES THE REST: a grader
-        # reading `format: py` beside `completion_check: true` would otherwise take the
-        # switch for a hand-made override rather than the notebook that is also in the repo.
+        # EVERY starter seeded, in the order it was named: the FIRST is the runnable one
+        # (the completion check and the autograder run it), the rest are there to be read.
+        # Written as a flow list so the line keeps the file's one-setting-per-line shape.
         _setting(
-            "format",
-            formats[0] if formats else NO_STARTER,
-            "ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; "
-            "grading reads whatever is in the repo"
-            + (f" (also seeded: {', '.join(formats[1:])})" if len(formats) > 1 else ""),
+            "formats",
+            _Flow(formats or [NO_STARTER]),
+            "ipynb | py | rmd | qmd | latex | none - the starter stubs; the first is the "
+            "runnable one",
         ),
         "",
         _QUESTIONS_STUB.rstrip(),
@@ -358,21 +362,21 @@ def _grading_config(
             "true" if autograde and not marked_by_hand else "false",
             _HAND_MARKED
             if marked_by_hand
-            else "true: run tests/ at the cutoff and show the count to graders",
+            else "true: run tests/ at the late cutoff and show the count to graders",
         ),
         _setting(
             "completion_check",
             "true" if "ipynb" in formats and not marked_by_hand else "false",
             _HAND_MARKED
             if marked_by_hand
-            else "true: execute the notebook at the cutoff, record whether it runs clean",
+            else "true: execute the notebook at the late cutoff, record whether it runs clean",
         ),
         _setting(
             "grader_pdf",
             "false",
             _HAND_MARKED
             if marked_by_hand
-            else "true: at the cutoff, archive each submission filtered to its marked "
+            else "true: at the late cutoff, archive each submission filtered to its marked "
             "questions as a PDF for graders",
         ),
     ]
@@ -380,7 +384,7 @@ def _grading_config(
 
 
 _HIDDEN_TEST_PY = """\
-# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
+# HIDDEN tests - run faculty-side at the late cutoff, never shipped to students.
 # They import the student's submission (the repo root) and check it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -391,7 +395,7 @@ def test_solve_runs():
 """
 
 _HIDDEN_TEST_NOTEBOOK = """\
-# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
+# HIDDEN tests - run faculty-side at the late cutoff, never shipped to students.
 # The submitted notebook is nbconvert'd to starter.py first; this imports it and checks it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -599,7 +603,7 @@ _ARTEFACT_NOTE = {
 _CONTRIBUTIONS_STUB = """\
 # Contributions
 
-<!-- dsl-stub: replace this with who did what. The teaching team reads it at the
+<!-- dsl-stub: replace this with who did what. The instructors read it at the
      deadline, alongside your commit history, when deciding individual adjustments. -->
 
 | Member | What they did |
@@ -616,10 +620,10 @@ def _brief_stub(
     unedited.
 
     NO facts line at all - two headings and what goes under them. The deadline, the late
-    rule and what the assignment is out of are the assignment's page on the cohort site,
+    rule and what the assignment is out of are the assignment's page on the semester site,
     which prints all three off the plan and off this assignment's own
     `grading_config.yml` (the total being the sum of its `questions:` maxima); spelling
-    any of them here as well is how a cohort comes to read two answers to one question -
+    any of them here as well is how a semester comes to read two answers to one question -
     and the copy that is hand-edited prose is the one that goes stale. The `**Points:**
     __` line this opened with was exactly that: a blank for an author to fill in beside a
     number the assignment already declares.
@@ -631,8 +635,8 @@ def _brief_stub(
 
     `submit_via` decides what "What to submit" asks for, and an `external` assignment
     drops the artefact sentences the rest of the stub carries: the repo collects nothing,
-    so "commit the notebook with its outputs saved" would tell a cohort to hand in where
-    nothing is ever read from. That shape opens no receipts issue either, so the brief is
+    so "commit the notebook with its outputs saved" would tell a semester to hand in where
+    nothing is ever read from. That shape opens no Submission receipts issue either, so the brief is
     the one place that can say where the work really goes."""
     external = submit_via == "external"
     artefacts = (
@@ -646,7 +650,7 @@ def _brief_stub(
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + (
             "_Say where and how students hand in - nothing is collected from this repo. "
-            "`submit_url:` in `grading_config.yml` puts that address on the cohort site "
+            "`submit_url:` in `grading_config.yml` puts that address on the semester site "
             "as a button._\n"
             if external
             else "_Say which files you expect back, and in what shape._\n"
@@ -738,7 +742,7 @@ _RELEASEIGNORE_STUB = f"""\
 # INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
 # rewritten by the toolkit, so anything you put here stays.
 #
-# Name a file here and it is never copied out of this repo - not into a cohort's
+# Name a file here and it is never copied out of this repo - not into a semester's
 # materials, not onto the public site, not with a solution. Same syntax as .gitignore,
 # and you can add another in any subfolder. The full rules:
 # https://github.com/{CENTRAL}/blob/main/docs/08-release-materials-to-cohort.md
@@ -759,13 +763,13 @@ _PUBLISH_STUB = f"""\
 # INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
 # rewritten by the toolkit, so anything you put here stays.
 #
-# What the cohort site hosts PUBLICLY, so a rendered deck opens in a browser instead of
+# What the semester site hosts PUBLICLY, so a rendered deck opens in a browser instead of
 # showing as source on GitHub. Same syntax as .gitignore, relative to this repo - or,
-# strictly, to the cohort's copy, so a release that renames a path with cohort_dest_path
-# needs the pattern written the way the COHORT repo has it. Anything unmatched stays
+# strictly, to the semester's copy, so a release that renames a path with semester_dest_path
+# needs the pattern written the way the SEMESTER repo has it. Anything unmatched stays
 # exactly as it is today: enrolled students open it on GitHub. A deck's
 # <name>_files/ bundle follows its deck. solution/, tests/, grading files and .env are
-# never copied whatever is written here. Applies to every cohort of this course. Edit,
+# never copied whatever is written here. Applies to every semester of this course. Edit,
 # then press Sync site (or wait for the next release / daily sync) - a file that does not
 # parse stops the sync and is reported, rather than quietly publishing nothing. Full rules:
 # https://github.com/{CENTRAL}/blob/main/docs/11-configure-cohort-site.md
@@ -824,9 +828,9 @@ def _actions_table(org: str) -> str:
         "| Action | What it does |\n"
         "| --- | --- |\n"
         "| **Release materials** | Copy any path - session folders, root files - into a "
-        "cohort's `materials` repo by default, or a destination path you name. |\n"
+        "semester's `materials` repo by default, or a destination path you name. |\n"
         "| **Release assignment** | Freeze an assignment template, then generate one private "
-        "repo per student (or per team) in the cohort org. |\n"
+        "repo per student (or per team) in the semester org. |\n"
         "| **New materials repo** | Scaffold a correctly structured materials repo; the "
         "release workflows come bootstrapped with it. |\n"
         "| **New assignment** | Scaffold an assignment template (brief + starter(s); the "
@@ -834,7 +838,7 @@ def _actions_table(org: str) -> str:
         "workflows come bootstrapped with it. |\n"
         "| **Refresh actions** | Re-seed the workflows and repopulate dropdowns after you "
         "add sessions/sections/repos. |\n"
-        "| **Check cohort setup** | Read-only per-cohort checklist of what's configured - it "
+        "| **Check semester setup** | Read-only per-semester checklist of what's configured - it "
         "says what still needs doing. |\n\n"
         "(**Release materials** and **Release assignment** also appear in this repo's own "
         "Actions tab.)\n"
@@ -855,7 +859,7 @@ def _maintaining(org: str, repo: str) -> str:
         "| You edit / add | Visible to students? | Notes |\n"
         "| --- | --- | --- |\n"
         "| `lectures/`, `labs/`, `readings/` (and any other section folders) | Yes, when you "
-        "release that session | The released files are copied into the cohort `materials` "
+        "release that session | The released files are copied into the semester `materials` "
         "repo, or another destination path you name. |\n"
         "| root files - `SYLLABUS.md`, `README.md`, or any name you use | Yes, when you name "
         "the file as the release path | A root file is released like any other path: type "
@@ -887,7 +891,7 @@ def _maintaining(org: str, repo: str) -> str:
         "new section (e.g. `datasets/01_intro/`). Nothing needs refreshing afterwards: the "
         "Release workflows take the path as free text (`course_source_path`), so a new "
         "session or section is releasable the moment you push it. **Refresh actions** "
-        "repopulates the repo/cohort dropdowns, and runs itself nightly.\n\n"
+        "repopulates the repo/semester dropdowns, and runs itself nightly.\n\n"
         "## Available actions\n\n" + actions_table + "\n"
         "## Public course website (optional) **[DEFERRED]**\n\n"
         "The **Publish course website** action can share this repo's materials on a public "
@@ -955,7 +959,7 @@ def materials_readme(org: str) -> str:
     deliberately, after checking the placeholder is still untouched
     (deploy.UNEDITED_README_MARKERS).
 
-    Release materials with the README toggle copies this file into the cohort's materials
+    Release materials with the README toggle copies this file into the semester's materials
     repo, where enrolled students read it - so it is written for them. How the source repo
     is structured, and how to operate it, is MAINTAINING.md, which is never released.
     """
@@ -978,7 +982,7 @@ def materials_readme(org: str) -> str:
         f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n\n"
         "- **How to populate & operate this repo:** see [`MAINTAINING.md`](MAINTAINING.md) - "
         "it explains what to edit, what gets released to students, and what to leave alone. "
-        "`MAINTAINING.md` is **not** deployed to the cohort org; leave it here as a persistent "
+        "`MAINTAINING.md` is **not** deployed to the semester org; leave it here as a persistent "
         "reference.\n"
         "- **Available actions:** " + actions_table
     )
@@ -999,7 +1003,7 @@ def _source_branches(wd: Path) -> tuple[list[str], list[str]]:
     branch of its own; pushed under that name it would open the new repo with a branch
     called `HEAD`, so it is in neither list.
 
-    Left behind are the human branches' opposite: `upstream` and `from-<cohort-org>` are
+    Left behind are the human branches' opposite: `upstream` and `from-<semester-org>` are
     toolkit-owned working branches, regenerated by release and propagate, and a copy has
     nothing to carry over from either. They are still NAMED, by the caller - an instructor
     who left work on one has no other way to see that the copy meant to drop it."""
@@ -1030,7 +1034,7 @@ def _copy_source_head(org: str, source: str) -> str | None:
     A repo built out of another repo's branches opens on whichever of them GitHub guessed
     (see `repos.set_default_branch`), and for an assignment template the default branch is
     what `assign.generate_from_template` builds every student repo from - so a source
-    whose default had landed on `solution` would hand the whole cohort the model answers,
+    whose default had landed on `solution` would hand the whole semester the model answers,
     the `grading_config.yml` and the hidden tests. Refused rather than quietly pinned to
     something else: the source repo is the thing that is wrong, and only the faculty who
     own it can say which branch this year's students should start from.
@@ -1164,7 +1168,7 @@ def scaffold_materials(
             "labs/01_session-1/.gitkeep": b"",
             RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
             # The other half of the same question: `.releaseignore` says what leaves this
-            # repo at all, `publish.yml` what the cohort site then hosts in the open.
+            # repo at all, `publish.yml` what the semester site then hosts in the open.
             PUBLISH_FILE: _publish_stub(public_dirs, public_types).encode(),
         }
         # One commit for the skeleton: they all carried the same subject anyway, so
@@ -1177,11 +1181,11 @@ def scaffold_materials(
     # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
     # push_content_workflows lands both in one commit, logs its own failure, and returns
     # 1 - a materials repo with no Release workflows must not report success.
-    cohorts = discover_cohorts(org)
+    semesters = discover_semesters(org)
     failures += push_content_workflows(
         org,
         repo,
-        cohorts,
+        semesters,
         discover_assignments(org),
         central_ref_for(org),
         workflows=RELEASE_WORKFLOWS,
@@ -1196,7 +1200,7 @@ def _seed_template_workflows(org: str, repo: str) -> int:
     """Equip the hand-out button, as scaffold_materials equips the release ones: faculty
     run Release assignment from this repo's own Actions tab, and it opens on THIS
     template. Which buttons a template hosts, and why, is `TEMPLATE_WORKFLOWS`;
-    `assign.withhold_from_template` is what strips them off the cohort copy, so no student
+    `assign.withhold_from_template` is what strips them off the semester copy, so no student
     repo generated from this template inherits one.
 
     Every path that makes a template calls it, the copied one included: a copy arrives
@@ -1212,7 +1216,7 @@ def _seed_template_workflows(org: str, repo: str) -> int:
     return push_content_workflows(
         org,
         repo,
-        discover_cohorts(org),
+        discover_semesters(org),
         sorted({*discover_assignments(org), repo}),
         central_ref_for(org),
         workflows=TEMPLATE_WORKFLOWS,
@@ -1249,7 +1253,7 @@ def parse_formats(answer: str, autograde: bool = False) -> list[str]:
             )
         return []
     if clash := _collision(named, autograde):
-        raise ValueError(f"--format: {clash} - ask for one of the two, not both")
+        raise ValueError(f"--formats: {clash} - ask for one of the two, not both")
     return named
 
 
@@ -1272,7 +1276,7 @@ def _collision(named: list[str], autograde: bool) -> str:
         )
     if autograde and "ipynb" in named and "py" in named:
         return (
-            "with autograde on, the cutoff converts the submitted starter.ipynb over "
+            "with autograde on, the late cutoff converts the submitted starter.ipynb over "
             "starter.py before the hidden tests import it, so only the notebook would "
             "be marked"
         )
@@ -1283,7 +1287,7 @@ def _collision(named: list[str], autograde: bool) -> str:
 # course's `assignment_defaults:` does not say either. `ipynb` for the starter because that
 # is what the button pre-filled before the course could choose.
 _TOOLKIT_ANSWERS = {
-    "format": "ipynb",
+    "formats": "ipynb",
     "team_formation": "self_select",
     "submit_via": "assignment_repo",
     "visibility": "private",
@@ -1309,7 +1313,7 @@ def _not_a_format(problem: str) -> ValueError:
     typed - the box takes free text, so the answer to a bad one is the vocabulary."""
     listed = ", ".join(STARTER_FORMATS)
     return ValueError(
-        f"--format: {problem} - name any of {listed}, comma-separated, or "
+        f"--formats: {problem} - name any of {listed}, comma-separated, or "
         f"{NO_STARTER} on its own"
     )
 
@@ -1392,7 +1396,7 @@ def scaffold_assignment(
         log(
             "  (boxes 5-10 - format, type, team_formation, submit_via, autograde and "
             "visibility - "
-            "were ignored: the number and the tag name the repo, the name describes it, "
+            "were ignored: the number and the semester name the repo, the name describes it, "
             "and the copied definition governs the rest: "
             f"https://github.com/{org}/{repo}/blob/"
             f"{SOLUTION_BRANCH}/grading_config.yml)"
@@ -1483,13 +1487,13 @@ def scaffold_assignment(
             f"# Assignment {number} - model solution\n\n"
             "Goes out to students after the deadline, two ways:\n\n"
             "- **On a clock** - set `solution_datetime:` on this assignment in the "
-            "cohort's `classroom-config/schedule.yml`, beside its `due_datetime`. The "
+            "semester's `classroom-config/schedule.yml`, beside its `due_datetime`. The "
             "hourly cron pushes this folder into every student/team repo at that "
             "moment. Needs `handout_datetime:` set too - the schedule can only push a "
             "solution into repos it provisioned. There is no default: leave it out and "
             "the solution never ships automatically.\n"
-            "- **By hand** - run **Release assignment** with **include_solution** "
-            "ticked.\n\n"
+            "- **By hand** - run **Release assignment** with `solution_datetime` set to "
+            "`now`.\n\n"
             "Both do the same thing, idempotently, so a scheduled release you then "
             "re-run by hand changes nothing.\n"
         )
@@ -1600,11 +1604,11 @@ def _dispatch_deploy(org: str, site: str) -> str | None:
 
 def scaffold_site(org: str) -> int:
     """Create an org's public website repo, seed its Pages build and enable GitHub Pages.
-    Used for both the per-cohort student-facing site and the opt-in public course site -
+    Used for both the per-semester student-facing site and the opt-in public course site -
     the org is whatever's passed.
 
     The repo is created EMPTY and the first `site sync` writes the site into it: the whole
-    of a cohort site ships from `templates/site/` and `templates/site-seed/` in this repo,
+    of a semester site ships from `templates/site/` and `templates/site-seed/` in this repo,
     so there is no template repo to fall behind them.
 
     The repo is named `<org>.github.io` so it serves at the org root. It must be PUBLIC
@@ -1714,11 +1718,11 @@ def scaffold_site(org: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     pm = sub.add_parser("materials")
     pm.add_argument("--org", required=True)
-    pm.add_argument("--tag", required=True, help="Year tag, e.g. f2026 or s2026")
+    pm.add_argument("--semester", required=True, help="Semester, e.g. f2026 or s2026")
     pm.add_argument(
         "--copy-from",
         dest="copy_from",
@@ -1735,7 +1739,7 @@ def main() -> int:
         dest="public_dirs",
         choices=PUBLIC_DIRS,
         default=NOTHING_PUBLIC,
-        help="Which folders the cohort site may host publicly, so they render in a "
+        help="Which folders the semester site may host publicly, so they render in a "
         "browser. Seeds publish.yml; never written over a repo that has one.",
     )
     pm.add_argument(
@@ -1748,7 +1752,7 @@ def main() -> int:
     pa = sub.add_parser("assignment")
     pa.add_argument("--org", required=True)
     pa.add_argument("--number", required=True)
-    pa.add_argument("--tag", required=True, help="Year tag, e.g. f2026 or s2026")
+    pa.add_argument("--semester", required=True, help="Semester, e.g. f2026 or s2026")
     pa.add_argument(
         "--name",
         default="",
@@ -1758,13 +1762,13 @@ def main() -> int:
     # Four boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
     # answers them, else the toolkit does (`resolve_answers`).
     pa.add_argument(
-        "--format",
+        "--formats",
         dest="formats",
         default=COURSE_DEFAULT_CHOICE,
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "
-        f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all "
-        "(grading reads whatever is in the repo either way). Default: the course's "
-        "`assignment_defaults: format`, else ipynb",
+        f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all; "
+        "the first is the runnable one (the completion check and the autograder run "
+        "it). Default: the course's `assignment_defaults: formats`, else ipynb",
     )
     pa.add_argument(
         "--type",
@@ -1797,14 +1801,14 @@ def main() -> int:
         choices=[*VISIBILITIES, COURSE_DEFAULT_CHOICE],
         default=COURSE_DEFAULT_CHOICE,
         help="public = every student's repo is world-readable from hand-out (portfolio "
-        "work); there is then no receipts issue. Read when the repo is created - editing "
+        "work); there is then no Submission receipts issue. Read when the repo is created - editing "
         "it later changes nothing",
     )
     pa.add_argument(
         "--autograde",
         choices=["false", "true"],
         default="false",
-        help="true = seed a tests/ stub on the solution branch and run it at the "
+        help="true = seed a tests/ stub on the solution branch and run it at the late "
         "cutoff; the count is shown to graders and never to a student",
     )
     pa.add_argument(
@@ -1822,14 +1826,14 @@ def main() -> int:
         # A copy ignores these boxes, so it pays for no read of the course's defaults.
         answers = resolve_answers(
             {
-                "format": args.formats,
+                "formats": args.formats,
                 "team_formation": args.team_formation,
                 "submit_via": args.submit_via,
                 "visibility": args.visibility,
             },
             course_assignment_defaults(args.org),
         )
-        args.formats = answers["format"]
+        args.formats = answers["formats"]
         args.team_formation = answers["team_formation"]
         args.submit_via = answers["submit_via"]
         args.visibility = answers["visibility"]
@@ -1854,14 +1858,14 @@ def main() -> int:
         except ValueError as exc:
             log_err(str(exc))
             return 1
-    # scaffold_materials equips the new repo's Release workflows, which reads the cohort
+    # scaffold_materials equips the new repo's Release workflows, which reads the semester
     # registry + assignment list; a read helper that couldn't reach the API raises, and in
     # an Actions log a one-line error beats a traceback.
     try:
         if args.cmd == "materials":
             return scaffold_materials(
                 args.org,
-                args.tag,
+                args.semester,
                 args.copy_from,
                 args.public_dirs,
                 args.public_types,
@@ -1871,7 +1875,7 @@ def main() -> int:
         return scaffold_assignment(
             args.org,
             args.number,
-            args.tag,
+            args.semester,
             formats,
             args.kind,
             name=args.name,

@@ -8,16 +8,26 @@
     "completion_check": {
       "type": "boolean"
     },
-    "format": {
-      "enum": [
-        "ipynb",
-        "py",
-        "rmd",
-        "qmd",
-        "latex",
-        "none"
-      ],
-      "type": "string"
+    "formats": {
+      "oneOf": [
+        {
+          "items": {
+            "enum": [
+              "ipynb",
+              "py",
+              "rmd",
+              "qmd",
+              "latex",
+              "none"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "string"
+        }
+      ]
     },
     "grader_pdf": {
       "type": "boolean"

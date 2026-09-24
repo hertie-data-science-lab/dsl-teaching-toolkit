@@ -1,5 +1,5 @@
 """The workflow FILES this repo ships: its own `.github/workflows/`, plus every template
-seeded verbatim into a course/cohort org.
+seeded verbatim into a course/semester org.
 
 Same operational properties the renderers are held to in test_renderers.py, enforced on
 the files rather than on the functions - so a hand-written workflow can't quietly take the
@@ -427,7 +427,7 @@ def _site_build_step() -> dict:
 def test_the_site_build_tells_github_metadata_which_repo_it_is_building():
     # jekyll-github-metadata synthesises `site.title` and `site.description` from the
     # repository, and dies with "No repo name found" unless something names it - the
-    # Actions checkout's origin is not a name it will take. Every cohort site went down
+    # Actions checkout's origin is not a name it will take. Every semester site went down
     # this way under theme v2.0.0, whose layouts read `site.title` as their fallback.
     assert _site_build_step()["env"]["PAGES_REPO_NWO"] == "${{ github.repository }}"
 
@@ -436,7 +436,7 @@ def test_the_theme_seam_job_builds_with_the_shipped_deploy_env_and_no_more():
     # `jekyll-theme-seam` is the only place a site meets the real theme before faculty do,
     # so it proves something only while it builds the way the shipped deploy.yml does.
     # It was green at theme v2.0.0 on an env that gave the build more than a live deploy
-    # gets, and every cohort site went down anyway. BASE_PATH is the sole exception: an
+    # gets, and every semester site went down anyway. BASE_PATH is the sole exception: an
     # org root site's baseurl is empty, and this job has no Pages step to compute one.
     seam = SHIPPED_WORKFLOWS[".github/workflows/ci.yml"]["jobs"]["jekyll-theme-seam"]
     step = next(

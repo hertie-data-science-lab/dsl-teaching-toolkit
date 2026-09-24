@@ -1,4 +1,4 @@
-"""The seeded welcome workflows/forms must be valid YAML - a typo breaks a cohort's
+"""The seeded welcome workflows/forms must be valid YAML - a typo breaks a semester's
 bootstrap (they're put_file'd verbatim into the welcome repo). github-script bodies are
 YAML literal-block strings, so safe_load parses the workflow without running any JS.
 
@@ -34,7 +34,7 @@ CSV_WORKFLOWS = {"onboard.yml": "onboard", "team-formation.yml": "form-team"}
 
 def script_of(rel: str, job: str) -> str:
     """The github-script body of a workflow's single step, AS SEEDED - through the same
-    reader the seeding uses, so the shared helper block is spliced in the way a cohort
+    reader the seeding uses, so the shared helper block is spliced in the way a semester
     receives it rather than left as its marker."""
     doc = yaml.safe_load(welcome.welcome_workflow(f"welcome/{rel}"))
     (step,) = doc["jobs"][job]["steps"]
@@ -111,7 +111,7 @@ def test_csv_is_parsed_with_quote_aware_helpers_not_split(rel, job):
 def test_csv_helpers_do_not_drift_between_workflows():
     # Both workflows write the same roster/teams CSVs, and both get their reader/writer
     # from ONE file spliced in at seeding time - so they cannot drift. Asserted on the
-    # SEEDED text, because the splice (and its indentation) is what a cohort receives.
+    # SEEDED text, because the splice (and its indentation) is what a semester receives.
     onboard, formation = (
         csv_helpers(script_of(rel, job)) for rel, job in sorted(CSV_WORKFLOWS.items())
     )
@@ -150,7 +150,7 @@ def test_onboard_routes_auditors_to_the_auditors_team():
 
 
 def test_onboard_treats_a_missing_role_column_as_enrolled():
-    # A cohort whose roster predates the column has no `role` header at all - it must
+    # A semester whose roster predates the column has no `role` header at all - it must
     # keep onboarding (blank/absent = enrolled, per roster.normalise_role), so `role` is
     # never part of the required-column guard.
     script = script_of("onboard.yml", "onboard")
@@ -204,7 +204,7 @@ def test_team_formation_refuses_auditors_without_publishing_their_role():
 def test_a_refused_team_name_gives_no_reason():
     # A team may not be named after a roster handle (a group repo is `<slug>-<team>` and a
     # per-student one `<slug>-<handle>`), but SAYING so turned the form into a membership
-    # oracle: try a name, and the reply tells you whether that person is in this cohort.
+    # oracle: try a name, and the reply tells you whether that person is in this semester.
     # Reserved names and handle collisions share one reason-free refusal.
     code = code_of(script_of("team-formation.yml", "form-team"))
     assert "named after a GitHub handle" not in code
@@ -214,7 +214,7 @@ def test_a_refused_team_name_gives_no_reason():
 
 
 def test_team_formation_treats_a_missing_role_column_as_enrolled():
-    # A cohort whose roster predates the column has no `role` header at all - those students
+    # A semester whose roster predates the column has no `role` header at all - those students
     # must keep forming teams (blank/absent = enrolled, per roster.normalise_role), so `role`
     # is never part of the required-column guard.
     script = script_of("team-formation.yml", "form-team")
@@ -339,11 +339,11 @@ def test_team_formation_retakes_the_cap_decision_on_every_attempt():
 def test_the_form_reads_the_lock_file_and_nothing_else():
     # The two answers this workflow needs - may a team form, and how big - live in the
     # template's grading_config.yml, in the course org, which this token cannot reach. It
-    # used to scrape them out of the cohort's schedule.yml, which no longer carries them
+    # used to scrape them out of the semester's schedule.yml, which no longer carries them
     # at all: every request would be accepted, at a default cap, for any slug.
     script = script_of("team-formation.yml", "form-team")
     assert "assignments.lock.yml" in script and "path: LOCK" in script
-    # Nothing reads the cohort's schedule any more, and nothing interprets a `type:`.
+    # Nothing reads the semester's schedule any more, and nothing interprets a `type:`.
     assert "path: 'schedule.yml'" not in script
     assert "declaredType" not in script
     # No cap of its own and no default cap of its own: both come from the file.
@@ -406,7 +406,7 @@ def _lock_answers(lock_yml: str | None, slugs: list[str]) -> list[dict | None]:
 
 @needs_js
 def test_the_scanner_reads_every_scalar_for_every_shape():
-    # `_LOCK_FILE` predates the formation window, which is what a cohort last synced by an
+    # `_LOCK_FILE` predates the formation window, which is what a semester last synced by an
     # older toolkit looks like: the two window scalars come back unset, and the workflow
     # reads that as open rather than shut (see the behavioural test further down).
     assert _lock_answers(_LOCK_FILE, ["solo", "project", "allocated", "invented"]) == [
@@ -443,7 +443,7 @@ def test_the_scanner_is_not_confused_by_the_files_own_header():
                 3,
                 "open",
                 "2026-10-04",
-                "https://cohort.github.io/assignments/02-assignment-2.html",
+                "https://semester.github.io/assignments/02-assignment-2.html",
             )
         }
     )
@@ -453,7 +453,7 @@ def test_the_scanner_is_not_confused_by_the_files_own_header():
             "cap": 3,
             "window": "open",
             "closes": "2026-10-04",
-            "page": "https://cohort.github.io/assignments/02-assignment-2.html",
+            "page": "https://semester.github.io/assignments/02-assignment-2.html",
         }
     ]
 
@@ -613,14 +613,14 @@ def test_onboard_throttles_a_student_before_it_touches_the_roster():
     # The THRESHOLD, as a number and not as a prefix: `>= 30` contains `>= 3`, and a
     # throttle that only fires on the thirtieth open Join issue is no throttle at all.
     assert re.search(r"unresolved\.length >= 3\b", code)
-    assert "unresolved Join course issues - contact the teaching team" in code
+    assert "unresolved Join course issues - contact your instructors" in code
     assert throttle < code.index("await readRoster()")
     assert throttle < code.index("process.env.HAS_BOT")
 
 
 def test_the_form_refuses_exactly_the_slugs_the_reconcile_reserves():
     # teams.csv is STUDENT-written, and `team_slug("course", "admin")` is `course-admin` -
-    # the faculty team with admin on every repo in the cohort. The form is the gate; the
+    # the faculty team with admin on every repo in the semester. The form is the gate; the
     # reconcile (teams.is_reserved_slug) is the backstop for a row that reached the
     # CSV another way. Two lists in two languages, so they are pinned to each other here:
     # a role team added to course.ROLE_TEAMS and not to the form is a slug a student can
@@ -675,7 +675,7 @@ def _run_form(
 
     `await`/`async` are taken out so the stubs can answer synchronously - the same trick
     `_lock_answers` plays on one helper, over the whole script. Nothing else is rewritten,
-    so what runs is the JavaScript a cohort receives."""
+    so what runs is the JavaScript a semester receives."""
     code = re.sub(
         r"\basync\s+",
         "",
@@ -696,7 +696,7 @@ def _run_form(
         "const process = { env: { HAS_BOT: 'true' } };\n"
         "const setTimeout = (fn, ms) => fn();\n"
         "const core = { setFailed: (m) => {}, warning: (m) => {} };\n"
-        "const context = { repo: { owner: 'cohort', repo: 'welcome' },"
+        "const context = { repo: { owner: 'semester', repo: 'welcome' },"
         " payload: { issue: ISSUE } };\n"
         "const github = {\n"
         "  rest: {\n"
@@ -727,8 +727,8 @@ def _run_form(
     return json.loads(run.stdout)
 
 
-# The assignment's page on the cohort site, as the lock carries it for the refusals.
-_PAGE = "https://cohort.github.io/assignments/02-assignment-2.html"
+# The assignment's page on the semester site, as the lock carries it for the refusals.
+_PAGE = "https://semester.github.io/assignments/02-assignment-2.html"
 
 
 def _lock_for(
@@ -780,9 +780,9 @@ def test_a_window_that_has_not_opened_yet_never_says_it_closed():
 
 @needs_js
 def test_a_lock_written_before_the_window_existed_still_forms_teams():
-    # THE fail-open case. A cohort whose last sync predates the window carries no
+    # THE fail-open case. A semester whose last sync predates the window carries no
     # `team_formation_window:` scalar at all; reading that as closed would take team
-    # formation away from every such cohort at once, silently, until someone noticed.
+    # formation away from every such semester at once, silently, until someone noticed.
     out = _run_form(
         "assignments:\n  assignment-2:\n"
         "    team_formation: self_select\n    max_team_size: 4\n",
@@ -847,7 +847,7 @@ def test_creating_a_near_miss_of_an_existing_name_is_refused_too(team):
 @needs_js
 def test_creating_a_name_nothing_resembles_still_opens_the_team():
     # The refusal must not be so eager that it takes the second team away: `team-beta` is
-    # nothing like `team-alpha`, and a cohort forming its teams has to be able to say so.
+    # nothing like `team-alpha`, and a semester forming its teams has to be able to say so.
     out = _run_form(
         _lock_for("open"),
         _TEAMS_CSV,
@@ -868,13 +868,13 @@ def test_joining_a_name_nothing_resembles_is_refused_with_somewhere_to_look():
     assert "no team **team-zeta** for `assignment-2`" in out["comments"][0]
     assert "Did you mean" not in out["comments"][0]
     assert "Create a new team" in out["comments"][0]
-    # Somewhere to look is the assignment's page on the cohort site - the one list of
+    # Somewhere to look is the assignment's page on the semester site - the one list of
     # teams - carried in the lock because this script cannot work its URL out; and a new
     # issue one click away, its Team box prefilled.
     said = out["comments"][0]
     assert f"spelt exactly as on [the assignment page]({_PAGE})" in said
     assert (
-        "(https://github.com/cohort/welcome/issues/new?template=02-join-team.yml"
+        "(https://github.com/semester/welcome/issues/new?template=02-join-team.yml"
         "&team=team-zeta)" in said
     )
     assert out["labels"] == ["team-refused"]
@@ -1100,7 +1100,7 @@ def test_a_student_not_on_the_roster_stays_open_for_staff():
 
 
 def test_nothing_opens_or_names_a_team_list_issue_any_more():
-    # The assignment's page on the cohort site is the one list of teams. A second list in
+    # The assignment's page on the semester site is the one list of teams. A second list in
     # the public welcome repo was a second writer to keep in step, and a second place a
     # student could be sent to that disagreed with the first.
     form = (WELCOME / "ISSUE_TEMPLATE/02-join-team.yml").read_text()
@@ -1113,9 +1113,9 @@ def test_nothing_opens_or_names_a_team_list_issue_any_more():
 # --- The generated Assignment field --------------------------------------------------
 
 
-def test_a_cohort_with_nothing_open_keeps_the_free_text_assignment_field():
+def test_a_semester_with_nothing_open_keeps_the_free_text_assignment_field():
     # A dropdown needs at least one option, and a form GitHub refuses to render is worse
-    # than an awkward one: it takes the Join-team route away from the cohort entirely.
+    # than an awkward one: it takes the Join-team route away from the semester entirely.
     assert welcome.join_team_form({}) == welcome.template(welcome.JOIN_TEAM_FORM)
 
 
@@ -1137,7 +1137,7 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
         "assignment-4-project",
     ]
     assert fields["assignment"]["validations"]["required"] is True
-    # The action field is never generated - two fixed options, the same in every cohort.
+    # The action field is never generated - two fixed options, the same in every semester.
     assert fields["action"]["attributes"]["options"] == [
         "Join an existing team",
         "Create a new team",
@@ -1147,7 +1147,7 @@ def test_the_open_assignments_become_a_dropdown_the_workflow_can_still_parse():
 def test_the_template_still_carries_the_sentence_the_links_are_spliced_over():
     # The header names the assignment's page; `join_team_form` rewrites that one sentence
     # into a LINK to it. A rewording in the template with none here would silently stop
-    # the splice and leave every cohort with a page nobody can click through to.
+    # the splice and leave every semester with a page nobody can click through to.
     assert welcome.TEAM_LIST_SENTENCE in welcome.template(welcome.JOIN_TEAM_FORM)
 
 
@@ -1161,7 +1161,7 @@ def test_the_header_links_the_page_of_the_one_open_assignment():
 
 
 def test_two_open_assignments_get_a_line_each():
-    third = "https://cohort.github.io/assignments/03-assignment-3.html"
+    third = "https://semester.github.io/assignments/03-assignment-3.html"
     form = welcome.join_team_form({"assignment-2": _PAGE, "assignment-3": third})
     header = yaml.safe_load(form)["body"][0]["attributes"]["value"]
     assert "listed on each assignment's page:" in header
@@ -1209,8 +1209,8 @@ def test_only_the_assignments_whose_window_is_open_are_offered():
     assert welcome.open_formations("assignments:\n  {}\n") == {}
 
 
-def test_a_cohort_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatch):
-    # Never a crash and never an empty dropdown: a cohort seeded before the file existed,
+def test_a_semester_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatch):
+    # Never a crash and never an empty dropdown: a semester seeded before the file existed,
     # one whose sync has not run, and a read that failed all land on the same fallback.
     for answer in (None, ""):
         monkeypatch.setattr(
@@ -1255,7 +1255,7 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
     (org, repo, path, content) = written[0]
     assert (org, repo, path) == ("Org", "welcome", welcome.JOIN_TEAM_FORM_PATH)
     assert len(written) == 1
-    # And it carries THIS cohort's open slug, which is the whole reason the tick calls it.
+    # And it carries THIS semester's open slug, which is the whole reason the tick calls it.
     field = yaml.safe_load(content.decode())["body"]
     (dropdown,) = [b for b in field if b.get("id") == "assignment"]
     assert dropdown["type"] == "dropdown" and dropdown["attributes"]["options"] == [
@@ -1266,7 +1266,7 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
 
 
 def test_a_form_that_could_not_be_written_is_reported(monkeypatch, capsys):
-    # The cohort keeps whatever the form last offered, so a window that just opened is one
+    # The semester keeps whatever the form last offered, so a window that just opened is one
     # nobody can file an issue for - the tick has to go red rather than log-and-go.
     from dsl_course import welcome
 

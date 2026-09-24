@@ -30,7 +30,7 @@ RETIRED_WORKFLOWS = (".github/workflows/release-code.yml",)
 
 # What no student repo may carry: every faculty release button, whether a repo hosts it
 # today or was seeded before it was retired. `assign.withhold_from_template` strips these
-# off a cohort template before per-student repos generate from it, and `patch_released`
+# off a semester template before per-student repos generate from it, and `patch_released`
 # refuses to push one. RETIRED is in the set deliberately: retiring a workflow (step 4 of
 # "Adding a workflow") moves its path out of the tuples above, and a course template whose
 # nightly refresh has not run yet still carries the file - so a set that named only what
@@ -49,7 +49,7 @@ NEVER_IN_STUDENT_REPOS = tuple(
 def push_content_workflows(
     org: str,
     repo: str,
-    cohort_orgs: list[str],
+    semester_orgs: list[str],
     assignments: list[str],
     central_ref: str,
     *,
@@ -57,7 +57,7 @@ def push_content_workflows(
 ) -> int:
     """Place the run-from-repo workflows in one repo, as ONE commit.
 
-    They are re-rendered from the same inputs and change together (a new cohort org, a new
+    They are re-rendered from the same inputs and change together (a new semester org, a new
     assignment template, an edit to the template here), so writing them file by file put a
     pair of near-identical `ci: ... wrapper` commits into a repo faculty actually read, for
     what is one logical change. put_files makes it one commit - and folds the
@@ -75,8 +75,8 @@ def push_content_workflows(
     Returns 1 if that commit didn't land, so refresh can report a run that didn't
     converge. It is all-or-nothing: put_files moves the branch once, at the end."""
     render = {
-        RELEASE_MATERIALS: lambda: render_release(cohort_orgs, repo),
-        RELEASE_ASSIGNMENT: lambda: render_provision(cohort_orgs, assignments, repo),
+        RELEASE_MATERIALS: lambda: render_release(semester_orgs, repo),
+        RELEASE_ASSIGNMENT: lambda: render_provision(semester_orgs, assignments, repo),
     }
     if not put_files(
         org,

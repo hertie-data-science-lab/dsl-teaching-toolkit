@@ -128,7 +128,7 @@ def _run_gh(
 # GitHub caps CONTENT-CREATING requests at roughly 80 a minute per token, separately from
 # the 5,000/hour budget. A first handout tick issues several writes per student in one
 # process, so past ~60 students the burst trips the secondary limit and the retry ladder
-# (30 + 60 + 120 s) is spent before it clears - and the rest of the cohort fails in turn.
+# (30 + 60 + 120 s) is spent before it clears - and the rest of the semester fails in turn.
 # Pacing the writes to stay under the cap is cheaper than retrying through it.
 WRITES_PER_MINUTE = 70
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})

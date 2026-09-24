@@ -1,6 +1,6 @@
 """dsl-course sync-teams -- materialise per-(assignment, team) GitHub Teams from teams.csv.
 
-The group "access" half, mirroring sync_roster for enrolment. `teams.csv` (in the cohort's
+The group "access" half, mirroring sync_roster for enrolment. `teams.csv` (in the semester's
 private classroom-config) is the single source of truth for who is in which project team for
 which assignment; this reconciles a GitHub Team `<assignment>-<team>` from each row so the
 team's repo access + @mentions track the CSV. Idempotent.
@@ -18,13 +18,12 @@ with prune=True - config is meant to be the live truth there; this module's own 
 is only for ad-hoc/CLI use outside that workflow.
 
 Usage:
-    python3 -m dsl_course.sync_teams --cohort-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.sync_teams --cohort-org hertie-dsl-demo-f2026 --prune
+    python3 -m dsl_course.sync_teams --semester-org hertie-dsl-demo-f2026
+    python3 -m dsl_course.sync_teams --semester-org hertie-dsl-demo-f2026 --prune
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from . import roster, schedule, teams
@@ -34,7 +33,7 @@ from .gh_teams import (
     list_teams,
     reconcile_team_members,
 )
-from .log import log_err, log_ok, log_person, log_step
+from .log import CLIParser, add_preview_flag, log_err, log_ok, log_person, log_step
 
 # The naming rules live with the file's parser, which is the only thing that can refuse a
 # row for breaking them. Imported for this module's own reconcile below, not re-exported:
@@ -79,7 +78,7 @@ def emptied_teams(
     A team qualifies only if ALL of these hold, because emptying the wrong one evicts
     people from something this module does not own:
     - it carries `PROJECT_TEAM_DESCRIPTION`, the mark `ensure_team` stamps on creation;
-    - its slug is `<assignment>-...` for an assignment key in the cohort's schedule;
+    - its slug is `<assignment>-...` for an assignment key in the semester's schedule;
     - it is not a role team (`teams.is_reserved_slug`: instructors, students, auditors,
       course-admin, instructors-*), whatever else is true of it;
     - teams.csv names no member for it."""
@@ -123,7 +122,7 @@ def known_handles(students: list[roster.Student] | None) -> set[str]:
     Adding a handle to a GitHub Team also INVITES it to the org if it isn't a member
     yet, so an unvetted teams.csv handle (a typo, or a placeholder name that happens
     to collide with a real GitHub account) would invite an arbitrary stranger. The
-    roster is the SSOT of who belongs to the cohort; teams.csv only groups them."""
+    roster is the SSOT of who belongs to the semester; teams.csv only groups them."""
     return {s.github_handle for s in students or [] if s.onboarded}
 
 
@@ -168,7 +167,7 @@ def vet_groups(
 
 
 def _empty_the_emptied(
-    cohort_org: str, wanted: dict[str, set[str]], dry_run: bool
+    semester_org: str, wanted: dict[str, set[str]], dry_run: bool
 ) -> int:
     """Reconcile every `emptied_teams` team to no members. Returns the error count.
 
@@ -176,25 +175,25 @@ def _empty_the_emptied(
     acting login are never removed, and an unreadable owner list skips the prune whole.
     A team listing that could not be read empties nothing - absence has to be a real
     answer before anybody loses access on the strength of it."""
-    existing = list_teams(cohort_org)
+    existing = list_teams(semester_org)
     if existing is None:
         return 1
-    keys = list(schedule.load(cohort_org).assignments)
+    keys = list(schedule.load(semester_org).assignments)
     errors = 0
     for slug in emptied_teams(existing, wanted, keys):
         if dry_run:
-            log_person(f"    DRY-RUN team {slug}: now empty - would remove its members")
+            log_person(f"    PREVIEW team {slug}: now empty - would remove its members")
             continue
-        errors += reconcile_team_members(cohort_org, slug, set(), prune=True)
+        errors += reconcile_team_members(semester_org, slug, set(), prune=True)
     return errors
 
 
-def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
-    wanted = desired_teams(teams.load(cohort_org))
+def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
+    wanted = desired_teams(teams.load(semester_org))
     if not wanted:
         log_ok("no project teams defined yet - nothing to sync.")
-        return _empty_the_emptied(cohort_org, wanted, dry_run) if prune else 0
-    students = roster.load(cohort_org)
+        return _empty_the_emptied(semester_org, wanted, dry_run) if prune else 0
+    students = roster.load(semester_org)
     if students is None:
         # The roster is ABSENT - distinct from a present-but-empty one. Building the
         # allowlist from None gives an empty set, so a pruning reconcile would then EVICT
@@ -204,11 +203,11 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         # them, and a red X here reaches only a maintainer who cannot fix it. A read that
         # FAILED still raises out of `roster.load` and still reds the run.
         log_err(
-            f"no roster to vet teams.csv against in {cohort_org} - skipping (reported on "
+            f"no roster to vet teams.csv against in {semester_org} - skipping (reported on "
             f"the students.csv digest issue in {teams.CONFIG_REPO})"
         )
         return 0
-    log_step(f"Materialising {len(wanted)} project team(s) in {cohort_org}")
+    log_step(f"Materialising {len(wanted)} project team(s) in {semester_org}")
     errors = 0
     for slug, accepted, rejected in vet_groups(
         {s: sorted(members) for s, members in wanted.items()}, students
@@ -236,27 +235,27 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         members = set(accepted)
         if dry_run:
             log_person(
-                f"    DRY-RUN team {slug}: {', '.join('@' + m for m in sorted(members))}"
+                f"    PREVIEW team {slug}: {', '.join('@' + m for m in sorted(members))}"
             )
-        elif not ensure_team(cohort_org, slug, members, prune):
+        elif not ensure_team(semester_org, slug, members, prune):
             errors += 1
     if prune:
-        errors += _empty_the_emptied(cohort_org, wanted, dry_run)
+        errors += _empty_the_emptied(semester_org, wanted, dry_run)
     return errors
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cohort-org", required=True)
+    parser = CLIParser(description=__doc__)
+    parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--prune",
         action="store_true",
         help="Remove team members no longer in teams.csv.",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report the team changes; make none (default).")
     args = parser.parse_args()
 
-    errors = sync(args.cohort_org, prune=args.prune, dry_run=args.dry_run)
+    errors = sync(args.semester_org, prune=args.prune, dry_run=args.preview)
     if errors:
         log_err(f"{errors} errors during sync")
         return 1

@@ -463,7 +463,7 @@ def test_a_question_fenced_inside_one_cell_is_a_whole_question():
     # Otter's fences are usually two markdown cells, but nothing stops a question being
     # opened and closed in one. Reading only the first fence left it open for ever, the
     # notebook raised "opened and never closed", and `pick_grader_document` swallowed that
-    # - so the whole cohort reported "no marked questions".
+    # - so the whole semester reported "no marked questions".
     nb = {
         "cells": [
             {"cell_type": "code", "metadata": {}, "source": "import numpy\n"},

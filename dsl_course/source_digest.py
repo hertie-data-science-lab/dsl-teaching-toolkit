@@ -21,7 +21,6 @@ that issue reads its state into this one and closes it.
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from .config_digest import (
@@ -40,6 +39,7 @@ from .config_digest import (
 )
 from .config_digest import sync as _sync
 from .faults import NOTIFY_FROM, Severity
+from .log import CLIParser
 from .schedule import SCHEDULE_PATH, SourceFault
 
 # What this module IS: schedule.yml's digest, its two frozen titles, its key migration and
@@ -111,7 +111,7 @@ def migrated(previous: dict[str, str], faults: list[SourceFault]) -> dict[str, s
 
 
 def sync(
-    cohort_org: str,
+    semester_org: str,
     course_org: str,
     faults: list[SourceFault],
     now,
@@ -122,7 +122,7 @@ def sync(
     `schedule.source_faults` found missing AND the entries `schedule.parse` had to drop."""
     return _sync(
         SCHEDULE,
-        cohort_org,
+        semester_org,
         course_org,
         faults,
         now,
@@ -133,19 +133,21 @@ def sync(
     )
 
 
-def hold(cohort_org: str, held: dict[str, str | None], clock: int | None = None) -> int:
+def hold(
+    semester_org: str, held: dict[str, str | None], clock: int | None = None
+) -> int:
     """Un-record a crossing whose mail did not go out - see `config_digest.hold`."""
-    return _hold(SCHEDULE, cohort_org, held, clock)
+    return _hold(SCHEDULE, semester_org, held, clock)
 
 
 def main() -> int:
     """`--title` prints the digest issue's exact title, and nothing else.
 
-    A CLI for one constant, because the alternative is a copy of it in the cohort's
+    A CLI for one constant, because the alternative is a copy of it in the semester's
     validate-schedule template - and every lookup of this issue matches the title
     EXACTLY (see `issues.find_issues`), so a copy stops finding the issue the day the
     wording changes, silently, on the one line that was meant to point at it."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--title",
         action="store_true",

@@ -11,7 +11,7 @@ Half of that row is written in Liquid, by `file_link.html`, which knows the URLs
 being told: `source` (the file's home on GitHub) and, where the site hosts a rendered copy,
 `render`. The other half cannot be: it depends on WHO is reading, and the settings that say
 so live in the reader's own browser (/profile/ writes them), because the site is one public
-page for the whole cohort. No profile, no `online` and no `local`.
+page for the whole semester. No profile, no `online` and no `local`.
 
 `_layouts/default.html` belongs to the shared theme, so there is no <head> to put this in:
 a body-inline script is the only place it can go, which is why it is small and loads
@@ -180,7 +180,7 @@ day that sentence is reworded.
 
   function onlineUrl(owner, repo, tail) {
     /* github.dev is VS Code in the browser, on whatever repo the path names - so the
-       owner is the student (their fork) or the cohort org (their submission repo). */
+       owner is the student (their fork) or the semester org (their submission repo). */
     return "https://github.dev/" + encodeSegment(owner) + "/" + encodeSegment(repo) + tail;
   }
 
@@ -338,7 +338,7 @@ day that sentence is reworded.
     var org = root.getAttribute("data-org");
     var repo = ownShape(root.getAttribute("data-repo-name"), me.handle);
     /* The drop box is the one page whose repo is not the reader's alone: there is a single
-       one for the cohort, and what is theirs is a folder inside it. So the name is taken
+       one for the semester, and what is theirs is a folder inside it. So the name is taken
        from the callout exactly as written and only the FOLDER is substituted - `path` is
        what tells the two cases apart from here down. */
     var path = "";

@@ -9,7 +9,7 @@ colour of the first cell differ, and those are what this passes in - so a fix to
 other three reaches both rows instead of one.
 
 It stays its own FILE because `_layouts/schedule.html` dispatches by name, one branch per
-row type, on purpose: an include name built out of `event.type` would ask Jekyll for a file
+row type, on purpose: an include name built out of `event.kind` would ask Jekyll for a file
 that does not exist the first time a schedule.yml carries an unknown type, and fail the
 whole build.
 {%- endcomment -%}

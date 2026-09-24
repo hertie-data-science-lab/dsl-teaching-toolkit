@@ -9,7 +9,7 @@
       },
       "counts_doc": "",
       "doc": "docs/reference/actions-reference.md",
-      "help": "Check the cohort's setup and refresh what the console shows.",
+      "help": "Check the semester's setup and refresh what the console shows.",
       "name": "cohort.check",
       "preview": false,
       "required_team": "instructors",
@@ -26,7 +26,7 @@
       },
       "counts_doc": "Reasons carry one entry per release that is due and would not go out.",
       "doc": "docs/07-schedule-releases.md",
-      "help": "Preview what automation would release in this cohort now.",
+      "help": "Preview what automation would release in this semester now.",
       "name": "cohort.preview_automation",
       "preview": true,
       "required_team": "instructors",
@@ -38,16 +38,6 @@
       "args_schema": {
         "additionalProperties": false,
         "properties": {
-          "cohort_dest_path": {
-            "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "cohort_dest_repo": {
-            "description": "Cohort repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
           "course_source_path": {
             "description": "Path(s), comma-separated",
             "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
@@ -61,6 +51,16 @@
           "entry": {
             "description": "The schedule.yml releases key",
             "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          },
+          "semester_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "semester_dest_repo": {
+            "description": "Semester repo to release into",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           }
         },
@@ -83,16 +83,6 @@
       "args_schema": {
         "additionalProperties": false,
         "properties": {
-          "cohort_dest_path": {
-            "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "cohort_dest_repo": {
-            "description": "Cohort repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
           "course_source_path": {
             "description": "Path(s), comma-separated",
             "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
@@ -106,6 +96,16 @@
           "entry": {
             "description": "The schedule.yml releases key",
             "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          },
+          "semester_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "semester_dest_repo": {
+            "description": "Semester repo to release into",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           }
         },
@@ -128,16 +128,6 @@
       "args_schema": {
         "additionalProperties": false,
         "properties": {
-          "cohort_dest_path": {
-            "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "cohort_dest_repo": {
-            "description": "Cohort repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
           "course_source_path": {
             "description": "Path(s), comma-separated",
             "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
@@ -151,6 +141,16 @@
           "entry": {
             "description": "The schedule.yml releases key",
             "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          },
+          "semester_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "semester_dest_repo": {
+            "description": "Semester repo to release into",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           }
         },
@@ -173,16 +173,6 @@
       "args_schema": {
         "additionalProperties": false,
         "properties": {
-          "cohort_dest_path": {
-            "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
-            "type": "string"
-          },
-          "cohort_dest_repo": {
-            "description": "Cohort repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
           "course_source_path": {
             "description": "Path(s), comma-separated",
             "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
@@ -190,6 +180,16 @@
           },
           "course_source_repo": {
             "description": "Course-org repo to release from",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          },
+          "semester_dest_path": {
+            "description": "Destination path(s), comma-separated",
+            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "type": "string"
+          },
+          "semester_dest_repo": {
+            "description": "Semester repo to release into",
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           }
@@ -219,7 +219,7 @@
       },
       "counts_doc": "",
       "doc": "docs/08-release-materials-to-cohort.md",
-      "help": "Keep this cohort's edits for future terms: one pull request per source repo.",
+      "help": "Keep this semester's edits for future terms: one pull request per source repo.",
       "name": "release.propagate_back",
       "preview": true,
       "required_team": "instructors",
@@ -236,9 +236,12 @@
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           },
-          "include_solution": {
-            "description": "Also push the solution branch",
-            "type": "boolean"
+          "solution_datetime": {
+            "description": "`now` also pushes the solution branch. Pushes the model answer and rubric into every student's repo. This is not returning marks, and cannot be undone for reuse.",
+            "enum": [
+              "now"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -339,7 +342,7 @@
             "type": "boolean"
           },
           "receipt_note": {
-            "description": "Post a note on each receipts thread",
+            "description": "Post a note on each Submission receipts issue",
             "type": "boolean"
           }
         },
@@ -382,7 +385,7 @@
       },
       "counts_doc": "",
       "doc": "docs/11-configure-cohort-site.md",
-      "help": "Update the cohort site now.",
+      "help": "Update the semester site now.",
       "name": "site.update",
       "preview": false,
       "required_team": "instructors",
@@ -424,7 +427,7 @@
       },
       "counts_doc": "",
       "doc": "docs/05-manage-teaching-team.md",
-      "help": "Check staff and student access against people.yml, the roster and teams.",
+      "help": "Check instructor and student access against instructors.yml, the roster and teams.",
       "name": "access.check",
       "preview": true,
       "required_team": "instructors",
@@ -437,7 +440,7 @@
         "additionalProperties": false,
         "properties": {
           "force": {
-            "description": "Archive before the cohort's archive date",
+            "description": "Archive before the semester's archive date",
             "type": "boolean"
           }
         },
@@ -446,7 +449,7 @@
       },
       "counts_doc": "",
       "doc": "docs/10-grade-and-return-assignments.md",
-      "help": "Archive the cohort: every repo read-only, nothing deleted.",
+      "help": "Archive the semester: every repo read-only, nothing deleted.",
       "name": "cohort.archive",
       "preview": true,
       "required_team": "instructors",
@@ -533,7 +536,7 @@
       },
       "counts_doc": "",
       "doc": "docs/07-schedule-releases.md",
-      "help": "Write the syllabus's session list from the cohort's schedule.",
+      "help": "Write the syllabus's session list from the semester's schedule.",
       "name": "assignment.generate_syllabus",
       "preview": true,
       "required_team": "instructors",
@@ -567,20 +570,20 @@
             ],
             "type": "string"
           },
-          "tag": {
-            "description": "Term tag, e.g. f2026",
+          "semester": {
+            "description": "Semester, e.g. f2026",
             "pattern": "^[fs][0-9]{4}$",
             "type": "string"
           }
         },
         "required": [
-          "tag"
+          "semester"
         ],
         "type": "object"
       },
       "counts_doc": "",
       "doc": "docs/02-add-materials-to-course.md",
-      "help": "Create a materials repo for a term.",
+      "help": "Create a materials repo for a semester.",
       "name": "materials.create",
       "preview": false,
       "required_team": "instructors",
@@ -593,7 +596,7 @@
         "additionalProperties": false,
         "properties": {
           "autograde": {
-            "description": "Seed tests and run them at the cutoff",
+            "description": "Seed tests and run them at the late cutoff",
             "type": "boolean"
           },
           "copy_from": {
@@ -601,8 +604,8 @@
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           },
-          "format": {
-            "description": "Starter file(s), comma-separated",
+          "formats": {
+            "description": "Starter file(s), comma-separated; the first is the runnable one",
             "pattern": "^(?:none|(?:ipynb|py|rmd|qmd|latex)(?:,(?:ipynb|py|rmd|qmd|latex))*)$",
             "type": "string"
           },
@@ -616,17 +619,17 @@
             "pattern": "^[0-9]{1,3}$",
             "type": "string"
           },
+          "semester": {
+            "description": "Semester, e.g. f2026",
+            "pattern": "^[fs][0-9]{4}$",
+            "type": "string"
+          },
           "submit_via": {
             "enum": [
               "assignment_repo",
               "shared_dropbox_repo",
               "external"
             ],
-            "type": "string"
-          },
-          "tag": {
-            "description": "Term tag, e.g. f2026",
-            "pattern": "^[fs][0-9]{4}$",
             "type": "string"
           },
           "team_formation": {
@@ -654,7 +657,7 @@
         },
         "required": [
           "number",
-          "tag"
+          "semester"
         ],
         "type": "object"
       },
@@ -677,7 +680,7 @@
       },
       "counts_doc": "",
       "doc": "docs/04-new-cohort-org.md",
-      "help": "Set up an empty cohort org for a new term.",
+      "help": "Set up an empty semester org.",
       "name": "cohort.bootstrap",
       "preview": false,
       "required_team": "course-admin",

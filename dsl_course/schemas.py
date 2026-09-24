@@ -13,7 +13,6 @@ the engine's own check runs, which remain the verdict.
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -22,12 +21,14 @@ from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
     FORMATS,
+    INSTRUCTOR_ROLES,
+    INSTRUCTORS_FILE,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
 )
 from .grades import COURSE_DEFAULT_KEYS, SPEC_KEYS
-from .log import log_ok
+from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
     HANDLE_PATTERN,
@@ -47,10 +48,9 @@ from .schedule import (
     KNOWN_DEPLOY,
     KNOWN_EVENT,
     KNOWN_RELEASE,
-    KNOWN_RELEASE_TYPES,
+    KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
 )
-from .sync_faculty import TEACHING_ROLES
 from .teams import FIELDS as TEAMS_FIELDS
 
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
@@ -59,10 +59,11 @@ DEFAULT_OUT = Path("console/schemas")
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
 # named here is a string: the parsers read dates, paths and titles as text.
 _FLAGS = {"tbc", "show_on_site"}
-_EVENT_TYPES = ("exam", "special_event")
-# people.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
+_EVENT_KINDS = ("exam", "special_event")
+# instructors.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
 PEOPLE_ENTRY_KEYS = (
     "github_handle",
+    "role",
     "email",
     "name",
     "title",
@@ -72,10 +73,10 @@ PEOPLE_ENTRY_KEYS = (
     "end",
     "show_email",
 )
-PEOPLE_REQUIRED = ("github_handle", "email")
+PEOPLE_REQUIRED = ("github_handle", "role", "email")
 COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
 COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url")
-# dsl-course.yml keys beyond `people`, `assignment_defaults` and `cohort_defaults`.
+# dsl-course.yml keys beyond `people`, `assignment_defaults` and `semester_defaults`.
 COURSE_TOP_KEYS = (
     "org",
     "org_name",
@@ -87,7 +88,7 @@ COURSE_TOP_KEYS = (
 )
 # The assignment_defaults keys New assignment reads as the course's defaults for the
 # questions it asks (contracts section 6); optional, beside COURSE_DEFAULT_KEYS.
-ASKED_DEFAULT_KEYS = ("format", "submit_via", "team_formation", "visibility")
+ASKED_DEFAULT_KEYS = ("formats", "submit_via", "team_formation", "visibility")
 
 
 def _obj(
@@ -193,7 +194,7 @@ ASSIGNMENT_STATES = (
     "returned",
 )
 RELEASE_STATES = ("planned", "will_be_skipped", "released", "late")
-PROBLEM_SCOPES = ("course", "cohort")
+PROBLEM_SCOPES = ("course", "semester")
 
 
 def status_schema() -> dict:
@@ -234,15 +235,15 @@ def status_schema() -> dict:
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": repo_state},
             "templates": {"type": "array", "items": repo_state},
-            "cohorts": {"type": "array", "items": _str()},
+            "semesters": {"type": "array", "items": _str()},
         },
         ("org", "stages"),
     )
-    cohort = _obj(
+    semester = _obj(
         {
             "org": _str(),
-            "term": nullable,
-            "term_label": nullable,
+            "key": nullable,
+            "label": nullable,
             "timezone": _str(),
             "week": {"type": ["integer", "null"]},
             "weeks": {"type": ["integer", "null"]},
@@ -269,12 +270,12 @@ def status_schema() -> dict:
     week_item = _obj(
         {
             "when": _str(),
-            "type": _str(),
+            "kind": _str(),
             "ref": _str(),
             "title": _str(),
             "state": _str(),
         },
-        ("when", "type", "ref", "state"),
+        ("when", "kind", "ref", "state"),
     )
     # An entry with nothing to copy has no source or destination.
     place = {
@@ -285,7 +286,7 @@ def status_schema() -> dict:
         {
             "id": _str(),
             "when": nullable,
-            "type": nullable,
+            "kind": nullable,
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
@@ -305,7 +306,7 @@ def status_schema() -> dict:
             "state": _enum(ASSIGNMENT_STATES),
             "handout": nullable,
             "due": nullable,
-            "late_until": nullable,
+            "grading_cutoff_datetime": nullable,
             "solution_shown": nullable,
             "units": {"type": ["integer", "null"]},
             "submissions": {"type": ["integer", "null"]},
@@ -318,7 +319,14 @@ def status_schema() -> dict:
         },
         # The four moments are always present (null when unset), so the console can move
         # an assignment from open to late window to marking on its own clock.
-        ("slug", "state", "handout", "due", "late_until", "solution_shown"),
+        (
+            "slug",
+            "state",
+            "handout",
+            "due",
+            "grading_cutoff_datetime",
+            "solution_shown",
+        ),
     )
     count = {"type": "integer"}
     return _doc(
@@ -328,7 +336,7 @@ def status_schema() -> dict:
                 "schema": {"type": "string", "enum": [STATUS_SCHEMA]},
                 "inputs": {"type": "object", "additionalProperties": nullable},
                 "course": course,
-                "cohort": cohort,
+                "semester": semester,
                 "problems": {"type": "array", "items": problem},
                 "this_week": {"type": "array", "items": week_item},
                 "releases": {"type": "array", "items": release},
@@ -374,14 +382,14 @@ def schedule_schema() -> dict:
         _keys(
             KNOWN_RELEASE,
             {
-                "type": _enum(KNOWN_RELEASE_TYPES),
+                "kind": _enum(KNOWN_ROW_KINDS),
                 "deploy": {"type": "array", "items": deploy},
                 "event_datetime": _str(),
             },
         )
     )
     assignment = _obj(_keys(KNOWN_ASSIGNMENT), ("due_datetime", "course_source_repo"))
-    event = _obj(_keys(KNOWN_EVENT, {"type": _enum(_EVENT_TYPES)}))
+    event = _obj(_keys(KNOWN_EVENT, {"kind": _enum(_EVENT_KINDS)}))
     archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
     top = _keys(
         KNOWN_TOP_LEVEL,
@@ -396,12 +404,21 @@ def schedule_schema() -> dict:
     return _doc("classroom-config/schedule.yml", _obj(top))
 
 
-def people_schema() -> dict:
+def instructors_schema() -> dict:
     entry = _obj(
-        _keys(PEOPLE_ENTRY_KEYS, {"show_email": {"type": "boolean"}}), PEOPLE_REQUIRED
+        _keys(
+            PEOPLE_ENTRY_KEYS,
+            {
+                "show_email": {"type": "boolean"},
+                "role": {"type": "string", "enum": list(INSTRUCTOR_ROLES)},
+            },
+        ),
+        PEOPLE_REQUIRED,
     )
-    roles = {role: {"type": "array", "items": entry} for role in TEACHING_ROLES}
-    return _doc("classroom-config/people.yml", _obj({"people": _obj(roles)}))
+    return _doc(
+        f"classroom-config/{INSTRUCTORS_FILE}",
+        _obj({"instructors": {"type": "array", "items": entry}}),
+    )
 
 
 def _csv_schema(title: str, fields, required, overrides: dict | None = None) -> dict:
@@ -430,7 +447,14 @@ _SPEC_TYPES = {
     "max_team_size": {"type": "integer"},
     "submit_via": _enum(SUBMIT_VIA),
     "visibility": _enum(VISIBILITIES),
-    "format": _enum(FORMATS),
+    # A list in grading_config.yml; the course's assignment_defaults may also give the
+    # New assignment box's comma-separated string.
+    "formats": {
+        "oneOf": [
+            {"type": "array", "items": _enum(FORMATS)},
+            {"type": "string"},
+        ]
+    },
     "questions": {
         "type": "object",
         "additionalProperties": {"type": ["string", "number"]},
@@ -457,7 +481,7 @@ def dsl_course_schema() -> dict:
         }
     )
     defaults = _obj(_keys((*COURSE_DEFAULT_KEYS, *ASKED_DEFAULT_KEYS), _SPEC_TYPES))
-    cohort_defaults = _obj(
+    semester_defaults = _obj(
         {
             "timezone": _str(),
             "archive": _obj(
@@ -480,7 +504,7 @@ def dsl_course_schema() -> dict:
     top |= {
         "people": people,
         "assignment_defaults": defaults,
-        "cohort_defaults": cohort_defaults,
+        "semester_defaults": semester_defaults,
     }
     return _doc(".github/dsl-course.yml", _obj(top, ("org",)))
 
@@ -493,7 +517,7 @@ def all_schemas() -> dict[str, dict]:
         "status.schema.json": status_schema(),
         "ops.json": ops_json(),
         "schedule.schema.json": schedule_schema(),
-        "people.schema.json": people_schema(),
+        "instructors.schema.json": instructors_schema(),
         "students.schema.json": students_schema(),
         "teams.schema.json": teams_schema(),
         "grading_config.schema.json": grading_config_schema(),
@@ -516,7 +540,7 @@ def write(out: Path) -> list[Path]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument(
         "--out", type=Path, default=DEFAULT_OUT, help="Output directory"
     )

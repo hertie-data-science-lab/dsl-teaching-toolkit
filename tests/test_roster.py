@@ -1,4 +1,4 @@
-"""roster pure core -- the `role` column splits the cohort into full participants and
+"""roster pure core -- the `role` column splits the semester into full participants and
 read-only auditors, and it is the newest column, so the parse must stay tolerant: rosters
 seeded before it existed have no `role` cell at all and must keep working (blank =
 enrolled). Getting this wrong either locks a student out or hands an auditor an assignment
@@ -196,10 +196,10 @@ def test_an_absent_roster_is_recorded_as_a_fault_not_just_logged(monkeypatch):
     # `load` returning None used to be a fact only the caller knew, and the caller either
     # reddened its run or shrugged. The digest that reports students.csv reads the fault
     # list, and an EMPTY one is how it says "this file is fine" - so an absent roster with
-    # nothing recorded closes the issue on a cohort that enrols nobody.
+    # nothing recorded closes the issue on a semester that enrols nobody.
     monkeypatch.setattr(roster, "_roster_text", lambda org: None)
     found: list = []
-    assert roster.load("Cohort-f2026", found) is None
+    assert roster.load("Semester-f2026", found) is None
     (fault,) = found
     assert fault.file == roster.ROSTER_PATH and fault.lineno is None
     assert "missing" in fault.what and "no student is enrolled" in fault.what
@@ -207,4 +207,4 @@ def test_an_absent_roster_is_recorded_as_a_fault_not_just_logged(monkeypatch):
 
 def test_a_caller_that_wants_no_faults_still_just_gets_none(monkeypatch):
     monkeypatch.setattr(roster, "_roster_text", lambda org: None)
-    assert roster.load("Cohort-f2026") is None
+    assert roster.load("Semester-f2026") is None

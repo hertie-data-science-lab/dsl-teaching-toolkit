@@ -98,17 +98,17 @@ def test_a_fault_cites_its_own_file_and_links_the_line():
     fault = _immediate()
     assert fault.at == "students.csv:4"
     assert (
-        fault.link("Cohort-f2026")
-        == "https://github.com/Cohort-f2026/classroom-config/blob/main/students.csv#L4"
+        fault.link("Semester-f2026")
+        == "https://github.com/Semester-f2026/classroom-config/blob/main/students.csv#L4"
     )
-    assert fault.cite("Cohort-f2026").startswith("[`students.csv:4`](https://")
+    assert fault.cite("Semester-f2026").startswith("[`students.csv:4`](https://")
 
 
 def test_a_line_that_is_not_known_is_cited_without_a_link():
     fault = ConfigFault("header", "unreadable", file="teams.csv")
     assert fault.at == "teams.csv"
-    assert fault.link("Cohort-f2026") is None
-    assert fault.cite("Cohort-f2026") == "`teams.csv`"
+    assert fault.link("Semester-f2026") is None
+    assert fault.cite("Semester-f2026") == "`teams.csv`"
 
 
 def test_an_immediate_fault_falls_back_to_its_files_fix_sentence():

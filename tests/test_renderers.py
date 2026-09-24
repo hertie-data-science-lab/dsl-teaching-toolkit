@@ -34,14 +34,14 @@ ROOT = Path(__file__).resolve().parents[1]
 GITHUB_MAX_DISPATCH_INPUTS = 10
 
 # The five inputs of a Release materials button, in the order they must appear: exactly a
-# schedule.yml `deploy:` entry's fields, plus the cohort org - ordered source-then-target
+# schedule.yml `deploy:` entry's fields, plus the semester org - ordered source-then-target
 # (what to copy, then where it lands) and numbered 1-5 in their descriptions to match.
 RELEASE_INPUTS = [
     "course_source_repo",
     "course_source_path",
-    "cohort_org",
-    "cohort_dest_repo",
-    "cohort_dest_path",
+    "semester_org",
+    "semester_dest_repo",
+    "semester_dest_path",
 ]
 
 # Every workflow renderer, rendered -> a "it parses, and it's gated" sweep. Completeness
@@ -49,29 +49,31 @@ RELEASE_INPUTS = [
 # cannot ship without passing through yaml.safe_load.
 ALL_RENDERED = {
     "release": workflows_render.render_release(
-        ["Cohort-f2026"], "course-materials-f2026"
+        ["Semester-f2026"], "course-materials-f2026"
     ),
     "central_release": workflows_render.render_central_release(
-        ["course-materials-f2026"], ["Cohort-f2026"]
+        ["course-materials-f2026"], ["Semester-f2026"]
     ),
     "provision": workflows_render.render_provision(
-        ["Cohort-f2026"], ["assignment-1-f2026"]
+        ["Semester-f2026"], ["assignment-1-f2026"]
     ),
     "collect_submissions": workflows_render.render_collect_submissions(
-        ["Cohort-f2026"], ["assignment-1-f2026"]
+        ["Semester-f2026"], ["assignment-1-f2026"]
     ),
-    "sync_membership": workflows_render.render_sync_membership(["Cohort-f2026"]),
+    "sync_membership": workflows_render.render_sync_membership(["Semester-f2026"]),
     "send_codes": workflows_render.render_send_codes(),
-    "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
+    "distribute_grades": workflows_render.render_distribute_grades(["Semester-f2026"]),
     "open_team_formation": workflows_render.render_open_team_formation(
-        ["Cohort-f2026"]
+        ["Semester-f2026"]
     ),
-    "propagate_cohort": workflows_render.render_propagate_cohort(["Cohort-f2026"]),
-    "archive_cohort": workflows_render.render_archive_cohort(["Cohort-f2026"]),
-    "bootstrap_cohort": workflows_render.render_bootstrap_cohort(),
+    "propagate_semester": workflows_render.render_propagate_semester(
+        ["Semester-f2026"]
+    ),
+    "archive_semester": workflows_render.render_archive_semester(["Semester-f2026"]),
+    "bootstrap_semester": workflows_render.render_bootstrap_semester(),
     "refresh": workflows_render.render_refresh(),
     "generate_syllabus": workflows_render.render_generate_syllabus(
-        ["course-materials-f2026"], ["Cohort-f2026"]
+        ["course-materials-f2026"], ["Semester-f2026"]
     ),
     "new_materials": workflows_render.render_new_materials(["course-materials-f2026"]),
     "new_assignment": workflows_render.render_new_assignment(["assignment-1-f2026"]),
@@ -79,11 +81,11 @@ ALL_RENDERED = {
         ["assignment-1-f2026"]
     ),
     "patch_assignment": workflows_render.render_patch_assignment(
-        ["Cohort-f2026"], ["assignment-1-f2026"]
+        ["Semester-f2026"], ["assignment-1-f2026"]
     ),
-    "sync_site": workflows_render.render_sync_site(["Cohort-f2026"]),
+    "sync_site": workflows_render.render_sync_site(["Semester-f2026"]),
     "publish_site": workflows_render.render_publish_site(["course-materials-f2026"]),
-    "status": workflows_render.render_status(["Cohort-f2026"]),
+    "status": workflows_render.render_status(["Semester-f2026"]),
     "scheduler": workflows_render.render_scheduler(),
     "console": workflows_render.render_console(),
 }
@@ -102,7 +104,7 @@ STEP_GATED = {"console"}
 CRONS = {"sync_membership", "sync_site", "refresh", "publish_site", "scheduler"}
 
 # Everything that runs with nobody watching: the crons, plus the codes send, which has no
-# button and no actor at all - a push to a cohort's students.csv fires it. The failure
+# button and no actor at all - a push to a semester's students.csv fires it. The failure
 # contract is the same for all of them and the reason is the same, so it is asserted over
 # the whole set rather than over the ones that happen to declare a `schedule:`.
 UNATTENDED = CRONS | {"send_codes"}
@@ -122,35 +124,35 @@ GIT_PUSHERS = (
     # Every op the Console runs goes through it, releases and hand-outs included.
     "dsl_course.console",
 )
-# The two scheduler sub-commands that only READ: one lists the cohorts, the other
+# The two scheduler sub-commands that only READ: one lists the semesters, the other
 # validates the course's own config. Neither clones anything, so neither needs git.
-GIT_READ_ONLY = ("--list-cohorts", "--check-course-config")
+GIT_READ_ONLY = ("--list-semesters", "--check-course-config")
 
 
 # Every renderer whose run ends in `seed refresh` - and the subset that may join a shared
 # concurrency group. See test_only_the_nightly_refresh_joins_the_seed_refresh_group.
-SEED_REFRESH = {"refresh", "new_materials", "new_assignment", "bootstrap_cohort"}
+SEED_REFRESH = {"refresh", "new_materials", "new_assignment", "bootstrap_semester"}
 SEED_REFRESH_GROUPED = {"refresh"}
 
 # Job time budgets, per workflow, where they differ from the ordinary 30 minutes. A
 # timeout that fires on a HEALTHY run is an outage, not a safety net: grading budgets 300s
-# per submission subprocess and walks a cohort serially, and Bootstrap cohort configures a
+# per submission subprocess and walks a semester serially, and Bootstrap semester configures a
 # whole org before converging it.
 DEFAULT_TIMEOUT = 30
 CHECK_TEAM_TIMEOUT = 5
-# Distribute grades walks every submission repo and every gradebook in the cohort, so
+# Distribute grades walks every submission repo and every gradebook in the semester, so
 # it is bounded like the other grading jobs rather than by the 30-minute default.
 JOB_TIMEOUTS = {
     "collect_submissions": 120,
     "distribute_grades": 120,
-    "bootstrap_cohort": 60,
-    # Archive cohort freezes every repo in a cohort org, in series - the same "many
+    "bootstrap_semester": 60,
+    # Archive semester freezes every repo in a semester org, in series - the same "many
     # repos, one at a time" shape as a handout - and propagates first, which clones every
-    # source repo the cohort has been released from.
-    "archive_cohort": 60,
-    # Propagate cohort edits clones every cohort dest and every course source the plan
+    # source repo the semester has been released from.
+    "archive_semester": 60,
+    # Propagate semester edits clones every semester dest and every course source the plan
     # names, then pushes and opens a pull request per source.
-    "propagate_cohort": 60,
+    "propagate_semester": 60,
     # Patch released assignment reads and commits into every submission repo of one
     # assignment, in series - the same shape as a handout.
     "patch_assignment": 60,
@@ -161,7 +163,7 @@ JOB_TIMEOUTS = {
 # grades in two jobs precisely so the two-hour one is never in the release's way, and giving
 # the release job that budget back would hide a hung release for two hours. 60 rather than
 # the ordinary 30 for releasing, because a handout provisions one repo per student across
-# every cohort in series.
+# every semester in series.
 PER_JOB_TIMEOUTS = {"scheduler": {"release": 60, "autograde": 120}}
 
 
@@ -170,33 +172,33 @@ def _trigger(rendered: str) -> dict:
     return doc.get("on", doc.get(True))
 
 
-# Every renderer that takes a discovered list of orgs/repos, rendered with TWO cohorts
+# Every renderer that takes a discovered list of orgs/repos, rendered with TWO semesters
 # (and two of everything else) so dropdown ORDER is observable - ALL_RENDERED passes
 # single-element lists, which cannot tell "newest first" from "oldest first".
-COHORTS_2 = ["Cohort-f2025", "Cohort-f2026"]
+SEMESTERS_2 = ["Semester-f2025", "Semester-f2026"]
 REPOS_2 = ["course-materials-f2025", "course-materials-f2026"]
 ASSIGNMENTS_2 = ["assignment-1-f2025", "assignment-1-f2026"]
 DATED_RENDERED = {
-    "release": workflows_render.render_release(COHORTS_2, "course-materials-f2026"),
-    "central_release": workflows_render.render_central_release(REPOS_2, COHORTS_2),
-    "provision": workflows_render.render_provision(COHORTS_2, ASSIGNMENTS_2),
+    "release": workflows_render.render_release(SEMESTERS_2, "course-materials-f2026"),
+    "central_release": workflows_render.render_central_release(REPOS_2, SEMESTERS_2),
+    "provision": workflows_render.render_provision(SEMESTERS_2, ASSIGNMENTS_2),
     "collect_submissions": workflows_render.render_collect_submissions(
-        COHORTS_2, ASSIGNMENTS_2
+        SEMESTERS_2, ASSIGNMENTS_2
     ),
     "derive_student_version": workflows_render.render_derive_student_version(
         ASSIGNMENTS_2
     ),
     "patch_assignment": workflows_render.render_patch_assignment(
-        COHORTS_2, ASSIGNMENTS_2
+        SEMESTERS_2, ASSIGNMENTS_2
     ),
-    "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
-    "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
-    "open_team_formation": workflows_render.render_open_team_formation(COHORTS_2),
-    "propagate_cohort": workflows_render.render_propagate_cohort(COHORTS_2),
-    "archive_cohort": workflows_render.render_archive_cohort(COHORTS_2),
-    "sync_site": workflows_render.render_sync_site(COHORTS_2),
+    "sync_membership": workflows_render.render_sync_membership(SEMESTERS_2),
+    "distribute_grades": workflows_render.render_distribute_grades(SEMESTERS_2),
+    "open_team_formation": workflows_render.render_open_team_formation(SEMESTERS_2),
+    "propagate_semester": workflows_render.render_propagate_semester(SEMESTERS_2),
+    "archive_semester": workflows_render.render_archive_semester(SEMESTERS_2),
+    "sync_site": workflows_render.render_sync_site(SEMESTERS_2),
     "publish_site": workflows_render.render_publish_site(REPOS_2),
-    "status": workflows_render.render_status(COHORTS_2),
+    "status": workflows_render.render_status(SEMESTERS_2),
 }
 
 
@@ -212,17 +214,17 @@ def test_renders_valid_yaml(name):
 
 @pytest.mark.parametrize("name", sorted(DATED_RENDERED))
 def test_every_org_repo_dropdown_pre_selects_the_newest(name):
-    # Dropdowns are listed alphabetically, which puts the OLDEST cohort/materials repo
+    # Dropdowns are listed alphabetically, which puts the OLDEST semester/materials repo
     # first - and GitHub selects the first option. Every one of them must therefore carry
     # an explicit `default:` naming the current year's, or faculty release last year's
-    # materials to last year's cohort with one wrong click.
+    # materials to last year's semester with one wrong click.
     for field, spec in workflow_inputs(DATED_RENDERED[name]).items():
         options = spec.get("options", [])
         if not any("2026" in o for o in options):
             continue  # a fixed vocabulary (reading-list / individual / group / ...)
         default = spec.get("default")
-        # Sync enrolment's cohort_org is the one exception: it stays pinned to the
-        # faculty-only sentinel, because touching a cohort must be opted into.
+        # Sync enrolment's semester_org is the one exception: it stays pinned to the
+        # faculty-only sentinel, because touching a semester must be opted into.
         if default == workflows_render._FACULTY_ONLY:
             continue
         assert default in options, f"{name}.{field} default must be one of its options"
@@ -329,9 +331,9 @@ def test_refresh_re_seeds_itself_nightly_without_a_gate():
 
 RELEASE_ASSIGNMENT_INPUTS = [
     "course_source_repo",
-    "cohort_org",
-    "include_solution",
-    "dry_run",
+    "semester_org",
+    "solution_datetime",
+    "preview",
 ]
 
 
@@ -340,15 +342,16 @@ def test_the_hand_out_button_asks_what_where_and_two_switches():
     # list and numbers nothing itself, so the numbering in the descriptions is the only
     # grouping there is - and it must match the order the boxes are rendered in.
     inp = workflow_inputs(
-        workflows_render.render_provision(COHORTS_2, ASSIGNMENTS_2, ASSIGNMENTS_2[0])
+        workflows_render.render_provision(SEMESTERS_2, ASSIGNMENTS_2, ASSIGNMENTS_2[0])
     )
     assert list(inp) == RELEASE_ASSIGNMENT_INPUTS
     for n, name in enumerate(RELEASE_ASSIGNMENT_INPUTS, start=1):
         assert inp[name]["description"].startswith(f"{n}. ")
     # The template it is seeded into is still the one it opens on.
     assert inp["course_source_repo"]["default"] == ASSIGNMENTS_2[0]
-    assert inp["include_solution"]["default"] is False
-    assert inp["dry_run"]["default"] is False
+    assert inp["solution_datetime"]["default"] == ""
+    assert course.SOLUTION_WARNING in inp["solution_datetime"]["description"]
+    assert inp["preview"]["default"] is True
 
 
 def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
@@ -356,7 +359,7 @@ def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
     # had not declared - one repo per student for an assignment whose teams, sheet and
     # Join-team form were all keyed per team. The declaration is the only route now.
     rendered = workflows_render.render_provision(
-        ["Cohort-f2026"], ["assignment-4-project-f2026"]
+        ["Semester-f2026"], ["assignment-4-project-f2026"]
     )
     assert "type" not in workflow_inputs(rendered)
     assert "--type" not in rendered
@@ -365,24 +368,24 @@ def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
 def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
     # The button is the on-demand half of the quarter-hourly refresh; the FREEZE belongs to
     # the cron, at the assignment's grading deadline. A button that could freeze early
-    # would move what a cohort is marked on, so it passes --refresh-only and no deadline.
+    # would move what a semester is marked on, so it passes --refresh-only and no deadline.
     rendered = workflows_render.render_collect_submissions(
-        ["Cohort-f2026"], ["assignment-1-f2026"]
+        ["Semester-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"cohort_org", "course_source_repo", "slug", "dry_run"}
-    assert inp["dry_run"]["default"] is False
+    assert set(inp) == {"semester_org", "course_source_repo", "slug", "preview"}
+    assert inp["preview"]["default"] is True
     assert "dsl_course.collect" in rendered and "--refresh-only" in rendered
     assert "--deadline" not in rendered
 
 
 def test_a_read_only_button_can_name_which_schedule_entry():
     # Two schedule entries may hand out from one template when each names its own
-    # `cohort_dest_repo`, and Collect submissions starts from the TEMPLATE - so it needs a
+    # `semester_dest_repo`, and Collect submissions starts from the TEMPLATE - so it needs a
     # way to say which of the two sheets to refresh. It may say it because refreshing the
     # wrong sheet costs a re-run; the HANDOUT may not, and has no such box.
     rendered = workflows_render.render_collect_submissions(
-        ["Cohort-f2026"], ["assignment-1-f2026"]
+        ["Semester-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
     assert inp["slug"]["required"] is False and inp["slug"]["default"] == ""
@@ -392,73 +395,73 @@ def test_a_read_only_button_can_name_which_schedule_entry():
 
 
 def test_the_hand_out_button_never_picks_between_two_schedule_entries():
-    # It was a box, and one press of it decided which half of a cohort got repos. The
+    # It was a box, and one press of it decided which half of a semester got repos. The
     # schedule fires each entry on its own datetime and knows which is which, so an
     # ambiguous template is refused by the run instead.
     rendered = workflows_render.render_provision(
-        ["Cohort-f2026"], ["assignment-1-f2026"]
+        ["Semester-f2026"], ["assignment-1-f2026"]
     )
     assert "slug" not in workflow_inputs(rendered)
     assert "--slug" not in rendered
 
 
-def test_archive_cohort_previews_by_default_and_never_deletes():
+def test_archive_semester_previews_by_default_and_never_deletes():
     # The end-of-term button. It is the one WRITE in the set that a second click cannot
     # take back, so it fails closed like Distribute grades: only an explicit `false`
-    # reaches the CLI as --no-dry-run, and `force` is the separate, deliberate override of
+    # reaches the CLI as --no-preview, and `force` is the separate, deliberate override of
     # the term-not-over refusal.
-    rendered = workflows_render.render_archive_cohort(["Cohort-f2026"])
+    rendered = workflows_render.render_archive_semester(["Semester-f2026"])
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"cohort_org", "dry_run", "force"}
-    assert inp["dry_run"]["default"] is True
+    assert set(inp) == {"semester_org", "preview", "force"}
+    assert inp["preview"]["default"] is True
     assert inp["force"]["default"] is False
-    assert workflows_render._DRY_RUN_GATE in rendered
-    assert "python3 -m dsl_course.teardown" in rendered
+    assert workflows_render._PREVIEW_GATE in rendered
+    assert "python3 -m dsl_course.archive" in rendered
     # Faculty read the header before they click a button whose name sounds final: it has
     # to say there, in the file, that this freezes and never destroys.
     assert "NOTHING IS DELETED" in rendered
 
 
-def test_propagate_cohort_previews_by_default():
+def test_propagate_semester_previews_by_default():
     # It force-pushes a branch and opens pull requests in the course org, so it fails
     # closed like the other cross-org buttons: only an explicit `false` reaches the CLI
-    # as --no-dry-run. The course org is the repo this runs in.
-    rendered = workflows_render.render_propagate_cohort(["Cohort-f2026"])
+    # as --no-preview. The course org is the repo this runs in.
+    rendered = workflows_render.render_propagate_semester(["Semester-f2026"])
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"cohort_org", "dry_run"}
-    assert inp["dry_run"]["default"] is True
-    assert workflows_render._DRY_RUN_GATE in rendered
+    assert set(inp) == {"semester_org", "preview"}
+    assert inp["preview"]["default"] is True
+    assert workflows_render._PREVIEW_GATE in rendered
     assert "python3 -m dsl_course.propagate" in rendered
     assert "COURSE_ORG: ${{ github.repository_owner }}" in rendered
     # Faculty read the header before they press it: it has to say there that a deletion
-    # made in the cohort is not carried back.
+    # made in the semester is not carried back.
     assert "DELETIONS ARE NOT PROPAGATED" in rendered
 
 
-def test_open_team_formation_asks_for_a_cohort_a_free_text_key_and_previews():
+def test_open_team_formation_asks_for_a_semester_a_free_text_key_and_previews():
     # The assignment box is FREE TEXT on purpose. Every other per-assignment button names
     # a course-org template repo, which this org can discover; a team-formation window is
-    # keyed on a SCHEDULE key out of each cohort's own private schedule.yml, so a dropdown
-    # rendered once for the whole course org would offer one cohort's keys to another.
-    rendered = workflows_render.render_open_team_formation(["Cohort-f2026"])
+    # keyed on a SCHEDULE key out of each semester's own private schedule.yml, so a dropdown
+    # rendered once for the whole course org would offer one semester's keys to another.
+    rendered = workflows_render.render_open_team_formation(["Semester-f2026"])
     inp = workflow_inputs(rendered)
-    assert list(inp) == ["cohort_org", "assignment", "dry_run"]
+    assert list(inp) == ["semester_org", "assignment", "preview"]
     assert "options" not in inp["assignment"]
     assert inp["assignment"]["required"] is False
     assert inp["assignment"]["default"] == ""
-    # It mails a whole cohort, so it fails closed like Distribute grades: only an explicit
-    # `false` reaches the CLI as --no-dry-run.
-    assert inp["dry_run"]["default"] is True
-    assert workflows_render._DRY_RUN_GATE in rendered
+    # It mails a whole semester, so it fails closed like Distribute grades: only an explicit
+    # `false` reaches the CLI as --no-preview.
+    assert inp["preview"]["default"] is True
+    assert workflows_render._PREVIEW_GATE in rendered
     assert 'args+=(--assignment "$ASSIGNMENT")' in rendered
     assert "python3 -m dsl_course.team_formation" in rendered
 
 
 def test_the_press_says_in_the_file_what_a_second_press_will_do():
-    # Faculty read this header before pressing a button that emails a cohort, and the two
+    # Faculty read this header before pressing a button that emails a semester, and the two
     # questions they will have are "what happens if I press it twice" and "why did nothing
     # go out at 23:30". Both are answered where they are asked, not in docs/09 alone.
-    rendered = workflows_render.render_open_team_formation(["Cohort-f2026"])
+    rendered = workflows_render.render_open_team_formation(["Semester-f2026"])
     assert "mailed.csv" in rendered, "the header has to name what makes a re-press safe"
     assert "23:00-07:00" in rendered
 
@@ -466,13 +469,13 @@ def test_the_press_says_in_the_file_what_a_second_press_will_do():
 def test_sync_membership_is_a_consolidated_reconcile():
     # One consolidated, fully-automatic reconcile (roster + teams + faculty) - no
     # --prune toggle at this level, config is always the live truth.
-    rendered = workflows_render.render_sync_membership(["Cohort-f2026"])
+    rendered = workflows_render.render_sync_membership(["Semester-f2026"])
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"cohort_org"}
-    assert inp["cohort_org"]["default"] == workflows_render._FACULTY_ONLY
-    assert inp["cohort_org"]["options"] == [
+    assert set(inp) == {"semester_org"}
+    assert inp["semester_org"]["default"] == workflows_render._FACULTY_ONLY
+    assert inp["semester_org"]["options"] == [
         workflows_render._FACULTY_ONLY,
-        "Cohort-f2026",
+        "Semester-f2026",
     ]
     assert "dsl_course.sync_membership" in rendered
     assert "--prune" not in rendered
@@ -490,7 +493,7 @@ def test_sync_membership_is_a_consolidated_reconcile():
 def test_the_two_student_landing_pages_invite_a_pull_request():
     # Students cannot push to the materials; forking and opening a pull request is how
     # they fix a typo, and it has to be said where they actually land. Both files are
-    # instructor-owned and seeded ONCE, so this text only ever reaches a cohort
+    # instructor-owned and seeded ONCE, so this text only ever reaches a semester
     # bootstrapped after it shipped - docs/08 says to paste it into the older ones.
     invitation = "open a pull request"
     page = profile_readme.render_profile_readme(
@@ -504,56 +507,56 @@ def test_the_two_student_landing_pages_invite_a_pull_request():
 def test_dotgithub_readme_orients_faculty():
     # The .github repo's own README points faculty at the Actions tab where the buttons live.
     course = profile_readme.render_dotgithub_readme(
-        "My-Course-E1", "My Course", is_cohort=False
+        "My-Course-E1", "My Course", is_semester=False
     )
     assert "control panel" in course
     assert "My-Course-E1/.github/actions" in course
-    # A cohort org's own `.github` is not where any of the work happens, so its README is
+    # A semester org's own `.github` is not where any of the work happens, so its README is
     # deliberately a stub that says so - naming the org, and nothing a reader would have to
     # act on. It must NOT grow into a second control panel competing with the course org's.
-    cohort = profile_readme.render_dotgithub_readme(
-        "My-Course-f2026", "My Course", is_cohort=True
+    semester = profile_readme.render_dotgithub_readme(
+        "My-Course-f2026", "My Course", is_semester=True
     )
-    assert "My-Course-f2026" in cohort
-    assert "rarely need to touch" in cohort
-    assert "/.github/actions" not in cohort
+    assert "My-Course-f2026" in semester
+    assert "rarely need to touch" in semester
+    assert "/.github/actions" not in semester
 
 
 @pytest.mark.parametrize(
     "rendered",
     [
         workflows_render.render_release(
-            ["Cohort-f2025", "Cohort-f2026"], "course-materials-f2026"
+            ["Semester-f2025", "Semester-f2026"], "course-materials-f2026"
         ),
         workflows_render.render_central_release(
-            ["course-materials-f2026"], ["Cohort-f2025", "Cohort-f2026"]
+            ["course-materials-f2026"], ["Semester-f2025", "Semester-f2026"]
         ),
     ],
     ids=["run-from-repo", "central"],
 )
 def test_both_release_buttons_take_exactly_a_deploy_entrys_fields(rendered):
     # The whole point of the merged button: its inputs ARE a schedule.yml `deploy:`
-    # entry (plus the cohort org), same names, same order, on BOTH variants - so what
+    # entry (plus the semester org), same names, same order, on BOTH variants - so what
     # faculty learn on the button reads straight across into the schedule.
     inp = workflow_inputs(rendered)
     assert list(inp) == RELEASE_INPUTS
     assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
-    assert inp["cohort_org"]["required"] is True
+    assert inp["semester_org"]["required"] is True
     assert inp["course_source_repo"]["required"] is True
     assert inp["course_source_path"]["required"] is True
-    # The destination repo carries the SAME default an omitted `cohort_dest_repo:` takes in
+    # The destination repo carries the SAME default an omitted `semester_dest_repo:` takes in
     # schedule.yml, so the button and the plan cannot disagree about where a release lands.
     # Pre-filled rather than required-and-blank: `materials` is what the system supplies
     # either way, so showing it teaches the default, and it spares faculty hand-typing the
     # word on every release (which was the typo risk the blank box was meant to prevent).
-    assert inp["cohort_dest_repo"]["default"] == "materials"
-    assert inp["cohort_dest_repo"]["required"] is True
-    # cohort_dest_path is the one optional box, and ships EMPTY - a `default:` on a
+    assert inp["semester_dest_repo"]["default"] == "materials"
+    assert inp["semester_dest_repo"]["required"] is True
+    # semester_dest_path is the one optional box, and ships EMPTY - a `default:` on a
     # free-text field is submitted verbatim, so pre-filling puts words in the faculty
     # member's mouth. Its fallback is stated on the box instead, or it is invisible.
-    assert inp["cohort_dest_path"]["required"] is False
-    assert "default" not in inp["cohort_dest_path"]
-    assert "blank mirrors box 2" in inp["cohort_dest_path"]["description"]
+    assert inp["semester_dest_path"]["required"] is False
+    assert "default" not in inp["semester_dest_path"]
+    assert "blank mirrors box 2" in inp["semester_dest_path"]["description"]
     # Labels are plain English: the schedule.yml mapping lives in the input NAMES (asserted
     # above), so no description repeats its own key back at the reader.
     for name in RELEASE_INPUTS:
@@ -564,14 +567,14 @@ def test_both_release_buttons_take_exactly_a_deploy_entrys_fields(rendered):
     # as a flat list with no grouping, so the sequence has to be in the labels.
     for n, name in enumerate(RELEASE_INPUTS, start=1):
         assert inp[name]["description"].startswith(f"{n}. ")
-    # The cohort dropdown pre-selects the latest cohort, not the alphabetically first.
-    assert inp["cohort_org"]["default"] == "Cohort-f2026"
+    # The semester dropdown pre-selects the latest semester, not the alphabetically first.
+    assert inp["semester_org"]["default"] == "Semester-f2026"
     # Gone with the section machinery: no per-section checkboxes, no session list, no
-    # root-files toggle, no cohort_repo dropdown.
+    # root-files toggle, no semester_repo dropdown.
     for retired in (
         "sessions",
         "include_root_files",
-        "cohort_repo",
+        "semester_repo",
         "release_lectures",
     ):
         assert retired not in inp
@@ -580,9 +583,9 @@ def test_both_release_buttons_take_exactly_a_deploy_entrys_fields(rendered):
 @pytest.mark.parametrize(
     "rendered",
     [
-        workflows_render.render_release(["Cohort-f2026"], "course-materials-f2026"),
+        workflows_render.render_release(["Semester-f2026"], "course-materials-f2026"),
         workflows_render.render_central_release(
-            ["course-materials-f2026"], ["Cohort-f2026"]
+            ["course-materials-f2026"], ["Semester-f2026"]
         ),
     ],
     ids=["run-from-repo", "central"],
@@ -594,10 +597,14 @@ def test_both_release_buttons_run_the_same_executor_through_env(rendered):
     assert "${{" not in step["run"]
     assert step["env"]["COURSE_SOURCE_REPO"] == "${{ inputs.course_source_repo }}"
     assert step["env"]["COURSE_SOURCE_PATH"] == "${{ inputs.course_source_path }}"
-    assert step["env"]["COHORT_DEST_REPO"] == "${{ inputs.cohort_dest_repo }}"
-    assert step["env"]["COHORT_DEST_PATH"] == "${{ inputs.cohort_dest_path }}"
+    assert step["env"]["SEMESTER_DEST_REPO"] == "${{ inputs.semester_dest_repo }}"
+    assert step["env"]["SEMESTER_DEST_PATH"] == "${{ inputs.semester_dest_path }}"
     assert "python3 -m dsl_course.deploy" in step["run"]
-    for flag in ("--course-source-path", "--cohort-dest-repo", "--cohort-dest-path"):
+    for flag in (
+        "--course-source-path",
+        "--semester-dest-repo",
+        "--semester-dest-path",
+    ):
         assert flag in step["run"]
 
 
@@ -605,7 +612,7 @@ def test_run_from_repo_button_prefills_course_source_repo_with_its_own_repo():
     # Inside a content repo the source is almost always that repo, so it is pre-filled -
     # but as free text, not a fixed expression, so another repo in the org can be typed in.
     inp = workflow_inputs(
-        workflows_render.render_release(["Cohort-f2026"], "course-materials-f2026")
+        workflows_render.render_release(["Semester-f2026"], "course-materials-f2026")
     )
     assert inp["course_source_repo"]["default"] == "course-materials-f2026"
     assert "type" not in inp["course_source_repo"]  # a string field, not a choice
@@ -618,7 +625,7 @@ def test_central_button_offers_the_orgs_content_repos_as_the_source_dropdown():
     inp = workflow_inputs(
         workflows_render.render_central_release(
             ["course-materials-f2025", "course-materials-f2026", "lecture-code"],
-            ["Cohort-f2026"],
+            ["Semester-f2026"],
         )
     )
     assert inp["course_source_repo"]["type"] == "choice"
@@ -636,16 +643,16 @@ def test_undated_dropdown_options_leave_the_default_to_github():
     # the dropdown ships bare and GitHub selects the first option.
     inp = workflow_inputs(
         workflows_render.render_central_release(
-            ["lecture-code", "slides"], ["Cohort-A"]
+            ["lecture-code", "slides"], ["Semester-A"]
         )
     )
     assert "default" not in inp["course_source_repo"]
-    assert "default" not in inp["cohort_org"]
+    assert "default" not in inp["semester_org"]
     # An org code that merely ends in four digits is not a year (GRAD-E1234 != 1234 AD).
     inp = workflow_inputs(
-        workflows_render.render_central_release(["mat-e1234"], ["Cohort-e1234"])
+        workflows_render.render_central_release(["mat-e1234"], ["Semester-e1234"])
     )
-    assert "default" not in inp["cohort_org"]
+    assert "default" not in inp["semester_org"]
 
 
 def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
@@ -664,7 +671,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
         workflows_place.push_content_workflows(
             "Course",
             "course-materials-f2026",
-            ["Cohort-f2026"],
+            ["Semester-f2026"],
             ["assignment-1-f2026"],
             "release",
             workflows=workflows_place.RELEASE_WORKFLOWS,
@@ -707,7 +714,7 @@ def test_an_assignment_template_hosts_only_the_hand_out_button(monkeypatch):
             # NOT the one `_newest` would pre-select out of these two, or the assertion
             # below would hold just as well with the pre-selection taken out again.
             "assignment-1-f2026",
-            ["Cohort-f2026"],
+            ["Semester-f2026"],
             ["assignment-1-f2026", "assignment-2-f2026"],
             "release",
             workflows=workflows_place.TEMPLATE_WORKFLOWS,
@@ -721,7 +728,7 @@ def test_an_assignment_template_hosts_only_the_hand_out_button(monkeypatch):
     assert inputs["course_source_repo"]["default"] == "assignment-1-f2026"
     # ...and a repo that names no template of its own still gets the newest-term pick.
     other = workflows_render.render_provision(
-        ["Cohort-f2026"], ["assignment-1-f2026", "assignment-2-f2026"]
+        ["Semester-f2026"], ["assignment-1-f2026", "assignment-2-f2026"]
     )
     assert workflow_inputs(other)["course_source_repo"]["default"] == (
         "assignment-2-f2026"
@@ -734,7 +741,7 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     # writes turned each such edit into a wall of near-identical commits in the repo whose
     # history faculty actually browse. The retired buttons ride along in the same commit
     # rather than earning three more.
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(seed, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         seed, "discover_content_repos", lambda org: ["course-materials"]
     )
@@ -778,7 +785,7 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
     for rendered in (materials, assignment):
         step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
         assert "${{" not in step["run"]
-        assert '--tag "$TAG"' in rendered
+        assert '--semester "$SEMESTER"' in rendered
         # `copy_from` is a repo name off a form like any other input, and it reaches the
         # CLI as an argument only when someone picked a repo: the placeholder first option
         # is emptied first, so scaffold is handed no --copy-from at all.
@@ -787,11 +794,11 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
             f'[ "$COPY_FROM" = "{workflows_render._FRESH_STARTER}" ] && COPY_FROM=""'
         ) in rendered
         assert '[ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")' in rendered
-    assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["TAG"] == (
-        "${{ inputs.tag }}"
+    assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["SEMESTER"] == (
+        "${{ inputs.semester }}"
     )
-    assert workflow_jobs(assignment)["scaffold"]["steps"][-1]["env"]["TAG"] == (
-        "${{ inputs.semester_tag }}"
+    assert workflow_jobs(assignment)["scaffold"]["steps"][-1]["env"]["SEMESTER"] == (
+        "${{ inputs.semester }}"
     )
     assert '--number "$NUMBER"' in assignment
     # The free-text ones are the ones that matter here: a name is prose a person types.
@@ -816,9 +823,9 @@ def test_choice_falls_back_when_empty():
 
 def test_sync_site_auto_resyncs_on_sourced_changes():
     # Sync site must auto-fire (no manual click) on the things the site reads: a push to
-    # the course dsl-course.yml, a repository_dispatch from a cohort's schedule.yml, and a
+    # the course dsl-course.yml, a repository_dispatch from a semester's schedule.yml, and a
     # daily cron catch-all. The auto path is ungated (no check-team); manual stays gated.
-    doc = yaml.safe_load(workflows_render.render_sync_site(["Cohort-f2026"]))
+    doc = yaml.safe_load(workflows_render.render_sync_site(["Semester-f2026"]))
     trigger = doc.get("on", doc.get(True))
     assert "dsl-course.yml" in trigger["push"]["paths"]
     assert trigger["repository_dispatch"]["types"] == ["sync-site"]
@@ -840,7 +847,7 @@ def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
-        "people.yml",
+        "instructors.yml",
         "schedule.yml",
         "students.csv",
         "teams.csv",
@@ -848,11 +855,11 @@ def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
 
 
 def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_change():
-    # All three feed the site: schedule.yml its dates, people.yml its staff cards, and
+    # All three feed the site: schedule.yml its dates, instructors.yml its staff cards, and
     # teams.csv the teams an assignment inside its formation window lists. None of them may
     # have to wait for the daily cron - least of all teams.csv, which the Join-team workflow
     # commits to on every join, and which a student then expects to see themselves in.
-    # (people.yml and teams.csv also fire dispatch-sync.yml - a different workflow, event
+    # (instructors.yml and teams.csv also fire dispatch-sync.yml - a different workflow, event
     # type sync-membership - which is fine.)
     tmpl = (
         ROOT / "templates" / "classroom-config" / "dispatch-sync-site.yml"
@@ -860,7 +867,7 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_chan
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
-        "people.yml",
+        "instructors.yml",
         "schedule.yml",
         "teams.csv",
     ]
@@ -881,7 +888,7 @@ def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     assert set(trigger) == {"push"}
     assert trigger["push"]["paths"] == [
         "schedule.yml",
-        "people.yml",
+        "instructors.yml",
         "students.csv",
         "teams.csv",
     ]
@@ -891,13 +898,13 @@ def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     assert doc["permissions"] == {}
     # The event type the course org's Scheduled release filters `types:` on.
     assert "event_type=scheduled-release" in tmpl
-    # The course org is read from THIS cohort's own pointer, never baked in at bootstrap.
+    # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
     assert "contents/dsl-course.yml" in tmpl
     assert tmpl.splitlines()[0].startswith("# SYSTEM-OWNED")
 
 
 def test_send_codes_only_ever_runs_off_a_roster_push():
-    # A roster edit is the ONLY way codes go out: no button, no cohort dropdown, no
+    # A roster edit is the ONLY way codes go out: no button, no semester dropdown, no
     # dry_run. The job is ungated (a repository_dispatch has no actor for check-team to
     # ask about) and it sends for real, because nobody is watching it.
     rendered = workflows_render.render_send_codes()
@@ -913,18 +920,19 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
         for s in jobs["send-codes"]["steps"]
         if s.get("name", "").startswith("Send enrolment codes")
     )
-    assert step["env"]["DISPATCH_COHORT"] == (
-        "${{ github.event.client_payload.cohort_org }}"
+    assert step["env"]["DISPATCH_SEMESTER"] == (
+        "${{ github.event.client_payload.semester_org }}"
     )
-    assert "dry-run" not in rendered and "dry_run" not in rendered
-    # The trust boundary: a client_payload is written by whoever holds a COHORT's bot
-    # token, so the cohort it names is checked against this course org's registry.
+    # No box to preview with: the push is the send, so it says so explicitly.
+    assert "inputs.preview" not in rendered and "--no-preview" in step["run"]
+    # The trust boundary: a client_payload is written by whoever holds a SEMESTER's bot
+    # token, so the semester it names is checked against this course org's registry.
     assert '--dispatched-by "$COURSE"' in step["run"]
     assert step["env"]["COURSE"] == "${{ github.repository_owner }}"
-    # Per cohort, off the payload alone: two cohorts pushing rosters at once must not
+    # Per semester, off the payload alone: two semesters pushing rosters at once must not
     # drop each other's queued send.
     assert (
-        "send-codes-${{ github.event.client_payload.cohort_org }}"
+        "send-codes-${{ github.event.client_payload.semester_org }}"
         in doc["concurrency"]["group"]
     )
 
@@ -943,7 +951,7 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert trigger["push"]["branches"] == ["main"]
     assert doc["permissions"] == {}
     assert "event_type=send-codes" in tmpl
-    # The course org is read from THIS cohort's own pointer, never baked in at bootstrap.
+    # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
     assert "contents/dsl-course.yml" in tmpl
 
 
@@ -954,9 +962,9 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
 NEW_ASSIGNMENT_INPUTS = [
     "assignment_name",
     "assignment_number",
-    "semester_tag",
+    "semester",
     "copy_from",
-    "format",
+    "formats",
     "type",
     "team_formation",
     "submit_via",
@@ -1004,9 +1012,9 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     # Four boxes arrive at the course-default sentinel, which the scaffold resolves
     # against the course's `assignment_defaults:` (tests/test_scaffold.py).
     sentinel = course.COURSE_DEFAULT_CHOICE
-    assert "type" not in inputs["format"] and inputs["format"]["default"] == sentinel
-    assert ", ".join(course.STARTER_FORMATS) in inputs["format"]["description"]
-    assert course.NO_STARTER in inputs["format"]["description"]
+    assert "type" not in inputs["formats"] and inputs["formats"]["default"] == sentinel
+    assert ", ".join(course.STARTER_FORMATS) in inputs["formats"]["description"]
+    assert course.NO_STARTER in inputs["formats"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == [sentinel, *course.TEAM_FORMATIONS]
     assert inputs["submit_via"]["options"] == [sentinel, *course.SUBMIT_VIA]
@@ -1030,9 +1038,9 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     for env_name, field in (
         ("NAME", "assignment_name"),
         ("NUMBER", "assignment_number"),
-        ("TAG", "semester_tag"),
+        ("SEMESTER", "semester"),
         ("COPY_FROM", "copy_from"),
-        ("FORMAT", "format"),
+        ("FORMATS", "formats"),
         ("TYPE", "type"),
         ("TEAM_FORMATION", "team_formation"),
         ("SUBMIT_VIA", "submit_via"),
@@ -1101,8 +1109,8 @@ def test_seed_refresh_steps_carry_dsl_bot_token(name):
 
 
 def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
-    # Seeded into a cohort's classroom-config, so it must carry the central repo and ref
-    # baked in - the cohort repo has no other way to reach the parser.
+    # Seeded into a semester's classroom-config, so it must carry the central repo and ref
+    # baked in - the semester repo has no other way to reach the parser.
     from dsl_course.central import CENTRAL, CENTRAL_REF
     from dsl_course.welcome import classroom_system_files
 
@@ -1123,9 +1131,9 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     assert central["with"]["repository"] == CENTRAL
     assert central["with"]["ref"] == CENTRAL_REF
 
-    # validates the cohort's OWN file, not a fetched copy - no token needed to read it
+    # validates the semester's OWN file, not a fetched copy - no token needed to read it
     run = next(s for s in steps if s.get("id") == "validate")["run"]
-    assert "--file ../cohort/schedule.yml --validate" in run
+    assert "--file ../semester/schedule.yml --validate" in run
     assert "$GITHUB_STEP_SUMMARY" in run
 
     # The run must end red so the commit is marked. Nothing here writes an ISSUE - the
@@ -1154,21 +1162,21 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
             {"name": "welcome", "url": "u", "visibility": "private", "description": ""}
         ],
     )
-    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "discover_semesters", lambda org: [])
     commits = []
     monkeypatch.setattr(
         P, "put_files", lambda org, repo, files, msg, **k: commits.append(files) or True
     )
     monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
 
-    P.update_profile_readme("Cohort-f2026", central_ref="release")  # must not raise
+    P.update_profile_readme("Semester-f2026", central_ref="release")  # must not raise
     # Both READMEs, using the org name as the fallback - and in ONE commit, since they are
     # rendered from the same org snapshot and always move together.
     assert len(commits) == 1
     assert set(commits[0]) == {"profile/README.md", "README.md"}
 
 
-# ------------------------------------- the cohort landing page is instructor-owned, bar
+# ------------------------------------- the semester landing page is instructor-owned, bar
 # its repo table. These pin the three ways a refresh can meet an existing page.
 
 _REPOS = [
@@ -1234,8 +1242,8 @@ def test_repo_table_drops_submission_and_gradebook_repos():
     assert "| [assignment-1]" not in rows
 
 
-def _cohort_org_repos():
-    org = "cohort-f2026"
+def _semester_org_repos():
+    org = "semester-f2026"
     return [
         {"name": n, "url": "u", "visibility": v, "description": "d", "topics": []}
         for n, v in (
@@ -1248,14 +1256,14 @@ def _cohort_org_repos():
     ]
 
 
-def test_cohort_table_names_the_audience_not_githubs_visibility():
-    from dsl_course.profile_readme import _cohort_repo_table
+def test_semester_table_names_the_audience_not_githubs_visibility():
+    from dsl_course.profile_readme import _semester_repo_table
 
     # "private" is the answer to a question nobody landing on the students' page is
     # asking: it does not say whether enrolling will let them in.
     cells = [
         row.split("|")[2].strip()
-        for row in _cohort_repo_table(_cohort_org_repos()).splitlines()
+        for row in _semester_repo_table(_semester_org_repos()).splitlines()
     ]
     assert cells == [
         "public (students join here)",
@@ -1266,19 +1274,19 @@ def test_cohort_table_names_the_audience_not_githubs_visibility():
     ]
 
 
-def test_cohort_table_runs_students_first_then_config_then_the_site():
-    from dsl_course.profile_readme import _cohort_repo_table
+def test_semester_table_runs_students_first_then_config_then_the_site():
+    from dsl_course.profile_readme import _semester_repo_table
 
     names = [
         row.split("[")[1].split("]")[0]
-        for row in _cohort_repo_table(_cohort_org_repos()).splitlines()
+        for row in _semester_repo_table(_semester_org_repos()).splitlines()
     ]
     assert names == [
         "welcome",
         "materials",
         "labs",
         "classroom-config",
-        "cohort-f2026.github.io",
+        "semester-f2026.github.io",
     ]
 
 
@@ -1287,7 +1295,7 @@ def test_course_table_keeps_bare_visibility():
 
     # Faculty read that one, and they can already open everything - what they want is
     # which repos a release would expose.
-    rows = _repo_table(_cohort_org_repos())
+    rows = _repo_table(_semester_org_repos())
     assert "| private |" in rows and "| public |" in rows
     assert "instructor-only" not in rows
 
@@ -1298,13 +1306,13 @@ def _readme_run(monkeypatch, put_ok):
     monkeypatch.setattr(P, "org_meta", lambda org: {})
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
-    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "discover_semesters", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
     said_ok: list[str] = []
     monkeypatch.setattr(P, "log_ok", lambda msg: said_ok.append(msg))
     monkeypatch.setattr(P, "log_err", lambda *a, **k: None)
     monkeypatch.setattr(P, "put_files", lambda *a, **k: put_ok)
-    return P.update_profile_readme("Cohort-f2026", central_ref="release"), said_ok
+    return P.update_profile_readme("Semester-f2026", central_ref="release"), said_ok
 
 
 def test_a_failed_readme_commit_is_counted_not_announced(monkeypatch):
@@ -1321,34 +1329,34 @@ def test_a_written_readme_reports_no_failures(monkeypatch):
     assert said_ok
 
 
-def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
+def test_semester_page_title_follows_the_course_pointer(monkeypatch):
     from dsl_course import profile_readme as P
 
-    # A cohort's dsl-course.yml is a pointer with no course_name, so this used to title
+    # A semester's dsl-course.yml is a pointer with no course_name, so this used to title
     # the students' landing page with the org slug.
     monkeypatch.setattr(P, "org_meta", lambda org: {"course": "Course-Org"})
     monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
-    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "discover_semesters", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
     monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
     written = {}
     monkeypatch.setattr(
         P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
     )
-    P.update_profile_readme("Cohort-f2026", central_ref="release")
+    P.update_profile_readme("Semester-f2026", central_ref="release")
     page = written["profile/README.md"].decode()
     assert "# Deep Learning" in page
-    assert "# Cohort-f2026" not in page
+    assert "# Semester-f2026" not in page
 
 
-def _cohort_readme(monkeypatch, existing):
+def _semester_readme(monkeypatch, existing):
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: existing)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
-    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "discover_semesters", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
     monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
     written = {}
@@ -1356,28 +1364,28 @@ def _cohort_readme(monkeypatch, existing):
         P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
     )
     P.update_profile_readme(
-        "Cohort-f2026", "Org", "Deep Learning", central_ref="release"
+        "Semester-f2026", "Org", "Deep Learning", central_ref="release"
     )
     return written
 
 
-def test_cohort_page_is_seeded_whole_when_absent(monkeypatch):
+def test_semester_page_is_seeded_whole_when_absent(monkeypatch):
     from dsl_course import profile_readme as P
 
-    page = _cohort_readme(monkeypatch, None)["profile/README.md"].decode()
+    page = _semester_readme(monkeypatch, None)["profile/README.md"].decode()
     assert "INSTRUCTOR-OWNED" in page
     assert P.TABLE_START in page and P.TABLE_END in page
     assert "front door" in page
 
 
-def test_cohort_refresh_replaces_only_the_marked_table(monkeypatch):
+def test_semester_refresh_replaces_only_the_marked_table(monkeypatch):
     from dsl_course import profile_readme as P
 
     edited = (
         "# Our course, our words\n\nSee you Tuesdays in room 4.\n\n"
         f"{P.TABLE_START} -->\n| stale | rows |\n{P.TABLE_END}\n\nGood luck!\n"
     )
-    page = _cohort_readme(monkeypatch, edited)["profile/README.md"].decode()
+    page = _semester_readme(monkeypatch, edited)["profile/README.md"].decode()
     assert "Our course, our words" in page  # prose above survives
     assert "See you Tuesdays in room 4." in page
     assert "Good luck!" in page  # and prose below
@@ -1385,10 +1393,10 @@ def test_cohort_refresh_replaces_only_the_marked_table(monkeypatch):
     assert "front door" in page
 
 
-def test_cohort_refresh_leaves_any_page_without_markers_alone(monkeypatch):
+def test_semester_refresh_leaves_any_page_without_markers_alone(monkeypatch):
     # No markers = wholly the instructor's, whether they deleted them or predate them.
     # There is no way to tell those apart from the bytes, so neither is overwritten.
-    written = _cohort_readme(monkeypatch, "# Entirely mine\n\nNo markers here.\n")
+    written = _semester_readme(monkeypatch, "# Entirely mine\n\nNo markers here.\n")
     # The .github README still refreshes; the landing page is not written at all.
     assert set(written) == {"README.md"}
 
@@ -1406,7 +1414,7 @@ def test_every_workflow_drops_the_ambient_token_and_bounds_its_jobs(name):
     # for 6 hours and, behind a concurrency group, blocks everything queued behind it.
     #
     # The bound is asserted by VALUE, not merely as "an int": a blanket 30 across the estate
-    # kills legitimate grading runs mid-cohort, and a timeout that fires on a healthy run is
+    # kills legitimate grading runs mid-semester, and a timeout that fires on a healthy run is
     # itself the outage. check-team is a single API call, so it keeps its 5.
     doc = yaml.safe_load(ALL_RENDERED[name])
     assert doc["permissions"] == {}
@@ -1505,8 +1513,8 @@ def _runs_student_code(step: dict) -> bool:
 # there means "no leg ran at all", which is neither a failure to file nor a recovery to
 # close; every other non-success conclusion, `cancelled` included, is the fault to report.
 #
-# The third is the first with the scheduler release job's scope: a run a cohort's push
-# scoped to one cohort neither files nor closes the course-wide issue.
+# The third is the first with the scheduler release job's scope: a run a semester's push
+# scoped to one semester neither files nor closes the course-wide issue.
 FAILURE_GATES = {
     "(failure() || cancelled())": "success()",
     "(failure() || cancelled()) && env.SCOPED == ''": "success() && env.SCOPED == ''",
@@ -1534,7 +1542,7 @@ def _assert_reports_a_failure(opener: dict) -> None:
     # The title is the workflow's own ambient name, so each keeps its own issue (a shared
     # title would let one recovery close another's open failure) with no mirrored string.
     # A workflow whose unattended jobs run CONCURRENTLY scopes it further - the scheduler's
-    # grading job names the cohort it grades - because there the sibling that closes the
+    # grading job names the semester it grades - because there the sibling that closes the
     # issue is the one that just went green.
     assert opener["env"]["WORKFLOW"] == "${{ github.workflow }}"
     assert re.fullmatch(r'"\$WORKFLOW( \([^"]+\))? is failing"', _issue_title(opener))
@@ -1582,7 +1590,7 @@ def _assert_emails_the_maintainer(step: dict, detached: bool) -> None:
         # The step's OWN log, teed by the step that failed. The jobs API cannot answer this
         # from in here: the job is still RUNNING, so its `conclusion` is null and a lookup
         # for the failed job mailed an empty tail - and on the grading matrix it could
-        # match another cohort's leg.
+        # match another semester's leg.
         assert f"tail -n 30 {workflows_render._RUN_LOG}" in step["run"]
         assert "actions/runs" not in step["run"]
     else:
@@ -1637,7 +1645,7 @@ _OPEN_ISSUES = [
     },
     {
         "number": 22,
-        "title": "Scheduled release (autograde Cohort-f2026) is failing",
+        "title": "Scheduled release (autograde Semester-f2026) is failing",
         "updatedAt": "2020-01-01T00:00:00Z",
     },
 ]
@@ -1712,7 +1720,7 @@ def test_a_recovery_closes_only_the_issue_its_own_job_filed(tmp_path):
     # `--search` is a WORD match, so the release job's title is a subset of the grading
     # job's. Without an exact client-side match every green release tick closed the open
     # grading issues, the still-failing leg refiled with a fresh cc, and the 6h throttle
-    # never engaged - ~96 mentions a day per faulty cohort.
+    # never engaged - ~96 mentions a day per faulty semester.
     jobs = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]
     release_closer = _closer(jobs["release"])
     assert _run_issue_step(release_closer, tmp_path / "r", _OPEN_ISSUES) == ["close 11"]
@@ -1721,7 +1729,7 @@ def test_a_recovery_closes_only_the_issue_its_own_job_filed(tmp_path):
     # may follow it on the same runner.
     grading_closer = _closer(jobs["autograde-report"])
     assert _run_issue_step(
-        grading_closer, tmp_path / "a", _OPEN_ISSUES, COHORT="Cohort-f2026"
+        grading_closer, tmp_path / "a", _OPEN_ISSUES, SEMESTER="Semester-f2026"
     ) == ["close 22"]
 
 
@@ -1876,7 +1884,7 @@ def test_only_the_nightly_refresh_joins_the_seed_refresh_group():
 # Every renderer that WRITES shared state, and the group name it must serialise under.
 # Listed rather than derived, because the decision is per workflow: a second overlapping
 # run of any of these races the first into sha conflicts, a clobbered force-push, or a
-# half-reconciled team. Read-only buttons (Check cohort setup) are deliberately absent.
+# half-reconciled team. Read-only buttons (Check semester setup) are deliberately absent.
 SERIALISED_WRITERS = {
     "release": "release-materials",
     "central_release": "release-materials",
@@ -1885,17 +1893,17 @@ SERIALISED_WRITERS = {
     "distribute_grades": "distribute-grades",
     # Two presses at once would read the record, both find a student unclaimed, and
     # both claim-then-send them - the one duplicate the whole protocol exists to
-    # avoid, to a whole cohort.
+    # avoid, to a whole semester.
     "open_team_formation": "open-team-formation",
     # Two overlapping Send-codes runs generate two codes for the same blank cell: one is
     # written and the other is emailed, so that student's code enrols nobody. Scoped PER
-    # COHORT, because that raced state is one cohort's students.csv: a roster push in one
-    # cohort must not drop a queued send in another (a group holds one pending run, and a
+    # SEMESTER, because that raced state is one semester's students.csv: a roster push in one
+    # semester must not drop a queued send in another (a group holds one pending run, and a
     # third arrival cancels the second).
-    "send_codes": "send-codes-${{ github.event.client_payload.cohort_org }}",
+    "send_codes": "send-codes-${{ github.event.client_payload.semester_org }}",
     "sync_membership": "sync-membership",
-    "propagate_cohort": "propagate-cohort",
-    "archive_cohort": "archive-cohort",
+    "propagate_semester": "propagate-semester",
+    "archive_semester": "archive-semester",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
     # Per ACTOR: one person's presses run in order, and two people never wait on each other.
@@ -1934,26 +1942,27 @@ def test_no_button_joins_the_scheduled_release_group():
 
 
 def test_the_scheduler_serialises_each_job_and_nothing_more():
-    # No workflow-level group: that was ONE queue for every action in every cohort, and a
-    # two-hour grading pass in one cohort then held up a release due in another. Each job
+    # No workflow-level group: that was ONE queue for every action in every semester, and a
+    # two-hour grading pass in one semester then held up a release due in another. Each job
     # declares its own instead.
     doc = yaml.safe_load(ALL_RENDERED["scheduler"])
     assert "concurrency" not in doc
     jobs = doc["jobs"]
     # Releases are fire-once, so a tick arriving mid-pass still queues behind one - but a
-    # manual DRY-RUN writes nothing, and joining that queue is how an operator's preview
+    # manual PREVIEW writes nothing, and joining that queue is how an operator's preview
     # gets silently dropped (a group holds one pending run; a third arrival cancels it).
     assert jobs["release"]["concurrency"] == {
-        "group": "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}",
+        "group": "${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && github.run_id || 'scheduled-release' }}",
         "cancel-in-progress": False,
     }
-    # Grading queues PER COHORT: the fire-once marker is a cohort-side file, and a pass
-    # over another cohort shares nothing with it. A dry-run leg is per run and per cohort,
+    # Grading queues PER SEMESTER: the fire-once marker is a semester-side file, and a pass
+    # over another semester shares nothing with it. A dry-run leg is per run and per semester,
     # for the same reason the release job's is.
     assert jobs["autograde"]["concurrency"] == {
         "group": (
-            "${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, "
-            "matrix.cohort) || format('scheduled-autograde-{0}', matrix.cohort) }}"
+            "${{ github.event_name == 'workflow_dispatch' && inputs.preview != false "
+            "&& format('{0}-{1}', github.run_id, "
+            "matrix.semester) || format('scheduled-autograde-{0}', matrix.semester) }}"
         ),
         "cancel-in-progress": False,
     }
@@ -1965,31 +1974,31 @@ def test_the_scheduler_serialises_each_job_and_nothing_more():
     assert "concurrency" not in jobs["autograde-report"]
 
 
-def test_the_scheduler_grades_every_cohort_without_waiting_on_the_releases():
+def test_the_scheduler_grades_every_semester_without_waiting_on_the_releases():
     jobs = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]
     autograde = jobs["autograde"]
-    # It needs the release job only for the cohort LIST, so it must run whatever became of
+    # It needs the release job only for the semester LIST, so it must run whatever became of
     # the releases: grading is gated on the durable snapshot marker, not on this run.
     assert autograde["needs"] == ["release"]
     assert autograde["if"].startswith("always()")
     # ...but not on an empty list: GitHub errors on a matrix with no vectors, and a course
-    # org with no cohorts registered yet is a normal state, not a failure.
-    assert "needs.release.outputs.cohorts != '[]'" in autograde["if"]
-    assert "needs.release.outputs.cohorts != ''" in autograde["if"]
+    # org with no semesters registered yet is a normal state, not a failure.
+    assert "needs.release.outputs.semesters != '[]'" in autograde["if"]
+    assert "needs.release.outputs.semesters != ''" in autograde["if"]
     assert jobs["release"]["outputs"] == {
-        "cohorts": "${{ steps.cohorts.outputs.cohorts }}"
+        "semesters": "${{ steps.semesters.outputs.semesters }}"
     }
     steps = jobs["release"]["steps"]
-    lister = next(s for s in steps if s.get("id") == "cohorts")
-    assert "--list-cohorts" in lister["run"]
+    lister = next(s for s in steps if s.get("id") == "semesters")
+    assert "--list-semesters" in lister["run"]
     # And it is listed BEFORE the release pass runs: a failed step skips the ones after
-    # it, so listing afterwards would let one cohort's release fault skip everyone's
+    # it, so listing afterwards would let one semester's release fault skip everyone's
     # grading - on a run that has already reported the release failure and moved on.
-    releaser = next(s for s in steps if "--all-cohorts" in str(s.get("run", "")))
+    releaser = next(s for s in steps if "--all-semesters" in str(s.get("run", "")))
     assert steps.index(lister) < steps.index(releaser)
     assert autograde["strategy"] == {
-        "fail-fast": False,  # one cohort's grading failure cancels nobody else's
-        "matrix": {"cohort": "${{ fromJSON(needs.release.outputs.cohorts) }}"},
+        "fail-fast": False,  # one semester's grading failure cancels nobody else's
+        "matrix": {"semester": "${{ fromJSON(needs.release.outputs.semesters) }}"},
     }
     # Each job runs its own half, and only its own half.
     assert "--skip-autograde" in str(jobs["release"]["steps"])
@@ -2021,7 +2030,7 @@ def test_the_scheduler_installs_the_autograder_it_runs():
     # The scheduler autogrades at every passed deadline through the grading preamble,
     # which installs requirements-autograde.txt and nothing else. When pytest
     # lived only in the manual grading step, `python -m pytest` was "No module
-    # named pytest" on the cron: silent zeros for the whole cohort, no sentinel, and the
+    # named pytest" on the cron: silent zeros for the whole semester, no sentinel, and the
     # same red run every hour for the rest of the term.
     steps = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["autograde"]["steps"]
     installs = [s["run"] for s in steps if "pip install -r " in str(s.get("run", ""))]
@@ -2099,7 +2108,7 @@ def test_the_core_requirements_carry_no_autograder():
 _SCOPED = (
     "(github.event_name == 'repository_dispatch' "
     "&& github.event.client_payload.driver == 'classroom-config' "
-    "&& github.event.client_payload.cohort_org || '')"
+    "&& github.event.client_payload.semester_org || '')"
 )
 
 
@@ -2122,13 +2131,13 @@ def _args_under_bash(script: str, env: dict) -> list[str]:
     return out.split()
 
 
-def test_a_config_push_run_releases_into_its_own_cohort_only():
-    # A classroom-config push (driver=classroom-config, cohort_org=<its org>) also fires
-    # Sync site, so its run takes that one cohort and leaves the site to Sync site's queue.
-    # The GitHub cron and the ds01 timer (no cohort) still walk every cohort.
+def test_a_config_push_run_releases_into_its_own_semester_only():
+    # A classroom-config push (driver=classroom-config, semester_org=<its org>) also fires
+    # Sync site, so its run takes that one semester and leaves the site to Sync site's queue.
+    # The GitHub cron and the ds01 timer (no semester) still walk every semester.
     release = _jobs_of(ALL_RENDERED["scheduler"])["release"]
     listing, step = (
-        next(s for s in release["steps"] if s.get("id") == "cohorts"),
+        next(s for s in release["steps"] if s.get("id") == "semesters"),
         next(s for s in release["steps"] if "DRIVER" in (s.get("env") or {})),
     )
     # Job-level, so the failure-issue steps' `if:` can read it.
@@ -2137,33 +2146,33 @@ def test_a_config_push_run_releases_into_its_own_cohort_only():
         assert "SCOPED" not in (s.get("env") or {})
     choose = _block(step["run"], 'if [ -n "$SCOPED" ]', "fi")
     base = {"COURSE": "Course-Org"}
-    assert _args_under_bash(choose, base | {"SCOPED": "Cohort-A"}) == [
-        "--course-org", "Course-Org", "--cohort-org", "Cohort-A",
+    assert _args_under_bash(choose, base | {"SCOPED": "Semester-A"}) == [
+        "--course-org", "Course-Org", "--semester-org", "Semester-A",
         "--skip-autograde", "--defer-site-sync",
     ]  # fmt: skip
     assert _args_under_bash(choose, base | {"SCOPED": ""}) == [
-        "--course-org", "Course-Org", "--all-cohorts", "--skip-autograde",
+        "--course-org", "Course-Org", "--all-semesters", "--skip-autograde",
     ]  # fmt: skip
     lines = listing["run"].splitlines()
     pick = "\n".join(line for line in lines if line.strip().startswith(("args", "[")))
-    assert _args_under_bash(pick, base | {"SCOPED": "Cohort-A"})[-2:] == [
-        "--cohort-org",
-        "Cohort-A",
+    assert _args_under_bash(pick, base | {"SCOPED": "Semester-A"})[-2:] == [
+        "--semester-org",
+        "Semester-A",
     ]
-    assert "--cohort-org" not in _args_under_bash(pick, base | {"SCOPED": ""})
+    assert "--semester-org" not in _args_under_bash(pick, base | {"SCOPED": ""})
     # The title is what cadence reads to tell the two apart; the fire-once queue is the
     # same one whichever arrival it is.
     assert yaml.safe_load(ALL_RENDERED["scheduler"])["run-name"] == (
         "${{ " + _SCOPED + " && format('" + course.SCOPED_RUN_TITLE
-        + " {0}', github.event.client_payload.cohort_org) || 'Scheduled release' }}"
+        + " {0}', github.event.client_payload.semester_org) || 'Scheduled release' }}"
     )  # fmt: skip
     assert release["concurrency"]["group"] == (
-        "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}"
+        "${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && github.run_id || 'scheduled-release' }}"
     )
 
 
 def test_a_scoped_run_neither_files_nor_closes_the_course_failure_issue():
-    # A green push in cohort A closing the issue cohort B's fault holds open, and the next
+    # A green push in semester A closing the issue semester B's fault holds open, and the next
     # full tick re-filing it with a cc and a mail, is one fault mentioned once per push.
     steps = _jobs_of(ALL_RENDERED["scheduler"])["release"]["steps"]
     by_name = {s.get("name"): s for s in steps}
@@ -2180,19 +2189,19 @@ def test_a_scoped_run_neither_files_nor_closes_the_course_failure_issue():
 
 
 @pytest.mark.parametrize(
-    "cohort, everyone, expected",
+    "semester, everyone, expected",
     [
-        ("", "true", ["--all-cohorts"]),
+        ("", "true", ["--all-semesters"]),
         ("", "false", []),
-        ("Cohort-A", "true", ["--cohort-org", "Cohort-A"]),
-        ("Cohort-A", "false", ["--cohort-org", "Cohort-A"]),
+        ("Semester-A", "true", ["--semester-org", "Semester-A"]),
+        ("Semester-A", "false", ["--semester-org", "Semester-A"]),
     ],
 )
-def test_the_ds01_membership_dispatch_can_ask_for_every_cohort(
-    cohort, everyone, expected
+def test_the_ds01_membership_dispatch_can_ask_for_every_semester(
+    semester, everyone, expected
 ):
-    # ds01's hourly `sync-membership` dispatch sends {"driver": "ds01", "all_cohorts":
-    # true}; a cohort's own dispatch names its cohort, which wins over all_cohorts.
+    # ds01's hourly `sync-membership` dispatch sends {"driver": "ds01", "all_semesters":
+    # true}; a semester's own dispatch names its semester, which wins over all_semesters.
     step = next(
         s
         for s in _jobs_of(ALL_RENDERED["sync_membership"])["sync-auto"]["steps"]
@@ -2200,12 +2209,12 @@ def test_the_ds01_membership_dispatch_can_ask_for_every_cohort(
     )
     # The JSON boolean and nothing else: a string "true" or a 1 is absent.
     assert step["env"]["DISPATCH_ALL"] == (
-        "${{ toJSON(github.event.client_payload.all_cohorts) == 'true' }}"
+        "${{ (toJSON(github.event.client_payload.all_semesters) == 'true' || toJSON(github.event.client_payload.all_cohorts) == 'true') }}"
     )
     script = "args=()\n" + _block(step["run"], 'case "$EVENT" in', "esac")
     env = {
         "EVENT": "repository_dispatch",
-        "DISPATCH_COHORT": cohort,
+        "DISPATCH_SEMESTER": semester,
         "DISPATCH_ALL": everyone,
     }
     assert _args_under_bash(script, env) == expected
@@ -2251,7 +2260,7 @@ def test_an_instructor_retitled_page_is_left_alone():
     # The signal is the H1 naming an org that is not this one. A human title matches
     # nothing, so prose someone has made their own is never rewritten - which is the
     # difference between this and "the page still looks generated", the heuristic
-    # _cohort_profile_body's docstring rejects.
+    # _semester_profile_body's docstring rejects.
     page = (
         "# NLP, Autumn 2026\n\nSee hertie-nlp-e1282-f2026 for last year's materials.\n"
     )
@@ -2266,7 +2275,7 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
     original = profile_readme.get_file_content
     profile_readme.get_file_content = lambda org, repo, path: monkey.get(path)
     try:
-        out = profile_readme._cohort_profile_body("new-org-f2026", [], "SEEDED")
+        out = profile_readme._semester_profile_body("new-org-f2026", [], "SEEDED")
     finally:
         profile_readme.get_file_content = original
     assert out is not None, "a rename must still be written even with no markers"
@@ -2276,15 +2285,15 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
 # --------------------------------------------------------- the workflows that send email
 
 # Everything that can put an email on the wire: the codes send, off a roster push, and
-# Distribute grades, the one button left that emails a whole cohort.
+# Distribute grades, the one button left that emails a whole semester.
 MAIL_SENDERS = ("send_codes", "distribute_grades", "open_team_formation")
 
-# Everything whose job env must carry the transport secrets. Check cohort setup sends
+# Everything whose job env must carry the transport secrets. Check semester setup sends
 # nothing - it REPORTS whether a send could (status' mail-transport row reads the very
 # same variables through `mailer.graph_config_from_env`), and a workflow that does not
 # carry them would report "unset" on every org whatever the truth. That is the exact
 # fiction an unattended codes send leans on when it says a person will read the row.
-# ...plus the scheduler, which mails a cohort about a source it has not staged, and
+# ...plus the scheduler, which mails a semester about a source it has not staged, and
 # every cron, whose failure step mails the maintainer the log (asserted per cron in
 # test_every_unattended_run_files_and_closes_its_own_failure_issue).
 MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status", "scheduler", "console")
@@ -2297,15 +2306,15 @@ def _secret_ref(name: str) -> str:
 
 # The mail senders that HAVE a button, i.e. the ones a preview is possible for at all.
 # Send enrolment codes is deliberately not among them: it has no button and no preview -
-# a push to a cohort's students.csv is what fires it, and it sends for real.
+# a push to a semester's students.csv is what fires it, and it sends for real.
 MAIL_BUTTONS = ("distribute_grades", "open_team_formation")
 
 
 @pytest.mark.parametrize("name", MAIL_BUTTONS)
 def test_every_mail_button_defaults_to_a_dry_run(name):
-    # The entire safety rail on a button that emails a whole cohort, and until now it was
+    # The entire safety rail on a button that emails a whole semester, and until now it was
     # asserted nowhere: a renderer edit flipping it would have been green.
-    dry_run = workflow_inputs(ALL_RENDERED[name])["dry_run"]
+    dry_run = workflow_inputs(ALL_RENDERED[name])["preview"]
     assert dry_run["type"] == "boolean"
     assert dry_run["default"] is True
 
@@ -2315,23 +2324,23 @@ def test_every_mail_button_defaults_to_a_dry_run(name):
     "value", ["", "true", "True", "TRUE", "yes", "1", " false", "false"]
 )
 def test_the_dry_run_gate_is_fail_closed_under_bash(name, value, tmp_path):
-    # Executed, not string-matched: `[ "$DRY_RUN" = "true" ] && args+=(--dry-run)` sent for
+    # Executed, not string-matched: `[ "$DRY_RUN" = "true" ] && args+=(--preview)` sent for
     # real on ANY value that was not the exact lowercase string - "True", "1", a blank from
     # a renamed input. Only an explicit `false` may send.
     gate = next(
         line.strip()
         for line in ALL_RENDERED[name].splitlines()
-        if "--no-dry-run" in line
+        if "--no-preview" in line
     )
     script = f'args=()\n{gate}\nprintf "%s\\n" "${{args[@]}}"'
     out = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", script],
-        env={"DRY_RUN": value, "PATH": os.environ["PATH"]},
+        env={"PREVIEW": value, "PATH": os.environ["PATH"]},
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    expected = "--no-dry-run" if value == "false" else "--dry-run"
+    expected = "--no-preview" if value == "false" else "--preview"
     assert out.strip() == expected
 
 
@@ -2357,13 +2366,13 @@ def test_the_release_pass_itself_carries_the_transport():
     # has to be on the step that runs `dsl_course.scheduler`, and the sweep above would
     # be satisfied by the failure step's copy alone.
     steps = workflow_jobs(ALL_RENDERED["scheduler"])["release"]["steps"]
-    step = next(s for s in steps if "--all-cohorts" in str(s.get("run", "")))
+    step = next(s for s in steps if "--all-semesters" in str(s.get("run", "")))
     assert set(mailer.GRAPH_ENV) <= set(step["env"])
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
 
 
 # Where a fault in a COURSE org's OWN config is emailed: the two steps that check
-# dsl-course.yml and the cohort registry, and nowhere else. An address list has no business
+# dsl-course.yml and the semester registry, and nowhere else. An address list has no business
 # in the env of a workflow that never reads it.
 COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
 
@@ -2371,7 +2380,7 @@ COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
 @pytest.mark.parametrize(
     ("name", "command"),
     [
-        ("scheduler", "--all-cohorts --skip-autograde"),
+        ("scheduler", "--all-semesters --skip-autograde"),
         ("sync_membership", "--check-course-config"),
     ],
 )
@@ -2399,7 +2408,7 @@ def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
     rendered = ALL_RENDERED["sync_membership"]
     doc = yaml.safe_load(rendered)
     paths = doc.get("on", doc.get(True))["push"]["paths"]
-    assert paths == ["dsl-course.yml", "cohort-courses-pages.yml"]
+    assert paths == ["dsl-course.yml", "semesters.yml"]
     auto = workflow_jobs(rendered)["sync-auto"]["steps"]
     step = next(
         s for s in auto if "dsl_course.sync_membership" in str(s.get("run", ""))
@@ -2417,11 +2426,13 @@ def test_the_manual_sync_button_is_not_given_the_addresses():
     assert all(mailer.COURSE_ADMIN_ENV not in (s.get("env") or {}) for s in steps)
 
 
-def test_a_cohort_bootstrap_forwards_the_maintainer_address_to_the_new_org():
+def test_a_semester_bootstrap_forwards_the_maintainer_address_to_the_new_org():
     # It runs in the COURSE org, which has the address as an org secret already, and
-    # --propagate-secret is what copies it down. A cohort org left without it is one whose
+    # --propagate-secret is what copies it down. A semester org left without it is one whose
     # own seeded workflows fall back to the shared send mailbox.
-    steps = workflow_jobs(ALL_RENDERED["bootstrap_cohort"])["bootstrap-cohort"]["steps"]
+    steps = workflow_jobs(ALL_RENDERED["bootstrap_semester"])["bootstrap-semester"][
+        "steps"
+    ]
     step = next(s for s in steps if "--propagate-secret" in str(s.get("run", "")))
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
 
@@ -2431,7 +2442,7 @@ def test_every_step_that_drives_git_authenticates_it(name):
     # `GH_TOKEN` in the env is what `gh` reads; git reads a credential helper, and only
     # `gh auth setup-git` writes one. A pushing step without it dies on the first remote
     # with `fatal: could not read Username for 'https://github.com'` - which is how a
-    # Propagate run died in a real course org, and how Archive cohort would have died at
+    # Propagate run died in a real course org, and how Archive semester would have died at
     # its step 0, which IS a propagate.
     for job, spec in workflow_jobs(ALL_RENDERED[name]).items():
         for step in spec.get("steps", []):
@@ -2454,8 +2465,8 @@ def test_the_git_authentication_sweep_sees_the_pushing_buttons():
     assert {
         "release",
         "provision",
-        "propagate_cohort",
-        "archive_cohort",
+        "propagate_semester",
+        "archive_semester",
         "new_materials",
         "new_assignment",
         "sync_site",

@@ -188,7 +188,7 @@ def _refresh_workflows(org: str, run_id: str, dry_run: bool) -> int:
     dispatched. So the teardown presses that button itself, in process, through the same
     writer the workflow runs (`seed.seed_github_workflows`).
 
-    A no-op in a cohort org, which holds no org-level workflows, and a no-op in a course
+    A no-op in a semester org, which holds no org-level workflows, and a no-op in a course
     org already converged - `put_files` drops a path whose sha already matches, so there
     is no commit at all when nothing moved. That is what makes this safe to run by hand.
 

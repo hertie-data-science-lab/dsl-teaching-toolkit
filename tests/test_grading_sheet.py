@@ -784,8 +784,8 @@ def test_the_line_scan_reads_nesting_off_the_indentation():
     assert lines[("teams", "team-alpha", "score_group", "Q1")] == 4
 
 
-def _cohort_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
-    """`cohort_sheet_faults` over `sheets`, with one of them refusing to be read."""
+def _semester_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
+    """`semester_sheet_faults` over `sheets`, with one of them refusing to be read."""
     monkeypatch.setattr(
         grades, "sheet_specs", lambda course, sched: dict.fromkeys(sheets, individual())
     )
@@ -798,12 +798,14 @@ def _cohort_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
 
     monkeypatch.setattr(grades, "get_file_content", _read)
     found: list = []
-    grades.cohort_sheet_faults("Course", "Cohort", None, found)
+    grades.semester_sheet_faults("Course", "Semester", None, found)
     return found
 
 
-def test_every_sheet_in_the_cohort_reaches_one_list_carrying_its_own_path(monkeypatch):
-    found = _cohort_sheets(
+def test_every_sheet_in_the_semester_reaches_one_list_carrying_its_own_path(
+    monkeypatch,
+):
+    found = _semester_sheets(
         monkeypatch, {"a1": "submissions: nope\n", "a2": "submissions: nope\n"}
     )
     assert [f.file for f in found] == ["grading_sheets/a1.yml", "grading_sheets/a2.yml"]
@@ -824,7 +826,7 @@ def test_a_sheet_that_could_not_be_read_reports_none_of_them(monkeypatch):
         lambda *a: (_ for _ in ()).throw(RuntimeError("rate-limited")),
     )
     with pytest.raises(RuntimeError):
-        grades.cohort_sheet_faults("Course", "Cohort", None, found)
+        grades.semester_sheet_faults("Course", "Semester", None, found)
     assert found == []
 
 
@@ -834,5 +836,5 @@ def test_an_assignment_with_no_sheet_yet_is_not_a_fault(monkeypatch):
     )
     monkeypatch.setattr(grades, "get_file_content", lambda *a: None)
     found: list = []
-    grades.cohort_sheet_faults("Course", "Cohort", None, found)
+    grades.semester_sheet_faults("Course", "Semester", None, found)
     assert found == []

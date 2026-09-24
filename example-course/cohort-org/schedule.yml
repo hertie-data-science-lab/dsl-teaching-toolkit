@@ -1,4 +1,4 @@
-# Worked example for the hertie-dsl-demo-f2026 cohort's whole term in one file. 
+# Worked example for the hertie-dsl-demo-f2026 semester's whole term in one file. 
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/07-schedule-releases.md
 # - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
@@ -44,7 +44,7 @@ releases:
         course_source_path: labs/01_week-1
       - course_source_repo: course-materials-f2026
         course_source_path: solutions/labs/01_week-1
-        cohort_dest_path: labs/01_week-1/solutions
+        semester_dest_path: labs/01_week-1/solutions
         deploy_datetime: 2026-09-03T18:00
   readings-2:
     event_datetime: 2026-09-01T09:00
@@ -138,7 +138,7 @@ assignments:
   assignment-2:
     course_source_repo: assignment-2-f2026
     details: Classification on a dataset you have not seen, scored on held-out data.
-    cohort_dest_repo: homework-2
+    semester_dest_repo: homework-2
     handout_datetime: 2026-09-29T14:00
     due_datetime: 2026-10-27T23:59
   assignment-4-project:
@@ -153,12 +153,12 @@ assignments:
 
 events:
   mid-term:
-    type: exam
+    kind: exam
     title: MidTerm Exam                   # NB if empty, default -> would display as this anyway
     details: Ninety minutes, closed book. Everything up to and including week 5.
     event_datetime: tbc
   final-exam:
-    type: exam
+    kind: exam
     title: Final Exam                     # NB if empty, default -> would display as this anyway
     details: Two hours, closed book. Room confirmed nearer the time.
     event_datetime: 2026-12-15T14:00   
@@ -172,10 +172,10 @@ events:
     details: An industry speaker - announced nearer the time.
     event_datetime: tbc
 
-# archive the org (freezes in place): removes all write permissions, retains all read permissions
+# archive the org (every repo read-only): removes all write permissions, retains all read permissions
 archive:
   event_datetime: 2027-02-16  # optional (default: semester_end + 60 days)
-  title: Cohort archived      # optional - the row's Title column
-  show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, also sends a notice email 14 days out
+  title: Semester archived      # optional - the row's Title column
+  show_on_site: true          # a "Semester archived" row on the site's Schedule tab, also sends a notice email 14 days out
   details: >-                 # optional, `{date}` is filled in automatically
-    This cohort is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
+    This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.

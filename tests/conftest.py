@@ -118,12 +118,12 @@ def _the_central_ref_is_present(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_cohort_is_closed_out(monkeypatch):
-    """Answer `discovery.cohort_is_live`'s probe with "still running" by default.
+def _no_semester_is_closed_out(monkeypatch):
+    """Answer `discovery.semester_is_live`'s probe with "still running" by default.
 
-    Every course-side sweep now asks whether a cohort's `classroom-config` is archived
+    Every course-side sweep now asks whether a semester's `classroom-config` is archived
     before writing into it, which is a live `gh api repos/<org>/classroom-config`. A
-    running cohort is the uninteresting answer for every test but the ones about the skip
+    running semester is the uninteresting answer for every test but the ones about the skip
     itself, which set their own after this fixture and win."""
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
 
@@ -136,7 +136,7 @@ def _not_on_a_runner(monkeypatch):
     is, whether the `dsl-sandbox` account is there to drop student code to. CI *is* a
     runner and has no such account, so without this the whole suite inherited the
     fail-closed answer - graded nothing, and a dozen tests about what `collect` does with a
-    cohort failed on Linux while passing on a laptop. The memos go with the variable: they
+    semester failed on Linux while passing on a laptop. The memos go with the variable: they
     are answered once per process, so a test that sets `GITHUB_ACTIONS` itself must not
     leave its answer behind for the next one."""
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
@@ -149,7 +149,7 @@ def _clear_process_memos():
     """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
     paths, a repo's metadata and its last committer, whether a central ref exists, the
     classroom-config files a run re-reads (students.csv, teams.csv, schedule.yml,
-    people.yml), an assignment's definition, its course's defaults and its handed-out
+    instructors.yml), an assignment's definition, its course's defaults and its handed-out
     starters, and the login the token belongs to. Tests reuse the same org/repo names
     with different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()
@@ -165,7 +165,7 @@ def _clear_process_memos():
     gh_contents.last_committer.cache_clear()
     gh_contents.blame_logins.cache_clear()
     gh_contents.path_committers.cache_clear()
-    sync_faculty.load_cohort_faculty.cache_clear()
+    sync_faculty.load_semester_faculty.cache_clear()
     ghcli.bot_login.cache_clear()
 
 
@@ -181,7 +181,7 @@ def stub_bootstrap(monkeypatch) -> None:
         "converge_org_settings",
         "create_default_teams",
         "grant_button_access",
-        "setup_cohort_extras",
+        "setup_semester_extras",
         "seed_workflows",
         "create_profile_repo",
     ):
@@ -190,17 +190,17 @@ def stub_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
     monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
     monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: True)
+    monkeypatch.setattr(bc, "register_semester", lambda course, semester: True)
     monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
-    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 0)
+    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, semesters=None: 0)
     # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
     # about what the run does, not which ref it seeds at.
     monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(bc, "course_cohort_defaults", lambda course: {})
+    monkeypatch.setattr(bc, "course_semester_defaults", lambda course: {})
 
 
 # What the `gh issue create` in `GhFake` prints.
-CREATED_ISSUE_URL = "https://github.com/Cohort/classroom-config/issues/12"
+CREATED_ISSUE_URL = "https://github.com/Semester/classroom-config/issues/12"
 
 
 class GhFake:
@@ -280,7 +280,7 @@ def issue_row(number: int, title: str, body: str = "") -> dict:
 # --------------------------------------------------------------- against real git
 
 # Two suites run against real repositories rather than a stubbed `git` - the release's
-# merge onto `upstream` (`test_release_merge`) and the propagate back out of a cohort
+# merge onto `upstream` (`test_release_merge`) and the propagate back out of a semester
 # (`test_propagate`). Both are about what ends up on a BRANCH and in a COMMIT HISTORY,
 # which a stubbed `git` can only assert back at itself, and both need the same three
 # things: bare origins on disk, a way to put a commit in one, and a `gh repo clone` that
@@ -346,7 +346,7 @@ class BareOrigins:
         to write into a repo with no working tree. A `None` value DELETES that path.
 
         `branch` is what students read unless a test needs the release branch a held merge
-        leaves ahead of it (`deploy.UPSTREAM_BRANCH`), which is a real state a cohort repo
+        leaves ahead of it (`deploy.UPSTREAM_BRANCH`), which is a real state a semester repo
         sits in whenever a release conflicted.
 
         The commit borrows the engine's identity and its disabled hooks, so a developer's

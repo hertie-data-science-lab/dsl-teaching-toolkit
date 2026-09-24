@@ -1,4 +1,4 @@
-"""mailer -- the transport's failure handling, which is where a whole cohort's mail is
+"""mailer -- the transport's failure handling, which is where a whole semester's mail is
 lost quietly. The HTTP POST itself is stubbed (`_post`), so nothing here reaches Graph or
 Graph; everything asserted is what the module does with the answer it gets.
 """
@@ -234,7 +234,7 @@ def test_no_address_anywhere_is_none_rather_than_an_empty_string(monkeypatch):
 
 
 def test_the_batch_is_paced_below_the_graph_rate_limit(monkeypatch, _no_sleeping):
-    # ~30/min per mailbox. Sent back-to-back, a full cohort starts 429-ing around message
+    # ~30/min per mailbox. Sent back-to-back, a full semester starts 429-ing around message
     # 30 and then pays the retry ladder per recipient, serially, against a 30-minute job.
     _replies(monkeypatch, [(202, {})] * 3)
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
@@ -388,7 +388,7 @@ def test_a_plain_three_tuple_is_still_a_message(monkeypatch):
 
 def test_a_group_is_counted_not_named_in_the_run_log(monkeypatch, capsys):
     # Every workflow runs in a PUBLIC repo, so its log is world-readable - and a mask is
-    # not anonymity: `a***@x.edu` beside a cohort's people.yml is a name.
+    # not anonymity: `a***@x.edu` beside a semester's instructors.yml is a name.
     _payloads(monkeypatch)
     mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
     out = capsys.readouterr().out

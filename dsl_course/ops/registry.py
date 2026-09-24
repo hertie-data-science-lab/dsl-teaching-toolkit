@@ -5,9 +5,9 @@ seeded workflow for the same job does (`workflows_render`), so the console and t
 tab cannot drift into two meanings for one button. `args_schema` is built from the course
 vocabulary in `course`, so a new enum value reaches the console's form with no second edit.
 
-The preview gate mirrors `workflows_render._DRY_RUN_GATE`: a CLI whose dry run DEFAULTS ON
-is handed `--no-dry-run` explicitly for a real run (`real_flag`), so an argv that lost a
-flag previews rather than acts. An op whose CLI has no dry run has `preview_flag=None`, and
+The preview gate mirrors `workflows_render._PREVIEW_GATE`: every CLI previews by default
+(`log.add_preview_flag`) and is handed `--no-preview` explicitly for a real run
+(`real_flag`), so an argv that lost a flag previews rather than acts. An op whose CLI has no dry run has `preview_flag=None`, and
 the request parser refuses `preview: true` for it (`NO_PREVIEW`).
 
 `via` says where the CLI runs. `inline` runs it inside the Console job. `workflow:<file>`
@@ -29,6 +29,8 @@ from ..course import (
     PUBLIC_DIRS,
     PUBLIC_HTML_PDF,
     PUBLIC_TYPES,
+    SOLUTION_NOW,
+    SOLUTION_WARNING,
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -41,7 +43,9 @@ STATUS_SCHEMA = "dsl.status/1"
 
 DISPATCH = "dispatch"
 COURSE = "course"
-COHORT = "cohort"
+# The op scope and the `cohort.*` op ids are what the console matches on; they are renamed
+# together with the console (WP-A3), not here.
+SEMESTER = "cohort"
 BOOTSTRAP_OP = "cohort.bootstrap"
 INLINE = "inline"
 VIA_WORKFLOW = "workflow:"
@@ -52,7 +56,7 @@ ORG_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 REPO_PATTERN = r"^(?!-)[A-Za-z0-9._-]{1,100}$"
 PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"
-TAG_PATTERN = r"^[fs][0-9]{4}$"
+SEMESTER_PATTERN = r"^[fs][0-9]{4}$"
 HANDLE_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 FORMATS_PATTERN = (
     rf"^(?:none|(?:{'|'.join(STARTER_FORMATS)})(?:,(?:{'|'.join(STARTER_FORMATS)}))*)$"
@@ -67,7 +71,7 @@ class Request:
     op: str
     actor: str
     course_org: str
-    cohort_org: str | None
+    semester_org: str | None
     args: dict
     preview: bool
     client: str = ""
@@ -124,12 +128,16 @@ def command(op: Operation, request: Request) -> list[str]:
 def workflow_inputs(op: Operation, argv: list[str]) -> dict[str, str]:
     """The dispatch inputs of a `workflow:` op, read off the argv its workflow would build:
     `--name value` fills input `name` (dashes to underscores), a bare `--name` switch is
-    "true", and an input the argv does not spell is left to the workflow's own default."""
+    "true", its `--no-name` form is "false", and an input the argv does not spell is left
+    to the workflow's own default."""
     out: dict[str, str] = {}
     for i, token in enumerate(argv):
         if not token.startswith("--"):
             continue
         name = token[2:].replace("-", "_")
+        if name.startswith("no_") and name[3:] in op.inputs:
+            out[name[3:]] = "false"
+            continue
         if name not in op.inputs:
             continue
         nxt = argv[i + 1] if i + 1 < len(argv) else None
@@ -179,8 +187,8 @@ _SLUG = _string(
 _DEPLOY_FIELDS = {
     "course_source_repo": _string(REPO_PATTERN, "Course-org repo to release from"),
     "course_source_path": _string(PATH_PATTERN, "Path(s), comma-separated"),
-    "cohort_dest_repo": _string(REPO_PATTERN, "Cohort repo to release into"),
-    "cohort_dest_path": _string(PATH_PATTERN, "Destination path(s), comma-separated"),
+    "semester_dest_repo": _string(REPO_PATTERN, "Semester repo to release into"),
+    "semester_dest_path": _string(PATH_PATTERN, "Destination path(s), comma-separated"),
 }
 
 
@@ -191,50 +199,51 @@ def _a(request: Request, key: str, default=None):
     return request.args.get(key, default)
 
 
-def _course_cohort(request: Request) -> list[str]:
-    return ["--course-org", request.course_org, "--cohort-org", request.cohort_org]
+def _course_semester(request: Request) -> list[str]:
+    return ["--course-org", request.course_org, "--semester-org", request.semester_org]
 
 
-def _status_write(request: Request) -> list[str]:
-    return [*_course_cohort(request), "--write"]
+def _status_refresh(request: Request) -> list[str]:
+    # The check REFRESHES status.json: `status` previews unless told --no-preview.
+    return [*_course_semester(request), "--no-preview"]
 
 
 def _scheduler(request: Request) -> list[str]:
-    return [*_course_cohort(request), "--skip-autograde", "--dry-run"]
+    return [*_course_semester(request), "--skip-autograde", "--preview"]
 
 
 def _deploy(request: Request) -> list[str]:
     return [
-        "--source-org",
+        "--course-org",
         request.course_org,
         "--course-source-repo",
         _a(request, "course_source_repo"),
-        "--cohort-org",
-        request.cohort_org,
+        "--semester-org",
+        request.semester_org,
         "--course-source-path",
         _a(request, "course_source_path"),
-        "--cohort-dest-repo",
-        _a(request, "cohort_dest_repo", "materials"),
-        "--cohort-dest-path",
-        _a(request, "cohort_dest_path", ""),
+        "--semester-dest-repo",
+        _a(request, "semester_dest_repo", "materials"),
+        "--semester-dest-path",
+        _a(request, "semester_dest_path", ""),
     ]
 
 
 def _assign_base(request: Request) -> list[str]:
     return [
-        "--master-org",
+        "--course-org",
         request.course_org,
         "--course-source-repo",
         _a(request, "course_source_repo"),
-        "--cohort-org",
-        request.cohort_org,
+        "--semester-org",
+        request.semester_org,
     ]
 
 
 def _handout(request: Request) -> list[str]:
     argv = _assign_base(request)
-    if _a(request, "include_solution"):
-        argv.append("--solution")
+    if _a(request, "solution_datetime"):
+        argv += ["--solution-datetime", _a(request, "solution_datetime")]
     return argv
 
 
@@ -255,7 +264,7 @@ def _collect(request: Request) -> list[str]:
 
 
 def _grades(request: Request) -> list[str]:
-    argv = ["distribute", "--cohort-org", request.cohort_org]
+    argv = ["distribute", "--semester-org", request.semester_org]
     if not _a(request, "notify", True):
         argv.append("--no-notify")
     if _a(request, "receipt_note"):
@@ -267,8 +276,8 @@ def _grades(request: Request) -> list[str]:
 
 def _send_codes(request: Request) -> list[str]:
     return [
-        "--cohort-org",
-        request.cohort_org,
+        "--semester-org",
+        request.semester_org,
         "--dispatched-by",
         request.course_org,
         "--resend-unjoined",
@@ -276,11 +285,11 @@ def _send_codes(request: Request) -> list[str]:
 
 
 def _site_sync(request: Request) -> list[str]:
-    return ["sync", *_course_cohort(request)]
+    return ["sync", *_course_semester(request)]
 
 
 def _teardown(request: Request) -> list[str]:
-    argv = _course_cohort(request)
+    argv = _course_semester(request)
     if _a(request, "force"):
         argv.append("--force")
     return argv
@@ -312,7 +321,7 @@ def _derive(request: Request) -> list[str]:
 
 def _syllabus(request: Request) -> list[str]:
     return [
-        *_course_cohort(request),
+        *_course_semester(request),
         "--course-source-repo",
         _a(request, "course_source_repo"),
     ]
@@ -323,8 +332,8 @@ def _new_materials(request: Request) -> list[str]:
         "materials",
         "--org",
         request.course_org,
-        "--tag",
-        _a(request, "tag"),
+        "--semester",
+        _a(request, "semester"),
         "--public-dirs",
         _a(request, "public_dirs", NOTHING_PUBLIC),
         "--public-types",
@@ -342,12 +351,12 @@ def _new_assignment(request: Request) -> list[str]:
         request.course_org,
         "--number",
         str(_a(request, "number")),
-        "--tag",
-        _a(request, "tag"),
+        "--semester",
+        _a(request, "semester"),
         "--name",
         _a(request, "name", ""),
-        "--format",
-        _a(request, "format", "ipynb"),
+        "--formats",
+        _a(request, "formats", "ipynb"),
         "--type",
         _a(request, "type", "individual"),
         "--team-formation",
@@ -364,13 +373,13 @@ def _new_assignment(request: Request) -> list[str]:
     return argv
 
 
-def _bootstrap_cohort(request: Request) -> list[str]:
+def _bootstrap_semester(request: Request) -> list[str]:
     return [
         "--org",
-        request.cohort_org,
+        request.semester_org,
         "--org-name",
-        request.cohort_org,
-        "--cohort",
+        request.semester_org,
+        "--semester",
         "--course",
         request.course_org,
         "--propagate-secret",
@@ -378,7 +387,7 @@ def _bootstrap_cohort(request: Request) -> list[str]:
 
 
 def _open_window(request: Request) -> list[str]:
-    return [*_course_cohort(request), "--assignment", _a(request, "assignment")]
+    return [*_course_semester(request), "--assignment", _a(request, "assignment")]
 
 
 # ------------------------------------------------------------------ the registry
@@ -394,14 +403,15 @@ def _release(name: str, help_text: str, args_schema: dict) -> Operation:
     return Operation(
         name=name,
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=args_schema,
         help=help_text,
         doc="docs/08-release-materials-to-cohort.md",
         module="deploy",
         argv=_deploy,
-        preview_flag="--dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc=_RELEASE_COUNTS,
         done_text="Materials released.",
     )
@@ -411,26 +421,27 @@ _OPS = (
     Operation(
         name="cohort.check",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Check the cohort's setup and refresh what the console shows.",
+        help="Check the semester's setup and refresh what the console shows.",
         done_text="Status refreshed.",
         doc="docs/reference/actions-reference.md",
         module="status",
-        argv=_status_write,
+        argv=_status_refresh,
     ),
     Operation(
         name="cohort.preview_automation",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Preview what automation would release in this cohort now.",
+        help="Preview what automation would release in this semester now.",
         doc="docs/07-schedule-releases.md",
         module="scheduler",
         argv=_scheduler,
-        preview_flag="--dry-run",
+        # Preview-only: its argv always carries `--preview`, and no real run exists.
+        preview_flag="--preview",
         counts_doc="Reasons carry one entry per release that is due and would not go out.",
     ),
     _release(
@@ -456,26 +467,29 @@ _OPS = (
     Operation(
         name="release.propagate_back",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Keep this cohort's edits for future terms: one pull request per source repo.",
-        done_text="Cohort edits checked for future terms.",
+        help="Keep this semester's edits for future terms: one pull request per source repo.",
+        done_text="Semester edits checked for future terms.",
         doc="docs/08-release-materials-to-cohort.md",
         module="propagate",
-        argv=_course_cohort,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        argv=_course_semester,
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.handout_now",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
                 "course_source_repo": _TEMPLATE,
-                "include_solution": _boolean("Also push the solution branch"),
+                "solution_datetime": _enum(
+                    (SOLUTION_NOW,),
+                    f"`{SOLUTION_NOW}` also pushes the solution branch. {SOLUTION_WARNING}",
+                ),
             },
             required=("course_source_repo",),
         ),
@@ -484,14 +498,14 @@ _OPS = (
         doc="docs/09-release-assignment-to-cohort.md",
         module="assign",
         argv=_handout,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Repos by what happened to them (created, skipped, ...).",
     ),
     Operation(
         name="assignment.update_copies",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
@@ -507,13 +521,13 @@ _OPS = (
         doc="docs/09-release-assignment-to-cohort.md",
         module="assign",
         argv=_patch,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.collect_now",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {"course_source_repo": _TEMPLATE, "slug": _SLUG},
@@ -523,19 +537,22 @@ _OPS = (
         doc="docs/10-grade-and-return-assignments.md",
         module="collect",
         argv=_collect,
-        preview_flag="--dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         via=f"{VIA_WORKFLOW}collect-submissions.yml",
-        inputs=("cohort_org", "course_source_repo", "slug", "dry_run"),
+        inputs=("semester_org", "course_source_repo", "slug", "preview"),
     ),
     Operation(
         name="grades.return",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
                 "notify": _boolean("Email students that there are new marks"),
-                "receipt_note": _boolean("Post a note on each receipts thread"),
+                "receipt_note": _boolean(
+                    "Post a note on each Submission receipts issue"
+                ),
                 "include_feedback": _boolean("Put the feedback text in the email"),
             }
         ),
@@ -544,14 +561,14 @@ _OPS = (
         doc="docs/10-grade-and-return-assignments.md",
         module="grades",
         argv=_grades,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Gradebooks written and emails sent, as distribute reports them.",
     ),
     Operation(
         name="roster.send_codes",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Send new codes to every student who has not joined; old codes stop working.",
@@ -559,16 +576,17 @@ _OPS = (
         doc="docs/06-enrol-students-to-cohort.md",
         module="enrol_codes",
         argv=_send_codes,
-        preview_flag="--dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Codes sent and rows skipped; never an address.",
     ),
     Operation(
         name="site.update",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Update the cohort site now.",
+        help="Update the semester site now.",
         done_text="Student site updated.",
         doc="docs/11-configure-cohort-site.md",
         module="site",
@@ -577,7 +595,7 @@ _OPS = (
     Operation(
         name="teams.open_window",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {"assignment": _string(KEY_PATTERN, "The schedule.yml assignments key")},
@@ -589,38 +607,39 @@ _OPS = (
         doc="docs/09-release-assignment-to-cohort.md",
         module="team_formation",
         argv=_open_window,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
         counts_doc="Team-formation emails sent, previewed or held; never an address.",
     ),
     Operation(
         name="access.check",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Check staff and student access against people.yml, the roster and teams.",
-        done_text="Staff access checked.",
+        help="Check instructor and student access against instructors.yml, the roster and teams.",
+        done_text="Access checked.",
         doc="docs/05-manage-teaching-team.md",
         module="sync_membership",
-        argv=_course_cohort,
-        preview_flag="--dry-run",
+        argv=_course_semester,
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="cohort.archive",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
-            {"force": _boolean("Archive before the cohort's archive date")}
+            {"force": _boolean("Archive before the semester's archive date")}
         ),
-        help="Archive the cohort: every repo read-only, nothing deleted.",
-        done_text="Cohort archived.",
+        help="Archive the semester: every repo read-only, nothing deleted.",
+        done_text="Semester archived.",
         doc="docs/10-grade-and-return-assignments.md",
-        module="teardown",
+        module="archive",
         argv=_teardown,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="course.publish_website",
@@ -656,26 +675,25 @@ _OPS = (
         doc="docs/03-add-assignment-to-course.md",
         module="derive",
         argv=_derive,
-        preview_flag="--dry-run",
-        real_flag="--no-dry-run",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.generate_syllabus",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {"course_source_repo": _string(REPO_PATTERN, "Repo holding the syllabus")},
             required=("course_source_repo",),
         ),
-        help="Write the syllabus's session list from the cohort's schedule.",
+        help="Write the syllabus's session list from the semester's schedule.",
         done_text="Syllabus session list written.",
         doc="docs/07-schedule-releases.md",
         module="syllabus",
         argv=_syllabus,
-        # The CLI previews unless told to write: a preview passes nothing.
-        preview_flag="",
-        real_flag="--write",
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="materials.create",
@@ -684,14 +702,14 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
-                "tag": _string(TAG_PATTERN, "Term tag, e.g. f2026"),
+                "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
                 "copy_from": _string(REPO_PATTERN, "Materials repo to copy forward"),
                 "public_dirs": _enum(PUBLIC_DIRS),
                 "public_types": _enum(PUBLIC_TYPES),
             },
-            required=("tag",),
+            required=("semester",),
         ),
-        help="Create a materials repo for a term.",
+        help="Create a materials repo for a semester.",
         done_text="Materials repo created.",
         doc="docs/02-add-materials-to-course.md",
         module="scaffold",
@@ -707,16 +725,19 @@ _OPS = (
             {
                 "name": _string(r"^(?!-)[^\x00-\x1f]{1,200}$", "The assignment's name"),
                 "number": _string(r"^[0-9]{1,3}$", "Assignment number"),
-                "tag": _string(TAG_PATTERN, "Term tag, e.g. f2026"),
+                "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
                 "copy_from": _string(REPO_PATTERN, "Template to copy forward"),
-                "format": _string(FORMATS_PATTERN, "Starter file(s), comma-separated"),
+                "formats": _string(
+                    FORMATS_PATTERN,
+                    "Starter file(s), comma-separated; the first is the runnable one",
+                ),
                 "type": _enum(ASSIGNMENT_TYPES),
                 "team_formation": _enum(TEAM_FORMATIONS),
                 "submit_via": _enum(SUBMIT_VIA),
                 "visibility": _enum(VISIBILITIES),
-                "autograde": _boolean("Seed tests and run them at the cutoff"),
+                "autograde": _boolean("Seed tests and run them at the late cutoff"),
             },
-            required=("number", "tag"),
+            required=("number", "semester"),
         ),
         help="Create an assignment template.",
         done_text="Assignment template created.",
@@ -727,15 +748,15 @@ _OPS = (
     ),
     Operation(
         name=BOOTSTRAP_OP,
-        done_text="Cohort set up.",
+        done_text="Semester set up.",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=COURSE_ADMIN_TEAM,
         args_schema=_args(),
-        help="Set up an empty cohort org for a new term.",
+        help="Set up an empty semester org.",
         doc="docs/04-new-cohort-org.md",
         module="bootstrap_course",
-        argv=_bootstrap_cohort,
+        argv=_bootstrap_semester,
         refresh_after=True,
     ),
 )
@@ -744,7 +765,7 @@ REGISTRY: dict[str, Operation] = {op.name: op for op in _OPS}
 
 
 def refresh_command(request: Request) -> list[str]:
-    """The `seed refresh` that ends New materials, New assignment and Bootstrap cohort."""
+    """The `seed refresh` that ends New materials, New assignment and Bootstrap semester."""
     return ["refresh", "--course-org", request.course_org]
 
 

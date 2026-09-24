@@ -1,6 +1,6 @@
 """dsl-course teams -- per-assignment group membership from classroom-config/teams.csv.
 
-`teams.csv` (private, in the cohort's `classroom-config` repo) is the single source of
+`teams.csv` (private, in the semester's `classroom-config` repo) is the single source of
 truth for who is in which team for which assignment:
 
     assignment,team,github_handle
@@ -29,7 +29,7 @@ FIELDS = ("assignment", "team", "github_handle")
 
 # Team slugs students may never materialise. teams.csv is STUDENT-written (the public
 # Join-team issue form), and `team_slug("course", "admin")` is `course-admin` - the faculty
-# team that holds admin on every repo in the cohort. Reconciling that slug from teams.csv
+# team that holds admin on every repo in the semester. Reconciling that slug from teams.csv
 # would add the student to it and prune the real admins. The workflow refuses these at the
 # form; this is the backstop for a row that reached the CSV any other way.
 RESERVED_TEAM_SLUGS = ROLE_TEAMS
@@ -172,30 +172,30 @@ def _row_faults(
 
 
 @cache
-def _teams_text(cohort_org: str) -> str | None:
-    """teams.csv's text, read ONCE per cohort per process.
+def _teams_text(semester_org: str) -> str | None:
+    """teams.csv's text, read ONCE per semester per process.
 
     A single run asks for it repeatedly - the handout, the collection and the off-boarding
     revoke each want the same file - and only the welcome workflow writes it, in a process
     of its own. The TEXT is memoised rather than `load`'s map, so each caller still parses
     its own copy and cannot mutate another's. Cleared between tests (tests/conftest.py)."""
-    return get_file_content(cohort_org, CONFIG_REPO, TEAMS_PATH)
+    return get_file_content(semester_org, CONFIG_REPO, TEAMS_PATH)
 
 
 def load(
-    cohort_org: str,
+    semester_org: str,
     faults: list[ConfigFault] | None = None,
     known_handles: set[str] | None = None,
 ) -> dict[str, dict[str, list[str]]]:
-    """Fetch + parse teams.csv from the cohort's PRIVATE classroom-config repo.
+    """Fetch + parse teams.csv from the semester's PRIVATE classroom-config repo.
 
     A pure loader: a missing CSV returns {} silently. Whether that is benign (a
-    cohort with no group assignments yet) or an error (group provisioning/grading
+    semester with no group assignments yet) or an error (group provisioning/grading
     asked for) is the caller's call - each contextualises it for itself.
 
     `faults` and `known_handles` are `parse`'s, for the caller that is checking the file
     rather than reading it."""
-    content = _teams_text(cohort_org)
+    content = _teams_text(semester_org)
     return parse(content, faults, known_handles) if content is not None else {}
 
 

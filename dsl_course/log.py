@@ -4,8 +4,11 @@ read through, plus the channel that keeps per-person lines out of a public log.
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
+
+from .faults import not_migrated_text
 
 
 def log(msg: str) -> None:
@@ -62,7 +65,7 @@ def log_person(msg: str) -> None:
     Named for the rule rather than for the mechanism, so a reviewer can see at the call
     site that the line is a per-person one. Every faculty workflow runs in the course org's
     PUBLIC `.github`, so its Actions log is world-readable, and a line naming one student's
-    handle, their `<slug>-<handle>` repo, or a team's roster publishes who is in the cohort
+    handle, their `<slug>-<handle>` repo, or a team's roster publishes who is in the semester
     and who is grouped with whom. Those lines are INFORMATIONAL; what a faculty member
     actually reads is the aggregate `Done - {...}` summary, which stays. So they go here:
     printed when someone runs the CLI locally with `DSL_VERBOSE=1`, absent from every
@@ -124,3 +127,65 @@ class Summary(int):
 def plural(n: int, one: str, many: str | None = None) -> str:
     """`1 file`, `3 files`: a count with its noun, for a Summary's sentence."""
     return f"{n} {one if n == 1 else (many or one + 's')}"
+
+
+def add_preview_flag(parser: argparse.ArgumentParser, help: str) -> None:
+    """`--preview/--no-preview` on a CLI, ON by default (decision 0012): trying an
+    operation without changing anything is what a bare invocation does, and acting takes
+    the explicit `--no-preview`. Every rendered workflow and every console op spells one of
+    the two, so no caller depends on the default (`tests/test_renderers.py`)."""
+    parser.add_argument(
+        "--preview", action=argparse.BooleanOptionalAction, default=True, help=help
+    )
+
+
+# Old CLI spellings (decision 0012), old -> new. None is ever parsed as its new flag - and,
+# with `allow_abbrev=False`, none is prefix-matched onto one either (`--format` would
+# otherwise resolve to `--formats`, `--solution` to `--solution-datetime`). A command line
+# that spells one is refused as NOT_MIGRATED, naming the new flag - unless the CLI still
+# defines that spelling for a meaning of its own (`status --format`, `list_orgs --format`).
+OLD_FLAGS = {
+    "--cohort-org": "--semester-org",
+    "--all-cohorts": "--all-semesters",
+    "--list-cohorts": "--list-semesters",
+    "--cohort-dest-repo": "--semester-dest-repo",
+    "--cohort-dest-path": "--semester-dest-path",
+    "--cohort": "--semester",
+    "--tag": "--semester",
+    "--format": "--formats",
+    "--solution": "--solution-datetime now",
+    "--dry-run": "--preview",
+    "--no-dry-run": "--no-preview",
+    "--write": "--no-preview",
+    "--master-org": "--course-org",
+    "--source-org": "--course-org",
+}
+
+
+class CLIParser(argparse.ArgumentParser):
+    """Every CLI's parser: no abbreviations, and old flags refused as NOT_MIGRATED."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
+    def _known_flags(self) -> set[str]:
+        flags = set(self._option_string_actions)
+        for action in self._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for sub in action.choices.values():
+                    flags |= (
+                        sub._known_flags()
+                        if isinstance(sub, CLIParser)
+                        else set(sub._option_string_actions)
+                    )
+        return flags
+
+    def parse_known_args(self, args=None, namespace=None):
+        argv = sys.argv[1:] if args is None else list(args)
+        known = self._known_flags()
+        for token in argv:
+            flag = str(token).split("=", 1)[0]
+            if flag in OLD_FLAGS and flag not in known:
+                self.error(not_migrated_text(flag, OLD_FLAGS[flag]))
+        return super().parse_known_args(args, namespace)

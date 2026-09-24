@@ -1,6 +1,6 @@
 # Deployment checklist
 
-Full checklist for standing up working course + cohort orgs: each step's workflow, inputs w/ copyable examples and outputs. 
+Full checklist for standing up working course + semester orgs: each step's workflow, inputs w/ copyable examples and outputs. 
 
 Accompanies the e2e [worked example](../example-course/).
 
@@ -10,31 +10,33 @@ Accompanies the e2e [worked example](../example-course/).
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the course org | course | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-<CODE>` (no year); invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
 | `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `org_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
-| `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `tag` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<tag>` with run-from-repo Release workflows |
-| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `tag` + `format` (one or more starters) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<tag>` template each, with its own run-from-repo Release assignment workflow |
-| *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every cohort, reconciled |
+| `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `semester` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<semester>` with run-from-repo Release workflows |
+| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `semester` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<semester>` template each, with its own run-from-repo Release assignment workflow |
+| *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every semester, reconciled |
 | `[required]` | 6. Refresh | course | course `.github` → **Refresh actions** | none | dropdowns populated, secrets on content repos and assignment templates |
 
 > Enrolment-code + grade emails send as `datasciencelab@hertie-school.org` via a central Entra app, authenticated by certificate ([details](../docs-admin-arch/central-admin.md#email)). Live on every course org. Where it is not, enrolment codes still land in `students.csv` (to be emailed by hand) and grades still reach each student's repo; only the notification is skipped.
 
-## Cohort setup (per year)
+<a id="cohort-setup-per-year"></a>
+
+## Semester setup (per year)
 
 | | Step | Org Level | Where | Input | Output |
 |---|------|-------|-------|-------|--------|
-| `[required]` | 1. Create the cohort org | cohort | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-f/sYYYY`; invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
-| `[required]` | 2. Bootstrap | course → cohort | course `.github` → **Bootstrap cohort** | `cohort_org` | `welcome` (Join course / Join team issues) + `classroom-config` (all the files below), `students`/`auditors` teams, the cohort site, cohort registered with the scheduler |
-| `[do this first]` | 3. The term plan | cohort | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole term; site dates; grading deadlines |
-| `[required]` | 4. Roster | cohort | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
-| *(optional)* | 5. Teaching team | cohort | edit [`classroom-config/people.yml`](#peopleyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this cohort's instructors/TAs + site cards; time-boxed if dated |
+| `[required]` | 1. Create the semester org | semester | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-f/sYYYY`; invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
+| `[required]` | 2. Bootstrap | course → semester | course `.github` → **Bootstrap semester** | `semester_org` | `welcome` (Join course / Join team issues) + `classroom-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
+| `[do this first]` | 3. The semester plan | semester | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole semester; site dates; grading deadlines |
+| `[required]` | 4. Roster | semester | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
+| *(optional)* | 5. Instructors | semester | edit [`classroom-config/instructors.yml`](#instructorsyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
 | `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
-| *(optional)* | 7. Ad-hoc release | course workflow, per cohort | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
+| *(optional)* | 7. Ad-hoc release | course workflow, per semester | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
 | *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
-| *(optional)* | 9. Check cohort setup | course workflow, per cohort | course `.github` → **Check cohort setup** | `cohort_org` | what's configured, what's missing, an edit link per gap |
+| *(optional)* | 9. Check semester setup | course workflow, per semester | course `.github` → **Check semester setup** | `semester_org` | what's configured, what's missing, an edit link per gap |
 
 > **Member privileges (once, and only if any assignment uses `visibility: student_choice`).**
-> Cohort org → Settings → Member privileges: **Allow members to change repository
+> Semester org → Settings → Member privileges: **Allow members to change repository
 > visibilities** ON, **Allow members to delete or transfer repositories** OFF. Both are
-> web-only - no API call sets them - so the toolkit reads them and the cohort's
+> web-only - no API call sets them - so the toolkit reads them and the semester's
 > *grading_config.yml* digest faults while either is wrong.
 
 ## Inputs by file
@@ -51,23 +53,23 @@ Live example: [`example-course/course-org/dsl-course.yml`](../example-course/cou
 ```yaml
 org: hertie-dsl-demo-course-e1234
 org_name: DSL Demo Course        # names the ORG - the websites never show it
-course_name: Deep Learning       # the cohort websites' title
+course_name: Deep Learning       # the semester websites' title
 course_code: E1234               # shown beside it
 course_description: One or two sentences, on one line - the sites' blurb
-site_link_extensions: [pdf, html]  # optional - cohort sites only; see below
+site_link_extensions: [pdf, html]  # optional - semester sites only; see below
 people:
   course_admins:
-    - github_handle: "janedoe"   # admin on the course org + every cohort
+    - github_handle: "janedoe"   # admin on the course org + every semester
       email: "jane@example.org"  # optional, PUBLIC - where a fault in this file is mailed
     - github_handle: "visiting"
       start: "2026-09-01"        # optional - access auto-starts/lapses on these dates
       end: "2027-06-30"
 ```
 
-`course_admins` is the **course-level** grant - declared once here, mirrored into every cohort's
+`course_admins` is the **course-level** grant - declared once here, mirrored into every semester's
 own `course-admin` team, and never re-declared per year. Deleting an entry, or an `end` date
 passing, revokes on the next sync. This org's `instructors`/`teaching_assistants` keys are
-display-only cards; TAs are declared per cohort in [`people.yml`](#peopleyml).
+display-only cards; TAs are declared per semester in [`instructors.yml`](#instructorsyml).
 Runbook: [05](05-manage-teaching-team.md).
 
 An admin's `email` is optional. When any admin has one, a fault in this file is mailed to
@@ -76,19 +78,19 @@ file is public, so an address written here is public too.
 
 `assignment_defaults:` is what **New assignment** stamps into each new assignment's
 `grading_config.yml`: `max_team_size`, `late_window_days` and `late_penalty_per_day`, plus
-`format`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
+`formats`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
 of the same name when they are left at `(course default)`.
 
-`cohort_defaults:` is what **Bootstrap cohort** writes into a new cohort's `schedule.yml`:
+`semester_defaults:` is what **Bootstrap semester** writes into a new semester's `schedule.yml`:
 `timezone:`, and `archive: {auto, grace_days}` - `auto: false` seeds no `archive:` block,
-so that cohort is never archived automatically; `grace_days` sets how long after
-`semester_end` it is. Unset, a new cohort gets today's skeleton. Neither block changes a
-cohort or an assignment that already exists.
+so that semester is never archived automatically; `grace_days` sets how long after
+`semester_end` it is. Unset, a new semester gets today's skeleton. Neither block changes a
+semester or an assignment that already exists.
 
 `course_name` / `course_code` / `course_description` are the fields that reach every
-cohort website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
+semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
 
-`site_link_extensions` narrows what each session row **links** on the **cohort** sites,
+`site_link_extensions` narrows what each session row **links** on the **semester** sites,
 never what it ships. Unset (the default), a row lists the files at its session folder's root
 plus one link per subfolder, so a rendered Quarto/Rmd deck links the deck rather than its
 hundreds of assets; set, only these file types are listed, plus a link to the folder itself.
@@ -120,41 +122,43 @@ e.evans@students.hertie-school.org,Eve Evans,auditor,,,
 
 Add any other column you want (a registrar id, a lecture section, notes) - the engine ignores it and preserves it.
 
-### `people.yml`
+<a id="peopleyml"></a>
 
-Live example: [`example-course/cohort-org/people.yml`](../example-course/cohort-org/people.yml).
+### `instructors.yml`
 
-`classroom-config/people.yml` - this cohort's teaching team. Grants the cohort's `instructors`
-team necessary access permissions at both the course- and cohort-org levels, including push
-from the course org into that year's content repos (`instructors-<tag>`), and supplies the
-cohort site's cards. `github_handle` and `email` are required on every instructor and TA
-entry; the rest are optional.
+Live example: [`example-course/cohort-org/instructors.yml`](../example-course/cohort-org/instructors.yml).
+
+`classroom-config/instructors.yml` - this semester's instructors, one list. Grants the semester's `instructors`
+team necessary access permissions at both the course- and semester-org levels, including push
+from the course org into that year's content repos (`instructors-<semester>`), and supplies the
+semester site's cards. `github_handle`, `role` (`instructor` or `teaching_assistant`) and
+`email` are required on every entry; the rest are optional.
 
 ```yaml
-people:
-  instructors:
-    - github_handle: "janedoe"     # required, with `email` - everything else is optional
-      email: "jane@example.org"    # required, and private
-      name: "Prof. Jane Doe"       # site card fields
-      title: "Professor of ..."
-      photo: "/_images/pp/jane.jpg"  # see "Staff photos" below
-      url: "https://.../jane"
-      start: "2026-09-01"          # access auto-starts/lapses on these dates
-      end: "2027-01-31"
-  teaching_assistants:
-    - github_handle: "anOther"
-      email: "another@example.org"
+instructors:
+  - github_handle: "janedoe"     # required, with `role` and `email` - the rest is optional
+    role: instructor             # instructor | teaching_assistant
+    email: "jane@example.org"    # required, and private
+    name: "Prof. Jane Doe"       # site card fields
+    title: "Professor of ..."
+    photo: "/_images/pp/jane.jpg"  # see "Instructor photos" below
+    url: "https://.../jane"
+    start: "2026-09-01"          # access auto-starts/lapses on these dates
+    end: "2027-01-31"
+  - github_handle: "anOther"
+    role: teaching_assistant
+    email: "another@example.org"
 ```
 
-The **course** org's `dsl-course.yml` accepts the same `instructors`/`teaching_assistants`
-shape, but there it is **display-only** (public-site cards, no access) - course-wide admin is
+The **course** org's `dsl-course.yml` `people:` block takes `instructors`/`teaching_assistants`
+lists, but there it is **display-only** (public-site cards, no access) - course-wide admin is
 [`course_admins`](#dsl-courseyml).
 
-**Staff photos.** `photo` accepts either form:
+**Instructor photos.** `photo` accepts either form:
 
 | Form | Example | Use when |
 |---|---|---|
-| site-relative path | `/_images/pp/jane.jpg` | **the safe default.** Commit the image into this cohort's site repo `<cohort-org>.github.io` under `_images/pp/`. That directory is served (`include: ['_images']` in the site's `_config.yml`) and is not a synced collection, so no release, cron or **Sync site** run will ever overwrite it. |
+| site-relative path | `/_images/pp/jane.jpg` | **the safe default.** Commit the image into this semester's site repo `<semester-org>.github.io` under `_images/pp/`. That directory is served (`include: ['_images']` in the site's `_config.yml`) and is not a synced collection, so no release, cron or **Sync site** run will ever overwrite it. |
 | absolute URL | `https://github.com/janedoe.png` | the host allows hotlinking. GitHub avatars (`https://github.com/<handle>.png`) always do. |
 
 Institutional profile sites often **don't** - `hertie-school.org`, for one, returns 403 to any
@@ -210,7 +214,7 @@ submissions:
 
 Live example: [`example-course/course-org/course-materials-f2026`](../example-course/course-org/course-materials-f2026).
 
-`course-materials-<tag>` - private; students only ever see what you release. Any top-level
+`course-materials-<semester>` - private; students only ever see what you release. Any top-level
 directory holding ordinal-prefixed subdirectories is a releasable section.
 
 ```
@@ -226,8 +230,8 @@ course-materials-f2026/
 
 Live example: [`example-course/course-org/assignment-1-f2026`](../example-course/course-org/assignment-1-f2026).
 
-`assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
-`main` only. The **New assignment** workflow's `format` - a comma-separated list of
+`assignment-N-<semester>` - a template repo with two branches. Student repos are generated from
+`main` only. The **New assignment** workflow's `formats` - a comma-separated list of
 `ipynb`/`py`/`rmd`/`qmd`/`latex`, or `none` on its own - picks the starter stubs; `type`
 (individual/group) is recorded in `grading_config.yml`, and handout and grading obey
 `type: group` automatically. The autograder takes any format - it converts any `.ipynb`
@@ -241,20 +245,20 @@ solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; 
 
 `grading_config.yml`, on the `solution` branch, is the assignment's whole definition:
 `title`, `type`, `team_formation`, `max_team_size`, `submit_via`, `submit_url`,
-`visibility`, `format`, `questions`, `late_window_days`, `late_penalty_per_day`,
+`visibility`, `formats` (a list; the first is the runnable one), `questions`, `late_window_days`, `late_penalty_per_day`,
 `autograde`, `completion_check`, `grader_pdf`, `tests`. The
 button writes it from its ten inputs plus the course's `assignment_defaults:`; every key
 is documented inline in the generated file and in
 [Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:
 `autograde: true` runs `tests/` (or `tests/run.sh`, in any language), and `completion_check`
-(default: on for `format: ipynb`) executes the notebook and records whether it runs top to
+(default: on when `formats:` starts with `ipynb`) executes the notebook and records whether it runs top to
 bottom.
 
 ### `schedule.yml`
 
 Live example: [`example-course/cohort-org/schedule.yml`](../example-course/cohort-org/schedule.yml).
 
-`classroom-config/schedule.yml` - the term plan: the **auto-release plan** the scheduler
+`classroom-config/schedule.yml` - the semester plan: the **auto-release plan** the scheduler
 runs, and the **dates** that drive the website and grading. Times are read in `timezone`
 (default `Europe/Berlin`) unless given an offset; a bare **release** date = 00:00, a bare
 **due_datetime**/`grading_datetime` date = 23:59:59, a bare **events** date shows as 09:00. Times are
@@ -265,20 +269,20 @@ Blocks encode behaviour: **`releases:`** deploys materials, **`assignments:`** r
 handout/due/grading lifecycle, **`events:`** is display-only calendar rows. Colour is a
 display concern only - see [row types](#schedule-row-types) below.
 
-**`releases`** - the term calendar and release plan in one block: each entry is a
+**`releases`** - the semester calendar and release plan in one block: each entry is a
 label you choose, an `event_datetime:`, and the deploys it ships.
-Sources are read from the course org, destinations written to this cohort, so entries name
+Sources are read from the course org, destinations written to this semester, so entries name
 repos, never orgs. Every release is idempotent - re-runs are no-ops.
 
 | Action | Does | Fields |
 |--------|------|--------|
-| `deploy` | copy a source path → a cohort repo | `course_source_repo`, `course_source_path`, `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror). A list, or a single mapping for one copy |
+| `deploy` | copy a source path → a semester repo | `course_source_repo`, `course_source_path`, `semester_dest_repo` (default `materials`), `semester_dest_path` (default: mirror). A list, or a single mapping for one copy |
 | `assignment` | one private repo per onboarded student - or per team, when the template's `grading_config.yml` says `type: group` | the template repo name |
 
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
 and it is the default fire time), `title` and `details` (optional - the session's name,
 shown beside its ordinal, and a sentence about it in the schedule's Details column and on
-the Lectures tab), `type` (optional - which row it belongs to), and the `deploy`
+the Lectures tab), `kind` (optional - which row it belongs to), and the `deploy`
 actions. A deploy item may carry its own `deploy_datetime` to ship earlier or later than
 the calendar event.
 An assignment's whole lifecycle (handout_datetime/due_datetime/grading_datetime), grading
@@ -290,14 +294,14 @@ Uncertain dates:
 = undated TBC row, nothing fires.
 
 Deploy-item fields (paths are **relative to their repo**: `course_source_path` inside
-`course_source_repo`, `cohort_dest_path` inside `cohort_dest_repo`):
+`course_source_repo`, `semester_dest_path` inside `semester_dest_repo`):
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `course_source_repo` | **yes** | - | repo in the COURSE org to copy from |
 | `course_source_path` | **yes** | - | folder or file to copy, relative to `course_source_repo` |
-| `cohort_dest_repo` | no | `materials` | cohort repo to copy into (created on first release) |
-| `cohort_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `cohort_dest_repo` |
+| `semester_dest_repo` | no | `materials` | semester repo to copy into (created on first release) |
+| `semester_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `semester_dest_repo` |
 | `deploy_datetime` | no | the entry's `event_datetime` | ship this copy earlier/later |
 
 **Minimal** - the recommended shape; everything not stated takes its default:
@@ -320,7 +324,7 @@ releases:
   session_2:
     event_datetime: 2026-09-15T10:00  # the class - what the site announces
     tbc: false                        # true = provisional date, shown "(TBC)"
-    type: lecture                     # optional override: lecture | lab | readings.
+    kind: lecture                     # optional override: lecture | lab | readings.
                                       # Default: worked out from where the deploy lands
     title: Linear regression          # the session's name, beside its "Session 2" ordinal
     details: Least squares by hand    # a sentence about it - the Details column, and
@@ -328,20 +332,20 @@ releases:
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_intro
-        cohort_dest_repo: lecture_materials
-        cohort_dest_path: lectures/02_intro
+        semester_dest_repo: lecture_materials
+        semester_dest_path: lectures/02_intro
         deploy_datetime: 2026-09-15T09:00   # ships 1h early
   bonus-dataset:
     event_datetime: 2026-10-20T09:30  # a one-off that isn't a teaching session
     deploy:
       - course_source_repo: course-datasets-f2026
         course_source_path: week7/housing.csv
-        cohort_dest_repo: materials
-        cohort_dest_path: datasets/housing.csv
+        semester_dest_repo: materials
+        semester_dest_path: datasets/housing.csv
 ```
 
 **Dates** - the website schedule and the grading deadlines. Absent values are synthesised
-(semester from the tag, lectures weekly, assignments fortnightly, a MidTerm Exam and a
+(semester from its name, lectures weekly, assignments fortnightly, a MidTerm Exam and a
 Final Exam).
 
 Per assignment (`assignments.<slug>`); `due_datetime` and `course_source_repo` are required,
@@ -365,7 +369,7 @@ assignments:
 | `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
 | `solution_datetime` | no | never | pushes the template's `solution/` into every provisioned repo. Must be after `handout_datetime` |
-| `cohort_dest_repo` | no | the slug | the cohort-side name: student/team repos (`<name>-<handle>`), the frozen cohort template, the teams.csv key, snapshots and grades |
+| `semester_dest_repo` | no | the slug | the semester-side name: student/team repos (`<name>-<handle>`), the frozen semester template, the teams.csv key, snapshots and grades |
 
 Timing only. `type:` and `max_team_size:` are no longer accepted here - they live in the assignment's own `grading_config.yml` on the course template's `solution` branch, and **Validate schedule** flags them here by name.
 
@@ -391,7 +395,7 @@ the row simply appears on the site's schedule.
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - (entry dropped without it) | when it happens; a bare date is a whole day, shown as 09:00 |
-| `type` | no | `special_event` | `exam` / `special_event` - which colour the row takes |
+| `kind` | no | `special_event` | `exam` / `special_event` - which colour the row takes |
 | `title` | no | prettified label | site row label |
 | `details` | no | - | the row's Details column: the room, the format, what to bring |
 | `tbc` | no | `false` | provisional date - shown "(TBC)" |
@@ -400,16 +404,16 @@ the row simply appears on the site's schedule.
 ```yaml
 events:
   mid-term:
-    type: exam
+    kind: exam
     title: MidTerm Exam
     event_datetime: 2026-11-03
     tbc: true   # provisional - shown "(TBC)"
   final-exam:
-    type: exam
+    kind: exam
     title: Final Exam
     event_datetime: 2026-12-15T14:00
   resit-exam:
-    type: exam
+    kind: exam
     title: Resit Exam
     event_datetime: tbc   # undated - shown as a TBC row
   project-clinic:         # no type -> special_event
@@ -417,33 +421,33 @@ events:
     event_datetime: 2026-11-17T10:00
 ```
 
-**`archive`** - when this cohort is frozen read-only. Optional, and the switch: written,
-the cohort is archived automatically; left out, it never is.
+**`archive`** - when this semester is frozen read-only. Optional, and the switch: written,
+the semester is archived automatically; left out, it never is.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `event_datetime` | no | `semester_end` + 60 days | the day every repository in the cohort org is archived |
-| `title` | no | `Cohort archived` | the row's Title column |
-| `show_on_site` | no | `true` | a "Cohort archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
+| `event_datetime` | no | `semester_end` + 60 days | the day every repository in the semester org is archived |
+| `title` | no | `Semester archived` | the row's Title column |
+| `show_on_site` | no | `true` | a "Semester archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
 | `details` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing, and `{date}` in it is filled in with the archive date |
-| `tbc` | no | `false` | provisional date - shown "(TBC)". Display only - the freeze still happens on the date above |
+| `tbc` | no | `false` | provisional date - shown "(TBC)". Display only - the archive still happens on the date above |
 
 ```yaml
 archive:
   event_datetime: 2027-02-16  # optional - without it, 60 days after semester_end
   show_on_site: true          # optional - false keeps it off the site
   details: >-                 # optional - what students are told, in your own words
-    This cohort is archived on 2027-02-16: every repository in it becomes read-only.
+    This semester is archived on 2027-02-16: every repository in it becomes read-only.
 ```
 
 `archive:` with nothing under it means "yes, on the default date". With no block at all, or
-no `semester_end` to count from, nothing is archived automatically. A new cohort's seeded
-`schedule.yml` already carries the block, so filling in `semester_end` arms a freeze sixty
+no `semester_end` to count from, nothing is archived automatically. A new semester's seeded
+`schedule.yml` already carries the block, so filling in `semester_end` arms an archive sixty
 days later; delete the block to opt out.
 
 #### Schedule row types
 
-The cohort site renders one merged, date-sorted schedule table; each row is colour-coded by
+The semester site renders one merged, date-sorted schedule table; each row is colour-coded by
 type, and the type is never a field you set - it follows from where the row came from:
 
 | Row type | Comes from |
@@ -451,16 +455,16 @@ type, and the type is never a field you set - it follows from where the row came
 | lecture | a released session folder under `lectures/` |
 | lab | a released session folder under `labs/` |
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
-| exam | an `events:` entry with `type: exam` |
-| special_event | an `events:` entry with no `type` (clinic, guest lecture, revision session), and the `archive` block's date - the "Cohort archived" row |
+| exam | an `events:` entry with `kind: exam` |
+| special_event | an `events:` entry with no `kind` (clinic, guest lecture, revision session), and the `archive` block's date - the "Semester archived" row |
 | term_date | the `semester_start` / `semester_end` scalars |
 
 So lecture vs lab is decided by the deployed section folder, not by the entry label, and a
 week with both a lecture and a lab renders two rows.
 
 **A malformed entry is dropped - and every drop is reported.** The parser never raises, so
-the rest of the term still runs, but nothing is silent: each drop is named in the run log,
-counted by **Check cohort setup**, and makes `--validate` exit non-zero. A push to
+the rest of the semester still runs, but nothing is silent: each drop is named in the run log,
+counted by **Check semester setup**, and makes `--validate` exit non-zero. A push to
 `schedule.yml` runs **Validate schedule** in `classroom-config`; a file the scheduler cannot
 fully read goes red and opens an issue naming the bad entry.
 
@@ -476,16 +480,16 @@ fully read goes red and opens an issue naming the bad entry.
 | `type:` / `max_team_size:` on an assignment | kept, and reported as moved to its `grading_config.yml` |
 | unknown `type:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |
 
-Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT> --validate`. Full account:
+Verify with `python3 -m dsl_course.schedule --semester-org <SEMESTER> --validate`. Full account:
 [Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).
 
 **What happens at the grading deadline.** The scheduler freezes each submission repo's
 commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
-then examines it **once** - the hidden tests where the `<slug>-<tag>` template's
+then examines it **once** - the hidden tests where the `<slug>-<semester>` template's
 `grading_config.yml` says `autograde: true`, the completion check where it asks for one (the
 `_graded.json` / `_skipped.json` record in `classroom-config/autograde/<slug>/` is the fired
 marker - delete it, or the whole folder, to re-grade). All of this happens whether or not the
-cohort uses `releases`.
+semester uses `releases`.
 
 ## Token
 

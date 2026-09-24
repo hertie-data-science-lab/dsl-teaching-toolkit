@@ -9,7 +9,7 @@ title: "Course Name (Code)"
 course_description: "One paragraph description of the course."
 course_semester: "Fall 2026"
 course_code: "GRAD-E1234"
-github_org: "your-cohort-org"
+github_org: "your-semester-org"
 
 # --- Institution ---
 schoolname: "Hertie School"

@@ -19,7 +19,7 @@ CODES = {
     "SOURCE_MISSING",
     "SOURCE_UNWRITTEN",
     "WITHHELD",
-    "COHORT_ARCHIVED",
+    "SEMESTER_ARCHIVED",
     "TEAMS_INCOMPLETE",
     "ALREADY_DONE",
 }
@@ -54,7 +54,7 @@ def test_a_due_source_that_is_not_there_is_a_decision():
     ]
 
 
-def test_an_archived_cohort_releases_nothing_that_is_due():
+def test_an_archived_semester_releases_nothing_that_is_due():
     sched = schedule.parse(
         {
             "releases": {
@@ -82,8 +82,8 @@ def test_an_archived_cohort_releases_nothing_that_is_due():
     )
     lines = [d.line() for d in scheduler.archived_decisions(sched, NOW)]
     assert [_parsed(line)[:2] for line in lines] == [
-        ("s1", "COHORT_ARCHIVED"),
-        ("a1", "COHORT_ARCHIVED"),
+        ("s1", "SEMESTER_ARCHIVED"),
+        ("a1", "SEMESTER_ARCHIVED"),
     ]
 
 
@@ -125,7 +125,7 @@ def _handout(monkeypatch, *, group: bool, teams_csv: dict, listing: dict | None)
     release = Release(
         label="a1-handout", when=PAST, assignment="a1-f2026", assignment_slug="a1"
     )
-    return scheduler._handout_decisions("Course", "Cohort", sched, [release], listing)
+    return scheduler._handout_decisions("Course", "Semester", sched, [release], listing)
 
 
 def test_a_group_handout_with_no_teams_waits_for_them(monkeypatch):
@@ -154,5 +154,5 @@ def test_a_read_that_fails_costs_its_decisions_not_the_preview(monkeypatch, caps
 
     monkeypatch.setattr(scheduler.schedule, "source_faults", boom)
     sched = schedule.parse({})
-    assert scheduler.dry_run_decisions("Course", "Cohort", sched, [], NOW, {}) == []
+    assert scheduler.dry_run_decisions("Course", "Semester", sched, [], NOW, {}) == []
     assert "could not work out every decision" in capsys.readouterr().err

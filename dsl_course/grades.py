@@ -5,7 +5,7 @@ A grader fills ONE file per assignment, `classroom-config/grading_sheets/<slug>.
 
     grading_sheets/<slug>.yml   (the grader types here; the toolkit owns only `info:`)
           |
-          +--> cohort/grades-<handle>   (private; student = read) grades.yml + README.md
+          +--> semester/grades-<handle>   (private; student = read) grades.yml + README.md
           +--> classroom-config/cohort-gradebook.csv   (the registrar export, never logged)
           +--> an email saying there is something new to read (no marks in it)
 
@@ -16,12 +16,11 @@ Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so
 after one correction reaches one student.
 
 Usage:
-    python3 -m dsl_course.grades distribute --cohort-org hertie-dsl-demo-f2026 [--dry-run]
+    python3 -m dsl_course.grades distribute --semester-org hertie-dsl-demo-f2026 [--preview]
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import sys
@@ -31,7 +30,7 @@ import time
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
@@ -55,6 +54,7 @@ from .course import (
     NO_STARTER,
     NO_TEAMS,
     RECEIPTS_ISSUE_LABEL,
+    RECEIPTS_ISSUE_LABELS,
     RECEIPTS_ISSUE_MARKS,
     RECEIPTS_ISSUE_TITLE,
     SELF_SELECT,
@@ -82,14 +82,14 @@ from .course import (
 )
 from .discovery import (
     assignment_rows,
-    course_name_for_cohort,
-    course_org_for_cohort,
+    course_name_for_semester,
+    course_org_for_semester,
     exists_in,
     listing_by_name,
     listing_row,
     org_meta,
 )
-from .faults import ConfigFault
+from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, not_migrated_text
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -103,7 +103,17 @@ from .gh_contents import (
 )
 from .ghcli import bot_login, clone, gh, is_missing_resource
 from .issues import close_issues_titled, upsert_issue
-from .log import Summary, log, log_err, log_ok, log_person, log_step, plural
+from .log import (
+    CLIParser,
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_person,
+    log_step,
+    plural,
+)
 from .repos import (
     add_collaborator,
     create_repo,
@@ -120,7 +130,7 @@ GRADEBOOK_DIR = (
 # migration in `_read_distributed` reads it once and deletes it in the same commit that
 # writes `distributed.csv`, which records every channel rather than just the email.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
-COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
+SEMESTER_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
 # What a gradebook says before its student has been marked in anything. The legend names
 # the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
@@ -217,26 +227,26 @@ class _Shape:
 
     @property
     def submit_shared(self) -> bool:
-        """Handed in by pushing into a folder of ONE private drop box the whole cohort
+        """Handed in by pushing into a folder of ONE private drop box the whole semester
         shares, rather than into a repo of the unit's own."""
         return self.submit_via == "shared_dropbox_repo"
 
     @property
     def submit_shape(self) -> str:
-        """The one word the cohort site branches this assignment on."""
+        """The one word the semester site branches this assignment on."""
         return submit_shape(self.submit_via, self.visibility)
 
     @property
     def has_receipts_issue(self) -> bool:
-        """Whether this assignment's units have a receipts issue to post into."""
+        """Whether this assignment's units have a Submission receipts issue to post into."""
         return has_receipts_issue(self.submit_via, self.visibility)
 
     @property
     def may_open_receipts_issue(self) -> bool:
-        """Whether this run may OPEN a receipts issue in a unit's repo.
+        """Whether this run may OPEN a Submission receipts issue in a unit's repo.
 
         Two conditions, and the second is the one easily lost: the shape must HAVE a
-        receipts issue, and the shape must have been read from a real definition. A sheet
+        Submission receipts issue, and the shape must have been read from a real definition. A sheet
         whose assignment the schedule no longer declares falls back to the defaults -
         `assignment_repo` + `private` - and a guess may keep writing in the thread a
         student was told to read, but must never open a second one over it."""
@@ -288,7 +298,7 @@ class SheetSpec(_Shape):
     visibility: str = "private"
     # False for a sheet whose assignment the schedule no longer declares
     # (`_spec_from_sheet`): the shape above is then a guess, and the one thing a guess may
-    # never do is open a receipts issue in a student's repo (`may_open_receipts_issue`).
+    # never do is open a Submission receipts issue in a student's repo (`may_open_receipts_issue`).
     shape_known: bool = True
     questions: dict[str, str] | None = None
     late_window_days: int | None = None
@@ -298,7 +308,7 @@ class SheetSpec(_Shape):
     due_display: str = ""
     cutoff_display: str = ""
     # The same two moments spelt out in full - `Sunday 4 October 2026, 23:59
-    # (Europe/Berlin)`. The receipts issue uses these: a student reads that line once and
+    # (Europe/Berlin)`. The Submission receipts issue uses these: a student reads that line once and
     # has to act on it, where a grader scans the sheet's header and wants it short.
     due_long: str = ""
     cutoff_long: str = ""
@@ -447,7 +457,7 @@ def merge_sheet(
     the freeze mean something.
 
     Everything else is the grader's and is kept exactly as found: their marks, their
-    feedback, keys they invented, and blocks for units that have since left the cohort (a
+    feedback, keys they invented, and blocks for units that have since left the semester (a
     withdrawn student's marks are not ours to delete). Deleted keys are not re-added either
     - a grader who removed `notes_not_shared_with_students` meant it, and a file that grows
     the key back on every tick is one nobody can tidy.
@@ -713,11 +723,11 @@ def _auto_filled_sentence(spec: SheetSpec) -> str:
             "`contributions` is read from CONTRIBUTIONS.md at the same moments"
         )
     if spec.autograde:
-        clauses.append("`autograde` fills once at the cutoff")
+        clauses.append("`autograde` fills once at the late cutoff")
     return (
         "Auto-filled by the toolkit (you never type these): every `info:` block. "
         + "; ".join(clauses)
-        + ". All of them freeze at the cutoff."
+        + ". All of them freeze at the late cutoff."
     )
 
 
@@ -907,7 +917,7 @@ def score_total(
 
 
 # Every way `late_penalty_per_day` can be written wrong, and what to say about it. One
-# multiplies every late mark in the cohort, so none of them may pass quietly: a bare `10`
+# multiplies every late mark in the semester, so none of them may pass quietly: a bare `10`
 # meant no penalty at all while the header still advertised one, and `-10%` ADDED marks for
 # being late.
 _PENALTY_FAULTS = {
@@ -1002,14 +1012,20 @@ class Dropped(str):
     field: str
     what: str
     allowed: tuple[str, ...]
+    code: str
 
     def __new__(
-        cls, where: str, field: str, what: str, allowed: tuple[str, ...] = ()
+        cls,
+        where: str,
+        field: str,
+        what: str,
+        allowed: tuple[str, ...] = (),
+        code: str = "",
     ) -> Self:
         # `  ! <where>: ` is the run-log form, unchanged; `what` on its own is what a
         # notification says, where the file is already named above it.
         out = super().__new__(cls, f"  ! {where}: {what}")
-        out.field, out.what, out.allowed = field, what, allowed
+        out.field, out.what, out.allowed, out.code = field, what, allowed, code
         return out
 
 
@@ -1022,7 +1038,7 @@ def _one_of(
     dropped: list[str],
 ) -> str:
     """A closed vocabulary, or the default with a warning. Never the raw value: an
-    unrecognised `submit_via` would silently turn late arithmetic off for a cohort."""
+    unrecognised `submit_via` would silently turn late arithmetic off for a semester."""
     text = str(value or "").strip().lower()
     if text in allowed:
         return text
@@ -1035,6 +1051,48 @@ def _one_of(
         )
     )
     return default
+
+
+def _formats(value: object, where: str, dropped: list[str]) -> tuple[str, ...]:
+    """`formats:` - the starter formats, a YAML list (or, as the New assignment box types
+    it, a comma-separated string). The FIRST is the runnable one: the completion check and
+    the autograder run it. `none` stands alone. An unusable value is dropped with a warning
+    and reads as no starter at all."""
+    items = value if isinstance(value, list) else str(value or "").split(",")
+    named = tuple(
+        dict.fromkeys(str(t).strip().lower() for t in items if str(t).strip())
+    )
+    if all(t in FORMATS for t in named) and (
+        NO_STARTER not in named or len(named) == 1
+    ):
+        return () if named == (NO_STARTER,) else named
+    dropped.append(
+        Dropped(
+            where,
+            "formats",
+            f"`formats: {value}` is not a list of {'/'.join(FORMATS)} - no starter "
+            f"format is recorded",
+            FORMATS,
+        )
+    )
+    return ()
+
+
+# Settings RENAMED (decision 0012), old -> new. The old key is never read: it is dropped
+# as NOT_MIGRATED, which names the new one, and the setting takes its default meanwhile.
+RENAMED_SETTINGS = {"format": "formats"}
+
+
+def _refuse_renamed(data: dict, where: str, dropped: list[str]) -> dict:
+    """`data` without its old keys, each one noted in `dropped` as NOT_MIGRATED."""
+    out = dict(data)
+    for old, new in RENAMED_SETTINGS.items():
+        if old in out:
+            del out[old]
+            dropped.append(
+                Dropped(where, old, not_migrated_text(old, new), code=NOT_MIGRATED)
+            )
+    return out
 
 
 def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
@@ -1123,7 +1181,7 @@ def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
 
     Checked here, once per spec, like every other malformed field: the derivation itself
     stays pure and is called per student. Refusing without saying so meant every late mark
-    in that cohort quietly lost its deduction while the sheet's header still advertised
+    in that semester quietly lost its deduction while the sheet's header still advertised
     one."""
     raw = str(value or "").strip()
     if not raw:
@@ -1147,7 +1205,7 @@ def _submit_url(value: object, where: str, dropped: list[str]) -> str:
     `Submit on <host>` button.
 
     `https://` only, and FILLED IN: this is the one link on a public course site that sends
-    a whole cohort somewhere on the strength of one hand-typed line, and `CHANGE-ME` is the
+    a whole semester somewhere on the strength of one hand-typed line, and `CHANGE-ME` is the
     placeholder the scaffold seeds - a file still carrying it has had the line uncommented
     and not answered. Refused rather than raised, so the site shows the brief with no
     button."""
@@ -1190,7 +1248,7 @@ _READERS = {
         v, VISIBILITIES, "visibility", "private", w, d
     ),
     "submit_url": _submit_url,
-    "format": lambda v, w, d: _one_of(v, FORMATS, "format", NO_STARTER, w, d),
+    "formats": _formats,
     "questions": _questions,
     "late_window_days": _whole_days,
     "late_penalty_per_day": _penalty,
@@ -1210,7 +1268,7 @@ COURSE_DEFAULT_KEYS = (
     "max_team_size",
     "late_window_days",
     "late_penalty_per_day",
-    "format",
+    "formats",
     "submit_via",
     "team_formation",
     "visibility",
@@ -1236,12 +1294,13 @@ class GradingSpec(_Shape):
     submit_via: str = "assignment_repo"
     # PRIVATE unless the assignment asks otherwise: everything the toolkit creates for a
     # student is private to them and the teaching team, and a default that published a
-    # cohort's work would be a default nobody chose.
+    # semester's work would be a default nobody chose.
     visibility: str = "private"
     # Where an `external` assignment is handed in (Moodle, Kaggle). Only the site reads it,
     # and only to put a button beside the brief.
     submit_url: str = ""
-    format: str = "none"
+    # The starter formats, in order; the FIRST is the runnable one (see `format`).
+    formats: tuple[str, ...] = ()
     questions: dict[str, str] | None = None
     # The Hertie standard from `course` unless this file says otherwise, so an assignment
     # nobody has written a late policy for is still graded by the one the syllabi state.
@@ -1260,9 +1319,18 @@ class GradingSpec(_Shape):
     tests: str = "tests"
     # The grader's reading copy, filtered to the HAND-marked questions and archived beside
     # the autograde detail. Off unless the assignment asks for it: it clones the whole
-    # cohort a second time at the cutoff, and most assignments are read in the browser.
+    # semester a second time at the cutoff, and most assignments are read in the browser.
     grader_pdf: bool = False
+    # The file still names its starters as `format:` (decision 0012): refused whole, and
+    # nothing hands out or grades from it until it is migrated.
+    not_migrated: bool = False
     dropped: tuple[str, ...] = ()
+
+    @property
+    def format(self) -> str:
+        """The runnable format: the first of `formats`, or `none`. What the completion
+        check and the autograder run; the other formats are there to be read."""
+        return self.formats[0] if self.formats else NO_STARTER
 
     @property
     def is_group(self) -> bool:
@@ -1331,30 +1399,32 @@ def parse_assignment_defaults(raw: object) -> dict:
     if not isinstance(raw, dict):
         log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
         return {}
-    # `format` here answers New assignment's box, which takes a comma-separated list of
-    # starters; an assignment's own `format:` is one value. Read as the box reads it, and
-    # dropped when unusable, so the toolkit's own answer applies rather than `none`.
-    starters = raw.get("format")
+    # `formats` here answers New assignment's box, which takes a comma-separated list of
+    # starters. Read as the box reads it, and dropped when unusable, so the toolkit's own
+    # answer applies rather than `none`.
+    raw = _refuse_renamed(raw, _DEFAULTS_WHERE, dropped)
+    starters = raw.get("formats")
     values = _read_settings(
-        {k: v for k, v in raw.items() if k != "format"},
+        {k: v for k, v in raw.items() if k != "formats"},
         COURSE_DEFAULT_KEYS,
         _DEFAULTS_WHERE,
         dropped,
     )
     if starters is not None:
-        named = [t.strip().lower() for t in str(starters).split(",") if t.strip()]
+        items = starters if isinstance(starters, list) else str(starters).split(",")
+        named = [str(t).strip().lower() for t in items if str(t).strip()]
         if (
             named
             and all(t in FORMATS for t in named)
             and (NO_STARTER not in named or len(named) == 1)
         ):
-            values["format"] = ",".join(dict.fromkeys(named))
+            values["formats"] = ",".join(dict.fromkeys(named))
         else:
             dropped.append(
                 Dropped(
                     _DEFAULTS_WHERE,
-                    "format",
-                    f"`format: {starters}` is not a comma-separated list of "
+                    "formats",
+                    f"`formats: {starters}` is not a list of "
                     f"{'/'.join(FORMATS)} - using the toolkit's default",
                     FORMATS,
                 )
@@ -1396,15 +1466,15 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 GRADING_FILE,
                 "visibility",
                 "`visibility:` is not read for a shared drop box - one repo holds the "
-                "whole cohort's work, so v1 keeps it private - ignored",
+                "whole semester's work, so v1 keeps it private - ignored",
             )
         )
     if via == "shared_dropbox_repo":
         for key in ("autograde", "completion_check", "grader_pdf"):
             if values.get(key):
                 # All three stages run PER UNIT against the unit's own repo, and a drop box
-                # is one repo for the whole cohort: each of fifty students would have the
-                # whole cohort's work cloned, run and archived under their own key, and
+                # is one repo for the whole semester: each of fifty students would have the
+                # whole semester's work cloned, run and archived under their own key, and
                 # every one of them would get the same result. Same note beside
                 # `course.SUBMIT_VIA`.
                 values[key] = False
@@ -1413,7 +1483,7 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                         GRADING_FILE,
                         key,
                         f"`{key}:` is not read for a shared drop box - one repo holds "
-                        f"the whole cohort's work, so it is hand-marked - ignored",
+                        f"the whole semester's work, so it is hand-marked - ignored",
                     )
                 )
             elif key == "completion_check":
@@ -1442,7 +1512,7 @@ def _late_pair(values: dict) -> None:
     all. A file naming just one of them has stated a rule of its own - `late_window_days:
     3` with no penalty is three days late accepted free, and a penalty with no window is a
     rate nothing is collected to spend it on - and completing it from the syllabus would
-    grade a cohort by a sentence nobody wrote."""
+    grade a semester by a sentence nobody wrote."""
     declared = [
         key for key in ("late_window_days", "late_penalty_per_day") if key in values
     ]
@@ -1465,7 +1535,13 @@ def parse_grading_spec(text: str) -> GradingSpec:
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
+    # A file that still names its starters under the old key alone has not migrated, and
+    # is refused WHOLE: read without them, it would grade as an assignment with no
+    # starter at all - the completion check off, the runnable format gone - and say nothing.
+    if "format" in data and "formats" not in data:
+        raise NotMigrated("format", "formats", GRADING_FILE)
     dropped: list[str] = []
+    data = _refuse_renamed(data, GRADING_FILE, dropped)
     values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
     _late_pair(values)
     _cross_check(values, dropped)
@@ -1523,6 +1599,11 @@ def declared_grading_spec(course_org: str, template: str) -> GradingSpec | None:
         return None
     try:
         return parse_grading_spec(text)
+    except NotMigrated as exc:
+        # Refused, and SAYS so: the lock reads it as no definition (its Join-team form
+        # refuses), and the handout and the grader refuse to act on it.
+        log_err(f"  ! {template}/{GRADING_FILE}: {exc} - refused")
+        return GradingSpec(not_migrated=True)
     except yaml.YAMLError as exc:
         log_err(
             f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
@@ -1535,7 +1616,7 @@ def load_grading_spec(course_org: str, template: str) -> GradingSpec:
 
     NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
     definition file, or one that does not parse must leave the rest of the tick running on
-    the defaults rather than take the cohort down with it."""
+    the defaults rather than take the semester down with it."""
     spec = declared_grading_spec(course_org, template)
     return spec if spec is not None else GradingSpec()
 
@@ -1561,13 +1642,14 @@ def _spec_fault(
     file: str = GRADING_FILE,
     plain: str = "",
     consequence: str = "",
-    per_cohort: bool = False,
+    per_semester: bool = False,
+    code: str = "",
 ) -> ConfigFault:
     """One value in one assignment's definition that will not grade as written.
 
     The fault is in the COURSE org, on the template's `solution` branch, and the digest
-    that carries it is the COHORT's - the cohort is what the grading happens to, and the
-    people who can fix it are the ones in its people.yml. So the file's own address rides
+    that carries it is the SEMESTER's - the semester is what the grading happens to, and the
+    people who can fix it are the ones in its instructors.yml. So the file's own address rides
     on the fault (`in_org`, `in_repo`, `ref`), which is what the deep link and the blame
     query both go by."""
     return ConfigFault(
@@ -1583,7 +1665,8 @@ def _spec_fault(
         fix_text=fix,
         plain=plain,
         consequence=consequence,
-        per_cohort=per_cohort,
+        per_semester=per_semester,
+        code=code,
     )
 
 
@@ -1618,6 +1701,21 @@ def grading_spec_faults(
     (see below), and the only thing read from outside this file."""
     try:
         spec = parse_grading_spec(text)
+    except NotMigrated as exc:
+        return [
+            _spec_fault(
+                slug,
+                template,
+                course_org,
+                fires,
+                f"{exc} - the whole file is refused, so the assignment is not handed "
+                f"out or graded until it is",
+                field="format",
+                lineno=key_lines(text).get(("format",)),
+                fix="run the migration, which rewrites it to the new name",
+                code=NOT_MIGRATED,
+            )
+        ], None
     except yaml.YAMLError as exc:
         return [
             _spec_fault(
@@ -1644,6 +1742,7 @@ def grading_spec_faults(
             field=dropped.field,
             lineno=lines.get((dropped.field,)),
             fix=_spec_fix(dropped),
+            code=dropped.code,
         )
         for dropped in spec.dropped
         if isinstance(dropped, Dropped)
@@ -1669,20 +1768,20 @@ def grading_spec_faults(
                 f"`solution_datetime:`, but `submit_via: {spec.submit_via}` with "
                 f"`visibility: {spec.visibility}` gives it no private repo of its own to "
                 f"push the model solution into - it is never pushed where the world can "
-                f"read it, where the students can publish it, or where the whole cohort "
+                f"read it, where the students can publish it, or where the whole semester "
                 f"shares one repo, so that moment passes and nothing is released",
                 field="visibility",
                 lineno=lines.get(("visibility",)),
                 fix="remove `solution_datetime:` from this assignment's entry in "
                 "classroom-config/schedule.yml - the model answer stays on this "
-                "template's `solution` branch, which is where the teaching team reads "
+                "template's `solution` branch, which is where the instructors read "
                 "it - or give this assignment a private repo per unit here "
                 "(`submit_via: assignment_repo`, `visibility: private`)",
-                plain=f"{slug} has a solution shown date in this cohort's schedule, "
+                plain=f"{slug} has a solution shown date in this semester's schedule, "
                 f"but its settings give it no private repo to put the solution in.",
                 consequence="the solution shown date passes and no solution is "
                 "released",
-                per_cohort=True,
+                per_semester=True,
             )
         )
     return faults, spec
@@ -1695,6 +1794,8 @@ def _spec_fix(dropped: Dropped) -> str:
     "Correct the value" is not an instruction about a line whose KEY is the mistake: a
     setting that moved here from schedule.yml, or a plain misspelling, has no value to
     correct."""
+    if dropped.code == NOT_MIGRATED:
+        return "run the migration, which rewrites it to the new name"
     if dropped.field not in SPEC_KEYS:
         return f"remove the line above, or spell it as one of: {', '.join(SPEC_KEYS)}"
     allowed = f" (allowed: {'/'.join(dropped.allowed)})" if dropped.allowed else ""
@@ -1703,29 +1804,29 @@ def _spec_fix(dropped: Dropped) -> str:
 
 def grading_config_faults(
     course_org: str,
-    cohort_org: str,
+    semester_org: str,
     sched,
     found: list[ConfigFault],
     listing: dict[str, dict] | None,
 ) -> None:
-    """Every assignment this cohort's plan declares, and everything in its definition that
+    """Every assignment this semester's plan declares, and everything in its definition that
     will not grade as written.
 
     `fires` is the moment the value is USED: the assignment's `grading_datetime`, and its
-    due date where it declares none (which is what `cutoff_at` resolves the freeze to
+    due date where it declares none (which is what `schedule.grading_cutoff_datetime` resolves the freeze to
     anyway). An assignment with neither has no moment, and its faults simply sit in the
     issue.
 
-    `listing` is the COHORT's repos keyed by name, off the one listing the tick already
+    `listing` is the SEMESTER's repos keyed by name, off the one listing the tick already
     holds, and it is read for one check: an assignment whose `visibility:` no longer
     describes the repos it handed out (see `_visibility_faults`). None is "we could not
     look", and that check reports nothing - it is not worth dropping a whole file's digest
     for, since every other fault in it was read from the template.
 
-    `cohort_org` is read for one more thing, and only where a definition asks for it: an
+    `semester_org` is read for one more thing, and only where a definition asks for it: an
     assignment that hands the visibility flag to its students depends on two settings of
     the ORG, which cannot be set through the API at all (`_org_settings_faults`). One GET
-    for the whole plan, and none at all for a cohort with no such assignment.
+    for the whole plan, and none at all for a semester with no such assignment.
 
     Everything else here is the definition alone, which lives in the course org. Nothing
     is appended until every template has been read: a read that failed is "we could not
@@ -1739,17 +1840,18 @@ def grading_config_faults(
         template = entry.course_source_repo
         if not template:
             continue  # the plan itself is faulty; schedule.yml's own digest says so
-        fires = entry.grading_datetime or entry.due_datetime
+        # The window-less cutoff: the spec that holds the window is what is read next.
+        fires = schedule.grading_cutoff_datetime(sched, slug)
         text = _grading_text(course_org, template)
         if text is None:
             faults += _undeclared_faults(slug, template, course_org, fires)
             continue
         # Nothing to compare a file against until the assignment has gone out. Archived
-        # repos are left out: one is read-only and a finished cohort is meant to stay
+        # repos are left out: one is read-only and a finished semester is meant to stay
         # frozen, so nothing it says can be anybody's fault.
         handed_out = None
         if listing is not None and entry.handout_datetime is not None:
-            handed_out = assignment_rows(listing, schedule.cohort_name(slug, entry))
+            handed_out = assignment_rows(listing, schedule.semester_name(slug, entry))
         spec_faults, spec = grading_spec_faults(
             slug,
             template,
@@ -1763,10 +1865,10 @@ def grading_config_faults(
         if handed_out and spec is not None and spec.visibility_is_students:
             hands_the_flag_over = True
     # ONE read of the org, after every template has been parsed and only when something
-    # in this cohort actually depends on it: an org with no such assignment is not
+    # in this semester actually depends on it: an org with no such assignment is not
     # misconfigured, it is an org the question does not apply to.
     if hands_the_flag_over:
-        faults += _org_settings_faults(cohort_org)
+        faults += _org_settings_faults(semester_org)
     found.extend(faults)
 
 
@@ -1782,7 +1884,7 @@ def _visibility_faults(
     """`visibility:` against the repos this assignment actually handed out, `rows`.
 
     The value is read at CREATE and nowhere else (see `repos.set_visibility`), so editing
-    the line afterwards is a silent no-op: the file says `public`, the cohort's work stays
+    the line afterwards is a silent no-op: the file says `public`, the semester's work stays
     private, and every page the toolkit writes describes repos that do not exist. Nothing
     else notices, which is why this is a fault and not a log line.
 
@@ -1790,7 +1892,7 @@ def _visibility_faults(
     vocabulary. A shape whose repos are legitimately a MIXTURE, because the students own
     the flag, is exempted by its own predicate in `course.py`, never by a name spelt
     here. `creates_repos` rather than `creates_unit_repos`: a shared drop box is one repo
-    for the whole cohort and `visibility:` describes it exactly as it describes the many."""
+    for the whole semester and `visibility:` describes it exactly as it describes the many."""
     if not spec.creates_repos or spec.visibility_is_students:
         # `student_choice` says the STUDENT decides, so twenty private repos and four
         # public ones is the assignment working - `course.visibility_is_students`. The
@@ -1818,15 +1920,15 @@ def _visibility_faults(
             f"{spec.visibility} by hand from its GitHub Settings - the toolkit never "
             f"re-opens a repo it has already created",
             plain=f"{slug}'s settings say its repos are {spec.visibility}, but "
-            f"{len(wrong)} of {len(rows)} handed out in this cohort are not.",
+            f"{len(wrong)} of {len(rows)} handed out in this semester are not.",
             consequence="those repos stay as they are, and the pages the toolkit "
             "writes describe them wrongly",
-            per_cohort=True,
+            per_semester=True,
         )
     ]
 
 
-# WHERE the org-settings fault sits in the digest's state. ONE key for the whole cohort
+# WHERE the org-settings fault sits in the digest's state. ONE key for the whole semester
 # and not one per assignment: the two switches belong to the org, so three `student_choice`
 # assignments under one plan are three readings of one problem, and three keys would mail
 # about it three times and clear it three times.
@@ -1837,7 +1939,7 @@ MEMBER_PRIVILEGES_URL = (
 )
 
 
-def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
+def _org_settings_faults(semester_org: str) -> list[ConfigFault]:
     """The org's own two switches, against what `visibility: student_choice` needs of them.
 
     That shape gives the student `admin` on their own repo, because `admin` is the only
@@ -1847,11 +1949,11 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
 
     READ-only, both of them: they are reported by `GET /orgs/{org}` and absent from
     `PATCH /orgs/{org}` (they are web-only settings), so the maintainer sets them once per
-    cohort org and this is what notices when nobody did. Explicit `is True` / `is False`,
+    semester org and this is what notices when nobody did. Explicit `is True` / `is False`,
     never truthiness: a plan whose payload omits a key has said nothing about it, and
-    faulting on a missing field would red every cohort on an account tier that does not
+    faulting on a missing field would red every semester on an account tier that does not
     carry it."""
-    settings = gh_teams.org_settings(cohort_org)
+    settings = gh_teams.org_settings(semester_org)
     if settings is None:
         return []  # we could not look; `org_settings` has already said why
     wrong: list[str] = []
@@ -1873,24 +1975,24 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
     return [
         ConfigFault(
             ORG_SETTINGS,
-            f"an assignment in this cohort is handed out with "
+            f"an assignment in this semester is handed out with "
             f"`visibility: student_choice`, which makes each student an admin of their "
             f"own repo - and {' and '.join(wrong)}",
             file=GRADING_FILE,
-            in_org=cohort_org,
-            plain="This cohort's GitHub member privileges do not suit an assignment "
+            in_org=semester_org,
+            plain="This semester's GitHub member privileges do not suit an assignment "
             "that lets students choose their repo's visibility.",
             consequence=" and ".join(costs),
-            per_cohort=True,
+            per_semester=True,
             # Both switches named whichever one is wrong: the fix is one visit to one
             # page, and a sentence that named only the offender would send somebody back
             # there a second time for the other.
             fix_text=(
-                f"on the cohort org's Member privileges page "
-                f"({MEMBER_PRIVILEGES_URL.format(org=cohort_org)}) set **Allow members to change repository "
+                f"on the semester org's Member privileges page "
+                f"({MEMBER_PRIVILEGES_URL.format(org=semester_org)}) set **Allow members to change repository "
                 f"visibilities** ON and **Allow members to delete or transfer "
                 f"repositories** OFF. Both are web-only org settings - the toolkit reads "
-                f"them and cannot set them - and they are the one-time cohort-org step "
+                f"them and cannot set them - and they are the one-time semester-org step "
                 f"in docs/DEPLOYMENT-CHECKLIST.md"
             ),
         )
@@ -1935,11 +2037,11 @@ def _undeclared_faults(
 # --------------------------------------------------- the team-formation lock file
 
 # `classroom-config/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
-# the Join-team form in the cohort's public `welcome` repo. It exists because of who can
+# the Join-team form in the semester's public `welcome` repo. It exists because of who can
 # read what: the form runs on an `issues: opened` event any stranger can trigger, in a
 # public repo, under a token deliberately scoped away from the course org's assignment
 # templates - so it cannot open `grading_config.yml` and ask what the assignment is. It
-# used to scrape `type:` and `max_team_size:` out of the cohort's own `schedule.yml`
+# used to scrape `type:` and `max_team_size:` out of the semester's own `schedule.yml`
 # instead, which is why a slug with neither let any student mint a real GitHub team.
 #
 # Flat scalars per schedule key, and no vocabulary the form has to interpret twice.
@@ -1950,7 +2052,7 @@ _TEAM_LOCK_HEADER = f"""\
 # `schedule.yml`. Faculty change an assignment by editing its own `{GRADING_FILE}` on
 # the course template's `{SOLUTION_BRANCH}` branch; this file catches up next sync.
 #
-# The Join-team form in this cohort's `welcome` repo reads THIS FILE and nothing else.
+# The Join-team form in this semester's `welcome` repo reads THIS FILE and nothing else.
 #
 #   team_formation: self_select   students form their own teams with the Join-team form
 #                   assigned      the teaching team writes teams.csv; the form refuses
@@ -1965,7 +2067,7 @@ _TEAM_LOCK_HEADER = f"""\
 #                   the date that window shuts, bare ISO (`2026-10-04`), for the refusal
 #                   to name - empty when there is no window, or no date to give
 #   team_formation_page:
-#                   the assignment's page on the cohort site, which lists the teams that
+#                   the assignment's page on the semester site, which lists the teams that
 #                   exist - for the refusal to link; empty for anything not self-select
 #
 # An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
@@ -1981,7 +2083,7 @@ def team_lock_text(entries: dict[str, tuple[str, int, str, str, str]]) -> str:
     read by a line scanner with no YAML library to hand (the Join-team form's JavaScript),
     and that scanner reads a two-space key with four-space scalars under it. `parse_team_lock`
     below is this file's Python reader, and the two are kept together on purpose. Keys
-    sorted, so a re-sync of an unchanged cohort produces an identical blob and `put_file`
+    sorted, so a re-sync of an unchanged semester produces an identical blob and `put_file`
     writes nothing.
 
     `team_formation_closes` and `team_formation_page` are written even when they are empty
@@ -2020,7 +2122,7 @@ def parse_team_lock(text: str) -> dict[str, dict[str, str]]:
 
     Forgiving in the same way the JavaScript is - a line it does not recognise is skipped,
     and a comment is cut off the end - because this file is read to decide what a form may
-    OFFER, and a cohort whose lock is half-written is better served by the entries that did
+    OFFER, and a semester whose lock is half-written is better served by the entries that did
     parse than by an exception."""
     entries: dict[str, dict[str, str]] = {}
     current: dict[str, str] | None = None
@@ -2042,7 +2144,7 @@ def team_lock_entries(
     now: datetime | None = None,
     pages: Mapping[str, str] | None = None,
 ) -> dict[str, tuple[str, int, str, str, str]]:
-    """What each of this cohort's assignments allows, resolved off the ONE place that
+    """What each of this semester's assignments allows, resolved off the ONE place that
     declares it - the template's `grading_config.yml` - plus where `now` falls in its
     team-formation window, and the day that window shuts.
 
@@ -2063,7 +2165,7 @@ def team_lock_entries(
     nobody asked. Empty whenever there is no window, or no pin to take one from - the
     refusal then says only that the window is shut.
 
-    `pages` is each assignment's page on the cohort site by schedule key
+    `pages` is each assignment's page on the semester site by schedule key
     (`_formation_pages`), written for a self-select entry alone: that page lists the teams
     that exist, and it is what a refused Join links."""
     now = now if now is not None else datetime.now(UTC)
@@ -2071,7 +2173,7 @@ def team_lock_entries(
     entries: dict[str, tuple[str, int, str, str, str]] = {}
     for key, entry in sched.assignments.items():
         spec = declared_grading_spec(course_org, entry.course_source_repo)
-        if spec is None:
+        if spec is None or spec.not_migrated:
             # Named by SLUG, never by anyone in it: this runs in a public workflow.
             log_err(
                 f"  ! {key}: {entry.course_source_repo} has no {GRADING_FILE} yet - "
@@ -2083,7 +2185,7 @@ def team_lock_entries(
         formation = spec.team_formation_resolved
         window, shuts, page = "none", "", ""
         if formation == SELF_SELECT:
-            # The same call the cohort site's team-formation callout makes, so the page
+            # The same call the semester site's team-formation callout makes, so the page
             # that invites a student in and the form that lets them in shut together.
             window, closes = schedule.formation_state(sched, key, now)
             shuts = closes.date().isoformat() if closes is not None else ""
@@ -2099,7 +2201,7 @@ def team_lock_entries(
 
 
 def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
-    """The cohort's assignments whose teams the STUDENTS form, in schedule order.
+    """The semester's assignments whose teams the STUDENTS form, in schedule order.
 
     A template nobody has written declares nothing and is not one of them - the lock has
     already locked its form to `none` - and `team_formation_resolved` answers `none` for
@@ -2113,23 +2215,24 @@ def self_select_keys(course_org: str, sched: schedule.Schedule) -> list[str]:
         for key, entry in sched.assignments.items()
         if (spec := declared_grading_spec(course_org, entry.course_source_repo))
         is not None
+        and not spec.not_migrated
         and spec.team_formation_resolved == SELF_SELECT
     ]
 
 
 def _formation_pages(
-    course_org: str, cohort_org: str, sched: schedule.Schedule
+    course_org: str, semester_org: str, sched: schedule.Schedule
 ) -> dict[str, str]:
-    """Each self-select assignment's page URL on the cohort site, by schedule key.
+    """Each self-select assignment's page URL on the semester site, by schedule key.
 
     Asked only when the plan HAS a self-select assignment: the pages cost a listing of the
-    course org, and the lock is written on every tick of a cohort with any assignment."""
+    course org, and the lock is written on every tick of a semester with any assignment."""
     if not self_select_keys(course_org, sched):
         return {}
     return {
-        key: page.url(cohort_org)
+        key: page.url(semester_org)
         for key, page in schedule.assignment_pages_by_key(
-            course_org, cohort_org, sched
+            course_org, semester_org, sched
         ).items()
     }
 
@@ -2143,7 +2246,7 @@ def team_cap(course_org: str, spec: GradingSpec | None) -> int:
     one whose template says nothing at all, which is what `spec=None` is.
 
     One place, because the number is now both enforced and PRINTED: the lock file the
-    Join-team form refuses on, and the cohort site's callout inviting a student to form a
+    Join-team form refuses on, and the semester site's callout inviting a student to form a
     team of up to this many. A page naming five against a form that refuses the fifth
     would be the page's fault."""
     if spec is not None and spec.max_team_size:
@@ -2163,7 +2266,7 @@ class LockWrite(NamedTuple):
 
 def sync_team_lock(
     course_org: str,
-    cohort_org: str,
+    semester_org: str,
     sched: schedule.Schedule | None = None,
     *,
     now: datetime | None = None,
@@ -2174,7 +2277,7 @@ def sync_team_lock(
 
     Written from everything that could have moved one of its inputs: the membership
     sync (whose dispatcher fires on a push to `schedule.yml`), the handout, and the nightly
-    refresh - which is also what seeds it, since a cohort's bootstrap ends in one. The blob
+    refresh - which is also what seeds it, since a semester's bootstrap ends in one. The blob
     compare makes every one of those a no-op when nothing changed, so the cost of writing
     it from four places is four reads a day.
 
@@ -2182,27 +2285,27 @@ def sync_team_lock(
     file needs to know when to re-render, and it would otherwise pay a second read to find
     out what this call already knows.
 
-    A CLOSED-OUT cohort is skipped: `teardown` archives `classroom-config` last, an
-    archived repo is read-only, and the membership sync reaches such a cohort every day -
+    A CLOSED-OUT semester is skipped: `teardown` archives `classroom-config` last, an
+    archived repo is read-only, and the membership sync reaches such a semester every day -
     the registry it fans out over is not what teardown seals. The check lives here rather
     than at one call site because it is the same answer for all of them: a finished term
     forms no teams, so there is nothing for the mirror to say."""
-    if repo_is_archived(cohort_org, CONFIG_REPO):
-        log(f"  [skip] {TEAM_LOCK_PATH} in {cohort_org} (cohort closed out)")
+    if repo_is_archived(semester_org, CONFIG_REPO):
+        log(f"  [skip] {TEAM_LOCK_PATH} in {semester_org} (semester archived)")
         return LockWrite(True, False)
-    sched = sched if sched is not None else schedule.load(cohort_org)
+    sched = sched if sched is not None else schedule.load(semester_org)
     if dry_run:
         # Above the render, not below it: resolving the entries reads every template's
         # `grading_config.yml`, and a preview that never writes has nothing to do with them.
-        log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
+        log(f"    PREVIEW  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
         return LockWrite(True, False)
     content = team_lock_text(
         team_lock_entries(
-            course_org, sched, now, _formation_pages(course_org, cohort_org, sched)
+            course_org, sched, now, _formation_pages(course_org, semester_org, sched)
         )
     ).encode()
     try:
-        existing = get_file_with_sha(cohort_org, CONFIG_REPO, TEAM_LOCK_PATH)
+        existing = get_file_with_sha(semester_org, CONFIG_REPO, TEAM_LOCK_PATH)
     except RuntimeError:
         # A read that failed for anything but a 404. `changed` is only a render HINT, so
         # the safe answer is the pessimistic one: one spurious re-render costs far less
@@ -2216,7 +2319,7 @@ def sync_team_lock(
     # write if the file moved since) and the no-op short circuit, since `put_file` returns
     # True without writing when `expected_sha` already matches what we would write.
     ok = put_file(
-        cohort_org,
+        semester_org,
         CONFIG_REPO,
         TEAM_LOCK_PATH,
         content,
@@ -2225,7 +2328,7 @@ def sync_team_lock(
     )
     if not ok:
         log_err(
-            f"could not write {TEAM_LOCK_PATH} in {cohort_org} - the Join-team form reads "
+            f"could not write {TEAM_LOCK_PATH} in {semester_org} - the Join-team form reads "
             f"it, so it answers from whatever the file last said"
         )
     return LockWrite(ok, changed and ok)
@@ -2249,32 +2352,11 @@ def _display_long(at: datetime | None, tz_name: str = "") -> str:
     return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
 
 
-def cutoff_at(
-    sched: schedule.Schedule, key: str, gspec: GradingSpec
-) -> datetime | None:
-    """When this assignment stops accepting work: an explicit `grading_datetime`, else the
-    due date plus the template's late window, else the due date.
-
-    THE cutoff. Everything that has to agree about when the door shuts reads it here - the
-    sheet's header and its late-policy line, the receipts that quote that policy to a
-    student, the snapshot that freezes the pin and the autograder that fires off it. It
-    needs the template's `grading_config.yml` to know the window, which is why it lives
-    beside the spec reader rather than in `schedule`; `schedule.grading_datetime_at` is the
-    same question answered without one, and is only right when there is no window at all."""
-    entry = sched.assignments.get(key)
-    if entry is None:
-        return None
-    if entry.grading_datetime is not None:
-        return entry.grading_datetime
-    days = gspec.late_window_days
-    return entry.due_datetime + timedelta(days=days) if days else entry.due_datetime
-
-
 def sheet_spec(
     sched: schedule.Schedule, key: str, slug: str, gspec: GradingSpec, is_group: bool
 ) -> SheetSpec:
     """What the sheet needs to know about this assignment, gathered from the two files
-    that own it: `grading_config.yml` on the template's solution branch, and the cohort's
+    that own it: `grading_config.yml` on the template's solution branch, and the semester's
     `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
     as the comment header, which is regenerated on every write."""
     entry = sched.assignments.get(key)
@@ -2290,14 +2372,19 @@ def sheet_spec(
         autograde=gspec.autograde,
         completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(cutoff_at(sched, key, gspec)),
+        cutoff_display=_display_moment(
+            schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days)
+        ),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
-        cutoff_long=_display_long(cutoff_at(sched, key, gspec), sched.timezone),
+        cutoff_long=_display_long(
+            schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days),
+            sched.timezone,
+        ),
         due_at=entry.due_datetime if entry else None,
     )
 
 
-# ----------------------------------------------------------- the receipts issue, in situ
+# ----------------------------------------------------------- the Submission receipts issue, in situ
 
 # Reading and writing the issue whose CONTRACT lives in `course`. Everything that decides
 # WHAT is said is there; everything that decides whether a call is made is here.
@@ -2309,12 +2396,12 @@ def late_policy(spec) -> str:
     """`accepted until Sunday 11 October 2026, 23:59 (Europe/Berlin), at 10% of your grade
     per day started.` - or "" when nothing is accepted after the deadline.
 
-    ONE sentence for both places a student meets the policy - the receipts issue at handout
+    ONE sentence for both places a student meets the policy - the Submission receipts issue at handout
     and every receipt after it. Two spellings of the same rule is how a student ends up
     reading two different deadlines.
 
     The rate TRAILS the date rather than bracketing it: `cutoff_long` already ends in the
-    cohort's timezone, and two parentheticals in a row read as a typo."""
+    semester's timezone, and two parentheticals in a row read as a typo."""
     if not spec.collects_commits or not (spec.late_window_days and spec.cutoff_long):
         return ""
     rate = (
@@ -2328,7 +2415,7 @@ def late_policy(spec) -> str:
 def receipts_thread_body(
     spec, unit: str = "", members: tuple[str, ...] | list[str] = ()
 ) -> str:
-    """The receipts issue's body for one submission repo, from the assignment's own spec.
+    """The Submission receipts issue's body for one submission repo, from the assignment's own spec.
 
     `unit` is the row that repo belongs to - a team name on a group assignment, the
     student's handle on an individual one - and WHICH VARIANT to write is read off the
@@ -2385,7 +2472,7 @@ class IssueLookupFailed:
     """The receipts-issue lookup could not be READ - as against finding nothing there.
 
     A 5xx or a secondary limit that outlived the retry ladder used to come back as "this
-    repo has no receipts issue", and the very next thing that happens is a SECOND issue
+    repo has no Submission receipts issue", and the very next thing that happens is a SECOND issue
     opened over the thread the student was told to read. Falsy, so `if not found` still
     reads naturally; distinguished from None by identity, never by truth."""
 
@@ -2397,7 +2484,7 @@ class IssueLookupFailed:
 
 LOOKUP_FAILED = IssueLookupFailed()
 
-# Oldest first, and the author with it. The toolkit opens the receipts issue at handout,
+# Oldest first, and the author with it. The toolkit opens the Submission receipts issue at handout,
 # so ours is the oldest one carrying the label - but a student holds `maintain` on their
 # own submission repo and can open and label their own, and GitHub's default ordering is
 # newest first, which handed it theirs.
@@ -2405,21 +2492,21 @@ _ISSUE_ORDER = "sort=created&direction=asc"
 
 
 def _receipts_issues(
-    cohort_org: str, repo: str, query: str, jq: str
+    semester_org: str, repo: str, query: str, jq: str
 ) -> list[str] | None:
     """The issues this query matches, or None when the question could not be ANSWERED.
 
-    A 404 IS an answer: there is no such repo, so it has no receipts issue. Every shape
+    A 404 IS an answer: there is no such repo, so it has no Submission receipts issue. Every shape
     can reach one - a student who never onboarded, a team formed after the handout, an
     assignment handed in off GitHub whose repos were never created - and answering "could
-    not read it" for them turned a cohort of absent repos into a red run and a `[wait]`
+    not read it" for them turned a semester of absent repos into a red run and a `[wait]`
     line per student. What stops the 404 being read as "so open one" is the policy
     (`receipts_thread_policy`), which never creates where the listing did not show a
     private repo.
 
     Anything else is genuinely "could not answer" - a token that lost its grant is not a
     repo with no issues - and the caller must not act on the difference."""
-    code, out = gh("api", f"repos/{cohort_org}/{repo}/issues?{query}", "--jq", jq)
+    code, out = gh("api", f"repos/{semester_org}/{repo}/issues?{query}", "--jq", jq)
     if code != 0:
         return [] if is_missing_resource(out) else None
     return [line for line in out.splitlines() if line.strip()]
@@ -2441,9 +2528,9 @@ def _ours(rows: list[list[str]], login_at: int) -> list[str]:
 
 
 def find_receipts_issue(
-    cohort_org: str, repo: str
+    semester_org: str, repo: str
 ) -> tuple[int, str] | IssueLookupFailed | None:
-    """`(number, state)` of this repo's receipts issue, None if it has none, or
+    """`(number, state)` of this repo's Submission receipts issue, None if it has none, or
     `LOOKUP_FAILED` if the question could not be answered.
 
     Three rungs, cheapest first: the LABEL, then a body carrying one of the marks, then the
@@ -2453,21 +2540,23 @@ def find_receipts_issue(
 
     Pull requests are issues to this endpoint, so they are filtered out: a PR titled
     A pull request titled like the issue would otherwise be commented on instead."""
-    by_label = _receipts_issues(
-        cohort_org,
-        repo,
-        f"labels={RECEIPTS_ISSUE_LABEL}&state=all&per_page=5&{_ISSUE_ORDER}",
-        ".[] | select(.pull_request == null) | "
-        '"\\(.number)\\t\\(.state)\\t\\(.user.login // "")"',
-    )
-    if by_label is None:
-        return LOOKUP_FAILED
-    if by_label:
-        row = _ours([line.split("\t") for line in by_label], 2)
-        return int(row[0]), row[1]
+    # One query per label in the chain: `labels=a,b` means BOTH, not either.
+    for label in RECEIPTS_ISSUE_LABELS:
+        by_label = _receipts_issues(
+            semester_org,
+            repo,
+            f"labels={label}&state=all&per_page=5&{_ISSUE_ORDER}",
+            ".[] | select(.pull_request == null) | "
+            '"\\(.number)\\t\\(.state)\\t\\(.user.login // "")"',
+        )
+        if by_label is None:
+            return LOOKUP_FAILED
+        if by_label:
+            row = _ours([line.split("\t") for line in by_label], 2)
+            return int(row[0]), row[1]
     marks = " or ".join(f'contains("{mark}")' for mark in RECEIPTS_ISSUE_MARKS)
     listed = _receipts_issues(
-        cohort_org,
+        semester_org,
         repo,
         f"state=all&per_page=50&{_ISSUE_ORDER}",
         ".[] | select(.pull_request == null) | "
@@ -2489,9 +2578,9 @@ def find_receipts_issue(
 
 
 def ensure_receipts_issue(
-    cohort_org: str, repo: str, body: str, dry_run: bool = False, create: bool = True
+    semester_org: str, repo: str, body: str, dry_run: bool = False, create: bool = True
 ) -> int | IssueLookupFailed | None:
-    """This repo's receipts issue number, opening one if it has none.
+    """This repo's Submission receipts issue number, opening one if it has none.
 
     A CLOSED issue is reopened: a student who closes theirs must still receive their
     receipts and their grade, and a second issue would split the thread they were told to
@@ -2500,14 +2589,14 @@ def ensure_receipts_issue(
     caller leaves this unit for the next tick.
 
     `create=False` finds one without ever opening one - what a shape with no receipts
-    issue of its own does, so a cohort handed out before that shape existed keeps
+    issue of its own does, so a semester handed out before that shape existed keeps
     getting its receipts in the thread it was told to read. A FLAG rather than a second
     function: reopening a closed issue and the `LOOKUP_FAILED` rule are the same either
     way, and two spellings of them would drift."""
-    found = find_receipts_issue(cohort_org, repo)
+    found = find_receipts_issue(semester_org, repo)
     if isinstance(found, IssueLookupFailed):
         log_err(
-            f"  ! could not read the receipts issues in {cohort_org} - opening none, "
+            f"  ! could not read the Submission receipts issues in {semester_org} - opening none, "
             f"posting none; the next run tries again"
         )
         return LOOKUP_FAILED
@@ -2519,22 +2608,24 @@ def ensure_receipts_issue(
                 "api",
                 "--method",
                 "PATCH",
-                f"repos/{cohort_org}/{repo}/issues/{number}",
+                f"repos/{semester_org}/{repo}/issues/{number}",
                 "--field",
                 "state=open",
             )
             if code != 0:
-                log_err(f"  ! could not reopen the receipts issue: {out[:160]}")
+                log_err(
+                    f"  ! could not reopen the Submission receipts issue: {out[:160]}"
+                )
         return number
     if not create:
         return None
     if dry_run:
-        log("    DRY-RUN  would open the receipts issue")
+        log("    PREVIEW  would open the Submission receipts issue")
         return None
     # The label first: GitHub silently drops a label the repo does not have, and the label
     # is the cheapest rung of the lookup above.
     ensure_label(
-        cohort_org,
+        semester_org,
         repo,
         RECEIPTS_ISSUE_LABEL,
         color=_RECEIPTS_LABEL_COLOUR,
@@ -2545,7 +2636,7 @@ def ensure_receipts_issue(
         "api",
         "--method",
         "POST",
-        f"repos/{cohort_org}/{repo}/issues",
+        f"repos/{semester_org}/{repo}/issues",
         "--field",
         f"title={RECEIPTS_ISSUE_TITLE}",
         "--field",
@@ -2556,20 +2647,20 @@ def ensure_receipts_issue(
         ".number",
     )
     if code != 0:
-        log_err(f"  ! could not open the receipts issue: {out[:160]}")
+        log_err(f"  ! could not open the Submission receipts issue: {out[:160]}")
         return None
     return int(out.strip()) if out.strip().isdigit() else None
 
 
 def post_marked_comment(
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     issue_no: int,
     body: str,
     marker: str,
     dry_run: bool = False,
 ) -> bool:
-    """Post one comment on the receipts issue, unless it already carries `marker`.
+    """Post one comment on the Submission receipts issue, unless it already carries `marker`.
 
     The marker is the whole idempotence story, and it is why both callers share this: the
     refresh pass runs four times an hour for the length of the late window, and Patch
@@ -2582,37 +2673,39 @@ def post_marked_comment(
     code, out = gh(
         "api",
         "--paginate",
-        f"repos/{cohort_org}/{repo}/issues/{issue_no}/comments?per_page=100",
+        f"repos/{semester_org}/{repo}/issues/{issue_no}/comments?per_page=100",
         "--jq",
         ".[].body",
     )
     if code != 0:
-        log_err(f"  ! could not read the receipts issue's comments: {out[:160]}")
+        log_err(
+            f"  ! could not read the Submission receipts issue's comments: {out[:160]}"
+        )
         return False
     if marker in out:
         return True  # already said, on this commit, for this event
     if dry_run:
-        log("    DRY-RUN  would post a submission receipt")
+        log("    PREVIEW  would post a submission receipt")
         return True
     code, out = gh(
         "api",
         "--method",
         "POST",
-        f"repos/{cohort_org}/{repo}/issues/{issue_no}/comments",
+        f"repos/{semester_org}/{repo}/issues/{issue_no}/comments",
         "--field",
         f"body={body}\n{marker}\n",
     )
     if code != 0:
-        log_err(f"  ! could not comment on the receipts issue: {out[:160]}")
+        log_err(f"  ! could not comment on the Submission receipts issue: {out[:160]}")
         return False
     return True
 
 
 def post_receipt(
-    cohort_org: str, repo: str, issue_no: int, body: str, marker: str, dry_run=False
+    semester_org: str, repo: str, issue_no: int, body: str, marker: str, dry_run=False
 ) -> bool:
     """A submission receipt - `post_marked_comment` under the name its caller uses."""
-    return post_marked_comment(cohort_org, repo, issue_no, body, marker, dry_run)
+    return post_marked_comment(semester_org, repo, issue_no, body, marker, dry_run)
 
 
 # ------------------------------------------------------------- what a student is shown
@@ -2643,7 +2736,7 @@ STUDENT_VIEW_KEYS = (
 )
 
 # The month names are the toolkit's own, never the runner's locale: otherwise a
-# German-locale Actions runner writes "Okt" into one cohort's gradebook and "Oct" into
+# German-locale Actions runner writes "Okt" into one semester's gradebook and "Oct" into
 # the next one's.
 _MONTHS = (
     "Jan",
@@ -2667,7 +2760,7 @@ def spoken_day(at: datetime) -> str:
 
     ONE spelling, because three surfaces name the same day and a student who is told one
     date by the Join-team form and another by the mail beside it has been told two things.
-    The team-formation mail, the cohort site's team-formation callout and the form's
+    The team-formation mail, the semester site's team-formation callout and the form's
     refusal all come through here; the form's own JavaScript carries its copy
     (`spokenDate`) because it cannot import this one. The gradebook's Submitted column does
     NOT (`_submitted_display`): respelling it would rewrite every student's grades.yml."""
@@ -2729,7 +2822,7 @@ def total_points(spec: SheetSpec | GradingSpec) -> str:
     """The assignment's total, or "" when the maxima are not all numbers - `questions`
     holds them as written, and a course may declare `Q1: see rubric`.
 
-    Public, and takes either spec, because the cohort site prints the same total on the
+    Public, and takes either spec, because the semester site prints the same total on the
     assignment's page (`site._assignment_entry`) that the gradebook prints beside a score.
     One implementation: a second sum of the same maxima is a second answer to "what is
     this assignment out of", and the two would part company the first time one was
@@ -2762,7 +2855,7 @@ def _submitted_display(value: object, external: bool = False) -> str:
 
     Anything that does not parse as a timestamp comes back verbatim. `info:` is the
     toolkit's, but a grader may have typed over it, and their words about their own
-    cohort beat this module's guess at what they meant."""
+    semester beat this module's guess at what they meant."""
     if external:
         return _EXTERNAL
     if is_blank(value):
@@ -3080,7 +3173,7 @@ def _sheet_fault(
     `where` is the sheet and the LINE, never the unit: a unit key is a student handle or a
     team name, and `where` is this fault's heading in the mail and its identity in the
     digest's state. The slug is part of it because one digest issue carries every sheet in
-    the cohort, so two sheets' line 42 must not be one fault."""
+    the semester, so two sheets' line 42 must not be one fault."""
     return ConfigFault(
         f"{slug} line {lineno}" if lineno else slug,
         what,
@@ -3132,10 +3225,10 @@ def sheet_faults(
     return faults
 
 
-def cohort_sheet_faults(
-    course_org: str, cohort_org: str, sched, found: list[ConfigFault]
+def semester_sheet_faults(
+    course_org: str, semester_org: str, sched, found: list[ConfigFault]
 ) -> None:
-    """Every grading sheet this cohort's plan declares, and everything in each of them a
+    """Every grading sheet this semester's plan declares, and everything in each of them a
     grader has to settle.
 
     Asked on the scheduled tick and NOWHERE else - no push fast path. A sheet is edited
@@ -3149,7 +3242,7 @@ def cohort_sheet_faults(
     specs = sheet_specs(course_org, sched)
     faults: list[ConfigFault] = []
     for name in sorted(specs):
-        text = get_file_content(cohort_org, CONFIG_REPO, sheet_path(name))
+        text = get_file_content(semester_org, CONFIG_REPO, sheet_path(name))
         if text is None:
             continue  # no sheet yet - the normal state before an assignment is due
         faults += sheet_faults(name, text, specs[name])
@@ -3209,10 +3302,10 @@ def build_gradebooks(
 def _on_the_roster(
     books: dict[str, dict[str, dict]], students: list[roster.Student] | None
 ) -> tuple[dict[str, dict[str, dict]], int]:
-    """The books belonging to somebody this cohort's roster knows, and how many marks the
+    """The books belonging to somebody this semester's roster knows, and how many marks the
     rest accounted for.
 
-    A grading sheet is hand-typed, so it carries blocks for handles the cohort does not
+    A grading sheet is hand-typed, so it carries blocks for handles the semester does not
     have: a student who withdrew before onboarding, a handle typed from memory, a sheet
     carried over wholesale from the term before. `ensure_gradebooks`
     provisions one repo per ONBOARDED enrolled student and nothing else, so a book for any
@@ -3222,7 +3315,7 @@ def _on_the_roster(
 
     A roster that could not be READ (None) filters nothing: the run is already going red
     for it, and treating an unreadable file as "nobody is enrolled" would withhold the
-    whole cohort's grades on the strength of a transient failure."""
+    whole semester's grades on the strength of a transient failure."""
     if students is None:
         return books, 0
     known = {
@@ -3418,8 +3511,8 @@ def load_sheets(wd: Path) -> dict[str, dict]:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def sheet_slugs(cohort_org: str) -> list[str]:
-    """The assignments this cohort has a grading sheet for, off ONE listing.
+def sheet_slugs(semester_org: str) -> list[str]:
+    """The assignments this semester has a grading sheet for, off ONE listing.
 
     The names, not the sheets: the only caller is the setup checklist, which wants a count
     and a yes/no. Downloading and parsing each file to get them cost a request per
@@ -3428,11 +3521,11 @@ def sheet_slugs(cohort_org: str) -> list[str]:
 
     [] where the folder does not exist, which is the normal state before the first handout
     rather than a fault - and, `gh` being optimistic here, also where the listing failed;
-    the checklist reports that cohort as having no sheets yet, which is what it would say
+    the checklist reports that semester as having no sheets yet, which is what it would say
     anyway."""
     code, out = gh(
         "api",
-        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{SHEETS_DIR}",
+        f"repos/{semester_org}/{CONFIG_REPO}/contents/{SHEETS_DIR}",
         "--jq",
         ".[].name",
     )
@@ -3441,7 +3534,7 @@ def sheet_slugs(cohort_org: str) -> list[str]:
     return sorted(n[:-4] for n in out.splitlines() if n.endswith(".yml"))
 
 
-def _tag_gradebook(cohort_org: str, repo: str, have: set[str]) -> None:
+def _tag_gradebook(semester_org: str, repo: str, have: set[str]) -> None:
     """Stamp `gradebook` on one private gradebook repo. Checked.
 
     Called on the ALREADY-EXISTS path too: the stamp is a separate PUT after the create,
@@ -3458,9 +3551,11 @@ def _tag_gradebook(cohort_org: str, repo: str, have: set[str]) -> None:
     """
     if "gradebook" in have:
         return
-    if not set_repo_topics(cohort_org, repo, sorted(have | {"gradebook"}), person=True):
+    if not set_repo_topics(
+        semester_org, repo, sorted(have | {"gradebook"}), person=True
+    ):
         log_err(
-            f"  ! a gradebook in {cohort_org} carries no `gradebook` topic. The name rule "
+            f"  ! a gradebook in {semester_org} carries no `gradebook` topic. The name rule "
             f"in `discovery._has_infra_topic` still keeps it off the public org landing "
             f"page, so no handle is published - but the record stays wrong until the "
             f"stamp lands. The next sync with a repo listing retries it, as does the "
@@ -3469,29 +3564,29 @@ def _tag_gradebook(cohort_org: str, repo: str, have: set[str]) -> None:
 
 
 def provision_one(
-    cohort_org: str, handle: str, existing: dict[str, dict] | None = None
+    semester_org: str, handle: str, existing: dict[str, dict] | None = None
 ) -> str:
     """Ensure a private grades-<handle> repo exists with the student as read collaborator.
 
-    `existing` is the cohort's repos off ONE listing (`discovery.listing_by_name`), keyed
+    `existing` is the semester's repos off ONE listing (`discovery.listing_by_name`), keyed
     by name; membership in it answers "is this gradebook already there?" without a GET per student,
     and each row carries the `topics` that `_tag_gradebook` converges off. None - no
     listing to hand - falls back to probing this one repo, and skips that convergence
     rather than paying a read per student for it."""
     repo = f"{GRADEBOOK_PREFIX}{handle}"
-    existed = exists_in(existing, cohort_org, repo)
+    existed = exists_in(existing, semester_org, repo)
     if existed:
-        log_person(f"  [skip] gradebook {cohort_org}/{repo}")
+        log_person(f"  [skip] gradebook {semester_org}/{repo}")
         # Converge the stamp off the listing row that already answered "is it there?",
         # rather than pay a read per student for it. An ARCHIVED gradebook is passed over:
-        # it is read-only, so the PUT would 403 on every sync, and a finished cohort is
+        # it is read-only, so the PUT would 403 on every sync, and a finished semester is
         # meant to stay frozen - `access.converge_topics` skips them for the same reason.
         row = existing[repo] if existing is not None else None
         if row is not None and not row.get("archived"):
-            _tag_gradebook(cohort_org, repo, set(row.get("topics") or []))
+            _tag_gradebook(semester_org, repo, set(row.get("topics") or []))
     else:
         if not create_repo(
-            cohort_org,
+            semester_org,
             repo,
             private=True,
             description=f"Private gradebook for @{handle}",
@@ -3501,16 +3596,16 @@ def provision_one(
         if existing is not None:
             # The caller's listing is now one repo out of date, and in a scheduler tick
             # the passes after this one read it (`discovery.listing_row`).
-            existing[repo] = listing_row(cohort_org, repo)
+            existing[repo] = listing_row(semester_org, repo)
         put_file(
-            cohort_org,
+            semester_org,
             repo,
             "README.md",
             _STARTER_README.encode(),
             "init gradebook",
             person=True,
         )
-        _tag_gradebook(cohort_org, repo, set())
+        _tag_gradebook(semester_org, repo, set())
 
         # At creation only: a team grant does not decay, and the nightly sweep
         # (access.converge_faculty_access) owns the floor for every gradebook that already
@@ -3520,13 +3615,13 @@ def provision_one(
         # mark corrected here would be overwritten on the next run. The sheet is where a
         # mark belongs.
         grant_faculty(
-            cohort_org,
+            semester_org,
             repo,
             FACULTY_READ_ACCESS,
             missing_is_note=True,
             person=True,
         )
-    if add_collaborator(cohort_org, repo, handle, permission="pull", person=True):
+    if add_collaborator(semester_org, repo, handle, permission="pull", person=True):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status
@@ -3536,7 +3631,7 @@ def provision_one(
 
 
 def ensure_gradebooks(
-    cohort_org: str,
+    semester_org: str,
     dry_run: bool = False,
     existing: dict[str, dict] | None = None,
     budget_minutes: float | None = None,
@@ -3549,52 +3644,54 @@ def ensure_gradebooks(
 
     Auditors are read-only and are never assessed, so they get no gradebook.
 
-    `existing` is the cohort's repos off a listing the CALLER already holds, keyed by name;
+    `existing` is the semester's repos off a listing the CALLER already holds, keyed by name;
     None means take one here. Every caller but the nightly sync has just listed the org for
     its own reasons, and a second listing per release run answers the same question twice.
 
     `budget_minutes` bounds the WALL CLOCK: once it is spent this stops and says how many
     students are left, and they wait for the next run. None - the default - is unbounded,
     which is what a caller with work waiting on these repos needs: a handout that stopped
-    halfway would publish a brief pointing at gradebooks half the cohort does not have,
+    halfway would publish a brief pointing at gradebooks half the semester does not have,
     and `distribute` is about to write a mark into every one of them. Only the nightly
     `sync_membership` passes a budget, because nothing in that run waits on the result -
     and the number of minutes is that caller's own
     (`sync_membership.GRADEBOOK_BUDGET_MINUTES`).
 
     A roster that is absent or empty is a SKIP, not a failure, for the reason
-    `sync_roster.sync` gives: an empty roster is a freshly bootstrapped cohort and a
+    `sync_roster.sync` gives: an empty roster is a freshly bootstrapped semester and a
     missing one is a content fault the roster's own digest issue already reports to the
     people who can fix it. This runs on every nightly Sync membership now, and reddening
     that run would tell a maintainer only that something is wrong in an org they cannot fix
     it in. `distribute` has its own guard: it is about to write a mark per student, so an
     unreadable roster stops it."""
-    students = roster.load(cohort_org)
+    students = roster.load(semester_org)
     if students is None:  # missing/unreadable roster - load() already logged why
         return 0
     if not students:
-        log(f"  [skip] no gradebooks in {cohort_org} - its roster has no rows yet")
+        log(f"  [skip] no gradebooks in {semester_org} - its roster has no rows yet")
         return 0
     participants = roster.enrolled(students)
     auditing = len(students) - len(participants)
     onboarded = [s for s in participants if s.onboarded]
     skipped = len(participants) - len(onboarded)
-    log_step(f"Syncing {len(onboarded)} gradebook repo(s) in {cohort_org}")
+    log_step(f"Syncing {len(onboarded)} gradebook repo(s) in {semester_org}")
     if skipped:
         log(f"  ({skipped} not-yet-onboarded row(s) skipped)")
     if auditing:
         log(f"  ({auditing} auditor row(s) skipped - read-only, never assessed)")
 
-    # ONE listing of the cohort answers "is it already there?" for every student below.
+    # ONE listing of the semester answers "is it already there?" for every student below.
     # A dry run creates nothing, so it needs no answer.
     if existing is None and not dry_run:
-        existing = listing_by_name(cohort_org)
+        existing = listing_by_name(semester_org)
     results: dict[str, int] = {}
     deferred = 0
     started = time.monotonic()
     for done, s in enumerate(onboarded):
         if dry_run:
-            log_person(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
+            log_person(
+                f"    PREVIEW  {semester_org}/{GRADEBOOK_PREFIX}{s.github_handle}"
+            )
             continue
         if budget_minutes is not None and (
             time.monotonic() - started > budget_minutes * 60
@@ -3603,7 +3700,7 @@ def ensure_gradebooks(
             # student after this one is deferred by the same clock.
             deferred = len(onboarded) - done
             break
-        status = provision_one(cohort_org, s.github_handle, existing)
+        status = provision_one(semester_org, s.github_handle, existing)
         results[status] = results.get(status, 0) + 1
     if dry_run:
         return 0
@@ -3623,12 +3720,12 @@ def ensure_gradebooks(
 
 # One row per thing SAID, so a re-run says nothing twice and a failure is retried exactly
 # once. It replaces `gradebook/notified.csv`, which recorded only the email and only per
-# student - so a corrected grade re-emailed the whole cohort, and a write that failed was
+# student - so a corrected grade re-emailed the whole semester, and a write that failed was
 # never retried because nothing recorded that it had not.
 DISTRIBUTED_PATH = f"{GRADEBOOK_DIR}/distributed.csv"
 DISTRIBUTED_HEADER = (
     "target",  # a handle; a TEAM name on the rows the retired issue channel left behind
-    "assignment",  # the cohort-side slug; "" for the whole-book email
+    "assignment",  # the semester-side slug; "" for the whole-book email
     "channel",
     "content_hash",
     "distributed_at",
@@ -3686,7 +3783,7 @@ def dump_distributed(records: Distributed) -> str:
 def _read_distributed(wd: Path) -> tuple[Distributed, bool]:
     """`(what has been distributed, whether this run is the migration)`.
 
-    A cohort part-way through the term has `notified.csv` and no `distributed.csv`. Its
+    A semester part-way through the term has `notified.csv` and no `distributed.csv`. Its
     rows become EMAIL rows here, so nobody is emailed again for a book they already know
     about - the hash is over different bytes now, so the first run after the migration
     does re-tell everyone once; that is what `--no-notify` is for."""
@@ -3713,8 +3810,8 @@ def _retired_gradebook_files(wd: Path) -> list[str]:
     """The per-student YAML the retired `render` staged for its preview PR. The gradebook
     repos hold the real thing now, and a stale copy of a grade is worse than none.
 
-    Asked on EVERY run, not only on the `notified.csv` migration: a cohort that reached
-    `distributed.csv` without ever having had a notified.csv - which is every cohort
+    Asked on EVERY run, not only on the `notified.csv` migration: a semester that reached
+    `distributed.csv` without ever having had a notified.csv - which is every semester
     bootstrapped since - was never on the migration path, so its `gradebook/*.yml` sat
     there for the rest of the term. They are dead either way, and the only file in that
     folder anything still reads is `distributed.csv`, which is not a `.yml`."""
@@ -3729,11 +3826,11 @@ def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
     real run exported them, so the preview can say which grades a run would CHANGE and
     which columns it would ADD. Empty when there is no export yet or it cannot be read,
     and every grade and column is then new."""
-    path = wd / COHORT_CSV_NAME
+    path = wd / SEMESTER_CSV_NAME
     if not path.is_file():
         return {}, set()
     try:
-        reader = read_csv(path.read_text(), ("github_handle",), COHORT_CSV_NAME)
+        reader = read_csv(path.read_text(), ("github_handle",), SEMESTER_CSV_NAME)
         rows = list(reader)
     except RuntimeError:
         return {}, set()
@@ -3754,7 +3851,7 @@ def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
     are simply unknown, and nothing is derived from them.
 
     `shape_known=False` says the rest is a guess: there is no definition to read
-    `submit_via` or `visibility` from, so this spec may use a receipts issue it finds and
+    `submit_via` or `visibility` from, so this spec may use a Submission receipts issue it finds and
     may never open one (`may_open_receipts_issue`)."""
     return SheetSpec(
         slug=slug,
@@ -3765,11 +3862,11 @@ def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
 
 
 def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
-    """One spec per assignment the cohort's schedule declares, keyed by its COHORT-side
+    """One spec per assignment the semester's schedule declares, keyed by its SEMESTER-side
     name - which is what the sheets, the repos and the gradebooks are all named after."""
     specs: dict[str, SheetSpec] = {}
     for key, entry in sched.assignments.items():
-        name = schedule.cohort_name(key, entry)
+        name = schedule.semester_name(key, entry)
         gspec = (
             load_grading_spec(course_org, entry.course_source_repo)
             if course_org
@@ -3837,7 +3934,7 @@ def _undue_marks(
     Nothing fills `info:` before the due date - there is nothing to derive there, and a
     handout must not cost an API call per student (`collect.sync_sheet`) - so a grade sent
     early carries a gradebook row reading `not submitted` while the work sits in the repo.
-    A grader may well mean it (a mark released early, a cohort that has all handed in), so
+    A grader may well mean it (a mark released early, a semester that has all handed in), so
     this is counted and said out loud and never blocks: the alternative is withholding a
     mark somebody decided to send.
 
@@ -3857,7 +3954,7 @@ def _undue_marks(
     )
 
 
-# What a run may do about one unit's receipts issue. THREE answers and one function that
+# What a run may do about one unit's Submission receipts issue. THREE answers and one function that
 # gives them (`receipts_thread_policy`), asked by the submission receipts and by nothing
 # else now that no mark is posted into a thread at all. THREE and not a boolean because
 # the answers are about the REPO: `find` is "there may be a thread here, but do not open
@@ -3871,10 +3968,10 @@ THREAD_NONE = "none"  # do not look, do not post
 def receipts_thread_policy(
     spec: SheetSpec, listed: dict[str, dict] | None, repo: str
 ) -> str:
-    """May this run touch `repo`'s receipts issue, and may it OPEN one?
+    """May this run touch `repo`'s Submission receipts issue, and may it OPEN one?
 
     Everything the toolkit knows about that, in one place: the assignment's SHAPE (does it
-    have a receipts issue at all?) and the org LISTING's word on the repo (is it there,
+    have a Submission receipts issue at all?) and the org LISTING's word on the repo (is it there,
     and is it still private?). Both are needed - the file says what was handed out and the
     listing says what is there now - and each answer here is deliberately narrow in the
     direction that cannot hurt a student: a listing is a snapshot, and answering "no
@@ -3882,7 +3979,7 @@ def receipts_thread_policy(
 
     - `listed is None` - we could not look at all: FIND. The thread a student was told to
       read is still the right place for their receipts; opening one on an org nobody could
-      list is how a second receipts issue appears over it.
+      list is how a second Submission receipts issue appears over it.
     - the repo is NOT in the listing: FIND where the shape creates a repo per unit (it may
       have been created since the listing was taken), NONE where it does not - an external
       assignment has no repos, and probing each would be an issues call per student for an
@@ -3890,9 +3987,9 @@ def receipts_thread_policy(
     - the listing says the repo is not private: NONE. A hand-in time is a fact about a
       student, and it does not go where the world can read it - which is what a
       `visibility:` edited after handout leaves behind.
-    - otherwise: CREATE for an assignment whose shape HAS a receipts issue and whose shape
+    - otherwise: CREATE for an assignment whose shape HAS a Submission receipts issue and whose shape
       was read from a real definition; FIND for every other one, which is what keeps a
-      cohort handed out before these shapes existed (Maths a1) getting its receipts in the
+      semester handed out before these shapes existed (Maths a1) getting its receipts in the
       thread it was told to read."""
     if listed is None:
         return THREAD_FIND
@@ -3908,7 +4005,7 @@ def receipts_thread_policy(
 
 def receipts_thread(
     spec: SheetSpec,
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     unit: str,
     members: list[str],
@@ -3916,19 +4013,19 @@ def receipts_thread(
     *,
     dry_run: bool = False,
 ) -> int | IssueLookupFailed | None:
-    """The receipts issue this unit's receipt goes on: its number, None where there is none
+    """The Submission receipts issue this unit's receipt goes on: its number, None where there is none
     this run may use, or `LOOKUP_FAILED` where the question could not be answered.
 
     THE entry point, and the only consumer of `receipts_thread_policy`. It takes the
     STRONGEST answer the policy gives and nothing weaker - the repo is in the listing, the
-    listing says it is private, and the shape has a receipts issue - because a receipt is
+    listing says it is private, and the shape has a Submission receipts issue - because a receipt is
     the one thing that would OPEN a thread nobody has asked for yet. A repo the listing
     does not carry, or a listing that could not be read at all, waits for a tick that can
     say so: the grading sheet is the record and the receipt is a courtesy."""
     if receipts_thread_policy(spec, listed, repo) != THREAD_CREATE:
         return None
     return ensure_receipts_issue(
-        cohort_org, repo, receipts_thread_body(spec, unit, members), dry_run
+        semester_org, repo, receipts_thread_body(spec, unit, members), dry_run
     )
 
 
@@ -4025,7 +4122,7 @@ def _gradebook_files(
 
 
 def _commit_record(
-    cohort_org: str, writes: dict[str, bytes], message: str, delete: list[str]
+    semester_org: str, writes: dict[str, bytes], message: str, delete: list[str]
 ) -> bool:
     """Land `distributed.csv` and the registrar export, with ONE retry on a fresh head.
 
@@ -4042,7 +4139,7 @@ def _commit_record(
     attempts, not a ladder - a second loss is a fault to report, not a race to keep
     running."""
     for attempt in (1, 2):
-        if put_files(cohort_org, CONFIG_REPO, writes, message, delete=delete):
+        if put_files(semester_org, CONFIG_REPO, writes, message, delete=delete):
             return True
         if attempt == 1:
             log(
@@ -4059,7 +4156,7 @@ def _returned_units(
 ) -> list[tuple[SheetSpec, str]]:
     """`(spec, unit repo)` for every unit whose marks this run's gradebooks now hold: a
     member's book is live and carries a final grade for that assignment. Only shapes with
-    a receipts issue of their own, since the note goes there."""
+    a Submission receipts issue of their own, since the note goes there."""
     out: list[tuple[SheetSpec, str]] = []
     held = {h.casefold() for h in live}
     by_fold = {h.casefold(): h for h in books}
@@ -4082,33 +4179,33 @@ def _returned_units(
 
 
 def _post_returned_notes(
-    cohort_org: str,
+    semester_org: str,
     units: list[tuple[SheetSpec, str]],
     listed: dict[str, dict] | None,
 ) -> int:
-    """Post `MARKS_RETURNED_NOTE` on each unit's receipts issue, once per assignment
+    """Post `MARKS_RETURNED_NOTE` on each unit's Submission receipts issue, once per assignment
     (`marks_returned_marker`). Only on an issue that already exists and a repo the listing
-    still says is private - the same guard every write into a receipts thread takes.
+    still says is private - the same guard every write into a Submission receipts issue takes.
     Returns how many units now carry the note. Never fatal: the gradebook is the record."""
     posted = 0
     for spec, repo in units:
         if receipts_thread_policy(spec, listed, repo) == THREAD_NONE:
             continue
-        found = find_receipts_issue(cohort_org, repo)
+        found = find_receipts_issue(semester_org, repo)
         if isinstance(found, IssueLookupFailed) or found is None:
             log_person(
-                f"    [skip] {cohort_org}/{repo}: no receipts issue for the note"
+                f"    [skip] {semester_org}/{repo}: no Submission receipts issue for the note"
             )
             continue
         if post_marked_comment(
-            cohort_org,
+            semester_org,
             repo,
             found[0],
             MARKS_RETURNED_NOTE,
             marks_returned_marker(spec.slug),
         ):
             posted += 1
-            log_person(f"    marks-returned note on {cohort_org}/{repo}#{found[0]}")
+            log_person(f"    marks-returned note on {semester_org}/{repo}#{found[0]}")
     return posted
 
 
@@ -4129,7 +4226,7 @@ def feedback_text(book: dict[str, dict], titles: dict[str, str]) -> str:
 
 
 def distribute(
-    cohort_org: str,
+    semester_org: str,
     notify: bool = True,
     dry_run: bool = False,
     *,
@@ -4154,32 +4251,32 @@ def distribute(
     narrowed the feedback comments and only ever those: a student's gradebook is the whole
     of what they have been given and is rendered from every sheet in the repo on every run,
     so it stays a pure function of the sheets rather than flip-flopping between a scoped
-    and an unscoped write and re-mailing a cohort each way. Rendering it from one selected
+    and an unscoped write and re-mailing a semester each way. Rendering it from one selected
     sheet is what silently deleted every other assignment from every gradebook it touched.
     The registrar's export is the same file for the same reason.
 
-    Dry run - the default - writes no grades and sends nothing: it prints the counts a
+    A preview - the default - writes no grades and sends nothing: it prints the counts a
     grader checks before pressing it for real, and posts the per-student detail as an
     issue in the private classroom-config (`_preview`).
 
     `receipt_note` also posts `MARKS_RETURNED_NOTE` once per assignment on each returned
-    unit's receipts issue; `include_feedback` puts the feedback text into the email. Both
+    unit's Submission receipts issue; `include_feedback` puts the feedback text into the email. Both
     off by default."""
-    # ONE listing of the cohort for the whole run: it answers "does this student already
+    # ONE listing of the semester for the whole run: it answers "does this student already
     # have a gradebook?". A dry run writes nothing and needs none.
-    listed = None if dry_run else listing_by_name(cohort_org)
+    listed = None if dry_run else listing_by_name(semester_org)
     provisioning_failed = bool(
-        ensure_gradebooks(cohort_org, dry_run=dry_run, existing=listed)
+        ensure_gradebooks(semester_org, dry_run=dry_run, existing=listed)
     )
-    course_org = course_org_for_cohort(cohort_org)
-    sched = schedule.load(cohort_org)
-    students = roster.load(cohort_org)
+    course_org = course_org_for_semester(semester_org)
+    sched = schedule.load(semester_org)
+    students = roster.load(semester_org)
     moment = datetime.now(UTC)
     now = moment.isoformat(timespec="seconds")
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
-        if not clone(cohort_org, CONFIG_REPO, wd):
-            log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
+        if not clone(semester_org, CONFIG_REPO, wd):
+            log_err(f"could not clone {semester_org}/{CONFIG_REPO}")
             return 1
         try:
             sheets = load_sheets(wd)
@@ -4191,7 +4288,7 @@ def distribute(
             return 1
         if not sheets:
             log_err(
-                f"no {SHEETS_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand out an "
+                f"no {SHEETS_DIR}/ in {semester_org}/{CONFIG_REPO} - hand out an "
                 f"assignment (which creates its grading sheet) first"
             )
             return 1
@@ -4213,7 +4310,7 @@ def distribute(
             for slug, sheet in sheets.items()
         },
     )
-    log_step(f"Distributing {len(books)} gradebook(s) in {cohort_org}")
+    log_step(f"Distributing {len(books)} gradebook(s) in {semester_org}")
     record: Distributed = dict(distributed)
     # Key ORDER is the order the spec prints the `Done` line in, because that line is a
     # JSON dump of this dict and a grader reads it as text. `unknown` is the one key the
@@ -4254,7 +4351,7 @@ def distribute(
     #    toolkit makes to the README lands; the EMAIL is keyed on what a grader wrote
     #    (`_marks_digest`), so "there is something new to read" means a MARK moved. Keyed
     #    on one hash, a single standing sentence added to the page re-mailed every student
-    #    in every live cohort to tell them nothing.
+    #    in every live semester to tell them nothing.
     live: dict[str, str] = {}
     legacy: dict[str, str] = {}
     for handle in sorted(books):
@@ -4270,7 +4367,7 @@ def distribute(
             counts["gradebooks"] += 1
             continue
         if put_files(
-            cohort_org,
+            semester_org,
             f"{GRADEBOOK_PREFIX}{handle}",
             files,
             "grades: update",
@@ -4299,7 +4396,7 @@ def distribute(
         if told and not told.startswith(MARKS_DIGEST_PREFIX) and told in described:
             # A LEGACY row that still describes this book: a hash of this very grades.yml,
             # or - from when BOTH channels were keyed on the whole book - of the content
-            # this cohort's last run committed. Either way this student has already been
+            # this semester's last run committed. Either way this student has already been
             # told about everything it holds. Carried over to the marks digest in place -
             # the CSV keeps its columns, and the row means what it says once more. A
             # legacy row that matches neither falls through to exactly what the old code
@@ -4325,11 +4422,11 @@ def distribute(
     if dry_run and receipt_note:
         log(
             f"  would post the marks-returned note on up to "
-            f"{len(_returned_units(specs, sheets, books, live))} receipts issue(s)"
+            f"{len(_returned_units(specs, sheets, books, live))} Submission receipts issue(s)"
         )
     if dry_run:
         previewed = _preview(
-            cohort_org,
+            semester_org,
             sheets,
             specs,
             books,
@@ -4347,7 +4444,7 @@ def distribute(
         # `not students` on both exits - no rows AND no file, for the same reason:
         # `ensure_gradebooks` passes over either rather than redden the nightly sync it now
         # also runs on, so saying so is this run's own job. Distribute is about to write a
-        # mark per student, and a header-only students.csv is not a cohort nobody enrolled
+        # mark per student, and a header-only students.csv is not a semester nobody enrolled
         # in by the time marks exist: `_on_the_roster` keeps only the books belonging to
         # somebody the roster knows, so an empty roster drops EVERY mark in the run as
         # `unknown`. This exit is the only signal that happened.
@@ -4357,7 +4454,7 @@ def distribute(
 
     failed_mail, told = (
         _email_updates(
-            cohort_org,
+            semester_org,
             pending,
             dry_run=False,
             feedback=(
@@ -4372,13 +4469,13 @@ def distribute(
     counts["emails"] = len(told)
     if receipt_note:
         counts["receipt_notes"] = _post_returned_notes(
-            cohort_org, _returned_units(specs, sheets, books, live), listed
+            semester_org, _returned_units(specs, sheets, books, live), listed
         )
     for handle in told:
         record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
 
     # 3. The registrar's export and the record of what went out, in ONE commit - together
-    #    with the retired files this cohort is migrating off, so the old and the new can
+    #    with the retired files this semester is migrating off, so the old and the new can
     #    never both be present for a reader to choose between.
     writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
     if not students:
@@ -4388,13 +4485,13 @@ def distribute(
         # from. Leaving it is the only safe answer; the run goes red and the next one
         # rebuilds it.
         log_err(
-            f"roster in {cohort_org} is empty or could not be read - "
-            f"{COHORT_CSV_NAME} left as it is"
+            f"roster in {semester_org} is empty or could not be read - "
+            f"{SEMESTER_CSV_NAME} left as it is"
         )
     else:
-        writes[COHORT_CSV_NAME] = render_registrar_csv(students, books).encode()
+        writes[SEMESTER_CSV_NAME] = render_registrar_csv(students, books).encode()
     recorded = _commit_record(
-        cohort_org,
+        semester_org,
         writes,
         f"grades: distribute ({counts['gradebooks']} gradebook(s), "
         f"{counts['emails']} email(s))",
@@ -4407,7 +4504,7 @@ def distribute(
         )
     # The dry run's preview is out of date once anything has gone out. Not a reason to red
     # the run: a preview left open is closed by the next real one.
-    close_issues_titled(f"{cohort_org}/{CONFIG_REPO}", PREVIEW_TITLE, PREVIEW_SENT)
+    close_issues_titled(f"{semester_org}/{CONFIG_REPO}", PREVIEW_TITLE, PREVIEW_SENT)
     # Counts only: this workflow's log is world-readable and every target here is a
     # student. The per-target lines above went through log_person.
     log_ok(f"Done - {json.dumps(counts)}")
@@ -4458,7 +4555,7 @@ _ISSUE_BODY_CAP = 65_536
 
 
 def _preview(
-    cohort_org: str,
+    semester_org: str,
     sheets: dict[str, dict],
     specs: dict[str, SheetSpec],
     books: dict[str, dict[str, dict]],
@@ -4506,7 +4603,7 @@ def _preview(
         if partly:
             log(f"    {partly} unit(s) have unmarked questions")
         if slug in exported and slug not in columns:
-            log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
+            log(f"  {SEMESTER_CSV_NAME}: would gain column {slug}")
     if counts["unknown"]:
         # Counted, not named: a handle nobody enrolled is still somebody's.
         log(f"  {counts['unknown']} mark(s) for handles not on the roster - ignored")
@@ -4514,12 +4611,12 @@ def _preview(
         f"  would update {counts['gradebooks']} gradebook(s) and email "
         f"{len(emailed)} student(s)"
     )
-    repo = f"{cohort_org}/{CONFIG_REPO}"
+    repo = f"{semester_org}/{CONFIG_REPO}"
     wrote = upsert_issue(
         repo,
         PREVIEW_TITLE,
         _preview_body(
-            cohort_org,
+            semester_org,
             specs,
             books,
             emailed,
@@ -4534,7 +4631,7 @@ def _preview(
     )
     if not wrote.errors:
         log(f"  Who gets what: {wrote.url or f'{PREVIEW_TITLE} in {repo}'}")
-    log_ok("DRY-RUN - no grades written, no mail sent")
+    log_ok("PREVIEW - no grades written, no mail sent")
     return not wrote.errors
 
 
@@ -4555,7 +4652,7 @@ def _counted(n: int, one: str, many: str) -> str:
 
 
 def _preview_body(
-    cohort_org: str,
+    semester_org: str,
     specs: dict[str, SheetSpec],
     books: dict[str, dict[str, dict]],
     emailed: list[str],
@@ -4653,25 +4750,25 @@ def _preview_body(
         (
             f"### Students who would be emailed ({len(mails)})",
             mails,
-            "Nothing - `silent` is ticked, so nobody is emailed."
+            "Nothing - `notify` is unticked, so nobody is emailed."
             if not notify
             else "Nothing - nobody has a new mark to be told about.",
         ),
     ]
     head = [
-        f"**Nothing has been sent.** Dry run: {moment.day} {moment:%b %H:%M} UTC.",
+        f"**Nothing has been sent.** Preview: {moment.day} {moment:%b %H:%M} UTC.",
         (
-            "This is what running Distribute grades for real (with `dry_run` "
+            "This is what running Distribute grades for real (with `preview` "
             "unticked) would do now."
         ),
-        "Each dry run replaces this text; the real run closes this issue.",
+        "Each preview replaces this text; the real run closes this issue.",
     ]
     tail = []
     if emailed:
         # Rendered exactly as the send renders it, course name and all: a preview that
         # showed the generic wording while the real mail named the course was reviewing
         # text nobody would ever receive.
-        subject, body = sample_message(cohort_org, _course_name(cohort_org))
+        subject, body = sample_message(semester_org, _course_name(semester_org))
         tail = [
             "",
             "<details><summary>The email they would get</summary>",
@@ -4715,7 +4812,10 @@ def _preview_body(
 
 
 def update_message(
-    student: roster.Student, cohort_org: str, course_name: str = "", feedback: str = ""
+    student: roster.Student,
+    semester_org: str,
+    course_name: str = "",
+    feedback: str = "",
 ) -> mailer.Message:
     """The 'your grades have been updated' email for one student: (to, subject, body).
 
@@ -4724,7 +4824,7 @@ def update_message(
     the body is redundant. A course with no name yet degrades to `course_phrase`'s plain
     "the course" in the body, and to the generic subject - never a blank, and never a
     literal placeholder."""
-    url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{student.github_handle}"
+    url = f"https://github.com/{semester_org}/{GRADEBOOK_PREFIX}{student.github_handle}"
     body = (
         f"Hello {student.name or 'there'},\n\n"
         f"Your grades for {course_phrase(course_name)} have been updated. View them in "
@@ -4742,25 +4842,27 @@ def update_message(
 
 
 def sample_message(
-    cohort_org: str, course_name: str = "", feedback: bool = False
+    semester_org: str, course_name: str = "", feedback: bool = False
 ) -> tuple[str, str]:
     """The notification's `(subject, body)` rendered with PLACEHOLDERS, for the preview.
 
     `update_message` with a placeholder in place of a student - see `mailer.sample_of`."""
     return mailer.sample_message_of(
         lambda student: update_message(
-            student, cohort_org, course_name, "<feedback>" if feedback else ""
+            student, semester_org, course_name, "<feedback>" if feedback else ""
         ),
         github_handle="<handle>",
     )
 
 
-def sample_body(cohort_org: str, course_name: str = "", feedback: bool = False) -> str:
+def sample_body(
+    semester_org: str, course_name: str = "", feedback: bool = False
+) -> str:
     """The body alone - what `send_bulk` prints beneath a dry-run send."""
-    return sample_message(cohort_org, course_name, feedback)[1]
+    return sample_message(semester_org, course_name, feedback)[1]
 
 
-def _course_name(cohort_org: str) -> str:
+def _course_name(semester_org: str) -> str:
     """The course's name for the subject and the body of an email, or "" if it cannot be
     read.
 
@@ -4770,14 +4872,14 @@ def _course_name(cohort_org: str) -> str:
     (`load_yaml_config` deliberately RAISES on both). A course that carries no name yet
     keeps the generic wording rather than emailing a blank."""
     try:
-        return course_name_for_cohort(cohort_org)
+        return course_name_for_semester(semester_org)
     except Exception as exc:  # a name is never worth losing the notifications over
         log_err(f"could not read the course name ({exc}) - the email goes without it")
         return ""
 
 
 def _email_updates(
-    cohort_org: str,
+    semester_org: str,
     handles: list[str],
     dry_run: bool = False,
     feedback: dict[str, str] | None = None,
@@ -4792,11 +4894,11 @@ def _email_updates(
     # Fold-keyed: the gradebook names come from what a marker typed into the sheet and the
     # roster's casing is its own, so a case-only difference used to mean a student was
     # silently never told their grades had landed.
-    students = roster.load(cohort_org)
+    students = roster.load(semester_org)
     if students is None:
         # Distinct from an empty roster: unreadable must red, as it does in enrol_codes.run.
         log_err(
-            f"roster in {cohort_org} could not be read - "
+            f"roster in {semester_org} could not be read - "
             f"{len(handles)} notification(s) not sent."
         )
         return len(handles), []
@@ -4808,7 +4910,7 @@ def _email_updates(
     # "your grades have been updated" from another. Read live from the course org's
     # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
     # than emailing a blank.
-    course_name = _course_name(cohort_org)
+    course_name = _course_name(semester_org)
     messages = []
     # Keyed on the ADDRESS, holding every handle that maps to it: two roster rows sharing
     # an address (one student, two accounts) would otherwise record only the last, leaving
@@ -4825,7 +4927,7 @@ def _email_updates(
         handles_for[email] = [handle]
         messages.append(
             update_message(
-                student, cohort_org, course_name, (feedback or {}).get(handle, "")
+                student, semester_org, course_name, (feedback or {}).get(handle, "")
             )
         )
     if not messages:
@@ -4837,7 +4939,7 @@ def _email_updates(
     sent = mailer.send_bulk(
         messages,
         dry_run=dry_run,
-        sample=sample_body(cohort_org, course_name, feedback is not None),
+        sample=sample_body(semester_org, course_name, feedback is not None),
     )
     failed = len(messages) - len(sent)
     if failed:
@@ -4848,10 +4950,10 @@ def _email_updates(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     p = sub.add_parser("distribute")
-    p.add_argument("--cohort-org", required=True)
+    p.add_argument("--semester-org", required=True)
     p.add_argument(
         "--no-notify",
         action="store_true",
@@ -4861,21 +4963,18 @@ def main() -> int:
         "--receipt-note",
         action="store_true",
         help="Also post 'Marks returned: see your marks repo.' once on each returned "
-        "unit's receipts issue.",
+        "unit's Submission receipts issue.",
     )
     p.add_argument(
         "--include-feedback",
         action="store_true",
         help="Put the markers' feedback text into each student's email.",
     )
-    # Default ON: the rendered workflow passes --dry-run / --no-dry-run explicitly, so a
+    # Default ON: the rendered workflow passes --preview / --no-preview explicitly, so a
     # bare local invocation cannot send by accident.
-    p.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Post who gets what as an issue in classroom-config; push no grades, "
-        "send nothing (default).",
+    add_preview_flag(
+        p,
+        "Post who gets what as an issue in classroom-config; push no grades, send nothing (default).",
     )
     args = parser.parse_args()
 
@@ -4883,9 +4982,9 @@ def main() -> int:
     # error beats a traceback, and the run still goes red.
     try:
         return distribute(
-            args.cohort_org,
+            args.semester_org,
             notify=not args.no_notify,
-            dry_run=args.dry_run,
+            dry_run=args.preview,
             receipt_note=args.receipt_note,
             include_feedback=args.include_feedback,
         )

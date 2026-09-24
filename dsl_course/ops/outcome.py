@@ -5,7 +5,7 @@ run. The Console workflow runs in the course org's public `.github`, so this hal
 `people` and no repo name of the `<slug>-<handle>` / `grades-<handle>` form - the same rule
 `log.log_person` keeps for every other line of a faculty workflow's log.
 
-PRIVATE: `classroom-config/.dsl/outcomes/<op>.json` in the cohort org, which may carry the
+PRIVATE: `classroom-config/.dsl/outcomes/<op>.json` in the semester org, which may carry the
 per-person lines. A course-wide op has no private repo to write to, so its file goes to the
 course org's `.github/.dsl/outcomes/<op>.json` in the public form.
 """
@@ -135,12 +135,12 @@ def private_path(op: str) -> str:
     return f"{OUTCOMES_DIR}/{op}.json"
 
 
-def write_private(outcome: Outcome, cohort_org: str | None, course_org: str) -> bool:
-    """Record the outcome where the console reads it back. A cohort op writes the full
+def write_private(outcome: Outcome, semester_org: str | None, course_org: str) -> bool:
+    """Record the outcome where the console reads it back. A semester op writes the full
     record to its private `classroom-config`; a course op writes the public form to the
     course org's `.github`. `put_file` compares blobs, so an identical record is no commit."""
-    if cohort_org:
-        org, repo, data = cohort_org, CONFIG_REPO, outcome.to_dict()
+    if semester_org:
+        org, repo, data = semester_org, CONFIG_REPO, outcome.to_dict()
     else:
         org, repo, data = course_org, ".github", public_dict(outcome)
     content = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode()
@@ -150,5 +150,5 @@ def write_private(outcome: Outcome, cohort_org: str | None, course_org: str) -> 
         private_path(outcome.op),
         content,
         f"Console: record the outcome of {outcome.op}",
-        person=bool(cohort_org),
+        person=bool(semester_org),
     )

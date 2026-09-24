@@ -55,18 +55,18 @@ def test_a_course_org_runs_the_tier_it_declares(monkeypatch):
     assert discovery.central_ref_for("Course") == "main"
 
 
-def test_a_cohort_inherits_the_tier_of_the_course_org_it_points_at(monkeypatch):
-    # A cohort's own file is a pointer, so the tier has to come from the far end of it -
-    # a cohort running a different engine from the course org releasing into it is not a
+def test_a_semester_inherits_the_tier_of_the_course_org_it_points_at(monkeypatch):
+    # A semester's own file is a pointer, so the tier has to come from the far end of it -
+    # a semester running a different engine from the course org releasing into it is not a
     # state worth being able to reach.
     _configs(
         monkeypatch,
         {
-            "Cohort-f2026": {"course": "Course", "central_ref": "release"},
+            "Semester-f2026": {"course": "Course", "central_ref": "release"},
             "Course": {"central_ref": "main"},
         },
     )
-    assert discovery.central_ref_for("Cohort-f2026") == "main"
+    assert discovery.central_ref_for("Semester-f2026") == "main"
 
 
 def test_an_org_that_declares_nothing_runs_the_default(monkeypatch):
@@ -128,7 +128,7 @@ def _central_checkout_refs(rendered: str) -> list[str]:
 
 
 def test_every_org_level_workflow_is_pinned_to_the_orgs_ref(monkeypatch):
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(seed, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         seed, "discover_content_repos", lambda org: ["course-materials"]
     )
@@ -165,7 +165,7 @@ def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
         workflows_place.push_content_workflows(
             "Course",
             "course-materials-f2026",
-            ["Cohort-f2026"],
+            ["Semester-f2026"],
             [],
             "main",
             workflows=workflows_place.RELEASE_WORKFLOWS,
@@ -178,7 +178,7 @@ def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
         assert refs and set(refs) == {"main"}, path
 
 
-def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch):
+def test_a_semesters_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch):
     written: dict[str, bytes] = {}
     monkeypatch.setattr(
         welcome,
@@ -186,7 +186,7 @@ def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch
         lambda org, repo, files, message, **k: written.update(files) or True,
     )
 
-    assert welcome.refresh_classroom_system_files("Cohort-f2026", "main") == 0
+    assert welcome.refresh_classroom_system_files("Semester-f2026", "main") == 0
     raw = written[".github/workflows/validate-schedule.yml"].decode()
     assert CENTRAL_REF_PLACEHOLDER not in raw
     assert _central_checkout_refs(raw) == ["main"]
@@ -275,7 +275,7 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
         "gh",
         lambda *a, **k: (0, "") if ref_exists else (1, "gh: Not Found (HTTP 404)"),
     )
-    monkeypatch.setattr(seed, "_live_cohorts", lambda org: (["Cohort-f2026"], 0))
+    monkeypatch.setattr(seed, "_live_semesters", lambda org: (["Semester-f2026"], 0))
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
     monkeypatch.setattr(seed, "discover_assignment_repos", lambda org: [])
     monkeypatch.setattr(seed, "push_content_workflows", renders("content-workflows"))
@@ -295,11 +295,11 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
         seed, "refresh_classroom_system_files", renders("classroom-system-files")
     )
     monkeypatch.setattr(seed, "refresh_classroom_samples", lambda org: 0)
-    monkeypatch.setattr(seed, "refresh_cohort_pointer", lambda org, course: 0)
+    monkeypatch.setattr(seed, "refresh_semester_pointer", lambda org, course: 0)
     monkeypatch.setattr(
-        seed, "sync_team_lock", lambda course, cohort: LockWrite(True, False)
+        seed, "sync_team_lock", lambda course, semester: LockWrite(True, False)
     )
-    monkeypatch.setattr(seed, "refresh_status", lambda course, cohort=None: 0)
+    monkeypatch.setattr(seed, "refresh_status", lambda course, semester=None: 0)
     return seed.refresh("Course-Org"), rendered
 
 

@@ -1,6 +1,6 @@
 """Course-level defaults in `dsl-course.yml`: `assignment_defaults:` answers the New
-assignment boxes left at the course-default choice, and `cohort_defaults:` shapes the
-`schedule.yml` Bootstrap cohort seeds."""
+assignment boxes left at the course-default choice, and `semester_defaults:` shapes the
+`schedule.yml` Bootstrap semester seeds."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ SENTINEL = course.COURSE_DEFAULT_CHOICE
 
 def test_the_four_new_assignment_boxes_can_be_set_course_wide():
     block = {
-        "format": "py",
+        "formats": "py",
         "submit_via": "external",
         "team_formation": "assigned",
         "visibility": "public",
@@ -35,13 +35,13 @@ def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
 
 
 def test_a_course_default_format_is_a_list_of_starters_as_the_box_takes(capsys):
-    got = grades.parse_assignment_defaults({"format": "ipynb, py"})
-    assert got == {"format": "ipynb,py"}
+    got = grades.parse_assignment_defaults({"formats": "ipynb, py"})
+    assert got == {"formats": "ipynb,py"}
     # An unusable answer is dropped, so the toolkit's ipynb applies - never `none`.
     for bad in ("ipnb", "none,py", ""):
-        assert grades.parse_assignment_defaults({"format": bad}) == {}
+        assert grades.parse_assignment_defaults({"formats": bad}) == {}
         assert "format" in capsys.readouterr().err
-    assert scaffold.resolve_answers({"format": SENTINEL}, {}) == {"format": "ipynb"}
+    assert scaffold.resolve_answers({"formats": SENTINEL}, {}) == {"formats": "ipynb"}
 
 
 def test_the_legacy_submit_via_word_reads_as_its_new_name():
@@ -52,17 +52,17 @@ def test_the_legacy_submit_via_word_reads_as_its_new_name():
 
 def test_a_box_left_at_the_course_default_takes_the_courses_value():
     answers = {
-        "format": SENTINEL,
+        "formats": SENTINEL,
         "team_formation": SENTINEL,
         "submit_via": SENTINEL,
         "visibility": "public",
     }
     got = scaffold.resolve_answers(
-        answers, {"format": "rmd", "submit_via": "external", "visibility": "private"}
+        answers, {"formats": "rmd", "submit_via": "external", "visibility": "private"}
     )
     # A box somebody chose is kept; one they left falls to the course, then the toolkit.
     assert got == {
-        "format": "rmd",
+        "formats": "rmd",
         "team_formation": "self_select",
         "submit_via": "external",
         "visibility": "public",
@@ -71,10 +71,10 @@ def test_a_box_left_at_the_course_default_takes_the_courses_value():
 
 def test_with_no_course_defaults_the_toolkit_answers_as_the_form_used_to():
     answers = dict.fromkeys(
-        ("format", "team_formation", "submit_via", "visibility"), SENTINEL
+        ("formats", "team_formation", "submit_via", "visibility"), SENTINEL
     )
     assert scaffold.resolve_answers(answers, {}) == {
-        "format": "ipynb",
+        "formats": "ipynb",
         "team_formation": "self_select",
         "submit_via": "assignment_repo",
         "visibility": "private",
@@ -99,7 +99,7 @@ def _run_new_assignment(monkeypatch, argv: list[str], defaults: dict) -> dict:
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
             *argv,
         ],
@@ -113,7 +113,7 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
         monkeypatch,
         [],
         {
-            "format": "py",
+            "formats": "py",
             "submit_via": "shared_dropbox_repo",
             "team_formation": "assigned",
         },
@@ -127,17 +127,17 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
 def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
     seen = _run_new_assignment(
         monkeypatch,
-        ["--format", "qmd", "--visibility", "public"],
-        {"format": "py", "visibility": "private"},
+        ["--formats", "qmd", "--visibility", "public"],
+        {"formats": "py", "visibility": "private"},
     )
     assert seen["formats"] == ["qmd"] and seen["visibility"] == "public"
 
 
-# ------------------------------------------------------------- cohort_defaults
+# ------------------------------------------------------------- semester_defaults
 
 
-def test_cohort_defaults_parse_a_zone_and_an_archive_switch():
-    got = schedule.parse_cohort_defaults(
+def test_semester_defaults_parse_a_zone_and_an_archive_switch():
+    got = schedule.parse_semester_defaults(
         {"timezone": "America/New_York", "archive": {"auto": True, "grace_days": 30}}
     )
     assert got == {
@@ -146,8 +146,8 @@ def test_cohort_defaults_parse_a_zone_and_an_archive_switch():
     }
 
 
-def test_unusable_cohort_defaults_are_dropped_with_a_warning(capsys):
-    got = schedule.parse_cohort_defaults(
+def test_unusable_semester_defaults_are_dropped_with_a_warning(capsys):
+    got = schedule.parse_semester_defaults(
         {"timezone": "Mars/Olympus", "archive": {"auto": "maybe"}, "colour": "red"}
     )
     assert got == {}
@@ -156,7 +156,7 @@ def test_unusable_cohort_defaults_are_dropped_with_a_warning(capsys):
 
 
 def _seeded(defaults: dict) -> str:
-    """The schedule.yml Bootstrap cohort writes, through the real render path."""
+    """The schedule.yml Bootstrap semester writes, through the real render path."""
     return bootstrap_course._scaffold_text(
         "schedule.yml", "classroom-config/schedule.yml", "main", "f2026", 2026, defaults
     ).decode()
@@ -168,7 +168,7 @@ def _parsed(text: str, **extra) -> schedule.Schedule:
     return schedule.parse(meta)
 
 
-def test_no_cohort_defaults_seed_todays_skeleton():
+def test_no_semester_defaults_seed_todays_skeleton():
     plain = pin_central_ref(template("classroom-config/schedule.yml"), "main").format(
         tag="f2026", year=2026, year_next=2027
     )
@@ -209,6 +209,6 @@ def test_an_unusable_grace_days_is_flagged_and_the_sixty_days_stand():
 
 def test_the_course_template_documents_both_blocks():
     text = template("course/dsl-course.yml")
-    assert "cohort_defaults" in text
+    assert "semester_defaults" in text
     for key in ("format", "submit_via", "team_formation", "visibility"):
         assert key in text

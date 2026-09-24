@@ -1,4 +1,4 @@
-"""source_digest: one self-updating issue per cohort, whose BODY is state and whose
+"""source_digest: one self-updating issue per semester, whose BODY is state and whose
 COMMENTS are events. The whole point is notification volume - a term written up front has
 dozens of missing sources, all normal, so anything that emails per fault or per tick buries
 the one that matters. These tests pin the three moments a human is meant to hear about
@@ -21,7 +21,7 @@ from dsl_course.faults import ConfigFault, Severity
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=BERLIN)
 COURSE = sd.Context("Course")
-COHORT = sd.Context("Course", "Cohort")
+SEMESTER = sd.Context("Course", "Semester")
 
 
 def _f(where, offset, field="course_source_path", lineno=None, repo="cm"):
@@ -145,7 +145,7 @@ def test_the_body_carries_the_one_sentence_that_would_fix_each_fault():
     # The issue and the mail say the SAME remedy, because both ask the fault - an issue
     # and an email disagreeing about the fix is worse than either on its own.
     body = sd.render_body(
-        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, COHORT
+        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, SEMESTER
     )
     assert "|  fix: push the materials to that folder in Course/cm," in body
 
@@ -157,24 +157,24 @@ def test_the_body_addresses_the_people_git_named():
         sd.SCHEDULE,
         [_f("releases.a", timedelta(hours=3))],
         NOW,
-        COHORT._replace(mention=("JanG", "cpj97")),
+        SEMESTER._replace(mention=("JanG", "cpj97")),
     )
     assert "cc @JanG @cpj97" in body
-    assert "Cohort/instructors" not in body
+    assert "Semester/instructors" not in body
 
 
 def test_with_nobody_named_the_body_falls_back_to_the_team():
     body = sd.render_body(
-        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3))], NOW, COHORT
+        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3))], NOW, SEMESTER
     )
-    assert "cc @Cohort/instructors" in body
+    assert "cc @Semester/instructors" in body
 
 
 def test_the_body_tells_the_reader_not_to_close_it_by_hand():
     # Closing it fixes nothing in the file and the next tick re-opens it. Saying so is
     # cheaper than the state adoption that has to cope with it.
     body = sd.render_body(
-        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3))], NOW, COHORT
+        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3))], NOW, SEMESTER
     )
     assert "**Do not close or edit this issue by hand.**" in body
 
@@ -182,10 +182,10 @@ def test_the_body_tells_the_reader_not_to_close_it_by_hand():
 def test_the_body_links_at_the_line_to_edit():
     # `releases.lecture_02` still leaves faculty scrolling a file they wrote in August.
     body = sd.render_body(
-        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, COHORT
+        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, SEMESTER
     )
     assert (
-        "at [`schedule.yml:36`](https://github.com/Cohort/classroom-config/blob/main/"
+        "at [`schedule.yml:36`](https://github.com/Semester/classroom-config/blob/main/"
         "schedule.yml#L36)"
     ) in body
 
@@ -194,7 +194,7 @@ def test_a_fault_whose_line_is_unknown_is_listed_without_one():
     # The parser has no line for a plan a caller built itself, and a broken link is worse
     # than no link - the fault itself still has to be reported.
     body = sd.render_body(
-        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3))], NOW, COHORT
+        sd.SCHEDULE, [_f("releases.a", timedelta(hours=3))], NOW, SEMESTER
     )
     assert "**releases.a -> course_source_path** at `schedule.yml`" in body
     assert "schedule.yml#L" not in body
@@ -207,7 +207,7 @@ def test_the_field_reference_points_at_the_tier_the_org_runs():
         sd.SCHEDULE,
         [_f("releases.a", timedelta(hours=2))],
         NOW,
-        COHORT._replace(central_ref="main"),
+        SEMESTER._replace(central_ref="main"),
     )
     assert "/blob/main/docs/07-schedule-releases.md" in body
 
@@ -265,7 +265,7 @@ def test_a_rung_name_this_ladder_no_longer_has_is_not_an_escalation(gh, offset):
     # the deploy, whatever it had actually been reported at.
     fault = _f("releases.a", offset)
     fake = gh(_open(fault, state={fault.key: "error"}))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {}
     assert fake.did("issue", "comment") == []
     # ...and the marker is rewritten in this ladder's own vocabulary, so it happens once.
@@ -278,7 +278,7 @@ def test_an_unreadable_previous_rung_still_clears(gh):
     # "It is fixed" is decided by the key being gone, not by the rung it left from.
     fault = _f("releases.a", timedelta(hours=3))
     fake = gh(_open(state={fault.key: "error"}))
-    sd.sync("Cohort", "Course", [], NOW)
+    sd.sync("Semester", "Course", [], NOW)
     (closed,) = fake.did("issue", "close")
     assert "7" in closed
 
@@ -325,13 +325,13 @@ def test_a_body_carrying_both_shapes_keeps_the_rung_it_reported_at():
 def _open(*faults, state=None, mention=(), absorbed=True):
     """An OPEN digest whose body is what a previous tick would have written.
 
-    `absorbed` by default: the one-off fold of the issue the cohort's own workflow used to
+    `absorbed` by default: the one-off fold of the issue the semester's own workflow used to
     open has already happened, so these tests are about the steady state."""
     body = sd.render_body(
         sd.SCHEDULE,
         list(faults),
         NOW,
-        COHORT._replace(mention=tuple(mention)),
+        SEMESTER._replace(mention=tuple(mention)),
         state,
         absorbed=sd.ABSORBED if absorbed else "",
     )
@@ -342,9 +342,9 @@ def test_the_issue_the_workflow_used_to_open_is_folded_in_and_closed_once(gh):
     # Its faults are in this issue now. Its recorded rungs come with them - read as
     # nothing, every one of them would appear afresh here, with a comment and a mail.
     fault = _f("releases.a", timedelta(hours=3))
-    old_body = sd.render_body(sd.SCHEDULE, [fault], NOW, COHORT)
+    old_body = sd.render_body(sd.SCHEDULE, [fault], NOW, SEMESTER)
     fake = gh([issue_row(7, sd.TITLE, ""), issue_row(9, sd.ABSORBED, old_body)])
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {}  # already reported over there
     (close,) = fake.did("issue", "close")
     # Superseded, NOT fixed: the fold only ever happens on a tick that has faults, so a
@@ -355,13 +355,13 @@ def test_the_issue_the_workflow_used_to_open_is_folded_in_and_closed_once(gh):
     # failed would be filed as done. The next tick finds nothing left to fold and says so.
     assert sd.ABSORBED not in fake.body_of("issue", "edit")
     after = gh([issue_row(7, sd.TITLE, fake.body_of("issue", "edit"))])
-    sd.sync("Cohort", "Course", [fault], NOW)
+    sd.sync("Semester", "Course", [fault], NOW)
     assert sd.ABSORBED in after.body_of("issue", "edit")
 
 
 def test_a_folded_issue_is_looked_for_once_and_then_never_again(gh):
     fake = gh(_open(_f("releases.a", timedelta(hours=3))))
-    sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert len(fake.did("issue", "list")) == 1
 
 
@@ -369,7 +369,7 @@ def test_an_advisory_only_plan_opens_no_issue_at_all(gh):
     # Jan writes his whole term in August: 21 sources that do not exist yet, all of them
     # normal. Opening a ticket for that is the cry-wolf failure in a different channel.
     fake = gh([])
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=60))], NOW)
+    out = sd.sync("Semester", "Course", [_f("releases.a", timedelta(days=60))], NOW)
     assert out.errors == 0
     assert fake.did("issue", "create") == []
     assert fake.did("issue", "comment") == []
@@ -378,7 +378,9 @@ def test_an_advisory_only_plan_opens_no_issue_at_all(gh):
 def test_the_first_warning_opens_the_issue(gh):
     fake = gh([])
     assert (
-        sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=20))], NOW).errors
+        sd.sync(
+            "Semester", "Course", [_f("releases.a", timedelta(hours=20))], NOW
+        ).errors
         == 0
     )
     created = fake.did("issue", "create")
@@ -393,7 +395,7 @@ def test_the_tick_that_opens_the_issue_still_reports_its_url(gh):
     # just opened is printed by `gh issue create` and nowhere else - so without it the
     # mail could not link the record it was summarising.
     gh([])
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=20))], NOW)
+    out = sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=20))], NOW)
     assert out.issue_url == CREATED_ISSUE_URL
 
 
@@ -402,7 +404,7 @@ def test_an_appearance_at_the_quietest_reported_rung_starts_the_thread(gh):
     # escalations and the clearing are a history of.
     fault = _f("releases.a", timedelta(hours=20))
     fake = gh(_open(state={}))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {fault.key: sd.Severity.WARNING}
     (comment,) = fake.did("issue", "comment")
     assert "**New**" in comment[comment.index("--body") + 1]
@@ -416,7 +418,7 @@ def test_an_appearance_already_louder_than_that_is_mailed_and_not_commented(gh, 
     # "at or above it".
     fault = _f("releases.a", offset)
     fake = gh(_open(state={}))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {fault.key: fault.severity(NOW)}
     assert fault.severity(NOW) > sd.NOTIFY_FROM
     assert fake.did("issue", "comment") == []
@@ -429,7 +431,7 @@ def test_a_quiet_tick_edits_the_body_and_says_nothing(gh):
     # email on a body edit) and NOT commented on - this is the noise control.
     fault = _f("releases.a", timedelta(hours=20))
     fake = gh(_open(fault))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.errors == 0 and out.mail == {}
     assert len(fake.did("issue", "edit")) == 1
     assert fake.did("issue", "comment") == []
@@ -438,7 +440,7 @@ def test_a_quiet_tick_edits_the_body_and_says_nothing(gh):
 def test_an_escalation_comments_and_mentions_the_instructors(gh):
     fake = gh(_open(_f("releases.a", timedelta(hours=20))))
     out = sd.sync(
-        "Cohort", "Course", [_f("releases.a", timedelta(hours=3), lineno=36)], NOW
+        "Semester", "Course", [_f("releases.a", timedelta(hours=3), lineno=36)], NOW
     )
     assert out.errors == 0
     (comment,) = fake.did("issue", "comment")
@@ -448,7 +450,7 @@ def test_an_escalation_comments_and_mentions_the_instructors(gh):
     assert "schedule.yml#L36" in text
     # An issue only emails people it mentions - without this the comment is as silent as
     # the run summary it exists to improve on.
-    assert "cc @Cohort/instructors" in text
+    assert "cc @Semester/instructors" in text
 
 
 def test_sync_reports_what_is_owed_a_mail_and_the_issue_to_link_to(gh):
@@ -456,9 +458,9 @@ def test_sync_reports_what_is_owed_a_mail_and_the_issue_to_link_to(gh):
     # issue that holds the detail, and the faults themselves.
     gh(_open(_f("releases.a", timedelta(hours=20))))
     fault = _f("releases.a", timedelta(hours=3), lineno=36)
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {"releases.a[x].course_source_path": sd.Severity.CRITICAL}
-    assert out.issue_url == "https://github.com/Cohort/classroom-config/issues/7"
+    assert out.issue_url == "https://github.com/Semester/classroom-config/issues/7"
     assert out.faults_by_key == {"releases.a[x].course_source_path": fault}
 
 
@@ -467,7 +469,7 @@ def test_a_digest_opened_before_the_key_changed_says_nothing_new(gh):
     # comment nor a fresh mail: nothing about this fault has changed.
     fault = _f("releases.a", timedelta(hours=20))
     fake = gh(_open(fault, state={"releases.a.course_source_path": "warning"}))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {}
     assert fake.did("issue", "comment") == []
     # ...and the marker is rewritten in the current shape, so this runs once.
@@ -477,7 +479,7 @@ def test_a_digest_opened_before_the_key_changed_says_nothing_new(gh):
 def test_an_old_shaped_key_still_escalates_from_the_rung_it_recorded(gh):
     fault = _f("releases.a", timedelta(hours=3), lineno=36)
     fake = gh(_open(state={"releases.a.course_source_path": "warning"}))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {fault.key: sd.Severity.CRITICAL}
     (comment,) = fake.did("issue", "comment")
     assert "Escalated" in comment[comment.index("--body") + 1]
@@ -496,7 +498,7 @@ def test_a_withheld_source_is_listed_and_commented_on_but_never_mailed(gh):
         path="x",
     )
     fake = gh([])
-    out = sd.sync("Cohort", "Course", [withheld], NOW)
+    out = sd.sync("Semester", "Course", [withheld], NOW)
     assert out.mail == {}
     (created,) = fake.did("issue", "create")
     assert "keeps them back" in created[created.index("--body") + 1]
@@ -519,7 +521,7 @@ def test_the_body_says_fired_off_the_clock_and_not_off_the_rung():
             )
         ],
         NOW,
-        COHORT,
+        SEMESTER,
     )
     assert "### WARNING" in body
     assert "_fired " in body and "_fires " not in body
@@ -527,7 +529,7 @@ def test_the_body_says_fired_off_the_clock_and_not_off_the_rung():
 
 def test_the_last_fault_clearing_closes_the_issue(gh):
     fake = gh(_open(_f("releases.a", timedelta(hours=3))))
-    out = sd.sync("Cohort", "Course", [], NOW)
+    out = sd.sync("Semester", "Course", [], NOW)
     assert out.errors == 0 and out.mail == {}
     (closed,) = fake.did("issue", "close")
     assert "7" in closed
@@ -544,30 +546,30 @@ def test_a_fault_that_comes_back_after_the_digest_closed_itself_is_news(gh):
     # the fault: at the same rung or a quieter one it is neither appeared nor escalated,
     # and the issue re-opened carrying it with nobody told a thing.
     fake = gh(_open(_f("releases.a", timedelta(hours=3))))
-    sd.sync("Cohort", "Course", [], NOW)
+    sd.sync("Semester", "Course", [], NOW)
     closed_body = fake.body_of("issue", "edit")
 
     fake = gh([], closed=[issue_row(7, sd.TITLE, closed_body)])
     fault = _f("releases.a", timedelta(hours=20))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {fault.key: sd.Severity.WARNING}
     assert len(fake.did("issue", "create")) == 1
 
 
 def test_an_issue_closed_by_hand_still_silences_what_it_left_standing(gh):
     # The case adoption exists for: somebody closes the digest while the fault stands.
-    # Nothing was staged, so re-announcing every standing fault would mail the cohort
+    # Nothing was staged, so re-announcing every standing fault would mail the semester
     # about all of it again.
     fault = _f("releases.a", timedelta(hours=3))
     fake = gh([], closed=_open(fault))
-    out = sd.sync("Cohort", "Course", [fault], NOW)
+    out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {}
     assert len(fake.did("issue", "create")) == 1
 
 
 def test_nothing_missing_and_no_issue_is_a_complete_no_op(gh):
     fake = gh([])
-    out = sd.sync("Cohort", "Course", [], NOW)
+    out = sd.sync("Semester", "Course", [], NOW)
     assert out.errors == 0 and out.issue_url is None
     assert fake.did("issue", "create") == fake.did("issue", "close") == []
 
@@ -577,7 +579,7 @@ def test_an_issue_a_human_filed_is_never_adopted_and_rewritten(gh):
     # back in the results. Rewriting their issue out from under them would be worse than
     # opening a second one.
     fake = gh([issue_row(3, "re: " + sd.TITLE, "my notes")])
-    sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=20))], NOW)
+    sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=20))], NOW)
     assert fake.did("issue", "edit") == []
     assert len(fake.did("issue", "create")) == 1
 
@@ -586,7 +588,7 @@ def test_dry_run_touches_nothing(gh):
     fake = gh([])
     assert (
         sd.sync(
-            "Cohort",
+            "Semester",
             "Course",
             [_f("releases.a", timedelta(hours=3))],
             NOW,
@@ -602,7 +604,7 @@ def test_the_body_is_written_from_one_listing_not_two(gh):
     # left behind are all in that listing - each asked separately was three searches a
     # tick.
     fake = gh(_open(_f("releases.a", timedelta(hours=20))))
-    sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert len(fake.did("issue", "list")) == 1
 
 
@@ -614,18 +616,18 @@ def test_sync_says_what_rung_each_mailed_key_was_last_reported_at(gh):
     # reported at all - an appearance, which has to be un-recorded rather than lowered.
     gh(_open(_f("releases.a", timedelta(hours=20))))
     escalating = _f("releases.a", timedelta(hours=3))
-    assert sd.sync("Cohort", "Course", [escalating], NOW).was == (
+    assert sd.sync("Semester", "Course", [escalating], NOW).was == (
         {escalating.key: "warning"}
     )
     gh([])
     appearing = _f("releases.b", timedelta(hours=20))
-    assert sd.sync("Cohort", "Course", [appearing], NOW).was == {appearing.key: None}
+    assert sd.sync("Semester", "Course", [appearing], NOW).was == {appearing.key: None}
 
 
 def test_holding_puts_the_previous_rung_back_so_the_next_tick_owes_it_again(gh):
     fault = _f("releases.a", timedelta(hours=3))
     fake = gh(_open(fault, state={fault.key: "critical"}))
-    assert sd.hold("Cohort", {fault.key: "warning"}) == 0
+    assert sd.hold("Semester", {fault.key: "warning"}) == 0
     assert _state(fake.body_of("issue", "edit")) == {fault.key: "warning"}
     # The rest of the body is untouched: only the marker is patched.
     assert "### CRITICAL" in fake.body_of("issue", "edit")
@@ -634,20 +636,20 @@ def test_holding_puts_the_previous_rung_back_so_the_next_tick_owes_it_again(gh):
 def test_holding_an_appearance_un_records_it_entirely(gh):
     fault = _f("releases.a", timedelta(hours=3))
     fake = gh(_open(fault, state={fault.key: "critical"}))
-    assert sd.hold("Cohort", {fault.key: None}) == 0
+    assert sd.hold("Semester", {fault.key: None}) == 0
     assert _state(fake.body_of("issue", "edit")) == {}
 
 
 def test_holding_nothing_writes_nothing(gh):
     fake = gh(_open(_f("releases.a", timedelta(hours=3))))
-    assert sd.hold("Cohort", {}) == 0
+    assert sd.hold("Semester", {}) == 0
     assert fake.did("issue", "list") == fake.did("issue", "edit") == []
 
 
 def test_holding_against_no_open_issue_is_a_no_op(gh):
     # Nothing recorded the crossing either, so the next tick finds it as new regardless.
     fake = gh([])
-    assert sd.hold("Cohort", {"releases.a[x].course_source_path": "warning"}) == 0
+    assert sd.hold("Semester", {"releases.a[x].course_source_path": "warning"}) == 0
     assert fake.did("issue", "edit") == []
 
 
@@ -656,23 +658,23 @@ def test_a_held_crossing_is_announced_again_on_the_next_tick(gh):
     # after it owes the very same escalation once.
     fault = _f("releases.a", timedelta(hours=3))
     fake = gh(_open(fault, state={fault.key: "warning"}))
-    first = sd.sync("Cohort", "Course", [fault], NOW)
+    first = sd.sync("Semester", "Course", [fault], NOW)
     assert first.mail == {fault.key: sd.Severity.CRITICAL}
-    sd.hold("Cohort", {k: first.was[k] for k in first.mail})
+    sd.hold("Semester", {k: first.was[k] for k in first.mail})
     # Two edits now: the tick's own body, then the patch putting the marker back.
     held = fake.did("issue", "edit")[-1]
     body = held[held.index("--body") + 1]
     assert _state(body) == {fault.key: "warning"}
 
     fake = gh([issue_row(7, sd.TITLE, body)])
-    assert sd.sync("Cohort", "Course", [fault], NOW).mail == (
+    assert sd.sync("Semester", "Course", [fault], NOW).mail == (
         {fault.key: sd.Severity.CRITICAL}
     )
 
 
 # ------------------------------------------------------------------- quiet hours
 
-# 02:00 and 07:05 in the cohort's zone. The window is LOCAL on purpose: the scheduler
+# 02:00 and 07:05 in the semester's zone. The window is LOCAL on purpose: the scheduler
 # ticks in UTC, and 02:00 in a datacentre is nobody's night.
 NIGHT = datetime(2026, 8, 17, 2, 0, tzinfo=BERLIN)
 MORNING = datetime(2026, 8, 17, 7, 5, tzinfo=BERLIN)
@@ -684,7 +686,7 @@ _FIRES_AT_FIVE = -timedelta(hours=7)
 _FIRED_AT_SIX = -timedelta(hours=6)
 
 
-def test_the_quiet_window_is_the_night_in_the_cohorts_own_zone():
+def test_the_quiet_window_is_the_night_in_the_semesters_own_zone():
     assert sd.in_quiet_hours(NIGHT)
     assert sd.in_quiet_hours(datetime(2026, 8, 17, 23, 0, tzinfo=BERLIN))
     assert not sd.in_quiet_hours(datetime(2026, 8, 17, 22, 59, tzinfo=BERLIN))
@@ -698,7 +700,7 @@ def test_a_rung_crossed_at_two_in_the_morning_updates_the_body_and_says_nothing(
     # keyboard is how a notification channel gets muted. The body still LISTS it at 02:00;
     # the comment and the mail wait for the morning.
     fake = gh(_open(state={_KEY: "warning"}))
-    out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRES_AT_FIVE)], NIGHT)
+    out = sd.sync("Semester", "Course", [_f("releases.a", _FIRES_AT_FIVE)], NIGHT)
     assert out.mail == {}
     assert fake.did("issue", "comment") == []
     body = fake.body_of("issue", "edit")
@@ -712,7 +714,7 @@ def test_the_first_tick_after_seven_says_it_once_at_the_rung_it_reached(gh):
     # Two rungs crossed overnight are ONE notification: what matters in the morning is how
     # bad it is now, not the order it got there.
     fake = gh(_open(state={_KEY: "warning"}))
-    out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRED_AT_SIX)], MORNING)
+    out = sd.sync("Semester", "Course", [_f("releases.a", _FIRED_AT_SIX)], MORNING)
     assert out.mail == {_KEY: sd.Severity.MISSED}
     assert len(fake.did("issue", "comment")) == 1
     # Recorded at last, so the tick after this one has nothing to say.
@@ -723,7 +725,7 @@ def test_a_fault_that_appeared_overnight_is_not_recorded_at_all(gh):
     # An appearance held as "reported at WARNING" would never be announced: the morning
     # tick would see no change. Left out of the marker, it appears again in the morning.
     fake = gh(_open(state={}))
-    out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRES_AT_FIVE)], NIGHT)
+    out = sd.sync("Semester", "Course", [_f("releases.a", _FIRES_AT_FIVE)], NIGHT)
     assert out.mail == {}
     assert _state(fake.body_of("issue", "edit")) == {}
 
@@ -732,14 +734,14 @@ def test_a_fault_that_cleared_overnight_closes_the_issue_at_once(gh):
     # It shipped. There is no notification to hold - the issue closes itself and nobody is
     # emailed about it.
     fake = gh(_open(_f("releases.a", timedelta(hours=3))))
-    out = sd.sync("Cohort", "Course", [], NIGHT)
+    out = sd.sync("Semester", "Course", [], NIGHT)
     assert out.mail == {}
     assert len(fake.did("issue", "close")) == 1
 
 
 def test_a_rung_crossed_in_the_working_day_notifies_at_once(gh):
     gh(_open(state={_KEY: "warning"}))
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    out = sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert out.mail == {_KEY: sd.Severity.CRITICAL}
 
 
@@ -747,7 +749,7 @@ def test_a_standing_fault_that_crossed_nothing_owes_no_mail(gh):
     # The hourly case. Every tick sees the same fault at the same rung, and mailing on
     # that is what "notify on transitions only" exists to prevent.
     gh(_open(state={_KEY: "missed"}))
-    out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRED_AT_SIX)], MORNING)
+    out = sd.sync("Semester", "Course", [_f("releases.a", _FIRED_AT_SIX)], MORNING)
     assert out.mail == {}
 
 
@@ -756,7 +758,7 @@ def test_a_clock_that_jumps_cannot_deliver_the_same_notification_twice(gh):
     # spent: the state marker already says MISSED, so there is no transition to find.
     fake = gh(_open(state={_KEY: "missed"}))
     for when in (MORNING, MORNING + timedelta(hours=1)):
-        out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRED_AT_SIX)], when)
+        out = sd.sync("Semester", "Course", [_f("releases.a", _FIRED_AT_SIX)], when)
         assert out.mail == {}
     assert fake.did("issue", "comment") == []
 
@@ -769,18 +771,18 @@ def _never():
 
 
 def test_a_tick_with_nothing_to_say_reuses_the_logins_the_body_recorded(gh):
-    # The answer costs a blame query, a people.yml read and a commit lookup per repo,
+    # The answer costs a blame query, a instructors.yml read and a commit lookup per repo,
     # every fifteen minutes for as long as the fault stands.
     fault = _f("releases.a", timedelta(hours=20))
     fake = gh(_open(fault, mention=["JanG"]))
-    sd.sync("Cohort", "Course", [fault], NOW, resolve_mention=_never)
+    sd.sync("Semester", "Course", [fault], NOW, resolve_mention=_never)
     assert "cc @JanG" in fake.body_of("issue", "edit")
 
 
 def test_a_tick_with_a_comment_to_post_asks_who_to_tell(gh):
     fake = gh(_open(_f("releases.a", timedelta(hours=20)), mention=["Stale"]))
     sd.sync(
-        "Cohort",
+        "Semester",
         "Course",
         [_f("releases.a", timedelta(hours=3))],
         NOW,
@@ -796,7 +798,7 @@ def test_the_tick_that_opens_the_issue_asks_too(gh):
     # notification.
     gh([])
     sd.sync(
-        "Cohort",
+        "Semester",
         "Course",
         [_f("releases.a", timedelta(hours=20))],
         NOW,
@@ -808,7 +810,7 @@ def test_a_held_notification_does_not_spend_the_lookup_either(gh):
     # Nothing is said until the morning, so there is nobody to name until then.
     fault = _f("releases.a", _FIRES_AT_FIVE)
     fake = gh(_open(fault, state={_KEY: "warning"}, mention=["JanG"]))
-    sd.sync("Cohort", "Course", [fault], NIGHT, resolve_mention=_never)
+    sd.sync("Semester", "Course", [fault], NIGHT, resolve_mention=_never)
     assert "cc @JanG" in fake.body_of("issue", "edit")
 
 
@@ -817,15 +819,15 @@ def test_a_held_notification_does_not_spend_the_lookup_either(gh):
 
 def test_re_opening_adopts_the_state_of_the_issue_somebody_closed(gh):
     # Closing it staged nothing. Without adopting the state it left behind, the next tick
-    # reads every standing fault as newly appeared and mails the cohort about all of it.
+    # reads every standing fault as newly appeared and mails the semester about all of it.
     gh([], closed=_open(state={_KEY: "critical"}))
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    out = sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert out.mail == {}
 
 
 def test_a_closed_issue_with_no_state_is_no_reason_not_to_report(gh):
     gh([], closed=[issue_row(7, sd.TITLE, "hand-written")])
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    out = sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert out.mail == {_KEY: sd.Severity.CRITICAL}
 
 
@@ -835,7 +837,7 @@ def test_a_closed_issue_with_no_state_is_no_reason_not_to_report(gh):
 def test_a_listing_that_could_not_be_read_is_an_error_not_an_empty_digest(gh):
     # Reported as "no issue", a rate-limited listing would open a duplicate every tick.
     fake = gh([], list_code=1)
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    out = sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert out.errors == 1 and out.mail == {}
     assert fake.did("issue", "create") == fake.did("issue", "edit") == []
 
@@ -844,7 +846,7 @@ def test_a_write_that_failed_owes_nobody_a_mail(gh):
     # The state was never written, so the next tick finds the same transition and says it
     # then. Mailing now would be a mail whose issue does not say the same thing.
     gh(_open(state={_KEY: "warning"}), write_code=1)
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    out = sd.sync("Semester", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert out.errors == 1 and out.mail == {}
 
 
@@ -875,7 +877,7 @@ def test_a_fault_floored_at_warning_is_not_filed_under_a_24h_deadline():
         file=schedule.SCHEDULE_PATH,
     )
     assert floored.severity(NOW) is Severity.WARNING
-    body = sd.render_body(sd.SCHEDULE, [floored], NOW, COHORT)
+    body = sd.render_body(sd.SCHEDULE, [floored], NOW, SEMESTER)
     assert "### WARNING\n" in body
     assert "24h" not in body
 
@@ -885,7 +887,7 @@ def test_the_two_clocks_are_filed_under_their_own_headings():
     # filed by how long it has stood rather than under a countdown rung.
     faults = [_f("releases.a", timedelta(hours=3), lineno=31), _dropped()]
     seen = {faults[1].key: (NOW - timedelta(days=2)).isoformat()}
-    body = sd.render_body(sd.SCHEDULE, faults, NOW, COHORT, since=seen)
+    body = sd.render_body(sd.SCHEDULE, faults, NOW, SEMESTER, since=seen)
     assert body.index("### CRITICAL (6h)") < body.index("### unfixed for 2 days")
     assert "_fires " in body and "_first seen " in body
 
@@ -894,7 +896,7 @@ def test_the_advisories_stay_below_the_entries_nobody_can_read():
     # The appendix's order: the rungs counting down, then what is unfixed, then the term
     # nobody has written yet.
     faults = [_f("releases.a", timedelta(days=40)), _dropped()]
-    body = sd.render_body(sd.SCHEDULE, faults, NOW, COHORT)
+    body = sd.render_body(sd.SCHEDULE, faults, NOW, SEMESTER)
     assert body.index("### needs fixing") < body.index("### advisory")
 
 
@@ -902,7 +904,7 @@ def test_a_dropped_entry_is_never_held_overnight_but_a_source_is(gh):
     night = NOW.replace(hour=2)
     dropped, source = _dropped(), _f("releases.a", timedelta(hours=3))
     gh([])
-    out = sd.sync("Cohort", "Course", [dropped, source], night)
+    out = sd.sync("Semester", "Course", [dropped, source], night)
     assert set(out.mail) == {dropped.key}
 
 
@@ -918,13 +920,13 @@ def test_a_reminder_counts_only_the_entries_that_have_no_deadline(gh):
         sd.SCHEDULE,
         [dropped, source],
         NOW,
-        COHORT,
+        SEMESTER,
         engine._state_marker(sd.current_state([dropped, source], NOW), seen),
         seen,
         absorbed=sd.ABSORBED,
     )
     fake = gh([issue_row(7, sd.TITLE, state)])
-    out = sd.sync("Cohort", "Course", [dropped, source], NOW)
+    out = sd.sync("Semester", "Course", [dropped, source], NOW)
     assert out.reminder == "2 days"
     assert set(out.mail) == {dropped.key}
     assert "**Escalated** (unfixed for 2 days)" in fake.body_of("issue", "comment")

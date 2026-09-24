@@ -1,13 +1,13 @@
-"""Discover, over the GitHub API, what a course/cohort org actually contains.
+"""Discover, over the GitHub API, what a course/semester org actually contains.
 
-Everything the workflow renderers need to populate their dropdowns (cohort orgs, target
+Everything the workflow renderers need to populate their dropdowns (semester orgs, target
 repos, assignment templates, sections/sessions), and everything the site generator needs
 to find released content - read live from the orgs themselves, so there is no declared
 config to drift out of date.
 
-The cohort registry is the one exception to "read it from the live org": cohort orgs
+The semester registry is the one exception to "read it from the live org": semester orgs
 can't be found by naming convention (they're arbitrary), so they're listed explicitly in
-the course org's .github/cohort-courses-pages.yml (register_cohort appends; faculty &
+the course org's .github/semesters.yml (register_semester appends; faculty &
 instructors can edit it by hand).
 
 The session-folder rule itself lives in course.session_dirs - this module is only the API
@@ -24,76 +24,92 @@ import yaml
 
 from .central import resolve_central_ref
 from .course import (
-    COHORT_TOPIC,
     CONFIG_REPO,
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
+    OLD_SEMESTER_TOPIC,
+    SEMESTER_TOPIC,
     session_dirs,
 )
-from .faults import ConfigFault, Unusable
+from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log, log_err, log_ok
 from .repos import default_branch, repo_exists, repo_is_archived
 
-COHORTS_PATH = (
-    "cohort-courses-pages.yml"  # standalone registry in the course org's .github repo
-)
+# The standalone semester registry in the course org's .github repo.
+SEMESTERS_PATH = "semesters.yml"
+# Its old name and key (decision 0012). Never read: a course that still has the old file
+# and not the new one, or the old `cohorts:` key, is refused as NOT_MIGRATED.
+OLD_SEMESTERS_PATH = "cohort-courses-pages.yml"
 
 INFRA_REPOS = {"welcome", "classroom-config", ".github"}
-# The topic assign.py stamps on the frozen cohort-side template it creates before
-# provisioning a single student repo (ensure_cohort_template). Named here, and imported by
+# The topic assign.py stamps on the frozen semester-side template it creates before
+# provisioning a single student repo (ensure_semester_template). Named here, and imported by
 # the one writer and the one reader, so the string cannot drift between them.
 ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # Topics marking a repo as machinery rather than faculty-authored content: per-student
-# submission repos and the frozen cohort-side assignment templates (assign.py), and the
+# submission repos and the frozen semester-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
-# The repos only a cohort org has - the fallback tier signal for an org bootstrapped
+# The repos only a semester org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
-COHORT_ONLY_REPOS = {"welcome", "classroom-config"}
+SEMESTER_ONLY_REPOS = {"welcome", "classroom-config"}
 
 
-def welcome_issue_url(cohort_org: str) -> str:
+def welcome_issue_url(semester_org: str) -> str:
     """Where a student opens a Join course or a Join team issue.
 
-    ONE spelling, because four surfaces point at it - the org profile, the cohort site's
-    callout, the enrolment-code mail and the team-formation mail - and a cohort whose
-    welcome repo moved with one of them left behind is a cohort told to go somewhere that
+    ONE spelling, because four surfaces point at it - the org profile, the semester site's
+    callout, the enrolment-code mail and the team-formation mail - and a semester whose
+    welcome repo moved with one of them left behind is a semester told to go somewhere that
     is not there."""
-    return f"https://github.com/{cohort_org}/welcome/issues/new/choose"
+    return f"https://github.com/{semester_org}/welcome/issues/new/choose"
+
+
+def carries_old_semester_topic(repos: list[dict]) -> bool:
+    """Whether the org's `.github` still carries the OLD semester topic and not the new
+    one (decision 0012): a semester that has not been migrated."""
+    dotgithub = next((r for r in repos if r["name"] == ".github"), None)
+    topics = set((dotgithub or {}).get("topics") or [])
+    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
 
 
 def org_tier(repos: list[dict]) -> str | None:
-    """`"cohort"`, `"course"`, or None when the listing cannot say.
+    """`"semester"`, `"course"`, or None when the listing cannot say.
 
-    The `.github` repo's topic is authoritative; the cohort-only infra repos are the
-    fallback. None is a real answer, not "course": a legacy cohort (`hertie-dl-f2025`:
+    The `.github` repo's topic is authoritative; the semester-only infra repos are the
+    fallback. None is a real answer, not "course": a legacy semester (`hertie-dl-f2025`:
     `.github` + student repos, no `welcome`, no topics) looks exactly like a course org by
     elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
     dotgithub = next((r for r in repos if r["name"] == ".github"), None)
     topics = set((dotgithub or {}).get("topics") or [])
-    if COHORT_TOPIC in topics:
-        return "cohort"
+    # The old topic alone is NOT a tier (never read as one): the org's tier cannot be told,
+    # so the faculty-access sweep gives it the read floor. Its caller reports the org as
+    # NOT_MIGRATED (`carries_old_semester_topic`) and carries on with the rest.
+    if carries_old_semester_topic(repos):
+        return None
+    if SEMESTER_TOPIC in topics:
+        return "semester"
     if COURSE_HUB_TOPIC in topics:
         return "course"
-    if any(r["name"] in COHORT_ONLY_REPOS for r in repos):
-        return "cohort"
+    if any(r["name"] in SEMESTER_ONLY_REPOS for r in repos):
+        return "semester"
     return None
 
 
 def classify_repos(repos: list[dict]) -> dict[str, str | None]:
-    """`{repo name: the cohort assignment template it derives from, or None}`.
+    """`{repo name: the semester assignment template it derives from, or None}`.
 
     THE submission-repo rule, computed ONCE for a whole listing. A submission repo is
-    generated from one of the org's cohort assignment templates, so its name is that
+    generated from one of the org's semester assignment templates, so its name is that
     template's name plus a `-<handle>` or `-<team>` suffix.
 
     Longest template first: `assignment-4` and `assignment-4-project` both prefix
     `assignment-4-project-ada-l`, and only the longer one leaves a suffix that is a handle
     rather than `project-ada-l`. Templates themselves map to None - `assignment-4-project`
-    is a repo in this listing AND starts with `assignment-4-`, so a cohort holding both
+    is a repo in this listing AND starts with `assignment-4-`, so a semester holding both
     would otherwise read one of its own templates as a submission belonging to `project`.
     """
     templates = sorted(
@@ -141,7 +157,7 @@ def _is_infra_repo(repo: dict) -> bool:
 
 
 def _has_infra_topic(repo: dict) -> bool:
-    """Whether `repo`'s TOPICS mark it machinery - a submission repo, a frozen cohort
+    """Whether `repo`'s TOPICS mark it machinery - a submission repo, a frozen semester
     assignment template, or a private gradebook. A gradebook is recognised by NAME too:
     the topic is stamped in a separate call after the create, and a failed stamp must not
     put `grades-<handle>` on a public page."""
@@ -154,7 +170,7 @@ def list_org_repos(org: str) -> list[dict]:
     """Every repo in `org`, fully paginated - the one repo listing every discovery
     helper here goes through.
 
-    `gh repo list` needs a fixed `--limit`, and a cohort org holds a repo per student
+    `gh repo list` needs a fixed `--limit`, and a semester org holds a repo per student
     per assignment plus a gradebook each, so any fixed cap silently truncates discovery
     (missing release targets, un-refreshed workflows). `gh api --paginate` walks every
     page instead. `--jq` emits one JSON object per line per page, so the pages are
@@ -168,7 +184,7 @@ def list_org_repos(org: str) -> list[dict]:
 
     An empty list means the org genuinely holds no repos; a failed listing raises, since
     every caller reads "no repos" as "nothing to do" (refresh converges zero repos and
-    reports success, profile_readme misfiles a cohort org as a course org).
+    reports success, profile_readme misfiles a semester org as a course org).
     """
     code, out = gh(
         "api",
@@ -192,7 +208,7 @@ def listing_by_name(org: str) -> dict[str, dict] | None:
 
     The shape every unattended pass wants from `list_org_repos`: "is this repo there, and
     what does GitHub say about it?" asked of a hundred names at once, rather than a GET
-    apiece. The scheduler takes one of these per cohort at the start of a tick and hands it
+    apiece. The scheduler takes one of these per semester at the start of a tick and hands it
     to every pass that asks a question of it (the freeze's `pushed_at`, the receipts'
     `visibility`, the digest's hand-out check, the gradebooks' existence).
 
@@ -220,8 +236,8 @@ def exists_in(listing: dict[str, dict] | None, org: str, name: str) -> bool:
 
 
 def assignment_rows(listing: dict[str, dict], name: str) -> list[dict]:
-    """The LIVE rows of `listing` that the cohort assignment `name` handed out: generated
-    from its cohort-side template, and not archived.
+    """The LIVE rows of `listing` that the semester assignment `name` handed out: generated
+    from its semester-side template, and not archived.
 
     One rule for a question two sweeps ask - the digest's `visibility:` check and the
     `student_choice` re-privatise pass - which were two spellings of a filter whose whole
@@ -229,7 +245,7 @@ def assignment_rows(listing: dict[str, dict], name: str) -> list[dict]:
     `assignment-4` does not own `assignment-4-project-ada-l`).
 
     Archived rows are left out on both sides: one is read-only, so a write against it 403s
-    on every tick for the rest of the term, and a finished cohort is meant to stay frozen.
+    on every tick for the rest of the term, and a finished semester is meant to stay frozen.
     Pure CPU over rows already in memory, so it is asked per assignment rather than
     computed once and threaded."""
     derived = classify_repos(list(listing.values()))
@@ -273,48 +289,50 @@ def listing_row(org: str, name: str, visibility: str = "private") -> dict:
 
 
 def _registry_fault(what: str) -> ConfigFault:
-    """The cohort registry, unusable - what a human is asked to fix.
+    """The semester registry, unusable - what a human is asked to fix.
 
     `where` is the file itself, because there is no entry to name: the registry is a flat
     list of org names, so what goes wrong with it is its SHAPE, and the whole course pays
     the same price either way (see `faults.CONSEQUENCE`). `in_repo` is the COURSE org's
     public `.github`, which is what makes the citation and the digest's deep link point at
-    the file somebody has to edit rather than at a cohort's classroom-config."""
+    the file somebody has to edit rather than at a semester's classroom-config."""
     return ConfigFault(
-        COHORTS_PATH,
+        SEMESTERS_PATH,
         what,
-        file=COHORTS_PATH,
-        field="cohorts",
+        file=SEMESTERS_PATH,
+        field="semesters",
         in_repo=".github",
         # Its own sentence, because every fault this builds is about the whole file and
         # the file's fallback (`faults.FIX`) says "correct the line above" - which names a
         # line that does not exist, under a citation with nothing to link to.
         fix_text=(
-            f"restore {COHORTS_PATH} in the course org's `.github` as a `cohorts:` list "
-            f"of this course's cohort org names, one per line"
+            f"restore {SEMESTERS_PATH} in the course org's `.github` as a `semesters:` list "
+            f"of this course's semester org names, one per line"
         ),
     )
 
 
-def _read_cohorts(
+def _read_semesters(
     course_org: str, faults: list[ConfigFault] | None = None
 ) -> list[str]:
-    """Read the course org's standalone .github/cohort-courses-pages.yml registry.
+    """Read the course org's standalone .github/semesters.yml registry.
 
     A genuinely absent or empty registry is [] (a valid brand-new course org). The
-    machine-written form is a `{cohorts: [...]}` mapping, but the file is human-editable
+    machine-written form is a `{semesters: [...]}` mapping, but the file is human-editable
     and a bare top-level list has always been accepted too. Anything else - YAML that does
-    not parse, a scalar, or a cohort list that isn't all strings - is malformed, logged and
+    not parse, a scalar, or a semester list that isn't all strings - is malformed, logged and
     raised, never silently flattened to [] (which downstream renders every dropdown as
     "(none-yet)" and lets a whole-course sync go quietly green).
 
     `faults` collects the same two verdicts for the notifier INSTEAD of raising them: a
     caller that passes one is asking what is wrong with the file so it can tell somebody,
-    not asking for a list of cohorts it is about to act on. Everything else still raises,
+    not asking for a list of semesters it is about to act on. Everything else still raises,
     because a registry nobody can read is a registry nothing may be pruned against - as
     `faults.Unusable`, which says this is a file faculty must fix rather than a read that
     failed, so an unattended run can skip it and stay green."""
-    content = get_file_content(course_org, ".github", COHORTS_PATH)
+    content = get_file_content(course_org, ".github", SEMESTERS_PATH)
+    if content is None and get_file_content(course_org, ".github", OLD_SEMESTERS_PATH):
+        return _not_migrated(course_org, OLD_SEMESTERS_PATH, SEMESTERS_PATH, faults)
     if not content:
         return []
     try:
@@ -323,88 +341,107 @@ def _read_cohorts(
         # Unparseable is malformed, exactly like the shape check below - and the bare
         # safe_load surfaced it as a raw PyYAML traceback from wherever the registry
         # happened to be read, naming a "<unicode string>" rather than the file.
-        msg = f"malformed cohort registry in {course_org}/.github/{COHORTS_PATH}: {exc}"
+        msg = f"malformed semester registry in {course_org}/.github/{SEMESTERS_PATH}: {exc}"
         log_err(msg)
         if faults is None:
             raise Unusable(msg) from exc
         faults.append(
             _registry_fault(
-                "this file is not valid YAML, so no cohort under this course is synced"
+                "this file is not valid YAML, so no semester under this course is synced"
             )
         )
         return []
-    cohorts = data.get("cohorts", []) if isinstance(data, dict) else data
-    if not isinstance(cohorts, list) or not all(isinstance(c, str) for c in cohorts):
+    if isinstance(data, dict) and "cohorts" in data and "semesters" not in data:
+        return _not_migrated(course_org, "cohorts", "semesters", faults)
+    semesters = data.get("semesters", []) if isinstance(data, dict) else data
+    if not isinstance(semesters, list) or not all(
+        isinstance(c, str) for c in semesters
+    ):
         msg = (
-            f"malformed cohort registry in {course_org}/.github/{COHORTS_PATH}: "
-            f"expected a list of cohort org names (bare, or under a 'cohorts:' key)"
+            f"malformed semester registry in {course_org}/.github/{SEMESTERS_PATH}: "
+            f"expected a list of semester org names (bare, or under a 'semesters:' key)"
         )
         log_err(msg)
         if faults is None:
             raise Unusable(msg)
         faults.append(
             _registry_fault(
-                "this is not a list of cohort org names (bare, or under a `cohorts:` "
-                "key), so no cohort under this course is synced"
+                "this is not a list of semester org names (bare, or under a `semesters:` "
+                "key), so no semester under this course is synced"
             )
         )
         return []
-    return [c for c in cohorts if c]
+    return [c for c in semesters if c]
 
 
-def read_cohort_registry(course_org: str, faults: list[ConfigFault]) -> list[str]:
-    """This course's registered cohorts, with what a human must fix collected rather than
+def _not_migrated(
+    course_org: str, old: str, new: str, faults: list[ConfigFault] | None
+) -> list[str]:
+    """An old spelling in the registry: raised, or - for a caller collecting faults -
+    filed, and read as no semesters at all."""
+    if faults is None:
+        raise NotMigrated(old, new, f"{course_org}/.github/{SEMESTERS_PATH}")
+    faults.append(
+        not_migrated_fault(
+            old, new, where=SEMESTERS_PATH, file=SEMESTERS_PATH, in_repo=".github"
+        )
+    )
+    return []
+
+
+def read_semester_registry(course_org: str, faults: list[ConfigFault]) -> list[str]:
+    """This course's registered semesters, with what a human must fix collected rather than
     raised.
 
-    The fault-collecting twin of `discover_cohorts`, and it draws the same line
-    `sync_faculty.read_cohort_people` draws: a file that is MALFORMED is a fault, because
-    every cohort under this course stops being reconciled and that is something a course
+    The fault-collecting twin of `discover_semesters`, and it draws the same line
+    `sync_faculty.read_semester_people` draws: a file that is MALFORMED is a fault, because
+    every semester under this course stops being reconciled and that is something a course
     admin has to fix; a read that FAILED still raises, because "we could not look" must
     never be reported to faculty as "your file is broken"."""
-    return _read_cohorts(course_org, faults)
+    return _read_semesters(course_org, faults)
 
 
 def org_meta(org: str) -> dict:
     """An org's `.github/dsl-course.yml`, or `{}` when it declares none.
 
     THE read for an org's declared identity - the course name, the faculty SSOT, a
-    cohort's `course:` pointer, the `central_ref:` its workflows run. `{}` for a genuine
+    semester's `course:` pointer, the `central_ref:` its workflows run. `{}` for a genuine
     404 or an empty file; a MALFORMED one still raises, because reading a typo as "this
-    org declares nothing" files a cohort under the course orgs and rewrites the inventory
+    org declares nothing" files a semester under the course orgs and rewrites the inventory
     around it. The one caller that must tell ABSENT from EMPTY - sync_faculty, which
     would otherwise prune every admin - reads load_yaml_config directly."""
     return load_yaml_config(org, ".github", COURSE_CONFIG) or {}
 
 
-def course_name_for_cohort(cohort_org: str) -> str:
-    """This cohort's course name, for student-facing prose ("your grades for X").
+def course_name_for_semester(semester_org: str) -> str:
+    """This semester's course name, for student-facing prose ("your grades for X").
 
-    Follows the cohort's own `.github/dsl-course.yml` `course:` pointer to its course
+    Follows the semester's own `.github/dsl-course.yml` `course:` pointer to its course
     org, then reads that org's identity file - the same two hops status.collect makes,
-    but starting from the cohort, which is all an emailer is given.
+    but starting from the semester, which is all an emailer is given.
 
     Returns "" when either file is missing or carries no name, so callers fall back to
     generic wording. A student must never be emailed a blank or a literal placeholder
     where the course name belongs.
     """
-    return course_name_of(course_org_for_cohort(cohort_org))
+    return course_name_of(course_org_for_semester(semester_org))
 
 
-def course_org_for_cohort(cohort_org: str) -> str:
-    """The COURSE org this cohort belongs to, from its own `.github/dsl-course.yml`
+def course_org_for_semester(semester_org: str) -> str:
+    """The COURSE org this semester belongs to, from its own `.github/dsl-course.yml`
     `course:` pointer. "" when the pointer is missing or unreadable.
 
-    A cohort-side CLI is given only the cohort; anything it needs from the course side -
+    A semester-side CLI is given only the semester; anything it needs from the course side -
     an assignment's `grading_config.yml`, say - has to start here."""
-    return str(org_meta(cohort_org).get("course") or "")
+    return str(org_meta(semester_org).get("course") or "")
 
 
 def course_name_of(course_org: str) -> str:
     """A COURSE org's display name from its own identity file. "" when unnamed or absent.
 
     The toolkit's single spelling of that fallback - `course_name`, else `org_name` - so a
-    cohort landing page, a status row and an email cannot disagree about what a course is
-    called. Takes "" and returns "" so a caller holding a cohort pointer that names no
+    semester landing page, a status row and an email cannot disagree about what a course is
+    called. Takes "" and returns "" so a caller holding a semester pointer that names no
     course org needs no guard of its own."""
     if not course_org:
         return ""
@@ -416,9 +453,9 @@ def central_ref_for(org: str) -> str:
     """Which ref of the central toolkit this org's seeded workflows run the engine from.
 
     Declared as `central_ref:` in the COURSE org's `.github/dsl-course.yml`, so one edit
-    moves a course and every cohort under it between tiers together. A cohort org's own
+    moves a course and every semester under it between tiers together. A semester org's own
     file is only a pointer (`course:`), so this follows it - a `central_ref:` written into
-    a cohort's file is ignored, because a cohort running a different engine from the course
+    a semester's file is ignored, because a semester running a different engine from the course
     org that releases into it is not a state anyone wants to debug.
 
     Absent means `central.CENTRAL_REF`; a value that is neither a tier nor a full SHA
@@ -432,112 +469,112 @@ def central_ref_for(org: str) -> str:
     )
 
 
-def discover_cohorts(course_org: str) -> list[str]:
-    """Cohort orgs are listed explicitly in the course's .github/cohort-courses-pages.yml
-    (naming-independent). `bootstrap --cohort --course X` appends; faculty & instructors can edit it."""
-    return sorted(_read_cohorts(course_org))
+def discover_semesters(course_org: str) -> list[str]:
+    """Semester orgs are listed explicitly in the course's .github/semesters.yml
+    (naming-independent). `bootstrap --semester --course X` appends; faculty & instructors can edit it."""
+    return sorted(_read_semesters(course_org))
 
 
-def cohort_is_live(cohort_org: str) -> bool:
-    """Whether `cohort_org` is still running, rather than closed out and left frozen.
+def semester_is_live(semester_org: str) -> bool:
+    """Whether `semester_org` is still running, rather than closed out and left frozen.
 
-    An archived `classroom-config` IS the "this cohort is finished" marker - it is the last
+    An archived `classroom-config` IS the "this semester is finished" marker - it is the last
     thing `teardown` freezes, for exactly that reason - and everything a course-side sweep
-    would do to a finished cohort is a write into a read-only org: every one of them 403s,
+    would do to a finished semester is a write into a read-only org: every one of them 403s,
     every night, for the rest of the course's life. A finished term is a state somebody
     chose, so it is a line rather than an error.
 
-    Says so once, here, so the six sweeps that skip such a cohort cannot word it six ways.
+    Says so once, here, so the six sweeps that skip such a semester cannot word it six ways.
     `repos.repo_is_archived` fails OPEN, so "could not tell" reads as LIVE: guessing that
     way costs one failed write that says so out loud, and guessing the other way silently
-    stops syncing a cohort mid-term."""
-    if not repo_is_archived(cohort_org, CONFIG_REPO):
+    stops syncing a semester mid-term."""
+    if not repo_is_archived(semester_org, CONFIG_REPO):
         return True
-    log(f"  [skip] {cohort_org} (archived cohort - left frozen)")
+    log(f"  [skip] {semester_org} (archived semester - left frozen)")
     return False
 
 
-def live_cohorts(course_org: str) -> list[str]:
-    """This course's registered cohorts, minus the ones that have been closed out.
+def live_semesters(course_org: str) -> list[str]:
+    """This course's registered semesters, minus the ones that have been closed out.
 
-    What every course-side sweep that WRITES into its cohorts iterates - the scheduler,
-    the faculty and membership syncs, the site build. `discover_cohorts` stays the answer
-    to "which cohorts does this course own?", which is a question about the registry and
-    not about whether a term is over: a finished cohort is still registered, still on the
+    What every course-side sweep that WRITES into its semesters iterates - the scheduler,
+    the faculty and membership syncs, the site build. `discover_semesters` stays the answer
+    to "which semesters does this course own?", which is a question about the registry and
+    not about whether a term is over: a finished semester is still registered, still on the
     course profile page, and still refuses a dispatch that names somebody else's org."""
-    return [c for c in discover_cohorts(course_org) if cohort_is_live(c)]
+    return [c for c in discover_semesters(course_org) if semester_is_live(c)]
 
 
-def register_cohort(course_org: str, cohort_org: str) -> bool:
-    """Append cohort_org to the course's cohort-courses-pages.yml registry (idempotent).
+def register_semester(course_org: str, semester_org: str) -> bool:
+    """Append semester_org to the course's semesters.yml registry (idempotent).
 
-    Returns True if the cohort is registered afterwards (already present, or the write
-    succeeded), False if the write failed - so bootstrap doesn't claim a cohort was
+    Returns True if the semester is registered afterwards (already present, or the write
+    succeeded), False if the write failed - so bootstrap doesn't claim a semester was
     registered when the put_file actually failed."""
-    cohorts = set(_read_cohorts(course_org))
-    if cohort_org in cohorts:
-        log_ok(f"{cohort_org} already in {course_org}/.github/{COHORTS_PATH}")
+    semesters = set(_read_semesters(course_org))
+    if semester_org in semesters:
+        log_ok(f"{semester_org} already in {course_org}/.github/{SEMESTERS_PATH}")
         return True
-    return _write_cohorts(
+    return _write_semesters(
         course_org,
-        cohorts | {cohort_org},
-        f"registry: add cohort {cohort_org}",
+        semesters | {semester_org},
+        f"registry: add semester {semester_org}",
         failure=(
-            f"failed to register {cohort_org} under {course_org}: the registry write "
-            f"to {COHORTS_PATH} failed"
+            f"failed to register {semester_org} under {course_org}: the registry write "
+            f"to {SEMESTERS_PATH} failed"
         ),
-        success=f"registered {cohort_org} under {course_org}",
+        success=f"registered {semester_org} under {course_org}",
     )
 
 
-def _write_cohorts(
-    course_org: str, cohorts: set[str], commit: str, *, failure: str, success: str
+def _write_semesters(
+    course_org: str, semesters: set[str], commit: str, *, failure: str, success: str
 ) -> bool:
     """Serialise the registry and write it back, reporting either way. The one place the
     file's SHAPE is decided, so the two callers that edit it cannot disagree about it -
     and the one place a write failure is turned into a False, so neither can claim an edit
     that did not land."""
-    body = yaml.safe_dump({"cohorts": sorted(cohorts)}, sort_keys=False)
-    if not put_file(course_org, ".github", COHORTS_PATH, body.encode(), commit):
+    body = yaml.safe_dump({"semesters": sorted(semesters)}, sort_keys=False)
+    if not put_file(course_org, ".github", SEMESTERS_PATH, body.encode(), commit):
         log_err(failure)
         return False
     log_ok(success)
     return True
 
 
-def unregister_cohort(course_org: str, cohort_org: str) -> bool:
-    """Drop cohort_org from the course's registry (idempotent), and NOT the mirror image
-    of `register_cohort`: the registry is APPEND-ON-INTENT, PRUNE-ON-REALITY.
+def unregister_semester(course_org: str, semester_org: str) -> bool:
+    """Drop semester_org from the course's registry (idempotent), and NOT the mirror image
+    of `register_semester`: the registry is APPEND-ON-INTENT, PRUNE-ON-REALITY.
 
-    Adding stays a deliberate act, because a cohort's absence can be intended - a faculty
-    member may unregister one to stop its nightly syncs. Removal cannot: a cohort dropped
+    Adding stays a deliberate act, because a semester's absence can be intended - a faculty
+    member may unregister one to stop its nightly syncs. Removal cannot: a semester dropped
     from here is invisible to every nightly sync, which is a SILENT no-op, where a stale
     entry merely fails loudly once a night. So the liveness verdict belongs to the caller
-    (`seed._live_cohorts`) and this only writes down what it was told.
+    (`seed._live_semesters`) and this only writes down what it was told.
 
-    Returns True if the cohort is absent from the registry afterwards."""
-    cohorts = set(_read_cohorts(course_org))
-    if cohort_org not in cohorts:
+    Returns True if the semester is absent from the registry afterwards."""
+    semesters = set(_read_semesters(course_org))
+    if semester_org not in semesters:
         return True
-    return _write_cohorts(
+    return _write_semesters(
         course_org,
-        cohorts - {cohort_org},
-        f"registry: drop deleted cohort {cohort_org}",
+        semesters - {semester_org},
+        f"registry: drop deleted semester {semester_org}",
         failure=(
-            f"failed to unregister the deleted org {cohort_org} from {course_org}: the "
-            f"registry write to {COHORTS_PATH} failed - every sync will keep trying it"
+            f"failed to unregister the deleted org {semester_org} from {course_org}: the "
+            f"registry write to {SEMESTERS_PATH} failed - every sync will keep trying it"
         ),
-        success=f"unregistered {cohort_org} from {course_org} (the org no longer exists)",
+        success=f"unregistered {semester_org} from {course_org} (the org no longer exists)",
     )
 
 
-def cohort_content_repos(repos: list[dict]) -> list[str]:
-    """Candidate target repos in a cohort LISTING: real content repos, excluding
+def semester_content_repos(repos: list[dict]) -> list[str]:
+    """Candidate target repos in a semester LISTING: real content repos, excluding
     everything _is_infra_repo covers (infra, the website, submission repos, assignment
     templates, gradebooks). Only what genuinely exists - no placeholder default, so an org
     with nothing registered yet correctly shows an empty (not phantom) dropdown.
 
-    Takes the listing rather than the org, because its one caller (the cohort site build)
+    Takes the listing rather than the org, because its one caller (the semester site build)
     asks two questions of the same org and paid for two full paginated listings to do it."""
     return sorted(r["name"] for r in repos if not _is_infra_repo(r))
 
@@ -551,7 +588,7 @@ def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
     with the site builder's blob-side twin: an absent/empty tree is genuinely no
     directories, any other failure RAISES. It must never come back as "no sessions" - the
     site clears and rewrites its collections from these rows, so one rate-limited fetch
-    would republish the cohort site with every session row deleted."""
+    would republish the semester site with every session row deleted."""
     return repo_tree(org, repo, default_branch(org, repo, fallback="main"), "tree")
 
 
@@ -559,10 +596,10 @@ def discover_release_sources(
     org: str, content_repos: list[str]
 ) -> list[tuple[str, str, str, int]]:
     """(repo, subpath, folder_name, session_number) for every session folder found
-    across a cohort's `content_repos` (see discover_cohort_repos), covering both shapes
+    across a semester's `content_repos` (see discover_semester_repos), covering both shapes
     a release can produce: nested - a session folder inside a subpath of a shared repo,
     `subpath/NN_.../` - or root - `NN_.../` directly at the repo root (what a `deploy:`
-    with a bare `cohort_dest_repo` and no `cohort_dest_path` produces). One recursive tree fetch per
+    with a bare `semester_dest_repo` and no `semester_dest_path` produces). One recursive tree fetch per
     repo; the exact folder name is captured too, so callers can list its files directly
     with no further discovery call."""
     return [
@@ -597,12 +634,12 @@ def discover_assignments(course_org: str) -> list[str]:
 
 
 def handed_out_assignments(repos: list[dict]) -> frozenset[str]:
-    """The cohort-side name of every assignment this cohort has ACTUALLY been given.
+    """The semester-side name of every assignment this semester has ACTUALLY been given.
 
-    assign.py's stage 1 freezes a cohort-level template repo named exactly the cohort-side
-    name (`schedule.cohort_name` - the slug unless `cohort_dest_repo` renames it) and
+    assign.py's stage 1 freezes a semester-level template repo named exactly the semester-side
+    name (`schedule.semester_name` - the slug unless `semester_dest_repo` renames it) and
     topics it `assignment-template`, before it provisions a single student repo
-    (`ensure_cohort_template`). So that repo existing IS the cohort-side record that the
+    (`ensure_semester_template`). So that repo existing IS the semester-side record that the
     hand-out happened, whatever route fired it - the scheduled pin, the manual workflow, or a
     `releases:` entry's `assignment:`.
 
@@ -611,7 +648,7 @@ def handed_out_assignments(repos: list[dict]) -> frozenset[str]:
     `handout_datetime` pinned - the manual workflow's documented mode - is invisible to the
     plan, and gating on the plan alone published those briefs on sight.
 
-    Takes the LISTING, shared with `cohort_content_repos` by the site build that asks both
+    Takes the LISTING, shared with `semester_content_repos` by the site build that asks both
     of the same org. SHARED, never memoised: a process-wide memo of `list_org_repos` would
     serve the site a listing taken BEFORE assign.py created the template repo it then syncs
     the site for, withholding the brief it had just handed out."""
@@ -626,7 +663,7 @@ def discover_content_repos(course_org: str) -> list[str]:
     would otherwise be handed the org-admin token as a repo secret) and not the
     assignment-* template repos, which hold a brief and a starter rather than the session
     folders a release copies - and which every student repo is GENERATED FROM, so what one
-    of them hosts has to be stripped off the cohort copy first
+    of them hosts has to be stripped off the semester copy first
     (`assign.withhold_from_template`) rather than placed and forgotten.
 
     So this is the Release materials SOURCE dropdown, and the repos that host that button.

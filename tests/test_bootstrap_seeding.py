@@ -1,7 +1,7 @@
 """Bootstrap seeding is create-only for USER-owned files.
 
-"Bootstrap cohort" is the documented idempotent-repair path (re-run to apply new team
-grants, refresh workflows), so it runs against LIVE cohorts. `repos.create_repo` reports
+"Bootstrap semester" is the documented idempotent-repair path (re-run to apply new team
+grants, refresh workflows), so it runs against LIVE semesters. `repos.create_repo` reports
 an already-existing repo as success, so the `if create_repo(...)` blocks are no
 first-run guard - the guard has to be per file. These tests pin the split:
 
@@ -11,8 +11,8 @@ first-run guard - the guard has to be per file. These tests pin the split:
   hertie-dsl-demo-f2026.
 - SYSTEM-owned (welcome's onboard/team-formation workflows + the issue forms they parse,
   classroom-config's dispatch-*.yml, its README contract and `*.sample` worked
-  examples, the cohort's generated dsl-course.yml pointer): re-pushed on every run so
-  fixes reach running cohorts.
+  examples, the semester's generated dsl-course.yml pointer): re-pushed on every run so
+  fixes reach running semesters.
 
 Every user-editable classroom-config file is a scaffold/sample PAIR - `<file>` seeded once,
 `<file>.sample` always converged - and the samples are injected from
@@ -22,7 +22,7 @@ The COURSE tier of example-course/ is validated here too. Only its SYLLABUS.md i
 pair (SYLLABUS.md.sample is derived from it); the rest is documentation, linked from docs/
 and never pushed anywhere. Both halves are parsed by the engine's own readers all the same,
 because the docs call that tree the live example and an unvalidated example goes
-schema-stale in silence - which is how a cohort's schedule.yml once parsed as zero releases.
+schema-stale in silence - which is how a semester's schedule.yml once parsed as zero releases.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def fake(monkeypatch):
     # seed.refresh can re-push them without importing bootstrap_course), in one commit per
     # set - so its put_files has to be faked too.
     monkeypatch.setattr(welcome, "put_files", f.put_files)
-    # The Join-team form is rendered from the cohort's own assignment lock, so the seeding
+    # The Join-team form is rendered from the semester's own assignment lock, so the seeding
     # reads it too - off the same recorder, which for a fresh org has no such file and so
     # gets the free-text Assignment field.
     monkeypatch.setattr(welcome, "get_file_content", f.get_file_content)
@@ -145,11 +145,11 @@ def fake(monkeypatch):
         "ensure_label",
         lambda org, repo, name, **k: f.labels.append((repo, name)) or True,
     )
-    # everything else setup_cohort_extras does is repo-level and safe to re-run; it is
+    # everything else setup_semester_extras does is repo-level and safe to re-run; it is
     # stubbed out so these tests stay pure (no gh calls).
     monkeypatch.setattr(bc, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(bc, "create_cohort_teams", lambda org: 0)
-    monkeypatch.setattr(bc, "grant_cohort_faculty_access", lambda org: None)
+    monkeypatch.setattr(bc, "create_semester_teams", lambda org: 0)
+    monkeypatch.setattr(bc, "grant_semester_faculty_access", lambda org: None)
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(bc.scaffold, "scaffold_site", lambda org: 0)
     return f
@@ -157,16 +157,16 @@ def fake(monkeypatch):
 
 def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
     # The scaffolds link the runbooks by absolute URL. They named `main` whatever the org
-    # ran, so a release cohort read the schema of code nobody had promoted yet.
-    bc.setup_cohort_extras("Cohort-f2026", "main")
-    for path in ("schedule.yml", "people.yml"):
+    # ran, so a release semester read the schema of code nobody had promoted yet.
+    bc.setup_semester_extras("Semester-f2026", "main")
+    for path in ("schedule.yml", "instructors.yml"):
         body = fake.files[("classroom-config", path)]
         assert f"{CENTRAL}/blob/main/docs/" in body, path
         assert f"{CENTRAL}/blob/release/docs/" not in body, path
 
 
-def test_fresh_cohort_seeds_every_file(fake):
-    bc.setup_cohort_extras("Cohort-f2026", "release")
+def test_fresh_semester_seeds_every_file(fake):
+    bc.setup_semester_extras("Semester-f2026", "release")
     assert USER_OWNED | SYSTEM_OWNED == fake.written("classroom-config")
     assert fake.written("welcome") == WELCOME_SYSTEM_OWNED | {"README.md"}
     assert fake.skips == []
@@ -174,10 +174,12 @@ def test_fresh_cohort_seeds_every_file(fake):
 
 def test_welcome_readme_links_to_this_orgs_issue_chooser(fake):
     # The "open a Join issue" link is org-specific, so `{org}` must be substituted - an
-    # unrendered placeholder would send every cohort's students to a dead link.
-    bc.setup_cohort_extras("Cohort-f2026", "release")
+    # unrendered placeholder would send every semester's students to a dead link.
+    bc.setup_semester_extras("Semester-f2026", "release")
     readme = fake.files[("welcome", "README.md")]
-    assert "https://github.com/Cohort-f2026/welcome/issues/new/choose" in readme, readme
+    assert "https://github.com/Semester-f2026/welcome/issues/new/choose" in readme, (
+        readme
+    )
     assert "{org}" not in readme
 
 
@@ -187,7 +189,7 @@ def test_rerun_preserves_a_faculty_edited_welcome_readme(fake):
     edited = "# Welcome to Deep Learning\n\nOur own wording.\n"
     fake.files[("welcome", "README.md")] = edited
 
-    bc.setup_cohort_extras("Cohort-f2026", "release")
+    bc.setup_semester_extras("Semester-f2026", "release")
 
     assert fake.files[("welcome", "README.md")] == edited
     assert fake.written("welcome") == WELCOME_SYSTEM_OWNED
@@ -195,13 +197,13 @@ def test_rerun_preserves_a_faculty_edited_welcome_readme(fake):
 
 
 def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
-    # A live mid-semester cohort: real roster + faculty-edited schedule/people, plus a
+    # A live mid-semester semester: real roster + faculty-edited schedule/people, plus a
     # stale README/sample from an older engine version.
     live = {
         "students.csv": "email,github_handle,enrol_code\na@x.edu,ahandle,AB12CD\n",
         "teams.csv": "assignment,team,github_handle\na1,team-1,ahandle\n",
         "schedule.yml": "timezone: Europe/Berlin\nassignments:\n  - id: a1\n",
-        "people.yml": "people:\n  instructors:\n    - github_handle: profx\n",
+        "instructors.yml": "people:\n  instructors:\n    - github_handle: profx\n",
         "teams.csv.sample": "team,members\nstale,sample\n",
         "README.md": "# stale contract from an older engine\n",
         ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
@@ -209,7 +211,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
     fake.files.update({("classroom-config", p): c for p, c in live.items()})
     fake.files[("welcome", ".github/workflows/onboard.yml")] = "name: stale onboard\n"
 
-    bc.setup_cohort_extras("Cohort-f2026", "release")
+    bc.setup_semester_extras("Semester-f2026", "release")
 
     # USER-owned files: untouched, byte for byte.
     for path in USER_OWNED:
@@ -225,7 +227,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         welcome.template("classroom-config/README.md")
     )
     assert fake.files[("classroom-config", "teams.csv.sample")] == (
-        welcome.example_cohort_file("teams.csv")
+        welcome.example_semester_file("teams.csv")
     )
     assert fake.files[("welcome", ".github/workflows/onboard.yml")] == (
         welcome.welcome_workflow("welcome/onboard.yml")
@@ -240,7 +242,7 @@ def test_rerun_logs_one_skip_per_preserved_file(fake):
             ("classroom-config", "schedule.yml"): "timezone: Europe/Berlin\n",
         }
     )
-    bc.setup_cohort_extras("Cohort-f2026", "release")
+    bc.setup_semester_extras("Semester-f2026", "release")
     assert fake.skips == [
         "classroom-config/students.csv",
         "classroom-config/schedule.yml",
@@ -250,10 +252,10 @@ def test_rerun_logs_one_skip_per_preserved_file(fake):
 def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     monkeypatch,
 ):
-    # Seeding a cohort's config is one act, so the scaffolds share a commit rather than
+    # Seeding a semester's config is one act, so the scaffolds share a commit rather than
     # opening a repo faculty then work in by hand with a burst of `init:`/`docs: seed`
     # lines. What must NOT change is the per-file create-only rule: a repair re-run against
-    # a live cohort has to write only what is genuinely missing, and leave the roster (enrol
+    # a live semester has to write only what is genuinely missing, and leave the roster (enrol
     # codes, onboarded handles) untouched.
     live = {"students.csv": "live-roster-sha"}
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: None)
@@ -269,16 +271,21 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     )
 
     assert gh_contents.put_files(
-        "Cohort-f2026",
+        "Semester-f2026",
         "classroom-config",
-        {"students.csv": b"header only\n", "teams.csv": b"t\n", "people.yml": b"p\n"},
+        {
+            "students.csv": b"header only\n",
+            "teams.csv": b"t\n",
+            "instructors.yml": b"p\n",
+        },
         "init: scaffolds",
         create_only=True,
     )
     assert len(committed) == 1
-    assert {entry["path"] for entry in committed[0]} == {"teams.csv", "people.yml"}, (
-        "a file already present must be left exactly as faculty left it"
-    )
+    assert {entry["path"] for entry in committed[0]} == {
+        "teams.csv",
+        "instructors.yml",
+    }, "a file already present must be left exactly as faculty left it"
 
 
 def test_a_create_only_write_commits_nothing_when_every_file_is_already_there(
@@ -294,7 +301,7 @@ def test_a_create_only_write_commits_nothing_when_every_file_is_already_there(
         gh_contents, "_commit_tree", lambda *a, **k: pytest.fail("wrote a no-op commit")
     )
     assert gh_contents.put_files(
-        "Cohort-f2026",
+        "Semester-f2026",
         "classroom-config",
         {"students.csv": b"x\n"},
         "init: scaffolds",
@@ -308,7 +315,7 @@ def test_seed_if_absent_skips_an_empty_existing_file(fake):
     # an existing empty file - falsy but present, so it still counts.
     fake.files[("classroom-config", "teams.csv")] = ""
     assert gh_contents.seed_if_absent(
-        "Cohort-f2026", "classroom-config", "teams.csv", b"x", "msg"
+        "Semester-f2026", "classroom-config", "teams.csv", b"x", "msg"
     )
     assert fake.writes == []
     assert "classroom-config/teams.csv" in fake.skips
@@ -323,17 +330,17 @@ def test_seed_if_absent_returns_false_only_when_the_write_fails(monkeypatch):
     assert not gh_contents.seed_if_absent("Org", "repo", "path", b"x", "msg")
 
 
-def test_seeded_scaffolds_render_this_cohorts_tag(fake):
-    # people.yml's commented example carries THIS cohort's dates, so the window a faculty
+def test_seeded_scaffolds_render_this_semesters_tag(fake):
+    # instructors.yml's commented example carries THIS semester's dates, so the window a faculty
     # member uncomments is already the right one. The schedule.yml scaffold deliberately
     # ships key-only (no example values to render) - `schedule.yml.sample` is where a
     # filled, tag-correct term lives instead.
     #
     # The invariant that matters for every scaffold: no format placeholder may survive
-    # into a seeded file. A `{tag}` reaching a cohort repo is a broken example, and it
+    # into a seeded file. A `{tag}` reaching a semester repo is a broken example, and it
     # would only be noticed by the faculty member who copy-pasted it.
-    bc.setup_cohort_extras("Deep-Learning-f2027", "release")
-    people = fake.files[("classroom-config", "people.yml")]
+    bc.setup_semester_extras("Deep-Learning-f2027", "release")
+    people = fake.files[("classroom-config", "instructors.yml")]
     assert '"2027-09-01"' in people and '"2028-01-31"' in people
     for (repo, path), content in fake.files.items():
         assert "{tag}" not in content and "{year" not in content, f"{repo}/{path}"
@@ -341,19 +348,19 @@ def test_seeded_scaffolds_render_this_cohorts_tag(fake):
 
 def test_the_seeded_archive_hint_keeps_its_date_token(fake):
     # `{date}` in an archive description is filled in by the site sync, not by the seeder,
-    # so the scaffold escapes it and the cohort's copy must still read `{date}`. Rendered
+    # so the scaffold escapes it and the semester's copy must still read `{date}`. Rendered
     # away here, the suggested wording would teach a date typed out by hand.
-    bc.setup_cohort_extras("Deep-Learning-f2027", "release")
+    bc.setup_semester_extras("Deep-Learning-f2027", "release")
     assert "{date}" in fake.files[("classroom-config", "schedule.yml")]
 
 
 def test_the_seeded_people_stub_teaches_every_required_field(fake):
-    # The commented skeleton IS the schema a fresh cohort is handed. Uncommenting it must
+    # The commented skeleton IS the schema a fresh semester is handed. Uncommenting it must
     # yield entries the real parser accepts with nothing missing - `email:` included,
     # since an entry without one is granted access but can never be notified.
-    bc.setup_cohort_extras("Deep-Learning-f2027", "release")
-    stub = fake.files[("classroom-config", "people.yml")]
-    block = "# people:" + stub.split("# people:", 1)[1]
+    bc.setup_semester_extras("Deep-Learning-f2027", "release")
+    stub = fake.files[("classroom-config", "instructors.yml")]
+    block = "# instructors:" + stub.split("# instructors:", 1)[1]
     uncommented = "\n".join(line.removeprefix("# ") for line in block.splitlines())
     faculty = sync_faculty.parse_faculty_from_meta(yaml.safe_load(uncommented) or {})
     assert faculty["instructors"] and faculty["teaching_assistants"]
@@ -365,14 +372,14 @@ def test_the_seeded_people_stub_teaches_every_required_field(fake):
     assert "show_email" in stub  # ...and how to opt that private address onto the card
 
 
-def test_cohort_tag_derivation():
+def test_semester_tag_derivation():
     assert bc._tag_and_year("Deep-Learning-f2027") == ("f2027", 2027)
     assert bc._tag_and_year("Stats-S2030") == ("s2030", 2030)
     # No recognisable suffix -> the fallback keeps the examples plausible.
     assert bc._tag_and_year("Some-Odd-Name") == ("f2026", 2026)
 
 
-def test_the_sample_set_is_the_whole_worked_example_cohort():
+def test_the_sample_set_is_the_whole_worked_example_semester():
     # The set is DERIVED from example-course/cohort-org/, not enumerated - that is what
     # makes "every file in cohort-org/ ships as a sample" true rather than aspirational
     # (an enumeration once silently dropped the team-graded grades table).
@@ -380,7 +387,7 @@ def test_the_sample_set_is_the_whole_worked_example_cohort():
         "students.csv.sample",
         "teams.csv.sample",
         "schedule.yml.sample",
-        "people.yml.sample",
+        "instructors.yml.sample",
         "grading_sheets/assignment-1.yml.sample",
         "grading_sheets/assignment-4-project.yml.sample",
     }
@@ -391,13 +398,13 @@ def test_the_sample_set_is_the_whole_worked_example_cohort():
 def test_every_shipped_sample_parses_with_the_real_parser():
     # A sample IS the schema documentation faculty copy from, so it is validated by the
     # very code that will read their copy - never by a second, driftable checker.
-    students = roster.parse(welcome.example_cohort_file("students.csv"))
+    students = roster.parse(welcome.example_semester_file("students.csv"))
     assert len(students) >= 3
     assert any(s.is_auditor for s in students), (
         "the roster sample must exercise `role: auditor`"
     )
 
-    per_assignment = teams.parse(welcome.example_cohort_file("teams.csv"))
+    per_assignment = teams.parse(welcome.example_semester_file("teams.csv"))
     assert sorted(per_assignment["assignment-4-project"]) == [
         "team-alpha",
         "team-beta",
@@ -411,17 +418,17 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     assert sched.releases and sched.assignments and sched.events
 
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(welcome.example_cohort_file("people.yml")) or {}
+        yaml.safe_load(welcome.example_semester_file("instructors.yml")) or {}
     )
     assert faculty["instructors"] and faculty["teaching_assistants"]
 
     # both grading sheets: the individual case, and the group one (which nests `members:`
     # inside each team). Parsed by the very function the toolkit reads a live sheet with.
     individual = grades.parse_sheet(
-        welcome.example_cohort_file("grading_sheets/assignment-1.yml")
+        welcome.example_semester_file("grading_sheets/assignment-1.yml")
     )
     project = grades.parse_sheet(
-        welcome.example_cohort_file("grading_sheets/assignment-4-project.yml")
+        welcome.example_semester_file("grading_sheets/assignment-4-project.yml")
     )
     assert set(individual) == {"submissions"}
     assert all(
@@ -461,7 +468,7 @@ _SAMPLE_SHEETS = [
 def test_every_sample_sheet_is_what_the_toolkit_would_write(
     slug, key, is_group, phase, submitted, total, derived
 ):
-    # These ship into every cohort's classroom-config as `grading_sheets/*.yml.sample`
+    # These ship into every semester's classroom-config as `grading_sheets/*.yml.sample`
     # and are the only worked example a grader has. Hand-written, they drifted: their
     # headers quoted points, a late window and `autograde off` that the example course's
     # own grading_config.yml declared none of, and a status line the renderer never
@@ -475,7 +482,7 @@ def test_every_sample_sheet_is_what_the_toolkit_would_write(
         )
     )
     spec = grades.sheet_spec(sched, key, slug, gspec, is_group)
-    text = welcome.example_cohort_file(f"{grades.SHEETS_DIR}/{slug}.yml")
+    text = welcome.example_semester_file(f"{grades.SHEETS_DIR}/{slug}.yml")
     status = collect._status_line(spec, phase, total, submitted, derived)
     assert grades.dump_sheet(grades.parse_sheet(text), spec, status) == text
 
@@ -491,7 +498,7 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
         ("teams.csv", teams.FIELDS),
     ):
         assert header(welcome.template(f"classroom-config/{name}")) == fields
-        assert header(welcome.example_cohort_file(name)) == fields
+        assert header(welcome.example_semester_file(name)) == fields
     # header-only scaffolds: nobody to enrol, and no team to provision, by accident
     assert roster.parse(welcome.template("classroom-config/students.csv")) == []
     assert teams.parse(welcome.template("classroom-config/teams.csv")) == {}
@@ -499,20 +506,20 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
 
 def test_samples_carry_nothing_that_only_makes_sense_inside_this_repo():
     # example-course/cohort-org/ is SHIPPING reference material: each file is pushed into
-    # every cohort's private config repo, where a repo-relative `docs/...` link resolves to
+    # every semester's private config repo, where a repo-relative `docs/...` link resolves to
     # nothing. Full URLs only, as the seeded README already does.
     for path, source in welcome.CLASSROOM_SAMPLES.items():
-        for line in welcome.example_cohort_file(source).splitlines():
+        for line in welcome.example_semester_file(source).splitlines():
             assert "docs/" not in line or "https://" in line, f"{path}: {line}"
 
 
 def test_the_people_sample_names_nobody_real():
-    # The staff cards it demonstrates land in six live cohort orgs, so a real handle would
+    # The staff cards it demonstrates land in six live semester orgs, so a real handle would
     # be an unasked-for mention (and would resolve to a real avatar). Fictional people
     # only: either no handle at all (valid - the card is display-only) or the
     # demo-*-placeholder convention.
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(welcome.example_cohort_file("people.yml")) or {}
+        yaml.safe_load(welcome.example_semester_file("instructors.yml")) or {}
     )
     for role, people in faculty.items():
         for person in people:
@@ -543,7 +550,7 @@ def _shipped_syllabus_sample() -> str:
 def test_the_syllabus_sample_is_read_from_the_example_course_not_authored_twice(
     monkeypatch,
 ):
-    # The course tier's one scaffold/sample pair follows the cohort rule: DERIVED. Asserting
+    # The course tier's one scaffold/sample pair follows the semester rule: DERIVED. Asserting
     # that the shipped sample contains the example's text would be tautological (it is read
     # from it), so feed the reader a sentinel instead - that fails the moment anyone
     # reintroduces a hand-authored literal, which is how the two copies drifted to a filled
@@ -715,7 +722,7 @@ def test_the_example_materials_tree_is_a_releasable_one():
 
 
 def test_the_example_course_names_nobody_real():
-    # Same rule as the cohort samples, for the same reason: faculty copy this file, and a
+    # Same rule as the semester samples, for the same reason: faculty copy this file, and a
     # real handle would send an unasked-for org invitation (the file says so itself).
     meta = yaml.safe_load(welcome.example_course_file("dsl-course.yml"))
     for role, people in sync_faculty.parse_faculty_from_meta(meta).items():
@@ -743,65 +750,65 @@ def test_course_dsl_course_yml_is_never_rewritten(fake, monkeypatch):
 
 
 def test_rerun_retires_the_pre_rename_issue_forms(fake):
-    # The forms moved to 01-/02- prefixed names (chooser ordering); a live cohort still
+    # The forms moved to 01-/02- prefixed names (chooser ordering); a live semester still
     # carrying the old files would show both generations in the issue chooser.
     fake.files[("welcome", ".github/ISSUE_TEMPLATE/join.yml")] = "name: old\n"
-    bc.setup_cohort_extras("Cohort-f2026", "release")
+    bc.setup_semester_extras("Semester-f2026", "release")
     assert ("welcome", ".github/ISSUE_TEMPLATE/join.yml") in fake.deletes
     assert ("welcome", ".github/ISSUE_TEMPLATE/join.yml") not in fake.files
 
 
-# --------------------------- setup_cohort_extras closes the partial-provisioning holes
+# --------------------------- setup_semester_extras closes the partial-provisioning holes
 
 
-def test_cohort_extras_reds_when_a_repo_cannot_be_created(fake, monkeypatch):
+def test_semester_extras_reds_when_a_repo_cannot_be_created(fake, monkeypatch):
     # A failed create_repo (post-PR1, a genuine failure - not the idempotent 422) leaves the
-    # cohort with no student-facing repo; its False must be counted and the seeding skipped,
-    # not silently dropped by a bare `if create_repo(...)` that reports a green cohort.
+    # semester with no student-facing repo; its False must be counted and the seeding skipped,
+    # not silently dropped by a bare `if create_repo(...)` that reports a green semester.
     monkeypatch.setattr(bc, "create_repo", lambda *a, **k: False)
     assert (
-        bc.setup_cohort_extras("Cohort-f2026", "release") == 2
+        bc.setup_semester_extras("Semester-f2026", "release") == 2
     )  # welcome + classroom-config
     # both seeding blocks skipped - nothing was written into either repo
     assert fake.writes == []
 
 
-def test_cohort_extras_no_longer_repeat_the_org_tighten(fake, monkeypatch):
+def test_semester_extras_no_longer_repeat_the_org_tighten(fake, monkeypatch):
     # One home for the PATCH (gh_teams.converge_org_settings), so the two org kinds
     # cannot drift.
     patched: list[tuple[str, ...]] = []
     monkeypatch.setattr(bc, "gh", lambda *a, **k: patched.append(a) or (0, ""))
     monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: patched.append(a) or (0, ""))
-    bc.setup_cohort_extras("Cohort-f2026", "release")
+    bc.setup_semester_extras("Semester-f2026", "release")
     fields = [f for call in patched for f in call]
     assert "default_repository_permission=none" not in fields
 
 
-def test_cohort_extras_reds_when_a_dispatcher_write_fails(fake, monkeypatch):
+def test_semester_extras_reds_when_a_dispatcher_write_fails(fake, monkeypatch):
     # A failed SYSTEM-owned write (the classroom-config README contract, or a dispatch-sync
     # workflow) means membership/site sync never triggers, yet the create_repo blocks stay
     # green - so the previously-discarded write return is now counted. The SYSTEM-owned
     # writes go through dsl_course.welcome (shared with the nightly refresh), so that is
     # the put_files to break.
     monkeypatch.setattr(welcome, "put_files", lambda *a, **k: False)
-    assert bc.setup_cohort_extras("Cohort-f2026", "release") >= 1
+    assert bc.setup_semester_extras("Semester-f2026", "release") >= 1
 
 
-def test_cohort_extras_reds_when_a_user_file_seed_fails(fake, monkeypatch):
+def test_semester_extras_reds_when_a_user_file_seed_fails(fake, monkeypatch):
     # A USER-owned scaffold that is absent and whose write FAILS must red the bootstrap -
     # seed_if_absent's False (a real write failure, not a skip of a live file) is now folded
     # into the count.
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: False)
-    assert bc.setup_cohort_extras("Cohort-f2026", "release") >= 1
+    assert bc.setup_semester_extras("Semester-f2026", "release") >= 1
 
 
 # ------------------------------------------ the one initial site sync a bootstrap does
 
 
-def test_cohort_bootstrap_runs_one_initial_site_sync(monkeypatch):
-    # Without it a fresh cohort site keeps the website template's placeholders ("Fall
+def test_semester_bootstrap_runs_one_initial_site_sync(monkeypatch):
+    # Without it a fresh semester site keeps the website template's placeholders ("Fall
     # 2025", "Course Name (Code)") until the first successful "Sync site" - which in the
-    # live incident never came, because the cohort's schedule.yml stopped parsing.
+    # live incident never came, because the semester's schedule.yml stopped parsing.
     synced: list[tuple[str, str]] = []
     stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: synced.append((c, o)) or 0)
@@ -810,19 +817,19 @@ def test_cohort_bootstrap_runs_one_initial_site_sync(monkeypatch):
         [
             "bootstrap_course",
             "--org",
-            "Cohort-f2026",
-            "--cohort",
+            "Semester-f2026",
+            "--semester",
             "--course",
             "Course-Org",
         ],
     )
 
     assert bc.main() == 0
-    assert synced == [("Course-Org", "Cohort-f2026")]
+    assert synced == [("Course-Org", "Semester-f2026")]
 
 
-@pytest.mark.parametrize("cohort", [True, False], ids=["cohort", "course"])
-def test_only_a_cohort_bootstrap_asks_for_private_forks(monkeypatch, cohort):
+@pytest.mark.parametrize("semester", [True, False], ids=["semester", "course"])
+def test_only_a_semester_bootstrap_asks_for_private_forks(monkeypatch, semester):
     # One converge call for both org kinds, so the org kind has to be told to it: a course
     # org's private repos hold the unreleased materials, the model solutions and the hidden
     # tests, and forking those into a personal account gains nobody anything.
@@ -838,17 +845,17 @@ def test_only_a_cohort_bootstrap_asks_for_private_forks(monkeypatch, cohort):
         [
             "bootstrap_course",
             "--org",
-            "Cohort-f2026",
-            "--cohort",
+            "Semester-f2026",
+            "--semester",
             "--course",
             "Course-Org",
         ]
-        if cohort
+        if semester
         else ["bootstrap_course", "--org", "Course-Org"],
     )
 
     assert bc.main() == 0
-    assert asked == [cohort]
+    assert asked == [semester]
 
 
 def _raises(c, o):
@@ -866,8 +873,8 @@ def test_bootstrap_survives_a_failing_initial_site_sync(monkeypatch, capsys, out
         [
             "bootstrap_course",
             "--org",
-            "Cohort-f2026",
-            "--cohort",
+            "Semester-f2026",
+            "--semester",
             "--course",
             "Course-Org",
         ],
@@ -880,7 +887,7 @@ def test_bootstrap_survives_a_failing_initial_site_sync(monkeypatch, capsys, out
 def test_bootstrap_reports_an_unreachable_api_instead_of_a_traceback(
     monkeypatch, capsys
 ):
-    # Every read on the way through (the create-only file check, the cohort registry, the
+    # Every read on the way through (the create-only file check, the semester registry, the
     # repo listing behind the profile README) now raises rather than reporting an absent
     # file or an empty org. Bootstrap runs from a button, so that has to land as an [err]
     # line and a red run, not a Python traceback halfway down the log.
@@ -896,7 +903,7 @@ def test_bootstrap_reports_an_unreachable_api_instead_of_a_traceback(
     assert "HTTP 502" in capsys.readouterr().err
 
 
-# ----------------------------------------- the nightly refresh converges live cohorts
+# ----------------------------------------- the nightly refresh converges live semesters
 
 
 def _stub_refresh(
@@ -905,8 +912,8 @@ def _stub_refresh(
     sample_failures=lambda org: 0,
     system_failures=lambda org, ref: 0,
     pointer_failures=lambda org, course: 0,
-    lock_failures=lambda course, cohort: LockWrite(True, False),
-    status_failures=lambda course, cohort=None: 0,
+    lock_failures=lambda course, semester: LockWrite(True, False),
+    status_failures=lambda course, semester=None: 0,
     seed_failures=0,
     heartbeat_failures=0,
     prior_misses=(),
@@ -916,11 +923,11 @@ def _stub_refresh(
 
     Returns the in-memory `.github` file store, seeded with `prior_misses` as the
     previous night's miss ledger (MISSES_PATH) - so a test can drive the two-misses rule
-    across runs without stubbing the rule itself. Each entry is a `<cohort> <first missed
+    across runs without stubbing the rule itself. Each entry is a `<semester> <first missed
     at>` line; `_missed_at` builds one at a chosen age."""
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
     monkeypatch.setattr(
-        seed, "discover_cohorts", lambda org: ["Cohort-f2026", "Cohort-s2027"]
+        seed, "discover_semesters", lambda org: ["Semester-f2026", "Semester-s2027"]
     )
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: [])
     monkeypatch.setattr(seed, "discover_assignment_repos", lambda org: [])
@@ -935,15 +942,15 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "refresh_welcome_workflows", welcome_failures)
     monkeypatch.setattr(seed, "refresh_classroom_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
-    monkeypatch.setattr(seed, "refresh_cohort_pointer", pointer_failures)
+    monkeypatch.setattr(seed, "refresh_semester_pointer", pointer_failures)
     monkeypatch.setattr(seed, "sync_team_lock", lock_failures)
     monkeypatch.setattr(seed, "refresh_status", status_failures)
-    # The per-cohort loop probes the cohort ORG once: gone = unregister + skip. A live org
+    # The per-semester loop probes the semester ORG once: gone = unregister + skip. A live org
     # then reads the archived flag off its own listing (empty above = nothing archived),
     # so org_exists True + an unarchived classroom-config = present and live, proceed.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(seed, "org_exists", lambda org: True)
-    monkeypatch.setattr(seed, "unregister_cohort", lambda course, cohort: True)
+    monkeypatch.setattr(seed, "unregister_semester", lambda course, semester: True)
     store = {seed.MISSES_PATH: "".join(f"{m}\n" for m in prior_misses)}
     monkeypatch.setattr(
         seed, "get_file_content", lambda org, repo, path: store.get(path)
@@ -976,7 +983,7 @@ def test_refresh_gives_every_assignment_template_the_hand_out_button(monkeypatch
     monkeypatch.setattr(
         seed,
         "push_content_workflows",
-        lambda org, repo, cohorts, assignments, ref, *, workflows: (
+        lambda org, repo, semesters, assignments, ref, *, workflows: (
             placed.append((repo, workflows)) or 0
         ),
     )
@@ -1014,7 +1021,7 @@ def test_refresh_leaves_an_archived_assignment_template_alone(monkeypatch):
     monkeypatch.setattr(
         seed,
         "push_content_workflows",
-        lambda org, repo, cohorts, assignments, ref, *, workflows: (
+        lambda org, repo, semesters, assignments, ref, *, workflows: (
             placed.append(repo) or offered.append(assignments) or 0
         ),
     )
@@ -1030,76 +1037,80 @@ def test_refresh_leaves_an_archived_assignment_template_alone(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "per_cohort_job",
+    "per_semester_job",
     ["welcome_failures", "sample_failures", "system_failures"],
     ids=["welcome-workflows", "config-samples", "classroom-system-files"],
 )
-def test_refresh_reaches_every_registered_cohort(monkeypatch, per_cohort_job):
-    # Every per-cohort job is seeded at Bootstrap cohort, and then left behind by an
+def test_refresh_reaches_every_registered_semester(monkeypatch, per_semester_job):
+    # Every per-semester job is seeded at Bootstrap semester, and then left behind by an
     # engine (and a set of schemas) that keep moving on central main. The nightly Refresh
-    # is what closes that gap, so each has to reach EVERY registered cohort, not just the
+    # is what closes that gap, so each has to reach EVERY registered semester, not just the
     # course org. The classroom-config dispatchers/README used to refresh ONLY inside
-    # Bootstrap cohort, so three live cohorts drifted a semester behind the templates.
+    # Bootstrap semester, so three live semesters drifted a semester behind the templates.
     refreshed: list[str] = []
     _stub_refresh(
-        monkeypatch, **{per_cohort_job: lambda org, *a: refreshed.append(org) or 0}
+        monkeypatch, **{per_semester_job: lambda org, *a: refreshed.append(org) or 0}
     )
 
     assert seed.refresh("Course-Org") == 0
-    assert refreshed == ["Cohort-f2026", "Cohort-s2027"]
+    assert refreshed == ["Semester-f2026", "Semester-s2027"]
 
 
-def test_refresh_repushes_every_cohorts_course_pointer(monkeypatch):
-    # `.github/dsl-course.yml` is what a cohort's classroom-config dispatchers read to
-    # find their course org. SYSTEM-owned, but written only by Bootstrap cohort's own
-    # wiring until now, so every live cohort's copy froze the day it was created - same
+def test_refresh_repushes_every_semesters_course_pointer(monkeypatch):
+    # `.github/dsl-course.yml` is what a semester's classroom-config dispatchers read to
+    # find their course org. SYSTEM-owned, but written only by Bootstrap semester's own
+    # wiring until now, so every live semester's copy froze the day it was created - same
     # bug class as the landing pages below.
     pointed: list[tuple[str, str]] = []
     _stub_refresh(
         monkeypatch,
-        pointer_failures=lambda cohort, course: pointed.append((cohort, course)) or 0,
+        pointer_failures=lambda semester, course: (
+            pointed.append((semester, course)) or 0
+        ),
     )
 
     assert seed.refresh("Course-Org") == 0
     assert pointed == [
-        ("Cohort-f2026", "Course-Org"),
-        ("Cohort-s2027", "Course-Org"),
+        ("Semester-f2026", "Course-Org"),
+        ("Semester-s2027", "Course-Org"),
     ]
 
 
-def test_refresh_seeds_and_converges_every_cohorts_team_lock(monkeypatch):
-    # `assignments.lock.yml` is SYSTEM-owned, but DERIVED (from the cohort's schedule and
+def test_refresh_seeds_and_converges_every_semesters_team_lock(monkeypatch):
+    # `assignments.lock.yml` is SYSTEM-owned, but DERIVED (from the semester's schedule and
     # each template's grading_config.yml) rather than templated, so it cannot join
-    # welcome.CLASSROOM_SYSTEM_FILES. This loop is what seeds it - Bootstrap cohort ends
+    # welcome.CLASSROOM_SYSTEM_FILES. This loop is what seeds it - Bootstrap semester ends
     # in a refresh - and what converges it every night, exactly like the pointer above.
     locked: list[tuple[str, str]] = []
     _stub_refresh(
         monkeypatch,
-        lock_failures=lambda course, cohort: (
-            locked.append((course, cohort)) or LockWrite(True, False)
+        lock_failures=lambda course, semester: (
+            locked.append((course, semester)) or LockWrite(True, False)
         ),
     )
 
     assert seed.refresh("Course-Org") == 0
     assert locked == [
-        ("Course-Org", "Cohort-f2026"),
-        ("Course-Org", "Cohort-s2027"),
+        ("Course-Org", "Semester-f2026"),
+        ("Course-Org", "Semester-s2027"),
     ]
 
 
-def test_refresh_rewrites_every_cohorts_status_and_the_courses(monkeypatch):
-    # status.json is how the console reads a cohort, and the nightly refresh is its floor:
-    # every live cohort's file, then the course's once.
+def test_refresh_rewrites_every_semesters_status_and_the_courses(monkeypatch):
+    # status.json is how the console reads a semester, and the nightly refresh is its floor:
+    # every live semester's file, then the course's once.
     wrote: list[tuple[str, str | None]] = []
     _stub_refresh(
         monkeypatch,
-        status_failures=lambda course, cohort=None: wrote.append((course, cohort)) or 0,
+        status_failures=lambda course, semester=None: (
+            wrote.append((course, semester)) or 0
+        ),
     )
 
     assert seed.refresh("Course-Org") == 0
     assert wrote == [
-        ("Course-Org", "Cohort-f2026"),
-        ("Course-Org", "Cohort-s2027"),
+        ("Course-Org", "Semester-f2026"),
+        ("Course-Org", "Semester-s2027"),
         ("Course-Org", None),
     ]
 
@@ -1107,7 +1118,7 @@ def test_refresh_rewrites_every_cohorts_status_and_the_courses(monkeypatch):
 def test_a_status_that_did_not_land_only_warns(monkeypatch, capsys):
     # status.json is the console's view: an org that never opens the console must not
     # have its nightly refresh go red over it. A warning, and the exit status unchanged.
-    _stub_refresh(monkeypatch, status_failures=lambda course, cohort=None: 1)
+    _stub_refresh(monkeypatch, status_failures=lambda course, semester=None: 1)
     assert seed.refresh("Course-Org") == 0
     assert (
         "::warning::status.json not refreshed for 3 org(s)" in capsys.readouterr().out
@@ -1117,8 +1128,8 @@ def test_a_status_that_did_not_land_only_warns(monkeypatch, capsys):
 def test_a_failing_status_writer_leaves_a_failed_refresh_failed(monkeypatch):
     _stub_refresh(
         monkeypatch,
-        status_failures=lambda course, cohort=None: 1,
-        lock_failures=lambda course, cohort: LockWrite(False, False),
+        status_failures=lambda course, semester=None: 1,
+        lock_failures=lambda course, semester: LockWrite(False, False),
     )
     assert seed.refresh("Course-Org") == 1
 
@@ -1127,16 +1138,16 @@ def test_a_team_lock_that_did_not_land_reds_the_refresh(monkeypatch):
     # A stale lock either refuses a real team or lets one form for an assignment the
     # template calls individual, and nothing else in the night rewrites it.
     _stub_refresh(
-        monkeypatch, lock_failures=lambda course, cohort: LockWrite(False, False)
+        monkeypatch, lock_failures=lambda course, semester: LockWrite(False, False)
     )
     assert seed.refresh("Course-Org") == 1
 
 
-def test_refresh_rebuilds_every_cohorts_own_landing_pages(monkeypatch):
+def test_refresh_rebuilds_every_semesters_own_landing_pages(monkeypatch):
     # Both org READMEs are SYSTEM-owned and documented as rewritten on every nightly
-    # refresh, but only the COURSE org's pair ever was: a cohort's were written once at
+    # refresh, but only the COURSE org's pair ever was: a semester's were written once at
     # Bootstrap and then frozen, so every wording fix since reached the course org and no
-    # cohort (a live cohort's .github README sat untouched for months).
+    # semester (a live semester's .github README sat untouched for months).
     rendered: list[str] = []
     _stub_refresh(monkeypatch)
     monkeypatch.setattr(
@@ -1144,12 +1155,12 @@ def test_refresh_rebuilds_every_cohorts_own_landing_pages(monkeypatch):
     )
 
     assert seed.refresh("Course-Org") == 0
-    assert rendered == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+    assert rendered == ["Course-Org", "Semester-f2026", "Semester-s2027"]
 
 
-def test_refresh_reasserts_every_cohort_role_teams_privacy(monkeypatch):
+def test_refresh_reasserts_every_semester_role_teams_privacy(monkeypatch):
     # A team's privacy was asserted only by the create call at bootstrap, and nothing
-    # revisited it: every cohort made before students/auditors were declared `secret`
+    # revisited it: every semester made before students/auditors were declared `secret`
     # still has them `closed`, with the class list browsable by the class. The nightly
     # sweep is what closes that, from the SAME table bootstrap creates them with.
     asked: list[tuple[str, str, str]] = []
@@ -1162,12 +1173,12 @@ def test_refresh_reasserts_every_cohort_role_teams_privacy(monkeypatch):
     monkeypatch.setattr(seed, "create_role_teams", record)
 
     assert seed.refresh("Course-Org") == 0
-    # Cohorts only - the course org holds unreleased materials and never gets the
-    # student teams (course.COHORT_TEAMS).
+    # Semesters only - the course org holds unreleased materials and never gets the
+    # student teams (course.SEMESTER_TEAMS).
     assert asked == [
-        (cohort, slug, privacy)
-        for cohort in ("Cohort-f2026", "Cohort-s2027")
-        for slug, _, privacy in (*course.FACULTY_TEAMS, *course.COHORT_TEAMS)
+        (semester, slug, privacy)
+        for semester in ("Semester-f2026", "Semester-s2027")
+        for slug, _, privacy in (*course.FACULTY_TEAMS, *course.SEMESTER_TEAMS)
     ]
     # ...and the table itself still says what the decision was, not just consistently
     # whatever it happens to hold.
@@ -1180,7 +1191,7 @@ def test_refresh_reasserts_every_cohort_role_teams_privacy(monkeypatch):
 
 
 def test_refresh_reds_when_a_role_team_privacy_cannot_be_converged(monkeypatch):
-    # A team whose privacy would not converge leaves a cohort's class list readable by
+    # A team whose privacy would not converge leaves a semester's class list readable by
     # the class, which is the kind of thing a green nightly cron must not hide.
     _stub_refresh(monkeypatch)
     monkeypatch.setattr(
@@ -1190,16 +1201,18 @@ def test_refresh_reds_when_a_role_team_privacy_cannot_be_converged(monkeypatch):
     assert seed.refresh("Course-Org") == 1
 
 
-def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
+def test_refresh_leaves_an_archived_semester_frozen(monkeypatch, capsys):
     # A finished semester's repos are archived, so every write 403s - and the config
     # samples are NEW files, which put_file's identical-sha no-op cannot absorb. The
-    # nightly cron therefore went red every night in any org with a past cohort. Skipping
-    # the archived cohort whole is the fix; the live cohort beside it still converges.
+    # nightly cron therefore went red every night in any org with a past semester. Skipping
+    # the archived semester whole is the fix; the live semester beside it still converges.
     refreshed: list[str] = []
 
     def refresh_one(org: str, *a) -> int:
         refreshed.append(org)
-        return 9 if org == "Cohort-f2026" else 0  # what the 403s would have counted as
+        return (
+            9 if org == "Semester-f2026" else 0
+        )  # what the 403s would have counted as
 
     _stub_refresh(
         monkeypatch,
@@ -1207,8 +1220,8 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
         sample_failures=refresh_one,
         system_failures=refresh_one,
     )
-    # Both orgs live (org probe healthy); Cohort-f2026 is a finished, archived semester.
-    # Read off the cohort's own listing, which the convergence sweep below needs anyway.
+    # Both orgs live (org probe healthy); Semester-f2026 is a finished, archived semester.
+    # Read off the semester's own listing, which the convergence sweep below needs anyway.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(
         seed,
@@ -1217,7 +1230,7 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
             {
                 "name": seed.CONFIG_REPO,
                 "topics": [],
-                "archived": org == "Cohort-f2026",
+                "archived": org == "Semester-f2026",
             }
         ],
     )
@@ -1228,19 +1241,19 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
         seed, "update_profile_readme", lambda org, **k: rendered.append(org) or 0
     )
     monkeypatch.setattr(
-        seed, "refresh_cohort_pointer", lambda org, course: pointed.append(org) or 0
+        seed, "refresh_semester_pointer", lambda org, course: pointed.append(org) or 0
     )
 
     assert seed.refresh("Course-Org") == 0
-    # every job, live cohort only
-    assert refreshed == ["Cohort-s2027"] * 3
+    # every job, live semester only
+    assert refreshed == ["Semester-s2027"] * 3
     # The pointer write sits in the same loop and must honour the skip too.
-    assert pointed == ["Cohort-s2027"]
+    assert pointed == ["Semester-s2027"]
     # The landing pages are written inside the same loop, so they have to honour the skip
     # too - an archived repo is read-only and the write would 403 the whole cron.
-    assert rendered == ["Course-Org", "Cohort-s2027"]
+    assert rendered == ["Course-Org", "Semester-s2027"]
     out = capsys.readouterr()
-    assert "[skip] Cohort-f2026 (archived cohort - left frozen)" in out.out
+    assert "[skip] Semester-f2026 (archived semester - left frozen)" in out.out
     assert "refresh incomplete" not in out.err
 
 
@@ -1250,14 +1263,14 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
 _RUN_START = datetime.now(timezone.utc)
 
 
-def _missed_at(cohort: str, hours_ago: float) -> str:
-    """A miss-ledger line for `cohort`, first missed `hours_ago` hours ago."""
+def _missed_at(semester: str, hours_ago: float) -> str:
+    """A miss-ledger line for `semester`, first missed `hours_ago` hours ago."""
     when = _RUN_START - timedelta(hours=hours_ago)
-    return f"{cohort.casefold()} {when.isoformat(timespec='seconds')}"
+    return f"{semester.casefold()} {when.isoformat(timespec='seconds')}"
 
 
-def _missing_cohort_run(monkeypatch, prior_misses=()):
-    """One refresh in which Cohort-f2026 does not answer; returns what it did."""
+def _missing_semester_run(monkeypatch, prior_misses=()):
+    """One refresh in which Semester-f2026 does not answer; returns what it did."""
     refreshed: list[str] = []
     store = _stub_refresh(
         monkeypatch,
@@ -1266,84 +1279,84 @@ def _missing_cohort_run(monkeypatch, prior_misses=()):
         system_failures=lambda org, *a: refreshed.append(org) or 0,
         prior_misses=prior_misses,
     )
-    monkeypatch.setattr(seed, "org_exists", lambda org: org != "Cohort-f2026")
+    monkeypatch.setattr(seed, "org_exists", lambda org: org != "Semester-f2026")
     pruned: list[tuple[str, str]] = []
     monkeypatch.setattr(
         seed,
-        "unregister_cohort",
-        lambda course, cohort: pruned.append((course, cohort)),
+        "unregister_semester",
+        lambda course, semester: pruned.append((course, semester)),
     )
     return seed.refresh("Course-Org"), refreshed, pruned, store
 
 
-def test_refresh_prunes_a_cohort_missing_since_the_day_before(monkeypatch, capsys):
-    # A cohort org DELETED after it was registered 404s on every write - which reds the
-    # nightly cron forever (distinct from an archived cohort, which still exists). It is
+def test_refresh_prunes_a_semester_missing_since_the_day_before(monkeypatch, capsys):
+    # A semester org DELETED after it was registered 404s on every write - which reds the
+    # nightly cron forever (distinct from an archived semester, which still exists). It is
     # skipped AND dropped from the registry: logging "prune it by hand" left the dead org
     # registered, so every nightly sync in every tool went on trying it.
-    code, refreshed, pruned, store = _missing_cohort_run(
-        monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 25)]
+    code, refreshed, pruned, store = _missing_semester_run(
+        monkeypatch, prior_misses=[_missed_at("Semester-f2026", 25)]
     )
 
-    assert refreshed == ["Cohort-s2027"] * 3  # deleted cohort skipped whole
+    assert refreshed == ["Semester-s2027"] * 3  # deleted semester skipped whole
     assert pruned == [
-        ("Course-Org", "Cohort-f2026")
+        ("Course-Org", "Semester-f2026")
     ]  # and unregistered, not just noted
     assert store[seed.MISSES_PATH] == ""  # the ledger is cleared once it has acted
-    # Unregistering is never a silent success: nothing re-adds a cohort, so the run that
+    # Unregistering is never a silent success: nothing re-adds a semester, so the run that
     # did it has to be a run somebody looks at.
     assert code == 1
     out = capsys.readouterr()
-    assert "[skip] Cohort-f2026" in out.out
+    assert "[skip] Semester-f2026" in out.out
     assert "refresh incomplete" in out.err
 
 
 def test_a_second_miss_hours_after_the_first_does_not_unregister(monkeypatch):
     # "Two consecutive refreshes" was nominally a night apart, but two manual runs minutes
-    # apart are also two consecutive refreshes - which unregistered a live cohort inside
+    # apart are also two consecutive refreshes - which unregistered a live semester inside
     # one bad afternoon, off a token blip that was over by the morning.
-    code, _refreshed, pruned, store = _missing_cohort_run(
-        monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 2)]
+    code, _refreshed, pruned, store = _missing_semester_run(
+        monkeypatch, prior_misses=[_missed_at("Semester-f2026", 2)]
     )
 
     assert code == 0
     assert pruned == []
     # ... and the ORIGINAL timestamp survives, or the grace period would restart nightly
     # and nothing would ever be unregistered.
-    assert store[seed.MISSES_PATH].strip() == _missed_at("Cohort-f2026", 2)
+    assert store[seed.MISSES_PATH].strip() == _missed_at("Semester-f2026", 2)
 
 
 def test_a_ledger_written_before_timestamps_costs_one_more_grace_period(monkeypatch):
-    # The live orgs carry a bare `<cohort>` line. Reading that as "missed at the epoch"
+    # The live orgs carry a bare `<semester>` line. Reading that as "missed at the epoch"
     # would unregister every one of them on the first run of this code; it reads as "too
     # recent to act on" instead, and the next run has a real timestamp to measure from.
-    code, _refreshed, pruned, store = _missing_cohort_run(
-        monkeypatch, prior_misses=["Cohort-f2026"]
+    code, _refreshed, pruned, store = _missing_semester_run(
+        monkeypatch, prior_misses=["Semester-f2026"]
     )
 
     assert (code, pruned) == (0, [])
-    assert store[seed.MISSES_PATH].startswith("cohort-f2026 20")
+    assert store[seed.MISSES_PATH].startswith("semester-f2026 20")
 
 
-def test_a_first_miss_never_unregisters_a_cohort(monkeypatch, capsys):
+def test_a_first_miss_never_unregisters_a_semester(monkeypatch, capsys):
     # GitHub answers 404, not 403, for an org the TOKEN cannot see, so a bot dropped from
     # one org reads exactly like a deleted org. Acting on one look silently removed a LIVE
-    # cohort from every nightly sync, and nothing re-adds it.
-    code, refreshed, pruned, store = _missing_cohort_run(monkeypatch)
+    # semester from every nightly sync, and nothing re-adds it.
+    code, refreshed, pruned, store = _missing_semester_run(monkeypatch)
 
     assert code == 0
     assert pruned == []
-    assert refreshed == ["Cohort-s2027"] * 3  # skipped for tonight, not unregistered
+    assert refreshed == ["Semester-s2027"] * 3  # skipped for tonight, not unregistered
     # remembered for the next run, WITH the moment it was first missed
-    assert store[seed.MISSES_PATH].startswith("cohort-f2026 20")
-    assert "Cohort-f2026 did not answer" in capsys.readouterr().err
+    assert store[seed.MISSES_PATH].startswith("semester-f2026 20")
+    assert "Semester-f2026 did not answer" in capsys.readouterr().err
 
 
-def test_a_cohort_that_answers_again_clears_its_miss(monkeypatch):
-    store = _stub_refresh(monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 25)])
+def test_a_semester_that_answers_again_clears_its_miss(monkeypatch):
+    store = _stub_refresh(monkeypatch, prior_misses=[_missed_at("Semester-f2026", 25)])
     pruned: list = []
     monkeypatch.setattr(
-        seed, "unregister_cohort", lambda course, cohort: pruned.append(cohort)
+        seed, "unregister_semester", lambda course, semester: pruned.append(semester)
     )
 
     assert seed.refresh("Course-Org") == 0
@@ -1352,7 +1365,7 @@ def test_a_cohort_that_answers_again_clears_its_miss(monkeypatch):
 
 
 def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
-    # A non-404 read error is NOT proof the cohort is gone - it must still be refreshed
+    # A non-404 read error is NOT proof the semester is gone - it must still be refreshed
     # (and fail loud there), never silently skipped on a rate-limit or 502, and above all
     # never UNREGISTERED, which would remove it from every nightly sync silently.
     refreshed: list[str] = []
@@ -1369,11 +1382,11 @@ def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
     monkeypatch.setattr(seed, "org_exists", cannot_tell)
     pruned: list = []
     monkeypatch.setattr(
-        seed, "unregister_cohort", lambda course, cohort: pruned.append(cohort)
+        seed, "unregister_semester", lambda course, semester: pruned.append(semester)
     )
 
     assert seed.refresh("Course-Org") == 0
-    assert refreshed == ["Cohort-f2026"] * 3 + ["Cohort-s2027"] * 3
+    assert refreshed == ["Semester-f2026"] * 3 + ["Semester-s2027"] * 3
     assert pruned == []
 
 
@@ -1574,47 +1587,47 @@ def test_course_bootstrap_reds_when_workflow_seeding_fails(monkeypatch, capsys):
     assert "bootstrap incomplete" in capsys.readouterr().err
 
 
-def _cohort_argv() -> list[str]:
+def _semester_argv() -> list[str]:
     return [
         "bootstrap_course",
         "--org",
-        "Cohort-f2026",
-        "--cohort",
+        "Semester-f2026",
+        "--semester",
         "--course",
         "Course-Org",
     ]
 
 
-def test_cohort_bootstrap_reds_when_registration_fails(monkeypatch, capsys):
-    # register_cohort returns False on a failed registry write: a cohort invisible to
-    # discover_cohorts is invisible to every nightly sync, so it must red the bootstrap.
+def test_semester_bootstrap_reds_when_registration_fails(monkeypatch, capsys):
+    # register_semester returns False on a failed registry write: a semester invisible to
+    # discover_semesters is invisible to every nightly sync, so it must red the bootstrap.
     stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: False)
+    monkeypatch.setattr(bc, "register_semester", lambda course, semester: False)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
-    monkeypatch.setattr("sys.argv", _cohort_argv())
+    monkeypatch.setattr("sys.argv", _semester_argv())
 
     assert bc.main() == 1
     err = capsys.readouterr().err
-    assert "could not register Cohort-f2026" in err
+    assert "could not register Semester-f2026" in err
     assert "bootstrap incomplete" in err
 
 
-def test_cohort_bootstrap_reds_when_faculty_sync_reports_errors(monkeypatch, capsys):
+def test_semester_bootstrap_reds_when_faculty_sync_reports_errors(monkeypatch, capsys):
     stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 2)
+    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, semesters=None: 2)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
-    monkeypatch.setattr("sys.argv", _cohort_argv())
+    monkeypatch.setattr("sys.argv", _semester_argv())
 
     assert bc.main() == 1
     assert "bootstrap incomplete" in capsys.readouterr().err
 
 
-def test_cohort_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, capsys):
-    # setup_cohort_extras returns the count of welcome/config-sample writes that failed.
+def test_semester_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, capsys):
+    # setup_semester_extras returns the count of welcome/config-sample writes that failed.
     stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "setup_cohort_extras", lambda org, ref, defaults: 4)
+    monkeypatch.setattr(bc, "setup_semester_extras", lambda org, ref, defaults: 4)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
-    monkeypatch.setattr("sys.argv", _cohort_argv())
+    monkeypatch.setattr("sys.argv", _semester_argv())
 
     assert bc.main() == 1
     assert "bootstrap incomplete" in capsys.readouterr().err
@@ -1657,7 +1670,7 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
         raise RuntimeError("could not list repos in Course-Org: gh: HTTP 502")
 
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(seed, "discover_cohorts", boom)
+    monkeypatch.setattr(seed, "discover_semesters", boom)
     monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
 
     assert seed.main() == 1
@@ -1677,11 +1690,11 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
     ],
     ids=["welcome-workflows", "config-samples", "classroom-system-files"],
 )
-def test_a_per_cohort_refresh_reds_on_a_failed_write_and_claims_nothing(
+def test_a_per_semester_refresh_reds_on_a_failed_write_and_claims_nothing(
     monkeypatch, capsys, job, extra_args, message
 ):
-    # "[ok] ... up to date" used to print unconditionally, so a cohort whose onboarding
-    # workflow never landed still read as fully seeded. Each per-cohort job owes the caller
+    # "[ok] ... up to date" used to print unconditionally, so a semester whose onboarding
+    # workflow never landed still read as fully seeded. Each per-semester job owes the caller
     # a non-zero instead, since that is what makes the nightly Refresh go red. Now that each
     # job lands as ONE commit the answer is 1, not a per-file tally: nothing partial can
     # land, so there is no count to take.
@@ -1689,7 +1702,7 @@ def test_a_per_cohort_refresh_reds_on_a_failed_write_and_claims_nothing(
     monkeypatch.setattr(welcome, "ensure_label", lambda *a, **k: True)
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: None)
 
-    assert getattr(welcome, job)("Cohort-f2026", *extra_args) == 1
+    assert getattr(welcome, job)("Semester-f2026", *extra_args) == 1
     out = capsys.readouterr()
     assert "up to date" not in out.out
     assert message in out.err
@@ -1697,9 +1710,9 @@ def test_a_per_cohort_refresh_reds_on_a_failed_write_and_claims_nothing(
 
 def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypatch):
     # THE no-clobber invariant. refresh_classroom_system_files runs nightly against LIVE
-    # cohorts, so every path it writes is a path overwritten from a template every night.
-    # The cohort's own config - students.csv (enrol codes + onboarded handles), teams.csv,
-    # schedule.yml, people.yml - is seeded create-if-missing at bootstrap and must stay
+    # semesters, so every path it writes is a path overwritten from a template every night.
+    # The semester's own config - students.csv (enrol codes + onboarded handles), teams.csv,
+    # schedule.yml, instructors.yml - is seeded create-if-missing at bootstrap and must stay
     # that way; adding one of them to the refresh set would destroy a live roster
     # (which is exactly what happened once, in hertie-dsl-demo-f2026).
     #
@@ -1714,7 +1727,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         ),
     )
 
-    assert welcome.refresh_classroom_system_files("Cohort-f2026", "release") == 0
+    assert welcome.refresh_classroom_system_files("Semester-f2026", "release") == 0
     assert {path for _, path in written} == {
         "README.md",
         ".github/workflows/dispatch-sync.yml",
@@ -1724,7 +1737,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         ".github/workflows/validate-schedule.yml",
     }, (
         "the nightly refresh may only re-push SYSTEM-owned classroom-config files; a "
-        "USER-owned file here (students.csv, teams.csv, schedule.yml, people.yml) "
+        "USER-owned file here (students.csv, teams.csv, schedule.yml, instructors.yml) "
         "would be overwritten from the template every night"
     )
     assert {repo for repo, _ in written} == {roster.CONFIG_REPO}
@@ -1741,7 +1754,7 @@ def test_a_team_that_could_not_be_created_is_counted(monkeypatch):
     # real failure - and an org missing `instructors` is one nobody but its owner can use.
     monkeypatch.setattr(gh_teams, "create_team", lambda *a, **k: False)
     assert bc.create_default_teams("Course-Org") == len(course.FACULTY_TEAMS)
-    assert bc.create_cohort_teams("Cohort-f2026") == len(course.COHORT_TEAMS)
+    assert bc.create_semester_teams("Semester-f2026") == len(course.SEMESTER_TEAMS)
     monkeypatch.setattr(gh_teams, "create_team", lambda *a, **k: True)
     assert bc.create_default_teams("Course-Org") == 0
 
@@ -1750,7 +1763,9 @@ def _profile_repo_run(monkeypatch, *, seeded=True, topics=True):
     monkeypatch.setattr(bc, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(bc, "seed_if_absent", lambda *a, **k: seeded)
     monkeypatch.setattr(bc, "set_repo_topics", lambda *a, **k: topics)
-    return bc.create_profile_repo("Course-Org", "Org", "Course", "C1", is_cohort=False)
+    return bc.create_profile_repo(
+        "Course-Org", "Org", "Course", "C1", is_semester=False
+    )
 
 
 def test_an_unseeded_course_ssot_reds_the_bootstrap(monkeypatch, capsys):
@@ -1812,7 +1827,7 @@ def test_the_student_facing_teams_are_secret(monkeypatch):
         "create_team",
         lambda org, slug, desc, privacy: created.append((slug, privacy)) or True,
     )
-    bc.create_cohort_teams("Cohort-f2026")
+    bc.create_semester_teams("Semester-f2026")
     assert created == [("students", "secret"), ("auditors", "secret")]
 
 
@@ -1842,12 +1857,12 @@ def _spy_sweep(monkeypatch, repos):
 
 
 def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
-    # Deleting the call, or passing cohort=False for a cohort, would otherwise be
+    # Deleting the call, or passing semester=False for a semester, would otherwise be
     # invisible: every other test stubs the sweep to a no-op. This pins what the one call
     # site passes.
-    cohort = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
-    assert _spy_sweep(monkeypatch, cohort) == {
-        "tier": "cohort",
+    semester = [_r(".github", topics=["dsl-semester"]), _r("welcome"), _r("grades-ada")]
+    assert _spy_sweep(monkeypatch, semester) == {
+        "tier": "semester",
         "protected": {"grades-ada"},
     }
 
@@ -1856,7 +1871,7 @@ def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
 
 
 def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
-    # A legacy cohort: `.github` without topics, student repos, no `welcome`. The landing
+    # A legacy semester: `.github` without topics, student repos, no `welcome`. The landing
     # page renders it as a course org, but the sweep must NOT hand instructors push on
     # every submission repo - so it is told the tier is UNKNOWN, which faculty_floor reads
     # as the read floor, and the student repos are protected by name as well.
@@ -1883,7 +1898,7 @@ def test_a_failed_topic_stamp_reds_the_refresh(monkeypatch):
 
 
 def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
-    # The course org AND every live cohort - a cohort's grants are the whole of a
+    # The course org AND every live semester - a semester's grants are the whole of a
     # non-owner instructor's access there. One list_org_repos per org, shared with the
     # landing page so the page renders the descriptions this run just corrected.
     listings: list[str] = []
@@ -1909,14 +1924,14 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
     )
 
     assert seed.refresh("Course-Org") == 0
-    assert swept == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+    assert swept == ["Course-Org", "Semester-f2026", "Semester-s2027"]
     # The org's own settings converge on the same sweep. They were written only at
     # bootstrap, so every org tightened after its own bootstrap kept GitHub's default of
     # `read` for every member on every repo.
     assert [org for org, _ in tightened] == swept
-    # Private forks are a COHORT setting and travel with `is_cohort`: a course org holds
+    # Private forks are a SEMESTER setting and travel with `is_semester`: a course org holds
     # the unreleased materials, the solutions and the hidden tests, and a private fork of
     # those into a personal account gains nobody anything.
     assert [forks for _, forks in tightened] == [False, True, True]
     assert listings == swept
-    assert rendered == [("Course-Org", 1), ("Cohort-f2026", 1), ("Cohort-s2027", 1)]
+    assert rendered == [("Course-Org", 1), ("Semester-f2026", 1), ("Semester-s2027", 1)]

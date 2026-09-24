@@ -32,14 +32,14 @@ def fingerprint(org: str) -> dict[str, dict]:
 
     `private`, `topics` and `archived` are the three fields the pipeline can change
     without adding or removing a repo: a submission repo that came back public, a lost
-    `dsl-assignment` topic or an archived cohort repo are all silent until something
+    `dsl-assignment` topic or an archived semester repo are all silent until something
     compares them.
 
     The workflow blob shas are here for the same reason, one layer up: creating this run's
     assignment template repopulates the assignment dropdowns of four of the org's buttons,
     so a teardown that deleted the template without re-rendering them left the org in a
     state no refresh produces - and nothing in the repo listing or in classroom-config
-    says so. Course orgs only; a cohort org holds no org-level workflows (its own live in
+    says so. Course orgs only; a semester org holds no org-level workflows (its own live in
     `welcome` and `classroom-config`), and asking for a directory that is not there
     raises."""
     listing = discovery.list_org_repos(org)
@@ -106,7 +106,7 @@ def workflow_drift(course_org: str, rendered: dict[str, bytes]) -> list[str]:
     `rendered` is `seed.github_workflow_files(course_org, tier)`: the exact bytes a
     refresh would write, placement banner and pinned central ref included. Every input to
     that render is discovered from the org itself, so nothing here has to be told the org
-    name, the course code or which cohorts exist - the comparison is byte-for-byte, over
+    name, the course code or which semesters exist - the comparison is byte-for-byte, over
     the whole set, with no file excused.
 
     A name reported here is either stale in the org, missing from it, or a retired

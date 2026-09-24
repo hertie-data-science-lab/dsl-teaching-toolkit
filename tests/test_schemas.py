@@ -35,7 +35,8 @@ def test_file_schema_enums_are_the_engine_constants():
     assert _enum(spec, "properties", "team_formation") == list(course.TEAM_FORMATIONS)
     assert _enum(spec, "properties", "submit_via") == list(course.SUBMIT_VIA)
     assert _enum(spec, "properties", "visibility") == list(course.VISIBILITIES)
-    assert _enum(spec, "properties", "format") == list(course.FORMATS)
+    listed = spec["properties"]["formats"]["oneOf"][0]
+    assert _enum(listed, "items") == list(course.FORMATS)
     assert set(spec["properties"]) == set(grades.SPEC_KEYS)
 
     sched = schemas.schedule_schema()
@@ -43,9 +44,7 @@ def test_file_schema_enums_are_the_engine_constants():
     assert set(top) == set(schedule.KNOWN_TOP_LEVEL)
     release = top["releases"]["additionalProperties"]
     assert set(release["properties"]) == set(schedule.KNOWN_RELEASE)
-    assert set(release["properties"]["type"]["enum"]) == set(
-        schedule.KNOWN_RELEASE_TYPES
-    )
+    assert set(release["properties"]["kind"]["enum"]) == set(schedule.KNOWN_ROW_KINDS)
     assert set(release["properties"]["deploy"]["items"]["properties"]) == set(
         schedule.KNOWN_DEPLOY
     )
@@ -119,7 +118,7 @@ CONTRACT_STATUS = {
     "schema": "dsl.status/1",
     "inputs": {
         "schedule.yml": "a",
-        "people.yml": "b",
+        "instructors.yml": "b",
         "students.csv": "c",
         "teams.csv": "d",
         "grading_sheets": "e",
@@ -143,12 +142,12 @@ CONTRACT_STATUS = {
         "templates": [
             {"repo": "assignment-3-f2026", "slug": "assignment-3", "state": "problem"}
         ],
-        "cohorts": ["hertie-dsl-demo-f2026"],
+        "semesters": ["hertie-dsl-demo-f2026"],
     },
-    "cohort": {
+    "semester": {
         "org": "hertie-dsl-demo-f2026",
-        "term": "f2026",
-        "term_label": "Fall 2026",
+        "key": "f2026",
+        "label": "Fall 2026",
         "timezone": "Europe/Berlin",
         "week": 3,
         "weeks": 15,
@@ -167,7 +166,7 @@ CONTRACT_STATUS = {
     "problems": [
         {
             "id": "schedule:s5:SOURCE_MISSING",
-            "scope": "cohort",
+            "scope": "semester",
             "stage": "K4",
             "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
             "stops": "The release on Thu 8 Oct will be skipped.",
@@ -183,7 +182,7 @@ CONTRACT_STATUS = {
     "this_week": [
         {
             "when": "2026-09-24T10:00:00+02:00",
-            "type": "release",
+            "kind": "release",
             "ref": "s3",
             "title": "Session 3: Trees",
             "state": "planned",
@@ -193,7 +192,7 @@ CONTRACT_STATUS = {
         {
             "id": "s5",
             "when": "2026-10-08T10:00:00+02:00",
-            "type": "lecture",
+            "kind": "lecture",
             "title": "Trees and ensembles",
             "state": "will_be_skipped",
             "source": {"repo": "course-materials-f2026", "path": "lectures/05_trees"},
@@ -210,7 +209,7 @@ CONTRACT_STATUS = {
             "state": "open",
             "handout": "2026-09-15T10:00:00+02:00",
             "due": "2026-09-27T23:59:00+02:00",
-            "late_until": "2026-10-07T23:59:00+02:00",
+            "grading_cutoff_datetime": "2026-10-07T23:59:00+02:00",
             "solution_shown": None,
             "units": 48,
             "submissions": 37,

@@ -61,7 +61,7 @@ def wired(monkeypatch):
         "get_file_content",
         lambda o, r, p: READING if p.endswith("READINGS.md") else "",
     )
-    return lambda: syllabus.build("Course", "Cohort-f2026", "cm")[0]
+    return lambda: syllabus.build("Course", "Semester-f2026", "cm")[0]
 
 
 def test_sessions_come_out_in_order_with_their_declared_names(wired):
@@ -141,11 +141,11 @@ def test_the_cli_succeeds_on_a_real_schedule(monkeypatch, capsys, wired):
             "x",
             "--course-org",
             "C",
-            "--cohort-org",
+            "--semester-org",
             "H",
             "--course-source-repo",
             "cm",
-            "--write",
+            "--no-preview",
         ],
     )
     assert syllabus.main() == 0
@@ -158,7 +158,7 @@ def test_the_cli_succeeds_on_a_real_schedule(monkeypatch, capsys, wired):
 def _argv(monkeypatch, *extra):
     monkeypatch.setattr(
         "sys.argv",
-        ["x", "--course-org", "C", "--cohort-org", "H", "--course-source-repo", "cm"]
+        ["x", "--course-org", "C", "--semester-org", "H", "--course-source-repo", "cm"]
         + list(extra),
     )
 
@@ -177,7 +177,7 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
     assert preview.block.startswith("## Course sessions and readings")
     assert preview.counts == {"sessions": 2}
     assert preview.text == "Built the session list: 2 sessions; nothing was written."
-    _argv(monkeypatch, "--write")
+    _argv(monkeypatch, "--no-preview")
     wrote = syllabus.main()
     assert wrote == 0 and wrote.block == preview.block
     assert wrote.block in written[syllabus.SYLLABUS_SESSIONS_FILE]
@@ -188,7 +188,7 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
 
 def test_a_failed_write_still_shows_the_block(monkeypatch, wired):
     monkeypatch.setattr(syllabus, "put_file", lambda *a: False)
-    _argv(monkeypatch, "--write")
+    _argv(monkeypatch, "--no-preview")
     out = syllabus.main()
     assert out == 1 and out.block
     assert [r["code"] for r in out.reasons] == ["WRITE_FAILED"]
@@ -199,7 +199,7 @@ def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkey
     # session whether or not that entry declared one - so a readings-only or "Course opens"
     # entry silently blanked a session the website names. Reading `schedule_plan.planned_sessions`
     # is what makes the two agree.
-    sched = syllabus.schedule.load("Cohort-f2026")
+    sched = syllabus.schedule.load("Semester-f2026")
     sched.releases.append(
         Release(
             "readings-push",
@@ -217,7 +217,7 @@ def test_a_schedule_with_no_sessions_is_an_error_not_an_empty_file(monkeypatch, 
     monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: ())
     monkeypatch.setattr(
         "sys.argv",
-        ["x", "--course-org", "C", "--cohort-org", "H", "--course-source-repo", "cm"],
+        ["x", "--course-org", "C", "--semester-org", "H", "--course-source-repo", "cm"],
     )
     assert syllabus.main() == 1
     assert "names no dated sessions" in capsys.readouterr().err

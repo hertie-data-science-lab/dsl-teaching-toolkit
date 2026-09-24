@@ -22,8 +22,8 @@ import pytest
 
 from dsl_course import ghcli, issues, site_repo
 
-ORG = "Cohort-f2026"
-SITE = "cohort-f2026.github.io"
+ORG = "Semester-f2026"
+SITE = "semester-f2026.github.io"
 HUMAN = ("a1b2c3d4e5f6", "Jan Instructor", "jan@uni.example")
 BOT = ("bbbbbbbbbbbb", "dsl-bot", "bot@dsl.local")
 TOKEN_ACCOUNT = ("cccccccccccc", "DSL-Bot-Account", "noreply@github.com")
@@ -121,7 +121,7 @@ def _run(monkeypatch, fakes: _Fakes) -> int:
     monkeypatch.setattr(issues, "gh", fakes.gh)
     monkeypatch.setattr(issues, "gh_json", fakes.gh_json)
     monkeypatch.setattr(site_repo, "git", fakes.git)
-    monkeypatch.setattr(site_repo, "course_org_for_cohort", lambda org: "Course-Org")
+    monkeypatch.setattr(site_repo, "course_org_for_semester", lambda org: "Course-Org")
     monkeypatch.setattr(
         site_repo.notify,
         "notify_overwritten_edits",
@@ -151,7 +151,7 @@ def test_an_overwritten_human_edit_files_an_issue(human_edit):
     assert f"https://github.com/{ORG}/{SITE}/commit/{HUMAN[0]}" in body
     assert "@jan-gh" in body  # pinged, so he learns where to edit instead
     assert "`_data/people.yml`" in body
-    assert "classroom-config/people.yml" in body  # where the edit belongs
+    assert "classroom-config/instructors.yml" in body  # where the edit belongs
     create = next(c for c in fakes.gh_calls if c[:2] == ("issue", "create"))
     assert create[create.index("--repo") + 1] == f"{ORG}/{SITE}"
     assert create[create.index("--title") + 1] == site_repo.OVERWRITE_ISSUE_TITLE

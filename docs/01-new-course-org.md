@@ -6,7 +6,7 @@ workflow),
 - Its teams,
 - Later teaching materials and assignment templates are added here
 
-Set up once per course; it serves every future cohort. Per-semester setup of the student-facing org is [New cohort org](04-new-cohort-org.md).
+Set up once per course; it serves every future semester. Per-semester setup of the student-facing org is [New semester org](04-new-cohort-org.md).
 
 ## Prerequisites
 
@@ -51,14 +51,14 @@ Set up once per course; it serves every future cohort. Per-semester setup of the
 
    > Each admin handle gets an org invite that stays `pending` until they accept, so check *People → Pending invitations* if someone looks missing.
 
-   NB: TAs and co-instructors are **not** granted access here; each cohort declares its own in `classroom-config/people.yml` when you [bootstrap that cohort](04-new-cohort-org.md).
+   NB: TAs and co-instructors are **not** granted access here; each semester declares its own in `classroom-config/instructors.yml` when you [bootstrap that semester](04-new-cohort-org.md).
 
-   > **If an edit here breaks the file**, nothing goes quiet. `dsl-course.yml` and `cohort-courses-pages.yml` (the cohort registry, written for you by **Bootstrap cohort**) are the two files that decide whether this course is synced at all, so a line the toolkit cannot use - a handle that is not a GitHub username, a `central_ref:` that is neither `main`, `release` nor a full 40-character commit SHA, a registry that is not a list of org names - opens **one** issue in this repo, *dsl-course.yml / cohort registry has entries the sync cannot use*, listing every such line with a link to it, and emails the admins. Fix the line and the issue closes itself. Nothing here reds a run.
+   > **If an edit here breaks the file**, nothing goes quiet. `dsl-course.yml` and `cohort-courses-pages.yml` (the semester registry, written for you by **Bootstrap semester**) are the two files that decide whether this course is synced at all, so a line the toolkit cannot use - a handle that is not a GitHub username, a `central_ref:` that is neither `main`, `release` nor a full 40-character commit SHA, a registry that is not a list of org names - opens **one** issue in this repo, *dsl-course.yml / cohort registry has entries the sync cannot use*, listing every such line with a link to it, and emails the admins. Fix the line and the issue closes itself. Nothing here reds a run.
 
 ## Next
 
 - [Add materials](02-add-materials-to-course.md) and [Add assignment](03-add-assignment-to-course.md) to the course org.
-- When the year starts: [New cohort org](04-new-cohort-org.md).
+- When the year starts: [New semester org](04-new-cohort-org.md).
 
 ---
 **Demo:** course org [`hertie-dsl-demo-course-e1234`](https://github.com/hertie-dsl-demo-course-e1234) ·

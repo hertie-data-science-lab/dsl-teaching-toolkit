@@ -101,7 +101,7 @@ def _record_pr_calls(monkeypatch) -> list[tuple[str, ...]]:
 
     def fake_gh(*args: str, **kwargs) -> tuple[int, str]:
         calls.append(args)
-        return (0, "https://github.com/Cohort/materials/pull/7\n")
+        return (0, "https://github.com/Semester/materials/pull/7\n")
 
     def listing(rows):
         def fake_json(*args: str, **kwargs):
@@ -114,12 +114,12 @@ def _record_pr_calls(monkeypatch) -> list[tuple[str, ...]]:
     # No PR yet: the create path, with the review request that follows it.
     monkeypatch.setattr(pulls, "gh_json", listing([]))
     pulls.upsert_pr(
-        "Cohort/materials",
+        "Semester/materials",
         head="upstream",
         base="main",
         title="Release held for review",
         body="materials/week02",
-        reviewer="Cohort/instructors",
+        reviewer="Semester/instructors",
     )
     # One already open: the body refresh. The row carries `baseRefName`, because a PR
     # whose base is not the one asked for is read as retargeted and left alone - which is
@@ -141,7 +141,7 @@ def _record_pr_calls(monkeypatch) -> list[tuple[str, ...]]:
         ),
     )
     pulls.upsert_pr(
-        "Cohort/materials",
+        "Semester/materials",
         head="upstream",
         base="main",
         title="Release held for review",

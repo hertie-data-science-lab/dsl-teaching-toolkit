@@ -12,8 +12,8 @@ constants/helpers below (the check-team gate, the checkout+python job preamble, 
 dropdown builders); the prose and ordering stay per-workflow.
 
 The Release materials workflow's inputs are deliberately the SAME five fields as a
-schedule.yml `deploy:` entry (course_source_repo, course_source_path, cohort_dest_repo,
-cohort_dest_path, plus the cohort org) - one vocabulary for the scheduled and the manual
+schedule.yml `deploy:` entry (course_source_repo, course_source_path, semester_dest_repo,
+semester_dest_path, plus the semester org) - one vocabulary for the scheduled and the manual
 path, so what faculty learn on the workflow reads straight across into the schedule.
 Nothing about the workflow is discovered from the source repo any more: `course_source_path`
 is free text (a folder, a file, or a comma-separated list), so it needs no per-section
@@ -38,11 +38,13 @@ from .course import (
     PUBLIC_TYPES,
     SANDBOX_USER,
     SCOPED_RUN_TITLE,
+    SOLUTION_NOW,
+    SOLUTION_WARNING,
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
-    term_tag,
+    semester_of,
 )
 
 # Third-party actions pinned to full commit SHAs. Every job below runs with an org-owner
@@ -86,12 +88,12 @@ jobs:
 """
 
 # `seed refresh` converges a whole org - dozens of Contents-API writes across every content
-# repo, .github, and every registered cohort - so two runs at once race each other into sha
+# repo, .github, and every registered semester - so two runs at once race each other into sha
 # conflicts. The nightly refresh is therefore serialised AGAINST ITSELF, and nothing else
 # joins the group.
 #
 # Deliberately NOT shared with the workflows that end in a refresh (New materials, New
-# assignment, Bootstrap cohort). Actions concurrency has no `queue:`: a group holds exactly
+# assignment, Bootstrap semester). Actions concurrency has no `queue:`: a group holds exactly
 # ONE pending run, so a third arrival CANCELS the second - `cancel-in-progress: false`
 # notwithstanding. Putting an operator's click in a group with a nightly cron therefore
 # means a click that silently does nothing, which is the worse failure: the operator is
@@ -103,28 +105,59 @@ _SEED_REFRESH_CONCURRENCY = """concurrency:
 """
 
 # The scheduler's concurrency sits on its JOBS, never on the workflow: a workflow-level
-# group is one queue for every action in every cohort, which is how a two-hour grading pass
+# group is one queue for every action in every semester, which is how a two-hour grading pass
 # held up a release that was due meanwhile. Each job declares its own instead.
 #
 # Releases are fire-once, guarded by markers written as they complete, so two concurrent
 # passes can double-release whatever the first has not yet marked - hence still a queue of
-# one. A manual DRY-RUN writes nothing and therefore needs no serialisation, and joining the
+# one. A manual PREVIEW writes nothing and therefore needs no serialisation, and joining the
 # queue is exactly how an operator's preview gets silently dropped (Actions holds ONE
 # pending run per group, so a third arrival cancels the second whatever
 # `cancel-in-progress` says): it gets a group of its own, per run.
 _RELEASE_CONCURRENCY = """    concurrency:
-      group: ${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}
+      group: ${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && github.run_id || 'scheduled-release' }}
       cancel-in-progress: false
 """
 
-# Grading is queued PER COHORT: the fire-once autograde marker is a cohort-side file, so two
-# passes over the same cohort can double-grade, while a pass over another cohort shares
-# nothing with it and must never wait. A dry-run leg is per run AND per cohort, for the same
+# Grading is queued PER SEMESTER: the fire-once autograde marker is a semester-side file, so two
+# passes over the same semester can double-grade, while a pass over another semester shares
+# nothing with it and must never wait. A dry-run leg is per run AND per semester, for the same
 # reason the release job's is: it writes nothing, so it needs no queue, and a queue is what
 # would silently drop an operator's preview.
 _AUTOGRADE_CONCURRENCY = """    concurrency:
-      group: ${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, matrix.cohort) || format('scheduled-autograde-{0}', matrix.cohort) }}
+      group: ${{ github.event_name == 'workflow_dispatch' && inputs.preview != false && format('{0}-{1}', github.run_id, matrix.semester) || format('scheduled-autograde-{0}', matrix.semester) }}
       cancel-in-progress: false
+"""
+
+
+# Which semester a repository_dispatch names, and whether it asks for all of them. The old
+# `cohort_org` (decision 0012) is never read: a dispatch that still sends it fails its step
+# as NOT_MIGRATED, from the check below.
+#
+# ONE narrow exception: `all_cohorts`, which the ds01 membership timer - an EXTERNAL system,
+# changed in lockstep at Promote - still sends. Read as a deprecated alias of
+# `all_semesters`, with a line in the log and no fault, so the hourly sync does not go red
+# in the gap. It goes once ds01-infra sends `all_semesters` (maintainers.md, Migration).
+_PAYLOAD_SEMESTER = "github.event.client_payload.semester_org"
+_PAYLOAD_ALL_SEMESTERS = (
+    "(toJSON(github.event.client_payload.all_semesters) == 'true' "
+    "|| toJSON(github.event.client_payload.all_cohorts) == 'true')"
+)
+_OLD_PAYLOAD_ENV = (
+    "          OLD_PAYLOAD: ${{ github.event.client_payload.cohort_org }}\n"
+)
+_OLD_PAYLOAD_CHECK = """          if [ -n "$OLD_PAYLOAD" ]; then
+            echo "::error::NOT_MIGRATED: this dispatch sends cohort_org, the old name of semester_org - run the migration"
+            exit 1
+          fi
+"""
+_DEPRECATED_ALL_ENV = (
+    "          DEPRECATED_ALL: "
+    "${{ toJSON(github.event.client_payload.all_cohorts) == 'true' }}\n"
+)
+_DEPRECATED_ALL_NOTE = """          if [ "$DEPRECATED_ALL" = "true" ]; then
+            echo "deprecated: this dispatch sends all_cohorts - read as all_semesters; switch the sender to all_semesters"
+          fi
 """
 
 
@@ -135,7 +168,7 @@ def _concurrency(name: str) -> str:
     roster), a force-pushed render branch, an org's team membership, a site repo. Two
     overlapping runs race each other into sha conflicts and half-written state, and the
     triggers that fire them are exactly the ones that bunch up (a push, a
-    repository_dispatch per cohort edit, a daily cron, an operator's click).
+    repository_dispatch per semester edit, a daily cron, an operator's click).
 
     `cancel-in-progress: false`, so a run already doing work is never killed part-way.
     Actions has no `queue:` - a group holds one pending run, and a third arrival drops the
@@ -187,13 +220,13 @@ _CHECK_TEAM = (
 # healthy run is an outage, not a safety net.
 #
 # 30 is the ordinary budget - a handful of API calls, or one repo cloned.
-# 60 covers the two jobs that write across MANY repos in series: Bootstrap cohort, which
+# 60 covers the two jobs that write across MANY repos in series: Bootstrap semester, which
 #     creates and configures a whole org and then converges it, and the scheduler's release
-#     job, whose `assignment` handout provisions one repo per student for every cohort at
-#     once - so two cohorts handing out on the same tick outlast the ordinary budget.
+#     job, whose `assignment` handout provisions one repo per student for every semester at
+#     once - so two semesters handing out on the same tick outlast the ordinary budget.
 # 120 covers the jobs that grade: collect budgets 300s PER submission subprocess and walks
-#     a cohort serially - the manual Collect submissions button and the scheduler's
-#     autograde job, which is one matrix leg per cohort - and Distribute grades, which
+#     a semester serially - the manual Collect submissions button and the scheduler's
+#     autograde job, which is one matrix leg per semester - and Distribute grades, which
 #     writes a gradebook and an email per student in series.
 _TIMEOUT_DEFAULT = 30
 _TIMEOUT_MANY_REPOS = 60
@@ -216,8 +249,8 @@ _TIMEOUT_GRADING = 120
 #
 #   05:27  Refresh actions          converge workflows + secrets
 #   05:58  Publish course website   public open-courseware site
-#   06:13  Sync membership          teams from people.yml
-#   06:41  Sync site                cohort sites (reads those teams)
+#   06:13  Sync membership          teams from instructors.yml
+#   06:41  Sync site                semester sites (reads those teams)
 #
 # Spacing is nominal only - a late delivery can still overlap - so it is the per-workflow
 # `concurrency` groups, not these minutes, that keep a workflow from overlapping ITSELF.
@@ -306,7 +339,7 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> 
 
 
 # Mail secrets, wired into the env of the workflows that send email (enrolment codes and
-# grade notifications) - and of Check cohort setup, which does not send but REPORTS
+# grade notifications) - and of Check semester setup, which does not send but REPORTS
 # whether a send could: its mail-transport row reads the very same variables, and without
 # them it would report "unset" on every org whatever the truth.
 # A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
@@ -322,26 +355,28 @@ def _secret_env(*names: str) -> str:
 
 
 _MAIL_ENV = _secret_env(*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
-# Who hears about a fault in the COURSE org's OWN config - dsl-course.yml and the cohort
+# Who hears about a fault in the COURSE org's OWN config - dsl-course.yml and the semester
 # registry, the two files that decide whether the course is synced at all. Separate from
 # _MAIL_ENV because only two steps in the estate check those files (the scheduler's release
 # pass and Sync membership's automatic job, both of which run in the course org), and an
 # address list has no business in the env of a workflow that never reads it. Never in a
-# cohort-seeded workflow: see maintainers.md.
+# semester-seeded workflow: see maintainers.md.
 _COURSE_ADMIN_ENV = _secret_env(mailer.COURSE_ADMIN_ENV)
 
 # Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
-# renamed input - previews. Shared by the buttons whose `dry_run` DEFAULTS TO TRUE, which is
-# the set whose real run reaches further than a second click can take back: Distribute
-# grades emails a whole cohort, Archive cohort freezes one, Derive student version
-# overwrites instructor-written files on a template's `main`, and Patch released
-# assignment commits into every student's repo. Their CLIs spell the flag
-# `--dry-run/--no-dry-run` and default it ON, so the gate has to pass one of the two
-# EXPLICITLY - "add nothing when the box is unticked" would preview for ever. The other
-# dry-run gates in this module guard convergent work and keep the simpler spelling.
-_DRY_RUN_GATE = (
-    '          if [ "$DRY_RUN" = "false" ]; '
-    "then args+=(--no-dry-run); else args+=(--dry-run); fi"
+# renamed input - previews. EVERY button with a `preview` box carries it (decision 0012),
+# and every CLI previews by default (`log.add_preview_flag`), so the gate passes one of the
+# two EXPLICITLY - "add nothing when the box is unticked" would preview for ever, and a
+# caller that relied on the default could not be told from one that forgot.
+_PREVIEW_GATE = (
+    '          if [ "$PREVIEW" = "false" ]; '
+    "then args+=(--no-preview); else args+=(--preview); fi"
+)
+# The scheduler's two jobs also run unattended: a cron or a repository_dispatch has no
+# `preview` box, and is a real run. Only a button press previews, unless told `false`.
+_SCHEDULED_PREVIEW_GATE = (
+    '          if [ "$EVENT" = "workflow_dispatch" ] && [ "$PREVIEW" != "false" ]; '
+    "then args+=(--preview); else args+=(--no-preview); fi"
 )
 
 
@@ -373,14 +408,14 @@ _DRY_RUN_GATE = (
 # without mailing.
 #
 # A workflow whose unattended jobs run CONCURRENTLY has to go further, and `scope` is how:
-# the scheduler releases and grades in two jobs (grading once per cohort), which fail
+# the scheduler releases and grades in two jobs (grading once per semester), which fail
 # independently, and on a shared title the green one closes the red one's issue - then the
 # next tick files it again, cc-ing course-admin four times an hour about the one fault. A
 # scoped job appends its own suffix and so keeps its own issue. The default, no suffix, is
 # the title every org already has open, so those still self-close.
 #
 # Which is why both lookups below match the title EXACTLY, client-side. `--search` is a
-# WORD match: "<workflow> is failing" also hits "<workflow> (autograde <cohort>) is
+# WORD match: "<workflow> is failing" also hits "<workflow> (autograde <semester>) is
 # failing", so the release job's close loop would close every grading leg's open issue on
 # every green tick, the failing leg would refile with a fresh cc, and the 6h throttle would
 # never engage. The search stays as the cheap server-side narrowing; `select(.title == ..)`
@@ -410,8 +445,8 @@ _UNATTENDED = "__CRON_UNATTENDED_IF__"
 _NOTE = "__CRON_NOTE__"
 
 # Where a cron step keeps its own output for the mail step below to tail. The runner's
-# temp directory, so it is per JOB - the scheduler's grading matrix runs a leg per cohort,
-# each on its own runner, and a shared path would let one cohort's mail carry another's log.
+# temp directory, so it is per JOB - the scheduler's grading matrix runs a leg per semester,
+# each on its own runner, and a shared path would let one semester's mail carry another's log.
 _RUN_LOG = '"$RUNNER_TEMP/run.log"'
 
 # Appended to the main `run:` command of every cron step the mail below reports on, so the
@@ -427,7 +462,7 @@ _TEE_RUN_LOG = f' 2>&1 | tee {_RUN_LOG}\n          exit "${{PIPESTATUS[0]}}"'
 # The step's OWN log, teed to `_RUN_LOG` by the step itself, rather than fetched back from
 # the jobs API: this step runs INSIDE the still-running job, whose `conclusion` is null
 # until the run ends, so a lookup for the failed job matched nothing here and mailed an
-# empty tail - and on the grading matrix it could match a different cohort's leg.
+# empty tail - and on the grading matrix it could match a different semester's leg.
 # `2>/dev/null` and `|| true` because a job that died before the teeing step ran leaves no
 # log at all, and a missing tail must not lose the mail as well: the run URL is in it
 # either way. The CLI always exits 0: this job has already failed for its own reasons, and
@@ -511,7 +546,7 @@ _CRON_NOTICE_TEMPLATE = (
           # because broken infrastructure is not the teaching staff's problem.
           # Teaching staff read these too (course-admin is mentioned below), and a
           # broken run is not theirs to fix - so the note says who is already on it.
-          note=$(printf '%s\\nThe toolkit maintainer has been emailed the log - nothing for teaching staff to do.\\n' "$note")
+          note=$(printf '%s\\nThe toolkit maintainer has been emailed the log - nothing for the instructors to do.\\n' "$note")
           body=$(printf '%s\\ncc @%s/course-admin\\n' "$note" "${REPO%%/*}")
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
@@ -563,7 +598,7 @@ def _fill(
     """Bind one job's issue scope - and how it tells a failure from a success, and where it
     reads the failed log - into a reporting template.
 
-    `scope` is a SHELL fragment, so it may name an env var (`$COHORT`) and `scope_env` is
+    `scope` is a SHELL fragment, so it may name an env var (`$SEMESTER`) and `scope_env` is
     where that var comes from - a value must never reach a run block as a `${{ }}`
     expression, which GitHub substitutes before the shell parses the line. The three
     keyword arguments default to the in-job answers (this job's own status, this job's own
@@ -585,9 +620,9 @@ def _fill(
 _CRON_NOTICE = _fill(_CRON_NOTICE_TEMPLATE)
 _CRON_CLOSE = _fill(_CRON_CLOSE_TEMPLATE)
 
-# The scheduler's release job, whose issue is about the WHOLE course: a run a cohort's push
-# scoped to that one cohort (job-level `SCOPED`, see render_scheduler) neither files nor
-# closes it. Otherwise a green push in cohort A closes the issue cohort B's fault holds open,
+# The scheduler's release job, whose issue is about the WHOLE course: a run a semester's push
+# scoped to that one semester (job-level `SCOPED`, see render_scheduler) neither files nor
+# closes it. Otherwise a green push in semester A closes the issue semester B's fault holds open,
 # and the next full tick re-files it - cc course-admin and a maintainer mail - once per push.
 _RELEASE_NOTICE = _fill(
     _CRON_NOTICE_TEMPLATE,
@@ -595,8 +630,8 @@ _RELEASE_NOTICE = _fill(
     succeeded="success() && env.SCOPED == ''",
 )
 
-# The scheduler's grading legs report PER COHORT: they run in parallel, so on a shared
-# title a green cohort would close a red cohort's open issue. A cohort org name is not
+# The scheduler's grading legs report PER SEMESTER: they run in parallel, so on a shared
+# title a green semester would close a red semester's open issue. A semester org name is not
 # per-person data, so it may be said out loud in a public repo's issue title.
 #
 # And they report from a job of their OWN. The grading job runs the student's code, which
@@ -605,27 +640,27 @@ _RELEASE_NOTICE = _fill(
 # student's and everything below runs on a fresh runner. What that costs is the two things
 # the in-job form got for free - the job's status and its log - so the first step here buys
 # both back off the jobs API, keyed on the leg's own name.
-_AUTOGRADE_OUTCOME = """      - name: How this cohort's grading leg ended
+_AUTOGRADE_OUTCOME = """      - name: How this semester's grading leg ended
         id: graded
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           ATTEMPT: ${{ github.run_attempt }}
-          COHORT: ${{ matrix.cohort }}
+          SEMESTER: ${{ matrix.semester }}
         run: |
-          # The leg's `name:` is `autograde <cohort>`, set explicitly on the job so this
+          # The leg's `name:` is `autograde <semester>`, set explicitly on the job so this
           # lookup matches a string the workflow declares rather than one GitHub composes.
           # `|| true` and a `head`: under `bash -e` a transient search failure would
           # otherwise abort the job that exists to report, and a re-run reads its OWN
           # attempt.
           row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \\
-            --jq ".jobs[] | select(.name == \\"autograde $COHORT\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
+            --jq ".jobs[] | select(.name == \\"autograde $SEMESTER\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
           if [ -z "$row" ]; then
-            # No leg for this cohort in this attempt - a cohort registered between the two
+            # No leg for this semester in this attempt - a semester registered between the two
             # jobs, or a matrix leg GitHub never started. Nothing happened, so nothing is
             # filed and nothing is closed.
-            echo "no grading leg for this cohort in this run - nothing to report"
+            echo "no grading leg for this semester in this run - nothing to report"
             echo "result=skipped" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -636,8 +671,8 @@ _AUTOGRADE_OUTCOME = """      - name: How this cohort's grading leg ended
 
 _AUTOGRADE_REPORT = _AUTOGRADE_OUTCOME + _fill(
     _CRON_NOTICE_TEMPLATE,
-    "autograde $COHORT",
-    "          COHORT: ${{ matrix.cohort }}\n",
+    "autograde $SEMESTER",
+    "          SEMESTER: ${{ matrix.semester }}\n",
     # `skipped` is "there was no run to report on", which is neither a failure to file nor
     # a recovery to close. Anything else that is not a success - including the `cancelled`
     # a leg killed by its own timeout-minutes ends in - is the fault this exists to surface.
@@ -665,15 +700,15 @@ def _choice(options: list[str]) -> str:
 # A trailing academic year in an org/repo name - the naming convention's term marker
 # (`...-f2026`, `course-materials-f2026`). Anchored to 19xx/20xx so a course code that
 # merely ends in four digits (`...-e1234`) is not mistaken for a year.
-_TERM_YEAR = re.compile(r"((?:19|20)\d{2})\D*$")
+_SEMESTER_YEAR = re.compile(r"((?:19|20)\d{2})\D*$")
 
 
 def _newest(options: list[str]) -> str | None:
     """The option carrying the latest term year, or None when none of them carries one
     (in which case GitHub's own "first option is selected" behaviour stands). Faculty
-    almost always want the cohort/materials repo they are teaching now, and the dropdowns
-    are sorted alphabetically, so without this the oldest cohort is pre-selected."""
-    dated = [(m.group(1), o) for o in options if (m := _TERM_YEAR.search(o))]
+    almost always want the semester/materials repo they are teaching now, and the dropdowns
+    are sorted alphabetically, so without this the oldest semester is pre-selected."""
+    dated = [(m.group(1), o) for o in options if (m := _SEMESTER_YEAR.search(o))]
     return max(dated)[1] if dated else None
 
 
@@ -684,7 +719,7 @@ def _newest_materials(options: list[str]) -> str | None:
     dated = [
         (tag[1:], tag[0] == "f", o)
         for o in options
-        if o.startswith(MATERIALS_REPO_PREFIX) and (tag := term_tag(o))
+        if o.startswith(MATERIALS_REPO_PREFIX) and (tag := semester_of(o))
     ]
     return max(dated)[2] if dated else None
 
@@ -698,7 +733,7 @@ def _choice_input(
 ) -> str:
     """A dropdown input, required by default. Pre-selected on `default` if given, otherwise
     on the latest term year (see _newest) - every org/repo dropdown in every workflow, so a
-    faculty member never has to scroll past last year's cohort to reach this year's.
+    faculty member never has to scroll past last year's semester to reach this year's.
 
     `required=False` drops the asterisk GitHub renders beside the label. It is for a box
     that always arrives answered anyway - a dropdown carrying a `default:` is submitted
@@ -743,19 +778,19 @@ def _copy_from_input(description: str, options: list[str]) -> str:
 # workflow_dispatch inputs as a flat list of boxes with no grouping. The input NAMES are
 # still a schedule.yml `deploy:` entry's keys exactly - the mapping is the key itself, not
 # the label, so the descriptions stay plain English rather than echoing the snake_case.
-# course_source_path and cohort_dest_path are comma-separated PARALLEL lists paired by
-# index (see deploy.parse_path_pairs); a blank cohort_dest_path mirrors every
-# course_source_path, exactly as an omitted `cohort_dest_path:` does in the schedule.
+# course_source_path and semester_dest_path are comma-separated PARALLEL lists paired by
+# index (see deploy.parse_path_pairs); a blank semester_dest_path mirrors every
+# course_source_path, exactly as an omitted `semester_dest_path:` does in the schedule.
 #
-# cohort_dest_path ships EMPTY rather than pre-filled - a `default:` on a free-text box is
+# semester_dest_path ships EMPTY rather than pre-filled - a `default:` on a free-text box is
 # submitted verbatim, so pre-filling a PATH reads as a value the faculty member chose.
-# cohort_dest_repo is the opposite case and carries `materials`, the same default an omitted
-# `cohort_dest_repo:` takes in the schedule: `materials` is not a guess at intent, it is the
+# semester_dest_repo is the opposite case and carries `materials`, the same default an omitted
+# `semester_dest_repo:` takes in the schedule: `materials` is not a guess at intent, it is the
 # answer the system supplies either way, so showing it teaches the default instead of hiding
 # it. This box used to be required-and-blank on the theory that naming the destination was
 # worth forcing - but a mandatory free-text field IS the typo surface that theory feared, and
 # it made the button contradict the schedule for no gain. A cleared box is still safe:
-# deploy.main resolves `cohort_dest_repo.strip() or "materials"`.
+# deploy.main resolves `semester_dest_repo.strip() or "materials"`.
 _COURSE_SOURCE_REPO_DESC = "1. repo to release from in the course org"
 
 _COURSE_SOURCE_PATH_INPUT = """\
@@ -763,19 +798,21 @@ _COURSE_SOURCE_PATH_INPUT = """\
         description: "2. within-repo folder/file path to copy from (or comma-separated list)"
         required: true"""
 
-_COHORT_DEST_INPUTS = """\
-      cohort_dest_repo:
-        description: "4. repo to release to in the cohort org; created if missing"
+_SEMESTER_DEST_INPUTS = """\
+      semester_dest_repo:
+        description: "4. repo to release to in the semester org; created if missing"
         default: "materials"
         required: true
-      cohort_dest_path:
+      semester_dest_path:
         description: "5. within-repo destination path (blank mirrors box 2's path(s)); created if missing"
         required: false"""
 
 
-def _render_release(header: str, cohort_orgs: list[str], source_repo_input: str) -> str:
+def _render_release(
+    header: str, semester_orgs: list[str], source_repo_input: str
+) -> str:
     """The Release materials workflow, shared by both variants. Its five inputs ARE a
-    schedule.yml `deploy:` entry (plus the cohort org): the same names, the same meaning -
+    schedule.yml `deploy:` entry (plus the semester org): the same names, the same meaning -
     and the same executor, deploy.deploy_many, so a batch of paths clones each repo once
     whether it arrives from the cron or from this workflow. Only the `course_source_repo`
     widget differs between variants (a dropdown centrally, a pre-filled string inside a
@@ -787,8 +824,8 @@ on:
     inputs:
 {source_repo_input}
 {_COURSE_SOURCE_PATH_INPUT}
-{_choice_input("cohort_org", "3. target cohort org", cohort_orgs)}
-{_COHORT_DEST_INPUTS}
+{_choice_input("semester_org", "3. target semester org", semester_orgs)}
+{_SEMESTER_DEST_INPUTS}
 
 {_concurrency("release-materials")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -796,22 +833,22 @@ on:
 {_run_preamble()}      - name: Release
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          SRC_ORG: ${{{{ github.repository_owner }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_PATH: ${{{{ inputs.course_source_path }}}}
-          COHORT_DEST_REPO: ${{{{ inputs.cohort_dest_repo }}}}
-          COHORT_DEST_PATH: ${{{{ inputs.cohort_dest_path }}}}
+          SEMESTER_DEST_REPO: ${{{{ inputs.semester_dest_repo }}}}
+          SEMESTER_DEST_PATH: ${{{{ inputs.semester_dest_path }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.deploy --source-org "$SRC_ORG" \\
-            --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" \\
-            --course-source-path "$COURSE_SOURCE_PATH" --cohort-dest-repo "$COHORT_DEST_REPO" \\
-            --cohort-dest-path "$COHORT_DEST_PATH"
+          python3 -m dsl_course.deploy --course-org "$COURSE_ORG" \\
+            --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" \\
+            --course-source-path "$COURSE_SOURCE_PATH" --semester-dest-repo "$SEMESTER_DEST_REPO" \\
+            --semester-dest-path "$SEMESTER_DEST_PATH" --no-preview
 """
 
 
-def render_release(cohort_orgs: list[str], repo: str) -> str:
+def render_release(semester_orgs: list[str], repo: str) -> str:
     """Run-from-repo copy: `course_source_repo` is a free-text field pre-filled with `repo`
     (the repo this workflow is being seeded into), so the common case needs no thought
     but a different source repo in the same org can still be typed in."""
@@ -822,18 +859,18 @@ def render_release(cohort_orgs: list[str], repo: str) -> str:
     return _render_release(
         header=(
             "\n# Run from a course content repo: course_source_repo is pre-filled with THIS"
-            " repo (editable).\n# Copies the given path(s) into the cohort org."
-            " course_source_path and\n# cohort_dest_path are comma-separated parallel lists"
-            " paired by index - leave\n# cohort_dest_path blank to mirror course_source_path."
-            " These are exactly a schedule.yml\n# `deploy:` entry's fields.\n# The cohort"
+            " repo (editable).\n# Copies the given path(s) into the semester org."
+            " course_source_path and\n# semester_dest_path are comma-separated parallel lists"
+            " paired by index - leave\n# semester_dest_path blank to mirror course_source_path."
+            " These are exactly a schedule.yml\n# `deploy:` entry's fields.\n# The semester"
             " dropdown is refreshed by the 'Refresh actions' workflow.\n"
         ),
-        cohort_orgs=cohort_orgs,
+        semester_orgs=semester_orgs,
         source_repo_input=source_repo_input,
     )
 
 
-def render_central_release(source_repos: list[str], cohort_orgs: list[str]) -> str:
+def render_central_release(source_repos: list[str], semester_orgs: list[str]) -> str:
     """Central copy that lives in .github: `course_source_repo` is a dropdown of the course
     org's content repos (discovery.discover_content_repos), since this workflow lives
     outside any one of them. Otherwise identical to the run-from-repo workflow."""
@@ -843,13 +880,13 @@ def render_central_release(source_repos: list[str], cohort_orgs: list[str]) -> s
     return _render_release(
         header=(
             "\n# Central copy: pick the SOURCE repo in this course org, then the path(s) to"
-            " copy into\n# the cohort org. course_source_path and cohort_dest_path are"
-            " comma-separated parallel lists paired\n# by index - leave cohort_dest_path"
+            " copy into\n# the semester org. course_source_path and semester_dest_path are"
+            " comma-separated parallel lists paired\n# by index - leave semester_dest_path"
             " blank to mirror course_source_path. These are exactly a\n# schedule.yml"
             " `deploy:` entry's fields.\n# Dropdowns are refreshed by the 'Refresh actions'"
             " workflow.\n"
         ),
-        cohort_orgs=cohort_orgs,
+        semester_orgs=semester_orgs,
         source_repo_input=source_repo_input,
     )
 
@@ -885,7 +922,7 @@ def _assignment_input(
 
 
 def render_provision(
-    cohort_orgs: list[str],
+    semester_orgs: list[str],
     assignments: list[str] | None = None,
     source_repo: str = "",
 ) -> str:
@@ -897,7 +934,7 @@ def render_provision(
     Nor which schedule entry, on the rare template two of them hand out from: the run
     refuses that template and names them, because the SCHEDULE is what knows which is
     firing and a box asking a faculty member to pick between two keys is a coin toss over
-    which half of a cohort gets its repos.
+    which half of a semester gets its repos.
 
     The four that remain are numbered in the order they are answered - what to hand out,
     where it goes, then the two switches - because GitHub renders dispatch inputs as a
@@ -918,15 +955,15 @@ on:
   workflow_dispatch:
     inputs:
 {_assignment_input(assignments or [], "1. Course-org repo to hand out from", source_repo)}
-{_choice_input("cohort_org", "2. Target cohort org", cohort_orgs)}
-      include_solution:
-        description: "3. Also push the model solution from the template's solution branch into every student repo"
+{_choice_input("semester_org", "2. Target semester org", semester_orgs)}
+      solution_datetime:
+        description: "3. Type {SOLUTION_NOW} to also push the model solution from the template's solution branch. {SOLUTION_WARNING} Leave empty otherwise; a later moment belongs in schedule.yml"
+        required: false
+        default: ""
+      preview:
+        description: "4. Preview - list the repos that would be created, create nothing"
         type: boolean
-        default: false
-      dry_run:
-        description: "4. Preview only - list the repos that would be created, create nothing"
-        type: boolean
-        default: false
+        default: true
 
 {_concurrency("release-assignment")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -934,22 +971,22 @@ on:
 {_run_preamble()}      - name: Provision
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          MASTER_ORG: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          INC_SOL: ${{{{ inputs.include_solution }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          SOLUTION_DATETIME: ${{{{ inputs.solution_datetime }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
-          [ "$INC_SOL" = "true" ] && args+=(--solution)
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG")
+          [ -n "$SOLUTION_DATETIME" ] && args+=(--solution-datetime "$SOLUTION_DATETIME")
+{_PREVIEW_GATE}
           python3 -m dsl_course.assign "${{args[@]}}"
 """
 
 
 def render_collect_submissions(
-    cohort_orgs: list[str], assignments: list[str] | None = None
+    semester_orgs: list[str], assignments: list[str] | None = None
 ) -> str:
     """Refresh one assignment's grading sheet on demand, between cron ticks."""
     return f"""name: Collect submissions
@@ -965,16 +1002,16 @@ def render_collect_submissions(
 on:
   workflow_dispatch:
     inputs:
-{_choice_input("cohort_org", "Cohort org (submissions)", cohort_orgs)}
+{_choice_input("semester_org", "Semester org (submissions)", semester_orgs)}
 {_assignment_input(assignments or [])}
       slug:
         description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
         required: false
         default: ""
-      dry_run:
-        description: "Preview only - show what WOULD be refreshed"
+      preview:
+        description: "Preview - show what WOULD be refreshed"
         type: boolean
-        default: false
+        default: true
 
 {_concurrency("collect-submissions")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -982,15 +1019,15 @@ on:
 {_run_preamble(_TIMEOUT_GRADING, sandbox=True)}      - name: Collect submissions
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          MASTER_ORG: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           SLUG: ${{{{ inputs.slug }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --refresh-only)
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --refresh-only)
           [ -n "$SLUG" ] && args+=(--slug "$SLUG")
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+{_PREVIEW_GATE}
           python3 -m dsl_course.collect "${{args[@]}}"
 """
 
@@ -998,25 +1035,25 @@ on:
 _FACULTY_ONLY = "(faculty only)"
 
 
-def render_sync_membership(cohort_orgs: list[str]) -> str:
+def render_sync_membership(semester_orgs: list[str]) -> str:
     """Consolidated roster + project-teams + faculty sync (replaces the old separate
     Sync enrolment / Sync teams workflows).
 
     Faculty always reconciles - split by role: course_admins (from THIS org's
-    declared `people:` block) into the course org + every cohort's own course-admin
-    team; and, for whichever cohort is in scope, that cohort's own instructors/TAs
-    (from its classroom-config/people.yml) into its own instructors team + a
+    declared `people:` block) into the course org + every semester's own course-admin
+    team; and, for whichever semester is in scope, that semester's own instructors/TAs
+    (from its classroom-config/instructors.yml) into its own instructors team + a
     course-org instructors-<tag> team. Roster (students.csv) + project teams
-    (teams.csv) additionally reconcile for whichever cohort is in scope. Fully
+    (teams.csv) additionally reconcile for whichever semester is in scope. Fully
     automatic, including removals (no --prune flag - config is the live truth):
 
-    - push to this file's own dsl-course.yml -> course_admins only (no single cohort
-      implied - but still applied to every cohort's own course-admin team)
-    - repository_dispatch (from a cohort's classroom-config dispatcher on push to its
-      students.csv/teams.csv/people.yml) -> course_admins + that one cohort's
-      instructors/TAs; one whose payload says `all_cohorts: true` and names no cohort
-      (the ds01 timer's hourly dispatch) -> EVERY registered cohort, like the cron
-    - daily cron -> course_admins + EVERY registered cohort (roster/teams/instructors,
+    - push to this file's own dsl-course.yml -> course_admins only (no single semester
+      implied - but still applied to every semester's own course-admin team)
+    - repository_dispatch (from a semester's classroom-config dispatcher on push to its
+      students.csv/teams.csv/instructors.yml) -> course_admins + that one semester's
+      instructors/TAs; one whose payload says `all_semesters: true` and names no semester
+      (the ds01 timer's hourly dispatch) -> EVERY registered semester, like the cron
+    - daily cron -> course_admins + EVERY registered semester (roster/teams/instructors,
       catching any start/end date rotation with no edit that day, and any drift
       generally)
     - workflow_dispatch -> manual escape hatch, gated by check-team (the other three
@@ -1033,14 +1070,14 @@ on:
       # The registry is the other half of the course's own config, and its digest issue is
       # the same one - so an edit to either is checked and mailed within the minute rather
       # than waiting for the scheduler's next tick.
-      - cohort-courses-pages.yml
+      - semesters.yml
   repository_dispatch:
     types: [sync-membership]
   schedule:
     - cron: "13 6 * * *"
   workflow_dispatch:
     inputs:
-{_cohort_dropdown(cohort_orgs, optional=True)}
+{_semester_dropdown(semester_orgs, optional=True)}
 
 {_concurrency("sync-membership")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -1049,10 +1086,10 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
         run: |
-          args=(--course-org "$COURSE")
-          [ "$COHORT_ORG" != "{_FACULTY_ONLY}" ] && args+=(--cohort-org "$COHORT_ORG")
+          args=(--course-org "$COURSE" --no-preview)
+          [ "$SEMESTER_ORG" != "{_FACULTY_ONLY}" ] && args+=(--semester-org "$SEMESTER_ORG")
           python3 -m dsl_course.sync_membership "${{args[@]}}"
 {_CRON_CLOSE}
   sync-auto:
@@ -1062,46 +1099,49 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           EVENT: ${{{{ github.event_name }}}}
-          DISPATCH_COHORT: ${{{{ github.event.client_payload.cohort_org }}}}
+          DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
           # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
-          DISPATCH_ALL: ${{{{ toJSON(github.event.client_payload.all_cohorts) == 'true' }}}}
-# A fault in the course org's own config is emailed to its admins from this step (see
+          DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
+{_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
 # dsl_course.notify.route_course), so the automatic job carries the transport and the
 # address list alongside the token. The manual button does not: somebody is standing at
 # that run and reads its log.
 {_MAIL_ENV}
 {_COURSE_ADMIN_ENV}
         run: |
-          # First, and never fatal: a push to either of the course's own config files is
+{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
           # what this job is here for, and the reconcile below is what SKIPS the course
           # when one of them cannot be read. Its own digest issue and mail are the report.
-          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config
-          args=(--course-org "$COURSE")
+          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview
+          args=(--course-org "$COURSE" --no-preview)
           case "$EVENT" in
-            schedule) args+=(--all-cohorts) ;;
+            schedule) args+=(--all-semesters) ;;
             repository_dispatch)
-              # A named cohort wins over all_cohorts.
-              if [ -n "$DISPATCH_COHORT" ]; then
-                args+=(--cohort-org "$DISPATCH_COHORT")
+              # A named semester wins over all_semesters.
+              if [ -n "$DISPATCH_SEMESTER" ]; then
+                args+=(--semester-org "$DISPATCH_SEMESTER")
               elif [ "$DISPATCH_ALL" = "true" ]; then
-                args+=(--all-cohorts)
+                args+=(--all-semesters)
               fi ;;
           esac
           python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
-def _cohort_dropdown(cohort_orgs: list[str], optional: bool = False) -> str:
-    """The plain cohort dropdown. `optional` prepends the faculty-only sentinel and pins
-    the default to it (opting IN to a cohort must stay a deliberate choice); otherwise the
-    latest cohort is pre-selected."""
-    options = ([_FACULTY_ONLY] + cohort_orgs) if optional else cohort_orgs
+def _semester_dropdown(semester_orgs: list[str], optional: bool = False) -> str:
+    """The plain semester dropdown. `optional` prepends the faculty-only sentinel and pins
+    the default to it (opting IN to a semester must stay a deliberate choice); otherwise the
+    latest semester is pre-selected."""
+    options = ([_FACULTY_ONLY] + semester_orgs) if optional else semester_orgs
     return _choice_input(
-        "cohort_org", "Cohort org", options, default=_FACULTY_ONLY if optional else None
+        "semester_org",
+        "Semester org",
+        options,
+        default=_FACULTY_ONLY if optional else None,
     )
 
 
-def render_distribute_grades(cohort_orgs: list[str]) -> str:
+def render_distribute_grades(semester_orgs: list[str]) -> str:
     """Send every mark a grader has written where it has to go."""
     return f"""name: Distribute grades
 
@@ -1111,23 +1151,23 @@ def render_distribute_grades(cohort_orgs: list[str]) -> str:
 # said twice - a re-run after one correction reaches one student.
 # There is no assignment to pick: every run rebuilds every gradebook from every sheet,
 # which is what keeps a gradebook the whole of a student's marks.
-# Dry run first; it writes no grades, sends no mail, and posts who gets what as a
+# Preview first; it writes no grades, sends no mail, and posts who gets what as a
 # "Distribute grades preview" issue in classroom-config. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
-{_cohort_dropdown(cohort_orgs)}
-      dry_run:
+{_semester_dropdown(semester_orgs)}
+      preview:
         description: "Preview who gets what, as an issue in classroom-config - push no grades, send nothing"
         type: boolean
         default: true
-      silent:
-        description: "Skip the email notification (just push the grades)"
+      notify:
+        description: "Email each student that their marks are in (off = just push the grades)"
         type: boolean
-        default: false
+        default: true
       receipt_note:
-        description: "Also post 'Marks returned: see your marks repo.' once on each student's receipts issue"
+        description: "Also post 'Marks returned: see your marks repo.' once on each student's Submission receipts issue"
         type: boolean
         default: false
       include_feedback:
@@ -1141,23 +1181,23 @@ on:
 {_run_preamble(_TIMEOUT_GRADING)}      - name: Distribute grades
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
-          SILENT: ${{{{ inputs.silent }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
+          NOTIFY: ${{{{ inputs.notify }}}}
           RECEIPT_NOTE: ${{{{ inputs.receipt_note }}}}
           INCLUDE_FEEDBACK: ${{{{ inputs.include_feedback }}}}
 {_MAIL_ENV}
         run: |
-          args=(--cohort-org "$COHORT_ORG")
-{_DRY_RUN_GATE}
-          [ "$SILENT" = "true" ] && args+=(--no-notify)
+          args=(--semester-org "$SEMESTER_ORG")
+{_PREVIEW_GATE}
+          [ "$NOTIFY" = "false" ] && args+=(--no-notify)
           [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
           [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
 """
 
 
-def render_open_team_formation(cohort_orgs: list[str]) -> str:
+def render_open_team_formation(semester_orgs: list[str]) -> str:
     """Ask the students who still have no team, on a faculty member's say-so.
 
     The SAME pass the quarter-hourly tick runs, reached from a button: `team_formation.run`
@@ -1168,9 +1208,9 @@ def render_open_team_formation(cohort_orgs: list[str]) -> str:
 
     `assignment` is FREE TEXT and not a dropdown. Every other per-assignment button names
     a course-org template repo, which this org can discover and list; a team-formation
-    window is keyed on a SCHEDULE key, which lives in each cohort's own private
+    window is keyed on a SCHEDULE key, which lives in each semester's own private
     schedule.yml - so a dropdown rendered once for the whole course org would either be
-    empty or be one cohort's keys offered to another. Left blank it asks about every window
+    empty or be one semester's keys offered to another. Left blank it asks about every window
     open right now, which is the ordinary press; a key with no open window is refused by
     name rather than passed over.
     """
@@ -1178,30 +1218,30 @@ def render_open_team_formation(cohort_orgs: list[str]) -> str:
 
 # Emails every enrolled student who is still without a team for an assignment whose
 # team-formation window is open: the cap, the day formation closes, and a link to the
-# cohort's Join team form. It is the same message the scheduler sends by itself when a
+# semester's Join team form. It is the same message the scheduler sends by itself when a
 # window opens - this is how you send it again on your own say-so, after announcing the
-# assignment in class or once a cohort's mail secrets are finally set.
+# assignment in class or once a semester's mail secrets are finally set.
 # NOTHING IS SAID TWICE: every message is recorded in classroom-config's
 # team-formation/mailed.csv, so a second press reaches only the students a first press did
 # not - a newcomer who has since joined GitHub, and nobody else.
 # Leave `assignment` empty for every window that is open. Filling it in narrows the run to
 # ONE schedule.yml assignment key and leaves the other windows alone; a key with no open
 # window is an error, not a quiet no-op.
-# Overnight (23:00-07:00 in the cohort's own timezone) the message is HELD, pressed or not
+# Overnight (23:00-07:00 in the semester's own timezone) the message is HELD, pressed or not
 # - the students' night is the same night either way - and nothing is claimed, so the next
 # quarter-hourly tick sends it in the morning.
-# Dry run first; it claims nothing, sends nothing, and prints the counts with a sample of
+# Preview first; it claims nothing, sends nothing, and prints the counts with a sample of
 # the wording. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
-{_cohort_dropdown(cohort_orgs)}
+{_semester_dropdown(semester_orgs)}
       assignment:
         description: "Only this schedule.yml assignment key (leave empty for every open window)"
         required: false
         default: ""
-      dry_run:
+      preview:
         description: "Preview the messages - claim nothing, send nothing"
         type: boolean
         default: true
@@ -1213,132 +1253,132 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           ASSIGNMENT: ${{{{ inputs.assignment }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
 {_MAIL_ENV}
         run: |
-          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
+          args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
           [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           python3 -m dsl_course.team_formation "${{args[@]}}"
 """
 
 
-def render_propagate_cohort(cohort_orgs: list[str]) -> str:
-    """Carry a cohort's edits to released material back into the course org."""
-    return f"""name: Propagate cohort edits
+def render_propagate_semester(semester_orgs: list[str]) -> str:
+    """Carry a semester's edits to released material back into the course org."""
+    return f"""name: Propagate semester edits
 
-# A release copies course org -> cohort, and lands on `upstream` so that an instructor's
-# correction typed into the cohort repo survives the next release. This is the way back:
-# for every path this cohort has already been released, it copies what the cohort has NOW
-# over the course org's own copy, on a branch `from-<cohort-org>`, and opens ONE pull
+# A release copies course org -> semester, and lands on `upstream` so that an instructor's
+# correction typed into the semester repo survives the next release. This is the way back:
+# for every path this semester has already been released, it copies what the semester has NOW
+# over the course org's own copy, on a branch `from-<semester-org>`, and opens ONE pull
 # request per source repo. Faculty merge it, cherry-pick from it, or close it.
-# DELETIONS ARE NOT PROPAGATED - a file the cohort dropped is named in the pull request
+# DELETIONS ARE NOT PROPAGATED - a file the semester dropped is named in the pull request
 # and left where it is.
 # The branch is cut fresh from the source repo's default branch and force-pushed on every
-# run, so each run proposes what the cohort has then; the pull request is reused.
-# Dry run first; it clones nothing and prints the path pairs.
-# Also runs as the first step of Archive cohort - see docs/10.
+# run, so each run proposes what the semester has then; the pull request is reused.
+# Preview first; it clones nothing and prints the path pairs.
+# Also runs as the first step of Archive semester - see docs/10.
 
 on:
   workflow_dispatch:
     inputs:
-{_cohort_dropdown(cohort_orgs)}
-      dry_run:
+{_semester_dropdown(semester_orgs)}
+      preview:
         description: "Preview the paths - clone nothing, push nothing, open nothing"
         type: boolean
         default: true
 
-{_concurrency("propagate-cohort")}
+{_concurrency("propagate-semester")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  propagate-cohort:
-{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Propagate cohort edits
+  propagate-semester:
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Propagate semester edits
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
-          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
-{_DRY_RUN_GATE}
+          args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
+{_PREVIEW_GATE}
           python3 -m dsl_course.propagate "${{args[@]}}"
 """
 
 
-def render_archive_cohort(cohort_orgs: list[str]) -> str:
-    """Close a finished cohort out: carry its edits back, freeze every repo, seal it."""
-    return f"""name: Archive cohort
+def render_archive_semester(semester_orgs: list[str]) -> str:
+    """Close a finished semester out: carry its edits back, freeze every repo, seal it."""
+    return f"""name: Archive semester
 
-# End of term. The scheduler runs this by itself ONLY for a cohort whose schedule.yml
+# End of term. The scheduler runs this by itself ONLY for a semester whose schedule.yml
 # writes an `archive:` block (its `event_datetime:` defaults to semester_end + 60 days). Archiving is
-# opt-in, so this button closes a cohort out early - and is the only way to close out one
-# that wrote no block. It offers the cohort's edits back to this org as a pull request
+# opt-in, so this button closes a semester out early - and is the only way to close out one
+# that wrote no block. It offers the semester's edits back to this org as a pull request
 # first, closes the toolkit's open notices, syncs the website one last time, then ARCHIVES
-# every repo in the cohort org - students' work, `welcome` so a finished term cannot still
+# every repo in the semester org - students' work, `welcome` so a finished term cannot still
 # be joined, the released materials, the website, `.github` - writes the teardown record
 # into the private classroom-config and archives that last, which is what tells every
-# nightly sweep the cohort is finished.
+# nightly sweep the semester is finished.
 # NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
 # students keep read access to their own work, and un-archiving a repo from its own
 # Settings page brings it back exactly as it was. Membership and teams are untouched.
-# `dry_run` defaults to true and prints counts only. A real run refuses until the cohort's
-# archive date has arrived; `force` says so by hand, which is how a cohort with no
+# `preview` defaults to true and prints counts only. A real run refuses until the semester's
+# archive date has arrived; `force` says so by hand, which is how a semester with no
 # `archive:` block - and so no date - is closed out.
 # A run that dies half way is resumed by running it again - see docs/10.
 
 on:
   workflow_dispatch:
     inputs:
-{_cohort_dropdown(cohort_orgs)}
-      dry_run:
-        description: "Preview the teardown - freeze nothing, open no pull request"
+{_semester_dropdown(semester_orgs)}
+      preview:
+        description: "Preview the archive - archive nothing, open no pull request"
         type: boolean
         default: true
       force:
-        description: "Close out before the cohort's archive date"
+        description: "Close out before the semester's archive date"
         type: boolean
         default: false
 
-{_concurrency("archive-cohort")}
+{_concurrency("archive-semester")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  archive-cohort:
-{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Archive cohort
+  archive-semester:
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Archive semester
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
           FORCE: ${{{{ inputs.force }}}}
         run: |
           gh auth setup-git
-          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
-{_DRY_RUN_GATE}
+          args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
+{_PREVIEW_GATE}
           [ "$FORCE" = "true" ] && args+=(--force)
-          python3 -m dsl_course.teardown "${{args[@]}}"
+          python3 -m dsl_course.archive "${{args[@]}}"
 """
 
 
-# Which cohort a Send-codes run is FOR: the roster dispatcher's payload, its only
-# trigger. Used to scope the concurrency group PER COHORT - the state two runs race each
-# other over is one cohort's students.csv, and a repo-wide group would have a roster push
-# in one cohort drop a queued send in another (Actions holds one pending run per group and
+# Which semester a Send-codes run is FOR: the roster dispatcher's payload, its only
+# trigger. Used to scope the concurrency group PER SEMESTER - the state two runs race each
+# other over is one semester's students.csv, and a repo-wide group would have a roster push
+# in one semester drop a queued send in another (Actions holds one pending run per group and
 # a third arrival cancels the second).
-_SEND_CODES_COHORT = "${{ github.event.client_payload.cohort_org }}"
+_SEND_CODES_SEMESTER = "${{ " + _PAYLOAD_SEMESTER + " }}"
 
 
 def render_send_codes() -> str:
     """Generate a non-PII enrolment code per student and email each their code.
 
-    One way in, and it is not a person: a push to a cohort's students.csv, which its
+    One way in, and it is not a person: a push to a semester's students.csv, which its
     classroom-config dispatcher turns into a `send-codes` repository_dispatch. So the job
     is UNGATED - a dispatch has no actor to check - and it sends for real, because the
     whole point is that a roster edit reaches the new students' inboxes without a click.
     Same routing as Sync membership's automatic path.
 
-    It carries `--dispatched-by`, which refuses a cohort this course org does not own: a
-    `client_payload` is written by whoever holds a cohort's bot token, a lower trust tier
+    It carries `--dispatched-by`, which refuses a semester this course org does not own: a
+    `client_payload` is written by whoever holds a semester's bot token, a lower trust tier
     than the course org (see enrol_codes.refuse_unregistered).
 
     And it reports itself like the crons do. Nobody watches a send either - there is no
@@ -1356,7 +1396,7 @@ def render_send_codes() -> str:
 # paste the code into the welcome Join course issue - no personal data in the public repo.
 # Needs the GRAPH_* secrets.
 #
-# There is no button: a push to a cohort's students.csv is what fires this (its
+# There is no button: a push to a semester's students.csv is what fires this (its
 # classroom-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
 # only thing anyone edits. Re-running is safe - a row is mailed only while its
 # `code_sent_at` is blank - which is also why pushing again does not re-send: to send a
@@ -1366,88 +1406,88 @@ on:
   repository_dispatch:
     types: [send-codes]
 
-{_concurrency("send-codes-" + _SEND_CODES_COHORT)}
+{_concurrency("send-codes-" + _SEND_CODES_SEMESTER)}
 {_PERMISSIONS_JOBS}  send-codes:
-{_ungated_preamble()}      - name: Send enrolment codes for the cohort that pushed its roster
+{_ungated_preamble()}      - name: Send enrolment codes for the semester that pushed its roster
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          DISPATCH_COHORT: ${{{{ github.event.client_payload.cohort_org }}}}
-{_MAIL_ENV}
+          DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
+{_OLD_PAYLOAD_ENV}{_MAIL_ENV}
         run: |
-          # A payload with no cohort names nothing to send for. Fail loudly rather than
-          # let an empty --cohort-org reach the CLI and be refused for the wrong reason.
-          if [ -z "$DISPATCH_COHORT" ]; then
-            echo "::error::the send-codes dispatch carried no client_payload.cohort_org - nothing to send."
+{_OLD_PAYLOAD_CHECK}          # A payload with no semester names nothing to send for. Fail loudly rather than
+          # let an empty --semester-org reach the CLI and be refused for the wrong reason.
+          if [ -z "$DISPATCH_SEMESTER" ]; then
+            echo "::error::the send-codes dispatch carried no client_payload.semester_org - nothing to send."
             exit 1
           fi
-          # --dispatched-by names the course org whose registry authorises this cohort:
-          # the payload comes from a cohort's bot token, so the cohort it names is
+          # --dispatched-by names the course org whose registry authorises this semester:
+          # the payload comes from a semester's bot token, so the semester it names is
           # untrusted input.
-          python3 -m dsl_course.enrol_codes --cohort-org "$DISPATCH_COHORT" \\
-            --dispatched-by "$COURSE"{_TEE_RUN_LOG}
+          python3 -m dsl_course.enrol_codes --semester-org "$DISPATCH_SEMESTER" \\
+            --dispatched-by "$COURSE" --no-preview{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
-def render_bootstrap_cohort() -> str:
-    """Configure a (pre-created, empty) cohort org from the course org: welcome +
+def render_bootstrap_semester() -> str:
+    """Configure a (pre-created, empty) semester org from the course org: welcome +
     classroom-config + tightened perms, register it, and refresh the dropdowns."""
-    return f"""name: Bootstrap cohort
+    return f"""name: Bootstrap semester
 
-# You create the empty cohort org in the web UI first (GitHub has no org-creation API)
+# You create the empty semester org in the web UI first (GitHub has no org-creation API)
 # and add the bot as an owner. Then run this with that org's name.
 
 on:
   workflow_dispatch:
     inputs:
-      cohort_org:
-        description: "Empty cohort org you've already created (bot must be an owner)"
+      semester_org:
+        description: "Empty semester org you've already created (bot must be an owner)"
         required: true
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  bootstrap-cohort:
+  bootstrap-semester:
 {_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Bootstrap + register + refresh
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          COHORT: ${{{{ inputs.cohort_org }}}}
+          SEMESTER: ${{{{ inputs.semester_org }}}}
           # Forwarded, not looked up: this runs in the COURSE org, whose own bootstrap
           # propagated the address here, so --propagate-secret can pass it down to the
-          # cohort. Empty on a course org that never got one - the cohort then falls back
+          # semester. Empty on a course org that never got one - the semester then falls back
           # to GRAPH_SENDER like everything else.
           DSL_MAINTAINER_EMAIL: ${{{{ secrets.DSL_MAINTAINER_EMAIL }}}}
         run: |
-          python3 -m dsl_course.bootstrap_course --org "$COHORT" --org-name "$COHORT" \\
-            --cohort --course "$COURSE" --propagate-secret
+          python3 -m dsl_course.bootstrap_course --org "$SEMESTER" --org-name "$SEMESTER" \\
+            --semester --course "$COURSE" --propagate-secret
           python3 -m dsl_course.seed refresh --course-org "$COURSE"
 """
 
 
-# The cohort a run is SCOPED to, or ''. Only a classroom-config dispatcher's push names one
+# The semester a run is SCOPED to, or ''. Only a classroom-config dispatcher's push names one
 # (`templates/classroom-config/dispatch-scheduled-release.yml` sends driver=classroom-config
-# and its own org as cohort_org). The run releases into the one cohort that changed and
-# hands any site render to Sync site's queue - which a schedule.yml / people.yml / teams.csv
+# and its own org as semester_org). The run releases into the one semester that changed and
+# hands any site render to Sync site's queue - which a schedule.yml / instructors.yml / teams.csv
 # push has usually just started as well - rather than racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
-# (driver=ds01, no cohort), the button - walks every cohort as before. The payload is
-# written by whoever holds a cohort's bot token, so the scheduler checks the name against
+# (driver=ds01, no semester), the button - walks every semester as before. The payload is
+# written by whoever holds a semester's bot token, so the scheduler checks the name against
 # the course's own registry before it touches anything.
-_SCOPED_COHORT = (
+_SCOPED_SEMESTER = (
     "(github.event_name == 'repository_dispatch' "
     "&& github.event.client_payload.driver == 'classroom-config' "
-    "&& github.event.client_payload.cohort_org || '')"
+    f"&& {_PAYLOAD_SEMESTER} || '')"
 )
 
 
 def render_scheduler() -> str:
-    """Quarter-hourly cron - and an external dispatch - that releases whatever each cohort's
-    schedule says is now due and grades each passed deadline, across every registered cohort.
+    """Quarter-hourly cron - and an external dispatch - that releases whatever each semester's
+    schedule says is now due and grades each passed deadline, across every registered semester.
     Two jobs, so neither waits on the other. No check-team gate: an unattended run has no
     actor, and every action is either idempotent or fire-once (manual dispatch still needs
     write)."""
     return f"""name: Scheduled release
 
-# Reads each cohort's classroom-config/schedule.yml and, on every tick: freezes the submission
+# Reads each semester's classroom-config/schedule.yml and, on every tick: freezes the submission
 # snapshot for each assignment whose grading deadline has passed, fires every `releases:`
 # release whose `when` datetime has arrived, and autogrades each frozen assignment ONCE
 # (marker: classroom-config/autograde/<slug>/ - delete it to re-grade). Releases are
@@ -1463,22 +1503,22 @@ def render_scheduler() -> str:
 # times a day, not 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is
 # negligible.
 #
-# ONE COHORT, when a cohort's classroom-config push fired this run (driver=classroom-config):
-# this run releases into that cohort alone and asks Sync site - by dispatch, into its own
+# ONE SEMESTER, when a semester's classroom-config push fired this run (driver=classroom-config):
+# this run releases into that semester alone and asks Sync site - by dispatch, into its own
 # queue, which the same push may already have started - for any render its releases need,
-# instead of pushing the site repo alongside it. The cron and the ds01 timer still walk every cohort.
+# instead of pushing the site repo alongside it. The cron and the ds01 timer still walk every semester.
 #
-# THREE JOBS. `release` walks every cohort (fast: dated copies and repo provisioning) and is
+# THREE JOBS. `release` walks every semester (fast: dated copies and repo provisioning) and is
 # separate because a grading pass can run for two hours and must not hold up a release due
-# meanwhile. `autograde` is one matrix leg per cohort, each queued only against itself, and
-# runs even when the release job failed - one cohort's fault is nobody else's wait. And
+# meanwhile. `autograde` is one matrix leg per semester, each queued only against itself, and
+# runs even when the release job failed - one semester's fault is nobody else's wait. And
 # `autograde-report` files/closes the grading legs' failure issues from a runner of its own,
 # because `autograde` executes the STUDENTS' code and a step after that one holding the bot
 # token would run whatever they left in $GITHUB_ENV, as the org owner.
 
-# A one-cohort run says so in its title: the runs listing is all `cadence` can see, and a run
-# that released into one cohort is not a tick of the whole course.
-run-name: ${{{{ {_SCOPED_COHORT} && format('{SCOPED_RUN_TITLE} {{0}}', github.event.client_payload.cohort_org) || 'Scheduled release' }}}}
+# A one-semester run says so in its title: the runs listing is all `cadence` can see, and a run
+# that released into one semester is not a tick of the whole course.
+run-name: ${{{{ {_SCOPED_SEMESTER} && format('{SCOPED_RUN_TITLE} {{0}}', {_PAYLOAD_SEMESTER}) || 'Scheduled release' }}}}
 
 on:
   schedule:
@@ -1487,76 +1527,76 @@ on:
     types: [scheduled-release]
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Preview only - list what WOULD open, release nothing"
+      preview:
+        description: "Preview - list what WOULD open, release nothing"
         type: boolean
         default: true
 
 {_PERMISSIONS_JOBS}  release:
 {_RELEASE_CONCURRENCY}    outputs:
-      cohorts: ${{{{ steps.cohorts.outputs.cohorts }}}}
+      semesters: ${{{{ steps.semesters.outputs.semesters }}}}
     # JOB-level, because the failure-issue steps' `if:` must see it and a step's `if:`
     # reads only job- and workflow-level env.
     env:
-      SCOPED: ${{{{ {_SCOPED_COHORT} }}}}
-{_ungated_preamble(_TIMEOUT_MANY_REPOS)}      - name: List the cohorts to grade
-        id: cohorts
+      SCOPED: ${{{{ {_SCOPED_SEMESTER} }}}}
+{_ungated_preamble(_TIMEOUT_MANY_REPOS)}      - name: List the semesters to grade
+        id: semesters
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
         run: |
           # FIRST, so the grading matrix is populated whatever the release pass does: a step
-          # that fails skips the ones after it, and a release fault in one cohort must not
+          # that fails skips the ones after it, and a release fault in one semester must not
           # cancel grading in the others. Assigned, not echoed inline: under `bash -e` a
           # failed substitution inside an echo would write an empty output on a GREEN step,
           # and grading would then be skipped for the whole course, silently.
-          args=(--course-org "$COURSE" --list-cohorts)
-          [ -n "$SCOPED" ] && args+=(--cohort-org "$SCOPED")
-          cohorts=$(python3 -m dsl_course.scheduler "${{args[@]}}")
-          echo "cohorts=$cohorts" >> "$GITHUB_OUTPUT"
+          args=(--course-org "$COURSE" --list-semesters --no-preview)
+          [ -n "$SCOPED" ] && args+=(--semester-org "$SCOPED")
+          semesters=$(python3 -m dsl_course.scheduler "${{args[@]}}")
+          echo "semesters=$semesters" >> "$GITHUB_OUTPUT"
       - name: Release what is due
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
           EVENT: ${{{{ github.event_name }}}}
           DRIVER: ${{{{ github.event.client_payload.driver }}}}
-# A source the plan cites and the org has not got is emailed to the people git names for
+{_OLD_PAYLOAD_ENV}# A source the plan cites and the org has not got is emailed to the people git names for
 # it, from this step (see dsl_course.notify) - so the release pass carries the transport
 # alongside the token. Without it the digest issue's @mention is the only channel, which
 # reaches whoever happens to read GitHub notifications that week. This pass also pre-flights
-# the COURSE org's own dsl-course.yml and cohort registry, whose mail goes to the course
+# the COURSE org's own dsl-course.yml and semester registry, whose mail goes to the course
 # admins instead - a second address list, read only here and by Sync membership.
 {_MAIL_ENV}
 {_COURSE_ADMIN_ENV}
         run: |
-          gh auth setup-git
+{_OLD_PAYLOAD_CHECK}          gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,
           # and it is what says whether both drivers are alive (a dispatch names its
           # sender in client_payload.driver; the cron has nobody to name).
           echo "delivered by event=$EVENT driver=${{DRIVER:-none}}"
           if [ -n "$SCOPED" ]; then
-            args=(--course-org "$COURSE" --cohort-org "$SCOPED" --skip-autograde --defer-site-sync)
+            args=(--course-org "$COURSE" --semester-org "$SCOPED" --skip-autograde --defer-site-sync)
           else
-            args=(--course-org "$COURSE" --all-cohorts --skip-autograde)
+            args=(--course-org "$COURSE" --all-semesters --skip-autograde)
           fi
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+{_SCHEDULED_PREVIEW_GATE}
           python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_RELEASE_NOTICE}  autograde:
     # Named, because `autograde-report` below looks its legs up by name through the jobs
     # API - a string this file declares rather than one GitHub composes from the matrix.
-    name: autograde ${{{{ matrix.cohort }}}}
+    name: autograde ${{{{ matrix.semester }}}}
     needs: [release]
     # always(), because grading is gated on the durable snapshot marker, not on this run's
-    # release pass: a red release must not silently skip a cohort's grading. The output test
+    # release pass: a red release must not silently skip a semester's grading. The output test
     # is the empty-matrix guard - GitHub errors on a matrix with no vectors, and a course org
-    # with no cohorts registered yet is a normal state, not a failure.
-    if: always() && needs.release.outputs.cohorts != '' && needs.release.outputs.cohorts != '[]'
+    # with no semesters registered yet is a normal state, not a failure.
+    if: always() && needs.release.outputs.semesters != '' && needs.release.outputs.semesters != '[]'
     strategy:
-      # One cohort's grading failure must not cancel the others' - they share nothing.
+      # One semester's grading failure must not cancel the others' - they share nothing.
       fail-fast: false
       matrix:
-        cohort: ${{{{ fromJSON(needs.release.outputs.cohorts) }}}}
+        semester: ${{{{ fromJSON(needs.release.outputs.semesters) }}}}
 {_AUTOGRADE_CONCURRENCY}{_ungated_preamble(_TIMEOUT_GRADING, sandbox=True)}      # THE LAST STEP OF THIS JOB, and it has to stay that way. It executes the students'
       # own notebooks, `run.sh` and hidden tests, and the runner sources whatever a step
       # leaves in $GITHUB_ENV / $GITHUB_PATH before it starts the next one - so a step
@@ -1567,53 +1607,54 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          COHORT: ${{{{ matrix.cohort }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          SEMESTER: ${{{{ matrix.semester }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
+          EVENT: ${{{{ github.event_name }}}}
         run: |
           gh auth setup-git
-          args=(--course-org "$COURSE" --cohort-org "$COHORT" --autograde-only)
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          args=(--course-org "$COURSE" --semester-org "$SEMESTER" --autograde-only)
+{_SCHEDULED_PREVIEW_GATE}
           python3 -m dsl_course.scheduler "${{args[@]}}"
   autograde-report:
-    # What the grading job may not do for itself. One leg per cohort, exactly like the
-    # matrix it reports on, so each cohort keeps its own failure issue and a green cohort
+    # What the grading job may not do for itself. One leg per semester, exactly like the
+    # matrix it reports on, so each semester keeps its own failure issue and a green semester
     # never closes a red one's.
     needs: [release, autograde]
-    if: always() && needs.release.outputs.cohorts != '' && needs.release.outputs.cohorts != '[]'
+    if: always() && needs.release.outputs.semesters != '' && needs.release.outputs.semesters != '[]'
     strategy:
       fail-fast: false
       matrix:
-        cohort: ${{{{ fromJSON(needs.release.outputs.cohorts) }}}}
+        semester: ${{{{ fromJSON(needs.release.outputs.semesters) }}}}
 {_ungated_preamble()}{_AUTOGRADE_REPORT}"""
 
 
-def render_status(cohort_orgs: list[str]) -> str:
-    """Per-cohort checklist of every faculty & instructors input location - identity, people,
+def render_status(semester_orgs: list[str]) -> str:
+    """Per-semester checklist of every faculty & instructors input location - identity, people,
     schedule + release plan, roster, teams, grades - with the current value and a
     direct edit link for anything missing. Read-only; changes nothing."""
-    return f"""name: Check cohort setup
+    return f"""name: Check semester setup
 
-# A per-cohort glance view of everything configured (and everything still missing),
+# A per-semester glance view of everything configured (and everything still missing),
 # with direct links to fix it. Read-only - this workflow changes nothing.
 # It carries the GRAPH_* secrets to REPORT on them (present/absent only - no value is
 # printed), never to send: this is where a missing mail transport is meant to be caught,
-# before a roster push tries to mail a cohort its codes.
+# before a roster push tries to mail a semester its codes.
 
 on:
   workflow_dispatch:
     inputs:
-{_cohort_dropdown(cohort_orgs)}
+{_semester_dropdown(semester_orgs)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   status:
-{_run_preamble()}      - name: Check cohort setup
+{_run_preamble()}      - name: Check semester setup
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
 {_MAIL_ENV}
         run: |
-          python3 -m dsl_course.status --course-org "$COURSE" --cohort-org "$COHORT_ORG" >> "$GITHUB_STEP_SUMMARY"
+          python3 -m dsl_course.status --course-org "$COURSE" --semester-org "$SEMESTER_ORG" --preview >> "$GITHUB_STEP_SUMMARY"
 """
 
 
@@ -1717,8 +1758,8 @@ on:
 {_CRON_NOTICE}"""
 
 
-def render_generate_syllabus(source_repos: list[str], cohort_orgs: list[str]) -> str:
-    """Build the syllabus's session-by-session section from a cohort's schedule.yml.
+def render_generate_syllabus(source_repos: list[str], semester_orgs: list[str]) -> str:
+    """Build the syllabus's session-by-session section from a semester's schedule.yml.
 
     A workflow rather than a CLI habit, because the people who write syllabi are the people
     who use the Actions tab. It writes a companion file for them to paste from and never
@@ -1726,7 +1767,7 @@ def render_generate_syllabus(source_repos: list[str], cohort_orgs: list[str]) ->
     return f"""name: Generate syllabus
 
 # Writes the "Course sessions and readings" section of a syllabus - one block per session,
-# with its title, its learning objectives and its reading list - from the cohort's
+# with its title, its learning objectives and its reading list - from the semester's
 # classroom-config/schedule.yml and this repo's readings/ folders.
 #
 # It lands in SYLLABUS.sessions.md beside your syllabus, and is NEVER released to students.
@@ -1737,9 +1778,9 @@ on:
   workflow_dispatch:
     inputs:
 {_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos)}
-{_choice_input("cohort_org", "Cohort whose schedule.yml supplies the sessions", cohort_orgs)}
-      write:
-        description: "Commit the block to SYLLABUS.sessions.md (off = just print it)"
+{_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
+      preview:
+        description: "Preview - print the block, commit nothing to SYLLABUS.sessions.md"
         type: boolean
         default: true
 
@@ -1749,12 +1790,12 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          WRITE: ${{{{ inputs.write }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
-          args=(--course-org "$COURSE" --cohort-org "$COHORT_ORG" --course-source-repo "$SOURCE_REPO")
-          [ "$WRITE" = "true" ] && args+=(--write)
+          args=(--course-org "$COURSE" --semester-org "$SEMESTER_ORG" --course-source-repo "$SOURCE_REPO")
+{_PREVIEW_GATE}
           python3 -m dsl_course.syllabus "${{args[@]}}"
 """
 
@@ -1779,7 +1820,7 @@ def render_new_materials(source_repos: list[str] | None = None) -> str:
 # arrive exactly as you left them. Leave it on the first option for a fresh starter.
 # The dropdown is refreshed by the 'Refresh actions' workflow.
 #
-# The last two boxes write the new repo's `publish.yml` - what the cohort site may host
+# The last two boxes write the new repo's `publish.yml` - what the semester site may host
 # publicly, so an HTML deck opens rendered in a browser instead of showing as source on
 # GitHub. Everything else stays private, exactly as today. They seed the file and nothing
 # more: edit it in the repo afterwards, and no workflow rewrites it. A copied repo brings
@@ -1788,12 +1829,12 @@ def render_new_materials(source_repos: list[str] | None = None) -> str:
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Year tag, e.g. f2026 or s2026 - creates course-materials-<tag>"
+      semester:
+        description: "Semester, e.g. f2026 or s2026 - creates course-materials-<semester>"
         required: true
 {_copy_from_input(f"Materials repo to copy forward - {_FRESH_STARTER} is the empty skeleton", materials)}
-{_choice_input("public_dirs", "Rendered publicly on the cohort site: which folders. Everything else stays private to enrolled students", list(PUBLIC_DIRS), NOTHING_PUBLIC, required=False)}
-{_choice_input("public_types", "Rendered publicly on the cohort site: which file types out of those folders", list(PUBLIC_TYPES), PUBLIC_HTML_PDF, required=False)}
+{_choice_input("public_dirs", "Rendered publicly on the semester site: which folders. Everything else stays private to enrolled students", list(PUBLIC_DIRS), NOTHING_PUBLIC, required=False)}
+{_choice_input("public_types", "Rendered publicly on the semester site: which file types out of those folders", list(PUBLIC_TYPES), PUBLIC_HTML_PDF, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1802,13 +1843,13 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           ORG: ${{{{ github.repository_owner }}}}
-          TAG: ${{{{ inputs.tag }}}}
+          SEMESTER: ${{{{ inputs.semester }}}}
           COPY_FROM: ${{{{ inputs.copy_from }}}}
           PUBLIC_DIRS: ${{{{ inputs.public_dirs }}}}
           PUBLIC_TYPES: ${{{{ inputs.public_types }}}}
         run: |
           gh auth setup-git
-          args=(--org "$ORG" --tag "$TAG" \\
+          args=(--org "$ORG" --semester "$SEMESTER" \\
             --public-dirs "$PUBLIC_DIRS" --public-types "$PUBLIC_TYPES")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
@@ -1826,15 +1867,15 @@ on:
 # dropdowns arrive at `COURSE_DEFAULT_CHOICE`: the course's `assignment_defaults:` answers
 # them, else the toolkit's own (`scaffold.resolve_answers`).
 _STARTER_FORMATS_INPUT = f"""\
-      format:
-        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else ipynb"
+      formats:
+        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. The first is the runnable one. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else ipynb"
         default: "{COURSE_DEFAULT_CHOICE}\""""
 
 
 def render_new_assignment(assignments: list[str] | None = None) -> str:
-    """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
+    """Scaffold an assignment-N-<semester> template repo (main + solution branch), then refresh.
 
-    TEN boxes, and between them they are the whole assignment: everything but `format`
+    TEN boxes, and between them they are the whole assignment: everything but `formats`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
     grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
     - the team cap, the late window, the penalty, the question maxima - comes from the
@@ -1864,19 +1905,19 @@ on:
       assignment_number:
         description: "2. Assignment number, e.g. 1"
         required: true
-      semester_tag:
-        description: "3. Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
+      semester:
+        description: "3. Semester, e.g. f2026 or s2026 - creates assignment-<number>-<semester>"
         required: true
 {_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-10 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
 {_choice_input("team_formation", f"7. Group only: self_select = students use the Join team form; assigned = you write teams.csv. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else self_select", [COURSE_DEFAULT_CHOICE, *TEAM_FORMATIONS], COURSE_DEFAULT_CHOICE, required=False)}
-{_choice_input("submit_via", f"8. Where students hand in. assignment_repo = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole cohort, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("submit_via", f"8. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
       autograde:
-        description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
+        description: "9. Also run hidden tests at the late cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
-{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else private", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the instructors; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else private", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1887,9 +1928,9 @@ on:
           ORG: ${{{{ github.repository_owner }}}}
           NAME: ${{{{ inputs.assignment_name }}}}
           NUMBER: ${{{{ inputs.assignment_number }}}}
-          TAG: ${{{{ inputs.semester_tag }}}}
+          SEMESTER: ${{{{ inputs.semester }}}}
           COPY_FROM: ${{{{ inputs.copy_from }}}}
-          FORMAT: ${{{{ inputs.format }}}}
+          FORMATS: ${{{{ inputs.formats }}}}
           TYPE: ${{{{ inputs.type }}}}
           TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
@@ -1897,8 +1938,8 @@ on:
           AUTOGRADE: ${{{{ inputs.autograde }}}}
         run: |
           gh auth setup-git
-          args=(--org "$ORG" --number "$NUMBER" --tag "$TAG" --name "$NAME" \\
-            --format "$FORMAT" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
+          args=(--org "$ORG" --number "$NUMBER" --semester "$SEMESTER" --name "$NAME" \\
+            --formats "$FORMATS" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
             --submit-via "$SUBMIT_VIA" --visibility "$VISIBILITY" \\
             --autograde "$AUTOGRADE")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
@@ -1909,7 +1950,7 @@ on:
 
 
 def render_patch_assignment(
-    cohort_orgs: list[str], assignments: list[str] | None = None
+    semester_orgs: list[str], assignments: list[str] | None = None
 ) -> str:
     """Push a correction into every submission repo of an assignment already handed out."""
     return f"""name: Patch released assignment
@@ -1917,17 +1958,17 @@ def render_patch_assignment(
 # A broken cell, a wrong path, a dataset that moved - after the assignment went out.
 # Commit the fix to the TEMPLATE's default branch first, then run this: it pushes that
 # file (or folder) into every submission repo of the assignment, as a NEW COMMIT on each
-# student's own branch, and posts a note on each receipts issue telling them to pull.
+# student's own branch, and posts a note on each Submission receipts issue telling them to pull.
 # It never force-pushes, and it never replaces a file a student has already changed
 # unless `overwrite` says so - their version is kept and counted instead.
-# The frozen cohort-side hand-out is patched too, so a student who onboards tomorrow is
+# The frozen semester-side hand-out is patched too, so a student who onboards tomorrow is
 # given the corrected file rather than the one everyone else was just patched off.
-# `dry_run` defaults to true. See docs/09-release-assignment-to-cohort.md.
+# `preview` defaults to true. See docs/09-release-assignment-to-cohort.md.
 
 on:
   workflow_dispatch:
     inputs:
-{_choice_input("cohort_org", "Cohort org holding the submission repos", cohort_orgs)}
+{_choice_input("semester_org", "Semester org holding the submission repos", semester_orgs)}
 {_assignment_input(assignments or [], "Assignment template holding the corrected file")}
       path:
         description: "File or folder on the template's default branch to push (e.g. starter.ipynb, or data/)"
@@ -1940,8 +1981,8 @@ on:
         description: "Replace the file even where the student has already changed it (their work on that file is lost)"
         type: boolean
         default: false
-      dry_run:
-        description: "Preview only - count the repos that would be patched, write nothing"
+      preview:
+        description: "Preview - count the repos that would be patched, write nothing"
         type: boolean
         default: true
 
@@ -1951,19 +1992,19 @@ on:
 {_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Patch released assignment
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          MASTER_ORG: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           PATH_INPUT: ${{{{ inputs.path }}}}
           SLUG: ${{{{ inputs.slug }}}}
           OVERWRITE: ${{{{ inputs.overwrite }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --patch-path "$PATH_INPUT")
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --patch-path "$PATH_INPUT")
           [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           python3 -m dsl_course.assign "${{args[@]}}"
 """
 
@@ -1971,7 +2012,7 @@ on:
 def render_derive_student_version(assignments: list[str] | None = None) -> str:
     """Write a template's student starter onto `main` from its `solution` branch.
 
-    A COURSE-org button: it touches one template repo and no cohort, so nothing it can
+    A COURSE-org button: it touches one template repo and no semester, so nothing it can
     print names a person and its dry run may list the files it would write."""
     return f"""name: Derive student version
 
@@ -1983,15 +2024,15 @@ def render_derive_student_version(assignments: list[str] | None = None) -> str:
 # repo - so the starter is never maintained by hand beside the answer it is meant to be
 # missing. It never writes to `solution`, and a file with nothing fenced in it is never
 # written at all: the "starter" derived from that would be the model answer.
-# `dry_run` defaults to true and prints the file list and the counts, never the content.
+# `preview` defaults to true and prints the file list and the counts, never the content.
 # See docs/03-add-assignment-to-course.md.
 
 on:
   workflow_dispatch:
     inputs:
 {_assignment_input(assignments or [], "Assignment template to derive the student starter for")}
-      dry_run:
-        description: "Preview only - list the files and how much would be stripped out of each"
+      preview:
+        description: "Preview - list the files and how much would be stripped out of each"
         type: boolean
         default: true
 
@@ -2003,28 +2044,28 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE_ORG: ${{{{ github.repository_owner }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO")
-{_DRY_RUN_GATE}
+{_PREVIEW_GATE}
           python3 -m dsl_course.derive "${{args[@]}}"
 """
 
 
-def render_sync_site(cohort_orgs: list[str]) -> str:
-    """Regenerate a cohort's website from the live org structure (released sessions +
+def render_sync_site(semester_orgs: list[str]) -> str:
+    """Regenerate a semester's website from the live org structure (released sessions +
     schedule.yml dates + assignment catalog). Auto-resyncs on any change the site sources
     from - not just on release:
 
-    - push to this .github repo's dsl-course.yml -> re-sync EVERY cohort (the course name /
-      instructor cards feed every cohort site).
-    - repository_dispatch `sync-site` (fired by the cohort's classroom-config dispatcher on
-      push to schedule.yml/people.yml) -> re-sync that one cohort (or all, if the payload
+    - push to this .github repo's dsl-course.yml -> re-sync EVERY semester (the course name /
+      instructor cards feed every semester site).
+    - repository_dispatch `sync-site` (fired by the semester's classroom-config dispatcher on
+      push to schedule.yml/instructors.yml) -> re-sync that one semester (or all, if the payload
       names none).
-    - daily cron -> re-sync every cohort (the catch-all: a direct edit to a released
+    - daily cron -> re-sync every semester (the catch-all: a direct edit to a released
       content repo can't fire a dispatch, because DSL_BOT_TOKEN is deliberately not
       scoped to content repos, so a daily pass reflects such edits within a day).
-    - workflow_dispatch -> manual escape hatch, gated by check-team (single cohort).
+    - workflow_dispatch -> manual escape hatch, gated by check-team (single semester).
 
     Releases also call site.sync_site directly (immediate). The push/dispatch/cron paths
     skip the check-team gate (no actor), same as Sync membership and the scheduler."""
@@ -2041,7 +2082,7 @@ on:
     - cron: "41 6 * * *"
   workflow_dispatch:
     inputs:
-{_choice_input("cohort_org", "Cohort whose site to regenerate from the org structure", cohort_orgs)}
+{_choice_input("semester_org", "Semester whose site to regenerate from the org structure", semester_orgs)}
 
 {_concurrency("sync-site")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -2050,10 +2091,10 @@ on:
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.site sync --course-org "$COURSE" --cohort-org "$COHORT_ORG"
+          python3 -m dsl_course.site sync --course-org "$COURSE" --semester-org "$SEMESTER_ORG"
 {_CRON_CLOSE}
   sync-auto:
     if: github.event_name != 'workflow_dispatch'
@@ -2062,17 +2103,17 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           EVENT: ${{{{ github.event_name }}}}
-          DISPATCH_COHORT: ${{{{ github.event.client_payload.cohort_org }}}}
-        run: |
-          gh auth setup-git
+          DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
+{_OLD_PAYLOAD_ENV}        run: |
+{_OLD_PAYLOAD_CHECK}          gh auth setup-git
           args=(--course-org "$COURSE")
           case "$EVENT" in
-            push|schedule) args+=(--all-cohorts) ;;
+            push|schedule) args+=(--all-semesters) ;;
             repository_dispatch)
-              if [ -n "$DISPATCH_COHORT" ]; then
-                args+=(--cohort-org "$DISPATCH_COHORT")
+              if [ -n "$DISPATCH_SEMESTER" ]; then
+                args+=(--semester-org "$DISPATCH_SEMESTER")
               else
-                args+=(--all-cohorts)
+                args+=(--all-semesters)
               fi ;;
           esac
           python3 -m dsl_course.site sync "${{args[@]}}"{_TEE_RUN_LOG}
@@ -2087,7 +2128,7 @@ def render_publish_site(source_repos: list[str]) -> str:
     the public site without another click. Hosts the chosen materials repo's lecture files
     in the public site (the source repos are private, so links would 404); readings are a
     text-only list or hosted files. The cron is a no-op for the (many) course orgs that
-    never publish. Separate from the per-cohort student-gated sites; releases never touch
+    never publish. Separate from the per-semester student-gated sites; releases never touch
     it."""
     # A run REPLACES what the site serves, so the default must be the repo the site was
     # published from - the latest `course-materials-*`. `_newest` alone picked the

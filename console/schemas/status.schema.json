@@ -12,13 +12,13 @@
               "null"
             ]
           },
-          "handout": {
+          "grading_cutoff_datetime": {
             "type": [
               "string",
               "null"
             ]
           },
-          "late_until": {
+          "handout": {
             "type": [
               "string",
               "null"
@@ -93,86 +93,12 @@
           "state",
           "handout",
           "due",
-          "late_until",
+          "grading_cutoff_datetime",
           "solution_shown"
         ],
         "type": "object"
       },
       "type": "array"
-    },
-    "cohort": {
-      "additionalProperties": false,
-      "properties": {
-        "app_installed": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "archive_date": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "live": {
-          "type": "boolean"
-        },
-        "org": {
-          "type": "string"
-        },
-        "stage_why": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        },
-        "stages": {
-          "additionalProperties": {
-            "enum": [
-              "done",
-              "todo",
-              "blocked",
-              "problem"
-            ],
-            "type": "string"
-          },
-          "type": "object"
-        },
-        "term": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "term_label": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "timezone": {
-          "type": "string"
-        },
-        "week": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "weeks": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "org",
-        "stages",
-        "live"
-      ],
-      "type": "object"
     },
     "course": {
       "additionalProperties": false,
@@ -185,12 +111,6 @@
         },
         "code": {
           "type": "string"
-        },
-        "cohorts": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
         },
         "materials": {
           "items": {
@@ -222,6 +142,12 @@
         },
         "ready": {
           "type": "boolean"
+        },
+        "semesters": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "stage_why": {
           "additionalProperties": {
@@ -367,7 +293,7 @@
           "scope": {
             "enum": [
               "course",
-              "cohort"
+              "semester"
             ],
             "type": "string"
           },
@@ -419,6 +345,12 @@
           "id": {
             "type": "string"
           },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "show_on_site": {
             "type": "boolean"
           },
@@ -455,12 +387,6 @@
           "title": {
             "type": "string"
           },
-          "type": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "when": {
             "type": [
               "string",
@@ -482,6 +408,80 @@
         "dsl.status/1"
       ],
       "type": "string"
+    },
+    "semester": {
+      "additionalProperties": false,
+      "properties": {
+        "app_installed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "archive_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "live": {
+          "type": "boolean"
+        },
+        "org": {
+          "type": "string"
+        },
+        "stage_why": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "stages": {
+          "additionalProperties": {
+            "enum": [
+              "done",
+              "todo",
+              "blocked",
+              "problem"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "week": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "weeks": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "org",
+        "stages",
+        "live"
+      ],
+      "type": "object"
     },
     "site": {
       "additionalProperties": false,
@@ -538,6 +538,9 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "type": "string"
+          },
           "ref": {
             "type": "string"
           },
@@ -547,16 +550,13 @@
           "title": {
             "type": "string"
           },
-          "type": {
-            "type": "string"
-          },
           "when": {
             "type": "string"
           }
         },
         "required": [
           "when",
-          "type",
+          "kind",
           "ref",
           "state"
         ],

@@ -156,7 +156,7 @@ def _fake_clock(monkeypatch):
 def test_a_burst_of_writes_waits_rather_than_tripping_the_secondary_limit(monkeypatch):
     # The first handout tick issues several writes per student in one process. GitHub caps
     # content-creating requests at ~80/min, and the retry ladder (30+60+120s) is spent
-    # before that clears - so past ~60 students the rest of the cohort simply failed.
+    # before that clears - so past ~60 students the rest of the semester simply failed.
     slept = _fake_clock(monkeypatch)
     write = ("api", "--method", "PUT", "repos/O/R/contents/f")
     for _ in range(ghcli.WRITES_PER_MINUTE):

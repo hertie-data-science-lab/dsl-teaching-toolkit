@@ -13,15 +13,16 @@ import json
 import re
 
 from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM
-from ..discovery import discover_cohorts
+from ..discovery import discover_semesters
+from ..faults import NOT_MIGRATED, not_migrated_text
 from ..gh_teams import get_team_members, list_teams
 from .registry import (
     BOOTSTRAP_OP,
-    COHORT,
     COURSE,
     ORG_PATTERN,
     REGISTRY,
     REQUEST_SCHEMA,
+    SEMESTER,
     Request,
 )
 
@@ -34,7 +35,7 @@ REQUEST_JSON_SCHEMA = {
         "op": {"type": "string", "enum": sorted(REGISTRY)},
         "actor": {"type": "string", "pattern": ORG_PATTERN},
         "course_org": {"type": "string", "pattern": ORG_PATTERN},
-        "cohort_org": {"type": "string", "pattern": ORG_PATTERN},
+        "semester_org": {"type": "string", "pattern": ORG_PATTERN},
         "args": {"type": "object"},
         "preview": {"type": "boolean"},
         "client": {"type": "string", "pattern": r"^[A-Za-z0-9._/+-]{0,64}$"},
@@ -42,6 +43,27 @@ REQUEST_JSON_SCHEMA = {
     "required": ["schema", "op", "actor", "course_org", "args", "preview"],
     "additionalProperties": False,
 }
+
+# Old request spellings (decision 0012), old -> new. Nothing reads them: a request that
+# carries one is refused as NOT_MIGRATED before anything else is checked, naming the new
+# spelling, so a console that has not caught up says so instead of failing as a typo.
+RENAMED_REQUEST_FIELDS = {"cohort_org": "semester_org"}
+RENAMED_REQUEST_ARGS = {
+    "cohort_dest_repo": "semester_dest_repo",
+    "cohort_dest_path": "semester_dest_path",
+    "tag": "semester",
+    "format": "formats",
+    "include_solution": "solution_datetime",
+}
+
+
+def _refuse_old_spellings(fields: object, renames: dict[str, str], where: str) -> None:
+    for old, new in renames.items():
+        if isinstance(fields, dict) and old in fields:
+            raise RequestError(
+                NOT_MIGRATED, f"{where}.{old}: {not_migrated_text(old, new)}."
+            )
+
 
 _TYPES = {
     "object": dict,
@@ -125,6 +147,12 @@ def parse_request(text: str) -> Request:
         raw = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         raise RequestError("BAD_REQUEST", "The request is not valid JSON.") from None
+    _refuse_old_spellings(raw, RENAMED_REQUEST_FIELDS, "$")
+    _refuse_old_spellings(
+        raw.get("args") if isinstance(raw, dict) else None,
+        RENAMED_REQUEST_ARGS,
+        "$.args",
+    )
     problems = validate(raw, REQUEST_JSON_SCHEMA)
     if problems:
         code = (
@@ -139,11 +167,11 @@ def parse_request(text: str) -> Request:
         raise RequestError(
             "BAD_ARGS", f"{op.name} was asked for with {'; '.join(problems)}."
         )
-    if op.scope == COHORT and not raw.get("cohort_org"):
-        raise RequestError("BAD_REQUEST", f"{op.name} needs a cohort_org.")
-    if op.scope == COURSE and raw.get("cohort_org"):
+    if op.scope == SEMESTER and not raw.get("semester_org"):
+        raise RequestError("BAD_REQUEST", f"{op.name} needs a semester_org.")
+    if op.scope == COURSE and raw.get("semester_org"):
         raise RequestError(
-            "BAD_REQUEST", f"{op.name} is course-wide and takes no cohort_org."
+            "BAD_REQUEST", f"{op.name} is course-wide and takes no semester_org."
         )
     if raw["preview"] and op.preview_flag is None:
         raise RequestError(
@@ -153,7 +181,7 @@ def parse_request(text: str) -> Request:
         op=op.name,
         actor=raw["actor"],
         course_org=raw["course_org"],
-        cohort_org=raw.get("cohort_org"),
+        semester_org=raw.get("semester_org"),
         args=raw["args"],
         preview=raw["preview"],
         client=raw.get("client", ""),
@@ -170,31 +198,31 @@ def _member(org: str, team: str, actor: str) -> bool | None:
 def check_access(request: Request) -> str | None:
     """None when `request.actor` may run the op, else the sentence saying why not.
 
-    The cohort must be registered under the course. Course admins may run everything. Otherwise an op whose `required_team` is the
-    instructors team needs the actor in the COHORT's instructors team, or - for a
+    The semester must be registered under the course. Course admins may run everything. Otherwise an op whose `required_team` is the
+    instructors team needs the actor in the SEMESTER's instructors team, or - for a
     course-wide op - in one of the course org's `instructors-<term>` teams, which is where
-    Sync membership mirrors every cohort's teaching team. A team that cannot be read counts
+    Sync membership mirrors every semester's teaching team. A team that cannot be read counts
     as "not a member": this gate fails closed."""
     op = REGISTRY[request.op]
     actor = request.actor
-    # The cohort must be this course's: a course admin here is nobody in another course.
-    # Bootstrap is the one op whose cohort is not registered yet - it registers it.
-    if op.scope == COHORT and op.name != BOOTSTRAP_OP:
-        registered = {c.casefold() for c in discover_cohorts(request.course_org)}
-        if request.cohort_org.casefold() not in registered:
-            return f"{request.cohort_org} is not a cohort of {request.course_org}."
+    # The semester must be this course's: a course admin here is nobody in another course.
+    # Bootstrap is the one op whose semester is not registered yet - it registers it.
+    if op.scope == SEMESTER and op.name != BOOTSTRAP_OP:
+        registered = {c.casefold() for c in discover_semesters(request.course_org)}
+        if request.semester_org.casefold() not in registered:
+            return f"{request.semester_org} is not a semester of {request.course_org}."
     if _member(request.course_org, COURSE_ADMIN_TEAM, actor):
         return None
     refusal = f"@{actor} may not run {op.name}: it needs the {op.required_team} team"
     if op.required_team != INSTRUCTORS_TEAM:
         return f"{refusal} of {request.course_org}."
-    if op.scope == COHORT:
-        if _member(request.cohort_org, INSTRUCTORS_TEAM, actor):
+    if op.scope == SEMESTER:
+        if _member(request.semester_org, INSTRUCTORS_TEAM, actor):
             return None
-        return f"{refusal} of {request.cohort_org}, or course-admin."
+        return f"{refusal} of {request.semester_org}, or course-admin."
     teams = list_teams(request.course_org) or {}
     for slug in sorted(teams):
         term_team = slug == INSTRUCTORS_TEAM or slug.startswith(f"{INSTRUCTORS_TEAM}-")
         if term_team and _member(request.course_org, slug, actor):
             return None
-    return f"{refusal} of any cohort of {request.course_org}, or course-admin."
+    return f"{refusal} of any semester of {request.course_org}, or course-admin."

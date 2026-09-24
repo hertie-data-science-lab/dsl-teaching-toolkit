@@ -5,16 +5,26 @@
     "assignment_defaults": {
       "additionalProperties": false,
       "properties": {
-        "format": {
-          "enum": [
-            "ipynb",
-            "py",
-            "rmd",
-            "qmd",
-            "latex",
-            "none"
-          ],
-          "type": "string"
+        "formats": {
+          "oneOf": [
+            {
+              "items": {
+                "enum": [
+                  "ipynb",
+                  "py",
+                  "rmd",
+                  "qmd",
+                  "latex",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ]
         },
         "late_penalty_per_day": {
           "type": [
@@ -57,27 +67,6 @@
     "central_ref": {
       "pattern": "^(?:main|release|preview|[0-9a-f]{40})$",
       "type": "string"
-    },
-    "cohort_defaults": {
-      "additionalProperties": false,
-      "properties": {
-        "archive": {
-          "additionalProperties": false,
-          "properties": {
-            "auto": {
-              "type": "boolean"
-            },
-            "grace_days": {
-              "type": "integer"
-            }
-          },
-          "type": "object"
-        },
-        "timezone": {
-          "type": "string"
-        }
-      },
-      "type": "object"
     },
     "course_code": {
       "type": "string"
@@ -145,6 +134,27 @@
             "type": "object"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "semester_defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "archive": {
+          "additionalProperties": false,
+          "properties": {
+            "auto": {
+              "type": "boolean"
+            },
+            "grace_days": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "timezone": {
+          "type": "string"
         }
       },
       "type": "object"

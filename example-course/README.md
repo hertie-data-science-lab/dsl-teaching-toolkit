@@ -2,7 +2,7 @@
 
 A complete, ready-to-copy set of **dummy course materials**: incl a growing lecture package, placeholder lab materials, three
 assignments (one group project run by three teams of 3-4), a roster with an auditor, instructor/TA
-cards, and a full term's auto-release schedule. Follow the same steps to stand up your own course.
+cards, and a full semester's auto-release schedule. Follow the same steps to stand up your own course.
 
 Find the example materials in this markdown's parent directory.
 
@@ -16,7 +16,7 @@ i.e. what these files were used to create
 | Tier | Org | Role | URL|
 |------|-----|------|----|
 | Course | **`hertie-dsl-demo-course-e1234`** | persistent control panel - materials, assignment templates, the workflows | [Course org](https://github.com/hertie-dsl-demo-course-e1234) | 
-| Cohort | **`hertie-dsl-demo-f2026`** | student-facing target - welcome, roster, released materials, the site | [Cohort org](https://github.com/hertie-dsl-demo-f2026) & [Deployed site](https://hertie-dsl-demo-f2026.github.io)|
+| Semester | **`hertie-dsl-demo-f2026`** | student-facing target - welcome, roster, released materials, the site | [Semester org](https://github.com/hertie-dsl-demo-f2026) & [Deployed site](https://hertie-dsl-demo-f2026.github.io)|
 
 ## What's in this dataset
 
@@ -36,25 +36,25 @@ example-course/
   cohort-org/
     students.csv                    # 10 students + 1 auditor (handles blank until they onboard)
     teams.csv                       # 3 project teams of 3-4 (auditors are refused from teams)
-    schedule.yml                    # the full term: releases + due dates + events
-    people.yml                      # this cohort's own instructors/TAs (real push access)
+    schedule.yml                    # the full semester: releases + due dates + events
+    instructors.yml                      # this semester's own instructors/TAs (real push access)
     grading_sheets/*.yml            # one marking sheet per assignment (individual + group)
 ```
 
-> Not shown, because nobody writes it: each live cohort also carries
+> Not shown, because nobody writes it: each live semester also carries
 > `assignments.lock.yml` in `classroom-config` - generated from the assignments'
 > `grading_config.yml` files, and the only thing the **Join team** form reads. It is not in
 > the worked example for the same reason there is no `.sample` twin of it: there is nothing
 > in it for a person to copy.
 
 > NB: **`cohort-org/` is shipped, not just documented.** Every file in it is seeded into each
-> cohort's private `classroom-config` repo as the `.sample` twin of the scaffold faculty fill
+> semester's private `classroom-config` repo as the `.sample` twin of the scaffold faculty fill
 > in - `students.csv` → `students.csv.sample`, and so on for every other file here. The set is
 > derived by walking this directory (`welcome.CLASSROOM_SAMPLES`), so adding a file here ships
 > it; bootstrap and the nightly Refresh both converge them, so editing one updates every
-> cohort's worked example. Keep the contents fictional and self-contained: no real accounts,
+> semester's worked example. Keep the contents fictional and self-contained: no real accounts,
 > and links written as full URLs (a repo-relative `docs/...` link resolves to nothing once the
-> file has landed in a cohort org).
+> file has landed in a semester org).
 
 > NB: **`course-org/` is documentation, with one exception.** Nothing here is pushed into a
 > course org - the docs link to it, faculty copy from it by hand. The exception is

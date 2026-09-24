@@ -30,7 +30,7 @@ from tests.e2e import (
 
 GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
 OTHER = "hertie-ml-26-deep"
-COURSE, COHORT = sorted(allowlist.DEMO_ORGS)
+COURSE, SEMESTER = sorted(allowlist.DEMO_ORGS)
 
 
 # ------------------------------------------------------------------ which orgs, exactly
@@ -42,9 +42,9 @@ def test_the_default_scope_is_both_demo_orgs(monkeypatch):
 
 
 def test_the_env_var_may_narrow_the_scope(monkeypatch):
-    monkeypatch.setenv("DSL_E2E_ORGS", f" {COHORT} ")
-    assert allowlist.orgs() == frozenset({COHORT})
-    allowlist.assert_allowed(COHORT)
+    monkeypatch.setenv("DSL_E2E_ORGS", f" {SEMESTER} ")
+    assert allowlist.orgs() == frozenset({SEMESTER})
+    allowlist.assert_allowed(SEMESTER)
     with pytest.raises(RuntimeError, match="not in scope"):
         allowlist.assert_allowed(COURSE)
 
@@ -52,7 +52,7 @@ def test_the_env_var_may_narrow_the_scope(monkeypatch):
 def test_the_env_var_may_not_widen_it(monkeypatch):
     # The whole point of a literal frozenset in the source: a typo, or a copied command
     # line from another course, must not be able to aim this harness at a real org.
-    monkeypatch.setenv("DSL_E2E_ORGS", f"{COHORT},{OTHER}")
+    monkeypatch.setenv("DSL_E2E_ORGS", f"{SEMESTER},{OTHER}")
     with pytest.raises(RuntimeError, match="only narrow"):
         allowlist.orgs()
 
@@ -71,7 +71,7 @@ def test_the_transport_fence_must_be_up(monkeypatch):
     monkeypatch.setenv("DSL_ORG_ALLOWLIST", f"{COURSE},{OTHER}")
     with pytest.raises(RuntimeError, match="reaches past"):
         allowlist.assert_fence()
-    monkeypatch.setenv("DSL_ORG_ALLOWLIST", f"{COURSE},{COHORT}")
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", f"{COURSE},{SEMESTER}")
     assert allowlist.assert_fence() == allowlist.DEMO_ORGS
 
 
@@ -142,7 +142,7 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
     monkeypatch.setattr(
         estate.gh_contents, "repo_blob_shas", lambda *a: {"schedule.yml": "s"}
     )
-    fp = estate.fingerprint(COHORT)
+    fp = estate.fingerprint(SEMESTER)
     assert fp["repos"]["welcome"] == {
         "private": False,
         "topics": ["x"],
@@ -157,7 +157,7 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
 
 
 def test_a_config_repo_that_is_not_there_is_not_an_error(monkeypatch):
-    # The course org has no classroom-config; only cohorts do.
+    # The course org has no classroom-config; only semesters do.
     monkeypatch.setattr(estate.discovery, "list_org_repos", lambda org: [])
     assert estate.fingerprint(COURSE) == {
         "repos": {},
@@ -192,7 +192,7 @@ def test_the_fingerprint_photographs_the_org_level_workflows(monkeypatch):
     }
 
 
-def test_a_cohort_org_is_not_asked_for_org_level_workflows(monkeypatch):
+def test_a_semester_org_is_not_asked_for_org_level_workflows(monkeypatch):
     # It holds none - its own workflows live in `welcome` and `classroom-config` - and a
     # tree fetch of a directory that is not there raises rather than coming back empty.
     monkeypatch.setattr(
@@ -202,17 +202,17 @@ def test_a_cohort_org_is_not_asked_for_org_level_workflows(monkeypatch):
             {
                 "name": ".github",
                 "visibility": "public",
-                "topics": [course.COHORT_TOPIC],
+                "topics": [course.SEMESTER_TOPIC],
                 "archived": False,
             }
         ],
     )
 
     def refuse(*args):
-        raise AssertionError("a cohort org has no org-level workflows to read")
+        raise AssertionError("a semester org has no org-level workflows to read")
 
     monkeypatch.setattr(estate.ghcli, "gh_json", refuse)
-    assert estate.fingerprint(COHORT)[estate.WORKFLOWS_DIR] == {}
+    assert estate.fingerprint(SEMESTER)[estate.WORKFLOWS_DIR] == {}
 
 
 # ------------------------------------------------------- are the org's workflows current
@@ -299,7 +299,7 @@ def test_the_harness_waits_on_the_group_the_renderer_declares():
 
 
 def test_a_schedule_push_that_drives_no_tick_is_not_an_error(monkeypatch):
-    # `dispatch-scheduled-release.yml` is only in cohorts that have refreshed since it
+    # `dispatch-scheduled-release.yml` is only in semesters that have refreshed since it
     # shipped. Where it is not, the edit starts nothing and the harness carries on to its
     # own dispatch rather than timing out.
     monkeypatch.setattr(drive, "_runs", lambda repo, workflow, limit=30: [{"id": 1}])
@@ -393,7 +393,7 @@ def test_one_run_does_not_remove_another_runs_block():
     ],
 )
 def test_the_round_trip_leaves_the_file_byte_for_byte_as_it_was(schedule):
-    # The whole point of fencing the edit rather than re-emitting the YAML: the cohort
+    # The whole point of fencing the edit rather than re-emitting the YAML: the semester
     # gets its own file back. The edit used to end every write with exactly one newline,
     # so a schedule.yml that had none came back one byte longer - and the teardown's
     # fidelity check, which compares blob shas, cannot tell that from a real edit. It was
@@ -468,8 +468,8 @@ def test_a_run_id_that_is_not_one_is_refused():
 def _one_repo_of_this_run(monkeypatch, answer: tuple[int, str]) -> None:
     """One org holding exactly one of this run's repos, and a `gh` that answers `answer`
     to the delete."""
-    monkeypatch.setenv("DSL_ORG_ALLOWLIST", f"{COURSE},{COHORT}")
-    monkeypatch.setenv("DSL_E2E_ORGS", COHORT)
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", f"{COURSE},{SEMESTER}")
+    monkeypatch.setenv("DSL_E2E_ORGS", SEMESTER)
     monkeypatch.setattr(
         cleanup.discovery, "list_org_repos", lambda org: [{"name": cleanup.slug(RUN)}]
     )
@@ -487,16 +487,16 @@ def test_a_delete_that_403s_is_counted_undone_not_deleted(monkeypatch, capsys):
     left: list[str] = []
     assert cleanup.cleanup(RUN, left=left) == 1
     out, err = capsys.readouterr()
-    assert f"{COHORT}: 0 repo(s) deleted" in out
+    assert f"{SEMESTER}: 0 repo(s) deleted" in out
     assert "left 1 thing(s) undone" in err
-    assert left == [f"{COHORT}/{cleanup.slug(RUN)}"]
+    assert left == [f"{SEMESTER}/{cleanup.slug(RUN)}"]
 
 
 def test_a_delete_that_works_is_counted_deleted(monkeypatch, capsys):
     _one_repo_of_this_run(monkeypatch, (0, ""))
     left: list[str] = []
     assert cleanup.cleanup(RUN, left=left) == 0
-    assert f"{COHORT}: 1 repo(s) deleted" in capsys.readouterr().out
+    assert f"{SEMESTER}: 1 repo(s) deleted" in capsys.readouterr().out
     assert left == []
 
 
@@ -511,7 +511,7 @@ def test_what_is_left_behind_comes_with_the_command_to_delete_it(monkeypatch, ca
 def test_the_repo_names_in_those_commands_are_verbose_only(monkeypatch, capsys):
     # `<slug>-<handle>` names a student; the template is safe to print, the filled-in
     # command is not.
-    filled = f"DELETE repos/{COHORT}/{cleanup.slug(RUN)}"
+    filled = f"DELETE repos/{SEMESTER}/{cleanup.slug(RUN)}"
     _one_repo_of_this_run(monkeypatch, FORBIDDEN)
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     cleanup.main(["--run-id", RUN])
@@ -564,7 +564,7 @@ def test_the_teardown_re_renders_the_course_orgs_buttons(monkeypatch):
     assert written == [(COURSE, "main")]
 
 
-def test_a_cohort_org_has_no_buttons_to_re_render(monkeypatch):
+def test_a_semester_org_has_no_buttons_to_re_render(monkeypatch):
     written = _a_course_org(monkeypatch)
     monkeypatch.setattr(
         cleanup.discovery,
@@ -638,7 +638,7 @@ def test_a_recorded_file_keeps_every_byte_it_had(monkeypatch):
     # called it drift on every single run.
     encoded = base64.b64encode(CRLF_CSV).decode()
     _reads(monkeypatch, {"cohort-gradebook.csv": (0, encoded)})
-    assert cleanup.file_bytes(COHORT, "classroom-config", "cohort-gradebook.csv") == (
+    assert cleanup.file_bytes(SEMESTER, "classroom-config", "cohort-gradebook.csv") == (
         CRLF_CSV
     )
 
@@ -646,7 +646,8 @@ def test_a_recorded_file_keeps_every_byte_it_had(monkeypatch):
 def test_a_file_that_is_not_there_is_recorded_as_absent(monkeypatch):
     _reads(monkeypatch, {})
     assert (
-        cleanup.file_bytes(COHORT, "classroom-config", "gradebook/nothing.csv") is None
+        cleanup.file_bytes(SEMESTER, "classroom-config", "gradebook/nothing.csv")
+        is None
     )
 
 
@@ -655,7 +656,7 @@ def test_a_read_that_failed_is_not_read_as_absent(monkeypatch):
     # real file out of a real org.
     _reads(monkeypatch, {"cohort-gradebook.csv": (1, "gh: API rate limit exceeded")})
     with pytest.raises(RuntimeError, match="could not read"):
-        cleanup.file_bytes(COHORT, "classroom-config", "cohort-gradebook.csv")
+        cleanup.file_bytes(SEMESTER, "classroom-config", "cohort-gradebook.csv")
 
 
 def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
@@ -669,14 +670,14 @@ def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
     )
     assert (
         cleanup.restore_files(
-            COHORT,
+            SEMESTER,
             "classroom-config",
             {"cohort-gradebook.csv": CRLF_CSV, "gradebook/distributed.csv": None},
         )
         == 0
     )
     ((org, repo, files, delete),) = written
-    assert (org, repo) == (COHORT, "classroom-config")
+    assert (org, repo) == (SEMESTER, "classroom-config")
     assert files == {"cohort-gradebook.csv": CRLF_CSV}
     assert delete == ("gradebook/distributed.csv",)
 
@@ -689,7 +690,7 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
         monkeypatch,
         {"cohort-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
     )
-    recorded = cleanup.file_bytes(COHORT, "classroom-config", "cohort-gradebook.csv")
+    recorded = cleanup.file_bytes(SEMESTER, "classroom-config", "cohort-gradebook.csv")
     written: list[dict] = []
     monkeypatch.setattr(
         cleanup.gh_contents,
@@ -699,7 +700,7 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
         ),
     )
     cleanup.restore_files(
-        COHORT, "classroom-config", {"cohort-gradebook.csv": recorded}
+        SEMESTER, "classroom-config", {"cohort-gradebook.csv": recorded}
     )
     assert written == [{"cohort-gradebook.csv": CRLF_CSV}]
 
@@ -717,7 +718,7 @@ def _pipeline_module(monkeypatch):
 
 def test_the_live_pipeline_module_imports(monkeypatch):
     module = _pipeline_module(monkeypatch)
-    assert {module.COURSE_ORG, module.COHORT_ORG} == set(allowlist.DEMO_ORGS)
+    assert {module.COURSE_ORG, module.SEMESTER_ORG} == set(allowlist.DEMO_ORGS)
 
 
 def test_the_lock_file_goes_back_even_when_the_walk_died_before_distribute(monkeypatch):
@@ -732,7 +733,7 @@ def test_the_lock_file_goes_back_even_when_the_walk_died_before_distribute(monke
 
 
 def test_a_lock_file_that_was_not_there_is_restored_by_deleting_it(monkeypatch):
-    # A cohort bootstrapped before the lock existed records None, which `restore_files`
+    # A semester bootstrapped before the lock existed records None, which `restore_files`
     # spells as a delete - so the handout's write comes out rather than being left as a
     # file that org never had.
     module = _pipeline_module(monkeypatch)
@@ -747,7 +748,7 @@ def test_a_lock_file_that_was_not_there_is_restored_by_deleting_it(monkeypatch):
     )
     assert module._config_restore(None, recorded) == {
         grades.TEAM_LOCK_PATH: None,
-        grades.COHORT_CSV_NAME: CRLF_CSV,
+        grades.SEMESTER_CSV_NAME: CRLF_CSV,
         grades.DISTRIBUTED_PATH: b"target,channel\n",
     }
 
@@ -767,7 +768,7 @@ def test_a_central_ref_that_no_longer_resolves_is_reported_not_raised(monkeypatc
 
 def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     """The fenced text goes into a file the scheduler parses every fifteen minutes: an
-    indentation slip here would not fail the harness, it would fail the cohort."""
+    indentation slip here would not fail the harness, it would fail the semester."""
     module = _pipeline_module(monkeypatch)
     when = datetime(2026, 9, 4, 14, 0)
     later = datetime(2026, 9, 4, 15, 0)
@@ -959,7 +960,7 @@ def test_the_drop_box_is_one_repo_and_the_work_is_a_folder_in_it():
     shape = shapes.BY_NAME["shared"]
     slug = shapes.slug(RUN, shape)
     assert shape.repo(RUN, "henrycgbaker") == f"{slug}-submissions"
-    # Never the bare slug: that is the frozen cohort template the brief lives in.
+    # Never the bare slug: that is the frozen semester template the brief lives in.
     assert shape.repo(RUN, "henrycgbaker") != slug
     # The name carries no handle, which is what makes it the one submission repo a public
     # workflow log may print in full.
@@ -1002,7 +1003,7 @@ def test_a_commented_setting_is_uncommented_and_keeps_its_explanation():
 
 def test_the_scaffolds_placeholder_never_reaches_a_live_setting():
     # `grades._submit_url` refuses a line still carrying `CHANGE-ME`, so a `configure`
-    # that merely uncommented the seeded line would ship a cohort a button pointing at a
+    # that merely uncommented the seeded line would ship a semester a button pointing at a
     # page that does not exist - and the reader would drop the value on the way.
     for shape in shapes.SHAPES:
         for line in shapes.configure(_seeded(shape), shape).splitlines():
@@ -1107,12 +1108,12 @@ def test_the_flip_is_made_with_the_students_own_token(monkeypatch):
         return True
 
     monkeypatch.setattr(student.repos, "set_visibility", _flip)
-    assert student.set_visibility("cohort", "assignment-90-x-ada-l", "public")
+    assert student.set_visibility("semester", "assignment-90-x-ada-l", "public")
     assert seen["gh"] == "ghp_thestudents"
     # Both, because `gh` will fall back to the second on a machine that exports it.
     assert seen["github"] == "ghp_thestudents"
     assert (seen["org"], seen["name"], seen["visibility"]) == (
-        "cohort",
+        "semester",
         "assignment-90-x-ada-l",
         "public",
     )
@@ -1139,7 +1140,7 @@ def test_the_token_goes_back_even_when_the_call_raises(monkeypatch):
 def test_a_refused_flip_is_not_read_as_a_successful_one(monkeypatch):
     _tokens(monkeypatch)
     monkeypatch.setattr(student.repos, "set_visibility", lambda *a, **k: False)
-    assert not student.set_visibility("cohort", "assignment-90-x-ada-l", "public")
+    assert not student.set_visibility("semester", "assignment-90-x-ada-l", "public")
 
 
 def test_the_flip_goes_through_the_engines_own_writer():
@@ -1153,7 +1154,7 @@ def test_the_flip_goes_through_the_engines_own_writer():
 
 def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     """The fenced text goes into a file the scheduler parses every fifteen minutes: an
-    indentation slip here would not fail the harness, it would fail the cohort. One
+    indentation slip here would not fail the harness, it would fail the semester. One
     fence for all five, so the teardown takes the whole run out in one edit whatever it
     got as far as adding."""
     module = _pipeline_module(monkeypatch)
@@ -1223,7 +1224,7 @@ def _student_row(handle: str, role: str = "enrolled"):
     )
 
 
-def test_a_cohort_short_of_a_gradebook_is_counted_not_named(monkeypatch):
+def test_a_semester_short_of_a_gradebook_is_counted_not_named(monkeypatch):
     # The handout provisions gradebooks now, and a repo it makes in a STUDENT's namespace
     # is drift the teardown cannot sweep - it owns only its own. So the preflight refuses
     # first, and says how many rather than who.
@@ -1235,7 +1236,7 @@ def test_a_cohort_short_of_a_gradebook_is_counted_not_named(monkeypatch):
 
 def test_an_auditor_needs_no_gradebook(monkeypatch):
     # Auditors are read-only and are never assessed, so `ensure_gradebooks` makes them
-    # none - and a preflight that demanded one would refuse every cohort that has one.
+    # none - and a preflight that demanded one would refuse every semester that has one.
     module = _pipeline_module(monkeypatch)
     students = [_student_row("ada-l"), _student_row("zoe-m", role="auditor")]
     assert module.missing_gradebooks(students, {"grades-ada-l"}) == 0
@@ -1387,7 +1388,7 @@ def test_the_walk_presses_new_assignment_once_per_shape_with_its_own_answers(
     presses = [i for w, i in dispatched if w == module.NEW_ASSIGNMENT]
     assert len(presses) == len(shapes.SHAPES)
     for shape, inputs in zip(shapes.SHAPES, presses, strict=True):
-        assert inputs["semester_tag"] == f"{RUN}-{shape.name}"
+        assert inputs["semester"] == f"{RUN}-{shape.name}"
         assert inputs["submit_via"] == shape.submit_via
         assert inputs["visibility"] == (shape.visibility or "private")
         assert inputs["autograde"] is shape.autograde
@@ -1412,8 +1413,8 @@ def test_the_walk_drives_the_ticks_in_the_order_the_passes_need(monkeypatch):
     # A live run must never put a real message in a real inbox.
     for workflow, inputs in dispatched:
         if workflow == module.DISTRIBUTE_GRADES:
-            assert inputs["silent"] is True
-    assert [i["dry_run"] for w, i in dispatched if w == module.DISTRIBUTE_GRADES] == [
+            assert inputs["notify"] is False
+    assert [i["preview"] for w, i in dispatched if w == module.DISTRIBUTE_GRADES] == [
         True,
         False,
         False,

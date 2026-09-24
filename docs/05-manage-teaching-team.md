@@ -1,11 +1,11 @@
-# Manage the teaching team
+# Manage the instructors
 
 Give an instructor, TA, faculty assistant or guest lecturer access to a course - permanently or for a fixed window.
 
 ## Prerequisites
 
 - A bootstrapped [course org](01-new-course-org.md), 
-- A bootstrapped [cohort](04-new-cohort-org.md).
+- A bootstrapped [semester](04-new-cohort-org.md).
 - Instructors' **GitHub handles** and **email addresses**. Those are the two required fields; everything else is display.
 
 ---
@@ -20,10 +20,10 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 | Role | You want them to… | Declare them in | Level | They get |
 |--- |---|---|---|---|
-| Faculty, FAs | Administer the **whole course**, every cohort, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every cohort org |
-| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that cohort's `classroom-config/people.yml` → `instructors` / `teaching_assistants` | **cohort** - per year | cohort org `instructors` team + course org `instructors-<tag>`: push on `.github` and on every course-org repo named `*-<tag>` |
+| Faculty, FAs | Administer the **whole course**, every semester, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every semester org |
+| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `classroom-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo named `*-<semester>` |
 
-**Prefer the cohort file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's staff cards.
+**Prefer the semester file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's instructor cards.
 
 >Full model - every team and what it reaches: [`access-reference.md`](reference/access-reference.md).
 
@@ -31,23 +31,26 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 1. **Edit the file.**
 
-   **Cohort org**: → `classroom-config` → `people.yml` (this year's teaching team):
+   **Semester org**: → `classroom-config` → `instructors.yml` (this year's instructors):
 
    ```yaml
-   people:
-     instructors:
-       - github_handle: "janedoe"        # required 
-         email: "jane@example.org"       # required
-         name: "Prof. Jane Doe"          # optional, from here down
-         title: "Professor of ..."
-         photo: "/_images/pp/jane.jpg"   
-         url: "https://.../jane"
-     teaching_assistants:
-       - github_handle: "henrycgbaker"
-         email: "another@example.org"
+   instructors:
+     - github_handle: "janedoe"        # required
+       role: instructor                # required: instructor | teaching_assistant
+       email: "jane@example.org"       # required
+       name: "Prof. Jane Doe"          # optional, from here down
+       title: "Professor of ..."
+       photo: "/_images/pp/jane.jpg"
+       url: "https://.../jane"
+     - github_handle: "henrycgbaker"
+       role: teaching_assistant
+       email: "another@example.org"
    ```
 
-   `email` is required and private: it is where this cohort's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the cohort site's staff card. A `course_admins` entry's `email` is optional, and public, since `dsl-course.yml` is. Leave every entry without one and the cohort's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
+   A semester that still has the old `people.yml` is refused as `NOT_MIGRATED` until the
+   migration moves it to `instructors.yml`.
+
+   `email` is required and private: it is where this semester's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the semester site's instructor card. A `course_admins` entry's `email` is optional, and public, since `dsl-course.yml` is. Leave every entry without one and the semester's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
 
    Or **course org** → `.github` → `dsl-course.yml` (course-wide admin):
 
@@ -70,7 +73,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 `photo` accepts either form:
 
-1. **A site-relative path** like `/_images/pp/jane.jpg` - commit the image into this cohort's site repo, `<cohort-org>.github.io`, under `_images/pp/`. The **safe default**.
+1. **A site-relative path** like `/_images/pp/jane.jpg` - commit the image into this semester's site repo, `<semester-org>.github.io`, under `_images/pp/`. The **safe default**.
 2. **An absolute URL** on a host that allows hotlinking. GitHub avatars (`https://github.com/<handle>.png`) always work.
 
 > Institutional profile sites often block off-site requests. E.g. `hertie-school.org` returns **403** to anything not loaded from its own pages.
@@ -80,42 +83,45 @@ Never edit the GitHub teams directly; the file is the auditable record.
 Every person entry, in **either** file, takes two optional ISO dates. This is how you give a guest lecturer, a visiting faculty member or a TA access
 
 ```yaml
-people:
-  teaching_assistants:
-    - github_handle: "anOther"
-      start: "2026-09-01"      # optional - omit for "active immediately"
-      end: "2027-01-31"        # optional - omit for "indefinite"
+instructors:
+  - github_handle: "anOther"
+    role: teaching_assistant
+    email: "another@example.org"
+    start: "2026-09-01"      # optional - omit for "active immediately"
+    end: "2027-01-31"        # optional - omit for "indefinite"
 ```
 
 >Because every sync is a full reconcile, a lapsed `end` prunes them exactly as a deleted entry would - no manual removal step needed. Leave the entry in the file afterwards: it doubles as the record of who taught what, and re-granting next year is a date edit.
 
-Worked example: [`example-course/cohort-org/people.yml`](../example-course/cohort-org/people.yml).
+Worked example: [`example-course/cohort-org/instructors.yml`](../example-course/cohort-org/instructors.yml).
 
 ## Remove someone / end access early
 
 - **Time-boxed:** do nothing, or bring the `end` date forward.
 - **Immediately:** delete their entry (or set `end` to yesterday) and push. The dispatch on that push revokes within a minute or two.
-- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<tag>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth.
+- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth.
 
 ## What the access actually reaches
 
-`instructors-<tag>` gets:
-1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check cohort setup…) visible and runnable for them
-2. every course-org repo whose **name ends their associated `-<tag>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
-3. Cohort-side they also get write on `classroom-config`, `welcome` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the cohort: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
+`instructors-<semester>` gets:
+1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check semester setup…) visible and runnable for them
+2. every course-org repo whose **name ends their associated `-<semester>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
+3. Semester-side they also get write on `classroom-config`, `welcome` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the semester: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
 
-So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the cohort org ([08](08-release-materials-to-cohort.md)) themselves.
+So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the semester org ([08](08-release-materials-to-cohort.md)) themselves.
 
->The suffix match is the whole rule: a course-org repo **without** the year tag in its name is not covered. Name per-year content repos `<thing>-<tag>`. 
+>The suffix match is the whole rule: a course-org repo **without** the semester in its name is not covered. Name per-year content repos `<thing>-<semester>`. 
 >
 >A repo scaffolded by **New materials repo** / **New assignment** is granted as it is created - there is nothing to run afterwards.
 
-## Only staff in these teams
+<a id="only-staff-in-these-teams"></a>
+
+## Only instructors in these teams
 
 `DSL_BOT_TOKEN` is mirrored as a repo secret onto every course-org content repo and assignment
 template (GitHub Free does not deliver org secrets to private repos), and a repo secret is
 readable by anyone with write on the repo. **Write on either is the bot token** - `instructors` and
-`instructors-<tag>` hold it, so put only teaching staff in them; a guest who needs to read
+`instructors-<semester>` hold it, so put only instructors in them; a guest who needs to read
 materials gets read on that one repo, by hand. This is rotation between trusted colleagues,
 not a security boundary.
 
@@ -124,10 +130,10 @@ not a security boundary.
 
 ## Next
 
-- [Enrol students](06-enrol-students-to-cohort.md) - the other half of populating a cohort.
+- [Enrol students](06-enrol-students-to-cohort.md) - the other half of populating a semester.
 - [Add materials to the course](02-add-materials-to-course.md) - what a new TA usually does first.
-- Field-by-field schemas: [DEPLOYMENT-CHECKLIST](DEPLOYMENT-CHECKLIST.md#peopleyml).
+- Field-by-field schemas: [DEPLOYMENT-CHECKLIST](DEPLOYMENT-CHECKLIST.md#instructorsyml).
 
 ---
-**Demo:** [`hertie-dsl-demo-f2026/classroom-config/people.yml`](https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/people.yml)
+**Demo:** [`hertie-dsl-demo-f2026/classroom-config/instructors.yml`](https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/instructors.yml)
 → [`hertie-dsl-demo-course-e1234` teams](https://github.com/orgs/hertie-dsl-demo-course-e1234/teams).

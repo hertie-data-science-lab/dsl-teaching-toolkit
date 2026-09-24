@@ -47,8 +47,8 @@ def test_session_dates_maps_folder_ordinal_and_section_to_release_when():
     sw = _row_dates(s)
     assert sw[("2", "lecture")] == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
     assert sw[("2", "lab")] == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
-    # keyed off the cohort_dest_path ordinal; a bare dest folder takes its section from
-    # cohort_dest_repo
+    # keyed off the semester_dest_path ordinal; a bare dest folder takes its section from
+    # semester_dest_repo
     assert sw[("1", "lecture")] == datetime(2026, 9, 8, 14, 0, tzinfo=BERLIN)
 
 
@@ -437,7 +437,7 @@ def test_row_kind_splits_labs_from_lectures():
 
 # ------------------------------------------------- `type:`, the declared row override
 # Optional, and purely additive: an entry that declares none is placed by where its files
-# land, exactly as every live cohort's is.
+# land, exactly as every live semester's is.
 
 
 def test_a_declared_type_places_a_row_its_path_would_not():
@@ -449,7 +449,7 @@ def test_a_declared_type_places_a_row_its_path_would_not():
                 "clinic-1",
                 datetime(2026, 9, 3, 14, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "clinics/01_week-1", "materials", None)],
-                type="lab",
+                kind="lab",
             )
         ]
     )
@@ -460,7 +460,7 @@ def test_a_declared_type_overrides_the_label_fallback_too():
     # A row raised from its own label (nothing staged yet) is placed by the same rule as
     # one raised from a destination, or the row moves column the day its files ship.
     s = _sched(
-        [Release("lecture-4", datetime(2026, 10, 1, 14, 0, tzinfo=BERLIN), type="lab")]
+        [Release("lecture-4", datetime(2026, 10, 1, 14, 0, tzinfo=BERLIN), kind="lab")]
     )
     assert set(schedule_plan.planned_sessions(s)) == {("4", "lab")}
 
@@ -475,7 +475,7 @@ def test_a_readings_type_contributes_to_a_row_without_raising_one():
                 "week-1-papers",
                 datetime(2026, 8, 25, 9, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "readings/01_week-1", "materials", None)],
-                type="readings",
+                kind="readings",
                 title="Not this one",
             ),
             Release(

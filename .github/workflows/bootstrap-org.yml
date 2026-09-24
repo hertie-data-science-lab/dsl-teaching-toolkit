@@ -102,7 +102,7 @@ jobs:
           # Unset here just means the org falls back to the GRAPH_SENDER mailbox.
           DSL_MAINTAINER_EMAIL: ${{ vars.DSL_MAINTAINER_EMAIL }}
           # The same arrangement for the course admins' addresses, which is who hears
-          # about a fault in the new org's OWN config (dsl-course.yml, the cohort
+          # about a fault in the new org's OWN config (dsl-course.yml, the semester
           # registry). Comma-separated, and a variable rather than a secret so it can be
           # read back and checked. Unset just means the digest issue's
           # `cc @<org>/course-admin` is the only channel.

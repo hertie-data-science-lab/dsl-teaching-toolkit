@@ -1,7 +1,7 @@
   # Instructor website cards (optional, DISPLAY ONLY - no GitHub access) for the
   # OPTIONAL public open-courseware course website. TAs are NOT listed here - a
-  # cohort's own teaching team (instructors & TAs) goes in that cohort's
-  # classroom-config/people.yml instead. Uncomment and fill:
+  # semester's own teaching team (instructors & TAs) goes in that semester's
+  # classroom-config/instructors.yml instead. Uncomment and fill:
   # instructors:
   #   - github_handle: "janedoe"
   #     name:  "Prof. Dr. Jane Doe"

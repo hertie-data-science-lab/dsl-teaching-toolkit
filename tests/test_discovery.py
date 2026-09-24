@@ -51,36 +51,36 @@ def test_is_infra_repo_excludes_by_name_and_by_topic():
     assert not discovery._is_infra_repo({"name": "notes"})  # topics absent -> content
 
 
-def test_unregister_cohort_rewrites_the_registry_without_it(monkeypatch):
+def test_unregister_semester_rewrites_the_registry_without_it(monkeypatch):
     monkeypatch.setattr(
         discovery,
         "get_file_content",
-        lambda *a: "cohorts:\n- Cohort-f2025\n- Cohort-f2026\n",
+        lambda *a: "semesters:\n- Semester-f2025\n- Semester-f2026\n",
     )
     written: list = []
     monkeypatch.setattr(discovery, "put_file", lambda *a: written.append(a) or True)
 
-    assert discovery.unregister_cohort("Course-Org", "Cohort-f2025") is True
+    assert discovery.unregister_semester("Course-Org", "Semester-f2025") is True
     (_org, _repo, _path, body, message) = written[0]
-    assert yaml.safe_load(body.decode()) == {"cohorts": ["Cohort-f2026"]}
-    assert "Cohort-f2025" in message
+    assert yaml.safe_load(body.decode()) == {"semesters": ["Semester-f2026"]}
+    assert "Semester-f2025" in message
 
 
-def test_unregister_cohort_writes_nothing_for_one_already_absent(monkeypatch):
-    # Idempotent: the nightly refresh probes every cohort every night, and a no-op must
+def test_unregister_semester_writes_nothing_for_one_already_absent(monkeypatch):
+    # Idempotent: the nightly refresh probes every semester every night, and a no-op must
     # not put a commit into the course org's .github repo each time.
     monkeypatch.setattr(
-        discovery, "get_file_content", lambda *a: "cohorts:\n- Cohort-f2026\n"
+        discovery, "get_file_content", lambda *a: "semesters:\n- Semester-f2026\n"
     )
     monkeypatch.setattr(
-        discovery, "put_file", lambda *a: pytest.fail("wrote for an absent cohort")
+        discovery, "put_file", lambda *a: pytest.fail("wrote for an absent semester")
     )
-    assert discovery.unregister_cohort("Course-Org", "Cohort-f2025") is True
+    assert discovery.unregister_semester("Course-Org", "Semester-f2025") is True
 
 
-def test_handed_out_assignments_are_the_topic_stamped_cohort_templates(monkeypatch):
-    # The site withholds an assignment's brief until this says the cohort has it, so it
-    # must name the frozen cohort template (assign.py stage 1) and nothing else - not the
+def test_handed_out_assignments_are_the_topic_stamped_semester_templates(monkeypatch):
+    # The site withholds an assignment's brief until this says the semester has it, so it
+    # must name the frozen semester template (assign.py stage 1) and nothing else - not the
     # per-student submission repos beside it, not the gradebooks.
     assert discovery.handed_out_assignments(INFRA_AND_CONTENT) == frozenset(
         {"assignment-1-f2026-template"}
@@ -93,13 +93,13 @@ def test_both_discover_functions_apply_the_same_infra_exclusions(monkeypatch):
     # repo secret), and gradebooks/submissions must never appear as release targets.
     monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
     expected = ["course-materials-f2026", "labs"]
-    assert discovery.cohort_content_repos(INFRA_AND_CONTENT) == expected
+    assert discovery.semester_content_repos(INFRA_AND_CONTENT) == expected
     assert discovery.discover_content_repos("My-Course-E1234") == expected
 
 
 def test_discover_content_repos_also_excludes_assignment_templates_by_name(monkeypatch):
     # Course-org assignment templates carry no `assignment-template` topic (that one is
-    # set on the frozen cohort-side copy), so the name prefix is the content-side rule.
+    # set on the frozen semester-side copy), so the name prefix is the content-side rule.
     monkeypatch.setattr(
         discovery,
         "list_org_repos",
@@ -114,7 +114,7 @@ def test_discover_content_repos_also_excludes_assignment_templates_by_name(monke
 
 
 def test_list_org_repos_paginates_instead_of_capping(monkeypatch):
-    # A cohort org holds a repo per student per assignment plus a gradebook each, so any
+    # A semester org holds a repo per student per assignment plus a gradebook each, so any
     # fixed --limit silently truncates discovery. --paginate walks every page, and each
     # page's --jq output is NDJSON (not one concatenated array).
     calls = []
@@ -133,7 +133,7 @@ def test_list_org_repos_paginates_instead_of_capping(monkeypatch):
 def test_list_org_repos_raises_instead_of_reporting_an_empty_org(monkeypatch):
     # [] means the org really is empty. A failed listing used to look identical, so a
     # transient API error made Refresh converge "0 content repo(s)" and go green, and
-    # made profile_readme file a cohort org (no `welcome` found) as a course org.
+    # made profile_readme file a semester org (no `welcome` found) as a course org.
     monkeypatch.setattr(discovery, "gh", lambda *args: (1, "gh: HTTP 502"))
     with pytest.raises(RuntimeError, match="could not list repos in Org"):
         discovery.list_org_repos("Org")
@@ -174,7 +174,7 @@ TREES = {
 
 
 def test_discover_release_sources_detects_root_and_nested_shapes(monkeypatch):
-    # root shape: a deploy landed with no cohort_dest_path, so session folders sit directly at
+    # root shape: a deploy landed with no semester_dest_path, so session folders sit directly at
     # the dest repo's root (labs/lectures in a live course).
     # nested shape: a deploy routed its session folders under a shared repo's subfolder.
     monkeypatch.setattr(discovery, "_repo_tree_dirs", lambda org, repo: TREES[repo])
@@ -226,17 +226,17 @@ def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
 
 def test_repo_tree_dirs_reads_an_absent_or_empty_repo_as_no_directories(monkeypatch):
     # A 404 (no such repo/tree) and a 409 (a repo with no commits yet) both genuinely mean
-    # "no session folders" - a brand-new cohort repo is not a failure.
+    # "no session folders" - a brand-new semester repo is not a failure.
     monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
     for out in ("gh: Not Found (HTTP 404)", "gh: Conflict (HTTP 409)"):
         monkeypatch.setattr(gh_contents, "gh", lambda *a, out=out, **k: (1, out))
-        assert discovery._repo_tree_dirs("Cohort-f2026", "materials") == ()
+        assert discovery._repo_tree_dirs("Semester-f2026", "materials") == ()
 
 
 def test_repo_tree_dirs_raises_rather_than_reporting_a_repo_with_no_sessions(
     monkeypatch,
 ):
-    # The site-wipe class: these rows ARE the cohort site's schedule, and the sync clears
+    # The site-wipe class: these rows ARE the semester site's schedule, and the sync clears
     # and rewrites the collections from them - so a rate-limited tree fetch swallowed as
     # `[]` republished the site with every session row deleted, silently and green.
     monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
@@ -244,7 +244,7 @@ def test_repo_tree_dirs_raises_rather_than_reporting_a_repo_with_no_sessions(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway")
     )
     with pytest.raises(RuntimeError, match="could not read the tree"):
-        discovery.discover_release_sources("Cohort-f2026", ["materials"])
+        discovery.discover_release_sources("Semester-f2026", ["materials"])
 
 
 def test_both_transports_share_one_tree_fetch(monkeypatch):
@@ -261,8 +261,8 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
     monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", fake_gh)
-    discovery._repo_tree_dirs("Cohort-f2026", "materials")
-    site._repo_tree("Cohort-f2026", "materials")
+    discovery._repo_tree_dirs("Semester-f2026", "materials")
+    site._repo_tree("Semester-f2026", "materials")
     assert [a[-1] for a in calls] == [
         '"\\(.truncated)", (.tree[] | select(.type=="tree") | .path)',
         '"\\(.truncated)", (.tree[] | select(.type=="blob") | .path)',
@@ -273,97 +273,97 @@ def _registry(text: str | None):
     return lambda *a, **k: text
 
 
-def test_read_cohorts_returns_empty_for_an_absent_registry(monkeypatch):
+def test_read_semesters_returns_empty_for_an_absent_registry(monkeypatch):
     monkeypatch.setattr(discovery, "get_file_content", _registry(None))
-    assert discovery._read_cohorts("Course") == []
+    assert discovery._read_semesters("Course") == []
 
 
-def test_read_cohorts_reads_a_valid_registry(monkeypatch):
+def test_read_semesters_reads_a_valid_registry(monkeypatch):
     monkeypatch.setattr(
         discovery,
         "get_file_content",
-        _registry("cohorts:\n  - Course-f2026\n  - Course-f2025\n"),
+        _registry("semesters:\n  - Course-f2026\n  - Course-f2025\n"),
     )
-    assert discovery.discover_cohorts("Course") == ["Course-f2025", "Course-f2026"]
+    assert discovery.discover_semesters("Course") == ["Course-f2025", "Course-f2026"]
 
 
-def test_read_cohorts_tolerates_a_bare_list_registry(monkeypatch):
-    # The machine-written form is {cohorts: [...]}, but the file is human-editable and a
+def test_read_semesters_tolerates_a_bare_list_registry(monkeypatch):
+    # The machine-written form is {semesters: [...]}, but the file is human-editable and a
     # bare top-level list has always been accepted - it must not newly hard-fail the sync.
     monkeypatch.setattr(
         discovery, "get_file_content", _registry("- Course-f2026\n- Course-f2025\n")
     )
-    assert discovery.discover_cohorts("Course") == ["Course-f2025", "Course-f2026"]
+    assert discovery.discover_semesters("Course") == ["Course-f2025", "Course-f2026"]
 
 
-def test_read_cohorts_names_the_file_when_the_yaml_does_not_parse(monkeypatch):
+def test_read_semesters_names_the_file_when_the_yaml_does_not_parse(monkeypatch):
     # The bare safe_load surfaced a raw PyYAML traceback from wherever the registry
     # happened to be read, naming "<unicode string>" rather than the file to fix.
     monkeypatch.setattr(
-        discovery, "get_file_content", _registry("cohorts: [unclosed\n")
+        discovery, "get_file_content", _registry("semesters: [unclosed\n")
     )
-    with pytest.raises(RuntimeError, match="malformed cohort registry in Course"):
-        discovery._read_cohorts("Course")
+    with pytest.raises(RuntimeError, match="malformed semester registry in Course"):
+        discovery._read_semesters("Course")
 
 
-def test_read_cohorts_raises_on_a_malformed_registry_shape(monkeypatch):
+def test_read_semesters_raises_on_a_malformed_registry_shape(monkeypatch):
     # A malformed shape used to be flattened to [], which renders every dropdown as
     # "(none-yet)" and lets a whole-course sync go quietly green. Now it raises.
     monkeypatch.setattr(
-        discovery, "get_file_content", _registry("cohorts: Course-f2026\n")
+        discovery, "get_file_content", _registry("semesters: Course-f2026\n")
     )
-    with pytest.raises(RuntimeError, match="expected a list of cohort org names"):
-        discovery._read_cohorts("Course")
+    with pytest.raises(RuntimeError, match="expected a list of semester org names"):
+        discovery._read_semesters("Course")
     monkeypatch.setattr(
-        discovery, "get_file_content", _registry("cohorts:\n  - 1\n  - 2\n")
+        discovery, "get_file_content", _registry("semesters:\n  - 1\n  - 2\n")
     )
-    with pytest.raises(RuntimeError, match="expected a list of cohort org names"):
-        discovery._read_cohorts("Course")
+    with pytest.raises(RuntimeError, match="expected a list of semester org names"):
+        discovery._read_semesters("Course")
 
 
 def test_a_caller_collecting_faults_is_told_rather_than_raised_at(monkeypatch):
     # The notifier is asking what is WRONG with the file so it can mail somebody about it.
     # Raising at it would take the whole pre-flight down over the one thing it exists to
-    # report - and the cohort listing above still raises, because nothing may be pruned
+    # report - and the semester listing above still raises, because nothing may be pruned
     # against a registry nobody can read.
     for text, expected in (
-        ("cohorts: [unclosed\n", "not valid YAML"),
-        ("cohorts: Course-f2026\n", "not a list of cohort org names"),
+        ("semesters: [unclosed\n", "not valid YAML"),
+        ("semesters: Course-f2026\n", "not a list of semester org names"),
     ):
         monkeypatch.setattr(discovery, "get_file_content", _registry(text))
         found: list = []
-        assert discovery.read_cohort_registry("Course", found) == []
+        assert discovery.read_semester_registry("Course", found) == []
         (fault,) = found
         assert expected in fault.what
         assert (fault.file, fault.in_repo, fault.field) == (
-            discovery.COHORTS_PATH,
+            discovery.SEMESTERS_PATH,
             ".github",
-            "cohorts",
+            "semesters",
         )
         # No line: the registry's shape is what is wrong, not one entry of it, so every
         # surface cites the file bare rather than deep-linking a guess - and the fix
         # sentence must not name a line either. The file's fallback (`faults.FIX`) says
         # "correct the line above", which is an instruction about nothing here.
-        assert fault.at == discovery.COHORTS_PATH and fault.lineno is None
+        assert fault.at == discovery.SEMESTERS_PATH and fault.lineno is None
         assert "line above" not in fault.fix()
-        assert fault.fix().startswith(f"restore {discovery.COHORTS_PATH}")
+        assert fault.fix().startswith(f"restore {discovery.SEMESTERS_PATH}")
 
 
 def test_a_registry_the_toolkit_can_read_leaves_no_fault(monkeypatch):
     monkeypatch.setattr(
-        discovery, "get_file_content", _registry("cohorts:\n  - Course-f2026\n")
+        discovery, "get_file_content", _registry("semesters:\n  - Course-f2026\n")
     )
     found: list = []
-    assert discovery.read_cohort_registry("Course", found) == ["Course-f2026"]
+    assert discovery.read_semester_registry("Course", found) == ["Course-f2026"]
     assert found == []
 
 
 def test_a_registry_that_is_not_there_yet_is_not_a_fault(monkeypatch):
-    # A brand-new course org has no cohorts and no registry file. That is the normal
+    # A brand-new course org has no semesters and no registry file. That is the normal
     # state for weeks, and an issue about it would be an issue about nothing.
     monkeypatch.setattr(discovery, "get_file_content", _registry(None))
     found: list = []
-    assert discovery.read_cohort_registry("Course", found) == []
+    assert discovery.read_semester_registry("Course", found) == []
     assert found == []
 
 
@@ -375,38 +375,38 @@ def test_a_registry_that_could_not_be_READ_still_raises(monkeypatch):
 
     monkeypatch.setattr(discovery, "get_file_content", boom)
     with pytest.raises(RuntimeError, match="rate limited"):
-        discovery.read_cohort_registry("Course", [])
+        discovery.read_semester_registry("Course", [])
 
 
-def test_register_cohort_reports_failure_when_the_write_fails(monkeypatch):
+def test_register_semester_reports_failure_when_the_write_fails(monkeypatch):
     # The put_file return was discarded and log_ok("registered ...") fired unconditionally,
-    # so bootstrap claimed a cohort was registered even when the write failed.
-    monkeypatch.setattr(discovery, "_read_cohorts", lambda org: [])
+    # so bootstrap claimed a semester was registered even when the write failed.
+    monkeypatch.setattr(discovery, "_read_semesters", lambda org: [])
     monkeypatch.setattr(discovery, "put_file", lambda *a, **k: False)
-    assert discovery.register_cohort("Course", "Course-f2026") is False
+    assert discovery.register_semester("Course", "Course-f2026") is False
 
     monkeypatch.setattr(discovery, "put_file", lambda *a, **k: True)
-    assert discovery.register_cohort("Course", "Course-f2026") is True
+    assert discovery.register_semester("Course", "Course-f2026") is True
 
 
-def test_register_cohort_is_idempotent_when_already_registered(monkeypatch):
-    monkeypatch.setattr(discovery, "_read_cohorts", lambda org: ["Course-f2026"])
+def test_register_semester_is_idempotent_when_already_registered(monkeypatch):
+    monkeypatch.setattr(discovery, "_read_semesters", lambda org: ["Course-f2026"])
     # no write attempted, still reports success (already present)
     monkeypatch.setattr(
         discovery, "put_file", lambda *a, **k: pytest.fail("should not write")
     )
-    assert discovery.register_cohort("Course", "Course-f2026") is True
+    assert discovery.register_semester("Course", "Course-f2026") is True
 
 
-def test_org_tier_reads_the_dotgithub_topic_then_the_cohort_only_repos_then_gives_up():
-    # None is a real answer: a legacy cohort (`.github` + student repos, no `welcome`, no
+def test_org_tier_reads_the_dotgithub_topic_then_the_semester_only_repos_then_gives_up():
+    # None is a real answer: a legacy semester (`.github` + student repos, no `welcome`, no
     # topics) is indistinguishable from a course org by elimination, and the faculty
     # sweep reads "course" as "push everywhere".
     gh = lambda *topics: {"name": ".github", "topics": list(topics)}
-    assert discovery.org_tier([gh("dsl-cohort"), {"name": "a1-ada"}]) == "cohort"
+    assert discovery.org_tier([gh("dsl-semester"), {"name": "a1-ada"}]) == "semester"
     assert discovery.org_tier([gh("dsl-course-hub"), {"name": "cm-f2026"}]) == "course"
-    assert discovery.org_tier([gh(), {"name": "welcome"}]) == "cohort"
-    assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "cohort"
+    assert discovery.org_tier([gh(), {"name": "welcome"}]) == "semester"
+    assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "semester"
     assert discovery.org_tier([gh(), {"name": "assignment-1-ada"}]) is None
     assert discovery.org_tier([{"name": "materials"}]) is None  # no .github at all
 
@@ -447,44 +447,44 @@ def test_student_repo_names_by_topic_or_by_name():
     }
 
 
-# ------------------------------------------------------------------- live cohorts
+# ------------------------------------------------------------------- live semesters
 
 
 def _closed_out(*orgs: str):
-    """`repo_is_archived` as it answers for a cohort whose classroom-config is frozen."""
+    """`repo_is_archived` as it answers for a semester whose classroom-config is frozen."""
     return lambda org, name: org in orgs
 
 
-def test_live_cohorts_leaves_a_closed_out_cohort_out(monkeypatch, capsys):
-    # An archived classroom-config IS the "this cohort is finished" marker, and every
+def test_live_semesters_leaves_a_closed_out_semester_out(monkeypatch, capsys):
+    # An archived classroom-config IS the "this semester is finished" marker, and every
     # write a course-side sweep would make on such an org 403s. Skipped as a LINE, not an
     # error: being finished is a state somebody chose.
     monkeypatch.setattr(
         discovery,
         "get_file_content",
-        _registry("cohorts:\n  - Course-f2025\n  - Course-f2026\n"),
+        _registry("semesters:\n  - Course-f2025\n  - Course-f2026\n"),
     )
     monkeypatch.setattr(discovery, "repo_is_archived", _closed_out("Course-f2025"))
-    assert discovery.live_cohorts("Course") == ["Course-f2026"]
+    assert discovery.live_semesters("Course") == ["Course-f2026"]
     printed = capsys.readouterr()
-    assert "[skip] Course-f2025 (archived cohort - left frozen)" in printed.out
+    assert "[skip] Course-f2025 (archived semester - left frozen)" in printed.out
     assert "Course-f2025" not in printed.err
 
 
-def test_a_cohort_whose_archived_flag_cannot_be_read_counts_as_live(monkeypatch):
+def test_a_semester_whose_archived_flag_cannot_be_read_counts_as_live(monkeypatch):
     # `repos.repo_is_archived` fails OPEN, and this inherits that: guessing "live" costs
     # one failed write that says so out loud, guessing "finished" silently stops syncing a
-    # cohort mid-term.
+    # semester mid-term.
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
-    assert discovery.cohort_is_live("Course-f2026") is True
+    assert discovery.semester_is_live("Course-f2026") is True
 
 
-def test_the_registry_still_lists_a_closed_out_cohort(monkeypatch):
-    # `discover_cohorts` answers "which cohorts does this course own?" - a question about
-    # the registry, not about whether a term is over. A finished cohort stays registered,
+def test_the_registry_still_lists_a_closed_out_semester(monkeypatch):
+    # `discover_semesters` answers "which semesters does this course own?" - a question about
+    # the registry, not about whether a term is over. A finished semester stays registered,
     # so a dispatch naming it is still authorised and the profile page still lists it.
     monkeypatch.setattr(
-        discovery, "get_file_content", _registry("cohorts:\n  - Course-f2025\n")
+        discovery, "get_file_content", _registry("semesters:\n  - Course-f2025\n")
     )
     monkeypatch.setattr(discovery, "repo_is_archived", _closed_out("Course-f2025"))
-    assert discovery.discover_cohorts("Course") == ["Course-f2025"]
+    assert discovery.discover_semesters("Course") == ["Course-f2025"]

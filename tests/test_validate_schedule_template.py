@@ -1,4 +1,4 @@
-"""validate-schedule.yml -- what the cohort's own commit-time check does that no other
+"""validate-schedule.yml -- what the semester's own commit-time check does that no other
 workflow can.
 
 The operational properties every shipped workflow shares are asserted in
@@ -42,14 +42,14 @@ def _step(name_starts: str) -> dict:
 
 
 def test_an_unreadable_course_org_is_a_failure_not_a_skipped_check():
-    # A cohort's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an empty
+    # A semester's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an empty
     # answer is an API error or a token that lost its scope. Swallowed, the source check
     # silently stopped running and every push looked clean.
     resolve = _step("Resolve the course org")
     assert "continue-on-error" not in resolve
     fail = _step("Fail the run because the course org")
     assert fail["if"] == "steps.course.outputs.org == ''"
-    assert "::error::could not read this cohort's dsl-course.yml" in fail["run"]
+    assert "::error::could not read this semester's dsl-course.yml" in fail["run"]
     assert "exit 1" in fail["run"]
     # ...and it says whose problem it is. Faculty reading a red X on their own push will
     # otherwise go looking through a file that is perfectly fine.
@@ -65,9 +65,9 @@ def test_the_course_org_is_read_by_the_real_loader_not_a_grep():
     # has both by the time it asks, so it asks the same YAML parse every CLI makes.
     resolve = _step("Resolve the course org")
     assert "grep" not in resolve["run"]
-    assert "course_org_for_cohort" in resolve["run"]
+    assert "course_org_for_semester" in resolve["run"]
     # ...and the name it invokes is a real one, in the checkout it runs from.
-    assert callable(discovery.course_org_for_cohort)
+    assert callable(discovery.course_org_for_semester)
     assert resolve["working-directory"] == "central"
 
 
@@ -76,7 +76,7 @@ def test_only_the_course_org_reaches_the_step_output():
     # before a successful retry. A second line writes a step-output line with no `=`,
     # GitHub rejects the whole file, and the step fails - which skips every step after it,
     # the parse verdict included. One rate-limited read would cost the dropped-entry
-    # channel entirely. `scheduler.main`'s --list-cohorts carries the same guard.
+    # channel entirely. `scheduler.main`'s --list-semesters carries the same guard.
     assert "redirect_stdout" in _step("Resolve the course org")["run"]
 
 
@@ -95,8 +95,8 @@ def test_the_parse_is_reported_even_when_the_course_org_cannot_be_read():
     assert names[-1].startswith("Fail the run because the course org")
 
 
-def test_nothing_in_the_cohort_template_pretends_it_can_send_mail():
-    # A cohort org carries DSL_BOT_TOKEN and nothing else. GRAPH_* and
+def test_nothing_in_the_semester_template_pretends_it_can_send_mail():
+    # A semester org carries DSL_BOT_TOKEN and nothing else. GRAPH_* and
     # DSL_MAINTAINER_EMAIL are set on COURSE orgs and nothing propagates them down, so a
     # mail step here would resolve to empty secrets and send to nobody - while reading, in
     # the file and in the docs, as a channel that works. The infrastructure verdict is
@@ -237,20 +237,20 @@ def test_each_listed_row_is_the_engines_own_line():
     # `SourceFault.line()` is dash-separated in this order precisely so every surface can
     # reuse it whole rather than re-arranging it.
     fault = _fault("releases.lecture_02", timedelta(hours=3), 131)
-    body = schedule.source_comment([fault], NOW, "Cohort-f2026")
-    assert f"- {fault.line(fault.cite('Cohort-f2026'))}" in body
+    body = schedule.source_comment([fault], NOW, "Semester-f2026")
+    assert f"- {fault.line(fault.cite('Semester-f2026'))}" in body
 
 
 def test_the_citation_is_a_link_at_the_line_that_needs_editing():
     # A commit comment is markdown, and the whole point of saying this on the push is that
     # the fix is one click away rather than a scroll through a file written in August.
     fault = _fault("releases.lecture_02", timedelta(hours=3), 131)
-    body = schedule.source_comment([fault], NOW, "Cohort-f2026")
+    body = schedule.source_comment([fault], NOW, "Semester-f2026")
     assert (
-        "[`schedule.yml:131`](https://github.com/Cohort-f2026/classroom-config/blob/main"
+        "[`schedule.yml:131`](https://github.com/Semester-f2026/classroom-config/blob/main"
         "/schedule.yml#L131)"
     ) in body
-    # No cohort to build a URL from - run by hand, off a runner - and it is plain code.
+    # No semester to build a URL from - run by hand, off a runner - and it is plain code.
     assert "](" not in schedule.source_comment([fault], NOW)
 
 

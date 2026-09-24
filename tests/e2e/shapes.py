@@ -2,11 +2,11 @@
 
 An assignment's SHAPE is `submit_via` x `visibility`, and the five combinations the engine
 acts on behave differently at every stage of the pipeline: what the handout creates, where
-a student pushes, whether there is a receipts issue, what the site page says. A harness
+a student pushes, whether there is a Submission receipts issue, what the site page says. A harness
 that drove one of them proved the wiring for one of them.
 
 So the run hands out FIVE assignments in one pass, serially, over the same roster and the
-same cohort. Each gets its own slug - `<namespace>-<shape name>` - which keeps every repo
+same semester. Each gets its own slug - `<namespace>-<shape name>` - which keeps every repo
 inside the one namespace `cleanup` sweeps, and keeps the five apart everywhere a name is
 the key: the schedule entry, the grading sheet, the snapshot, the gradebook section.
 
@@ -31,7 +31,7 @@ from . import cleanup
 # Where an `external` assignment says the work is handed in. A real https URL because the
 # reader refuses anything else (and refuses the scaffold's `CHANGE-ME` placeholder), and a
 # deliberately inert host because the value is rendered as a `Submit on ...` button on the
-# demo cohort's site for as long as the run lasts.
+# demo semester's site for as long as the run lasts.
 SUBMIT_URL = "https://example.org/e2e/submit"
 
 
@@ -71,12 +71,12 @@ class Shape:
 
     @property
     def has_receipts_issue(self) -> bool:
-        """Whether a student's feedback has a receipts issue to go on."""
+        """Whether a student's feedback has a Submission receipts issue to go on."""
         return course.has_receipts_issue(self.submit_via, self.visibility or "private")
 
     @property
     def submit_shared(self) -> bool:
-        """Whether the whole cohort hands in to ONE repo."""
+        """Whether the whole semester hands in to ONE repo."""
         return self.submit_via == "shared_dropbox_repo"
 
     def repo(self, run_id: str, handle: str) -> str:

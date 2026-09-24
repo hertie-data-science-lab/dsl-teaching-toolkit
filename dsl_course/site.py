@@ -1,9 +1,9 @@
-"""dsl-course site -- regenerate a course/cohort website from the live org structure.
+"""dsl-course site -- regenerate a course/semester website from the live org structure.
 
 Two sites, two audiences, one set of Jekyll templates (`templates/site/`):
 
-- **cohort site** (`<cohort>.github.io`, `sync_site`) - student-facing. Its lecture links
-  point at the cohort's PRIVATE content repos (wherever a release actually landed each
+- **semester site** (`<semester>.github.io`, `sync_site`) - student-facing. Its lecture links
+  point at the semester's PRIVATE content repos (wherever a release actually landed each
   section - see `discovery.discover_release_sources`), so they 404 for non-members (the gate is
   deliberate). Regenerates `_lectures/`, `_assignments/`, `_events/` from the release state.
   Releases call it; the Sync site action runs it on demand.
@@ -16,14 +16,13 @@ Both hand their plan to `site_repo`, which applies it; pushing the site repo red
 
 Usage:
     python3 -m dsl_course.site sync --course-org TEST-HERTIE-COURSE \\
-        --cohort-org TEST-HERTIE-COHORT-f2026
+        --semester-org TEST-HERTIE-SEMESTER-f2026
     python3 -m dsl_course.site public-sync --course-org TEST-HERTIE-COURSE \\
         --source-repo course-materials-f2026 --readings-mode reading-list
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import shutil
 import stat
@@ -42,6 +41,7 @@ from pathspec import GitIgnoreSpec
 from . import schedule, status, teams
 from .course import (
     CUTOFF_SENTENCE,
+    INSTRUCTORS_FILE,
     PUBLISH_FILE,
     SELF_SELECT,
     assignment_slug,
@@ -49,29 +49,29 @@ from .course import (
     late_rule,
     pages_repo,
     row_name,
+    semester_label,
+    semester_of,
     session_number,
     shape_note,
     shared_repo,
     submission_repo,
-    term_label,
-    term_tag,
 )
 from .discovery import (
-    COHORTS_PATH,
-    cohort_content_repos,
-    cohort_is_live,
+    SEMESTERS_PATH,
     discover_assignments,
-    discover_cohorts,
     discover_release_sources,
+    discover_semesters,
     handed_out_assignments,
     list_org_repos,
-    live_cohorts,
+    live_semesters,
+    semester_content_repos,
+    semester_is_live,
     welcome_issue_url,
 )
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .grades import load_grading_spec, spoken_day, team_cap, total_points
-from .log import log, log_err, log_step, log_withheld
+from .log import CLIParser, log, log_err, log_step, log_withheld
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
 from .releaseignore import parse as parse_patterns
@@ -109,29 +109,37 @@ from .site_repo import (
 )
 
 
-def _semester_start(cohort_org: str) -> date:
+def _semester_start(semester_org: str) -> date:
     """Best-effort semester start from a fYYYY / sYYYY tag (for schedule ordering)."""
-    tag = term_tag(cohort_org)
+    tag = semester_of(semester_org)
     if tag:
         return date(int(tag[1:]), 9 if tag[0] == "f" else 2, 1)
     return date(2026, 1, 1)
 
 
-def _semester_label(cohort_org: str) -> str:
+def _instructors_meta(semester_org: str) -> tuple[dict, str]:
+    """A semester's `instructors.yml` and its path. The old `people.yml` is never read
+    (decision 0012): a semester that has not migrated gets the instructors-team cards."""
+    return yaml_file(
+        semester_org, "classroom-config", INSTRUCTORS_FILE
+    ), INSTRUCTORS_FILE
+
+
+def _semester_label(semester_org: str) -> str:
     """fYYYY -> 'Fall YYYY', sYYYY -> 'Spring YYYY' (for site.course_semester)."""
-    return term_label(term_tag(cohort_org)) or ""
+    return semester_label(semester_of(semester_org)) or ""
 
 
 @cache
 def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     """(default branch, every blob path in it) for a repo - one recursive tree fetch,
-    memoised for the run. A cohort site asks for the files of EVERY released session, and
+    memoised for the run. A semester site asks for the files of EVERY released session, and
     they nearly all live in the same repo, so without the memo the identical tree got
     fetched once per session. Paths come back sorted, so callers filtering them keep a
     stable diff.
 
     Unbounded cache: this is a one-shot CLI process, and the trees it reads are the
-    handful of repos one cohort released into.
+    handful of repos one semester released into.
 
     The fetch itself is gh_contents.repo_tree (shared with discovery's directory-side twin, so
     the absent-vs-failed discrimination is written once): a genuinely absent/empty tree is
@@ -167,8 +175,8 @@ def _ext(name: str) -> str:
 
 # ---------------------------------------------------------------- publicly hosted copies
 
-# Where a cohort site serves the public copies, under its root. `files/`, never `<repo>/`:
-# `/materials/` is the All Materials page's own permalink, and a cohort whose content repo
+# Where a semester site serves the public copies, under its root. `files/`, never `<repo>/`:
+# `/materials/` is the All Materials page's own permalink, and a semester whose content repo
 # is called `materials` would otherwise take that page's URL. Jekyll serves any path that
 # does not begin with `_`, so nothing has to be declared for these to be published.
 SITE_FILES_DIR = "files"
@@ -185,7 +193,7 @@ _RENDERED_EXTENSIONS = _DECK_EXTENSIONS | {"pdf"}
 # sync's own push rather than the release that put it in the materials repo.
 _MAX_PUBLIC_FILE_BYTES = 100 * 1024 * 1024
 
-# Cohort repo -> the paths this run actually copied under `files/<repo>/`. The ONE record
+# Semester repo -> the paths this run actually copied under `files/<repo>/`. The ONE record
 # of what is hosted: the mirror hands it back and every renderer reads it, so a page cannot
 # link a rendered copy that a size cap, a broken clone or a denylist stopped being made.
 Hosted = dict[str, frozenset[str]]
@@ -197,8 +205,8 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
     nothing.
 
     The policy is COURSE-level and lives in the source repo faculty actually edit, not in
-    each cohort's copy: one file per course, applying to every cohort of it. Memoised for
-    the run because `--all-cohorts` asks the same course the same question once per cohort.
+    each semester's copy: one file per course, applying to every semester of it. Memoised for
+    the run because `--all-semesters` asks the same course the same question once per semester.
 
     Patterns go through the same parser faculty's `.releaseignore` goes through, so the one
     syntax they already know covers both directions of the same question.
@@ -206,7 +214,7 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
     A file that is absent or empty is "nothing public", said deliberately, and the mirror
     may then delete what an earlier sync copied. A file that does not PARSE, or whose
     `public:` is not a list of patterns, stops the sync and reports - the same rule
-    `people.yml` follows next door, and for the same reason: read as "nothing public" it
+    `instructors.yml` follows next door, and for the same reason: read as "nothing public" it
     would unpublish a whole course's rendered decks over a typo, on a green run."""
     declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
     if declared is None:
@@ -222,7 +230,7 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
 def _publish_policies(
     course_org: str, sched: schedule.Schedule, content_repos: list[str]
 ) -> dict[str, tuple[GitIgnoreSpec, ...]]:
-    """Each cohort content repo the schedule releases into, mapped to the policies of the
+    """Each semester content repo the schedule releases into, mapped to the policies of the
     source repos that feed it.
 
     Keyed on the DESTINATION, because that is the repo whose files the site links and
@@ -240,8 +248,10 @@ def _publish_policies(
     sources: dict[str, set[str]] = {}
     for release in sched.releases:
         for d in release.deploy:
-            if d.cohort_dest_repo in content_repos:
-                sources.setdefault(d.cohort_dest_repo, set()).add(d.course_source_repo)
+            if d.semester_dest_repo in content_repos:
+                sources.setdefault(d.semester_dest_repo, set()).add(
+                    d.course_source_repo
+                )
     return {
         repo: tuple(
             spec
@@ -259,13 +269,13 @@ def _publishable(path: str) -> bool:
     return not has_denied_component(path) and not has_never_material_component(path)
 
 
-def _view_url(cohort_org: str, repo: str, path: str) -> str:
-    """Where the cohort site serves its own copy of one published file.
+def _view_url(semester_org: str, repo: str, path: str) -> str:
+    """Where the semester site serves its own copy of one published file.
 
     Absolute, not site-relative: the templates prepend `site.baseurl` to anything without
     a scheme, and a link record now carries two destinations - so the one that is already
     a full URL on every other row stays a full URL here too."""
-    return f"https://{pages_repo(cohort_org)}/{SITE_FILES_DIR}/{repo}/{quote(path)}"
+    return f"https://{pages_repo(semester_org)}/{SITE_FILES_DIR}/{repo}/{quote(path)}"
 
 
 def _public_selection(
@@ -281,7 +291,7 @@ def _public_selection(
     written around.
 
     A file GitHub would refuse on a push is dropped with a warning rather than failing the
-    sync: one 200 MB recording in a materials repo would otherwise take a cohort's whole
+    sync: one 200 MB recording in a materials repo would otherwise take a semester's whole
     site offline, and the file it is a copy of is still on GitHub. So is anything that is
     not a regular file - `lstat`, so a `notes.pdf -> ../solution/answers.pdf` is judged as
     the link it is rather than as what it points at - and anything the clone does not
@@ -308,7 +318,7 @@ def _public_selection(
             continue
         if st.st_size > _MAX_PUBLIC_FILE_BYTES:
             log_withheld(
-                f"{repo}/{path} from the cohort site's public copies: it is over "
+                f"{repo}/{path} from the semester site's public copies: it is over "
                 f"{_MAX_PUBLIC_FILE_BYTES // (1024 * 1024)} MB, which GitHub refuses"
             )
             continue
@@ -322,14 +332,14 @@ def _bundle_prefix(path: str) -> str:
 
 
 def _mirror_public(
-    site_wd: Path, cohort_org: str, policies: dict[str, tuple[GitIgnoreSpec, ...]]
+    site_wd: Path, semester_org: str, policies: dict[str, tuple[GitIgnoreSpec, ...]]
 ) -> Hosted:
-    """Copy every publicly declared file of this cohort's content repos into the site's
+    """Copy every publicly declared file of this semester's content repos into the site's
     own `files/<repo>/` tree, and say what actually landed there.
 
-    The copy source is the RELEASED cohort repo, never the course-org source: one release
+    The copy source is the RELEASED semester repo, never the course-org source: one release
     boundary for the whole toolkit, so a `.releaseignore` that held a file back from the
-    cohort holds it back from the public site without publishing having to re-ask. The
+    semester holds it back from the public site without publishing having to re-ask. The
     clone is shallow - this wants the files at HEAD, not a term of old blobs.
 
     Deleted and rebuilt per repo on every sync, which is what makes unpublishing work:
@@ -350,12 +360,12 @@ def _mirror_public(
             if served.exists():
                 shutil.rmtree(served)
             continue
-        _branch, paths = _repo_tree(cohort_org, repo)
+        _branch, paths = _repo_tree(semester_org, repo)
         with tempfile.TemporaryDirectory() as work:
             src = Path(work) / repo
-            if not clone(cohort_org, repo, src, shallow=True):
+            if not clone(semester_org, repo, src, shallow=True):
                 log_err(
-                    f"could not clone {cohort_org}/{repo} - its public copies on the "
+                    f"could not clone {semester_org}/{repo} - its public copies on the "
                     "site are left as the last sync made them"
                 )
                 continue
@@ -376,14 +386,14 @@ def _mirror_public(
 def _gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
     """A GitHub `blob`/`tree` URL for a path in a repo. One template, three callers.
 
-    The cohort site's own script parses THIS shape out of the rendered page to offer a file
+    The semester site's own script parses THIS shape out of the rendered page to offer a file
     in the student's own fork or clone (`templates/site/_includes/open_in.html`), so the
     two change together."""
     return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
 
 
 def _file_link(
-    cohort_org: str, repo: str, branch: str, path: str, name: str, hosted: Hosted
+    semester_org: str, repo: str, branch: str, path: str, name: str, hosted: Hosted
 ) -> Link:
     """One released file as a link: the GitHub blob it always has, plus the site's own
     hosted copy when the mirror actually made one AND a browser would render it
@@ -391,11 +401,11 @@ def _file_link(
     what was COPIED rather than re-deciding what should have been - a page cannot link a
     copy that does not exist."""
     view = (
-        _view_url(cohort_org, repo, path)
+        _view_url(semester_org, repo, path)
         if _ext(path) in _RENDERED_EXTENSIONS and path in hosted.get(repo, ())
         else ""
     )
-    return Link(name, _gh_url(cohort_org, repo, branch, "blob", path), view)
+    return Link(name, _gh_url(semester_org, repo, branch, "blob", path), view)
 
 
 def _session_files(
@@ -448,7 +458,7 @@ def _shape_links(
     Release is recursive (see `_session_files`) because a release copies a session folder
     wholesale, and it must stay that way. DISPLAY must not be: a rendered Quarto/Rmd deck is
     one deliverable plus hundreds of assets (`libs/`, `pics/`, `<name>_files/`), and linking
-    each of them put 1,641 links across 27 rows on a live cohort site - burying the three
+    each of them put 1,641 links across 27 rows on a live semester site - burying the three
     files a student actually opens. Nothing here changes what ships, only what is listed.
 
     Two shapes, and neither leaves a released file unreachable from the page:
@@ -469,10 +479,10 @@ def _shape_links(
     (`repos.NEVER_MATERIAL`), dropped before the counts are taken so a folder cannot be
     listed as "3 files" while showing two.
 
-    The site applies it as well as the release, not instead: a cohort site showed
+    The site applies it as well as the release, not instead: a semester site showed
     `labs/01_session-1/.gitkeep` and a `readings/.DS_Store` as materials, and neither had
     passed through a release copy that day or would ever pass through one again. Junk
-    committed straight into a cohort's own content repo never meets the release filter, so
+    committed straight into a semester's own content repo never meets the release filter, so
     a release-only rule leaves it listed for the rest of the term.
 
     `blobs` is `_session_files`' output, named by path relative to the session folder;
@@ -534,7 +544,9 @@ def _row_links(
     return [link for link in links if not is_reading_overlay(link.name)]
 
 
-def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]]) -> str:
+def _released_reading_list(
+    semester_org: str, sources: list[tuple[str, str, str]]
+) -> str:
     """The prose a session row inlines: the text of the OVERLAY released into its `readings`
     section (`READINGS.md`), verbatim.
 
@@ -546,7 +558,7 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
     So the shared rule still holds - overlay is prose, everything else is a file - and only
     the CHANNEL differs: a link where the row can link, a name where it cannot.
 
-    Reads the released COHORT copy, so a reading list appears on the same gate as every
+    Reads the released SEMESTER copy, so a reading list appears on the same gate as every
     other material. `get_file_content` raises on anything but a 404 - a rate-limited read
     must not republish the row with the reading list silently emptied."""
     parts = []
@@ -555,11 +567,11 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
             continue
         prefix = _source_prefix(subpath, folder)
         # Names only, so nothing here needs to know what the site hosts.
-        for link in _session_files(cohort_org, repo, subpath, folder, {}):
+        for link in _session_files(semester_org, repo, subpath, folder, {}):
             if not is_reading_overlay(link.name):
                 continue
             text = (
-                get_file_content(cohort_org, repo, f"{prefix}/{link.name}") or ""
+                get_file_content(semester_org, repo, f"{prefix}/{link.name}") or ""
             ).strip()
             if text:
                 parts.append(demote_headings(text))
@@ -573,14 +585,14 @@ def _section_boundary(repo: str, path: str) -> tuple[str, str]:
     The ordinal decides only the LEVEL a section is read at, never whether a file shows up:
 
     - a repo whose top-level directories are session folders (`01_intro/...`) IS one
-      section, the repo's own name - the shape a cohort gets from
-      `cohort_dest_repo: lectures`. Nothing is stripped, so a session folder is itself the
+      section, the repo's own name - the shape a semester gets from
+      `semester_dest_repo: lectures`. Nothing is stripped, so a session folder is itself the
       first node the tree gets.
     - a repo holding `lectures/`, `labs/`, `datasets/` gives one section EACH, named after
       the top directory - the shape from a single `materials` repo. That directory name IS
       the prefix, stripped so its own children become the section's nodes.
 
-    Both live cohort shapes therefore land where a reader expects. Same reading as
+    Both live semester shapes therefore land where a reader expects. Same reading as
     `deploy_section` - head-of-path, else the repo - one level down."""
     head, _sep, _rest = path.partition("/")
     if session_number(head) is not None:
@@ -624,7 +636,7 @@ def _sorted_entries(entries: dict[str, _IndexEntry]) -> list[_IndexEntry]:
 
 def _insert_released_path(
     root: dict[str, _IndexEntry],
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     branch: str,
     full_path: str,
@@ -648,9 +660,9 @@ def _insert_released_path(
         entry = node.get(part)
         if entry is None:
             link = (
-                Link(part, _gh_url(cohort_org, repo, branch, "tree", entry_path))
+                Link(part, _gh_url(semester_org, repo, branch, "tree", entry_path))
                 if is_dir
-                else _file_link(cohort_org, repo, branch, entry_path, part, hosted)
+                else _file_link(semester_org, repo, branch, entry_path, part, hosted)
             )
             entry = node[part] = _IndexEntry(part, is_dir, link)
         entry.files += 1
@@ -679,9 +691,9 @@ def _emit_entries(entries: list[_IndexEntry], indent: str) -> list[str]:
 def _indexable_repos(
     sched: schedule.Schedule, release_sources: list[tuple[str, str, str, int]]
 ) -> set[str]:
-    """Which cohort repos the All Materials index is allowed to read.
+    """Which semester repos the All Materials index is allowed to read.
 
-    A POSITIVE allowlist, deliberately. `discover_cohort_repos` works by exclusion - a repo
+    A POSITIVE allowlist, deliberately. `discover_semester_repos` works by exclusion - a repo
     is content unless it carries an infra topic - and that topic is written once, on
     creation, with its result ignored (`assign.py`), so a submission repo whose tag failed
     is content forever. That was survivable while a repo only reached the site by holding
@@ -693,14 +705,14 @@ def _indexable_repos(
     manual release into a repo the plan never mentions). Non-ordinal material - a root
     `SYLLABUS.md`, a flat `datasets/` - is still indexed, because the signal is the REPO,
     not the folder shape inside it."""
-    planned = {d.cohort_dest_repo for r in sched.releases for d in r.deploy}
+    planned = {d.semester_dest_repo for r in sched.releases for d in r.deploy}
     return planned | {repo for repo, _sub, _folder, _n in release_sources}
 
 
 def _released_syllabus(
-    cohort_org: str, content_repos: list[str], hosted: Hosted
+    semester_org: str, content_repos: list[str], hosted: Hosted
 ) -> Link | None:
-    """The syllabus released to this cohort, or None when there isn't one - the home page
+    """The syllabus released to this semester, or None when there isn't one - the home page
     then shows no line at all rather than an empty one.
 
     Found by name, under whatever name and format the course uses (`SYLLABUS.md`,
@@ -710,11 +722,11 @@ def _released_syllabus(
 
     Two rules that matter more than they look:
 
-    - ROOT files only. One live cohort has `lectures/01_introduction/pics/
+    - ROOT files only. One live semester has `lectures/01_introduction/pics/
       ids-syllabus-2024.png`, and pinning a screenshot on the landing page as the syllabus
       would be worse than pinning nothing.
     - An exact `syllabus.*` stem wins over a longer name. Plain sorting put
-      `SYLLABUS-draft.pdf` ahead of `SYLLABUS.pdf` ('-' sorts before '.'), so a cohort that
+      `SYLLABUS-draft.pdf` ahead of `SYLLABUS.pdf` ('-' sorts before '.'), so a semester that
       shipped a draft alongside the real thing got the draft on its front page.
 
     Reads the trees the caller already discovered, so this costs no API call. Order is
@@ -727,11 +739,11 @@ def _released_syllabus(
     unpublished one, which is nearly all of them, is the GitHub blob it has always been."""
     fallback = None
     for repo in content_repos:
-        branch, paths = _repo_tree(cohort_org, repo)
+        branch, paths = _repo_tree(semester_org, repo)
         for path in paths:
             if "/" in path or "syllab" not in path.lower():
                 continue
-            link = _file_link(cohort_org, repo, branch, path, path, hosted)
+            link = _file_link(semester_org, repo, branch, path, path, hosted)
             if path.rsplit(".", 1)[0].lower() == "syllabus":
                 return link
             fallback = fallback or link
@@ -739,12 +751,12 @@ def _released_syllabus(
 
 
 def _materials_index(
-    cohort_org: str,
+    semester_org: str,
     content_repos: list[str],
     hosted: Hosted,
     syllabus: Link | None = None,
 ) -> str:
-    """`_data/materials.yml` - every file released to this cohort, nested exactly as its
+    """`_data/materials.yml` - every file released to this semester, nested exactly as its
     repo has it, for the All Materials tab.
 
     The catch-all. Every other page is curated: a row exists because the schedule named a
@@ -774,11 +786,11 @@ def _materials_index(
     # Course-level documents - the syllabus, the README - keyed by NAME, not by the repo
     # they happen to sit in. They used to take the repo as their section, so a README
     # released into three content repos showed up three times, once under each. Deduping by
-    # name is not lossy: a root document reaches a cohort by being released FROM one file in
+    # name is not lossy: a root document reaches a semester by being released FROM one file in
     # the course materials repo, so the copies are the same document by construction.
     docs: dict[str, _IndexEntry] = {}
     for repo in sorted(content_repos):
-        branch, paths = _repo_tree(cohort_org, repo)
+        branch, paths = _repo_tree(semester_org, repo)
         for path in paths:
             # A released `solution/`, `grading_config.yml` or hidden `tests/` is not course
             # material, and this index is the one page that lists everything a release
@@ -791,13 +803,13 @@ def _materials_index(
             if not _publishable(path):
                 continue
             if "/" not in path:
-                doc = _file_link(cohort_org, repo, branch, path, path, hosted)
+                doc = _file_link(semester_org, repo, branch, path, path, hosted)
                 docs.setdefault(path, _IndexEntry(path, False, doc, files=1))
                 continue
             section, prefix = _section_boundary(repo, path)
             _insert_released_path(
                 found.setdefault(section, {}),
-                cohort_org,
+                semester_org,
                 repo,
                 branch,
                 path,
@@ -831,26 +843,26 @@ def _materials_index(
     return header + body + "\n"
 
 
-def _dest_link(cohort_org: str, dest: str, live_repos: frozenset[str]) -> str:
+def _dest_link(semester_org: str, dest: str, live_repos: frozenset[str]) -> str:
     """A planned destination (`repo/path`) as markdown - a LINK when there is something to
     link to, plain code when there is not.
 
     The path itself does not exist yet, by definition: that is what "not released" means, so
     linking it would hand a student a 404. What can exist is the destination repo, and once
     it does, its tree is already in hand - so the link points at the deepest ancestor of the
-    path that is really there. `live_repos` is the cohort's existing repos, already
+    path that is really there. `live_repos` is the semester's existing repos, already
     discovered by the caller, so knowing this costs no extra API call."""
     repo, _, path = dest.partition("/")
     if repo not in live_repos:
         return f"`{dest}`"
-    branch, blobs = _repo_tree(cohort_org, repo)
+    branch, blobs = _repo_tree(semester_org, repo)
     here = ""
     for part in path.split("/"):
         candidate = f"{here}/{part}" if here else part
         if not any(b == candidate or b.startswith(f"{candidate}/") for b in blobs):
             break
         here = candidate
-    return f"[`{dest}`]({_gh_url(cohort_org, repo, branch, 'tree', here) if here else f'https://github.com/{cohort_org}/{repo}'})"
+    return f"[`{dest}`]({_gh_url(semester_org, repo, branch, 'tree', here) if here else f'https://github.com/{semester_org}/{repo}'})"
 
 
 def _details(text: str) -> str:
@@ -879,7 +891,7 @@ def _details(text: str) -> str:
 
 
 def _lecture_entry(
-    cohort_org: str,
+    semester_org: str,
     session: str,
     row: PlannedRow,
     sources: list[tuple[str, str, str]],
@@ -932,12 +944,12 @@ def _lecture_entry(
             [
                 (
                     _source_section(repo, subpath),
-                    _row_links(cohort_org, repo, subpath, folder, allow, hosted),
+                    _row_links(semester_org, repo, subpath, folder, allow, hosted),
                 )
                 for repo, subpath, folder in sources
             ]
         )
-        reading_list = _released_reading_list(cohort_org, sources)
+        reading_list = _released_reading_list(semester_org, sources)
         # No body. It used to read "Materials for session 1. Open the links above (you must
         # be an enrolled member of ...)" on every released row of every course - the links
         # are right there, and each page already states who can open them.
@@ -949,7 +961,7 @@ def _lecture_entry(
         # indistinguishable from a released folder that happens to hold no files.
         flags = "unreleased: true\n"
         links = links_block([])
-        where = ", ".join(_dest_link(cohort_org, d, live_repos) for d in row.dests)
+        where = ", ".join(_dest_link(semester_org, d, live_repos) for d in row.dests)
         # Italic, with the lead in bold: this is the one line on an unreleased row, and
         # it sat in the same weight as the session description above it - so a reader
         # scanning the Lectures tab read a paragraph before learning there was nothing to
@@ -977,7 +989,8 @@ def _lecture_entry(
         flags += "readings_pending: true\n"
     return (
         f"---\n"
-        f"type: {kind}\n"
+        f"kind: {kind}\n"
+        f"type: {kind}\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(row.when)}\n"
         f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
@@ -990,17 +1003,17 @@ def _lecture_entry(
     )
 
 
-def member_digest(cohort_org: str, handle: str) -> str:
-    """A team member as the public cohort site carries them: SHA-256 of
-    `<cohort org>:<handle, lower-cased>`, hex. Never the handle itself - the page's script
+def member_digest(semester_org: str, handle: str) -> str:
+    """A team member as the public semester site carries them: SHA-256 of
+    `<semester org>:<handle, lower-cased>`, hex. Never the handle itself - the page's script
     hashes its reader's saved handle the same way (_layouts/assignment.html, `memberKey`)
     to recognise their team, and nothing else can read one back. Salted with the org so one
-    student's digest differs from cohort to cohort. `.lower()`, not `.casefold()`, because
+    student's digest differs from semester to semester. `.lower()`, not `.casefold()`, because
     the browser side is `toLowerCase` and GitHub handles are ASCII."""
-    return hashlib.sha256(f"{cohort_org}:{handle.lower()}".encode()).hexdigest()
+    return hashlib.sha256(f"{semester_org}:{handle.lower()}".encode()).hexdigest()
 
 
-def _formed_teams(cohort_org: str, key: str) -> list[tuple[str, list[str]]]:
+def _formed_teams(semester_org: str, key: str) -> list[tuple[str, list[str]]]:
     """`(team, member handles)` for every team formed for `key` so far, by name.
 
     The same reader `team_formation.open_windows` uses, on the same private file and keyed
@@ -1008,19 +1021,19 @@ def _formed_teams(cohort_org: str, key: str) -> list[tuple[str, list[str]]]:
     gets count one thing.
 
     Never fatal, and that is the point of catching here: teams.csv is student-written, and a
-    row somebody broke must not take down the render of a cohort's whole website. The
+    row somebody broke must not take down the render of a semester's whole website. The
     callout above still goes out; only the table is missing."""
     try:
-        groups = teams.teams_for(teams.load(cohort_org), key)
+        groups = teams.teams_for(teams.load(semester_org), key)
     except RuntimeError as exc:
-        log_err(f"could not read {cohort_org}'s teams for {key}: {exc}")
+        log_err(f"could not read {semester_org}'s teams for {key}: {exc}")
         return []
     return sorted((team, sorted(members)) for team, members in groups.items())
 
 
 def _assignment_entry(
     course_org: str,
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     when: date | datetime,
     handout: datetime | None = None,
@@ -1038,11 +1051,11 @@ def _assignment_entry(
     unscheduled assignment keeps both rows on the due date (the only date known).
 
     `found` is this assignment's `(slug, entry)` from the plan, already resolved by the
-    caller, or None for one the plan does not name. It supplies the cohort-side repo name
-    exactly as assign.py / collect.py resolve it (`cohort_dest_repo` else the slug, else
+    caller, or None for one the plan does not name. It supplies the semester-side repo name
+    exactly as assign.py / collect.py resolve it (`semester_dest_repo` else the slug, else
     the course repo minus its -fYYYY/-sYYYY tag), so the page names the repo students
     actually get - deriving it from the course repo alone named the wrong repo, and titled
-    the page wrong, whenever an entry set `cohort_dest_repo`.
+    the page wrong, whenever an entry set `semester_dest_repo`.
 
     Handed IN rather than looked up here, because `schedule.entry_for_repo` maps a repo to
     the FIRST entry citing it - and two entries may legitimately cite one
@@ -1052,13 +1065,13 @@ def _assignment_entry(
 
     BOTH orgs, because the two halves of an assignment live in different ones: the template
     and its README are read from `course_org`, and the repo a student actually works in is
-    in `cohort_org`. This took `course_org` alone and used it for both, so every released
-    assignment told students their repo was "in `<course-org>`'s cohort org" - naming the
+    in `semester_org`. This took `course_org` alone and used it for both, so every released
+    assignment told students their repo was "in `<course-org>`'s semester org" - naming the
     org they have no access to, and leaving them to guess the one they do.
 
-    A released entry carries `repo_url` / `repo_name` for that repo. The URL is the cohort
+    A released entry carries `repo_url` / `repo_name` for that repo. The URL is the semester
     org's repo list filtered to this assignment, not a per-student address: the site is one
-    public page for the whole cohort and cannot know who is reading it, but GitHub shows a
+    public page for the whole semester and cannot know who is reading it, but GitHub shows a
     signed-in student only the repos they can see - so the filter resolves to their own (or
     their team's). `repo_name` is the shape to expect, `<slug>-<your-handle>` or
     `-<your-team>` for a group assignment.
@@ -1074,13 +1087,13 @@ def _assignment_entry(
     (`discovery.discover_assignments`), which exist from the moment faculty write the
     assignment - weeks before it hands out - so the README is not read at all while the
     assignment is pending: neither the brief nor the real title (`# Detecting fraud in the
-    transfer dataset` is the assignment, not its name) can reach the public cohort site
+    transfer dataset` is the assignment, not its name) can reach the public semester site
     early. The placeholder carries only what the plan already publishes on the schedule -
     the slug's own name, the hand-out date and the deadline.
 
     Handed out means EITHER of two things, and it takes both being false to withhold:
 
-    - `handed_out` holds this assignment's cohort-side name - a frozen cohort template repo
+    - `handed_out` holds this assignment's semester-side name - a frozen semester template repo
       exists (`discovery.discover_handed_out_assignments`), so students have their repos
       whatever route fired it. This is the same "what actually shipped" signal a session
       row reads, and the only one that covers the manual workflow, whose documented mode
@@ -1089,7 +1102,7 @@ def _assignment_entry(
       meant to be out by now, and a schedule that says so is not a secret worth keeping.
 
     `now` is the moment to judge the pin against (default: actual now, in the handout's own
-    cohort timezone - `_coerce_datetime` hands out nothing naive).
+    semester timezone - `_coerce_datetime` hands out nothing naive).
 
     A self-select GROUP assignment inside its team-formation window is the third state,
     and it exists because the second bullet above is right about the brief and silent about
@@ -1101,11 +1114,11 @@ def _assignment_entry(
     about an empty listing.
 
     The WINDOW, off `sched` and never "has any team formed yet": the second is
-    cohort-wide, so the first team to form would take the invitation away from every
+    semester-wide, so the first team to form would take the invitation away from every
     student still looking for one. `sched` is the plan the caller already parsed; without
     it (a caller that has no plan to hand) there is no window and the page reads as it
     always did."""
-    slug = schedule.cohort_name(*found) if found else assignment_slug(repo)
+    slug = schedule.semester_name(*found) if found else assignment_slug(repo)
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = iso_when(when, "23:59:00")
     released = iso_when(handout) if handout is not None else due
@@ -1117,7 +1130,7 @@ def _assignment_entry(
     # differs. Off the assignment's own spec, like every other consumer, rather than a
     # second copy of the rule here - which is how the site comes to name a shape the
     # handout does not create. It costs the template's grading_config.yml, memoised per
-    # template per process; the cohort's schedule.yml, which the site used to read it
+    # template per process; the semester's schedule.yml, which the site used to read it
     # from for free, no longer has a say.
     spec = load_grading_spec(course_org, repo)
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
@@ -1137,7 +1150,7 @@ def _assignment_entry(
     # row's worth of information arriving at hand-out.
     details = found[1].details if found else ""
     # Display-only, and it reaches nothing but the two rows: `due` above is already
-    # resolved, and the freeze, the late window and the cutoff are `grades.cutoff_at`'s
+    # resolved, and the freeze, the late window and the cutoff are `schedule.grading_cutoff_datetime`'s
     # business off `due_datetime`. A deadline that says "(TBC)" still closes when it says.
     tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
     tbc_due = indent(tbc_fm, "    ")
@@ -1153,7 +1166,7 @@ def _assignment_entry(
         else ("closed", None)
     )
     # Whether this page should ASK for a team. Keyed on the window, never on whether a
-    # team has formed: "has anybody formed one" is a cohort-wide answer, so the first team
+    # team has formed: "has anybody formed one" is a semester-wide answer, so the first team
     # to form would take the call to action away from every student still without one.
     #
     # It does NOT suppress `repo_url`. Hiding the button for the whole window would punish
@@ -1168,7 +1181,7 @@ def _assignment_entry(
     # `assignment-repo-private`, `assignment-repo-public`, `external`), written whatever
     # the handout state
     # because it is the plan's and is known before anything ships - the theme `case`s on
-    # it, and without it both the page and the due row told a Moodle cohort to submit by
+    # it, and without it both the page and the due row told a Moodle semester to submit by
     # pushing to `main`. ONE key and not the `submit_via`/`visibility` pair it is derived
     # from: the two are orthogonal in the config and are not on the page, and a theme that
     # branched on both had to be re-opened for every shape that is neither. An ADDRESS is a
@@ -1184,21 +1197,21 @@ def _assignment_entry(
             repo_lines.append(f'submit_url: "{q(spec.submit_url)}"')
             repo_lines.append(f'submit_host: "{q(spec.submit_host)}"')
     elif spec.submit_shared:
-        # The REAL name, and a real URL: there is one drop box for the whole cohort, so
+        # The REAL name, and a real URL: there is one drop box for the whole semester, so
         # unlike every other shape the page can name the repo exactly rather than describe
         # its shape. No `repo_name_is_shape` with it - see below.
         repo_name = shared_repo(slug)
         repo_lines.append(f'submit_path: "{whose}/"')
         if out:
             repo_lines.append(
-                f'repo_url: "https://github.com/{cohort_org}/{q(repo_name)}"'
+                f'repo_url: "https://github.com/{semester_org}/{q(repo_name)}"'
             )
         repo_lines.append(f'repo_name: "{q(repo_name)}"')
     else:
         repo_name = submission_repo(slug, whose)
         if out:
             repo_lines.append(
-                f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"'
+                f'repo_url: "https://github.com/orgs/{semester_org}/repositories?q={slug}-"'
             )
         repo_lines.append(f'repo_name: "{q(repo_name)}"')
         # Whether `repo_name` is a SHAPE to substitute a handle into, or a real repo
@@ -1257,15 +1270,15 @@ def _assignment_entry(
     # and the schedule row read the same two facts rather than each wording its own.
     #
     # The first thing on either site to link `welcome` at all, so it is built from the
-    # COHORT org: the course org has no welcome repo, and the one this cohort's students
+    # SEMESTER org: the course org has no welcome repo, and the one this semester's students
     # are members of is the only one that would answer them.
     #
-    # The day, not the moment, and SPOKEN here (`grades.spoken_day`, in the cohort's zone):
+    # The day, not the moment, and SPOKEN here (`grades.spoken_day`, in the semester's zone):
     # it is the same day the Join-team form's refusal and the mail name, in the same
     # spelling, and an hour would invite a student to read a deadline off a page whose
     # timezone it does not state.
     #
-    # WHICH teams exist rides with them, off the cohort's private teams.csv: a student
+    # WHICH teams exist rides with them, off the semester's private teams.csv: a student
     # deciding whether to start a team or ask to join one needs to know what is already
     # there, and this page is the one list of them - a push to teams.csv re-syncs it.
     #
@@ -1279,19 +1292,17 @@ def _assignment_entry(
     # team, so its URL is the drop box's; an external assignment has no repo to link.
     team_fm = ""
     if forming and shuts is not None:
-        welcome = welcome_issue_url(cohort_org)
+        welcome = welcome_issue_url(semester_org)
         cap = team_cap(course_org, spec)
 
         def team_entry(name: str, handles: list[str]) -> str:
             if external:
                 url = ""
             elif spec.submit_shared:
-                url = f"https://github.com/{cohort_org}/{q(shared_repo(slug))}"
+                url = f"https://github.com/{semester_org}/{q(shared_repo(slug))}"
             else:
-                url = (
-                    f"https://github.com/{cohort_org}/{q(submission_repo(slug, name))}"
-                )
-            digests = ", ".join(f'"{member_digest(cohort_org, h)}"' for h in handles)
+                url = f"https://github.com/{semester_org}/{q(submission_repo(slug, name))}"
+            digests = ", ".join(f'"{member_digest(semester_org, h)}"' for h in handles)
             return (
                 f'  - name: "{q(name)}"\n    members: {len(handles)}\n    cap: {cap}\n'
                 f"    members_sha256: [{digests}]\n"
@@ -1300,14 +1311,15 @@ def _assignment_entry(
 
         listed = "".join(
             team_entry(name, handles)
-            for name, handles in _formed_teams(cohort_org, found[0])
+            for name, handles in _formed_teams(semester_org, found[0])
         )
-        closes = spoken_day(schedule.in_cohort_zone(sched, shuts))
+        closes = spoken_day(schedule.in_semester_zone(sched, shuts))
         team_fm = (
             f'team_join_url: "{welcome}"\n'
             f'team_join_cap: "{cap}"\n'
             f'team_join_closes: "{closes}"\n'
-            f'team_salt: "{q(cohort_org)}"\n' + (f"teams:\n{listed}" if listed else "")
+            f'team_salt: "{q(semester_org)}"\n'
+            + (f"teams:\n{listed}" if listed else "")
         )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
@@ -1346,7 +1358,7 @@ def _assignment_entry(
         if external:
             coming = "the brief appears here when it is"
         elif spec.submit_shared:
-            # Not "your repo": there is one, it is the cohort's, and what is the student's
+            # Not "your repo": there is one, it is the semester's, and what is the student's
             # own is a folder in it.
             coming = f"the `{repo_name}` drop box appears when it is"
         else:
@@ -1365,7 +1377,8 @@ def _assignment_entry(
     details_due = indent(details_fm, "    ")
     return (
         f"---\n"
-        f"type: assignment\n"
+        f"kind: assignment\n"
+        f"type: assignment\n"  # the pinned theme's key, until its next release
         f"date: {released}\n"
         f'title: "{q(title)}"\n'
         f"{sub_fm}"
@@ -1379,6 +1392,7 @@ def _assignment_entry(
         f"{note_fm}"
         f"{team_fm}"
         f"due_event:\n"
+        f"    kind: due\n"
         f"    type: due\n"
         f"    date: {due}\n"
         f'    title: "{q(title)}"\n'
@@ -1433,7 +1447,7 @@ def _event_row(
     whoever read it had to know which kind of row it was on to know which. One meaning per
     column, and one word per meaning: Event says what kind of row this is, Title which one
     it is, Details what there is to say about it. An exam's Details cell used to be the
-    fixed sentence "Details to be confirmed.", written into every exam of every cohort
+    fixed sentence "Details to be confirmed.", written into every exam of every semester
     whether or not anything was outstanding - a toolkit opinion about a room and a format
     it knows nothing about, and one nobody could delete by editing their schedule. There
     is no default now: a row says what its `details:` says, or nothing.
@@ -1447,7 +1461,8 @@ def _event_row(
         flags = "tbc: true\n" + ("dateless: true\n" if dateless else "")
     return (
         f"---\n"
-        f"type: {kind}\n"
+        f"kind: {kind}\n"
+        f"type: {kind}\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(title)}"\n'
@@ -1465,7 +1480,7 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     `show_on_site: false` is the caller's business, not this function's: an event hidden
     from the schedule is one this is never called for."""
     return _event_row(
-        "exam" if event.type == "exam" else "special_event",
+        "exam" if event.kind == "exam" else "special_event",
         event.title or _pretty(event.label),
         event.when if event.when is not None else fallback,
         event.tbc,
@@ -1475,7 +1490,7 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
 
 
 def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
-    """The archive row: when this cohort is frozen read-only.
+    """The archive row: when this semester is frozen read-only.
 
     Takes the parsed block whole (`schedule.ArchiveRow`) rather than five of its fields,
     for the same reason `_lecture_entry` takes its `PlannedRow`: the block's keys are the
@@ -1484,15 +1499,15 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
     the time this is called; the caller does not render a block nothing can date.
 
     A `special_event` rather than a type of its own, because it IS one - a dated thing
-    that happens to the cohort and releases nothing - and the theme already colours that
+    that happens to the semester and releases nothing - and the theme already colours that
     row. Inventing a fourth row type would mean shipping a theme change for one line.
 
-    `archive.title` ("Cohort archived" unless the cohort renames it) fills the row's
+    `archive.title` ("Semester archived" unless the semester renames it) fills the row's
     Title cell like every other row's.
 
     `archive.details` is the WHOLE of what either
     surface says - there is no default sentence, because the toolkit does not know what a
-    freeze means for a given cohort's students and a wrong reassurance is worse than none.
+    freeze means for a given semester's students and a wrong reassurance is worse than none.
     Without one the row still renders as its title and date, and is not announced at all
     (below). The seeded skeleton carries a sentence ready to uncomment.
 
@@ -1533,7 +1548,8 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
         flags += "announce: true\n"
     return (
         f"---\n"
-        f"type: special_event\n"
+        f"kind: special_event\n"
+        f"type: special_event\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(archive.title)}"\n'
@@ -1545,15 +1561,16 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
 def _term_date_entry(name: str, when: date) -> str:
     """A semester-boundary row (the theme's schedule_row_term_date.html).
 
-    `name` ("Term starts" / "Term ends") is the row's TITLE. It used to be written to
+    `name` ("Semester starts" / "Semester ends") is the row's TITLE. It used to be written to
     `name:`, which the theme prints in the Event column, beside a `description: ""` that
     left the Title cell permanently blank - so the one row type on the schedule read its
-    name out of a different column from every other. The Event column now says "Term",
+    name out of a different column from every other. The Event column now says "Semester",
     which is the kind, and this says which one. `hide_time` suppresses the placeholder
     clock time - a term boundary is a whole day, not a 09:00 appointment."""
     return (
         f"---\n"
-        f"type: term_date\n"
+        f"kind: term_date\n"
+        f"type: term_date\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"hide_time: true\n"
         f'title: "{q(name)}"\n'
@@ -1561,46 +1578,46 @@ def _term_date_entry(name: str, when: date) -> str:
     )
 
 
-def sync_site(course_org: str, cohort_org: str) -> int:
-    """Regenerate the cohort's student-facing site from the live org state: the term's
+def sync_site(course_org: str, semester_org: str) -> int:
+    """Regenerate the semester's student-facing site from the live org state: the term's
     lecture and lab rows (released ones linked into the private content repos, planned
     ones marked not-yet-released), this year's assignments, and the display-only rows of
     the schedule (exams, special events and term dates)."""
 
     def build(site_wd: Path) -> SitePlan:
-        # ONE listing of the cohort answers both questions this build asks of it: which
+        # ONE listing of the semester answers both questions this build asks of it: which
         # repos hold released content, and which assignments have actually gone out.
         # Taken here rather than memoised in `discovery`, because a memo would serve a
         # listing from before assign.py created the template it is syncing the site for.
-        cohort_repos = list_org_repos(cohort_org)
-        content_repos = cohort_content_repos(cohort_repos)
-        release_sources = discover_release_sources(cohort_org, content_repos)
+        semester_repos = list_org_repos(semester_org)
+        content_repos = semester_content_repos(semester_repos)
+        release_sources = discover_release_sources(semester_org, content_repos)
         assignments = discover_assignments(course_org)
-        # Which of them this cohort has actually been given - what gates their briefs. Read
-        # from the cohort org rather than inferred from the plan, since the manual workflow
+        # Which of them this semester has actually been given - what gates their briefs. Read
+        # from the semester org rather than inferred from the plan, since the manual workflow
         # hands out with no `handout_datetime` pinned at all.
-        handed_out = handed_out_assignments(cohort_repos)
+        handed_out = handed_out_assignments(semester_repos)
 
-        # Course identity comes from the course org metadata, semester from the cohort tag.
+        # Course identity comes from the course org metadata, semester from the semester tag.
         meta = yaml_file(course_org, ".github", "dsl-course.yml")
-        # Schedule is cohort-specific (it varies by year), so it comes from the cohort's
-        # own classroom-config/schedule.yml. So do this cohort's instructors/TAs - read
-        # from its own classroom-config/people.yml below, NOT the course org (whose
+        # Schedule is semester-specific (it varies by year), so it comes from the semester's
+        # own classroom-config/schedule.yml. So do this semester's instructors/TAs - read
+        # from its own classroom-config/instructors.yml below, NOT the course org (whose
         # dsl-course.yml carries only the multi-year instructor cards).
-        sched = schedule.load(cohort_org)
-        # Every datetime on `sched` is already the cohort's wall clock (the parser converts
-        # a written offset into the cohort timezone), so the renderers below just print it.
-        start = sched.semester_start or _semester_start(cohort_org)
+        sched = schedule.load(semester_org)
+        # Every datetime on `sched` is already the semester's wall clock (the parser converts
+        # a written offset into the semester timezone), so the renderers below just print it.
+        start = sched.semester_start or _semester_start(semester_org)
         # Every session row the plan declares, dated and with its destinations. A row that
         # discovery already found takes its date from here (else a synthesised weekly date
         # below); a planned row discovery has NOT found yet becomes a not-yet-released row,
         # so the whole term is on the schedule the day it is written rather than filling in
         # release by release. Discovery still leads: a folder released outside the plan
         # (the manual workflow, an off-plan extra) keeps its row whether or not it is here.
-        # Every assignment this cohort has a page for, numbered as every link to one
+        # Every assignment this semester has a page for, numbered as every link to one
         # numbers it (`schedule.assignment_pages`: this term's templates plus the plan's
         # entries, hidden ones included so that a hidden page keeps its ordinal unspent).
-        pages = schedule.assignment_pages(cohort_org, sched, assignments)
+        pages = schedule.assignment_pages(semester_org, sched, assignments)
 
         def shown(hit: tuple[str, schedule.AssignmentEntry] | None) -> bool:
             """Does this assignment appear on the site at all?
@@ -1644,7 +1661,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # Every key of sources_by_row is in rows by construction, so this is arithmetic
         # rather than a scan.
         log_step(
-            f"Syncing {cohort_org}/{pages_repo(cohort_org)}: {len(rows)} session row(s) "
+            f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} session row(s) "
             f"({len(rows) - len(sources_by_row)} not released yet), "
             f"{sum(1 for page in pages if shown(page.hit))} assignment(s)"
         )
@@ -1652,7 +1669,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # What a session row LINKS, out of everything it released - the default
         # folder-shaped listing unless this course declared an extension allowlist.
         allow = _link_extensions(meta)
-        # The repos this cohort actually releases into - the only ones the index and
+        # The repos this semester actually releases into - the only ones the index and
         # the syllabus lookup may read (see `_indexable_repos`).
         indexable = sorted(
             set(content_repos) & _indexable_repos(sched, release_sources)
@@ -1661,7 +1678,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # source repo the plan names). The copy happens here, before a single row is
         # rendered, so every page that links a hosted copy links one that exists.
         policies = _publish_policies(course_org, sched, content_repos)
-        hosted = _mirror_public(site_wd, cohort_org, policies)
+        hosted = _mirror_public(site_wd, semester_org, policies)
 
         def session_row(s: str, kind: str) -> str:
             """One row, from the plan where it has one and a synthesised weekly date where
@@ -1673,7 +1690,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 when=start + timedelta(days=int(s) * 7)
             )
             return _lecture_entry(
-                cohort_org,
+                semester_org,
                 s,
                 row,
                 sources_by_row.get((s, kind), []),
@@ -1686,19 +1703,19 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         config = {}
         if meta.get("course_name"):
             config["course_name"] = str(meta["course_name"])
-        if _semester_label(cohort_org):
-            config["course_semester"] = _semester_label(cohort_org)
+        if _semester_label(semester_org):
+            config["course_semester"] = _semester_label(semester_org)
         if meta.get("course_code"):
             config["course_code"] = str(meta["course_code"])
         # The site's blurb. Declared once in the course org's dsl-course.yml and pushed to
-        # every cohort site; left as the site repo has it when the course doesn't declare
+        # every semester site; left as the site repo has it when the course doesn't declare
         # one. Written as a single line whatever the source shape (see q).
         if meta.get("course_description"):
             config["course_description"] = str(meta["course_description"])
-        # The footer's GitHub link (the site's only click-back). This is the COHORT site,
-        # so it links the cohort org - where this year's materials and the students' own
+        # The footer's GitHub link (the site's only click-back). This is the SEMESTER site,
+        # so it links the semester org - where this year's materials and the students' own
         # repos live - never the course org (faculty-side) or the template's default.
-        config["github_org"] = cohort_org
+        config["github_org"] = semester_org
 
         # The display-only half of the schedule. `events:` rows render as what they
         # declared (exam or special event); an undated (TBC) one sorts at end-of-term.
@@ -1715,57 +1732,59 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # dates of a ~15-week semester (bounded by semester_end when set) - a placeholder
         # faculty replace, rather than a schedule page with no exams on it at all.
         #
-        # Counted over EVERY event, hidden ones included: a cohort that wrote its exams and
+        # Counted over EVERY event, hidden ones included: a semester that wrote its exams and
         # then took them off the site has said what its exams are, and answering that with
         # two invented ones would put back exactly what it asked to remove.
-        if not any(e.type == "exam" for e in sched.events):
+        if not any(e.kind == "exam" for e in sched.events):
             event_entries |= {
                 "midterm.md": _event_row(
                     "exam", "MidTerm Exam", start + timedelta(weeks=8)
                 ),
                 "final.md": _event_row("exam", "Final Exam", end),
             }
-        # When the whole cohort is frozen read-only. Off the same date the scheduler
+        # When the whole semester is frozen read-only. Off the same date the scheduler
         # acts on, so what students are told and what happens are one date.
         if sched.archive and sched.archive.when and sched.archive.show_on_site:
-            event_entries["cohort-archived.md"] = _archive_entry(
+            event_entries["semester-archived.md"] = _archive_entry(
                 sched.archive, date.today()
             )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
             event_entries["term-start.md"] = _term_date_entry(
-                "Term starts", sched.semester_start
+                "Semester starts", sched.semester_start
             )
         if sched.semester_end:
             event_entries["term-end.md"] = _term_date_entry(
-                "Term ends", sched.semester_end
+                "Semester ends", sched.semester_end
             )
 
+        instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(
             config=config,
-            # People: this cohort's own classroom-config/people.yml (instructors AND TAs -
-            # the per-cohort teaching team; schema in
-            # templates/classroom-config/people.yml), else its instructors team.
+            # People: this semester's own classroom-config/instructors.yml (instructors AND TAs -
+            # the per-semester teaching team; schema in
+            # templates/classroom-config/instructors.yml), else its instructors team.
             files={
-                "README.md": site_readme(cohort_org, cohort=True),
+                "README.md": site_readme(semester_org, semester=True),
                 "_data/people.yml": people_yaml(
-                    cohort_org,
-                    yaml_file(cohort_org, "classroom-config", "people.yml"),
-                    edit_at=f"{cohort_org}/classroom-config/people.yml",
+                    semester_org,
+                    instructors_meta,
+                    edit_at=f"{semester_org}/classroom-config/{instructors_path}",
+                    semester=True,
                 ),
-                "_data/nav.yml": nav_yaml(cohort=True),
+                "_data/nav.yml": nav_yaml(semester=True),
                 # The catch-all index behind the All Materials tab: every released file,
                 # including what no session ordinal covers - across the repos faculty
                 # actually release into, never everything discovery failed to exclude.
                 "_data/materials.yml": _materials_index(
-                    cohort_org,
+                    semester_org,
                     indexable,
                     hosted,
-                    # Absent when the cohort has no syllabus, so the home page shows no
+                    # Absent when the semester has no syllabus, so the home page shows no
                     # line rather than an empty one.
-                    syllabus=_released_syllabus(cohort_org, indexable, hosted),
+                    syllabus=_released_syllabus(semester_org, indexable, hosted),
                 ),
-                **theme_pages(cohort=True),
+                **theme_pages(semester=True),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to
                 # how a session renders is tested against the generator that
@@ -1778,7 +1797,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "_lectures": {
                     row_file(s, kind): session_row(s, kind) for s, kind in rows
                 },
-                # Named by the cohort-side name, ordinal from the position in the full
+                # Named by the semester-side name, ordinal from the position in the full
                 # list, so every assignment keeps its URL for the whole term. A pending one
                 # is a placeholder rather than an absence - see `_assignment_entry`.
                 # A hidden one is SKIPPED, not renumbered around: its ordinal stays spent,
@@ -1787,7 +1806,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "_assignments": {
                     f"{page.stem}.md": _assignment_entry(
                         course_org,
-                        cohort_org,
+                        semester_org,
                         page.repo,
                         *_assignment_dates(
                             page.hit, start + timedelta(days=page.number * 14)
@@ -1805,31 +1824,33 @@ def sync_site(course_org: str, cohort_org: str) -> int:
             title="Student site",
         )
 
-    # `--all-cohorts` loops this in one process, and the index reads EVERY release
+    # `--all-semesters` loops this in one process, and the index reads EVERY release
     # destination's tree, not just the session-bearing ones - so the memo would pin a few
     # hundred KB per repo for the whole run. Cleared on ENTRY rather than on the way out:
-    # most cohorts in a daily cron are already up to date and return early, so an exit-path
+    # most semesters in a daily cron are already up to date and return early, so an exit-path
     # clear ran on the rare path and never on the common one. Keys include the org, so this
     # is purely about memory, never staleness.
     _repo_tree.cache_clear()
     # Cleared for memory, like the tree memo above, not for staleness: the key names the
     # course org, and the policy is one small file per source repo.
     _publish_policy.cache_clear()
-    return sync_site_repo(cohort_org, build)
+    return sync_site_repo(semester_org, build)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     ps = sub.add_parser("sync")
     ps.add_argument("--course-org", required=True)
     ps.add_argument(
-        "--cohort-org", default=None, help="One cohort; omit with --all-cohorts"
+        "--semester-org",
+        default=None,
+        help="One semester; omit with --all-semesters",
     )
     ps.add_argument(
-        "--all-cohorts",
+        "--all-semesters",
         action="store_true",
-        help="Sync every registered cohort (a course-level change, e.g. dsl-course.yml)",
+        help="Sync every registered semester (a course-level change, e.g. dsl-course.yml)",
     )
     pp = sub.add_parser("public-sync")
     pp.add_argument("--course-org", required=True)
@@ -1848,11 +1869,11 @@ def main() -> int:
         "--no-include-lectures", action="store_true", help="Skip lecture files"
     )
     args = parser.parse_args()
-    if args.cmd != "public-sync" and not (args.all_cohorts or args.cohort_org):
-        log_err("pass --cohort-org or --all-cohorts.")
+    if args.cmd != "public-sync" and not (args.all_semesters or args.semester_org):
+        log_err("pass --semester-org or --all-semesters.")
         return 1
     # A read helper that couldn't reach the API raises RuntimeError; a config file with
-    # one bad indent raises yaml.YAMLError out of load_yaml_config (people.yml is
+    # one bad indent raises yaml.YAMLError out of load_yaml_config (instructors.yml is
     # web-editable, so faculty author that fault directly). In an Actions log a one-line
     # error beats a traceback either way, and the run still goes red.
     try:
@@ -1865,48 +1886,48 @@ def main() -> int:
                 args.readings_mode,
                 include_lectures=not args.no_include_lectures,
             )
-        if args.all_cohorts:
+        if args.all_semesters:
             rc = 0
-            for cohort in live_cohorts(args.course_org):
-                # One cohort's raised failure (an unreachable API, a people.yml that
-                # doesn't parse) must not skip every LATER cohort's site on the 06:00
-                # cron - log it, mark the batch failed, and carry on. The same per-cohort
+            for semester in live_semesters(args.course_org):
+                # One semester's raised failure (an unreachable API, a instructors.yml that
+                # doesn't parse) must not skip every LATER semester's site on the 06:00
+                # cron - log it, mark the batch failed, and carry on. The same per-semester
                 # isolation PR #151/#146 applied to the nightly refresh and the scheduler.
                 try:
-                    rc |= sync_site(args.course_org, cohort)
+                    rc |= sync_site(args.course_org, semester)
                 except Exception as exc:
                     log_err(
-                        f"site sync for {cohort} failed ({type(exc).__name__}): {exc}"
+                        f"site sync for {semester} failed ({type(exc).__name__}): {exc}"
                     )
-                    rc |= 1  # accumulate, don't clobber prior cohorts' status bits
+                    rc |= 1  # accumulate, don't clobber prior semesters' status bits
             return rc
-        # --cohort-org arrives on the automatic path straight from a repository_dispatch's
-        # `client_payload.cohort_org`, written by whoever holds a cohort's DSL_BOT_TOKEN - a
-        # lower trust tier than the course org. Naming SOMEONE ELSE'S cohort would rebuild
-        # that cohort's site from this dispatch. The registry is the authority on which
-        # cohorts this course org owns, so an unregistered name is refused. Checked here
+        # --semester-org arrives on the automatic path straight from a repository_dispatch's
+        # `client_payload.semester_org`, written by whoever holds a semester's DSL_BOT_TOKEN - a
+        # lower trust tier than the course org. Naming SOMEONE ELSE'S semester would rebuild
+        # that semester's site from this dispatch. The registry is the authority on which
+        # semesters this course org owns, so an unregistered name is refused. Checked here
         # rather than inside sync_site, because every internal caller (a release, the
-        # scheduler, the --all-cohorts loop above) already passes a cohort it read FROM the
+        # scheduler, the --all-semesters loop above) already passes a semester it read FROM the
         # registry - only the CLI takes one from outside. Casefold: GitHub org names are
         # case-insensitive.
         # An EMPTY registry authorises nothing. It used to short-circuit the whole check,
-        # so a course org that had never registered a cohort - or whose registry failed to
+        # so a course org that had never registered a semester - or whose registry failed to
         # parse to anything - accepted any org name a dispatch cared to name.
-        registered = discover_cohorts(args.course_org)
-        if args.cohort_org.casefold() not in {c.casefold() for c in registered}:
+        registered = discover_semesters(args.course_org)
+        if args.semester_org.casefold() not in {c.casefold() for c in registered}:
             listed = ", ".join(sorted(registered)) or "nothing"
             log_err(
-                f"{args.cohort_org} is not registered under {args.course_org} "
-                f"({COHORTS_PATH} lists {listed}) - refusing to sync its site."
+                f"{args.semester_org} is not registered under {args.course_org} "
+                f"({SEMESTERS_PATH} lists {listed}) - refusing to sync its site."
             )
             return 1
-        # Registered but closed out: the site repo is frozen with the rest of the cohort
+        # Registered but closed out: the site repo is frozen with the rest of the semester
         # and its last sync was the one teardown ran before freezing it.
-        if not cohort_is_live(args.cohort_org):
+        if not semester_is_live(args.semester_org):
             return 0
-        rc = sync_site(args.course_org, args.cohort_org)
-        # The site's last update is part of the cohort's status. Not counted.
-        status.refresh(args.course_org, args.cohort_org)
+        rc = sync_site(args.course_org, args.semester_org)
+        # The site's last update is part of the semester's status. Not counted.
+        status.refresh(args.course_org, args.semester_org)
         return rc
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(str(exc))

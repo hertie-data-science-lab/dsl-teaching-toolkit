@@ -14,7 +14,7 @@ from conftest import CREATED_ISSUE_URL, issue_row
 
 from dsl_course import issues
 
-REPO = "Cohort-f2026/classroom-config"
+REPO = "Semester-f2026/classroom-config"
 TITLE = "Scheduled release: late delivery"
 
 
@@ -290,7 +290,7 @@ def test_open_titles_is_the_whole_list_not_a_title_search(gh):
 
 def test_a_listing_that_could_not_be_read_is_not_an_empty_one(gh):
     # Absence has to be a real answer: a status table that read a rate limit as "nothing
-    # is open" would report a cohort with a broken roster as healthy.
+    # is open" would report a semester with a broken roster as healthy.
     gh([], list_code=1)
     with pytest.raises(RuntimeError):
         issues.open_titles(REPO)

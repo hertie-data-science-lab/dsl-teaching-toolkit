@@ -1,9 +1,9 @@
 """dsl-course sync-roster -- materialise org + team access from students.csv.
 
 The enrolment "access" half: a single idempotent reconcile that ensures every onboarded
-row in the cohort's students.csv is (a) a member of the cohort org and (b) in the role
+row in the semester's students.csv is (a) a member of the semester org and (b) in the role
 team its `role` column names - `students` for enrolled rows, `auditors` for auditors.
-Both teams carry cohort-private read on released materials; only `students` rows get
+Both teams carry semester-private read on released materials; only `students` rows get
 assignment repos and gradebooks (see dsl_course.assign / dsl_course.grades).
 
 Students normally grant themselves on Join (templates/welcome/onboard.yml); this is the
@@ -17,20 +17,20 @@ this with prune=True - config is meant to be the live truth there; this module's
 off-by-default is only for ad-hoc/CLI use outside that workflow.
 
 Usage:
-    python3 -m dsl_course.sync_roster --cohort-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.sync_roster --cohort-org hertie-dsl-demo-f2026 --prune
+    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026   # previews
+    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026 --no-preview
+    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026 --prune --no-preview
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from . import roster, teams
 from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_repo, submission_suffix
 from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
-from .log import log_err, log_ok, log_person, log_step
+from .log import CLIParser, add_preview_flag, log_err, log_ok, log_person, log_step
 from .repos import (
     cancel_invitation,
     is_collaborator,
@@ -44,7 +44,7 @@ AUDITOR_TEAM = AUDITORS_TEAM  # read-only rows
 
 def desired_members(students: list[roster.Student]) -> dict[str, list[roster.Student]]:
     """`{role team: the onboarded rows that belong in it}` - the ONE partition of a roster
-    into the two cohort role teams.
+    into the two semester role teams.
 
     A not-yet-onboarded row has no handle to add, so it isn't wanted anywhere yet. Both
     keys are always present, so a pruning sync empties a team that should be empty rather
@@ -63,7 +63,7 @@ def desired_members(students: list[roster.Student]) -> dict[str, list[roster.Stu
 
 
 def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
-    """`(repo, suffix)` for every submission repo in a cohort org's listing.
+    """`(repo, suffix)` for every submission repo in a semester org's listing.
 
     `discovery.classify_repos` names the template each one derives from; the suffix is
     what is left. That suffix is a student's HANDLE for an individual assignment and a
@@ -77,14 +77,14 @@ def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
 
 
 def revoke_repo_grants(
-    cohort_org: str, repo: str, login: str, dry_run: bool = False
+    semester_org: str, repo: str, login: str, dry_run: bool = False
 ) -> tuple[int, int]:
-    """Take back `login`'s DIRECT grant on `cohort_org/repo`, and any invitation to it they
+    """Take back `login`'s DIRECT grant on `semester_org/repo`, and any invitation to it they
     have not accepted. Returns `(withdrawn, errors)`.
 
     The one revoke path, shared by the two callers that need it: off-boarding, below, for a
     handle that left the roster, and the end-of-term teardown (`dsl_course.teardown`) for
-    every repo in a finished cohort. Both need the same two halves - a grant is not the same
+    every repo in a finished semester. Both need the same two halves - a grant is not the same
     object as an un-accepted invitation, and cancelling only the first hands the access
     straight back the day the second is accepted.
 
@@ -99,30 +99,30 @@ def revoke_repo_grants(
     left exactly as it is."""
     withdrawn = 0
     errors = 0
-    present = is_collaborator(cohort_org, repo, login, person=True)
+    present = is_collaborator(semester_org, repo, login, person=True)
     if present is None:  # unreadable - never guess, in either direction
         return 0, 1
     if present:
         if dry_run:
-            log_person(f"    DRY-RUN revoke {login} <- {cohort_org}/{repo}")
+            log_person(f"    PREVIEW revoke {login} <- {semester_org}/{repo}")
             withdrawn += 1
-        elif remove_collaborator(cohort_org, repo, login, person=True):
-            log_person(f"  [ok] revoked {login} from {cohort_org}/{repo}")
+        elif remove_collaborator(semester_org, repo, login, person=True):
+            log_person(f"  [ok] revoked {login} from {semester_org}/{repo}")
             withdrawn += 1
         else:
             errors += 1
     # A grant made before the org invite was accepted is a pending INVITATION, which
     # `is_collaborator` cannot see and `remove_collaborator` does not touch. Left live,
     # accepting it later hands `maintain` back to a student who should no longer have it.
-    invitations = pending_invitations(cohort_org, repo, login, person=True)
+    invitations = pending_invitations(semester_org, repo, login, person=True)
     if invitations is None:
         return withdrawn, errors + 1
     for invitation_id in invitations:
         if dry_run:
-            log_person(f"    DRY-RUN cancel invite {login} <- {cohort_org}/{repo}")
+            log_person(f"    PREVIEW cancel invite {login} <- {semester_org}/{repo}")
             withdrawn += 1
-        elif cancel_invitation(cohort_org, repo, invitation_id, person=True):
-            log_person(f"  [ok] cancelled {login}'s invite to {cohort_org}/{repo}")
+        elif cancel_invitation(semester_org, repo, invitation_id, person=True):
+            log_person(f"  [ok] cancelled {login}'s invite to {semester_org}/{repo}")
             withdrawn += 1
         else:
             errors += 1
@@ -130,7 +130,7 @@ def revoke_repo_grants(
 
 
 def revoke_offboarded_access(
-    cohort_org: str,
+    semester_org: str,
     on_roster: set[str],
     dry_run: bool = False,
     existing: dict[str, dict] | None = None,
@@ -158,13 +158,13 @@ def revoke_offboarded_access(
     # for an answer that is always "no". Matched on the whole repo NAME rather than the
     # bare suffix: a team name and a student's handle live in the same namespace, and only
     # `<assignment>-<team>` says which of the two this repo is. An assignment renamed by
-    # `cohort_dest_repo` does not match and simply keeps its probe.
+    # `semester_dest_repo` does not match and simply keeps its probe.
     declared_team_repos = {
         submission_repo(key, team).casefold()
-        for key, per_team in teams.load(cohort_org).items()
+        for key, per_team in teams.load(semester_org).items()
         for team in per_team
     }
-    rows = list_org_repos(cohort_org) if existing is None else list(existing.values())
+    rows = list_org_repos(semester_org) if existing is None else list(existing.values())
     stale = [
         (repo, suffix)
         for repo, suffix in submission_repo_suffixes(rows)
@@ -175,7 +175,7 @@ def revoke_offboarded_access(
     revoked = 0
     for repo, suffix in stale:
         withdrawn, failed = revoke_repo_grants(
-            cohort_org, repo, suffix, dry_run=dry_run
+            semester_org, repo, suffix, dry_run=dry_run
         )
         revoked += withdrawn
         errors += failed
@@ -185,23 +185,23 @@ def revoke_offboarded_access(
         # suffix merely matches somebody with team or owner access is never one of these.
         log_ok(
             f"{revoked} direct submission-repo grant(s)/invite(s) revoked for handle(s) "
-            f"no longer on the roster{' (dry run)' if dry_run else ''}"
+            f"no longer on the roster{' (preview)' if dry_run else ''}"
         )
     return errors
 
 
 def sync(
-    cohort_org: str,
+    semester_org: str,
     prune: bool = False,
     dry_run: bool = False,
     existing: dict[str, dict] | None = None,
 ) -> int:
-    """Reconcile the cohort's role teams and, with `prune`, its off-boarded access.
+    """Reconcile the semester's role teams and, with `prune`, its off-boarded access.
 
-    `existing` is the cohort's repos keyed by name when the CALLER already holds a listing
+    `existing` is the semester's repos keyed by name when the CALLER already holds a listing
     (the nightly Sync membership takes one for this and the gradebooks alike); None means
     take one here, and only the prune half needs it at all."""
-    students = roster.load(cohort_org)
+    students = roster.load(semester_org)
     if students is None:
         # An ABSENT students.csv, which `load` has already logged. A file faculty have to
         # write is a CONTENT fault: it is recorded on the roster's own digest issue and
@@ -212,16 +212,16 @@ def sync(
         # here: `get_file_content` returns None only for a 404 and raises otherwise, so an
         # expired token or a rate limit still reds the run.
         log_err(
-            f"no roster to reconcile in {cohort_org} - skipping (reported on the "
+            f"no roster to reconcile in {semester_org} - skipping (reported on the "
             f"students.csv digest issue in {roster.CONFIG_REPO})"
         )
         return 0
-    # An empty roster (header only - a freshly bootstrapped cohort) is a valid state,
+    # An empty roster (header only - a freshly bootstrapped semester) is a valid state,
     # not an error: reconcile both role teams to empty like any other edit.
     wanted = desired_members(students)
     log_step(
         f"Materialising access for {len(wanted[TEAM])} onboarded student(s) + "
-        f"{len(wanted[AUDITOR_TEAM])} auditor(s) in {cohort_org}"
+        f"{len(wanted[AUDITOR_TEAM])} auditor(s) in {semester_org}"
     )
 
     errors = 0
@@ -229,15 +229,15 @@ def sync(
         handles = {s.github_handle for s in rows}
         for handle in sorted(handles):
             if dry_run:
-                log_person(f"    DRY-RUN enrol: {handle} -> org member")
-            elif not set_org_membership(cohort_org, handle, role="member"):
+                log_person(f"    PREVIEW enrol: {handle} -> org member")
+            elif not set_org_membership(semester_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:
         # an org Owner (or the acting bot) on the roster is never evicted. `keep_ids` is
-        # keyed per TEAM, not cohort-wide - a role change is meant to prune the handle out
+        # keyed per TEAM, not semester-wide - a role change is meant to prune the handle out
         # of the team it left.
         errors += reconcile_team_members(
-            cohort_org,
+            semester_org,
             team,
             handles,
             prune=prune,
@@ -248,7 +248,7 @@ def sync(
         # Behind the same flag as the team prune, and for the same reason: this is the
         # other half of off-boarding, and an ad-hoc run must not silently revoke anything.
         errors += revoke_offboarded_access(
-            cohort_org,
+            semester_org,
             {s.github_handle.casefold() for rows in wanted.values() for s in rows},
             dry_run=dry_run,
             existing=existing,
@@ -257,17 +257,17 @@ def sync(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cohort-org", required=True)
+    parser = CLIParser(description=__doc__)
+    parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--prune",
         action="store_true",
         help="Remove team members no longer on the roster.",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    add_preview_flag(parser, "Report the membership changes; make none (default).")
     args = parser.parse_args()
 
-    errors = sync(args.cohort_org, prune=args.prune, dry_run=args.dry_run)
+    errors = sync(args.semester_org, prune=args.prune, dry_run=args.preview)
     if errors:
         log_err(f"{errors} errors during sync")
         return 1

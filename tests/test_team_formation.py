@@ -24,7 +24,7 @@ from dsl_course.mailer import send_bulk as _SEND_BULK
 from dsl_course.schedule import AssignmentEntry, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
-COURSE, COHORT = "Course-Org", "Cohort-f2026"
+COURSE, SEMESTER = "Course-Org", "Semester-f2026"
 OPENS = datetime(2026, 9, 22, 7, 0, tzinfo=BERLIN)
 SHUTS = datetime(2026, 10, 4, 23, 59, 59, tzinfo=BERLIN)
 INSIDE = datetime(2026, 9, 25, 9, 0, tzinfo=BERLIN)
@@ -60,8 +60,8 @@ def _sched(**entries: AssignmentEntry) -> Schedule:
 
 
 @pytest.fixture
-def cohort(monkeypatch):
-    """The cohort's two hand-edited files and each template's definition, as TEXT where
+def semester(monkeypatch):
+    """The semester's two hand-edited files and each template's definition, as TEXT where
     there is text - so the real parsers run and the fold-casing rules under test are the
     ones the toolkit actually applies."""
 
@@ -98,65 +98,65 @@ def _rows(*pairs: tuple[str, str], key: str = "assignment-2") -> str:
 # ------------------------------------------------------------------ which windows open
 
 
-def test_an_open_self_select_group_window_is_reported_with_when_it_shuts(cohort):
-    cohort()
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+def test_an_open_self_select_group_window_is_reported_with_when_it_shuts(semester):
+    semester()
+    (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert (window.key, window.closes) == ("assignment-2", SHUTS)
     assert (window.teams, window.enrolled) == (0, 4)
 
 
-def test_the_cohort_side_name_rides_along_beside_the_schedule_key(cohort):
-    # teams.csv is keyed on the SCHEDULE key and every repo is named after the cohort-side
-    # name, and they differ exactly when `cohort_dest_repo` is set - so a surface that had
+def test_the_semester_side_name_rides_along_beside_the_schedule_key(semester):
+    # teams.csv is keyed on the SCHEDULE key and every repo is named after the semester-side
+    # name, and they differ exactly when `semester_dest_repo` is set - so a surface that had
     # only one of them would either find no teams or name a repo nobody has.
-    cohort(teams_csv=_rows(("team-x", "anna-adams"), key="assignment-2"))
+    semester(teams_csv=_rows(("team-x", "anna-adams"), key="assignment-2"))
     (window,) = team_formation.open_windows(
         COURSE,
-        COHORT,
-        _sched(**{"assignment-2": _entry(cohort_dest_repo="a2")}),
+        SEMESTER,
+        _sched(**{"assignment-2": _entry(semester_dest_repo="a2")}),
         INSIDE,
     )
     assert (window.key, window.name) == ("assignment-2", "a2")
     assert window.teams == 1
 
 
-def test_an_individual_assignment_never_opens_a_window(cohort):
-    cohort(spec=GradingSpec(type="individual"))
-    assert team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE) == []
+def test_an_individual_assignment_never_opens_a_window(semester):
+    semester(spec=GradingSpec(type="individual"))
+    assert team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE) == []
 
 
-def test_an_assigned_group_assignment_never_opens_a_window(cohort):
+def test_an_assigned_group_assignment_never_opens_a_window(semester):
     # The teaching team writes teams.csv for these, and the Join-team form refuses them -
     # so "nobody has self-selected yet" is not a thing that can be true of one.
-    cohort(spec=GradingSpec(type="group", team_formation="assigned"))
-    assert team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE) == []
+    semester(spec=GradingSpec(type="group", team_formation="assigned"))
+    assert team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE) == []
 
 
-def test_a_template_with_no_definition_opens_no_window(cohort):
+def test_a_template_with_no_definition_opens_no_window(semester):
     # The lock has already locked such an assignment's form to `none`, so there is no door
     # for a student to be waiting at.
-    cohort(spec=None)
-    assert team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE) == []
+    semester(spec=None)
+    assert team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE) == []
 
 
-def test_a_window_that_has_not_opened_yet_is_not_reported(cohort):
-    cohort()
+def test_a_window_that_has_not_opened_yet_is_not_reported(semester):
+    semester()
     when = OPENS - timedelta(minutes=1)
-    assert team_formation.open_windows(COURSE, COHORT, _sched(), when) == []
+    assert team_formation.open_windows(COURSE, SEMESTER, _sched(), when) == []
 
 
 @pytest.mark.parametrize("when", [SHUTS, SHUTS + timedelta(days=30)])
-def test_a_shut_window_is_still_reported_while_somebody_is_unteamed(cohort, when):
+def test_a_shut_window_is_still_reported_while_somebody_is_unteamed(semester, when):
     # The door shutting is the moment the problem becomes PERMANENT - no team, so no repo,
     # so nothing to hand in - and a window that disappeared here would be read by the
     # digest as a fault that cleared. Marked `shut`, so nothing mails about it.
-    cohort()
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), when)
+    semester()
+    (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), when)
     assert window.shut is True and len(window.waiting) == 4
 
 
-def test_a_shut_window_everybody_teamed_up_for_is_simply_over(cohort):
-    cohort(
+def test_a_shut_window_everybody_teamed_up_for_is_simply_over(semester):
+    semester(
         teams_csv=_rows(
             ("team-x", "anna-adams"),
             ("team-x", "ben-baker"),
@@ -164,22 +164,24 @@ def test_a_shut_window_everybody_teamed_up_for_is_simply_over(cohort):
             ("team-y", "dan-doyle"),
         )
     )
-    assert team_formation.open_windows(COURSE, COHORT, _sched(), SHUTS) == []
+    assert team_formation.open_windows(COURSE, SEMESTER, _sched(), SHUTS) == []
 
 
-def test_an_open_window_is_not_marked_shut(cohort):
-    cohort()
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+def test_an_open_window_is_not_marked_shut(semester):
+    semester()
+    (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert window.shut is False
 
 
 @pytest.mark.parametrize("when", [INSIDE, SHUTS + timedelta(days=1)])
-def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(cohort, when):
+def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(
+    semester, when
+):
     # No `handout_datetime` is no hour from which "form your team now" would be true. Asked
     # past the grading pin too: `formation_state` calls both a door that never opens and one
     # that has shut `closed`, and only the second left anybody standing at it - read as the
     # second, every hand-handed-out group assignment in the plan would carry a MISSED fault.
-    cohort()
+    semester()
     sched = _sched(
         **{
             "assignment-2": AssignmentEntry(
@@ -187,17 +189,17 @@ def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(cohort,
             )
         }
     )
-    assert team_formation.open_windows(COURSE, COHORT, sched, when) == []
+    assert team_formation.open_windows(COURSE, SEMESTER, sched, when) == []
 
 
 # -------------------------------------------------------------------------- who waits
 
 
-def test_only_enrolled_onboarded_rows_count_as_waiting(cohort):
+def test_only_enrolled_onboarded_rows_count_as_waiting(semester):
     # An auditor gets no assignment repo at all, and a row with no handle cannot be in a
     # team - so neither is anybody to chase.
-    cohort()
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+    semester()
+    (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert {s.github_handle for s in window.waiting} == {
         "anna-adams",
         "ben-baker",
@@ -206,17 +208,17 @@ def test_only_enrolled_onboarded_rows_count_as_waiting(cohort):
     }
 
 
-def test_a_handle_typed_in_another_casing_is_the_same_student(cohort):
+def test_a_handle_typed_in_another_casing_is_the_same_student(semester):
     # teams.csv is parsed casefolded (GitHub logins are case-insensitive); a roster handle
     # compared in its own casing would read as a student who never joined, and would be
     # chased for a team she is already in.
-    cohort(teams_csv=_rows(("team-x", "CARLA-COHEN")))
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+    semester(teams_csv=_rows(("team-x", "CARLA-COHEN")))
+    (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert "Carla-Cohen" not in {s.github_handle for s in window.waiting}
     assert window.enrolled == 4 and len(window.waiting) == 3
 
 
-def test_an_auditor_sharing_a_handle_with_a_student_is_still_not_counted(cohort):
+def test_an_auditor_sharing_a_handle_with_a_student_is_still_not_counted(semester):
     # The population is one filter over the ENROLLED rows, never a round trip through a
     # set of handles: a set re-admits every row of the unfiltered roster that happens to
     # carry the handle, and both numbers this window hands out - `enrolled` and the size
@@ -226,15 +228,15 @@ def test_an_auditor_sharing_a_handle_with_a_student_is_still_not_counted(cohort)
         "fred@x.edu,Fred Frey,auditor,fred-frey,6,,",
         "fred@x.edu,Fred Frey,auditor,anna-adams,6,,",
     )
-    cohort(roster_csv=shared)
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+    semester(roster_csv=shared)
+    (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert window.enrolled == 4
     assert [s.hertie_email for s in window.waiting].count("fred@x.edu") == 0
 
 
-def test_rows_for_another_assignment_do_not_team_anybody_up(cohort):
-    cohort(teams_csv=_rows(("team-x", "anna-adams"), key="assignment-1"))
-    (window,) = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+def test_rows_for_another_assignment_do_not_team_anybody_up(semester):
+    semester(teams_csv=_rows(("team-x", "anna-adams"), key="assignment-1"))
+    (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert window.teams == 0 and len(window.waiting) == 4
 
 
@@ -242,53 +244,55 @@ def test_rows_for_another_assignment_do_not_team_anybody_up(cohort):
 
 
 def test_a_teams_csv_that_could_not_be_read_reports_no_windows_at_all(
-    cohort, monkeypatch, capsys
+    semester, monkeypatch, capsys
 ):
     # None, not []: "we could not look" reported as "everybody has a team" is the failure
     # this whole pass exists to stop. The None travels on through the fault builder, so the
-    # pre-flight can tell it from a cohort that really has nothing wrong with it.
-    cohort()
+    # pre-flight can tell it from a semester that really has nothing wrong with it.
+    semester()
 
     def boom(org):
         raise RuntimeError("API rate limit exceeded")
 
     monkeypatch.setattr(team_formation.teams, "_teams_text", boom)
-    windows = team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE)
+    windows = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert windows is None
     assert "rate limit" in capsys.readouterr().err
     assert team_formation.window_faults(_sched(), windows) is None
 
 
-def test_a_cohort_with_no_self_select_assignment_reads_neither_csv(cohort, monkeypatch):
-    # `open_windows` runs on EVERY cohort on every tick, and most cohorts' `assignments:`
+def test_a_semester_with_no_self_select_assignment_reads_neither_csv(
+    semester, monkeypatch
+):
+    # `open_windows` runs on EVERY semester on every tick, and most semesters' `assignments:`
     # block declares nothing a student forms a team for. Asking the memoised spec question
     # first is free (the tick has read every template already); the two contents reads it
     # would otherwise pay - students.csv and teams.csv, ~192 a day - could only ever
     # produce an empty list.
-    cohort(spec=GradingSpec(type="individual"))
+    semester(spec=GradingSpec(type="individual"))
 
     def refuse(org):
         raise AssertionError(
-            "the cohort was read for a plan with no self-select window"
+            "the semester was read for a plan with no self-select window"
         )
 
     monkeypatch.setattr(team_formation.roster, "_roster_text", refuse)
     monkeypatch.setattr(team_formation.teams, "_teams_text", refuse)
-    assert team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE) == []
+    assert team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE) == []
 
 
-def test_an_absent_roster_reports_no_windows_rather_than_a_teamed_cohort(cohort):
+def test_an_absent_roster_reports_no_windows_rather_than_a_teamed_semester(semester):
     # The roster is the allowlist. The empty set an absent file implies would report every
     # student as teamed; students.csv already carries its own fault on its own digest.
-    cohort(roster_csv=None)
-    assert team_formation.open_windows(COURSE, COHORT, _sched(), INSIDE) is None
+    semester(roster_csv=None)
+    assert team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE) is None
 
 
 # ------------------------------------------------------------------------- the fault
 
 
-def test_no_fault_once_every_enrolled_student_has_a_team(cohort):
-    cohort(
+def test_no_fault_once_every_enrolled_student_has_a_team(semester):
+    semester(
         teams_csv=_rows(
             ("team-x", "anna-adams"),
             ("team-x", "ben-baker"),
@@ -297,16 +301,16 @@ def test_no_fault_once_every_enrolled_student_has_a_team(cohort):
         )
     )
     sched = _sched()
-    windows = team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+    windows = team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     assert [w.teams for w in windows] == [2]
     assert team_formation.window_faults(sched, windows) == []
 
 
-def test_with_no_team_at_all_the_fault_says_so_in_counts(cohort):
-    cohort()
+def test_with_no_team_at_all_the_fault_says_so_in_counts(semester):
+    semester()
     sched = _sched()
     (fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     )
     assert fault.what == (
         "team formation is open and no team has formed yet - all 4 enrolled student(s) "
@@ -314,11 +318,11 @@ def test_with_no_team_at_all_the_fault_says_so_in_counts(cohort):
     )
 
 
-def test_with_some_teams_formed_the_fault_counts_the_students_left_over(cohort):
-    cohort(teams_csv=_rows(("team-x", "anna-adams"), ("team-x", "ben-baker")))
+def test_with_some_teams_formed_the_fault_counts_the_students_left_over(semester):
+    semester(teams_csv=_rows(("team-x", "anna-adams"), ("team-x", "ben-baker")))
     sched = _sched()
     (fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     )
     assert fault.what == (
         "team formation is open and 2 of 4 enrolled student(s) are not in a team yet, "
@@ -326,14 +330,14 @@ def test_with_some_teams_formed_the_fault_counts_the_students_left_over(cohort):
     )
 
 
-def test_nothing_in_the_fault_names_a_student(cohort):
+def test_nothing_in_the_fault_names_a_student(semester):
     # This runs in a PUBLIC workflow, and the fault's text reaches a run log, a digest
     # issue and an email. Every handle, name and address on the fixture roster, and the
     # team names students typed, are checked against every string the fault carries.
-    cohort(teams_csv=_rows(("wizards", "anna-adams")))
+    semester(teams_csv=_rows(("wizards", "anna-adams")))
     sched = _sched()
     (fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     )
     text = (
         f"{fault.what} {fault.where} {fault.field} "
@@ -351,13 +355,13 @@ def test_nothing_in_the_fault_names_a_student(cohort):
         assert secret not in text, f"{secret!r} reached a public surface"
 
 
-def test_the_fault_points_at_the_line_that_decides_when_the_window_shuts(cohort):
-    # The deep link has to land on the line a reader would EDIT to give the cohort longer,
+def test_the_fault_points_at_the_line_that_decides_when_the_window_shuts(semester):
+    # The deep link has to land on the line a reader would EDIT to give the semester longer,
     # and that is whichever key closed the window.
-    cohort()
+    semester()
     plain = _sched()
     (fault,) = team_formation.window_faults(
-        plain, team_formation.open_windows(COURSE, COHORT, plain, INSIDE)
+        plain, team_formation.open_windows(COURSE, SEMESTER, plain, INSIDE)
     )
     assert (fault.where, fault.field, fault.lineno) == (
         "assignments.assignment-2",
@@ -371,18 +375,18 @@ def test_the_fault_points_at_the_line_that_decides_when_the_window_shuts(cohort)
         **{"assignment-2": _entry(grading_datetime=SHUTS - timedelta(days=1))}
     )
     (fault,) = team_formation.window_faults(
-        pinned, team_formation.open_windows(COURSE, COHORT, pinned, INSIDE)
+        pinned, team_formation.open_windows(COURSE, SEMESTER, pinned, INSIDE)
     )
     assert (fault.field, fault.lineno) == ("grading_datetime", 14)
 
 
-def test_the_fault_carries_its_own_consequence_and_fix(cohort):
+def test_the_fault_carries_its_own_consequence_and_fix(semester):
     # schedule.yml's own sentence says the entry "is not scheduled" - which is exactly
     # false here: the entry is scheduled, it has fired, and what is missing is the teams.
-    cohort()
+    semester()
     sched = _sched()
     (fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     )
     assert fault.consequence == (
         "no repos are provisioned for that assignment, so the students still without a "
@@ -397,14 +401,14 @@ def test_the_fault_carries_its_own_consequence_and_fix(cohort):
 # ------------------------------------------------------------- the rungs across the close
 
 
-def test_the_fault_climbs_the_rungs_towards_the_moment_formation_shuts(cohort):
+def test_the_fault_climbs_the_rungs_towards_the_moment_formation_shuts(semester):
     # An immediate fault that carries a MOMENT: `kind` is None, so the letter is the one
     # for a line somebody has to act on, while `fires` makes it get louder as the window
     # runs out. Both follow from `severity` branching on `fires`, never on `is_source`.
-    cohort()
+    semester()
     sched = _sched()
     (fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     )
     assert fault.is_source is False and fault.fires == SHUTS
     rungs = [
@@ -423,14 +427,14 @@ def test_the_fault_climbs_the_rungs_towards_the_moment_formation_shuts(cohort):
     ]
 
 
-def test_a_window_open_for_a_week_with_somebody_waiting_is_at_least_a_warning(cohort):
+def test_a_window_open_for_a_week_with_somebody_waiting_is_at_least_a_warning(semester):
     # The ladder alone says nothing until a day before the close, so a fortnight-long
     # window nobody has acted on would sit below the notify bar for most of its life. Once
     # it has stood open for a week, the digest files it - and the climb above is unchanged.
-    cohort()
+    semester()
     sched = _sched()
     (fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     )
     week = OPENS + team_formation.WARN_AFTER_OPEN
     assert fault.severity(week - timedelta(minutes=1)) is Severity.ADVISORY
@@ -439,18 +443,18 @@ def test_a_window_open_for_a_week_with_somebody_waiting_is_at_least_a_warning(co
     assert fault.severity(SHUTS + timedelta(hours=1)) is Severity.MISSED
 
 
-def test_the_fault_survives_the_close_and_reaches_MISSED(cohort):
+def test_the_fault_survives_the_close_and_reaches_MISSED(semester):
     # The rung above is unreachable unless the fault OUTLIVES the window: `fires` IS the
     # moment formation shuts, so a fault that only existed while the window was open could
     # never be read at a `now` past it. And `config_digest.transitions` reads a key that
     # stops appearing as CLEARED - so a fault that vanished at the close would post the
     # teaching team a *Cleared* comment at the exact minute five students stopped being
     # able to form a team at all.
-    cohort(teams_csv=_rows(("team-x", "anna-adams"), ("team-x", "ben-baker")))
+    semester(teams_csv=_rows(("team-x", "anna-adams"), ("team-x", "ben-baker")))
     sched = _sched()
     after = SHUTS + timedelta(days=3)
     (fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, after)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, after)
     )
     assert fault.severity(after) is Severity.MISSED
     assert fault.what == (
@@ -460,16 +464,16 @@ def test_the_fault_survives_the_close_and_reaches_MISSED(cohort):
     # Same key as while it was open, so the digest sees one fault that ESCALATED and not a
     # clear followed by a new appearance.
     (open_fault,) = team_formation.window_faults(
-        sched, team_formation.open_windows(COURSE, COHORT, sched, INSIDE)
+        sched, team_formation.open_windows(COURSE, SEMESTER, sched, INSIDE)
     )
     assert fault.key == open_fault.key
 
 
-def test_the_shut_window_s_fault_clears_when_the_missing_rows_are_written(cohort):
+def test_the_shut_window_s_fault_clears_when_the_missing_rows_are_written(semester):
     # What the fault is FOR: it goes away because somebody did the thing, never because the
     # calendar moved past it. (The other two ways out are moving the date and taking the
     # entry out of the plan, and both are edits to schedule.yml.)
-    cohort(
+    semester(
         teams_csv=_rows(
             ("team-x", "anna-adams"),
             ("team-x", "ben-baker"),
@@ -479,17 +483,17 @@ def test_the_shut_window_s_fault_clears_when_the_missing_rows_are_written(cohort
     )
     sched = _sched()
     windows = team_formation.open_windows(
-        COURSE, COHORT, sched, SHUTS + timedelta(days=3)
+        COURSE, SEMESTER, sched, SHUTS + timedelta(days=3)
     )
     assert team_formation.window_faults(sched, windows) == []
 
 
-def test_nothing_the_shut_window_s_fault_says_names_a_student(cohort):
-    cohort(teams_csv=_rows(("wizards", "anna-adams")))
+def test_nothing_the_shut_window_s_fault_says_names_a_student(semester):
+    semester(teams_csv=_rows(("wizards", "anna-adams")))
     sched = _sched()
     (fault,) = team_formation.window_faults(
         sched,
-        team_formation.open_windows(COURSE, COHORT, sched, SHUTS + timedelta(days=3)),
+        team_formation.open_windows(COURSE, SEMESTER, sched, SHUTS + timedelta(days=3)),
     )
     text = f"{fault.what} {fault.where} {fault.field} {fault.fix()}".casefold()
     for secret in (
@@ -504,10 +508,10 @@ def test_nothing_the_shut_window_s_fault_says_names_a_student(cohort):
         assert secret not in text, f"{secret!r} reached a public surface"
 
 
-# ------------------------------------------------------------------ telling the cohort
+# ------------------------------------------------------------------ telling the semester
 #
 # The first mail this toolkit sends off a CLOCK rather than off somebody's action, so
-# every test below is about a way a whole cohort's inbox could be got wrong: mailed twice,
+# every test below is about a way a whole semester's inbox could be got wrong: mailed twice,
 # mailed at 2am, mailed after the door shut, mailed with somebody's address in a public
 # log, or recorded as mailed and never sent.
 
@@ -523,7 +527,7 @@ NEAR_CLOSE = SHUTS - timedelta(hours=10)
 
 
 class Record:
-    """The cohort's `team-formation/mailed.csv`, as a file that remembers its sha.
+    """The semester's `team-formation/mailed.csv`, as a file that remembers its sha.
 
     `refuse` is how many writes GitHub turns down, which is what another tick's commit
     looks like from here; `on_refuse` is that other tick's content landing. `refuse_from`
@@ -657,7 +661,7 @@ def post(monkeypatch):
         monkeypatch.setattr(
             team_formation, "course_name_of", lambda org: "Deep Learning"
         )
-        # The course org's templates, which number the assignment's page on the cohort
+        # The course org's templates, which number the assignment's page on the semester
         # site: one off-plan template sorts first, so `assignment-2` is page 2.
         monkeypatch.setattr(
             team_formation.schedule,
@@ -672,9 +676,9 @@ def post(monkeypatch):
 def _tick(now=INSIDE, sched=None, dry_run=False) -> int:
     """One scheduler tick's worth of this pass: read who is waiting, then mail them."""
     sched = sched or _sched()
-    windows = team_formation.open_windows(COURSE, COHORT, sched, now)
+    windows = team_formation.open_windows(COURSE, SEMESTER, sched, now)
     return team_formation.notify_windows(
-        COURSE, COHORT, sched, windows, now, dry_run=dry_run
+        COURSE, SEMESTER, sched, windows, now, dry_run=dry_run
     )
 
 
@@ -687,9 +691,9 @@ def _already(*claims: tuple[str, str, str]) -> Record:
 
 
 def test_the_mail_goes_to_every_enrolled_student_without_a_team_and_to_nobody_else(
-    cohort, post
+    semester, post
 ):
-    cohort()
+    semester()
     _rec, sender = post()
     assert _tick() == 0
     assert sender.to == set(ADDRESSES), "the recipients are the window's, not the org's"
@@ -698,21 +702,23 @@ def test_the_mail_goes_to_every_enrolled_student_without_a_team_and_to_nobody_el
     assert len(sender.sent) == len(sender.to), "one message per student"
 
 
-def test_a_student_who_has_not_joined_github_is_not_asked_to_form_a_team(cohort, post):
+def test_a_student_who_has_not_joined_github_is_not_asked_to_form_a_team(
+    semester, post
+):
     # The only thing they could do about this mail is the Join course issue their
     # enrolment code already asked them for, so a second message naming a step they cannot
     # reach is noise. It also keeps this set and the fault's counts describing ONE
     # population - otherwise the mail says five where the digest beside it says four.
-    cohort()
+    semester()
     _rec, sender = post()
     assert _tick() == 0
     assert EVE not in sender.to
 
 
-def test_a_student_who_joins_mid_window_is_asked_on_the_very_next_tick(cohort, post):
+def test_a_student_who_joins_mid_window_is_asked_on_the_very_next_tick(semester, post):
     # Which is why leaving them out costs nothing: the claim is per recipient, so nobody
     # is skipped for good. They are asked at the moment they can act, not before it.
-    cohort()
+    semester()
     rec, sender = post()
     assert _tick() == 0
     assert EVE not in sender.to
@@ -720,7 +726,7 @@ def test_a_student_who_joins_mid_window_is_asked_on_the_very_next_tick(cohort, p
     onboarded = ROSTER.replace(
         "eve@x.edu,Eve Evans,enrolled,,,,", "eve@x.edu,Eve Evans,enrolled,eve-evans,5,,"
     )
-    cohort(roster_csv=onboarded)
+    semester(roster_csv=onboarded)
     # The SAME record: this is the next tick, carrying what the last one claimed.
     rec2, sender2 = post(record=rec)
     assert _tick() == 0
@@ -730,32 +736,32 @@ def test_a_student_who_joins_mid_window_is_asked_on_the_very_next_tick(cohort, p
     assert rec2.recipients(team_formation.PHASE_OPEN) == {*ADDRESSES, EVE}
 
 
-def test_a_student_already_in_a_team_is_not_asked_to_form_one(cohort, post):
-    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+def test_a_student_already_in_a_team_is_not_asked_to_form_one(semester, post):
+    semester(teams_csv=_rows(("team-x", "anna-adams")))
     _rec, sender = post()
     _tick()
     assert "anna@x.edu" not in sender.to
     assert sender.to == {"ben@x.edu", "carla@x.edu", "dan@x.edu"}
 
 
-def test_a_roster_row_somebody_duplicated_gets_one_message(cohort, post):
+def test_a_roster_row_somebody_duplicated_gets_one_message(semester, post):
     # Two rows, one address (a re-enrolment, a second GitHub account). Keyed on the
-    # handle, this cohort would get two copies of the same mail - and `enrol_codes`
+    # handle, this semester would get two copies of the same mail - and `enrol_codes`
     # collapses a duplicated row exactly this way.
-    cohort(roster_csv=f"{ROSTER}\nanna@x.edu,Anna Adams,enrolled,anna-second,7,,")
+    semester(roster_csv=f"{ROSTER}\nanna@x.edu,Anna Adams,enrolled,anna-second,7,,")
     _rec, sender = post()
     _tick()
     assert len([m for m in sender.sent if m.to == "anna@x.edu"]) == 1
 
 
 def test_a_window_everybody_has_teamed_up_for_does_not_even_read_the_record(
-    cohort, post, monkeypatch
+    semester, post, monkeypatch
 ):
-    # A window stands open for WEEKS, and once the cohort has teamed up there is nothing
+    # A window stands open for WEEKS, and once the semester has teamed up there is nothing
     # left to owe off it - so reading the record on every tick until the grading pin buys
-    # a contents read per cohort per quarter of an hour and nothing else. Exactly
+    # a contents read per semester per quarter of an hour and nothing else. Exactly
     # equivalent: `_nudges` iterates `waiting`, so an all-empty `waiting` owes nothing.
-    cohort(
+    semester(
         teams_csv=_rows(
             ("team-x", "anna-adams"),
             ("team-x", "ben-baker"),
@@ -773,11 +779,11 @@ def test_a_window_everybody_has_teamed_up_for_does_not_even_read_the_record(
     assert sender.batches == []
 
 
-def test_a_window_that_has_shut_is_never_mailed_about(cohort, post, monkeypatch):
+def test_a_window_that_has_shut_is_never_mailed_about(semester, post, monkeypatch):
     # It is carried only for the teaching team's fault. The Join-team form would refuse the
-    # team this message asks for, so the mail would be asking a cohort for something it
+    # team this message asks for, so the mail would be asking a semester for something it
     # cannot do - and the record is not even read, since nothing could ever be owed off it.
-    cohort()
+    semester()
 
     def refuse(*a, **k):
         raise AssertionError("the record was read for a window that has already shut")
@@ -789,11 +795,11 @@ def test_a_window_that_has_shut_is_never_mailed_about(cohort, post, monkeypatch)
 
 
 def test_a_press_will_not_mail_a_window_that_has_shut_either(
-    cohort, post, plan, capsys
+    semester, post, plan, capsys
 ):
     # The button is a second way into the same pass, so the door is shut for it too - and
     # the refusal reads as "nothing is open", which is exactly what is true.
-    cohort()
+    semester()
     rec, sender = post()
     plan()
     assert _press(now=SHUTS + timedelta(days=1)) == 0
@@ -801,8 +807,8 @@ def test_a_press_will_not_mail_a_window_that_has_shut_either(
     assert "no team-formation window is open" in capsys.readouterr().out
 
 
-def test_a_re_run_mails_nobody(cohort, post):
-    cohort()
+def test_a_re_run_mails_nobody(semester, post):
+    semester()
     rec, sender = post()
     assert _tick() == 0
     assert _tick() == 0
@@ -811,14 +817,14 @@ def test_a_re_run_mails_nobody(cohort, post):
 
 
 def test_a_student_who_joined_a_team_since_the_last_tick_is_not_mailed_again(
-    cohort, post
+    semester, post
 ):
-    cohort()
+    semester()
     _rec, sender = post()
     _tick()
     # She acted on it. The record already holds her `open` row, and she has dropped out of
     # `waiting` - either alone would be enough, and the reminder below relies on both.
-    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+    semester(teams_csv=_rows(("team-x", "anna-adams")))
     assert _tick() == 0
     assert len(sender.batches) == 1
 
@@ -826,8 +832,8 @@ def test_a_student_who_joined_a_team_since_the_last_tick_is_not_mailed_again(
 # ------------------------------------------------------------------------ the two phases
 
 
-def test_only_the_open_phase_goes_out_while_the_door_is_still_far_off(cohort, post):
-    cohort()
+def test_only_the_open_phase_goes_out_while_the_door_is_still_far_off(semester, post):
+    semester()
     rec, _sender = post()
     _tick()
     assert rec.recipients(team_formation.PHASE_REMINDER) == set()
@@ -835,9 +841,9 @@ def test_only_the_open_phase_goes_out_while_the_door_is_still_far_off(cohort, po
 
 
 def test_the_reminder_goes_out_inside_the_last_48_hours_to_whoever_is_still_unteamed(
-    cohort, post
+    semester, post
 ):
-    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+    semester(teams_csv=_rows(("team-x", "anna-adams")))
     rec, sender = post(
         record=_already(*(("assignment-2", a, "open") for a in ADDRESSES))
     )
@@ -849,12 +855,12 @@ def test_the_reminder_goes_out_inside_the_last_48_hours_to_whoever_is_still_unte
 
 
 def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phases(
-    cohort, post
+    semester, post
 ):
     # Two mails a minute apart is what a reminder must never become. The message is the
     # OPEN one: a "reminder" to somebody who was never told refers to a mail that does not
     # exist.
-    cohort()
+    semester()
     rec, sender = post()
     short = _sched(
         **{
@@ -872,8 +878,8 @@ def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phas
     assert rec.recipients("open") == rec.recipients("reminder") == set(ADDRESSES)
 
 
-def test_two_open_windows_are_one_batch_of_one_message_each(cohort, post):
-    cohort()
+def test_two_open_windows_are_one_batch_of_one_message_each(semester, post):
+    semester()
     _rec, sender = post()
     assert _tick(sched=_sched(**{"a-1": _entry(), "a-2": _entry()})) == 0
     assert len(sender.batches) == 1, (
@@ -887,11 +893,11 @@ def test_two_open_windows_are_one_batch_of_one_message_each(cohort, post):
 
 
 def test_an_org_with_no_mail_transport_claims_nothing_and_is_offered_it_again(
-    cohort, post, capsys
+    semester, post, capsys
 ):
-    # The property that makes this feature inert rather than destructive on a cohort whose
+    # The property that makes this feature inert rather than destructive on a semester whose
     # GRAPH_* secrets were never set: asked BEFORE the claim, as enrol_codes asks it.
-    cohort()
+    semester()
     rec, sender = post(transport=False)
     assert _tick() == 0
     assert rec.attempts == [] and sender.batches == []
@@ -902,10 +908,10 @@ def test_an_org_with_no_mail_transport_claims_nothing_and_is_offered_it_again(
     assert sender2.to == set(ADDRESSES) and rec2.attempts
 
 
-def test_quiet_hours_hold_the_mail_and_claim_nothing(cohort, post, capsys):
-    # A handout_datetime of 00:00 would otherwise mail a whole cohort at 2am. The WINDOW
+def test_quiet_hours_hold_the_mail_and_claim_nothing(semester, post, capsys):
+    # A handout_datetime of 00:00 would otherwise mail a whole semester at 2am. The WINDOW
     # is untouched - it opened at its own minute, upstream of this call.
-    cohort()
+    semester()
     rec, sender = post()
     assert _tick(now=QUIET) == 0
     assert rec.attempts == [] and sender.batches == []
@@ -914,44 +920,44 @@ def test_quiet_hours_hold_the_mail_and_claim_nothing(cohort, post, capsys):
     assert sender.to == set(ADDRESSES)
 
 
-def test_an_archived_cohort_mails_nobody(cohort, post, monkeypatch):
+def test_an_archived_semester_mails_nobody(semester, post, monkeypatch):
     # Its classroom-config is frozen, so the claim could not land anyway - and nobody is
     # forming a team in a term that is over.
-    cohort()
+    semester()
     rec, sender = post()
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)
     assert _tick() == 0
     assert rec.attempts == [] and sender.batches == []
 
 
-def test_a_record_that_cannot_be_written_mails_nobody(cohort, post):
-    # Claim-then-send means a write GitHub refuses costs a tick, not a duplicate cohort
+def test_a_record_that_cannot_be_written_mails_nobody(semester, post):
+    # Claim-then-send means a write GitHub refuses costs a tick, not a duplicate semester
     # mail. The next tick retries the lot.
-    cohort()
+    semester()
     rec, sender = post(record=Record(refuse=team_formation.WRITE_ATTEMPTS))
     assert _tick() == 1
     assert sender.batches == []
     assert len(rec.attempts) == team_formation.WRITE_ATTEMPTS
 
 
-def test_a_record_nobody_can_parse_mails_nobody(cohort, post):
+def test_a_record_nobody_can_parse_mails_nobody(semester, post):
     # An Excel `;` export of the record read as EMPTY would be a second copy of every
-    # message to every student in the cohort.
-    cohort()
+    # message to every student in the semester.
+    semester()
     rec, sender = post(record=Record("assignment;recipient;phase;mailed_at"))
     assert _tick() == 1
     assert sender.batches == [] and rec.attempts == []
 
 
-def test_the_first_claim_of_a_term_does_not_overwrite_a_racing_writer(cohort, post):
-    # `mailed.csv` does not exist until the first window of a cohort's term claims it, and
-    # that is exactly when a faculty press and a tick can both be holding the whole cohort.
+def test_the_first_claim_of_a_term_does_not_overwrite_a_racing_writer(semester, post):
+    # `mailed.csv` does not exist until the first window of a semester's term claims it, and
+    # that is exactly when a faculty press and a tick can both be holding the whole semester.
     # An absent file read as "no sha" must be sent to GitHub as NO SHA - which it refuses if
     # the file has appeared since - and never as "fetch the sha yourself and overwrite",
     # which is what `put_file` does with None and which would discard the other writer's
     # rows and mail every unteamed student twice. `grades.sync_team_lock` passes "" for the
     # same absence and for the same reason.
-    cohort()
+    semester()
     mine = "2026-09-25T07:00"
 
     def landed(rec: Record) -> None:
@@ -971,10 +977,10 @@ def test_the_first_claim_of_a_term_does_not_overwrite_a_racing_writer(cohort, po
     )
 
 
-def test_a_message_another_tick_claimed_first_is_not_sent_twice(cohort, post):
+def test_a_message_another_tick_claimed_first_is_not_sent_twice(semester, post):
     # The claim reports what it INSERTED, not what it asked for: the other tick has
     # already taken responsibility for that student's message.
-    cohort()
+    semester()
 
     def landed(rec: Record) -> None:
         rec.text = team_formation.dump_mailed(
@@ -990,8 +996,8 @@ def test_a_message_another_tick_claimed_first_is_not_sent_twice(cohort, post):
 # --------------------------------------------------------------- what the send gave back
 
 
-def test_a_partial_batch_releases_exactly_the_claims_it_did_not_spend(cohort, post):
-    cohort()
+def test_a_partial_batch_releases_exactly_the_claims_it_did_not_spend(semester, post):
+    semester()
     rec, sender = post(deliver=2)
     assert _tick() == 1, "students this tick could not reach must red it"
     went = {m.to for m in sender.sent[:2]}
@@ -1003,7 +1009,7 @@ def test_a_partial_batch_releases_exactly_the_claims_it_did_not_spend(cohort, po
 
 
 def test_a_batch_that_stops_inside_the_second_window_releases_that_window_s_claims(
-    cohort, post
+    semester, post
 ):
     # The one case a per-ADDRESS record cannot survive. Anna is unteamed in both windows, so
     # she owns two messages to one address, and the batch is ordered window by window. If it
@@ -1011,7 +1017,7 @@ def test_a_batch_that_stops_inside_the_second_window_releases_that_window_s_clai
     # read that way, their a-2 nudge counts as sent, its claim is never released, and
     # `mailed.csv` says for ever that they were told about an assignment they never heard
     # of. The record is per MESSAGE, so what stands is exactly what went out.
-    cohort()
+    semester()
     two = _sched(**{"a-1": _entry(), "a-2": _entry()})
     rec, _sender = post(deliver=4)
     assert _tick(sched=two) == 1, "the messages this tick could not send must red it"
@@ -1026,11 +1032,11 @@ def test_a_batch_that_stops_inside_the_second_window_releases_that_window_s_clai
     assert all("Assignment 2" in m.subject for m in sender2.sent)
 
 
-def test_the_public_count_is_per_window_and_not_per_address(cohort, post, capsys):
+def test_the_public_count_is_per_window_and_not_per_address(semester, post, capsys):
     # The same miscount, on the line faculty read: four messages went out, all of them
     # a-1's, and a-2 is owed to everybody. Counted by address, a-2 would report four of
     # four mailed - the log agreeing with a record that is wrong.
-    cohort()
+    semester()
     post(deliver=4)
     _tick(sched=_sched(**{"a-1": _entry(), "a-2": _entry()}))
     out = capsys.readouterr().out
@@ -1038,10 +1044,10 @@ def test_the_public_count_is_per_window_and_not_per_address(cohort, post, capsys
     assert "mailed 0 of 4 student(s) about a-2" in out
 
 
-def test_a_transport_that_raised_gives_every_claim_back(cohort, post):
-    # Nothing went out at all, and an unreleased claim is a whole cohort silently recorded
+def test_a_transport_that_raised_gives_every_claim_back(semester, post):
+    # Nothing went out at all, and an unreleased claim is a whole semester silently recorded
     # as told.
-    cohort()
+    semester()
     rec, _sender = post(boom=True)
     with pytest.raises(RuntimeError):
         _tick()
@@ -1049,11 +1055,11 @@ def test_a_transport_that_raised_gives_every_claim_back(cohort, post):
 
 
 def test_a_release_that_also_failed_says_which_stamp_to_delete_by_hand(
-    cohort, post, capsys
+    semester, post, capsys
 ):
     # The one failure that must never be swallowed: the record says these students were
     # told and they were not, so nothing will ever retry them.
-    cohort()
+    semester()
     rec, sender = post(record=Record(refuse_from=1), deliver=0)
     assert _tick() == 1
     assert len(sender.sent) == 4 and rec.rows, "the claim landed; the send did not"
@@ -1064,34 +1070,34 @@ def test_a_release_that_also_failed_says_which_stamp_to_delete_by_hand(
 # -------------------------------------------------------------------------- the wording
 
 
-def _body(cohort, post, **kw) -> tuple[str, str]:
-    cohort()
+def _body(semester, post, **kw) -> tuple[str, str]:
+    semester()
     _rec, sender = post()
     _tick(**kw)
     return sender.sent[0].subject, sender.sent[0].body
 
 
-def test_the_message_carries_what_a_student_needs_in_order_to_act(cohort, post):
-    subject, body = _body(cohort, post)
+def test_the_message_carries_what_a_student_needs_in_order_to_act(semester, post):
+    subject, body = _body(semester, post)
     assert subject == "Form your team for Assignment 2 - Deep Learning"
     assert "the Deep Learning course" in body
     assert "up to 4 people" in body, "the cap the Join-team form enforces"
-    assert "closes on 4th Oct" in body, "the day, in the cohort's own zone"
-    assert f"https://github.com/{COHORT}/welcome/issues/new/choose" in body
-    assert "https://cohort-f2026.github.io/assignments/02-assignment-2.html" in body, (
-        "the assignment's page, which lists the teams"
-    )
+    assert "closes on 4th Oct" in body, "the day, in the semester's own zone"
+    assert f"https://github.com/{SEMESTER}/welcome/issues/new/choose" in body
+    assert (
+        "https://semester-f2026.github.io/assignments/02-assignment-2.html" in body
+    ), "the assignment's page, which lists the teams"
     # No Join-course line: every recipient is onboarded by construction, and a student
     # who is not enters `waiting` on the tick after they join and is sent this then.
     assert "Join course" not in body
     assert len(body.splitlines()) < 20, "a student reads this once, on a phone"
 
 
-def test_the_message_greets_the_student_it_is_addressed_to(cohort, post):
+def test_the_message_greets_the_student_it_is_addressed_to(semester, post):
     # One Message per recipient already, so the body costs nothing to personalise - and a
     # mail asking somebody to go and find three people to work with reads better addressed
-    # to them than to a cohort.
-    cohort()
+    # to them than to a semester.
+    semester()
     _rec, sender = post()
     _tick()
     greeted = {m.to: m.body.splitlines()[0] for m in sender.sent}
@@ -1099,20 +1105,20 @@ def test_the_message_greets_the_student_it_is_addressed_to(cohort, post):
     assert greeted["dan@x.edu"] == "Dear Dan,"
 
 
-def test_a_roster_row_with_no_name_is_greeted_without_one(cohort, post):
-    # A cohort imported from a system that only had addresses. A greeting to nobody reads
+def test_a_roster_row_with_no_name_is_greeted_without_one(semester, post):
+    # A semester imported from a system that only had addresses. A greeting to nobody reads
     # worse than none at all.
-    cohort(roster_csv=f"{ROSTER_HEADER}\nzoe@x.edu,,enrolled,zoe-z,9,,")
+    semester(roster_csv=f"{ROSTER_HEADER}\nzoe@x.edu,,enrolled,zoe-z,9,,")
     _rec, sender = post()
     _tick()
     assert sender.sent[0].body.startswith("Hello,\n")
 
 
-def test_the_assignment_is_named_as_the_site_names_it(cohort, post):
+def test_the_assignment_is_named_as_the_site_names_it(semester, post):
     # `assignment-2` is what the PLAN calls it. The gradebook, the brief and the course
     # site all print the title, and the site numbers the page - and this is the one mail a
     # student gets about it.
-    cohort(
+    semester(
         spec=GradingSpec(type="group", team_formation="self_select", title="Project")
     )
     _rec, sender = post()
@@ -1140,11 +1146,11 @@ def test_the_number_is_not_doubled_up(title, expected):
 
 
 def test_a_page_nobody_could_look_up_leaves_the_title_and_drops_the_link(
-    cohort, post, monkeypatch
+    semester, post, monkeypatch
 ):
     # A course org whose templates could not be listed: no number to give and no page to
     # link, so the mail says what stands on its own rather than naming the wrong page.
-    cohort()
+    semester()
     _rec, sender = post()
 
     def refuse(org):
@@ -1156,16 +1162,16 @@ def test_a_page_nobody_could_look_up_leaves_the_title_and_drops_the_link(
     assert "github.io" not in sender.sent[0].body
 
 
-def test_the_message_says_nothing_about_working_alone(cohort, post):
+def test_the_message_says_nothing_about_working_alone(semester, post):
     # Whether a one-person team is allowed is the instructor's call, it is written down
     # nowhere the toolkit can read, and a mail that guessed would overrule them in the
     # students' inbox.
-    _subject, body = _body(cohort, post)
+    _subject, body = _body(semester, post)
     for word in ("alone", "solo", "yourself", "on your own", "at least", "minimum"):
         assert word not in body.lower()
 
 
-def test_the_closing_day_is_told_in_the_cohorts_zone(cohort, post):
+def test_the_closing_day_is_told_in_the_semesters_zone(semester, post):
     # A window shutting at 00:30 Berlin is the 3rd in UTC and the 4th to everybody reading
     # the mail.
     just_after_midnight = datetime(2026, 10, 5, 0, 30, tzinfo=BERLIN)
@@ -1173,19 +1179,19 @@ def test_the_closing_day_is_told_in_the_cohorts_zone(cohort, post):
     assert team_formation.spoken_date(just_after_midnight, "UTC") == "4th Oct"
 
 
-def test_the_sample_is_placeholders_and_the_same_template_as_the_send(cohort, post):
-    subject, body = team_formation.sample_message(COHORT, "Deep Learning")
+def test_the_sample_is_placeholders_and_the_same_template_as_the_send(semester, post):
+    subject, body = team_formation.sample_message(SEMESTER, "Deep Learning")
     assert "Assignment <n>: <title>" in subject
     assert "<n>" in body and "<date>" in body and "<assignment page>" in body
     # The NAME is a placeholder too: the preview is printed in a public run log.
     assert body.startswith("Dear <first name>,")
-    assert f"https://github.com/{COHORT}/welcome/issues/new/choose" in body
+    assert f"https://github.com/{SEMESTER}/welcome/issues/new/choose" in body
 
 
 def test_the_dry_run_prints_the_sample_claims_nothing_and_sends_nothing(
-    cohort, post, capsys
+    semester, post, capsys
 ):
-    cohort()
+    semester()
     rec, sender = post()
     assert _tick(dry_run=True) == 0
     out = capsys.readouterr().out
@@ -1196,13 +1202,13 @@ def test_the_dry_run_prints_the_sample_claims_nothing_and_sends_nothing(
         assert address not in out
 
 
-def test_the_dry_run_previews_the_real_batch_and_proves_the_credential(cohort, post):
+def test_the_dry_run_previews_the_real_batch_and_proves_the_credential(semester, post):
     # `mailer.send_bulk`'s OWN preview, not a hand-rolled one: it runs `mailer.preflight`,
     # which is the only thing that makes a rehearsal say anything about the GRAPH_* secrets
     # - a preview that returns before the transport is chosen reads the same whether the
     # certificate is right, wrong or absent. This is the toolkit's first clock-driven
-    # cohort-wide mail, so its rehearsal has to test something.
-    cohort()
+    # semester-wide mail, so its rehearsal has to test something.
+    semester()
     _rec, sender = post()
     assert _tick(dry_run=True) == 0
     assert sender.preflights == 1
@@ -1213,9 +1219,11 @@ def test_the_dry_run_previews_the_real_batch_and_proves_the_credential(cohort, p
 # ------------------------------------------------------------------------ the public log
 
 
-def test_nothing_the_public_log_says_names_a_student(cohort, post, capsys, monkeypatch):
+def test_nothing_the_public_log_says_names_a_student(
+    semester, post, capsys, monkeypatch
+):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    cohort()
+    semester()
     _rec, _sender = post(deliver=3)
     _tick()
     printed = capsys.readouterr()
@@ -1226,11 +1234,11 @@ def test_nothing_the_public_log_says_names_a_student(cohort, post, capsys, monke
         assert named not in public, f"{named} reached a world-readable log"
 
 
-def test_the_per_recipient_lines_are_masked_and_verbose_only(cohort, post, capsys):
+def test_the_per_recipient_lines_are_masked_and_verbose_only(semester, post, capsys):
     # The mutation half of the test above: the lines DO exist, on the channel a faculty
     # member opts into locally - so "no address in the public log" is a statement about
     # where they go, not about a run that logged nothing.
-    cohort()
+    semester()
     _rec, _sender = post(deliver=3)
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("DSL_VERBOSE", "1")
@@ -1253,7 +1261,7 @@ def test_the_per_recipient_lines_are_masked_and_verbose_only(cohort, post, capsy
 
 @pytest.fixture
 def plan(monkeypatch):
-    """The cohort's schedule, as `run` reads it for itself (the tick is handed one)."""
+    """The semester's schedule, as `run` reads it for itself (the tick is handed one)."""
 
     def _wire(sched=None):
         chosen = sched or _sched()
@@ -1264,11 +1272,11 @@ def plan(monkeypatch):
 
 
 def _press(only: str = "", now=INSIDE, dry_run: bool = False) -> int:
-    return team_formation.run(COURSE, COHORT, now, only=only, dry_run=dry_run)
+    return team_formation.run(COURSE, SEMESTER, now, only=only, dry_run=dry_run)
 
 
-def test_a_press_mails_every_student_still_waiting_for_a_team(cohort, post, plan):
-    cohort(teams_csv=_rows(("team-x", "anna-adams")))
+def test_a_press_mails_every_student_still_waiting_for_a_team(semester, post, plan):
+    semester(teams_csv=_rows(("team-x", "anna-adams")))
     rec, sender = post()
     plan()
     assert _press() == 0
@@ -1276,10 +1284,10 @@ def test_a_press_mails_every_student_still_waiting_for_a_team(cohort, post, plan
     assert rec.recipients(team_formation.PHASE_OPEN) == sender.to
 
 
-def test_a_second_press_mails_nobody(cohort, post, plan):
+def test_a_second_press_mails_nobody(semester, post, plan):
     # The whole of the idempotence, and none of it is in the button: `mailed.csv` already
     # holds every phase the second press would owe, exactly as it does for a re-tick.
-    cohort()
+    semester()
     rec, sender = post()
     plan()
     assert _press() == 0
@@ -1290,10 +1298,10 @@ def test_a_second_press_mails_nobody(cohort, post, plan):
     assert len(sender.batches) == 1
 
 
-def test_a_press_the_tick_already_covered_mails_nobody_either(cohort, post, plan):
+def test_a_press_the_tick_already_covered_mails_nobody_either(semester, post, plan):
     # And the other way round: one record, so the button cannot re-send what the clock
     # already sent. This is why the two must not be two implementations.
-    cohort()
+    semester()
     rec, _sender = post()
     plan()
     assert _tick() == 0
@@ -1303,9 +1311,9 @@ def test_a_press_the_tick_already_covered_mails_nobody_either(cohort, post, plan
 
 
 def test_an_assignment_key_narrows_the_press_and_leaves_the_others_alone(
-    cohort, post, plan
+    semester, post, plan
 ):
-    cohort()
+    semester()
     rec, sender = post()
     plan(_sched(**{"a-1": _entry(), "a-2": _entry()}))
     assert _press(only="a-1") == 0
@@ -1315,19 +1323,19 @@ def test_an_assignment_key_narrows_the_press_and_leaves_the_others_alone(
     assert len(sender.sent) == 4
 
 
-def test_a_key_with_no_open_window_is_an_error_and_mails_nobody(cohort, post, plan):
-    # A mistyped box that exited 0 is a faculty member who believes a cohort was mailed
+def test_a_key_with_no_open_window_is_an_error_and_mails_nobody(semester, post, plan):
+    # A mistyped box that exited 0 is a faculty member who believes a semester was mailed
     # and was not. The refusal names what IS open, which is the list they wanted anyway.
-    cohort()
+    semester()
     rec, sender = post()
     plan(_sched(**{"a-1": _entry(), "a-2": _entry()}))
     assert _press(only="a-3") == 1
     assert rec.attempts == [] and sender.batches == []
 
 
-def test_a_key_the_schedule_does_not_have_at_all_says_so(cohort, post, plan, capsys):
+def test_a_key_the_schedule_does_not_have_at_all_says_so(semester, post, plan, capsys):
     # Two mistakes with two fixes: a typo in the box, or a window that is not open yet.
-    cohort()
+    semester()
     post()
     plan()
     assert _press(only="assignment-9") == 1
@@ -1336,8 +1344,8 @@ def test_a_key_the_schedule_does_not_have_at_all_says_so(cohort, post, plan, cap
     assert "assignment-9" in err and "assignment-2" in err
 
 
-def test_a_press_with_nothing_open_is_green_and_says_so(cohort, post, plan, capsys):
-    cohort()
+def test_a_press_with_nothing_open_is_green_and_says_so(semester, post, plan, capsys):
+    semester()
     rec, sender = post()
     plan()
     # Before the handout: the window has not opened yet.
@@ -1346,11 +1354,11 @@ def test_a_press_with_nothing_open_is_green_and_says_so(cohort, post, plan, caps
     assert "no team-formation window is open" in capsys.readouterr().out
 
 
-def test_a_cohort_the_press_could_not_read_is_red(cohort, post, plan, monkeypatch):
+def test_a_semester_the_press_could_not_read_is_red(semester, post, plan, monkeypatch):
     # The tick treats the same "could not look" as nothing to report; a press must not,
     # because somebody is standing at the run and a press that reached nobody would look
     # exactly like a press that had nobody to reach.
-    cohort()
+    semester()
     rec, sender = post()
     plan()
     monkeypatch.setattr(team_formation.roster, "load", lambda org: None)
@@ -1358,22 +1366,22 @@ def test_a_cohort_the_press_could_not_read_is_red(cohort, post, plan, monkeypatc
     assert rec.attempts == [] and sender.batches == []
 
 
-def test_the_press_previews_by_default(cohort, post, plan, capsys):
+def test_the_press_previews_by_default(semester, post, plan, capsys):
     # `run`'s own default, not the workflow's: a maintainer running the CLI by hand with
-    # no flag at all must not mail a cohort.
-    cohort()
+    # no flag at all must not mail a semester.
+    semester()
     rec, sender = post()
     plan()
-    assert team_formation.run(COURSE, COHORT, INSIDE) == 0
+    assert team_formation.run(COURSE, SEMESTER, INSIDE) == 0
     assert rec.attempts == [] and sender.batches == []
-    assert "DRY-RUN" in capsys.readouterr().out
+    assert "PREVIEW" in capsys.readouterr().out
 
 
-def test_the_overnight_hold_applies_to_a_press_too(cohort, post, plan, capsys):
-    # The 23:00-07:00 rule is about the STUDENTS' night, and a cohort woken at 02:00 is
+def test_the_overnight_hold_applies_to_a_press_too(semester, post, plan, capsys):
+    # The 23:00-07:00 rule is about the STUDENTS' night, and a semester woken at 02:00 is
     # woken just as hard by a person as by a datetime. Nothing is lost to it: the press
     # claims nothing, so the next tick after 07:00 sends exactly what it asked for.
-    cohort()
+    semester()
     rec, sender = post()
     plan()
     assert _press(now=QUIET) == 0
@@ -1387,7 +1395,7 @@ def test_the_overnight_hold_applies_to_a_press_too(cohort, post, plan, capsys):
 def _argv(monkeypatch, *args: str) -> None:
     monkeypatch.setattr(
         "sys.argv",
-        ["team_formation", "--course-org", COURSE, "--cohort-org", COHORT, *args],
+        ["team_formation", "--course-org", COURSE, "--semester-org", SEMESTER, *args],
     )
 
 
@@ -1395,12 +1403,17 @@ def _argv(monkeypatch, *args: str) -> None:
 def pressed(monkeypatch):
     """What `main` asked `run` for. The clock is `main`'s own (`datetime.now`), so the
     press itself is exercised against a fixed `now` above; what is asserted here is the
-    part that is only `main`'s - the flags it parses and the cohort it refuses."""
+    part that is only `main`'s - the flags it parses and the semester it refuses."""
     calls: list[dict] = []
 
-    def _run(course_org, cohort_org, now, *, only="", dry_run=True):
+    def _run(course_org, semester_org, now, *, only="", dry_run=True):
         calls.append(
-            {"course": course_org, "cohort": cohort_org, "only": only, "dry": dry_run}
+            {
+                "course": course_org,
+                "semester": semester_org,
+                "only": only,
+                "dry": dry_run,
+            }
         )
         return 0
 
@@ -1408,39 +1421,41 @@ def pressed(monkeypatch):
     return calls
 
 
-def test_the_cli_refuses_an_archived_cohort(pressed, monkeypatch):
+def test_the_cli_refuses_an_archived_semester(pressed, monkeypatch):
     # Its classroom-config is frozen, so the claim could not land - and nobody is forming
     # a team in a term that is over. Green, as every other sweep treats one, and refused
-    # BEFORE the cohort is read.
+    # BEFORE the semester is read.
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)
-    _argv(monkeypatch, "--no-dry-run")
+    _argv(monkeypatch, "--no-preview")
     assert team_formation.main() == 0
     assert pressed == []
 
 
 def test_the_cli_previews_unless_it_is_told_not_to(pressed, monkeypatch):
-    # A bare invocation - the one a maintainer types by hand - must not mail a cohort.
+    # A bare invocation - the one a maintainer types by hand - must not mail a semester.
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: False)
     _argv(monkeypatch)
     assert team_formation.main() == 0
-    assert pressed == [{"course": COURSE, "cohort": COHORT, "only": "", "dry": True}]
+    assert pressed == [
+        {"course": COURSE, "semester": SEMESTER, "only": "", "dry": True}
+    ]
 
 
 def test_the_cli_sends_for_real_and_narrows_only_when_asked(pressed, monkeypatch):
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: False)
-    _argv(monkeypatch, "--assignment", "assignment-2", "--no-dry-run")
+    _argv(monkeypatch, "--assignment", "assignment-2", "--no-preview")
     assert team_formation.main() == 0
     assert pressed == [
-        {"course": COURSE, "cohort": COHORT, "only": "assignment-2", "dry": False}
+        {"course": COURSE, "semester": SEMESTER, "only": "assignment-2", "dry": False}
     ]
 
 
-def test_an_archived_cohort_mails_nobody_even_if_the_press_is_reached(
-    cohort, post, plan, monkeypatch
+def test_an_archived_semester_mails_nobody_even_if_the_press_is_reached(
+    semester, post, plan, monkeypatch
 ):
     # The backstop, on the pass that WRITES: `notify_windows` asks the same question again
     # as its last guard, so a caller that skipped the CLI's check still claims nothing.
-    cohort()
+    semester()
     rec, sender = post()
     plan()
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)

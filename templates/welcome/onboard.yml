@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Onboard student
 
-# Seed this into a cohort's public `welcome` repo as
+# Seed this into a semester's public `welcome` repo as
 # .github/workflows/onboard.yml. Students open a "Join course" issue here; the issue AUTHOR is
 # the authenticated GitHub handle (unspoofable). We match the typed ENROLMENT CODE (a
 # random, non-PII token the bot emailed to each student) against the PRIVATE
@@ -23,7 +23,7 @@ name: Onboard student
 # comment, which is never redacted. Once bound, a code is single-use (the "already linked"
 # guard), so a classmate can't bind your row to their account.
 #
-# Runs under secrets.DSL_BOT_TOKEN, which needs, on the cohort org: Contents R/W on
+# Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
 # classroom-config, Members R/W (org invite + team), Issues R/W on welcome.
 
 on:
@@ -60,7 +60,7 @@ jobs:
         with:
           github-token: ${{ secrets.DSL_BOT_TOKEN || github.token }}
           script: |
-            const org    = context.repo.owner;            // the cohort org
+            const org    = context.repo.owner;            // the semester org
             const issue  = context.payload.issue;
             const handle = issue.user.login;              // authenticated identity
             const userId = issue.user.id;                 // immutable - key on this
@@ -110,7 +110,7 @@ jobs:
                 creator: handle, labels: 'needs-review', per_page: 100,
               })).filter(i => !i.pull_request && i.number !== issue.number);
               if (unresolved.length >= 3) return fail(
-                `Thanks @${handle} - you have ${unresolved.length} unresolved Join course issues - contact the teaching team.`,
+                `Thanks @${handle} - you have ${unresolved.length} unresolved Join course issues - contact your instructors.`,
                 'needs-review');
 
               if (!process.env.HAS_BOT) {
@@ -142,7 +142,7 @@ jobs:
               const iCode = header.indexOf('enrol_code');
               // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
               // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
-              // required, so an older cohort's roster keeps onboarding.
+              // required, so an older semester's roster keeps onboarding.
               const iRole = header.indexOf('role');
               if (iHandle < 0 || iId < 0 || iCode < 0) return fail(
                 `Thanks @${handle} - the enrolment roster file's header is missing a required column ` +
@@ -155,7 +155,7 @@ jobs:
               const NO_MATCH =
                 `Thanks @${handle} - that enrolment code could not be matched to an unclaimed enrolment placement. ` +
                 `Check the code in your email; if you have already joined from another GitHub account, ` +
-                `or think this is a mistake, contact the teaching team.`;
+                `or think this is a mistake, contact your instructors.`;
               // Single-use: a code binds to the FIRST account that claims it. The one
               // exception is that account under a NEW NAME. A GitHub id is immutable and a
               // login is not, so a row whose `github_id` is this user's IS this user, whatever
@@ -196,7 +196,7 @@ jobs:
                   matched = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
                   if (!matched) return fail(
                     `Thanks @${handle} - your roster row disappeared while I was writing to it. ` +
-                    `Please re-open this issue, or contact the teaching team.`,
+                    `Please re-open this issue, or contact your instructors.`,
                     'needs-review');
                   // Re-check the single-use binding on the FRESH row, not only before the loop:
                   // two issues quoting the same code race here, and the loser must not overwrite

@@ -32,11 +32,11 @@ def row_kind(section: str) -> str:
 
 
 def deploy_dest(deploy: schedule.Deploy) -> str:
-    """Where a deploy lands inside its destination repo - `cohort_dest_path` when it is
+    """Where a deploy lands inside its destination repo - `semester_dest_path` when it is
     set, else the source path mirrored. Stated once: the ordinal and the section of a row
     are both read off this, and deriving them from two separate copies of the rule is how
     they come to disagree."""
-    return (deploy.cohort_dest_path or deploy.course_source_path).strip("/")
+    return (deploy.semester_dest_path or deploy.course_source_path).strip("/")
 
 
 def deploy_section(deploy: schedule.Deploy) -> str:
@@ -45,14 +45,14 @@ def deploy_section(deploy: schedule.Deploy) -> str:
     a repo that IS one section). The read-side twin is `site._source_section`, which reports for
     an already-released folder, so both sides classify a row the same way."""
     head, sep, _ = deploy_dest(deploy).partition("/")
-    return head if sep else deploy.cohort_dest_repo
+    return head if sep else deploy.semester_dest_repo
 
 
 @dataclass
 class PlannedRow:
     """What the release PLAN says about one session row, before anything has shipped.
 
-    `when` is the earliest event_datetime touching the row; `dests` the cohort-side
+    `when` is the earliest event_datetime touching the row; `dests` the semester-side
     `repo/path`s its deploys will land in (ordered, deduped); `subtitle` and `details`
     the display text its entry declared; `readings_planned` whether any of its deploys
     targets the readings section - which is how a row can say a reading list is still to
@@ -104,21 +104,21 @@ _LABEL_ROW_KINDS = {
 
 def _declared_kind(release: schedule.Release) -> str | None:
     """The row kind a `releases:` entry DECLARED: 'lecture' or 'lab'; `""` when it declared
-    nothing at all, which is every cohort today and means the row is placed by where the
+    nothing at all, which is every semester today and means the row is placed by where the
     entry's files land; None when it declared that it belongs to no session row
     (`type: readings`), which must NOT fall back to that inference.
 
     Through the same table a label head goes through, because they name the same thing:
     `type: lab` and the label `lab-3` both say "this is the week's lab row", and a second
     table would let the two disagree. Indexed rather than looked up with a default: the
-    parser writes only a `KNOWN_RELEASE_TYPES` value here (it flags a typo and blanks it),
+    parser writes only a `KNOWN_ROW_KINDS` value here (it flags a typo and blanks it),
     so a key this table does not hold is a toolkit bug, and one better raised than turned
     into a row placement nobody asked for."""
-    return _LABEL_ROW_KINDS[release.type] if release.type else ""
+    return _LABEL_ROW_KINDS[release.kind] if release.kind else ""
 
 
 def declared_dest_kinds(sched: schedule.Schedule) -> dict[str, str]:
-    """Every cohort-side destination (`repo/path`) whose `releases:` entry declared the row
+    """Every semester-side destination (`repo/path`) whose `releases:` entry declared the row
     kind for it, mapped to that kind.
 
     The declaration travels with the DESTINATION because two sides place the same folder
@@ -129,7 +129,7 @@ def declared_dest_kinds(sched: schedule.Schedule) -> dict[str, str]:
     comes to hold two rows. Entries that declared nothing are absent, and the destination
     path decides for them as it always has."""
     return {
-        f"{d.cohort_dest_repo}/{deploy_dest(d)}": kind
+        f"{d.semester_dest_repo}/{deploy_dest(d)}": kind
         for release in sched.releases
         if (kind := _declared_kind(release))
         for d in release.deploy
@@ -137,7 +137,7 @@ def declared_dest_kinds(sched: schedule.Schedule) -> dict[str, str]:
 
 
 def dest_row_kind(dest: str, section: str, declared: Mapping[str, str]) -> str:
-    """Which schedule row a cohort-side destination belongs to: the kind its entry
+    """Which schedule row a semester-side destination belongs to: the kind its entry
     declared, else the kind its section implies.
 
     THE placement rule, stated once and asked by both sides - `planned_sessions` of a
@@ -181,7 +181,7 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
     ever contributes.
 
     `type: lecture` / `type: lab` override which row a deploy places, for materials that
-    belong to a lab without landing under `labs/`. Declared nowhere, which is every cohort
+    belong to a lab without landing under `labs/`. Declared nowhere, which is every semester
     today, the destination path decides exactly as it always has - and it decides for
     discovery too, through the one rule `dest_row_kind` states."""
     out: dict[tuple[str, str], PlannedRow] = {}
@@ -234,7 +234,7 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
             if n is None:
                 continue
             section = deploy_section(d)
-            full = f"{d.cohort_dest_repo}/{dest}"
+            full = f"{d.semester_dest_repo}/{dest}"
             place(
                 (str(n), dest_row_kind(full, section, declared)),
                 release,
@@ -275,7 +275,7 @@ def planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], PlannedR
             if n is None:
                 continue
             section = deploy_section(d)
-            full = f"{d.cohort_dest_repo}/{dest}"
+            full = f"{d.semester_dest_repo}/{dest}"
             row = out.get((str(n), dest_row_kind(full, section, declared)))
             if row is None:
                 continue  # raising a row is precisely what silence forbids

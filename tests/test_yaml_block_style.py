@@ -2,10 +2,10 @@
 used as a list item (`- {a: 1, b: 2}`).
 
 Flow and block parse identically, so this is a teaching/readability standard rather than a
-correctness one: `schedule.yml`, `people.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
+correctness one: `schedule.yml`, `instructors.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
-`templates/classroom-config/schedule.yml` is `.format()`ed into every new cohort org, so the
+`templates/classroom-config/schedule.yml` is `.format()`ed into every new semester org, so the
 style regression ships to real courses.
 
 Deliberately NOT covered: GitHub Actions workflows and Issue Forms (see EXCLUDED). Those are
@@ -38,7 +38,7 @@ from dsl_course.scaffold import _grading_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# `#` allowed: the seeded schedule.yml/people.yml scaffolds are commented-out YAML, which
+# `#` allowed: the seeded schedule.yml/instructors.yml scaffolds are commented-out YAML, which
 # is exactly where the last flow item hid.
 FLOW_ITEM = re.compile(r"^\s*(?:#\s*)?-\s*\{")
 
@@ -140,19 +140,19 @@ def _grading_sheet_dump() -> str:
 
 
 def _inventory_dump() -> str:
-    """`list_orgs --yaml`: dict of course/cohort lists, the shape flow style would show up in."""
+    """`list_orgs --yaml`: dict of course/semester lists, the shape flow style would show up in."""
     return yaml.safe_dump(
         {
             "course_orgs": [{"org": "A", "url": "https://a", "course_code": "E1"}],
-            "cohort_orgs": [{"org": "A-f2026", "course": "A", "url": "https://af"}],
+            "semester_orgs": [{"org": "A-f2026", "course": "A", "url": "https://af"}],
         },
         sort_keys=False,
     )
 
 
-def _cohort_registry_dump() -> str:
-    """`discovery.register_cohort`'s cohort-courses-pages.yml body."""
-    return yaml.safe_dump({"cohorts": ["Demo-f2025", "Demo-f2026"]}, sort_keys=False)
+def _semester_registry_dump() -> str:
+    """`discovery.register_semester`'s semesters.yml body."""
+    return yaml.safe_dump({"semesters": ["Demo-f2025", "Demo-f2026"]}, sort_keys=False)
 
 
 # PyYAML 6 defaults `default_flow_style` to False, so these are block today and none of
@@ -161,7 +161,7 @@ def _cohort_registry_dump() -> str:
 DUMPED = {
     "grades-<handle>/grades.yml (grades.render_yaml)": _gradebook,
     "list_orgs --yaml inventory": _inventory_dump,
-    "cohort-courses-pages.yml (discovery)": _cohort_registry_dump,
+    "semesters.yml (discovery)": _semester_registry_dump,
     "grading_sheets/<slug>.yml (grades.dump_sheet)": _grading_sheet_dump,
 }
 
@@ -173,8 +173,8 @@ SEEDED = {
     "classroom-config/schedule.yml (seeded)": lambda: welcome.template(
         "classroom-config/schedule.yml"
     ).format(tag="f2026", year=2026),
-    "classroom-config/people.yml (seeded)": lambda: welcome.template(
-        "classroom-config/people.yml"
+    "classroom-config/instructors.yml (seeded)": lambda: welcome.template(
+        "classroom-config/instructors.yml"
     ).format(year=2026, year_next=2027),
     "course/dsl-course.yml (seeded, commented)": lambda: (
         bootstrap_course._course_metadata("Org", "Org Name", "Course", "CODE")
@@ -184,7 +184,7 @@ SEEDED = {
             "Org", "Org Name", "Course", "CODE", admins=["adminhandle"]
         )
     ),
-    "cohort/dsl-course.yml (seeded)": lambda: bootstrap_course._cohort_metadata(
+    "cohort/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
         "Org", "Course"
     ),
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(

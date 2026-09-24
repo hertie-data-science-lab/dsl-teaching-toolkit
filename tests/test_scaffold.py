@@ -82,7 +82,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(scaffold, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "grant_tagged_team_access", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
-    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: [])
     monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
     monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 0)
     return f
@@ -109,7 +109,7 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "labs/01_session-1/.gitkeep",
         # Seeded inert, purely so faculty find out the withhold list exists.
         ".releaseignore",
-        # The other half of that question: what the cohort site may host in the open.
+        # The other half of that question: what the semester site may host in the open.
         "publish.yml",
     }
     assert fake.skips == []
@@ -294,25 +294,27 @@ def test_a_notebook_among_the_starters_decides_the_notebook_machinery(
     assert "completion_check: true" in written["grading_config.yml"]
 
 
-def test_the_definition_records_the_starter_it_was_named_first_by(fake, monkeypatch):
-    # `grading_config.yml`'s `format:` is one word, because `grades` reads one - it is
-    # the vocabulary the file teaches, and the switch it stands behind is written out
-    # beside it either way. So several starters record the first, not a list no reader
-    # could use.
+def test_the_definition_records_every_starter_the_first_runnable(fake, monkeypatch):
+    # `formats:` lists every starter seeded, in the order it was named; the first is the
+    # runnable one, and the switch it stands behind is written out beside it either way.
     written = _solution_files(monkeypatch)
 
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["rmd", "ipynb"]) == 0
 
     spec = grades.parse_grading_spec(written["grading_config.yml"])
     assert spec.dropped == ()
+    assert spec.formats == ("rmd", "ipynb")
     assert spec.format == "rmd"
     assert spec.runs_completion_check  # the notebook in the list, said explicitly
-    # ...and the line SAYS the notebook is there, so `completion_check: true` beside
-    # `format: rmd` reads as the repo it describes rather than a hand-made override.
     (line,) = [
-        l for l in written["grading_config.yml"].splitlines() if l.startswith("format:")
+        l
+        for l in written["grading_config.yml"].splitlines()
+        if l.startswith("formats:")
     ]
-    assert "also seeded: ipynb" in line
+    assert line.startswith("formats: [rmd, ipynb]")
+    assert not any(
+        l.startswith("format:") for l in written["grading_config.yml"].splitlines()
+    )
 
 
 def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
@@ -325,7 +327,7 @@ def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
     monkeypatch.setattr(
         scaffold,
         "push_content_workflows",
-        lambda org, repo, cohorts, assignments, ref, *, workflows: (
+        lambda org, repo, semesters, assignments, ref, *, workflows: (
             asked.append((repo, workflows)) or 0
         ),
     )
@@ -346,7 +348,7 @@ def test_a_new_templates_button_pre_selects_it_before_the_listing_catches_up(
     monkeypatch.setattr(
         scaffold, "push_content_workflows", workflows_place.push_content_workflows
     )
-    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         scaffold, "discover_assignments", lambda org: ["assignment-1-f2026"]
     )
@@ -535,7 +537,7 @@ def test_an_external_hand_in_asks_the_brief_where_it_goes(fake, monkeypatch):
 
 
 def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
-    # "Commit the notebook with its outputs saved" tells a cohort to hand in where nothing
+    # "Commit the notebook with its outputs saved" tells a semester to hand in where nothing
     # is ever read from: the repo collects nothing on a hand-in made off GitHub.
     _clone_ok(monkeypatch, _git_ok)
 
@@ -565,10 +567,10 @@ def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     assert brief.startswith("# Neural networks from scratch\n\n## Task\n")
     assert "## Task" in brief and "## What to submit" in brief
     # No facts line at all. The deadline, the late rule and what the assignment is worth
-    # are the assignment's page on the cohort site, which prints all three off the plan
+    # are the assignment's page on the semester site, which prints all three off the plan
     # and off this assignment's own grading_config.yml (the total being the sum of its
     # `questions:` maxima) - spelt here as well, the hand-edited copy is the one that goes
-    # stale and a cohort reads two answers to one question.
+    # stale and a semester reads two answers to one question.
     assert "Points" not in brief
     assert "Due" not in brief and "Late work" not in brief
 
@@ -699,7 +701,7 @@ def test_the_submit_url_line_is_seeded_commented_on_every_shape(fake, monkeypatc
     # `submit_url` is the one thing the toolkit is ever told about a handover it does not
     # see, and it is not a form input - so the seeded file is where an instructor finds it.
     # COMMENTED even on the shape that uses it: the value seeded is a placeholder, and a
-    # live line carrying it would put a `Submit on ...` button in front of a whole cohort
+    # live line carrying it would put a `Submit on ...` button in front of a whole semester
     # pointing at a page nobody created.
     written = _solution_files(monkeypatch)
     for number, via in (("1", "external"), ("2", "assignment_repo")):
@@ -782,7 +784,7 @@ def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypa
     # The button wrote `completion_check: true` behind `format: ipynb` whatever the shape
     # was, and the parse refuses all three per-unit stages for a drop box - so the file
     # New assignment had just written reported a `Dropped` line on every quarter-hourly
-    # tick and stood in the cohort's digest issue as an advisory that escalates to mail.
+    # tick and stood in the semester's digest issue as an advisory that escalates to mail.
     # Nothing the scaffold seeds may be a value the reader will not take.
     written = _solution_files(monkeypatch)
     assert (
@@ -924,9 +926,9 @@ def test_a_format_box_the_scaffold_cannot_act_on_creates_no_repo(
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
-            "--format",
+            "--formats",
             answer,
         ],
     )
@@ -967,9 +969,9 @@ def test_a_colliding_format_box_creates_no_repo(fake, monkeypatch, capsys):
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
-            "--format",
+            "--formats",
             "ipynb,py",
             "--autograde",
             "true",
@@ -1305,7 +1307,7 @@ def test_a_copied_assignment_brings_both_branches(origins, fake):
 
 
 def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins, capsys):
-    # `from-<cohort-org>` and `upstream` are regenerated by propagate and release from
+    # `from-<semester-org>` and `upstream` are regenerated by propagate and release from
     # whatever the repo holds at the time. Copied forward they would open next year's repo
     # on last year's half-merged working state, under names the toolkit then reuses. Said
     # out loud, though: an instructor who left work on one of them has nothing else to
@@ -1314,7 +1316,7 @@ def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins, capsys):
     origins.commit(
         "assignment-1-f2025", {"grading_config.yml": "type: group\n"}, "solution"
     )
-    origins.commit("assignment-1-f2025", {"README.md": "# Proposed\n"}, "from-Cohort")
+    origins.commit("assignment-1-f2025", {"README.md": "# Proposed\n"}, "from-Semester")
     origins.commit("assignment-1-f2025", {"README.md": "# Released\n"}, "upstream")
 
     assert (
@@ -1326,7 +1328,7 @@ def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins, capsys):
 
     assert origins.branches("assignment-1-f2026") == ["main", "solution"]
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "left behind" in l]
-    assert "from-Cohort" in line and "upstream" in line
+    assert "from-Semester" in line and "upstream" in line
 
 
 def test_a_copy_opens_on_the_branch_its_source_opened_on(origins):
@@ -1388,7 +1390,7 @@ def test_a_copied_assignment_gets_a_button_aimed_at_itself(origins, monkeypatch)
     # way the fresh path seeds it, rather than leaving the repo wrong until a later refresh
     # that may be refused or may fail.
     stale = workflows_render.render_provision(
-        ["Cohort-f2026"],
+        ["Semester-f2026"],
         ["assignment-1-f2025", "assignment-1-f2026"],
         "assignment-1-f2025",
     )
@@ -1404,7 +1406,7 @@ def test_a_copied_assignment_gets_a_button_aimed_at_itself(origins, monkeypatch)
     monkeypatch.setattr(
         scaffold, "push_content_workflows", workflows_place.push_content_workflows
     )
-    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         scaffold,
         "discover_assignments",
@@ -1499,9 +1501,9 @@ def test_a_copy_is_not_refused_over_the_starter_boxes_it_ignores(origins, monkey
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
-            "--format",
+            "--formats",
             "ipynb,py",
             "--autograde",
             "true",
@@ -1608,7 +1610,7 @@ def test_the_syllabus_stub_carries_the_standard_sections(fake):
 
 def test_no_system_file_is_ever_released_to_students():
     # A whole-repo release must not ship our example syllabus - or any other file the
-    # toolkit wrote about itself - into a cohort. Asserted over the whole manifest because
+    # toolkit wrote about itself - into a semester. Asserted over the whole manifest because
     # the nightly refresh back-fills these into repos that have been running for months:
     # the exclusion is the precondition that makes creating them there safe.
     from dsl_course import deploy

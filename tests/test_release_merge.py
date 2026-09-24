@@ -2,7 +2,7 @@
 
 Against real repositories - a bare origin per repo, cloned exactly as `deploy_many` clones
 one - because every property here is a fact about git that a stubbed `git` can only assert
-back at itself: that a cohort's own edit survives the next release, that a conflict leaves
+back at itself: that a semester's own edit survives the next release, that a conflict leaves
 the branch students read exactly as they last saw it, and that a dest released into before
 any of this existed grows an `upstream` cut from what it already had.
 
@@ -18,11 +18,11 @@ from dsl_course import deploy, ghcli
 from dsl_course.schedule import Deploy
 from tests.conftest import BareOrigins, PullsFake, git_ok
 
-PR_URL = "https://github.com/Cohort-Org/materials/pull/1"
+PR_URL = "https://github.com/Semester-Org/materials/pull/1"
 
 
 class World(BareOrigins):
-    """A course org and a cohort org as bare repositories on disk, plus the one call this
+    """A course org and a semester org as bare repositories on disk, plus the one call this
     suite is about. Everything under it - the origins, the throwaway-clone commits, the
     reads afterwards - is `conftest.BareOrigins`, shared with `test_propagate`."""
 
@@ -33,7 +33,7 @@ class World(BareOrigins):
     def release(self, *paths: str) -> tuple[int, bool]:
         return deploy.deploy_many(
             "Course-Org",
-            "Cohort-Org",
+            "Semester-Org",
             [Deploy("cm", p, "materials", None) for p in paths],
             sync=False,
         )
@@ -72,7 +72,7 @@ def world(tmp_path, monkeypatch) -> World:
 
 def test_a_release_lands_on_upstream_and_the_read_branch_follows_it(world):
     world.commit("cm", {"lectures/01/lab.md": "week one"})
-    world.commit("materials", {"README.md": "the cohort"})
+    world.commit("materials", {"README.md": "the semester"})
 
     assert world.release("lectures/01") == (0, True)
 
@@ -81,10 +81,10 @@ def test_a_release_lands_on_upstream_and_the_read_branch_follows_it(world):
     # released, commit for commit.
     assert world.sha("main") == world.sha("upstream")
     assert world.read("main", "lectures/01/lab.md") == "week one"
-    assert world.read("main", "README.md") == "the cohort"
-    # And `upstream` was cut from what the cohort already had, so a dest released into
+    assert world.read("main", "README.md") == "the semester"
+    # And `upstream` was cut from what the semester already had, so a dest released into
     # before any of this existed does not start life conflicting with every file in it.
-    assert world.read("upstream", "README.md") == "the cohort"
+    assert world.read("upstream", "README.md") == "the semester"
 
 
 def test_both_branches_are_pushed_in_one_atomic_push(world, monkeypatch):
@@ -101,7 +101,7 @@ def test_both_branches_are_pushed_in_one_atomic_push(world, monkeypatch):
 
     monkeypatch.setattr(deploy, "git", recording)
     world.commit("cm", {"lectures/01/lab.md": "week one"})
-    world.commit("materials", {"README.md": "the cohort"})
+    world.commit("materials", {"README.md": "the semester"})
 
     assert world.release("lectures/01") == (0, True)
     (push,) = pushes
@@ -111,7 +111,7 @@ def test_both_branches_are_pushed_in_one_atomic_push(world, monkeypatch):
 
 def test_a_second_release_with_nothing_new_moves_nothing(world, capsys):
     world.commit("cm", {"lectures/01/lab.md": "week one"})
-    world.commit("materials", {"README.md": "the cohort"})
+    world.commit("materials", {"README.md": "the semester"})
     world.release("lectures/01")
     before = world.sha("main")
 
@@ -120,11 +120,11 @@ def test_a_second_release_with_nothing_new_moves_nothing(world, capsys):
     assert "nothing new to release" in capsys.readouterr().out
 
 
-def test_a_cohort_edit_survives_the_next_release(world):
+def test_a_semester_edit_survives_the_next_release(world):
     # The whole point of the merge. The copy used to land on the branch students read, so
     # an instructor's correction was reverted by the next tick of the release cron.
     world.commit("cm", {"lectures/01/lab.md": "week one", "lectures/02/lab.md": "two"})
-    world.commit("materials", {"README.md": "the cohort"})
+    world.commit("materials", {"README.md": "the semester"})
     world.release("lectures/01")
     world.commit("materials", {"NOTES.md": "read this first"}, "an instructor's note")
 
@@ -139,17 +139,17 @@ def test_a_cohort_edit_survives_the_next_release(world):
 def _conflict(world) -> tuple[int, bool]:
     """A release whose source and dest have both changed the same line."""
     world.commit("cm", {"lectures/01/lab.md": "version one\n"})
-    world.commit("materials", {"README.md": "the cohort"})
+    world.commit("materials", {"README.md": "the semester"})
     world.release("lectures/01")
-    world.commit("materials", {"lectures/01/lab.md": "the cohort's fix\n"}, "fix")
+    world.commit("materials", {"lectures/01/lab.md": "the semester's fix\n"}, "fix")
     world.commit("cm", {"lectures/01/lab.md": "version two\n"}, "rewrite")
     return world.release("lectures/01")
 
 
 def test_a_conflict_leaves_the_branch_students_read_untouched(world, capsys):
     assert _conflict(world) == (0, False)
-    # What students read is exactly what the cohort last put there...
-    assert world.read("main", "lectures/01/lab.md") == "the cohort's fix"
+    # What students read is exactly what the semester last put there...
+    assert world.read("main", "lectures/01/lab.md") == "the semester's fix"
     # ...and the release is not lost: it is on `upstream`, waiting to be merged.
     assert world.read("upstream", "lectures/01/lab.md") == "version two"
     assert "held for review" in capsys.readouterr().out
@@ -158,13 +158,13 @@ def test_a_conflict_leaves_the_branch_students_read_untouched(world, capsys):
 def test_a_conflict_asks_the_instructors_to_decide(world):
     _conflict(world)
     (call,) = world.pulls.calls
-    assert call["repo"] == "Cohort-Org/materials"
+    assert call["repo"] == "Semester-Org/materials"
     assert (call["head"], call["base"]) == (deploy.UPSTREAM_BRANCH, "main")
-    assert call["reviewer"] == "Cohort-Org/instructors"
+    assert call["reviewer"] == "Semester-Org/instructors"
 
 
 def test_the_pull_request_body_names_branches_and_nothing_else(world):
-    # This repo is readable by the whole cohort, so nothing about WHO edited what belongs
+    # This repo is readable by the whole semester, so nothing about WHO edited what belongs
     # in the body - and no file list either: the pull request's own Files tab is that
     # list, and GitHub keeps it current as later releases add to the branch.
     _conflict(world)
@@ -191,7 +191,7 @@ def test_resolving_the_conflict_by_hand_ends_the_holding_pattern(world):
     # What an instructor does on GitHub: take a decision about the two versions.
     world.commit("materials", {"lectures/01/lab.md": "version two\n"}, "resolved")
 
-    # The next release merges cleanly and the cohort is reading the released copy again.
+    # The next release merges cleanly and the semester is reading the released copy again.
     assert world.release("lectures/01") == (0, True)
     assert world.read("main", "lectures/01/lab.md") == "version two"
     assert len(world.pulls.calls) == 1  # no second conflict, no second pull request
@@ -224,7 +224,7 @@ def test_a_merge_git_refused_is_an_error_not_a_conflict(world, capsys):
     # branch students read went green every quarter of an hour, for ever, with nothing
     # landing and a pull request standing about a disagreement nobody had.
     world.commit("cm", {"lectures/01/lab.md": "week one"})
-    world.commit("materials", {"README.md": "the cohort"})
+    world.commit("materials", {"README.md": "the semester"})
     _orphan_upstream(world)
 
     assert world.release("lectures/01") == (1, False)
@@ -244,7 +244,7 @@ def test_a_dest_that_calls_its_default_branch_upstream_is_refused(world, capsys)
     # passes, and the release says "nothing new to release" having pushed nothing at all.
     # Silently releasing nothing for ever is worse than a red run.
     world.commit("cm", {"lectures/01/lab.md": "week one"})
-    world.commit("materials", {"README.md": "the cohort"})
+    world.commit("materials", {"README.md": "the semester"})
     git_ok(
         "--git-dir", str(world.bare("materials")), "branch", "-m", "main", "upstream"
     )
@@ -256,7 +256,7 @@ def test_a_dest_that_calls_its_default_branch_upstream_is_refused(world, capsys)
 
 
 def test_a_release_with_nothing_new_still_puts_upstream_on_the_remote(world, capsys):
-    # A cohort whose every due release has already landed - every real org on the day it
+    # A semester whose every due release has already landed - every real org on the day it
     # upgrades. `upstream` is cut from the branch students read, the copy changes nothing,
     # and the no-op path used to return before any push: the remote ended the run with no
     # `upstream` at all.
@@ -271,10 +271,10 @@ def test_a_release_with_nothing_new_still_puts_upstream_on_the_remote(world, cap
     # remote the next tick re-cut it from the EDITED base, copied the source over it and
     # fast-forwarded the base onto that - reverting the edit, with no pull request and a
     # green run.
-    world.commit("materials", {"lectures/01/lab.md": "the cohort's fix"}, "fix")
+    world.commit("materials", {"lectures/01/lab.md": "the semester's fix"}, "fix")
 
     assert world.release("lectures/01") == (0, False)
-    assert world.read("main", "lectures/01/lab.md") == "the cohort's fix"
+    assert world.read("main", "lectures/01/lab.md") == "the semester's fix"
     assert world.pulls.calls == []
 
 

@@ -39,13 +39,13 @@ there. Under it is the command that needs no dialog: the page cannot RUN anythin
 line it prints puts the clone exactly where the folder above says it is - and works for a
 student whose editor is not VS Code, who gets no clone button at all.
 
-The materials repo is named once here, as the default a cohort release deploys into
-(`cohort_dest_repo`, dsl_course/deploy.py). Nothing else on this page depends on it: the
+The materials repo is named once here, as the default a semester release deploys into
+(`semester_dest_repo`, dsl_course/deploy.py). Nothing else on this page depends on it: the
 per-file control reads the repo out of each file's own GitHub URL, so a course that renamed
 its materials repo still gets working file links and only these buttons point at the
 default name.
 
-The two folder examples put the clone under a folder named for THIS cohort org, so a
+The two folder examples put the clone under a folder named for THIS semester org, so a
 student on two courses is not steered into cloning two `materials` repos into one place.
 They ship spelt as macOS spells a home folder, and the script below respells the home
 part for the reader's own platform where the browser can tell (Windows, Linux) - a Windows

@@ -1,8 +1,8 @@
-"""dsl-course status -- a per-cohort checklist of every faculty & instructors input location.
+"""dsl-course status -- a per-semester checklist of every faculty & instructors input location.
 
-Faculty & instructors currently touch several distinct files across 2 orgs to run a cohort: course
+Faculty & instructors currently touch several distinct files across 2 orgs to run a semester: course
 identity, course admins, and classroom-config's roster/teams/grading sheets/schedule.yml (which
-now carries the release plan too)/people.yml. This module answers one glance-able question -
+now carries the release plan too)/instructors.yml. This module answers one glance-able question -
 what's configured, what's still missing, and where do I go to fix it - by reusing
 each source's existing loader rather than re-deriving anything. Read-only; it
 changes no state.
@@ -15,15 +15,14 @@ by `status_json`): `write` puts it where the console reads it, and `write_after_
 hook the Console run calls at the end of every operation.
 
 Usage:
-    python3 -m dsl_course.status --course-org COURSE --cohort-org COHORT
-    python3 -m dsl_course.status --course-org COURSE --cohort-org COHORT --format json
-    python3 -m dsl_course.status --course-org COURSE [--cohort-org COHORT] --json-v1
-    python3 -m dsl_course.status --course-org COURSE [--cohort-org COHORT] --write
+    python3 -m dsl_course.status --course-org COURSE --semester-org SEMESTER
+    python3 -m dsl_course.status --course-org COURSE --semester-org SEMESTER --format json
+    python3 -m dsl_course.status --course-org COURSE [--semester-org SEMESTER] --json-v1
+    python3 -m dsl_course.status --course-org COURSE [--semester-org SEMESTER] --no-preview
 """
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import io
 import json
@@ -46,9 +45,10 @@ from . import (
 )
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
+from .faults import Unusable
 from .gh_contents import put_file
 from .issues import open_titles
-from .log import Summary, log_err, log_ok, log_step, plural
+from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, log_step, plural
 from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
@@ -97,14 +97,14 @@ def _row(
 # The verdict for a row that is not about an input at all but about a fault the toolkit is
 # already reporting. Neither "missing" (nothing is unset) nor "optional" (nobody chose
 # this) says it, and a standing digest issue read as either would be a table calling a
-# cohort healthy while its roster enrols nobody.
+# semester healthy while its roster enrols nobody.
 ATTENTION = "attention"
 
 
 def _fault_row(
     label: str, org: str, repo: str, standing: list[str], detail: str
 ) -> dict:
-    """One row about the fault issues a cohort has open, rather than about a file.
+    """One row about the fault issues a semester has open, rather than about a file.
 
     The link is the repo's ISSUE LIST, in both states: with something standing it is where
     the reader is going anyway, and with nothing standing there is no file to point at -
@@ -169,7 +169,7 @@ def _transport_detail() -> tuple[bool, str]:
     return usable, detail + _maintainer_note()
 
 
-def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
+def render_markdown(course_org: str, semester_org: str, data: dict[str, dict]) -> str:
     """One markdown table, in `docs/DEPLOYMENT-CHECKLIST.md`'s B/C order, each
     row linking straight to the file to fix if something's missing."""
     icon = {
@@ -179,7 +179,7 @@ def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> 
         ATTENTION: "ATTENTION",
     }
     lines = [
-        f"## Status: {cohort_org} (course: {course_org})",
+        f"## Status: {semester_org} (course: {course_org})",
         "",
         "| Item | Status | Detail | |",
         "| --- | --- | --- | --- |",
@@ -197,16 +197,18 @@ def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> 
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
-    """One status row per faculty & instructors input location for `cohort_org`. Read-only."""
+def collect(course_org: str, semester_org: str) -> dict[str, dict]:
+    """One status row per faculty & instructors input location for `semester_org`. Read-only."""
     # load_yaml_config raises a clear error on malformed YAML (caught in main()) instead
     # of handing a traceback to the operator who runs status to find the broken input.
     course_meta = org_meta(course_org)
 
-    # Every course-org row lives in .github; every cohort row lives in
+    # Every course-org row lives in .github; every semester row lives in
     # classroom-config - resolve each default branch once, not once per row.
     course_branch = default_branch(course_org, ".github", fallback="main")
-    cohort_branch = default_branch(cohort_org, schedule.CONFIG_REPO, fallback="main")
+    semester_branch = default_branch(
+        semester_org, schedule.CONFIG_REPO, fallback="main"
+    )
 
     data: dict[str, dict] = {}
 
@@ -251,9 +253,9 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         else "no people: block - Sync empties course-admin",
     )
 
-    # Which toolkit tier this cohort's workflows run. Declared on the COURSE org and
+    # Which toolkit tier this semester's workflows run. Declared on the COURSE org and
     # inherited here, so it belongs in the B (course-org) block even though the checklist
-    # is per-cohort - and an org whose tier is the default should read as such rather than
+    # is per-semester - and an org whose tier is the default should read as such rather than
     # as an unset input someone forgot.
     declared = course_meta.get("central_ref")
     try:
@@ -278,9 +280,9 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         tier,
     )
 
-    # Org-level configuration, not per-cohort: the GRAPH_* secrets and the maintainer
+    # Org-level configuration, not per-semester: the GRAPH_* secrets and the maintainer
     # address are read from the workflow env of the COURSE org, so this row belongs with
-    # B1/B6/B7 even though every mail path it gates is a cohort action.
+    # B1/B6/B7 even though every mail path it gates is a semester action.
     transport_ok, transport = _transport_detail()
     data["B8"] = _row(
         "B8",
@@ -294,45 +296,45 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         edit_url=_SECRETS_URL.format(org=course_org),
     )
 
-    students = roster.load(cohort_org) or []
+    students = roster.load(semester_org) or []
     onboarded = sum(s.onboarded for s in students)
     data["C2"] = _row(
         "C2",
         "Roster",
-        cohort_org,
+        semester_org,
         roster.CONFIG_REPO,
         roster.ROSTER_PATH,
-        cohort_branch,
+        semester_branch,
         bool(students),
         f"{len(students)} student(s), {onboarded} onboarded" if students else "",
     )
 
-    sheets = grades.sheet_slugs(cohort_org)
+    sheets = grades.sheet_slugs(semester_org)
     data["C3"] = _row(
         "C3",
         f"Grading sheets ({grades.SHEETS_DIR}/)",
-        cohort_org,
+        semester_org,
         grades.CONFIG_REPO,
         f"{grades.SHEETS_DIR}/",
-        cohort_branch,
+        semester_branch,
         bool(sheets),
         f"{len(sheets)} assignment(s)" if sheets else "",
     )
 
-    team_data = teams.load(cohort_org)
+    team_data = teams.load(semester_org)
     n_teams = sum(len(t) for t in team_data.values())
     data["C4"] = _row(
         "C4",
         "Teams",
-        cohort_org,
+        semester_org,
         teams.CONFIG_REPO,
         teams.TEAMS_PATH,
-        cohort_branch,
+        semester_branch,
         bool(team_data),
         f"{n_teams} team(s) across {len(team_data)} assignment(s)" if team_data else "",
     )
 
-    sched = schedule.load(cohort_org)
+    sched = schedule.load(semester_org)
     # A dropped entry is the one schedule fault a count alone hides: the numbers below
     # look plausible, they are just quietly short of what faculty wrote. Say so on both
     # schedule rows, since a drop in either block lands in whichever row reads it.
@@ -346,17 +348,17 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     data["C5"] = _row(
         "C5",
         f"Release plan ({schedule.SCHEDULE_PATH} -> releases)",
-        cohort_org,
+        semester_org,
         schedule.CONFIG_REPO,
         schedule.SCHEDULE_PATH,
-        cohort_branch,
+        semester_branch,
         bool(sched.releases),
         f"{len(sched.releases)} scheduled release(s), {n_actions} action(s){dropped}"
         if sched.releases
         else dropped.lstrip(" -"),
     )
 
-    # When the whole cohort goes read-only - the one date in this file that acts on
+    # When the whole semester goes read-only - the one date in this file that acts on
     # every repo in the org, and the one nobody would otherwise think to check.
     archives = (
         f"archives {sched.archive.when}"
@@ -373,26 +375,32 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     data["C6"] = _row(
         "C6",
         f"Due dates & events ({schedule.SCHEDULE_PATH})",
-        cohort_org,
+        semester_org,
         schedule.CONFIG_REPO,
         schedule.SCHEDULE_PATH,
-        cohort_branch,
+        semester_branch,
         has_due_dates,
         f"{dates}{archives}{dropped}",
     )
 
-    # load_cohort_faculty returns None when people.yml is absent - an empty desired set
+    # load_semester_faculty returns None when instructors.yml is absent - an empty desired set
     # for this read-only status view (no team to count).
-    cohort_faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
-    cohort_desired = sync_faculty.desired_team_members(
-        cohort_faculty, date.today().isoformat()
+    try:
+        semester_faculty = sync_faculty.load_semester_faculty(semester_org) or {}
+    except Unusable as exc:
+        # NOT_MIGRATED, or a file with no `instructors:` list: a line saying so, never a
+        # crash - this is a read-only checklist.
+        log_err(f"  ! {exc}")
+        semester_faculty = {}
+    semester_desired = sync_faculty.desired_team_members(
+        semester_faculty, date.today().isoformat()
     )
-    n_instructors = len(cohort_desired.get("instructors", set()))
+    n_instructors = len(semester_desired.get("instructors", set()))
     # `email:` is required on every instructor/TA entry - it is the only way a fault
     # reaches the person who can fix it - and an entry missing one still gets access, so
     # nothing else here would show the gap. Counts only: this table is appended to the
     # step summary of a PUBLIC repo, and the run log names the handles.
-    unreachable = sync_faculty.without_email(cohort_faculty, date.today().isoformat())
+    unreachable = sync_faculty.without_email(semester_faculty, date.today().isoformat())
     no_email = (
         f"WARNING: {len(unreachable)} without email, see the run log"
         if unreachable
@@ -400,11 +408,11 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     )
     data["C7"] = _row(
         "C7",
-        f"Instructors/TAs ({sync_faculty.COHORT_PEOPLE_PATH})",
-        cohort_org,
+        f"Instructors/TAs ({sync_faculty.SEMESTER_PEOPLE_PATH})",
+        semester_org,
         sync_faculty.CONFIG_REPO,
-        sync_faculty.COHORT_PEOPLE_PATH,
-        cohort_branch,
+        sync_faculty.SEMESTER_PEOPLE_PATH,
+        semester_branch,
         bool(n_instructors),
         " - ".join(
             p
@@ -418,12 +426,12 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     # table that did not show them would be the one place a reader looks that disagrees
     # with the mail in their inbox. It raises rather than guessing, like every other read
     # here: "we could not list" is not "nothing is open".
-    standing = open_titles(f"{cohort_org}/{schedule.CONFIG_REPO}")
+    standing = open_titles(f"{semester_org}/{schedule.CONFIG_REPO}")
 
     sources_open = [source_digest.TITLE] if source_digest.TITLE in standing else []
     data["C8"] = _fault_row(
         "Source faults (release plan)",
-        cohort_org,
+        semester_org,
         schedule.CONFIG_REPO,
         sources_open,
         "the release plan cites sources nobody has staged"
@@ -431,13 +439,13 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         else "no source-fault issue open",
     )
 
-    # Every hand-edited file in this cohort EXCEPT schedule.yml, whose faults are C8's.
+    # Every hand-edited file in this semester EXCEPT schedule.yml, whose faults are C8's.
     # The FILES, not a count of faults: a title names the file to go and fix, which is
     # what a reader does next, and the issue itself lists the rows.
-    broken = [d.file for d in config_digest.COHORT_DIGESTS if d.title in standing]
+    broken = [d.file for d in config_digest.SEMESTER_DIGESTS if d.title in standing]
     data["C9"] = _fault_row(
         "Config faults (hand-edited files)",
-        cohort_org,
+        semester_org,
         schedule.CONFIG_REPO,
         broken,
         f"config faults: {len(broken)} open - {', '.join(broken)}"
@@ -451,41 +459,43 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
 # ------------------------------------------------------------------ status.json
 
 
-def _document(course_org: str, cohort_org: str | None) -> dict:
-    """The cohort's `status.json` document, or the course's when no cohort is named."""
-    if cohort_org:
-        return status_json.collect_cohort(course_org, cohort_org)
+def _document(course_org: str, semester_org: str | None) -> dict:
+    """The semester's `status.json` document, or the course's when no semester is named."""
+    if semester_org:
+        return status_json.collect_semester(course_org, semester_org)
     return status_json.collect_course(course_org)
 
 
-def write(course_org: str, cohort_org: str | None = None) -> int:
-    """Write `status.json`: the cohort's into its private `classroom-config`, or - with no
-    cohort - the course's into its PUBLIC `.github` (counts only; see `status_json`).
+def write(course_org: str, semester_org: str | None = None) -> int:
+    """Write `status.json`: the semester's into its private `classroom-config`, or - with no
+    semester - the course's into its PUBLIC `.github` (counts only; see `status_json`).
     Returns the error count - a `log.Summary` of what it wrote when that is 0.
 
     `put_file` blob-compares, so a render identical to the file makes no commit. It is
     tried twice: the four dispatchers a config push fires all end here within the same
     minute, and the loser of that race is refused for a sha that moved under it - the
-    second attempt re-reads it. An archived cohort is left alone: it is read-only, and a
+    second attempt re-reads it. An archived semester is left alone: it is read-only, and a
     finished term's status is whatever it last said."""
-    if cohort_org:
-        org, repo = cohort_org, schedule.CONFIG_REPO
+    if semester_org:
+        org, repo = semester_org, schedule.CONFIG_REPO
     else:
         org, repo = course_org, ".github"
     # This run's memo of students.csv can predate a Send codes that stamped it since; the
     # status counts the codes sent, so it reads the file as it is now.
     roster.reread()
-    doc = _document(course_org, cohort_org)
-    # The cohort can arrive in a dispatch payload, which whoever holds a cohort's bot
+    doc = _document(course_org, semester_org)
+    # The semester can arrive in a dispatch payload, which whoever holds a semester's bot
     # token writes: the course's own registry decides, as it does for every dispatch.
-    registered = {c.casefold() for c in doc["course"]["cohorts"]}
-    if cohort_org and cohort_org.casefold() not in registered:
-        log_err(f"{cohort_org} is not registered under {course_org} - no status.json")
+    registered = {c.casefold() for c in doc["course"]["semesters"]}
+    if semester_org and semester_org.casefold() not in registered:
+        log_err(f"{semester_org} is not registered under {course_org} - no status.json")
         return 1
-    if cohort_org and not doc["cohort"]["live"]:
-        log_step(f"  [skip] {cohort_org} status.json (archived cohort - left frozen)")
+    if semester_org and not doc["semester"]["live"]:
+        log_step(
+            f"  [skip] {semester_org} status.json (archived semester - left frozen)"
+        )
         return Summary(
-            "Status left as it was: this cohort is archived.", conclusion="skipped"
+            "Status left as it was: this semester is archived.", conclusion="skipped"
         )
     content = status_json.dumps(doc)
     message = "ci: refresh status.json"
@@ -501,7 +511,7 @@ def refreshed(doc: dict) -> Summary:
     """What a status write says it did: the counts the console's home screen leads
     with. Counts only - the course file is public, and so is the run log."""
     problems = len(doc.get("problems") or [])
-    if "cohort" not in doc:
+    if "semester" not in doc:
         return Summary(
             f"Course status refreshed: {plural(problems, 'problem')}.",
             {"problems": problems},
@@ -514,16 +524,16 @@ def refreshed(doc: dict) -> Summary:
     )
 
 
-def refresh(course_org: str, cohort_org: str | None = None) -> int:
+def refresh(course_org: str, semester_org: str | None = None) -> int:
     """`write`, for a caller whose own work is already done and must not be undone by
     this: every exception is logged and counted, never raised. Returns the error count."""
     try:
-        return write(course_org, cohort_org)
+        return write(course_org, semester_org)
     except Exception as exc:
         # The type only: this runs in public logs, and the text of a read that failed can
         # name the repo it was reading - a student's, for a submission or a gradebook.
         log_err(
-            f"could not refresh status.json for {cohort_org or course_org} "
+            f"could not refresh status.json for {semester_org or course_org} "
             f"({type(exc).__name__})"
         )
         return 1
@@ -531,26 +541,26 @@ def refresh(course_org: str, cohort_org: str | None = None) -> int:
 
 def write_after_op(request: dict) -> int:
     """The hook the Console run calls at the end of every operation, with its
-    `dsl.request/1` request. Rewrites the cohort's status when the request names one, and
+    `dsl.request/1` request. Rewrites the semester's status when the request names one, and
     the course's always - a course operation (a new template, a fixed dsl-course.yml)
-    changes what every cohort's file says about the course too. Never raises; returns the
+    changes what every semester's file says about the course too. Never raises; returns the
     error count, which the caller may ignore: the operation's outcome is its own."""
     course_org = str(request.get("course_org") or "")
     if not course_org:
         log_err("status.json not refreshed: the request names no course_org")
         return 1
-    cohort_org = str(request.get("cohort_org") or "") or None
-    errors = refresh(course_org, cohort_org) if cohort_org else 0
+    semester_org = str(request.get("semester_org") or "") or None
+    errors = refresh(course_org, semester_org) if semester_org else 0
     return errors + refresh(course_org)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
     parser.add_argument(
-        "--cohort-org",
+        "--semester-org",
         default=None,
-        help="Required for the checklist; optional with --json-v1/--write (course only).",
+        help="Required for the checklist; optional with --json-v1/--no-preview (course only).",
     )
     parser.add_argument("--format", choices=["md", "json"], default="md")
     parser.add_argument(
@@ -558,38 +568,39 @@ def main() -> int:
         action="store_true",
         help="Print the status.json document (dsl.status/1) instead of the checklist.",
     )
-    parser.add_argument(
-        "--write",
-        action="store_true",
-        help="Write status.json into classroom-config (cohort) or .github (course).",
+    add_preview_flag(
+        parser,
+        "Print the checklist (or, with --json-v1, the document) and write nothing "
+        "(default). --no-preview writes status.json into classroom-config (semester) "
+        "or .github (course).",
     )
     args = parser.parse_args()
-    if args.write:
-        return refresh(args.course_org, args.cohort_org)
+    if not args.preview:
+        return refresh(args.course_org, args.semester_org)
     if args.json_v1:
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                doc = _document(args.course_org, args.cohort_org)
+                doc = _document(args.course_org, args.semester_org)
         except (RuntimeError, yaml.YAMLError) as exc:
             log_err(str(exc))
             return 1
         print(json.dumps(doc, indent=2, ensure_ascii=False))
         return 0
-    if not args.cohort_org:
-        parser.error("--cohort-org is required for the checklist")
+    if not args.semester_org:
+        parser.error("--semester-org is required for the checklist")
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
         # collect()'s dependencies (schedule.load, roster.load, sync_faculty...) log
-        # informational lines to stdout, some naming people.yml entries. Both modes keep
+        # informational lines to stdout, some naming instructors.yml entries. Both modes keep
         # them off stdout: --format json promises parseable output, and the workflow
         # appends the markdown to $GITHUB_STEP_SUMMARY of a PUBLIC repo.
         with contextlib.redirect_stdout(io.StringIO()):
-            data = collect(args.course_org, args.cohort_org)
+            data = collect(args.course_org, args.semester_org)
         if args.format == "json":
             print(json.dumps(data, indent=2))
         else:
-            print(render_markdown(args.course_org, args.cohort_org, data))
+            print(render_markdown(args.course_org, args.semester_org, data))
     except (RuntimeError, yaml.YAMLError) as exc:
         # A read helper that couldn't reach the API raises RuntimeError; a malformed
         # config file raises yaml.YAMLError. Either way an operator wants a one-line

@@ -160,9 +160,9 @@ def test_a_course_bootstrap_publishes_the_course_admin_addresses(monkeypatch):
     assert published[-1] == ("Course-Org", mailer.COURSE_ADMIN_ENV, ADMINS)
 
 
-def test_a_cohort_bootstrap_publishes_nothing_of_the_kind(monkeypatch):
+def test_a_semester_bootstrap_publishes_nothing_of_the_kind(monkeypatch):
     # Every course-level mail is sent from the COURSE org's own `.github`, and no workflow
-    # seeded into a cohort may wire the mail env at all - so an address list on a cohort
+    # seeded into a semester may wire the mail env at all - so an address list on a semester
     # would be personal data published to an org with no step that reads it.
     published: list = []
     _propagating_run(monkeypatch, published)
@@ -172,8 +172,8 @@ def test_a_cohort_bootstrap_publishes_nothing_of_the_kind(monkeypatch):
         [
             "bootstrap_course",
             "--org",
-            "Cohort-f2026",
-            "--cohort",
+            "Semester-f2026",
+            "--semester",
             "--course",
             "Course-Org",
             "--propagate-secret",

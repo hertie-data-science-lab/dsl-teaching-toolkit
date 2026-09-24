@@ -71,7 +71,7 @@ jobs:
           # refresh nothing, say "_No course org runs_", and go green on a deploy that
           # never happened.
           [ -n "$inventory" ] || { echo "::error::no inventory - list_orgs produced nothing"; exit 1; }
-          # Cohort orgs are not listed: a course org's refresh converges every cohort
+          # Semester orgs are not listed: a course org's refresh converges every semester
           # registered under it in the same run.
           orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
           # A null tier has two causes, and only one of them is this deploy's problem.

@@ -38,7 +38,7 @@ def _data(**overrides) -> dict:
 
 
 def test_render_markdown_covers_every_item_in_order():
-    md = status.render_markdown("Course", "Cohort-f2026", _data())
+    md = status.render_markdown("Course", "Semester-f2026", _data())
     lines = [ln for ln in md.splitlines() if ln.startswith("| ") and "---" not in ln]
     # header row + one row per ITEMS, in ITEMS order
     assert len(lines) == 1 + len(status.ITEMS)
@@ -48,45 +48,45 @@ def test_render_markdown_covers_every_item_in_order():
 def test_render_markdown_c7_instructors_row_present_with_edit_link():
     md = status.render_markdown(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         _data(
             C7={
-                "label": "Instructors/TAs (people.yml)",
-                "org": "Cohort-f2026",
+                "label": "Instructors/TAs (instructors.yml)",
+                "org": "Semester-f2026",
                 "repo": "classroom-config",
-                "path": "people.yml",
+                "path": "instructors.yml",
                 "status": "ok",
                 "detail": "2 active",
-                "edit_url": "https://x/edit/people.yml",
+                "edit_url": "https://x/edit/instructors.yml",
             }
         ),
     )
-    assert "Instructors/TAs (people.yml)" in md
+    assert "Instructors/TAs (instructors.yml)" in md
     assert "2 active" in md
-    assert "[edit](https://x/edit/people.yml)" in md
+    assert "[edit](https://x/edit/instructors.yml)" in md
 
 
 def test_render_markdown_missing_status_uses_add_link_text():
     md = status.render_markdown(
-        "Course", "Cohort-f2026", _data(C7={**_ROW, "status": "missing"})
+        "Course", "Semester-f2026", _data(C7={**_ROW, "status": "missing"})
     )
     assert "[add](https://x/edit)" in md
 
 
 def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
     # The workflow appends stdout to $GITHUB_STEP_SUMMARY of a PUBLIC repo, and the
-    # loaders log lines that can name people.yml entries. Only the rendered table may
+    # loaders log lines that can name instructors.yml entries. Only the rendered table may
     # reach stdout, in both formats.
     from dsl_course import status
 
-    def chatty_collect(course, cohort):
+    def chatty_collect(course, semester):
         print("  (instructor entry 'Jane Doe' has no github_handle)")
         return {}
 
     monkeypatch.setattr(status, "collect", chatty_collect)
     monkeypatch.setattr(status, "render_markdown", lambda *a: "# table")
     monkeypatch.setattr(
-        "sys.argv", ["status", "--course-org", "C", "--cohort-org", "K"]
+        "sys.argv", ["status", "--course-org", "C", "--semester-org", "K"]
     )
     assert status.main() == 0
     out = capsys.readouterr().out
@@ -94,7 +94,7 @@ def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
 
 
 def _stub_every_read(monkeypatch, standing=None):
-    """Answer each loader `collect()` reads with "this cohort is empty", so the real
+    """Answer each loader `collect()` reads with "this semester is empty", so the real
     row-building runs end to end with no gh. `conftest._no_live_gh` catches any read
     this misses."""
     monkeypatch.setattr(status, "org_meta", lambda org: {"course_name": "Course"})
@@ -103,24 +103,24 @@ def _stub_every_read(monkeypatch, standing=None):
     monkeypatch.setattr(grades, "sheet_slugs", lambda org: [])
     monkeypatch.setattr(teams, "load", lambda org: {})
     monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule())
-    monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: None)
+    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: None)
     monkeypatch.setattr(status, "open_titles", lambda repo: set(standing or ()))
 
 
 def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, capsys):
     # Every row is built on the way to the table, so this is the only test that would
-    # have caught `sync_faculty.COHORT_CONFIG_REPO` going stale in the module split -
+    # have caught `sync_faculty.SEMESTER_CONFIG_REPO` going stale in the module split -
     # an AttributeError that reached the demo org, not CI.
     _stub_every_read(monkeypatch)
     monkeypatch.setattr(
         "sys.argv",
-        ["status", "--course-org", "C", "--cohort-org", "K", "--format", "json"],
+        ["status", "--course-org", "C", "--semester-org", "K", "--format", "json"],
     )
     assert status.main() == 0
     data = json.loads(capsys.readouterr().out)
     assert set(data) == set(status.ITEMS)
     assert data["C7"]["repo"] == "classroom-config"
-    assert data["C7"]["path"] == "people.yml"
+    assert data["C7"]["path"] == "instructors.yml"
 
 
 def test_c7_says_how_many_of_the_teaching_team_cannot_be_notified(monkeypatch):
@@ -130,13 +130,13 @@ def test_c7_says_how_many_of_the_teaching_team_cannot_be_notified(monkeypatch):
     _stub_every_read(monkeypatch)
     monkeypatch.setattr(
         sync_faculty,
-        "load_cohort_faculty",
+        "load_semester_faculty",
         lambda org: {
             "instructors": [{"github_handle": "janedoe", "email": "jane@x.org"}],
             "teaching_assistants": [{"github_handle": "nomail"}],
         },
     )
-    row = status.collect("Course", "Cohort-f2026")["C7"]
+    row = status.collect("Course", "Semester-f2026")["C7"]
     assert row["detail"] == "2 active - WARNING: 1 without email, see the run log"
     assert "nomail" not in row["detail"]
 
@@ -145,12 +145,12 @@ def test_c7_is_quiet_when_every_entry_can_be_notified(monkeypatch):
     _stub_every_read(monkeypatch)
     monkeypatch.setattr(
         sync_faculty,
-        "load_cohort_faculty",
+        "load_semester_faculty",
         lambda org: {
             "instructors": [{"github_handle": "janedoe", "email": "jane@x.org"}]
         },
     )
-    assert status.collect("Course", "Cohort-f2026")["C7"]["detail"] == "1 active"
+    assert status.collect("Course", "Semester-f2026")["C7"]["detail"] == "1 active"
 
 
 # ------------------------------------------------------------- B8, the mail transport
@@ -171,7 +171,7 @@ def _transport_row(monkeypatch, **secrets):
         else:
             monkeypatch.setenv(name, value)
     _stub_every_read(monkeypatch)
-    return status.collect("Course", "Cohort-f2026")["B8"]
+    return status.collect("Course", "Semester-f2026")["B8"]
 
 
 def test_b8_reads_the_transport_off_the_names_the_mailer_actually_uses(monkeypatch):
@@ -229,14 +229,14 @@ def test_b8_stays_ok_when_only_the_maintainer_address_is_missing(monkeypatch):
 # ------------------------------------------- the rows about faults, not about inputs
 #
 # C8 and C9 are the only rows that do not describe an input file: they say which of this
-# cohort's digest issues are standing. They exist so the table a faculty member opens
+# semester's digest issues are standing. They exist so the table a faculty member opens
 # agrees with the mail already in their inbox - every other row can read perfectly while
 # a roster nobody can parse sits in an open issue.
 
 
 def test_c8_and_c9_are_clean_when_no_digest_issue_is_open(monkeypatch):
     _stub_every_read(monkeypatch)
-    data = status.collect("Course", "Cohort-f2026")
+    data = status.collect("Course", "Semester-f2026")
     assert data["C8"]["status"] == "ok"
     assert data["C8"]["detail"] == "no source-fault issue open"
     assert data["C9"]["status"] == "ok"
@@ -245,10 +245,12 @@ def test_c8_and_c9_are_clean_when_no_digest_issue_is_open(monkeypatch):
 
 def test_c8_reports_the_release_plans_own_digest(monkeypatch):
     _stub_every_read(monkeypatch, standing={source_digest.TITLE})
-    row = status.collect("Course", "Cohort-f2026")["C8"]
+    row = status.collect("Course", "Semester-f2026")["C8"]
     assert row["status"] == status.ATTENTION
     assert row["detail"] == "the release plan cites sources nobody has staged"
-    assert row["edit_url"] == "https://github.com/Cohort-f2026/classroom-config/issues"
+    assert (
+        row["edit_url"] == "https://github.com/Semester-f2026/classroom-config/issues"
+    )
 
 
 def test_c9_names_the_files_whose_digest_issues_are_standing(monkeypatch):
@@ -256,33 +258,33 @@ def test_c9_names_the_files_whose_digest_issues_are_standing(monkeypatch):
         monkeypatch,
         standing={config_digest.ROSTER.title, config_digest.TEAMS.title},
     )
-    row = status.collect("Course", "Cohort-f2026")["C9"]
+    row = status.collect("Course", "Semester-f2026")["C9"]
     assert row["status"] == status.ATTENTION
     assert row["detail"] == "config faults: 2 open - students.csv, teams.csv"
 
 
-def test_c9_covers_every_digest_a_cohort_can_have(monkeypatch):
+def test_c9_covers_every_digest_a_semester_can_have(monkeypatch):
     # A seventh digest added without a line here would be a file this table never
     # mentions, in the one place a reader goes to ask what is wrong.
     _stub_every_read(
-        monkeypatch, standing={d.title for d in config_digest.COHORT_DIGESTS}
+        monkeypatch, standing={d.title for d in config_digest.SEMESTER_DIGESTS}
     )
-    row = status.collect("Course", "Cohort-f2026")["C9"]
-    assert f"{len(config_digest.COHORT_DIGESTS)} open" in row["detail"]
+    row = status.collect("Course", "Semester-f2026")["C9"]
+    assert f"{len(config_digest.SEMESTER_DIGESTS)} open" in row["detail"]
 
 
 def test_the_schedule_digest_is_c8s_alone_and_never_counted_twice(monkeypatch):
     # schedule.yml has its own row because its faults keep the other clock. It must not
     # also appear in C9, or one broken file would read as two.
     _stub_every_read(monkeypatch, standing={source_digest.TITLE})
-    data = status.collect("Course", "Cohort-f2026")
+    data = status.collect("Course", "Semester-f2026")
     assert data["C9"]["detail"] == "config faults: 0 open"
 
 
 def test_a_fault_row_links_the_issue_list_in_both_states(monkeypatch):
     md = status.render_markdown(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         _data(C9={**_ROW, "status": status.ATTENTION, "link_text": "open"}),
     )
     assert "ATTENTION" in md and "[open](https://x/edit)" in md
@@ -292,12 +294,12 @@ def test_c3_points_at_the_grading_sheets_folder(monkeypatch):
     # It said `grades/`, a path retired in 2026-09 - so the one link a grader would
     # follow from this table opened a file-creation form for a folder nothing reads.
     _stub_every_read(monkeypatch)
-    row = status.collect("Course", "Cohort-f2026")["C3"]
+    row = status.collect("Course", "Semester-f2026")["C3"]
     assert row["path"] == "grading_sheets/"
     assert "grading_sheets/" in row["label"] and "grading_sheets/" in row["edit_url"]
 
 
-def test_c6_says_when_the_whole_cohort_freezes(monkeypatch):
+def test_c6_says_when_the_whole_semester_freezes(monkeypatch):
     # The one date in schedule.yml that acts on every repo in the org, and the one nobody
     # would otherwise think to check before the day it fires.
     _stub_every_read(monkeypatch)
@@ -311,14 +313,30 @@ def test_c6_says_when_the_whole_cohort_freezes(monkeypatch):
     )
     assert (
         "archives 2027-02-16"
-        in status.collect("Course", "Cohort-f2026")["C6"]["detail"]
+        in status.collect("Course", "Semester-f2026")["C6"]["detail"]
     )
 
 
-def test_c6_says_so_when_nothing_will_ever_archive_the_cohort(monkeypatch):
+def test_c6_says_so_when_nothing_will_ever_archive_the_semester(monkeypatch):
     _stub_every_read(monkeypatch)
     monkeypatch.setattr(
         schedule, "load", lambda org: schedule.Schedule(semester_start=date(2026, 9, 7))
     )
-    detail = status.collect("Course", "Cohort-f2026")["C6"]["detail"]
+    detail = status.collect("Course", "Semester-f2026")["C6"]["detail"]
     assert "archive not scheduled (write an archive: block)" in detail
+
+
+def test_a_semester_that_has_not_migrated_its_instructors_is_a_line_not_a_crash(
+    monkeypatch, capsys
+):
+    from dsl_course.faults import NOT_MIGRATED, NotMigrated
+
+    _stub_every_read(monkeypatch)
+
+    def refuse(org):
+        raise NotMigrated("people.yml", "instructors.yml", org)
+
+    monkeypatch.setattr(sync_faculty, "load_semester_faculty", refuse)
+    row = status.collect("Course", "Semester-f2026")["C7"]
+    assert row["status"] != "ok"
+    assert NOT_MIGRATED in capsys.readouterr().err

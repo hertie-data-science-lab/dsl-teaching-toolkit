@@ -2,7 +2,7 @@ org: hertie-dsl-demo-course-e1234
 org_name: DSL Demo Course
 course_name: Deep Learning (Demo)
 course_code: E1234
-course_description: A demo course - the blurb every cohort site shows under the title.
+course_description: A demo course - the blurb every semester site shows under the title.
 
 # What every assignment under this course starts from. **New assignment** stamps these
 # values into the `grading_config.yml` it generates, so each assignment's own file says
@@ -15,11 +15,11 @@ assignment_defaults:
   late_penalty_per_day: 10%   # of the EARNED grade, per day started
 
 # course_admins is the SSOT for course-wide GitHub admin access (applied here AND
-# mirrored into every cohort org's own course-admin team by sync_faculty).
+# mirrored into every semester org's own course-admin team by sync_faculty).
 # instructors/teaching_assistants below are DISPLAY ONLY at this level - website
-# cards (institutional headshots + bio links), not access. Their real, per-cohort
-# push access is declared in the cohort's own classroom-config/people.yml instead
-# (see ../cohort-org/people.yml) - most cohorts have different lecturers/TAs, so
+# cards (institutional headshots + bio links), not access. Their real, per-semester
+# push access is declared in the semester's own classroom-config/instructors.yml instead
+# (see ../cohort-org/instructors.yml) - most semesters have different lecturers/TAs, so
 # that's where it's actually reconciled.
 #
 # `photo` takes EITHER an absolute URL on a host that ALLOWS HOTLINKING, OR a
@@ -35,7 +35,7 @@ assignment_defaults:
 # exist is logged as a warning and skipped, so the sync still completes).
 people:
   course_admins:
-    # Course-wide admin, mirrored into every cohort. Optional start/end bound it -
+    # Course-wide admin, mirrored into every semester. Optional start/end bound it -
     # here, the course director's tenure running this course.
     - github_handle: "demo-lkaack-placeholder"
       start: "2026-08-01"
@@ -49,8 +49,8 @@ people:
       start: "2026-08-01"
       end: "2027-07-31"
   # NB: the public course site renders INSTRUCTOR cards only (`include_tas=False` in
-  # site.sync_public_site) - TAs are cohort-scoped, so their cards come from the
-  # cohort's own classroom-config/people.yml (../cohort-org/people.yml). The two
+  # site.sync_public_site) - TAs are semester-scoped, so their cards come from the
+  # semester's own classroom-config/instructors.yml (../cohort-org/instructors.yml). The two
   # entries below are therefore inert here; they are kept only to show the key is
   # accepted and to keep the two files' shapes comparable.
   teaching_assistants:
@@ -69,6 +69,6 @@ people:
       photo: "/_images/pp/henrycgbaker.jpg"   # the other form: local file in the site repo
       url: "https://www.hertie-school.org/en/who-we-are/profile/person/baker"
 
-# The schedule (release calendar, due dates, exams) is cohort-specific - it lives in
-# the COHORT org's classroom-config/schedule.yml instead, not here. See
+# The schedule (release calendar, due dates, exams) is semester-specific - it lives in
+# the SEMESTER org's classroom-config/schedule.yml instead, not here. See
 # ../cohort-org/schedule.yml.
