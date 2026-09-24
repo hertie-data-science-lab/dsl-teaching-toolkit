@@ -36,6 +36,7 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
     );
   const tone = TONE[o.conclusion] ?? 'skip';
   const counts = Object.entries(o.counts ?? {});
+  const reasons = o.reasons ?? [], details = o.details ?? [];
   return (
     <div class="outcome">
       <Mark tone={tone} />
@@ -44,15 +45,16 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
       {result.leaked.length ? (
         <p class="check-line bad"><span>The public record of this run names {result.leaked.length === 1 ? 'a person' : `${result.leaked.length} people`}. Tell the lab: the console reports it so it can be fixed.</span></p>
       ) : null}
-      {(o.reasons ?? []).length || result.people.length ? (
+      {reasons.length || details.length || result.people.length ? (
         <details class="fold reasons">
           <summary>Details</summary>
           <div class="fold-body">
-            {(o.reasons ?? []).length ? (
-              <table><tbody>{(o.reasons ?? []).map((r) => (
-                <tr><td><code>{r.code}</code></td><td>{r.text}{r.fix?.screen ? <> <a href={`#${r.fix.screen}${r.fix.entry ? `-${r.fix.entry}` : ''}`}>Fix</a></> : null}</td></tr>
+            {reasons.length ? (
+              <table><tbody>{reasons.map((r) => (
+                <tr><td><code>{r.code}</code></td><td class="pre">{r.text}{r.fix?.screen ? <> <a href={`#${r.fix.screen}${r.fix.entry ? `-${r.fix.entry}` : ''}`}>Fix</a></> : null}</td></tr>
               ))}</tbody></table>
             ) : null}
+            {details.length ? <pre class="outcome-details">{details.join('\n')}</pre> : null}
             {result.people.length ? (
               <>
                 <p class="footnote">Per person (private; not in the public run log):</p>

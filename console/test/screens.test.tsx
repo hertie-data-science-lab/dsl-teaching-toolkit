@@ -16,6 +16,8 @@ import { StaffScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
 import { OperationsScreen, SiteScreen } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
+import { generateSyllabus } from '../src/ops/defs';
+import { OutcomeView } from '../src/ops/Panel';
 import { ScreenBoundary } from '../src/ui/boundary';
 import { Footer, Sidenav, Topbar } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
@@ -212,6 +214,17 @@ describe('S6 schedule and S11 release', () => {
     expect(t).toContain('Nothing staged yet: this entry has no deploy block.');
     expect(t).toContain('Edit entry');
     expect(t).not.toContain('Release early');
+  });
+});
+
+describe('operation outcome', () => {
+  it('shows what the op produced in the details fold, preformatted', () => {
+    const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026');
+    const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the session list.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['## Course sessions and readings', '- Session 1: Intro'] };
+    const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
+    expect(out).toContain('<summary>Details</summary>');
+    expect(out).toContain('<pre class="outcome-details">## Course sessions and readings\n- Session 1: Intro</pre>');
+    expect(out).toContain('<td class="pre">solution.py\nhas no region');
   });
 });
 

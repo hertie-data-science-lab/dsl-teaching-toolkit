@@ -120,6 +120,7 @@ export interface Outcome {
   summary: string;
   counts?: Record<string, number>;
   reasons?: { code: string; text: string; fix?: Fix }[];
+  details?: string[]; // what the op produced or would produce, line by line (a file list, a generated block)
   people?: { handle: string; text: string }[]; // private file only
   started?: string;
   finished?: string;
