@@ -292,7 +292,7 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
           <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the term ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
           <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after term end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the term ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
           <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Cohort archived' }} />
-          <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{{date}} is filled in with the archive date.')} />
+          <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{date} is filled in with the archive date.')} />
           <Common d={d} set={set} />
         </div>
       ) : null}
