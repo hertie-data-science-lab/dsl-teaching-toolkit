@@ -217,8 +217,9 @@ a first visit, mostly free 304s after).
 
 ## Names and migration
 
-The instructor screens take every repo and path name from `src/model/names.ts`, which reads
-`schemas/names.json` when the engine exports it (decisions 0010 and 0012). The console reads
+Every repo and path name comes from `src/model/names.ts`, which reads the engine's
+`schemas/names.json` (decisions 0010 and 0012). A semester's course comes from its pointer,
+`.system/dsl-course.yml` in `semester-config`. The console reads
 the new names only. An org that still carries a retired one (the `classroom-config` or
 `welcome` repo, `people.yml`, `.dsl/`, the `dsl-cohort` topic, the old course registry or its
 `cohorts:` key, `cohort_defaults:` in `dsl-course.yml`) shows one screen, "This semester has

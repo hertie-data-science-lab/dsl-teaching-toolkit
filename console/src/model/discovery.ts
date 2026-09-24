@@ -10,7 +10,7 @@ import { parse } from 'yaml';
 import type { GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
 import { SEMESTER_TOPIC } from './migration';
-import { COURSE_REPO, REGISTRY_FILE } from './names';
+import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE } from './names';
 
 export const COURSE_HUB_TOPIC = 'dsl-course-hub';
 export const REGISTRY_PATH = REGISTRY_FILE;
@@ -85,9 +85,17 @@ export async function discoverCourse(client: GitHubClient, org: string, known?: 
 
 const topicsOf = async (client: GitHubClient, org: string, repo: GhRepo) => repo.topics ?? (await client.getRepoTopics(org, COURSE_REPO));
 
-/** An org's `.github/dsl-course.yml` as parsed; null when absent or unreadable. */
-async function readMeta(client: GitHubClient, org: string): Promise<Record<string, unknown> | null> {
-  const f = await client.getContents(org, COURSE_REPO, COURSE_META_PATH);
+/** A course org's `.github/dsl-course.yml` as parsed; null when absent or unreadable. */
+const readMeta = (client: GitHubClient, org: string) => readYamlMap(client, org, COURSE_REPO, COURSE_META_PATH);
+
+/**
+ * A semester's pointer to its course (`.system/dsl-course.yml` in its config repo); null when
+ * absent or unreadable. The config repo is private, so a student reads null here.
+ */
+const readPointer = (client: GitHubClient, org: string) => readYamlMap(client, org, CONFIG_REPO, POINTER_PATH);
+
+async function readYamlMap(client: GitHubClient, org: string, repo: string, path: string): Promise<Record<string, unknown> | null> {
+  const f = await client.getContents(org, repo, path);
   try {
     const m = f ? parse(f.text) : null;
     return m && typeof m === 'object' ? (m as Record<string, unknown>) : null;
@@ -106,7 +114,7 @@ export type Mode = 'instructor' | 'student';
 
 /** A semester org the person is a member of. */
 export interface Semester extends CohortRef {
-  /** The course org its `.github/dsl-course.yml` points back to; '' when it names none. */
+  /** The course org its pointer (`.system/dsl-course.yml` in the config repo) names; '' when it names none or cannot be read. */
   courseOrg: string;
   courseName: string;
   /** Archiving a semester archives its `.github` last but one, so an archived `.github` means an archived semester. */
@@ -204,7 +212,7 @@ async function classify(client: GitHubClient, org: string): Promise<Found> {
     return course ? { course } : null;
   }
   if (!topics.includes(SEMESTER_TOPIC)) return null;
-  const meta = await readMeta(client, org);
+  const meta = await readPointer(client, org);
   const t = termOf(org);
   return {
     semester: {

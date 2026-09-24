@@ -74,11 +74,11 @@ function orgs(gh: FakeGitHub, push: string[] = [], archived: string[] = []) {
     .on('GET', `/repos/${COURSE}/.github/contents/semesters.yml`, fileBody('x', `semesters:\n  - ${OLD}\n  - ${SEM}\n`))
     .on('GET', `/repos/${COURSE}/.github/contents/dsl-course.yml`, fileBody('x', 'course_name: Machine Learning\ncourse_code: E1234\n'))
     .on('GET', `/repos/${SEM}/.github`, dot(SEM, ['dsl-semester']))
-    .on('GET', `/repos/${SEM}/.github/contents/dsl-course.yml`, meta(COURSE))
+    .on('GET', `/repos/${SEM}/semester-config/contents/.system/dsl-course.yml`, meta(COURSE))
     .on('GET', `/repos/${OLD}/.github`, dot(OLD, ['dsl-semester']))
-    .on('GET', `/repos/${OLD}/.github/contents/dsl-course.yml`, meta(COURSE))
+    .on('GET', `/repos/${OLD}/semester-config/contents/.system/dsl-course.yml`, meta(COURSE))
     .on('GET', `/repos/${OTHER_SEM}/.github`, dot(OTHER_SEM, ['dsl-semester']))
-    .on('GET', `/repos/${OTHER_SEM}/.github/contents/dsl-course.yml`, meta('hertie-nlp-e1282'))
+    .on('GET', `/repos/${OTHER_SEM}/semester-config/contents/.system/dsl-course.yml`, meta('hertie-nlp-e1282'))
     .on('GET', '/repos/hertie-nlp-e1282/.github/contents/dsl-course.yml', fileBody('x', 'course_name: Natural Language Processing\n'));
 }
 

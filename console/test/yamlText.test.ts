@@ -2,7 +2,7 @@ import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { YamlText } from '../src/edit/yamlText';
 
-import SEEDED from '../../templates/classroom-config/schedule.yml?raw';
+import SEEDED from '../../templates/semester-config/schedule.yml?raw';
 import SHEET from '../../example-course/semester-org/grading_sheets/assignment-4-project.yml?raw';
 
 const comments = (t: string): string[] => t.split('\n').filter((l) => l.trim().startsWith('#'));

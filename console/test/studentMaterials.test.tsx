@@ -169,7 +169,7 @@ describe('opening a file', () => {
 });
 
 describe('Join', () => {
-  const form = (name: string) => parse(readFileSync(new URL(`../../templates/welcome/ISSUE_TEMPLATE/${name}`, import.meta.url), 'utf8')) as { labels: string[]; body: { type: string; id?: string }[] };
+  const form = (name: string) => parse(readFileSync(new URL(`../../templates/join/ISSUE_TEMPLATE/${name}`, import.meta.url), 'utf8')) as { labels: string[]; body: { type: string; id?: string }[] };
 
   it('opens the seeded issue forms, filling in exactly their text inputs by field id', () => {
     const course = new URL(joinCourseUrl(ORG, ' dsl-ab3k9m '));

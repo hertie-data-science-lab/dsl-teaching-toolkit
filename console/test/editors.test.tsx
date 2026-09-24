@@ -4,7 +4,7 @@
 import { render } from 'preact-render-to-string';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
-import SEEDED from '../../templates/classroom-config/schedule.yml?raw';
+import SEEDED from '../../templates/semester-config/schedule.yml?raw';
 import { EnvCtx, type Env } from '../src/env';
 import { CONFLICT, saveText, type SaveState } from '../src/edit/save';
 import { YamlText } from '../src/edit/yamlText';

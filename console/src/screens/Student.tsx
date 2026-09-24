@@ -86,7 +86,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   const f = facts.kind === 'ready' ? facts.value : null;
   const mine = useLoad(env && f && !studentView ? () => readMine(env.client, org, env.user.login, f.assignments) : null, [org, f]);
   const m: Mine | null = mine.kind === 'ready' ? mine.value : null;
-  // The receipts threads feed Assignments and This week's "your instructors updated files" line.
+  // The Submission receipts issues feed Assignments and This week's "your instructors updated files" line.
   const threads = screen === 'week' || screen === 'assignments';
   const receipts = useLoad<Record<string, Receipts | null>>(env && f && m && threads && !m.auditor ? () => readAllReceipts(env.client, org, f.assignments, m) : null, [org, f, m, threads]);
   const login = env?.user.login ?? '';

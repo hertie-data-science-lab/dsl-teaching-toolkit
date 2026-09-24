@@ -116,13 +116,13 @@ export function buildRequest(actor: string, input: RequestInput): Request {
     op: input.op,
     actor,
     course_org: input.courseOrg,
-    ...(spec.scope === 'cohort' && input.cohortOrg ? { semester_org: input.cohortOrg } : {}),
+    ...(spec.scope === 'semester' && input.cohortOrg ? { semester_org: input.cohortOrg } : {}),
     args,
     preview: input.preview,
     client: CLIENT,
   };
   const errors = [...(requestValidator(req) ? [] : messages(requestValidator)), ...validateArgs(input.op, args)];
-  if (spec.scope === 'cohort' && !input.cohortOrg) errors.push('a semester operation needs a semester');
+  if (spec.scope === 'semester' && !input.cohortOrg) errors.push('a semester operation needs a semester');
   if (input.preview && !spec.preview) errors.push(`${input.op} has no preview`);
   if (errors.length) throw new RequestInvalid(errors);
   return req;

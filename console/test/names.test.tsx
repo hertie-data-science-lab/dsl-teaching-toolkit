@@ -8,7 +8,7 @@ import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { GitHubClient } from '../src/github/client';
 import { courseLeftovers, notMigratedText, semesterLeftovers } from '../src/model/migration';
-import { DECIDED, EXPORTED, NAMES } from '../src/model/names';
+import { NAMES } from '../src/model/names';
 import { buildRequest } from '../src/ops/adapter';
 import { hashOf, movedHash, parseHash, wizardOf } from '../src/router';
 import { NotMigratedScreen } from '../src/screens/NotMigrated';
@@ -62,14 +62,12 @@ describe('names', () => {
     expect(NAMES.records.status.startsWith(`${NAMES.system_dir}/`)).toBe(true);
   });
 
-  // TODO(WP-A2): A2 exports console/schemas/names.json. Once it has merged, turn this into a
-  // plain `it`: the file must exist (no early return) and agree with the decided names.
-  it.todo('agrees with schemas/names.json, which WP-A2 exports', () => {
-    expect(EXPORTED, 'schemas/names.json is missing').toBeDefined();
-    if (!EXPORTED) return;
-    for (const k of ['config_repo', 'join_repo', 'system_dir', 'instructors_file', 'assignments_file', 'registry_file'] as const)
-      expect(String(EXPORTED[k]).replace(/\/$/, ''), k).toBe(DECIDED[k].replace(/\/$/, ''));
-    for (const [k, v] of Object.entries(DECIDED.records)) expect(EXPORTED.records?.[k], `records.${k}`).toBe(v);
+  it('agrees with schemas/names.json, which the engine exports, and holds every record the console reads', () => {
+    const file = JSON.parse(readFileSync(new URL('../schemas/names.json', import.meta.url), 'utf8'));
+    expect(NAMES).toEqual(file);
+    const decided = { config_repo: 'semester-config', join_repo: 'join', system_dir: '.system', instructors_file: 'instructors.yml', assignments_file: 'assignments.yml', registry_file: 'semesters.yml' };
+    for (const [k, v] of Object.entries(decided)) expect(file[k], k).toBe(v);
+    for (const k of ['status', 'outcomes', 'distributed', 'pointer']) expect(file.records[k], `records.${k}`).toMatch(/^\.system\//);
   });
 
   it('leaves no retired spelling in src/, outside the migration check', () => {

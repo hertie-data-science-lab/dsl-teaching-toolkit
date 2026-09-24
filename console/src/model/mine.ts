@@ -221,7 +221,7 @@ export async function readMine(client: GitHubClient, org: string, login: string,
   return { units, gradebook: grades ? parseGradebook(grades.text, updated) : null, auditor: audit === 'active' };
 }
 
-/** What a comment on the receipts thread is: a receipt, a note that the instructors updated files, the marks-returned note, or anyone's comment. */
+/** What a comment on the Submission receipts issue is: a receipt, a note that the instructors updated files, the marks-returned note, or anyone's comment. */
 export type ThreadKind = 'receipt' | 'patch' | 'marks' | 'comment';
 
 export interface ThreadEntry {
@@ -278,7 +278,7 @@ export async function readReceipts(client: GitHubClient, org: string, repo: stri
 export const repoUrl = (org: string, repo: string) => `https://github.com/${org}/${repo}`;
 export const gradebookUrl = (org: string, login: string) => `https://github.com/${org}/grades-${login}`;
 
-/** The Submission receipts threads of the student's private repos in the semester, by repo (a thread that cannot be read is null). */
+/** The Submission receipts issues of the student's private repos in the semester, by repo (one that cannot be read is null). */
 export async function readAllReceipts(client: GitHubClient, org: string, assignments: SemesterAssignment[], mine: Mine): Promise<Record<string, Receipts | null>> {
   const repos = assignments.filter((a) => a.privateRepo).map((a) => mine.units[a.slug]?.repo).filter((r): r is string => !!r);
   return Object.fromEntries(await Promise.all(repos.map(async (r) => [r, await readReceipts(client, org, r).catch(() => null)] as const)));
