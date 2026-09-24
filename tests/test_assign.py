@@ -2474,7 +2474,7 @@ def _cli(monkeypatch, *argv: str) -> dict:
         "argv",
         [
             "assign",
-            "--master-org",
+            "--course-org",
             "COURSE",
             "--course-source-repo",
             "assignment-1-f2026",

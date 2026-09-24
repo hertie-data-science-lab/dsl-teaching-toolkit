@@ -18,6 +18,8 @@ from test_renderers import ALL_RENDERED
 from dsl_course import (
     assign,
     bootstrap_course,
+    collect,
+    deploy,
     discovery,
     grades,
     list_orgs,
@@ -346,7 +348,7 @@ def _hand_out(monkeypatch, *flags: str) -> list[bool]:
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
     base = [
         "assign",
-        "--master-org",
+        "--course-org",
         "C",
         "--course-source-repo",
         "a1",
@@ -424,7 +426,7 @@ def test_every_cli_previews_unless_told_otherwise(monkeypatch):
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
     base = [
         "assign",
-        "--master-org",
+        "--course-org",
         "C",
         "--course-source-repo",
         "a1",
@@ -523,3 +525,25 @@ def test_the_site_emits_kind_beside_the_pinned_themes_type():
 def test_status_json_rows_say_kind():
     row = schemas.status_schema()["properties"]["releases"]["items"]["properties"]
     assert "kind" in row and "type" not in row
+
+
+# --------------------------------------------- --course-org (--master-org, --source-org)
+
+
+@pytest.mark.parametrize(
+    "module, old",
+    [(assign, "--master-org"), (collect, "--master-org"), (deploy, "--source-org")],
+)
+def test_the_course_org_flag_is_course_org_and_the_old_one_is_refused(
+    monkeypatch, module, old
+):
+    base = ["--course-source-repo", "r", "--semester-org", "S"]
+    monkeypatch.setattr(sys, "argv", ["cli", old, "C", *base])
+    with pytest.raises(SystemExit):
+        module.main()
+
+
+def test_no_rendered_workflow_spells_an_old_course_org_flag_or_variable():
+    for name, rendered in ALL_RENDERED.items():
+        for old in ("--master-org", "--source-org", "MASTER_ORG", "SRC_ORG"):
+            assert old not in rendered, (name, old)

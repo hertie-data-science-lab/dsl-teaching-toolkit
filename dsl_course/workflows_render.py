@@ -818,7 +818,7 @@ on:
 {_run_preamble()}      - name: Release
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          SRC_ORG: ${{{{ github.repository_owner }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_PATH: ${{{{ inputs.course_source_path }}}}
@@ -826,7 +826,7 @@ on:
           SEMESTER_DEST_PATH: ${{{{ inputs.semester_dest_path }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.deploy --source-org "$SRC_ORG" \\
+          python3 -m dsl_course.deploy --course-org "$COURSE_ORG" \\
             --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" \\
             --course-source-path "$COURSE_SOURCE_PATH" --semester-dest-repo "$SEMESTER_DEST_REPO" \\
             --semester-dest-path "$SEMESTER_DEST_PATH" --no-preview
@@ -956,14 +956,14 @@ on:
 {_run_preamble()}      - name: Provision
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          MASTER_ORG: ${{{{ github.repository_owner }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           SOLUTION_DATETIME: ${{{{ inputs.solution_datetime }}}}
           PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG")
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG")
           [ -n "$SOLUTION_DATETIME" ] && args+=(--solution-datetime "$SOLUTION_DATETIME")
 {_PREVIEW_GATE}
           python3 -m dsl_course.assign "${{args[@]}}"
@@ -1004,13 +1004,13 @@ on:
 {_run_preamble(_TIMEOUT_GRADING, sandbox=True)}      - name: Collect submissions
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          MASTER_ORG: ${{{{ github.repository_owner }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           SLUG: ${{{{ inputs.slug }}}}
           PREVIEW: ${{{{ inputs.preview }}}}
         run: |
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --refresh-only)
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --refresh-only)
           [ -n "$SLUG" ] && args+=(--slug "$SLUG")
 {_PREVIEW_GATE}
           python3 -m dsl_course.collect "${{args[@]}}"
@@ -1977,7 +1977,7 @@ on:
 {_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Patch released assignment
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          MASTER_ORG: ${{{{ github.repository_owner }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           PATH_INPUT: ${{{{ inputs.path }}}}
@@ -1986,7 +1986,7 @@ on:
           PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --patch-path "$PATH_INPUT")
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --patch-path "$PATH_INPUT")
           [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
 {_PREVIEW_GATE}

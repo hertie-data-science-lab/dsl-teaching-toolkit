@@ -339,8 +339,8 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
-        lambda source_org, semester_org, deploys, sync=True: (
-            calls.append((source_org, semester_org, list(deploys), sync)) or (0, True)
+        lambda course_org, semester_org, deploys, sync=True: (
+            calls.append((course_org, semester_org, list(deploys), sync)) or (0, True)
         ),
     )
     monkeypatch.setattr(
@@ -374,8 +374,8 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     assert scheduler.run("Course-Org", "Semester-Org", now) == 0
     # exactly ONE deploy_many call, carrying all 3 deploys across both releases, sync=False
     assert len(calls) == 1
-    source_org, semester_org, deploys, sync = calls[0]
-    assert (source_org, semester_org, sync) == ("Course-Org", "Semester-Org", False)
+    course_org, semester_org, deploys, sync = calls[0]
+    assert (course_org, semester_org, sync) == ("Course-Org", "Semester-Org", False)
     assert len(deploys) == 3
     # the scheduler syncs the site exactly once, itself (deploy_many was told not to)
     assert synced == [("Course-Org", "Semester-Org")]
@@ -942,11 +942,11 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda master_org, template, semester_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
+        lambda course_org, template, semester_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
             (
                 calls.append(
                     (
-                        master_org,
+                        course_org,
                         template,
                         semester_org,
                         solution,

@@ -716,6 +716,7 @@ an already-open issue carries.
 | `schedule.yml` `type:` on a `releases:` entry or an `events:` entry | `kind:` (the template's `type:` individual/group is unchanged) | semester `schedule.yml` |
 | site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
 | `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
+| CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

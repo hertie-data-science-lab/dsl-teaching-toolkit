@@ -84,7 +84,7 @@ with `testthat` (see docs/10) without this module learning a word of R.
 
 Usage:
     python3 -m dsl_course.collect \\
-        --master-org COURSE --course-source-repo assignment-1-f2026 \\
+        --course-org COURSE --course-source-repo assignment-1-f2026 \\
         --semester-org SEMESTER --deadline 2026-10-15 [--group] [--preview]
 """
 
@@ -3138,7 +3138,7 @@ def _grade_target(
 
 
 def refresh_assignment_sheet(
-    master_org: str,
+    course_org: str,
     template: str,
     semester_org: str,
     *,
@@ -3165,10 +3165,10 @@ def refresh_assignment_sheet(
         log_err(target)
         return 1
     key, slug = target
-    gspec = load_grading_spec(master_org, template)
+    gspec = load_grading_spec(course_org, template)
     is_group = resolve_is_group(force=group, template_type=gspec.type)
     ok = sync_sheet(
-        master_org,
+        course_org,
         semester_org,
         sched,
         key,
@@ -3190,7 +3190,7 @@ def _today_in_semester_tz(sched: schedule.Schedule) -> str:
 
 
 def collect(
-    master_org: str,
+    course_org: str,
     template: str,
     semester_org: str,
     deadline: str | None = None,
@@ -3210,8 +3210,8 @@ def collect(
     `slug` names WHICH schedule entry this is, when two of them hand out from this one
     template. Left empty with two in the plan, this refuses: they keep separate snapshots,
     separate grading sheets and separate marks, and the freeze is write-once."""
-    if master_org == semester_org:
-        log_err("master-org and semester-org must differ.")
+    if course_org == semester_org:
+        log_err("course-org and semester-org must differ.")
         return 1
     # The semester-side identity is the SCHEDULE key when the assignment is scheduled
     # (the slug is a free label since course_source_repo), else the repo name minus its
@@ -3231,7 +3231,7 @@ def collect(
     # of them never reach a clone: a template with no solution branch, and an all-manual
     # assignment. Both are ordinary states, not failures, and both still have a deadline.
     # It is also what the cutoff itself is measured with (`late_window_days`).
-    gspec = load_grading_spec(master_org, template)
+    gspec = load_grading_spec(course_org, template)
     # SSOT: default the grading pin to the assignment's CUTOFF - an explicit
     # `grading_datetime`, else the due date plus the template's late window. An explicit
     # `deadline` (CLI override) wins; fall back to today - in the semester's own timezone,
@@ -3299,7 +3299,7 @@ def collect(
         `info:` is never touched again. Every path out of a passed cutoff runs it, because
         a sheet left OPEN after the deadline tells a grader marks can still move."""
         return sync_sheet(
-            master_org,
+            course_org,
             semester_org,
             sched,
             key,
@@ -3334,9 +3334,9 @@ def collect(
 
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"
-        if not clone(master_org, template, soldir, branch=SOLUTION_BRANCH):
+        if not clone(course_org, template, soldir, branch=SOLUTION_BRANCH):
             log_err(
-                f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template} - no hidden "
+                f"no `{SOLUTION_BRANCH}` branch on {course_org}/{template} - no hidden "
                 f"tests to run; nothing to collect."
             )
             # Hand-marked, then: say so once in the archive rather than re-deciding it
@@ -3347,7 +3347,7 @@ def collect(
             return _record_skip(
                 semester_org,
                 slug,
-                f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
+                f"no `{SOLUTION_BRANCH}` branch on {course_org}/{template}",
                 dry_run,
             )
         # WHAT this run does, decided once: hidden tests, a completion check, either,
@@ -3388,7 +3388,7 @@ def collect(
                 # deleting `autograde/<slug>/` re-runs it once the runner is fixed.
                 no_completion = COMPLETION_DEP_SKIP
             else:
-                starters = _starter_notebook_shas(master_org, template)
+                starters = _starter_notebook_shas(course_org, template)
 
         if tests_src is None and starters is None:
             log_ok(f"{slug}: hand-marked, nothing to collect.")
@@ -3644,7 +3644,7 @@ def collect(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--master-org", required=True, help="Course org (template source)"
+        "--course-org", required=True, help="Course org (template source)"
     )
     parser.add_argument(
         "--course-source-repo",
@@ -3679,7 +3679,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.refresh_only:
         return refresh_assignment_sheet(
-            args.master_org,
+            args.course_org,
             args.template,
             args.semester_org,
             group=args.group,
@@ -3687,7 +3687,7 @@ def main() -> int:
             slug=args.slug,
         )
     return collect(
-        args.master_org,
+        args.course_org,
         args.template,
         args.semester_org,
         args.deadline,

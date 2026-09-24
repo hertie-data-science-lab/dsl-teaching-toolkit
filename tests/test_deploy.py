@@ -82,7 +82,7 @@ def test_cli_rejects_a_count_mismatch_with_a_nonzero_exit(monkeypatch, capsys):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
@@ -104,9 +104,9 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
     # through ONE deploy_many call - so each repo is cloned once for the whole batch.
     seen = {}
 
-    def fake_deploy_many(source_org, semester_org, deploys, sync=True):
+    def fake_deploy_many(course_org, semester_org, deploys, sync=True):
         seen.update(
-            source_org=source_org, semester_org=semester_org, deploys=deploys, sync=sync
+            course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
         return 0, True
 
@@ -115,7 +115,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
@@ -136,7 +136,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
@@ -148,7 +148,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         ],
     )
     assert deploy.main() == 0
-    assert seen["source_org"] == "Course" and seen["semester_org"] == "Semester-f2026"
+    assert seen["course_org"] == "Course" and seen["semester_org"] == "Semester-f2026"
     assert [
         (
             d.course_source_repo,
@@ -176,7 +176,7 @@ def test_semester_dest_repo_defaults_to_materials(monkeypatch):
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
@@ -206,7 +206,7 @@ def test_dry_run_prints_the_resolved_pairs_without_deploying(monkeypatch, capsys
         "sys.argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             "Course",
             "--course-source-repo",
             "course-materials-f2026",
@@ -228,7 +228,7 @@ def test_dry_run_prints_the_resolved_pairs_without_deploying(monkeypatch, capsys
 def _dry_run_argv(source_path):
     return [
         "deploy",
-        "--source-org",
+        "--course-org",
         "Course",
         "--course-source-repo",
         "course-materials-f2026",

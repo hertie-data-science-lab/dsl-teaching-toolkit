@@ -429,7 +429,7 @@ def _deploy_main(monkeypatch, *extra) -> Summary:
         "argv",
         [
             "deploy",
-            "--source-org",
+            "--course-org",
             COURSE,
             "--course-source-repo",
             "course-materials-f2026",

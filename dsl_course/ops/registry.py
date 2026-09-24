@@ -213,7 +213,7 @@ def _scheduler(request: Request) -> list[str]:
 
 def _deploy(request: Request) -> list[str]:
     return [
-        "--source-org",
+        "--course-org",
         request.course_org,
         "--course-source-repo",
         _a(request, "course_source_repo"),
@@ -230,7 +230,7 @@ def _deploy(request: Request) -> list[str]:
 
 def _assign_base(request: Request) -> list[str]:
     return [
-        "--master-org",
+        "--course-org",
         request.course_org,
         "--course-source-repo",
         _a(request, "course_source_repo"),

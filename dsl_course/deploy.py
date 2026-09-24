@@ -22,7 +22,7 @@ paired by index (parse_path_pairs) - one Deploy per pair, one deploy_many call f
 
 Usage:
     python3 -m dsl_course.deploy \\
-        --source-org COURSE --course-source-repo course-materials-f2026 \\
+        --course-org COURSE --course-source-repo course-materials-f2026 \\
         --semester-org SEMESTER --semester-dest-repo materials \\
         --course-source-path "lectures/02_intro,labs/02_lab" [--semester-dest-path "week02/lecture,week02/lab"]
 """
@@ -100,7 +100,7 @@ WITHHELD_ROOT_STUBS = ("README.md", "SYLLABUS.md")
 UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
 
 
-def _warn_withheld_stub(source_org: str, repo: str, path: str) -> None:
+def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
     """Say what was withheld and how to fix it - visibly, but WITHOUT failing the release.
 
     Withholding an unwritten stub is this guard working, not a fault: the release did
@@ -113,13 +113,13 @@ def _warn_withheld_stub(source_org: str, repo: str, path: str) -> None:
     failure" (see `templates/classroom-config/validate-schedule.yml`): a `::warning::`
     annotation on a green run, which touches no exit code."""
     log_withheld(
-        f"{source_org}/{repo}/{path} was NOT released - it is still the scaffold stub, "
+        f"{course_org}/{repo}/{path} was NOT released - it is still the scaffold stub, "
         "written for faculty rather than students. Everything else in this release "
         "shipped. Write it for students, then release again."
     )
 
 
-def _warn_ignored_source(source_org: str, repo: str, path: str) -> None:
+def _warn_ignored_source(course_org: str, repo: str, path: str) -> None:
     """Say that a release's own source path is excluded by a `.releaseignore`.
 
     Faculty naming a path outright is a clear ask, so answering it with nothing at all
@@ -128,7 +128,7 @@ def _warn_ignored_source(source_org: str, repo: str, path: str) -> None:
     of an error for the reason in `_warn_withheld_stub`: the hourly scheduler runs through
     the same `deploy_many`."""
     log_withheld(
-        f"{source_org}/{repo}/{path} was NOT released - a `{RELEASEIGNORE}` excludes it. "
+        f"{course_org}/{repo}/{path} was NOT released - a `{RELEASEIGNORE}` excludes it. "
         "Everything else in this release shipped. Drop the pattern that matches it, or "
         "release a path that is not excluded."
     )
@@ -486,7 +486,7 @@ def _merge_and_push(
 
 
 def deploy_many(
-    source_org: str,
+    course_org: str,
     semester_org: str,
     deploys: list[Deploy],
     sync: bool = True,
@@ -515,8 +515,8 @@ def deploy_many(
         src_dirs: dict[str, Path] = {}
         for repo in sorted({d.course_source_repo for d in deploys}):
             sd = root / "src" / repo
-            if not clone(source_org, repo, sd):
-                log_err(f"could not clone source {source_org}/{repo}")
+            if not clone(course_org, repo, sd):
+                log_err(f"could not clone source {course_org}/{repo}")
             else:
                 src_dirs[repo] = sd
 
@@ -571,7 +571,7 @@ def deploy_many(
             if srcp is None:
                 log_err(
                     f"unsafe course_source_path `{d.course_source_path}` for "
-                    f"{source_org}/{d.course_source_repo} - it escapes the clone. skipped."
+                    f"{course_org}/{d.course_source_repo} - it escapes the clone. skipped."
                 )
                 errors += 1
                 continue
@@ -586,7 +586,7 @@ def deploy_many(
             if not srcp.exists():
                 log_err(
                     f"`{d.course_source_path}` not found in "
-                    f"{source_org}/{d.course_source_repo} - skipped."
+                    f"{course_org}/{d.course_source_repo} - skipped."
                 )
                 errors += 1
                 continue
@@ -595,7 +595,7 @@ def deploy_many(
                 # `!` deeper down can re-include any of it. Nothing else was asked for, so
                 # this copy is a no-op rather than a partial one.
                 _warn_ignored_source(
-                    source_org, d.course_source_repo, d.course_source_path
+                    course_org, d.course_source_repo, d.course_source_path
                 )
                 continue
             try:
@@ -618,7 +618,7 @@ def deploy_many(
                             ):
                                 withheld |= {stub}
                                 _warn_withheld_stub(
-                                    source_org, d.course_source_repo, stub
+                                    course_org, d.course_source_repo, stub
                                 )
                     copy_tree(
                         srcp,
@@ -639,7 +639,7 @@ def deploy_many(
                     # Named outright rather than swept up by a whole-repo release: nothing
                     # else was asked for, so this copy is simply a no-op.
                     _warn_withheld_stub(
-                        source_org, d.course_source_repo, d.course_source_path
+                        course_org, d.course_source_repo, d.course_source_path
                     )
                     continue
                 else:
@@ -650,7 +650,7 @@ def deploy_many(
                 # exception out of deploy_many that takes every other release with it.
                 log_err(
                     f"could not copy `{d.course_source_path}` from "
-                    f"{source_org}/{d.course_source_repo}: {exc}"
+                    f"{course_org}/{d.course_source_repo}: {exc}"
                 )
                 errors += 1
                 continue
@@ -702,7 +702,7 @@ def deploy_many(
         # site-sync failure must be logged and counted (making the release non-zero), not
         # an unhandled traceback that aborts the batch.
         try:
-            if site.sync_site(source_org, semester_org) != 0:
+            if site.sync_site(course_org, semester_org) != 0:
                 log_err("site sync incomplete after release")
                 errors += 1
         except Exception as exc:
@@ -745,7 +745,7 @@ def parse_path_pairs(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-org", required=True, help="Course org (source)")
+    parser.add_argument("--course-org", required=True, help="Course org (source)")
     parser.add_argument(
         "--course-source-repo", required=True, help="Source repo holding the path(s)"
     )
@@ -773,7 +773,7 @@ def main() -> int:
     args = parser.parse_args()
 
     dest_repo = args.semester_dest_repo.strip() or "materials"
-    if (args.source_org, args.course_source_repo) == (args.semester_org, dest_repo):
+    if (args.course_org, args.course_source_repo) == (args.semester_org, dest_repo):
         log_err("source and target must differ.")
         return 1
     try:
@@ -785,7 +785,7 @@ def main() -> int:
     if args.preview:
         log_step(
             f"PREVIEW release {len(pairs)} path(s) from "
-            f"{args.source_org}/{args.course_source_repo} -> {args.semester_org}/{dest_repo}"
+            f"{args.course_org}/{args.course_source_repo} -> {args.semester_org}/{dest_repo}"
         )
         # The cheap structural checks need no clone, so catch them here: a source path that
         # strips to the repo root (drags the source's own .git/.github over the dest), or one
@@ -819,14 +819,14 @@ def main() -> int:
         )
 
     log_step(
-        f"Releasing {len(pairs)} path(s) from {args.source_org}/{args.course_source_repo} -> "
+        f"Releasing {len(pairs)} path(s) from {args.course_org}/{args.course_source_repo} -> "
         f"{args.semester_org}/{dest_repo}"
     )
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
         errors, changed = deploy_many(
-            args.source_org,
+            args.course_org,
             args.semester_org,
             [
                 Deploy(args.course_source_repo, src, dest_repo, dest)

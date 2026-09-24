@@ -45,7 +45,7 @@ the scheduler puts any of them back that has gone public early.
 
 Usage:
     python3 -m dsl_course.assign \\
-        --master-org TEST-HERTIE-COURSE --course-source-repo assignment-1-f2026 \\
+        --course-org TEST-HERTIE-COURSE --course-source-repo assignment-1-f2026 \\
         --semester-org TEST-HERTIE-SEMESTER-f2026
 """
 
@@ -304,7 +304,7 @@ def withhold_from_template(semester_org: str, template: str) -> bool:
 
 
 def ensure_semester_template(
-    master_org: str,
+    course_org: str,
     template: str,
     semester_org: str,
     slug: str,
@@ -329,7 +329,7 @@ def ensure_semester_template(
             # is already correct.
             return slug
     elif not generate_from_template(
-        template_org=master_org,
+        template_org=course_org,
         template_name=template,
         owner=semester_org,
         name=slug,
@@ -403,14 +403,14 @@ def ensure_semester_template(
     return slug
 
 
-def fetch_solution(master_org: str, template: str, dest: Path) -> Path | None:
+def fetch_solution(course_org: str, template: str, dest: Path) -> Path | None:
     """Clone the template's `solution` branch and return its solution/ dir, or None.
 
     Solutions live on a non-default branch so native template-generate (default branch
     only) never copies them into student repos - they're pushed separately, on demand."""
-    if not clone(master_org, template, dest, branch=SOLUTION_BRANCH):
+    if not clone(course_org, template, dest, branch=SOLUTION_BRANCH):
         log_err(
-            f"  ! no `{SOLUTION_BRANCH}` branch on {master_org}/{template} - "
+            f"  ! no `{SOLUTION_BRANCH}` branch on {course_org}/{template} - "
             f"nothing to push (add the solution there first)"
         )
         return None
@@ -420,7 +420,7 @@ def fetch_solution(master_org: str, template: str, dest: Path) -> Path | None:
         # at the branch root, or the folder was renamed. Silent before, which made the
         # caller's failure look like a missing branch.
         log_err(
-            f"  ! {master_org}/{template}'s `{SOLUTION_BRANCH}` branch has no "
+            f"  ! {course_org}/{template}'s `{SOLUTION_BRANCH}` branch has no "
             f"`{SOLUTION_DIR}/` folder - nothing to push"
         )
         return None
@@ -662,7 +662,7 @@ def note_the_patch(
 
 
 def patch_released(
-    master_org: str,
+    course_org: str,
     template: str,
     semester_org: str,
     path: str,
@@ -695,10 +695,10 @@ def patch_released(
         return 1
     _key, semester_slug = target
     log_step(
-        f"Patching {semester_slug} in {semester_org} from {master_org}/{template}:{path}"
+        f"Patching {semester_slug} in {semester_org} from {course_org}/{template}:{path}"
         f"{' (preview)' if dry_run else ''}"
     )
-    corrected = template_files(master_org, template, path)
+    corrected = template_files(course_org, template, path)
     # The second outbound copy from a course template, and the one with no
     # `generate_from_template` in it. `path` is free text naming a file OR A FOLDER, so
     # `.github` or `.github/workflows` sweeps up the Release assignment button the
@@ -724,12 +724,12 @@ def patch_released(
             # student's repo may never hold. Saying the other thing sends faculty looking
             # for a file that is sitting on the branch in front of them.
             log_err(
-                f"`{path}` on {master_org}/{template} holds nothing but faculty release "
+                f"`{path}` on {course_org}/{template} holds nothing but faculty release "
                 f"buttons, which are never a student's to press - nothing to patch."
             )
         else:
             log_err(
-                f"`{path}` is not on {master_org}/{template}'s default branch - nothing "
+                f"`{path}` is not on {course_org}/{template}'s default branch - nothing "
                 f"to patch. Commit the correction to the template first; this button "
                 f"only distributes what is already there."
             )
@@ -751,7 +751,7 @@ def patch_released(
     # into a Submission receipts issue, and whether that issue is one the world can read is the
     # listing's answer (`note_the_patch`).
     rows = {row["name"]: row for row in listing}
-    if load_grading_spec(master_org, template).submit_shared:
+    if load_grading_spec(course_org, template).submit_shared:
         # One repo for the whole semester, and `patch_targets` finds it by the same
         # template-prefix rule that finds a repo per unit - so the loop below needs no arm
         # of its own. Said out loud because "1 submission repo" would otherwise read as a
@@ -825,7 +825,7 @@ def patch_released(
 
 
 def provision_one(
-    master_org: str,
+    course_org: str,
     template: str,
     semester_org: str,
     repo: str,
@@ -904,7 +904,7 @@ def provision_one(
             # is repaired by re-running the Release assignment button (touch_existing).
             return "skipped"
     elif not generate_from_template(
-        template_org=master_org,
+        template_org=course_org,
         template_name=template,
         owner=semester_org,
         name=repo,
@@ -1228,7 +1228,7 @@ def ensure_drop_box(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--master-org", required=True, help="Course org (template source)"
+        "--course-org", required=True, help="Course org (template source)"
     )
     parser.add_argument(
         "--course-source-repo",
@@ -1257,7 +1257,7 @@ def main() -> int:
     )
     # The PATCH mode: `--patch-path` switches this CLI from handing an assignment out to
     # correcting one that is already out. A flag rather than a subcommand, because
-    # `python3 -m dsl_course.assign --master-org ...` is a frozen public contract - every
+    # `python3 -m dsl_course.assign --course-org ...` is a frozen public contract - every
     # bootstrapped org's Release assignment workflow spells it, and an org that has not
     # refreshed yet must keep working.
     parser.add_argument(
@@ -1290,7 +1290,7 @@ def main() -> int:
     try:
         if args.patch_path:
             return patch_released(
-                args.master_org,
+                args.course_org,
                 args.template,
                 args.semester_org,
                 args.patch_path,
@@ -1299,7 +1299,7 @@ def main() -> int:
                 dry_run=args.preview,
             )
         rc, _changed = provision_all(
-            args.master_org,
+            args.course_org,
             args.template,
             args.semester_org,
             roster_path=args.roster,
@@ -1450,7 +1450,7 @@ def _release_shared(
 
 
 def _release_units(
-    master_org: str,
+    course_org: str,
     template: str,
     semester_template: str,
     semester_org: str,
@@ -1533,7 +1533,7 @@ def _release_units(
         # Solution still comes from the COURSE template's solution branch.
         sol_dir = None
         if solution:
-            sol_dir = fetch_solution(master_org, template, Path(soldir) / "t")
+            sol_dir = fetch_solution(course_org, template, Path(soldir) / "t")
             if sol_dir is None:
                 # NOT fatal. The fan-out below is what gets students their repos at all,
                 # and a scheduled handout re-runs every tick - so returning here would
@@ -1570,7 +1570,7 @@ def _release_units(
 
 
 def provision_all(
-    master_org: str,
+    course_org: str,
     template: str,
     semester_org: str,
     roster_path: str | None = None,
@@ -1615,15 +1615,15 @@ def provision_all(
     repos and gradebooks this one just made instead of creating them again and counting
     GitHub's refusals as failures. None is "we could not look", and each step below falls
     back to a probe of its own."""
-    if master_org == semester_org:
-        log_err("master-org and semester-org must differ.")
+    if course_org == semester_org:
+        log_err("course-org and semester-org must differ.")
         return 1, False
     # The assignment's own definition, read ONCE here: it answers the shape (below), and
     # it composes both the grading sheet's header and the Submission receipts issue's body further
     # down. Two reads of one memoised file is not expensive, but it is two places for the
     # answer to be spelt, which is how a handout came to provision a shape the sheet did
     # not expect.
-    gspec = load_grading_spec(master_org, template)
+    gspec = load_grading_spec(course_org, template)
     # The assignment's own grading_config.yml is the only declaration there is.
     group = gspec.is_group
     if group:
@@ -1788,7 +1788,7 @@ def provision_all(
     semester_template = ""
     if gspec.creates_repos and not dry_run:
         frozen = ensure_semester_template(
-            master_org, template, semester_org, slug, listing
+            course_org, template, semester_org, slug, listing
         )
         if frozen is None:
             log_err("could not create the semester assignment template.")
@@ -1818,7 +1818,7 @@ def provision_all(
         )
     else:
         released = _release_units(
-            master_org,
+            course_org,
             template,
             semester_template,
             semester_org,
@@ -1866,7 +1866,7 @@ def provision_all(
     sheet_written = False
     if changed or not gspec.creates_repos:
         sheet = sync_sheet(
-            master_org,
+            course_org,
             semester_org,
             sched,
             key,
@@ -1913,7 +1913,7 @@ def provision_all(
     # the repos are out, and Sync membership rewrites it on every schedule.yml push anyway.
     if changed:
         grades.sync_team_lock(
-            semester_org=semester_org, course_org=master_org, sched=sched
+            semester_org=semester_org, course_org=course_org, sched=sched
         )
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
@@ -1926,7 +1926,7 @@ def provision_all(
         # A tick that created or changed nothing has nothing to show the site: skipping the
         # sync here is what stops every handed-out assignment re-rendering the site hourly.
         if changed:
-            site.sync_site(master_org, semester_org)
+            site.sync_site(course_org, semester_org)
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(
             f"site sync failed after provisioning {slug} - the repos are handed out; the "
