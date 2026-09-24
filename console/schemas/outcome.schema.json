@@ -5,6 +5,9 @@
     "actor": {
       "type": "string"
     },
+    "block": {
+      "type": "string"
+    },
     "conclusion": {
       "enum": [
         "done",

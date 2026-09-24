@@ -28,6 +28,7 @@ from dsl_course import (
     scheduler,
     site_repo,
     status,
+    syllabus,
     sync_membership,
     team_formation,
     teardown,
@@ -72,7 +73,7 @@ def test_run_cli_with_a_bare_exit_code_has_no_summary(monkeypatch):
 
 
 def test_combine_adds_counts_and_joins_different_sentences():
-    text, counts, reasons, details, conclusion = console.combine(
+    text, counts, reasons, details, block, conclusion = console.combine(
         [
             Summary("Released 2 items from a to materials.", {"items": 2}),
             Summary(
@@ -80,6 +81,7 @@ def test_combine_adds_counts_and_joins_different_sentences():
                 {"items": 1},
                 [{"code": "X", "text": "y"}],
                 details=["b/x.md"],
+                block="## Sessions",
             ),
         ]
     )
@@ -89,14 +91,15 @@ def test_combine_adds_counts_and_joins_different_sentences():
     assert counts == {"items": 3}
     assert reasons == [{"code": "X", "text": "y"}]
     assert details == ["b/x.md"]
+    assert block == "## Sessions"
     assert conclusion is None
 
 
 def test_combine_keeps_a_conclusion_only_when_every_call_agrees():
     quiet = Summary("Nothing new.", conclusion="nothing_to_do")
     busy = Summary("Released 1 item.")
-    assert console.combine([quiet, quiet])[4] == "nothing_to_do"
-    assert console.combine([quiet, busy])[4] is None
+    assert console.combine([quiet, quiet])[5] == "nothing_to_do"
+    assert console.combine([quiet, busy])[5] is None
 
 
 # ------------------------------------------------------------------ end to end
@@ -186,6 +189,23 @@ def test_a_refused_derive_carries_its_reasons_and_file_list(
     assert body["conclusion"] == "failed"
     assert [r["code"] for r in body["reasons"]] == ["NO_SOLUTION_REGION"]
     assert body["details"] == ["solution/starter.py -> starter.py: 1 region(s)"]
+
+
+def test_the_session_list_reaches_the_outcome(monkeypatch, capsys, engine):
+    monkeypatch.setattr(
+        syllabus,
+        "main",
+        lambda: Summary("Built the session list: 1 session.", block="## Sessions\n"),
+    )
+    body = _run(
+        monkeypatch,
+        capsys,
+        "assignment.generate_syllabus",
+        preview=True,
+        args={"course_source_repo": "course-materials-f2026"},
+    )
+    assert body["conclusion"] == "previewed"
+    assert body["block"] == "## Sessions\n"
 
 
 def test_a_summary_can_say_a_run_had_nothing_to_do(monkeypatch, capsys, engine):

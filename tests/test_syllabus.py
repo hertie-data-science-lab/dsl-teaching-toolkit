@@ -155,6 +155,45 @@ def test_the_cli_succeeds_on_a_real_schedule(monkeypatch, capsys, wired):
     )
 
 
+def _argv(monkeypatch, *extra):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["x", "--course-org", "C", "--cohort-org", "H", "--course-source-repo", "cm"]
+        + list(extra),
+    )
+
+
+def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired):
+    # MA1: the console panel shows the generated list; it used to live in the run log only.
+    written = {}
+    monkeypatch.setattr(
+        syllabus,
+        "put_file",
+        lambda o, r, p, c, m: written.update({p: c.decode()}) or True,
+    )
+    _argv(monkeypatch)
+    preview = syllabus.main()
+    assert preview == 0 and written == {}
+    assert preview.block.startswith("## Course sessions and readings")
+    assert preview.counts == {"sessions": 2}
+    assert preview.text == "Built the session list: 2 sessions; nothing was written."
+    _argv(monkeypatch, "--write")
+    wrote = syllabus.main()
+    assert wrote == 0 and wrote.block == preview.block
+    assert wrote.block in written[syllabus.SYLLABUS_SESSIONS_FILE]
+    assert (
+        wrote.text == "Wrote the session list (2 sessions) to cm/SYLLABUS.sessions.md."
+    )
+
+
+def test_a_failed_write_still_shows_the_block(monkeypatch, wired):
+    monkeypatch.setattr(syllabus, "put_file", lambda *a: False)
+    _argv(monkeypatch, "--write")
+    out = syllabus.main()
+    assert out == 1 and out.block
+    assert [r["code"] for r in out.reasons] == ["WRITE_FAILED"]
+
+
 def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkeypatch):
     # Re-deriving the naming rule here took the title from the EARLIEST deploy touching a
     # session whether or not that entry declared one - so a readings-only or "Course opens"
