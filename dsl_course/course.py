@@ -299,7 +299,7 @@ def submit_shape(submit_via: str, visibility: str) -> str:
 # reassurance. `external` has none - it hands out no repo for a sentence to be about.
 SHAPE_NOTES = {
     "assignment-repo-private": (
-        "NB: this repo is private - only you and the teaching team can read it."
+        "NB: this repo is private - only you and the instructors can read it."
     ),
     "assignment-repo-public": (
         "NB: this repo is public, anyone on the internet can read it. Push to main as "
@@ -659,6 +659,39 @@ def coerce_date(value: object) -> date | None:
         except ValueError:
             return None
     return None
+
+
+# A semester's instructors file (decision 0012): ONE `instructors:` list, each entry with
+# a required `role:`. `OLD_PEOPLE_FILE` - a `people:` mapping of role -> list - is still
+# read for one release when the new file is absent, and is never written.
+INSTRUCTORS_FILE = "instructors.yml"
+OLD_PEOPLE_FILE = "people.yml"
+# `role:` value -> the role key every consumer groups by (the old file's own keys).
+INSTRUCTOR_ROLES = {
+    "instructor": "instructors",
+    "teaching_assistant": "teaching_assistants",
+}
+
+
+def people_by_role(meta: object) -> dict | None:
+    """A people block as `{role key: [entries]}`, from either shape: the new file's
+    `instructors:` list grouped by each entry's `role:` (an entry without a valid one is
+    left out - `sync_faculty` reports it), or the old `people:` mapping as it stands.
+    None when `meta` carries neither."""
+    if not isinstance(meta, dict):
+        return None
+    listed = meta.get("instructors")
+    if isinstance(listed, list):
+        grouped: dict[str, list] = {key: [] for key in INSTRUCTOR_ROLES.values()}
+        for entry in listed:
+            role = INSTRUCTOR_ROLES.get(
+                str(entry.get("role") or "") if isinstance(entry, dict) else ""
+            )
+            if role:
+                grouped[role].append(entry)
+        return grouped
+    people = meta.get("people")
+    return people if isinstance(people, dict) else None
 
 
 def active_today(start: str | date | None, end: str | date | None, today: str) -> bool:

@@ -156,11 +156,11 @@ def test_a_summary_becomes_the_outcome(monkeypatch, capsys, engine):
     monkeypatch.setattr(
         sync_membership,
         "main",
-        lambda: Summary("Staff access checked: 2 team memberships changed.", {"a": 2}),
+        lambda: Summary("Access checked: 2 team memberships changed.", {"a": 2}),
     )
     body = _run(monkeypatch, capsys, "access.check")
     assert body["conclusion"] == "done"
-    assert body["summary"] == "Staff access checked: 2 team memberships changed."
+    assert body["summary"] == "Access checked: 2 team memberships changed."
     assert body["counts"] == {"a": 2}
 
 
@@ -380,15 +380,15 @@ def test_reconcile_tallies_the_membership_changes(monkeypatch):
 def test_the_access_check_sentence():
     assert (
         sync_membership.access_summary({"added": 2, "removed": 1}, False).text
-        == "Staff access checked: 3 team memberships changed."
+        == "Access checked: 3 team memberships changed."
     )
     assert (
         sync_membership.access_summary({"added": 1, "removed": 0}, True).text
-        == "Staff access checked: 1 team membership would change."
+        == "Access checked: 1 team membership would change."
     )
     assert (
         sync_membership.access_summary({"added": 0, "removed": 0}, False).text
-        == "Staff access checked: nothing needed changing."
+        == "Access checked: nothing needed changing."
     )
 
 

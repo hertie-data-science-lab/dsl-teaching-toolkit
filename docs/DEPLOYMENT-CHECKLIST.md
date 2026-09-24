@@ -25,7 +25,7 @@ Accompanies the e2e [worked example](../example-course/).
 | `[required]` | 2. Bootstrap | course → semester | course `.github` → **Bootstrap semester** | `semester_org` | `welcome` (Join course / Join team issues) + `classroom-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
 | `[do this first]` | 3. The term plan | semester | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole term; site dates; grading deadlines |
 | `[required]` | 4. Roster | semester | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
-| *(optional)* | 5. Teaching team | semester | edit [`classroom-config/people.yml`](#peopleyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
+| *(optional)* | 5. Instructors | semester | edit [`classroom-config/instructors.yml`](#instructorsyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
 | `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
 | *(optional)* | 7. Ad-hoc release | course workflow, per semester | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
 | *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
@@ -67,7 +67,7 @@ people:
 `course_admins` is the **course-level** grant - declared once here, mirrored into every semester's
 own `course-admin` team, and never re-declared per year. Deleting an entry, or an `end` date
 passing, revokes on the next sync. This org's `instructors`/`teaching_assistants` keys are
-display-only cards; TAs are declared per semester in [`people.yml`](#peopleyml).
+display-only cards; TAs are declared per semester in [`instructors.yml`](#instructorsyml).
 Runbook: [05](05-manage-teaching-team.md).
 
 An admin's `email` is optional. When any admin has one, a fault in this file is mailed to
@@ -120,37 +120,37 @@ e.evans@students.hertie-school.org,Eve Evans,auditor,,,
 
 Add any other column you want (a registrar id, a lecture section, notes) - the engine ignores it and preserves it.
 
-### `people.yml`
+### `instructors.yml`
 
-Live example: [`example-course/cohort-org/people.yml`](../example-course/cohort-org/people.yml).
+Live example: [`example-course/cohort-org/instructors.yml`](../example-course/cohort-org/instructors.yml).
 
-`classroom-config/people.yml` - this semester's teaching team. Grants the semester's `instructors`
+`classroom-config/instructors.yml` - this semester's instructors, one list. Grants the semester's `instructors`
 team necessary access permissions at both the course- and semester-org levels, including push
 from the course org into that year's content repos (`instructors-<tag>`), and supplies the
-semester site's cards. `github_handle` and `email` are required on every instructor and TA
-entry; the rest are optional.
+semester site's cards. `github_handle`, `role` (`instructor` or `teaching_assistant`) and
+`email` are required on every entry; the rest are optional.
 
 ```yaml
-people:
-  instructors:
-    - github_handle: "janedoe"     # required, with `email` - everything else is optional
-      email: "jane@example.org"    # required, and private
-      name: "Prof. Jane Doe"       # site card fields
-      title: "Professor of ..."
-      photo: "/_images/pp/jane.jpg"  # see "Staff photos" below
-      url: "https://.../jane"
-      start: "2026-09-01"          # access auto-starts/lapses on these dates
-      end: "2027-01-31"
-  teaching_assistants:
-    - github_handle: "anOther"
-      email: "another@example.org"
+instructors:
+  - github_handle: "janedoe"     # required, with `role` and `email` - the rest is optional
+    role: instructor             # instructor | teaching_assistant
+    email: "jane@example.org"    # required, and private
+    name: "Prof. Jane Doe"       # site card fields
+    title: "Professor of ..."
+    photo: "/_images/pp/jane.jpg"  # see "Instructor photos" below
+    url: "https://.../jane"
+    start: "2026-09-01"          # access auto-starts/lapses on these dates
+    end: "2027-01-31"
+  - github_handle: "anOther"
+    role: teaching_assistant
+    email: "another@example.org"
 ```
 
-The **course** org's `dsl-course.yml` accepts the same `instructors`/`teaching_assistants`
-shape, but there it is **display-only** (public-site cards, no access) - course-wide admin is
+The **course** org's `dsl-course.yml` `people:` block takes `instructors`/`teaching_assistants`
+lists, but there it is **display-only** (public-site cards, no access) - course-wide admin is
 [`course_admins`](#dsl-courseyml).
 
-**Staff photos.** `photo` accepts either form:
+**Instructor photos.** `photo` accepts either form:
 
 | Form | Example | Use when |
 |---|---|---|

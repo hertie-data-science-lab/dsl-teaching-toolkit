@@ -191,7 +191,7 @@ class SemesterFacts:
     site_home: str | None = None
     site_last_update: datetime | None = None
     config_last_update: datetime | None = None
-    # Whether the instructors team holds exactly who people.yml grants. None = unread.
+    # Whether the instructors team holds exactly who instructors.yml grants. None = unread.
     staff_synced: bool | None = None
     outcomes: list[dict] = field(default_factory=list)  # parsed dsl.outcome/1 files
 
@@ -244,8 +244,9 @@ STOPS = {
     schedule.SCHEDULE_PATH: (
         "That entry is not scheduled: nothing is released, handed out or marked from it."
     ),
-    sync_faculty.SEMESTER_PEOPLE_PATH: (
-        "This person has no access and is not told about problems."
+    **dict.fromkeys(
+        sync_faculty.SEMESTER_PEOPLE_PATHS,
+        "This person has no access and is not told about problems.",
     ),
     roster.ROSTER_PATH: (
         "The whole roster is skipped: nobody new can join or is sent a code."
@@ -256,10 +257,10 @@ STOPS = {
     grades.SHEETS_DIR: "That sheet is not updated, and none of its marks are returned.",
     grades.GRADING_FILE: "Marking uses the toolkit's default for that value.",
     COURSE_CONFIG: (
-        "Automation skips this course: staff access and semesters are not updated."
+        "Automation skips this course: instructor access and semesters are not updated."
     ),
     SEMESTERS_PATH: (
-        "Automation skips this course: staff access and semesters are not updated."
+        "Automation skips this course: instructor access and semesters are not updated."
     ),
 }
 
@@ -284,8 +285,9 @@ _FILES = {
     schedule.SCHEDULE_PATH: _Where(
         "schedule", "semester", "K4", "schedule", "SCHEDULE"
     ),
-    sync_faculty.SEMESTER_PEOPLE_PATH: _Where(
-        "people", "semester", "K3", "staff", "PEOPLE"
+    **dict.fromkeys(
+        sync_faculty.SEMESTER_PEOPLE_PATHS,
+        _Where("people", "semester", "K3", "staff", "PEOPLE"),
     ),
     roster.ROSTER_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
     teams.TEAMS_PATH: _Where("teams", "semester", "K5", "teams", "TEAMS"),
@@ -384,7 +386,7 @@ def _subject(fault: ConfigFault, filed: _Where, entry: str) -> str:
     person = _PERSON.match(fault.where)
     if person:
         role = _ROLES.get(person[1], "Entry")
-        where = "course details" if filed.kind == "course" else "people.yml"
+        where = "course details" if filed.kind == "course" else "instructors.yml"
         return f"{role} {int(person[2]) + 1} in {where}"
     row = _ROW.match(fault.where)
     if row and filed.kind in ("roster", "teams"):
@@ -397,7 +399,7 @@ def _subject(fault: ConfigFault, filed: _Where, entry: str) -> str:
     if filed.kind == "template":
         return f"The {entry} template's settings"
     return {
-        "people": "people.yml",
+        "people": "instructors.yml",
         "roster": "The roster",
         "teams": "The teams file",
         "course": "Course details",
@@ -1021,8 +1023,8 @@ def _no_email_problem(
             "id": "people:staff:NO_EMAIL",
             "scope": "semester",
             "stage": "K3",
-            "text": f"{len(missing)} staff entr{'y' if len(missing) == 1 else 'ies'} in "
-            f"people.yml ha{'s' if len(missing) == 1 else 've'} no email.",
+            "text": f"{len(missing)} instructor entr{'y' if len(missing) == 1 else 'ies'} in "
+            f"instructors.yml ha{'s' if len(missing) == 1 else 've'} no email.",
             "stops": "They are not told about problems in this semester.",
             "fix": {
                 "repo": f"{semester_org}/{schedule.CONFIG_REPO}",
@@ -1094,7 +1096,8 @@ def semester_inputs(facts: SemesterFacts, course: CourseFacts) -> dict[str, str 
     paths = facts.config_paths
     return {
         schedule.SCHEDULE_PATH: paths.get(schedule.SCHEDULE_PATH),
-        sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH),
+        sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH)
+        or paths.get(sync_faculty.OLD_PEOPLE_FILE),
         roster.ROSTER_PATH: paths.get(roster.ROSTER_PATH),
         teams.TEAMS_PATH: paths.get(teams.TEAMS_PATH),
         grades.SHEETS_DIR: paths.get(grades.SHEETS_DIR),
@@ -1133,7 +1136,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     Stage predicates (lifecycle, semester stages):
     - K1 the org resolves (`app_installed` is a stub until decision 0002);
     - K2 classroom-config, welcome and the site repo exist, and the course registry lists it;
-    - K3 people.yml is read, grants at least one instructor, and every entry has an email;
+    - K3 instructors.yml is read, grants at least one instructor, and every entry has an email;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
     - K5 the roster has rows and every row has been sent a code;
     - K6 the site repo exists and its home page is written;
@@ -1369,7 +1372,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         facts.site_last_update = _last_commit_at(semester_org, site)
     moments = [
         _last_commit_at(semester_org, schedule.CONFIG_REPO, p)
-        for p in (schedule.SCHEDULE_PATH, sync_faculty.SEMESTER_PEOPLE_PATH)
+        for p in (schedule.SCHEDULE_PATH, *sync_faculty.SEMESTER_PEOPLE_PATHS)
     ]
     facts.config_last_update = max((m for m in moments if m), default=None)
     members = get_team_members(semester_org, INSTRUCTORS_TEAM)

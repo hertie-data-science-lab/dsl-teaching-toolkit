@@ -493,7 +493,7 @@ def patch_note(paths: list[str], on: date) -> str:
         else f"updated {len(paths)} files - {listed} -"
     )
     return (
-        f"The teaching team {what} in this repository on {on}; pull before you continue. "
+        f"The instructors {what} in this repository on {on}; pull before you continue. "
         f"Your own commits are untouched."
     )
 
@@ -612,7 +612,7 @@ def patch_one_repo(
         semester_org,
         repo,
         write,
-        f"fix: the teaching team updated {', '.join(sorted(write))}",
+        f"fix: the instructors updated {', '.join(sorted(write))}",
         person=True,
     ):
         return PATCH_FAILED, []
@@ -1715,7 +1715,7 @@ def provision_all(
                 arrives = (
                     "the first team forms"
                     if self_select
-                    else "the teaching team writes them into teams.csv"
+                    else "the instructors write them into teams.csv"
                 )
                 log(
                     f"  [wait] no teams for `{key}` in {semester_org} yet - the handout "
@@ -1726,7 +1726,7 @@ def provision_all(
                 "students self-select via the welcome 'Join team' issue, or seed the CSV"
                 if self_select
                 else "this assignment allocates teams (`team_formation: assigned`), so "
-                "the teaching team fills the CSV - the Join-team form refuses it"
+                "the instructors fill the CSV - the Join-team form refuses it"
             )
             log_err(
                 f"no teams for `{key}` in {semester_org}/classroom-config/teams.csv - {how}."

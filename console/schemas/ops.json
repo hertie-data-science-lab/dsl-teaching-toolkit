@@ -424,7 +424,7 @@
       },
       "counts_doc": "",
       "doc": "docs/05-manage-teaching-team.md",
-      "help": "Check staff and student access against people.yml, the roster and teams.",
+      "help": "Check instructor and student access against instructors.yml, the roster and teams.",
       "name": "access.check",
       "preview": true,
       "required_team": "instructors",

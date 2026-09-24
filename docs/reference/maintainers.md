@@ -49,7 +49,7 @@ breaks a live link that faculty click:
 |---|---|
 | `docs/01-new-course-org.md` | `config_digest.COURSE` |
 | `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
-| `docs/05-manage-teaching-team.md` | `templates/classroom-config/people.yml`, `config_digest.PEOPLE` |
+| `docs/05-manage-teaching-team.md` | `templates/classroom-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
 | `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/classroom-config/schedule.yml`, `templates/classroom-config/validate-schedule.yml` |
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
@@ -299,7 +299,7 @@ its annotation instead of emailing them
 (`tests/test_validate_schedule_template.py` enforces it).
 
 Nothing converges a semester's addresses either. `email:` is required on every instructor and
-TA entry in a semester's `classroom-config/people.yml`, and that file is INSTRUCTOR-OWNED, so
+TA entry in a semester's `classroom-config/instructors.yml`, and that file is INSTRUCTOR-OWNED, so
 no refresh can fill it in: until somebody edits it by hand the whole feature is inert on
 that semester - every fault still opens its digest issue and still @mentions the instructors
 team, and no email goes anywhere. `Check semester setup`'s C7 row counts the entries without
@@ -462,7 +462,7 @@ with the faults would never match and every run would open a new issue, so these
 | issue title | file | where it lives |
 | --- | --- | --- |
 | `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | semester `classroom-config` |
-| `people.yml has entries the sync cannot use` | `people.yml` | semester `classroom-config` |
+| `people.yml has entries the sync cannot use` | `instructors.yml` | semester `classroom-config` |
 | `students.csv has rows the toolkit cannot use` | `students.csv` | semester `classroom-config` |
 | `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `classroom-config` |
 | `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `classroom-config` |
@@ -490,7 +490,7 @@ half a dozen assignments in one afternoon.
 **Recipients** are the committer of the faulty line, by blame of the file at that line (for a
 CSV, the actor who pushed it, skipping the bot). Any addressee who is a TA puts the
 instructors on Cc; nobody identifiable falls back to every instructor, and a semester whose
-`people.yml` holds no address at all falls further - to `DSL_COURSE_ADMIN_EMAILS`, then to the
+`instructors.yml` holds no address at all falls further - to `DSL_COURSE_ADMIN_EMAILS`, then to the
 maintainer, with the run log naming which fallback it used and never an address. The
 course-level digest goes to `DSL_COURSE_ADMIN_EMAILS` (see
 [Secrets an org carries](#secrets-an-org-carries)) with the maintainer copied from the first
@@ -501,7 +501,7 @@ handle - in the mail, the issue and the log alike.
 **What still reds an unattended run.** Nothing above does, and there is no exception. A
 content fault is delivered by its digest issue and the mail beside it, never by an exit
 code: Sync membership skips the semester it cannot read (`sync_membership._CONTENT_FAULT` -
-`faults.Unusable` plus a YAML error), skips a semester with no `people.yml` and no
+`faults.Unusable` plus a YAML error), skips a semester with no `instructors.yml` and no
 `students.csv`, and does not count a `teams.csv` handle that is not on the roster; a course
 file it cannot read reconciles nothing at all and still exits 0; a `schedule.yml` that does
 not parse is one fault on the file, not a red scheduler tick; Send enrolment codes is green
@@ -549,7 +549,7 @@ gaps of 13 hours, so its cron is the **backstop** and not the clock. The primary
 systemd timer on the lab server ds01 - `dsl-scheduled-release.timer` running
 `scripts/maintenance/dsl-scheduled-release.sh`, both in `hertie-data-science-lab/ds01-infra` - which
 POSTs `repository_dispatch: scheduled-release` to the `.github` repo of every `dsl-course-hub`
-org at :00/:15/:30/:45. A push to a semester's `schedule.yml`, `people.yml`, `students.csv` or
+org at :00/:15/:30/:45. A push to a semester's `schedule.yml`, `instructors.yml`, `students.csv` or
 `teams.csv` dispatches the same event with `driver: classroom-config`, and that run releases
 into **that semester only** (checked against the registry) and asks Sync site for any render
 instead of pushing the site itself. Each driver guards the other; the cron and ds01 runs
@@ -700,10 +700,13 @@ hand migration of the live orgs' files). Nothing may write an old spelling again
 | `schedule.yml` `cohort_dest_repo`, `cohort_dest_path` | `semester_dest_repo`, `semester_dest_path` | assignment and `deploy:` entries | next release |
 | `dsl-course.yml` `cohort_defaults:` | `semester_defaults:` | course org | next release |
 | `status.json` `cohort`, `cohorts`, `cohort.term`, `cohort.term_label` | `semester`, `semesters`, `semester.key`, `semester.label` | `dsl.status/1` (the console follows in WP-A3) | now |
+| `classroom-config/people.yml` (`people:` -> `instructors:`/`teaching_assistants:` lists) | `classroom-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` required) | every reader (`sync_faculty`, the site); a fault names the move; the dispatchers watch both | next release |
+| copy "staff", "teaching team" | "instructors" | logs, mails, forms, docs | now |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,
-`check-cohort-setup.yml` - only their display names changed), the digest issue titles, the
+`check-cohort-setup.yml` - only their display names changed), the digest issue titles (so `people.yml has entries the sync cannot use` keeps its old
+word), the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, and the console's op ids and op
 scope (`cohort.*`, renamed with the console source).
 

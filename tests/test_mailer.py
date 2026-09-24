@@ -388,7 +388,7 @@ def test_a_plain_three_tuple_is_still_a_message(monkeypatch):
 
 def test_a_group_is_counted_not_named_in_the_run_log(monkeypatch, capsys):
     # Every workflow runs in a PUBLIC repo, so its log is world-readable - and a mask is
-    # not anonymity: `a***@x.edu` beside a semester's people.yml is a name.
+    # not anonymity: `a***@x.edu` beside a semester's instructors.yml is a name.
     _payloads(monkeypatch)
     mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
     out = capsys.readouterr().out

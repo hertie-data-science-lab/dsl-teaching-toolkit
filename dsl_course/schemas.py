@@ -22,6 +22,8 @@ from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
     FORMATS,
+    INSTRUCTOR_ROLES,
+    INSTRUCTORS_FILE,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -50,7 +52,6 @@ from .schedule import (
     KNOWN_RELEASE_TYPES,
     KNOWN_TOP_LEVEL,
 )
-from .sync_faculty import TEACHING_ROLES
 from .teams import FIELDS as TEAMS_FIELDS
 
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
@@ -60,9 +61,10 @@ DEFAULT_OUT = Path("console/schemas")
 # named here is a string: the parsers read dates, paths and titles as text.
 _FLAGS = {"tbc", "show_on_site"}
 _EVENT_TYPES = ("exam", "special_event")
-# people.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
+# instructors.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
 PEOPLE_ENTRY_KEYS = (
     "github_handle",
+    "role",
     "email",
     "name",
     "title",
@@ -72,7 +74,7 @@ PEOPLE_ENTRY_KEYS = (
     "end",
     "show_email",
 )
-PEOPLE_REQUIRED = ("github_handle", "email")
+PEOPLE_REQUIRED = ("github_handle", "role", "email")
 COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
 COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url")
 # dsl-course.yml keys beyond `people`, `assignment_defaults` and `semester_defaults`.
@@ -396,12 +398,21 @@ def schedule_schema() -> dict:
     return _doc("classroom-config/schedule.yml", _obj(top))
 
 
-def people_schema() -> dict:
+def instructors_schema() -> dict:
     entry = _obj(
-        _keys(PEOPLE_ENTRY_KEYS, {"show_email": {"type": "boolean"}}), PEOPLE_REQUIRED
+        _keys(
+            PEOPLE_ENTRY_KEYS,
+            {
+                "show_email": {"type": "boolean"},
+                "role": {"type": "string", "enum": list(INSTRUCTOR_ROLES)},
+            },
+        ),
+        PEOPLE_REQUIRED,
     )
-    roles = {role: {"type": "array", "items": entry} for role in TEACHING_ROLES}
-    return _doc("classroom-config/people.yml", _obj({"people": _obj(roles)}))
+    return _doc(
+        f"classroom-config/{INSTRUCTORS_FILE}",
+        _obj({"instructors": {"type": "array", "items": entry}}),
+    )
 
 
 def _csv_schema(title: str, fields, required, overrides: dict | None = None) -> dict:
@@ -493,7 +504,7 @@ def all_schemas() -> dict[str, dict]:
         "status.schema.json": status_schema(),
         "ops.json": ops_json(),
         "schedule.schema.json": schedule_schema(),
-        "people.schema.json": people_schema(),
+        "instructors.schema.json": instructors_schema(),
         "students.schema.json": students_schema(),
         "teams.schema.json": teams_schema(),
         "grading_config.schema.json": grading_config_schema(),

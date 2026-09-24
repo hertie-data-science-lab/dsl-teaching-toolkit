@@ -771,7 +771,7 @@ def _never():
 
 
 def test_a_tick_with_nothing_to_say_reuses_the_logins_the_body_recorded(gh):
-    # The answer costs a blame query, a people.yml read and a commit lookup per repo,
+    # The answer costs a blame query, a instructors.yml read and a commit lookup per repo,
     # every fifteen minutes for as long as the fault stands.
     fault = _f("releases.a", timedelta(hours=20))
     fake = gh(_open(fault, mention=["JanG"]))

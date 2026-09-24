@@ -54,7 +54,7 @@ def test_is_repo_root_knows_every_whole_repo_spelling():
 
 
 def test_active_today_accepts_date_objects_as_bounds():
-    # An unquoted `start: 2026-09-01` in people.yml parses to a datetime.date, not a
+    # An unquoted `start: 2026-09-01` in instructors.yml parses to a datetime.date, not a
     # string; `today < start` used to raise TypeError: str < date.
     from datetime import date, datetime
 

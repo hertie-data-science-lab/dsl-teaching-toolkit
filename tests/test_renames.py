@@ -8,8 +8,20 @@ import json
 import sys
 
 import pytest
+import yaml
 
-from dsl_course import bootstrap_course, discovery, list_orgs, schedule, status
+from dsl_course import (
+    bootstrap_course,
+    discovery,
+    list_orgs,
+    schedule,
+    schemas,
+    site,
+    status,
+    sync_faculty,
+    welcome,
+)
+from dsl_course.course import INSTRUCTOR_ROLES, people_by_role
 from dsl_course.ops.request import RequestError, parse_request
 
 # ------------------------------------------------------------------ semester (cohort)
@@ -200,3 +212,83 @@ def test_bootstrap_reads_the_old_cohort_defaults_block(monkeypatch):
         lambda org: {"cohort_defaults": {"timezone": "Europe/London"}},
     )
     assert bootstrap_course.course_semester_defaults("C")["timezone"] == "Europe/London"
+
+
+# --------------------------------------------------------- instructors.yml (people.yml)
+
+NEW_INSTRUCTORS = {
+    "instructors": [
+        {"github_handle": "prof", "role": "instructor", "email": "p@x.org"},
+        {"github_handle": "ta", "role": "teaching_assistant", "email": "t@x.org"},
+        {"github_handle": "nobody", "email": "n@x.org"},
+    ]
+}
+OLD_PEOPLE = {
+    "people": {
+        "instructors": [{"github_handle": "old-prof", "email": "o@x.org"}],
+        "teaching_assistants": [],
+    }
+}
+
+
+def test_the_instructors_list_is_grouped_by_role_and_a_missing_role_is_a_fault():
+    found: list = []
+    faculty = sync_faculty.parse_faculty_from_meta(NEW_INSTRUCTORS, found)
+    assert [p["github_handle"] for p in faculty["instructors"]] == ["prof"]
+    assert [p["github_handle"] for p in faculty["teaching_assistants"]] == ["ta"]
+    assert [(f.where, f.field) for f in found] == [("instructors[2]", "role")]
+
+
+def _semester_files(monkeypatch, files: dict[str, dict]) -> None:
+    monkeypatch.setattr(
+        sync_faculty,
+        "load_yaml_config",
+        lambda org, repo, path, lines=False: files.get(path),
+    )
+
+
+def test_the_old_people_file_is_read_with_a_fault_naming_the_new_one(monkeypatch):
+    _semester_files(monkeypatch, {"people.yml": OLD_PEOPLE})
+    found: list = []
+    faculty = sync_faculty.read_semester_people("Sem", found)
+    assert [p["github_handle"] for p in faculty["instructors"]] == ["old-prof"]
+    assert [f.file for f in found] == ["people.yml"]
+    assert "renamed to instructors.yml" in found[0].what
+    assert sync_faculty.load_semester_faculty("Sem")["instructors"][0][
+        "github_handle"
+    ] == ("old-prof")
+
+
+def test_the_new_instructors_file_wins_over_the_old_one(monkeypatch):
+    _semester_files(
+        monkeypatch, {"instructors.yml": NEW_INSTRUCTORS, "people.yml": OLD_PEOPLE}
+    )
+    found: list = []
+    faculty = sync_faculty.read_semester_people("Sem", found)
+    assert [p["github_handle"] for p in faculty["instructors"]] == ["prof"]
+    assert all(f.file == "instructors.yml" for f in found)
+
+
+def test_the_site_cards_read_either_file(monkeypatch):
+    files = {"people.yml": OLD_PEOPLE}
+    monkeypatch.setattr(site, "yaml_file", lambda org, repo, path: files.get(path, {}))
+    assert site._instructors_meta("Sem") == (OLD_PEOPLE, "people.yml")
+    files["instructors.yml"] = NEW_INSTRUCTORS
+    meta, path = site._instructors_meta("Sem")
+    assert path == "instructors.yml"
+    grouped = people_by_role(meta)
+    assert [p["github_handle"] for p in grouped["teaching_assistants"]] == ["ta"]
+
+
+def test_a_new_semester_is_seeded_instructors_yml_and_never_people_yml():
+    assert "instructors.yml" in welcome.CLASSROOM_SCAFFOLDS
+    assert "people.yml" not in welcome.CLASSROOM_SCAFFOLDS
+    assert "people.yml.sample" not in welcome.CLASSROOM_SAMPLES
+    shipped = yaml.safe_load(welcome.example_semester_file("instructors.yml"))
+    assert {p["role"] for p in shipped["instructors"]} == set(INSTRUCTOR_ROLES)
+
+
+def test_the_exported_instructors_schema_requires_a_role():
+    entry = schemas.instructors_schema()["properties"]["instructors"]["items"]
+    assert "role" in entry["required"]
+    assert entry["properties"]["role"]["enum"] == list(INSTRUCTOR_ROLES)

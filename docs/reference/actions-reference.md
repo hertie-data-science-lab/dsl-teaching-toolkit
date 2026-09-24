@@ -20,7 +20,7 @@ grants it: [`access-reference.md`](access-reference.md).
 | **Refresh actions** | Re-seed the run-from-repo workflows, propagate the repo secret, repopulate every dropdown, rebuild the profile READMEs. No inputs. Also runs itself daily, so every org converges on the toolkit tier its course org runs within 24h without anyone clicking. _(All DSL orgs at once: [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml).)_ |
 | **Check semester setup** | Read-only per-semester checklist of what's configured and what's missing, with an edit link for each gap. The last two rows say which of the semester's fault issues are open, so the table agrees with the mail in your inbox. |
 | **Console** | No button to press: runs what the Instructor Console asks for, one request per run. A run that breaks (not an op that says no) files a *Console is failing* issue and emails the maintainer; the next good run closes it. |
-| **Sync membership** | Reconcile `students`/`auditors` teams (`students.csv`), project teams (`teams.csv`) and instructor/course-admin access (`people.yml`, `dsl-course.yml`), and rewrite `assignments.lock.yml` - the generated mirror the **Join team** form reads (hence the `schedule.yml` trigger). Automatic on push to any of those files, plus a daily cron - run it by hand only to apply a `start`/`end` date that rolled over without an edit. A push to the course org's own `dsl-course.yml` or `cohort-courses-pages.yml` instead checks just those two and reports them; a semester whose files it cannot use is skipped and reported, not failed. See [05](../05-manage-teaching-team.md), [`access-reference.md`](access-reference.md). |
+| **Sync membership** | Reconcile `students`/`auditors` teams (`students.csv`), project teams (`teams.csv`) and instructor/course-admin access (`instructors.yml`, `dsl-course.yml`), and rewrite `assignments.lock.yml` - the generated mirror the **Join team** form reads (hence the `schedule.yml` trigger). Automatic on push to any of those files, plus a daily cron - run it by hand only to apply a `start`/`end` date that rolled over without an edit. A push to the course org's own `dsl-course.yml` or `cohort-courses-pages.yml` instead checks just those two and reports them; a semester whose files it cannot use is skipped and reported, not failed. See [05](../05-manage-teaching-team.md), [`access-reference.md`](access-reference.md). |
 
 ## Release
 
@@ -83,7 +83,7 @@ again after a week - then the issue stands and says no more.
 
 **Who gets it.** Whoever git says edited that line, or pushed that CSV. A TA's email copies
 the semester's instructors; if git can name nobody, the whole teaching team is emailed.
-Addresses come from `email:` in `classroom-config/people.yml`; if nobody there has one, it
+Addresses come from `email:` in `classroom-config/instructors.yml`; if nobody there has one, it
 goes to the course admins, and to the toolkit maintainer if the course names none. A row or
 line and a column are named - never a cell value, never a student.
 

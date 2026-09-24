@@ -2998,7 +2998,7 @@ ARCHIVES = date(2027, 2, 16)
 def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=()):
     """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
 
-    Routing is stubbed too: it reads blame and people.yml over the API, and what these
+    Routing is stubbed too: it reads blame and instructors.yml over the API, and what these
     tests are about is the exit code and what the phases are handed."""
     seen: dict = {}
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: faults)
@@ -3637,7 +3637,7 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
     rc, synced, mailed = _config_preflight(monkeypatch)
     assert rc == 0
     everything = {
-        "people.yml",
+        "instructors.yml",
         "students.csv",
         "teams.csv",
         "grading_sheets/",
@@ -3661,7 +3661,7 @@ def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
         monkeypatch, roster_raises=RuntimeError("rate limited")
     )
     assert "students.csv" not in synced and "students.csv" not in mailed
-    assert "people.yml" in synced  # the others are still checked
+    assert "instructors.yml" in synced  # the others are still checked
 
 
 def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch):
@@ -4116,7 +4116,7 @@ def test_the_mail_goes_once_however_many_ticks_the_fortnight_has(monkeypatch):
 
 
 def test_a_notice_whose_mail_never_went_offers_it_again(monkeypatch):
-    # An org with no address in people.yml, or with no mail transport wired up, gets a
+    # An org with no address in instructors.yml, or with no mail transport wired up, gets a
     # `False` - and that must NOT be recorded as "mailed", or the tick after somebody
     # fixes the transport would read the mark and stay quiet for the rest of the
     # fortnight. The issue is filed either way; only the mark waits for a real send.

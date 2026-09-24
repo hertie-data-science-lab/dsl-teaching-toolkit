@@ -226,7 +226,7 @@ _TIMEOUT_GRADING = 120
 #
 #   05:27  Refresh actions          converge workflows + secrets
 #   05:58  Publish course website   public open-courseware site
-#   06:13  Sync membership          teams from people.yml
+#   06:13  Sync membership          teams from instructors.yml
 #   06:41  Sync site                semester sites (reads those teams)
 #
 # Spacing is nominal only - a late delivery can still overlap - so it is the per-workflow
@@ -521,7 +521,7 @@ _CRON_NOTICE_TEMPLATE = (
           # because broken infrastructure is not the teaching staff's problem.
           # Teaching staff read these too (course-admin is mentioned below), and a
           # broken run is not theirs to fix - so the note says who is already on it.
-          note=$(printf '%s\\nThe toolkit maintainer has been emailed the log - nothing for teaching staff to do.\\n' "$note")
+          note=$(printf '%s\\nThe toolkit maintainer has been emailed the log - nothing for the instructors to do.\\n' "$note")
           body=$(printf '%s\\ncc @%s/course-admin\\n' "$note" "${REPO%%/*}")
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
@@ -1017,7 +1017,7 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
     Faculty always reconciles - split by role: course_admins (from THIS org's
     declared `people:` block) into the course org + every semester's own course-admin
     team; and, for whichever semester is in scope, that semester's own instructors/TAs
-    (from its classroom-config/people.yml) into its own instructors team + a
+    (from its classroom-config/instructors.yml) into its own instructors team + a
     course-org instructors-<tag> team. Roster (students.csv) + project teams
     (teams.csv) additionally reconcile for whichever semester is in scope. Fully
     automatic, including removals (no --prune flag - config is the live truth):
@@ -1025,7 +1025,7 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
     - push to this file's own dsl-course.yml -> course_admins only (no single semester
       implied - but still applied to every semester's own course-admin team)
     - repository_dispatch (from a semester's classroom-config dispatcher on push to its
-      students.csv/teams.csv/people.yml) -> course_admins + that one semester's
+      students.csv/teams.csv/instructors.yml) -> course_admins + that one semester's
       instructors/TAs; one whose payload says `all_semesters: true` and names no semester
       (the ds01 timer's hourly dispatch) -> EVERY registered semester, like the cron
     - daily cron -> course_admins + EVERY registered semester (roster/teams/instructors,
@@ -1444,7 +1444,7 @@ on:
 # The semester a run is SCOPED to, or ''. Only a classroom-config dispatcher's push names one
 # (`templates/classroom-config/dispatch-scheduled-release.yml` sends driver=classroom-config
 # and its own org as semester_org). The run releases into the one semester that changed and
-# hands any site render to Sync site's queue - which a schedule.yml / people.yml / teams.csv
+# hands any site render to Sync site's queue - which a schedule.yml / instructors.yml / teams.csv
 # push has usually just started as well - rather than racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
 # (driver=ds01, no semester), the button - walks every semester as before. The payload is
 # written by whoever holds a semester's bot token, so the scheduler checks the name against
@@ -1893,7 +1893,7 @@ on:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
-{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else private", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the instructors; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else private", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -2036,7 +2036,7 @@ def render_sync_site(semester_orgs: list[str]) -> str:
     - push to this .github repo's dsl-course.yml -> re-sync EVERY semester (the course name /
       instructor cards feed every semester site).
     - repository_dispatch `sync-site` (fired by the semester's classroom-config dispatcher on
-      push to schedule.yml/people.yml) -> re-sync that one semester (or all, if the payload
+      push to schedule.yml/instructors.yml) -> re-sync that one semester (or all, if the payload
       names none).
     - daily cron -> re-sync every semester (the catch-all: a direct edit to a released
       content repo can't fire a dispatch, because DSL_BOT_TOKEN is deliberately not

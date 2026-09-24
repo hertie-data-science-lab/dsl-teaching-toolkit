@@ -70,7 +70,7 @@ CONTRACT_EXAMPLE = {
     "schema": "dsl.status/1",
     "inputs": {
         "schedule.yml": "<blob sha>",
-        "people.yml": "...",
+        "instructors.yml": "...",
         "students.csv": "...",
         "teams.csv": "...",
         "grading_sheets": "<sha of the directory tree>",
@@ -246,7 +246,7 @@ def _semester(**over) -> status_json.SemesterFacts:
         listing=listing,
         config_paths={
             "schedule.yml": "5c4ed",
-            "people.yml": "9e091",
+            "instructors.yml": "9e091",
             "students.csv": "57ude",
             "teams.csv": "7ea45",
             "grading_sheets": "5hee7",
@@ -559,7 +559,7 @@ def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
     doc = _render()
     assert doc["inputs"] == {
         "schedule.yml": "5c4ed",
-        "people.yml": "9e091",
+        "instructors.yml": "9e091",
         "students.csv": "57ude",
         "teams.csv": "7ea45",
         "grading_sheets": "5hee7",
@@ -895,7 +895,7 @@ def test_no_problem_sentence_carries_markdown_or_a_null_stage():
 def test_a_derived_sentence_names_its_subject_in_the_consoles_words():
     by_id = {p["id"]: p for p in _problems(_many_faults())}
     ta = by_id["people:people.teaching_assistants-0:PEOPLE"]
-    assert ta["text"] == "Teaching assistant 1 in people.yml: no usable email."
+    assert ta["text"] == "Teaching assistant 1 in instructors.yml: no usable email."
     assert ta["stops"] == (
         "Access is still granted, but no notification reaches this person."
     )
@@ -1030,7 +1030,7 @@ def test_a_stage_that_is_not_done_says_why():
     doc = _render(course, _semester(people=ta_only))
     assert doc["semester"]["stages"]["K3"] == "todo"
     assert doc["semester"]["stage_why"]["K3"] == (
-        "No instructor is declared in people.yml yet."
+        "No instructor is declared in instructors.yml yet."
     )
     assert doc["course"]["stages"]["C4"] == "todo"
     assert doc["course"]["stage_why"]["C4"] == (

@@ -22,7 +22,7 @@ release anything there. Being a course admin, conversely, grants nothing central
 | Right | Declared in | Level | Reaches |
 |---|---|---|---|
 | **Admin**, course-wide | course org `.github/dsl-course.yml` → `people:` `course_admins` (or the `admin` input at bootstrap) | **course** - once, for all years | `course-admin` team on the course org **and mirrored into every semester org** |
-| **Push**, one year's content | that semester's `classroom-config/people.yml` → `instructors` / `teaching_assistants` | **semester** - per year | semester org `instructors` team + course org `instructors-<tag>` team |
+| **Push**, one year's content | that semester's `classroom-config/instructors.yml` → `instructors` / `teaching_assistants` | **semester** - per year | semester org `instructors` team + course org `instructors-<tag>` team |
 | **Read** on released materials | `classroom-config/students.csv` | semester | `students` or `auditors` team (`role` column) |
 | **Write** on a shared project repo | `classroom-config/teams.csv` | semester | `<assignment>-<team>` team |
 
@@ -41,7 +41,7 @@ people: course_admins`"] -->|Sync membership| ca["`course-admin team (course org
 admin on .github → every workflow, all semesters`"]
   ca -->|mirrored down| cca["`course-admin team
 (every semester org)`"]
-  py["`SEMESTER org · classroom-config/people.yml
+  py["`SEMESTER org · classroom-config/instructors.yml
 instructors + teaching_assistants`"] -->|Sync membership| ci["`instructors team (semester org)
 classroom-config + welcome`"]
   py -->|synced upward| itag["`instructors-<tag> team (course org)
@@ -146,8 +146,8 @@ a *population* (who teaches at DSL); the other three name a *role in one course*
 | Team | Lives in | Declared by | Grants |
 | --- | --- | --- | --- |
 | `instructors` | **`hertie-data-science-lab`** | nothing - manual | write on the toolkit → run **Bootstrap Course Org**. No access inside any course. |
-| `instructors` | a **semester** org | that semester's `classroom-config/people.yml` | semester-org membership for that year's instructors/TAs; reconciled |
-| `instructors-<tag>` | the **course** org | the same `people.yml` (tag = e.g. `f2026`) | push on `.github` + that tag's content repos, i.e. the workflows for that semester; reconciled |
+| `instructors` | a **semester** org | that semester's `classroom-config/instructors.yml` | semester-org membership for that year's instructors/TAs; reconciled |
+| `instructors-<tag>` | the **course** org | the same `instructors.yml` (tag = e.g. `f2026`) | push on `.github` + that tag's content repos, i.e. the workflows for that semester; reconciled |
 | `instructors` | the **course** org (generic) | nothing - manual | a rare, permanent escape hatch |
 
 The central one is the odd kind out: it is the only one that grants **provisioning** and the only
@@ -156,7 +156,7 @@ one that reaches nothing inside a course. See
 
 The generic course-org `instructors` team is the other exception: a manual add sticks until manually
 removed, but it is **invisible to every config file and to Check semester setup**. Use it sparingly and
-record who's on it elsewhere. Route FA (faculty assistant) and TA access through `people.yml`.
+record who's on it elsewhere. Route FA (faculty assistant) and TA access through `instructors.yml`.
 
 ## Rules that catch people out
 
@@ -191,7 +191,7 @@ made.
 
 - [05 Manage the teaching team](../05-manage-teaching-team.md) - the runbook for changing any of this.
 - [`DEPLOYMENT-CHECKLIST.md`](../DEPLOYMENT-CHECKLIST.md) - field-by-field schemas for `dsl-course.yml`
-  and `people.yml`.
+  and `instructors.yml`.
 - [`../../docs-admin-arch/central-admin.md`](../../docs-admin-arch/central-admin.md) - central DSL-org
   authority: who can create orgs, the bot and its rotation, the org inventory.
 - [`../../docs-admin-arch/admin-setup.md`](../../docs-admin-arch/admin-setup.md) - the bot account, its

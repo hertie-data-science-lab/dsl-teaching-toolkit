@@ -9,7 +9,7 @@ name: Dispatch scheduled release
 # handout, freeze or solution moment takes effect NOW rather than at the next cron tick.
 #
 # The other three files are here because the same run checks them: the scheduler's
-# pre-flight reads people.yml, students.csv and teams.csv and opens (or closes) a digest
+# pre-flight reads instructors.yml, students.csv and teams.csv and opens (or closes) a digest
 # issue per file, so a push that leaves one of them unreadable is mailed to whoever pushed
 # it within the minute instead of at the top of the hour. Grading sheets are deliberately
 # NOT here - they are edited all day by a grader working through a pile of marks, and a
@@ -33,7 +33,8 @@ on:
     branches: [main]
     paths:
       - schedule.yml
-      - people.yml
+      - instructors.yml
+      - people.yml  # the old name, watched for one release
       - students.csv
       - teams.csv
 

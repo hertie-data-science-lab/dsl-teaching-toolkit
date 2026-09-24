@@ -7,7 +7,7 @@ One entrypoint replacing three separate workflows' worth of orchestration:
   (sync_faculty.sync_course_admins) - regardless of which semester (if any) triggered
   this sync, since admin access is course-wide by design.
 - Roster (students.csv), project teams (teams.csv), and each semester's own
-  instructors/TAs (classroom-config/people.yml, via
+  instructors/TAs (classroom-config/instructors.yml, via
   sync_faculty.sync_semester_instructors) additionally reconcile for whichever
   semester(s) are in scope: one named semester (--semester-org, e.g. a push to that
   semester's classroom-config), or every registered semester (--all-semesters, e.g. the
@@ -18,7 +18,7 @@ config is the live truth, so a deleted roster row or a lapsed faculty `end` date
 revokes access on the very next sync.
 
 A CONTENT fault never reds this run. A students.csv saved as a `;`-delimited export, a
-teams.csv with no header, a people.yml that is not YAML: each skips its semester and is
+teams.csv with no header, a instructors.yml that is not YAML: each skips its semester and is
 reported where the person who left it there will see it - the per-file digest issue in
 that semester's classroom-config, and the mail beside it. The COURSE org's own two files
 (`dsl-course.yml`, the semester registry) are the same rule at a wider blast radius: nothing
@@ -59,7 +59,7 @@ from .welcome import refresh_join_team_form
 
 # What a semester's hand-edited config can be wrong in a way this sync cannot act on: a CSV
 # whose header nobody can read (`faults.Unusable`, raised by `gh_contents.read_csv`) and a
-# people.yml that is not YAML at all. Both mean the same thing here - the file says
+# instructors.yml that is not YAML at all. Both mean the same thing here - the file says
 # nothing this run may reconcile from, and reconciling from what it does say would prune
 # a semester's teams down to whatever survived the parse.
 _CONTENT_FAULT = (Unusable, yaml.YAMLError)
@@ -263,7 +263,7 @@ def main() -> int:
         all_semesters=args.all_semesters,
         dry_run=args.dry_run,
     )
-    # A push to one semester's roster, teams or people.yml dispatches exactly this: the
+    # A push to one semester's roster, teams or instructors.yml dispatches exactly this: the
     # semester's status.json follows the membership it just reconciled. Not counted - the
     # sync's exit code is the sync's - and `status.write` refuses a semester the course's
     # registry does not list, whatever the payload named.
@@ -280,11 +280,9 @@ def access_summary(changes: dict[str, int], dry_run: bool) -> Summary:
     """Check staff access's sentence: how many team memberships moved (or would)."""
     n = sum(changes.values())
     if not n:
-        return Summary("Staff access checked: nothing needed changing.", changes)
+        return Summary("Access checked: nothing needed changing.", changes)
     verb = "would change" if dry_run else "changed"
-    return Summary(
-        f"Staff access checked: {plural(n, 'team membership')} {verb}.", changes
-    )
+    return Summary(f"Access checked: {plural(n, 'team membership')} {verb}.", changes)
 
 
 if __name__ == "__main__":

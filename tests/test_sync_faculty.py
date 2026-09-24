@@ -14,7 +14,7 @@ from dsl_course import gh_contents, gh_teams, sync_faculty
 
 
 def _parse(raw: str) -> dict:
-    """Parse a people.yml/dsl-course.yml text through the production entry point."""
+    """Parse a instructors.yml/dsl-course.yml text through the production entry point."""
     return sync_faculty.parse_faculty_from_meta(yaml.safe_load(raw) or {})
 
 
@@ -73,9 +73,9 @@ def test_sync_course_admins_still_prunes_a_present_but_empty_people_block(monkey
 def test_sync_semester_instructors_refuses_to_prune_when_people_yml_is_absent(
     monkeypatch,
 ):
-    # Nothing is reconciled - an absent people.yml with prune=True would strip the
+    # Nothing is reconciled - an absent instructors.yml with prune=True would strip the
     # semester's whole instructors team - and the run stays GREEN: a file faculty have to
-    # write reaches them on the people.yml digest issue, while this run's red X reaches
+    # write reaches them on the instructors.yml digest issue, while this run's red X reaches
     # only a maintainer who cannot write another org's teaching team.
     monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: None)
     calls = []
@@ -199,7 +199,7 @@ def test_semester_roles_only_is_safe_without_course_admins():
 
 
 def test_semester_people_yml_declaring_course_admins_grants_nothing():
-    # a stray course_admins: entry in a semester's people.yml must not grant admin -
+    # a stray course_admins: entry in a semester's instructors.yml must not grant admin -
     # that role is exclusively course-level.
     raw = """
 people:
@@ -277,14 +277,14 @@ people:
     assert "instructors entry janedoe" in err
     assert "teaching_assistants entry anOther" in err
     assert "`email:`" in err
-    # course_admins is notified through the course org, not a semester's people.yml
+    # course_admins is notified through the course org, not a semester's instructors.yml
     assert "adminhandle" not in err
     # the declared value is personal data: the report names the handle, never the address
     assert "not-an-address" not in err
 
 
 def test_teaching_contacts_carries_the_handle_the_address_and_the_role():
-    # All three, from one pass over people.yml: a notification is ADDRESSED by email,
+    # All three, from one pass over instructors.yml: a notification is ADDRESSED by email,
     # ATTRIBUTED by handle (git blame speaks handles) and COPIED by role. Reading the role
     # back off the entry afterwards would mean iterating the file a second way.
     faculty = sync_faculty.parse_faculty_from_meta(
@@ -320,7 +320,7 @@ people:
 
 
 def test_teaching_contacts_takes_the_same_faculty_and_clock_as_without_email():
-    # One parse of people.yml and one clock answer both questions: who a notification can
+    # One parse of instructors.yml and one clock answer both questions: who a notification can
     # reach, and who it cannot. Two signatures meant two parses and two `date.today()`
     # calls, neither of them the clock a scheduler tick is reasoning about.
     faculty = sync_faculty.parse_faculty_from_meta(
@@ -363,13 +363,13 @@ def test_without_email_names_the_active_handles_no_notification_reaches():
 
 # ------------------------------------------------------------- faults a human must fix
 #
-# people.yml decides who has access and who can be told anything, so an entry the sync
+# instructors.yml decides who has access and who can be told anything, so an entry the sync
 # skips is invisible twice over: no team membership, and no notification about the entry
 # either. These are the faults the digest issue and the mail carry.
 
 
 def _faults(raw: str) -> list:
-    """Parse people.yml text WITH line stamps, as the pre-flight reads it."""
+    """Parse instructors.yml text WITH line stamps, as the pre-flight reads it."""
     found = []
     sync_faculty.parse_faculty_from_meta(gh_contents.load_yaml_lines(raw), found)
     return found
@@ -400,7 +400,7 @@ def test_every_unusable_people_entry_is_reported_with_its_line():
         ("people.instructors[1]", "github_handle", 6),
         ("people.teaching_assistants[0]", "email", 12),
     ]
-    assert all(f.file == "people.yml" for f in found)
+    assert all(f.file == "instructors.yml" for f in found)
 
 
 def test_an_entry_that_is_neither_a_handle_nor_a_card_is_a_fault():
@@ -448,13 +448,13 @@ def test_a_people_yml_that_is_absent_or_unreadable_is_itself_the_fault(monkeypat
         assert sync_faculty.read_semester_people("Semester-f2026", found) is None
         (fault,) = found
         assert expected in fault.what
-        assert fault.file == "people.yml" and fault.lineno is None
+        assert fault.file == "instructors.yml" and fault.lineno is None
 
 
 def test_a_read_that_failed_is_not_reported_as_a_broken_people_yml(monkeypatch):
     # A rate limit or a token that lost its scope raises a BARE RuntimeError out of
     # `get_file_content`. Recorded as a fault it would rewrite the digest with one entry
-    # saying people.yml is broken - closing every real fault in it as cleared and mailing
+    # saying instructors.yml is broken - closing every real fault in it as cleared and mailing
     # the teaching team about a file nobody touched. It has to come back out.
     monkeypatch.setattr(
         sync_faculty,
@@ -682,5 +682,5 @@ def test_course_admin_emails_are_the_active_usable_ones_in_order():
 
 
 def test_a_course_admin_email_in_a_semester_file_is_not_checked():
-    # A semester's people.yml drops course_admins altogether; nothing to report there.
+    # A semester's instructors.yml drops course_admins altogether; nothing to report there.
     assert _faults(COURSE_PEOPLE) == []

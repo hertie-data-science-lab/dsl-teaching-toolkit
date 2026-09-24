@@ -1567,7 +1567,7 @@ def _spec_fault(
 
     The fault is in the COURSE org, on the template's `solution` branch, and the digest
     that carries it is the SEMESTER's - the semester is what the grading happens to, and the
-    people who can fix it are the ones in its people.yml. So the file's own address rides
+    people who can fix it are the ones in its instructors.yml. So the file's own address rides
     on the fault (`in_org`, `in_repo`, `ref`), which is what the deep link and the blame
     query both go by."""
     return ConfigFault(
@@ -1675,7 +1675,7 @@ def grading_spec_faults(
                 lineno=lines.get(("visibility",)),
                 fix="remove `solution_datetime:` from this assignment's entry in "
                 "classroom-config/schedule.yml - the model answer stays on this "
-                "template's `solution` branch, which is where the teaching team reads "
+                "template's `solution` branch, which is where the instructors read "
                 "it - or give this assignment a private repo per unit here "
                 "(`submit_via: assignment_repo`, `visibility: private`)",
                 plain=f"{slug} has a solution shown date in this semester's schedule, "

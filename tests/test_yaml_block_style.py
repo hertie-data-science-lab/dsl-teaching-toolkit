@@ -2,7 +2,7 @@
 used as a list item (`- {a: 1, b: 2}`).
 
 Flow and block parse identically, so this is a teaching/readability standard rather than a
-correctness one: `schedule.yml`, `people.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
+correctness one: `schedule.yml`, `instructors.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
 `templates/classroom-config/schedule.yml` is `.format()`ed into every new semester org, so the
@@ -38,7 +38,7 @@ from dsl_course.scaffold import _grading_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# `#` allowed: the seeded schedule.yml/people.yml scaffolds are commented-out YAML, which
+# `#` allowed: the seeded schedule.yml/instructors.yml scaffolds are commented-out YAML, which
 # is exactly where the last flow item hid.
 FLOW_ITEM = re.compile(r"^\s*(?:#\s*)?-\s*\{")
 
@@ -173,8 +173,8 @@ SEEDED = {
     "classroom-config/schedule.yml (seeded)": lambda: welcome.template(
         "classroom-config/schedule.yml"
     ).format(tag="f2026", year=2026),
-    "classroom-config/people.yml (seeded)": lambda: welcome.template(
-        "classroom-config/people.yml"
+    "classroom-config/instructors.yml (seeded)": lambda: welcome.template(
+        "classroom-config/instructors.yml"
     ).format(year=2026, year_next=2027),
     "course/dsl-course.yml (seeded, commented)": lambda: (
         bootstrap_course._course_metadata("Org", "Org Name", "Course", "CODE")

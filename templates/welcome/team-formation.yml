@@ -229,7 +229,7 @@ jobs:
               // published the author's enrolment role to anyone who could read the repo.
               const NOT_A_PARTICIPANT =
                 `Thanks @${handle} - I can't find you on the course enrolment roster yet. Please open a **Join course** issue first ` +
-                `to onboard, then come back to join a team. If you have already joined, contact the teaching team.`;
+                `to onboard, then come back to join a team. If you have already joined, contact your instructors.`;
               const myRow = rosterTable.slice(1)
                 .find(r => (r[iRosterHandle] || '').trim().toLowerCase() === handle.toLowerCase());
               if (!myRow) return fail(NOT_A_PARTICIPANT, 'needs-review');
@@ -284,7 +284,7 @@ jobs:
               // workflow. Both mean the same thing to a student: wait to be added.
               if (lock.formation !== 'self_select') return refuse(
                 `Thanks @${handle} - teams for \`${assignment}\` are assigned by the instructor. ` +
-                `The teaching team will add you to one; there is nothing for you to do here.`);
+                `Your instructors will add you to one; there is nothing for you to do here.`);
               // The formation WINDOW, which runs from the handout to the grading pin. Only
               // an explicit `pending` or `closed` refuses: a lock written by a toolkit older
               // than the window carries no such scalar at all (`window` is null), and that
@@ -302,7 +302,7 @@ jobs:
               if (lock.window === 'closed') return refuse(
                 `Thanks @${handle} - team formation for \`${assignment}\` ` +
                 (lock.closes ? `closed on ${spokenDate(lock.closes)}.` : `is closed.`) +
-                ` Contact the teaching team if you still need a team for it.`);
+                ` Contact your instructors if you still need a team for it.`);
               const cap = lock.cap;
               if (!(cap > 0)) return fail(
                 `Thanks @${handle} - \`${assignment}\` has no team-size cap recorded. ` +

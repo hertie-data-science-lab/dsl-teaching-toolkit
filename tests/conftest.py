@@ -149,7 +149,7 @@ def _clear_process_memos():
     """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
     paths, a repo's metadata and its last committer, whether a central ref exists, the
     classroom-config files a run re-reads (students.csv, teams.csv, schedule.yml,
-    people.yml), an assignment's definition, its course's defaults and its handed-out
+    instructors.yml), an assignment's definition, its course's defaults and its handed-out
     starters, and the login the token belongs to. Tests reuse the same org/repo names
     with different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()

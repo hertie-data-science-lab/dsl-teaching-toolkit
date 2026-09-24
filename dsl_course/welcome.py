@@ -6,7 +6,7 @@ bootstrap_course imports seed, so seed cannot import bootstrap_course back - thi
 is what both sides may import.
 
 Everything this module writes is SYSTEM-owned, and that is the whole rule for what may
-live here: a semester's own config (students.csv, teams.csv, schedule.yml, people.yml) is
+live here: a semester's own config (students.csv, teams.csv, schedule.yml, instructors.yml) is
 seeded create-if-missing by bootstrap_course and must never be refreshed from a template,
 or a nightly run would clobber a live roster.
 """
@@ -39,7 +39,7 @@ CLASSROOM_SCAFFOLDS = {
     "students.csv": "classroom-config/students.csv",
     "teams.csv": "classroom-config/teams.csv",
     "schedule.yml": "classroom-config/schedule.yml",
-    "people.yml": "classroom-config/people.yml",
+    "instructors.yml": "classroom-config/instructors.yml",
 }
 
 # The SAMPLE half - DERIVED, not enumerated: every regular file in the worked example
@@ -401,7 +401,7 @@ def refresh_classroom_samples(org: str) -> int:
 # `(path in the repo, template file)`.
 #
 # HARD INVARIANT: nothing the semester edits may join this table. students.csv, teams.csv,
-# schedule.yml and people.yml hold the semester's LIVE state (enrol codes, onboarded
+# schedule.yml and instructors.yml hold the semester's LIVE state (enrol codes, onboarded
 # handles); they are seeded create-if-missing by bootstrap_course and stay that way.
 # Adding one here would have the nightly refresh overwrite it every night.
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.

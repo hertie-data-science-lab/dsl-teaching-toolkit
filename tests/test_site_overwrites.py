@@ -151,7 +151,7 @@ def test_an_overwritten_human_edit_files_an_issue(human_edit):
     assert f"https://github.com/{ORG}/{SITE}/commit/{HUMAN[0]}" in body
     assert "@jan-gh" in body  # pinged, so he learns where to edit instead
     assert "`_data/people.yml`" in body
-    assert "classroom-config/people.yml" in body  # where the edit belongs
+    assert "classroom-config/instructors.yml" in body  # where the edit belongs
     create = next(c for c in fakes.gh_calls if c[:2] == ("issue", "create"))
     assert create[create.index("--repo") + 1] == f"{ORG}/{SITE}"
     assert create[create.index("--title") + 1] == site_repo.OVERWRITE_ISSUE_TITLE

@@ -51,19 +51,19 @@ def test_render_markdown_c7_instructors_row_present_with_edit_link():
         "Semester-f2026",
         _data(
             C7={
-                "label": "Instructors/TAs (people.yml)",
+                "label": "Instructors/TAs (instructors.yml)",
                 "org": "Semester-f2026",
                 "repo": "classroom-config",
-                "path": "people.yml",
+                "path": "instructors.yml",
                 "status": "ok",
                 "detail": "2 active",
-                "edit_url": "https://x/edit/people.yml",
+                "edit_url": "https://x/edit/instructors.yml",
             }
         ),
     )
-    assert "Instructors/TAs (people.yml)" in md
+    assert "Instructors/TAs (instructors.yml)" in md
     assert "2 active" in md
-    assert "[edit](https://x/edit/people.yml)" in md
+    assert "[edit](https://x/edit/instructors.yml)" in md
 
 
 def test_render_markdown_missing_status_uses_add_link_text():
@@ -75,7 +75,7 @@ def test_render_markdown_missing_status_uses_add_link_text():
 
 def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
     # The workflow appends stdout to $GITHUB_STEP_SUMMARY of a PUBLIC repo, and the
-    # loaders log lines that can name people.yml entries. Only the rendered table may
+    # loaders log lines that can name instructors.yml entries. Only the rendered table may
     # reach stdout, in both formats.
     from dsl_course import status
 
@@ -120,7 +120,7 @@ def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, cap
     data = json.loads(capsys.readouterr().out)
     assert set(data) == set(status.ITEMS)
     assert data["C7"]["repo"] == "classroom-config"
-    assert data["C7"]["path"] == "people.yml"
+    assert data["C7"]["path"] == "instructors.yml"
 
 
 def test_c7_says_how_many_of_the_teaching_team_cannot_be_notified(monkeypatch):

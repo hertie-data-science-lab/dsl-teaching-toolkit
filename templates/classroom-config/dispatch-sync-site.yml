@@ -5,9 +5,9 @@ name: Dispatch site sync
 # Seeded into a semester's private classroom-config repo as
 # .github/workflows/dispatch-sync-site.yml (companion to dispatch-sync.yml, which handles
 # membership). Its only job: fire the course org's Sync site whenever schedule.yml,
-# people.yml or teams.csv changes here, so the semester website - which reads its release
+# instructors.yml or teams.csv changes here, so the semester website - which reads its release
 # plan, session dates, due dates and exams from schedule.yml, its staff cards from
-# people.yml, and which teams have room from teams.csv - refreshes immediately without a
+# instructors.yml, and which teams have room from teams.csv - refreshes immediately without a
 # manual click.
 #
 # teams.csv is here because the Join-team workflow commits to it on every join, and an
@@ -15,7 +15,7 @@ name: Dispatch site sync
 # the daily cron, a student who has just formed a team would not see it listed until the
 # next day, by which time somebody else has opened a second team for want of one to join.
 #
-# people.yml also fires dispatch-sync.yml (event_type sync-membership). The two are
+# instructors.yml also fires dispatch-sync.yml (event_type sync-membership). The two are
 # independent: different workflows, different event types, different targets (teams vs the
 # site repo), so both running on one push is expected and harmless.
 #
@@ -30,7 +30,8 @@ on:
     branches: [main]
     paths:
       - schedule.yml
-      - people.yml
+      - instructors.yml
+      - people.yml  # the old name, watched for one release
       - teams.csv
 
 # Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and

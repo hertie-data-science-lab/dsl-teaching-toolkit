@@ -408,7 +408,7 @@ def test_the_marker_is_not_written_when_a_solution_push_failed(tmp_path, monkeyp
 
 def test_the_marker_IS_written_when_the_site_sync_fails(tmp_path, monkeypatch):
     # A site-sync failure says nothing about whether the solution shipped - and it is
-    # PERSISTENT (a malformed people.yml raises every run), so withholding the marker for
+    # PERSISTENT (a malformed instructors.yml raises every run), so withholding the marker for
     # it would re-clone every student repo every hour for the rest of the term.
     rc, recorded = _marker_run(tmp_path, monkeypatch, site_raises=True)
     assert recorded == [("SEMESTER", "assignment-1", 1)]
@@ -1608,7 +1608,7 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
         )
 
     assert run(scheduled=True) == (0, False)
-    assert "the teaching team writes them into teams.csv" in capsys.readouterr().out
+    assert "the instructors write them into teams.csv" in capsys.readouterr().out
     assert run() == (1, False)
     err = capsys.readouterr().err
     assert "team_formation: assigned" in err and "self-select" not in err
@@ -2585,12 +2585,12 @@ def test_the_note_names_only_the_files_this_repo_actually_got(monkeypatch):
 def test_the_note_reads_as_a_sentence_however_many_files_it_names():
     one = assign.patch_note(["starter.ipynb"], date(2026, 10, 14))
     assert one == (
-        "The teaching team updated `starter.ipynb` in this repository on 2026-10-14; "
+        "The instructors updated `starter.ipynb` in this repository on 2026-10-14; "
         "pull before you continue. Your own commits are untouched."
     )
     several = assign.patch_note(["b.py", "a.py"], date(2026, 10, 14))
     assert several == (
-        "The teaching team updated 2 files - `a.py`, `b.py` - in this repository on "
+        "The instructors updated 2 files - `a.py`, `b.py` - in this repository on "
         "2026-10-14; pull before you continue. Your own commits are untouched."
     )
 

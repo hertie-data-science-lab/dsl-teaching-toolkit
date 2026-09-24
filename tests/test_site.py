@@ -1853,7 +1853,7 @@ def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys
 
 
 def _bad_indent_error() -> yaml.YAMLError:
-    """The REAL exception a bad indent in people.yml produces. load_yaml_config re-raises
+    """The REAL exception a bad indent in instructors.yml produces. load_yaml_config re-raises
     it untouched, and yaml.YAMLError is NOT a RuntimeError - a stub that raised
     RuntimeError instead is exactly why the boundaries below went uncaught."""
     try:
@@ -1866,25 +1866,28 @@ def _bad_indent_error() -> yaml.YAMLError:
 def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     monkeypatch,
 ):
-    # A semester's people.yml with one bad indent used to parse to `{}` - "nothing declared" -
+    # A semester's instructors.yml with one bad indent used to parse to `{}` - "nothing declared" -
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
     monkeypatch.setattr(
         site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
     )
     with pytest.raises(yaml.YAMLError):
-        site_repo.yaml_file("Semester-f2026", "classroom-config", "people.yml")
+        site_repo.yaml_file("Semester-f2026", "classroom-config", "instructors.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
     monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
-    assert site_repo.yaml_file("Semester-f2026", "classroom-config", "people.yml") == {}
+    assert (
+        site_repo.yaml_file("Semester-f2026", "classroom-config", "instructors.yml")
+        == {}
+    )
 
 
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
     monkeypatch, capsys
 ):
-    # people.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
+    # instructors.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
     # is not a RuntimeError, so it used to walk straight through main()'s guard and out as
     # a traceback in the Actions log.
     err = _bad_indent_error()
@@ -2473,7 +2476,7 @@ def _one_deploy() -> Schedule:
 def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
     # Syntactically a bad indent is indistinguishable from "nothing public", and reading
     # it that way would unpublish a whole course's decks over a typo - on a green run,
-    # since the rest of the site syncs fine. So it fails loudly, like people.yml: nothing
+    # since the rest of the site syncs fine. So it fails loudly, like instructors.yml: nothing
     # is republished and nothing is wiped.
     def boom(*_a):
         raise yaml.YAMLError("mapping values are not allowed here")

@@ -37,7 +37,7 @@ example-course/
     students.csv                    # 10 students + 1 auditor (handles blank until they onboard)
     teams.csv                       # 3 project teams of 3-4 (auditors are refused from teams)
     schedule.yml                    # the full term: releases + due dates + events
-    people.yml                      # this semester's own instructors/TAs (real push access)
+    instructors.yml                      # this semester's own instructors/TAs (real push access)
     grading_sheets/*.yml            # one marking sheet per assignment (individual + group)
 ```
 

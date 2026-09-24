@@ -386,7 +386,7 @@ def test_a_roster_nobody_can_read_skips_its_semester_and_leaves_the_run_green(
 
 def test_a_people_yml_that_is_not_yaml_skips_its_semester_too(monkeypatch, capsys):
     # The other half of the same rule, and the other exception a content fault arrives as:
-    # `load_yaml_config` raises the loader's own error for a people.yml that does not
+    # `load_yaml_config` raises the loader's own error for a instructors.yml that does not
     # parse. Reconciling from what a half-read file says would prune every instructor the
     # parse dropped.
     def instructors(course, org, *a, **k):
@@ -532,7 +532,7 @@ def test_a_dispatch_from_a_closed_out_semester_reconciles_nothing(monkeypatch):
 def test_a_dispatched_semester_sync_refreshes_that_semesters_status(
     monkeypatch, extra, expected
 ):
-    # A push to one semester's roster, teams or people.yml dispatches this with its name:
+    # A push to one semester's roster, teams or instructors.yml dispatches this with its name:
     # the status follows. A preview writes nothing, and the nightly sweep leaves status
     # to the nightly refresh.
     monkeypatch.setattr(sync_membership, "acting_login", lambda: "bot")

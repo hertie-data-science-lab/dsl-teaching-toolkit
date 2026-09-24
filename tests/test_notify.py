@@ -35,7 +35,7 @@ _REAL_SEND_BULK = mailer.send_bulk
 # entry are two faults, so the path is part of it.
 _KEY = "releases.lecture_02[students/lectures/02_lecture].course_source_path"
 
-# One instructor, one TA, one entry with no address at all - the three cases people.yml
+# One instructor, one TA, one entry with no address at all - the three cases instructors.yml
 # really contains.
 PEOPLE = {
     "people": {
@@ -269,7 +269,7 @@ def test_an_addressee_with_no_email_is_counted_not_named(wired, capsys):
 def test_a_semester_no_address_can_be_found_for_falls_to_the_course_admins(
     wired, admins, capsys
 ):
-    # A people.yml with no `email:` anywhere used to leave the digest's @mention as the
+    # A instructors.yml with no `email:` anywhere used to leave the digest's @mention as the
     # only channel until the 48h rung copied the maintainer. The course this semester
     # belongs to has admins, and a semester that will ship nothing is theirs to chase.
     admins(", ".join(ADMINS))
@@ -630,7 +630,7 @@ def test_a_people_yml_that_will_not_parse_never_prints_the_line_it_broke_on(
     wired, monkeypatch, capsys
 ):
     # PyYAML renders the offending SOURCE LINE into `str(exc)`, and the line that breaks a
-    # people.yml is as often as not the one carrying somebody's address. The parser's own
+    # instructors.yml is as often as not the one carrying somebody's address. The parser's own
     # complaint and the line NUMBER say everything a reader needs (`read_error`).
     wired(blame={131: "cpj97"}, committer=None)
 
@@ -641,7 +641,7 @@ def test_a_people_yml_that_will_not_parse_never_prints_the_line_it_broke_on(
     notify.route(SEMESTER, COURSE, [_fault()], NOW)
     err = capsys.readouterr().err
     assert "jan@x.edu" not in err
-    assert f"could not read {SEMESTER}'s people.yml" in err
+    assert f"could not read {SEMESTER}'s instructors.yml" in err
     assert "ScannerError: mapping values are not allowed here (line 3)" in err
 
 
@@ -734,7 +734,7 @@ def _people_fault() -> notify.ConfigFault:
         "people.instructors[1]",
         "no usable `email:` - access is still granted, but no notification reaches "
         "this person",
-        file="people.yml",
+        file="instructors.yml",
         field="email",
         lineno=6,
     )
@@ -993,9 +993,9 @@ def test_a_people_fault_names_its_own_file(wired):
     sent = wired(blame={6: "JanG"})
     routing = notify.route(SEMESTER, COURSE, [_people_fault()], NOW)
     _mail_config([_people_fault()], routing, spec=config_digest.PEOPLE)
-    assert "people.yml has 1 entry the toolkit cannot use" in sent.one["subject"]
+    assert "instructors.yml has 1 entry the toolkit cannot use" in sent.one["subject"]
     assert "this person has no access and is not notified" in sent.one["body"]
-    assert "people.yml#L6" in sent.one["body"]
+    assert "instructors.yml#L6" in sent.one["body"]
 
 
 def _sheet_fault() -> notify.ConfigFault:
@@ -1335,7 +1335,7 @@ def test_two_people_who_lost_edits_get_a_letter_each(wired):
 
 
 def test_a_site_org_with_nobody_to_address_sends_nothing(wired, capsys):
-    # The public COURSE site: the org declares no people.yml at all, so the issue's cc is
+    # The public COURSE site: the org declares no instructors.yml at all, so the issue's cc is
     # the only channel there is. Not an error, and not a raise inside a site sync.
     sent = wired(people=None)
     assert _overwritten({"JanG": [("_data/people.yml", SHA)]}) == notify.Unsent()

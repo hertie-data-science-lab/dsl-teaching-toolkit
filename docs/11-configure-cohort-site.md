@@ -11,7 +11,7 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | Course blurb under the title | course org `.github/dsl-course.yml` | `course_description` |
 | Course title + code | course org `.github/dsl-course.yml` | `course_name`, `course_code` - **not** `org_name` |
 | Semester + year | *nothing to set* | inferred from the semester org's `fYYYY`/`sYYYY` tag (`hertie-dsl-demo-f2026` → "Fall 2026") |
-| Instructor / TA cards | semester `classroom-config/people.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
+| Instructor / TA cards | semester `classroom-config/instructors.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
 | Instructor photos | site repo `<semester-org>.github.io` | commit the image under `_images/pp/`, then `photo: /_images/pp/jane.jpg`. Can also use a URL that allows hotlinking |
 | Schedule rows, exams, assignment due dates | semester `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `releases`, `events`, `assignments` (there is no `exams:` key - an exam is an `events:` entry with `type: exam`) |
 | A hand-written entry in the **Updates** box | site repo | add a file under `_announcements/` with `date:` + `details:` front matter (the file's body works too). The box shows the newest 7 items (releases feed it automatically, and only once they have actually shipped); older ones roll off as new ones arrive - delete the file to pull one early |
@@ -33,7 +33,7 @@ commit still holds the change, to be copied back out and made at the source.
 | In the site repo | What happens |
 |---|---|
 | `_lectures/`, `_assignments/`, `_events/` | each directory is **deleted and rebuilt** every sync - a file you drop in here vanishes |
-| `_data/people.yml` | overwritten from `classroom-config/people.yml` |
+| `_data/people.yml` | overwritten from `classroom-config/instructors.yml` |
 | `lectures.md`, `labs.md`, `readings.md`, `materials.md`, `assignments.md`, `profile.md` | front-matter stubs pointing at the layouts below - generated wrappers, so put your own words in `index.md` |
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
 | `_data/materials.yml` | the All Materials index, rebuilt from what each semester repo actually holds |
@@ -60,7 +60,7 @@ every site pins at a fixed ref.
 
 | Trigger | Latency |
 |---|---|
-| Push to `classroom-config/schedule.yml` or `people.yml` | immediate |
+| Push to `classroom-config/schedule.yml` or `instructors.yml` | immediate |
 | **Release materials** / **Release assignment** workflow | immediate, in the same run |
 | A scheduled release firing | within that tick ([about every 15 minutes](07-schedule-releases.md#what-drives-the-scheduler)) |
 | Push to course org `.github/dsl-course.yml` | immediate - and re-syncs **every** semester site |
@@ -69,7 +69,7 @@ every site pins at a fixed ref.
 
 ## Next
 
-- [Manage the teaching team](05-manage-teaching-team.md) - where the staff cards come from.
+- [Manage the instructors](05-manage-teaching-team.md) - where the instructor cards come from.
 - [Schedule releases](07-schedule-releases.md) - where the dates come from.
 - Field-by-field schemas: [DEPLOYMENT-CHECKLIST](DEPLOYMENT-CHECKLIST.md#dsl-courseyml).
 

@@ -117,8 +117,8 @@ Why three paths, and why `selected` visibility:
   get none: they host no run-from-repo buttons (`discover_content_repos` excludes them), and a
   secret on a template would propagate into every generated student repo.
 - The same gap hits the private **infra** repo `classroom-config`, whose workflows (a push to
-  `students.csv`/`teams.csv`/`people.yml` fires **Sync membership**, a push to
-  `schedule.yml`/`people.yml` fires **Sync site**, both cross-org) also run under
+  `students.csv`/`teams.csv`/`instructors.yml` fires **Sync membership**, a push to
+  `schedule.yml`/`instructors.yml` fires **Sync site**, both cross-org) also run under
   `DSL_BOT_TOKEN`. Refresh sets the repo secret only on *content* repos, so **Bootstrap** mirrors the token
   as a **repo** secret onto each private infra repo in the same run that sets the org secret
   (`bootstrap_course.set_org_secret`) - that is the only path the token reaches
@@ -152,7 +152,7 @@ faculty / instructors / admin teams`"] -->|"write/admin on"| cr["central repo"] 
     ca["`course org people: → course-admin
 (course-wide, admin)`"] -->|"mirrored to"| gh["`course org .github
 + every semester org`"]
-    it["`semester people.yml → instructors-<tag>
+    it["`semester instructors.yml → instructors-<tag>
 (per-semester, push)`"] -->|"granted on"| ghtag["`course org .github
 + that tag's own content repos`"]
     gh --> rb["run Release / Refresh / Sync membership / ..."]
@@ -171,14 +171,14 @@ faculty / instructors / admin teams`"] -->|"write/admin on"| cr["central repo"] 
   by design and instead validate their **payload** (see
   [Failure semantics](#failure-semantics)). Teams are org-scoped (no cross-org grant exists), so
   `sync_faculty` runs two independent flows: `course_admins` mirrors the same desired membership
-  into the course org AND every semester; each semester's people.yml reconciles into that semester's
+  into the course org AND every semester; each semester's instructors.yml reconciles into that semester's
   `instructors` team AND a **parallel**, tag-scoped `instructors-<tag>` team on the course org -
   no merge across semesters. Who-to-declare-where:
   [access-reference](../docs/reference/access-reference.md); the runbook for changing it:
   [05 Manage the teaching team](../docs/05-manage-teaching-team.md).
 - Each person entry takes optional `start`/`end` ISO dates (`course.active_today`), applied by
   `desired_team_members` to **both** flows. Since every reconcile is a full add-and-remove, a
-  lapsed `end` prunes the member with no manual step. An *edit* to `people.yml` /
+  lapsed `end` prunes the member with no manual step. An *edit* to `instructors.yml` /
   `students.csv` / `teams.csv` dispatches Sync membership on the push; a *date* rolling over
   pushes nothing, so it lands on the daily cron.
 
@@ -215,7 +215,7 @@ so an admin added via the Teams UI or a one-off `gh api` call must also be decla
 A **semester** is bootstrapped from the course org's own **Bootstrap semester** button (not the
 central action), given the empty semester org's name. It runs the same `bootstrap_course` with
 `--semester`: seeds `welcome` + `classroom-config` (roster, teams, `schedule.yml`,
-`people.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
+`instructors.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
 website, applies the course's current `course_admins`, registers the semester in the course's
 `cohort-courses-pages.yml`, and writes a small `.github/dsl-course.yml` **pointer** (`course:`,
 `org:`) so the semester-side dispatchers know which course org to fire at. All of this semester's
@@ -532,7 +532,7 @@ file · tree · team · repo list`"]
   `repo_tree`, `load_yaml_config` and `delete_file` all go through it. A returned `None`/`[]`/`{}`
   therefore means *genuinely absent*, never *couldn't read*. Before this, a rate limit could
   republish a semester site with every session row deleted, green.
-- **Absent vs empty** is the anti-eviction invariant: a missing `people.yml` / `students.csv`
+- **Absent vs empty** is the anti-eviction invariant: a missing `instructors.yml` / `students.csv`
   makes the sync refuse and return 1; an empty one legitimately empties the team.
 - `reconcile_team_members` is the single prune guard: unreadable current membership aborts the
   reconcile entirely, an unreadable owner list still adds but skips the prune pass, and org
@@ -629,7 +629,7 @@ org structure.
 ```mermaid
 flowchart LR
   sch["classroom-config/schedule.yml"] --> sync["site.sync_site"]
-  ppl["classroom-config/people.yml"] --> sync
+  ppl["classroom-config/instructors.yml"] --> sync
   live["`live org
 released repos + file trees`"] --> sync
   meta["`.github/dsl-course.yml
@@ -640,7 +640,7 @@ course identity`"] --> sync
 rebuilt from scratch each run`"]
 ```
 
-**Triggers**: a push to the semester's `schedule.yml` or `people.yml` (a `repository_dispatch` from
+**Triggers**: a push to the semester's `schedule.yml` or `instructors.yml` (a `repository_dispatch` from
 `classroom-config`), a push to the course org's `dsl-course.yml`, a daily 06:00 cron, manual
 **Sync site**, and every release - `deploy`, `assign`, the scheduler and Bootstrap semester all
 call `sync_site` in-process when they change something.
@@ -660,7 +660,7 @@ What release adds is the row's CONTENT: a session picks up its file links (`unre
 (`handout_pending: true` until then, and the README is not read at all while it holds - the
 template repo exists weeks early and the semester site is public).
 
-**People.** Cards come from that semester's `classroom-config/people.yml`. With no `people:` block
+**People.** Cards come from that semester's `classroom-config/instructors.yml`. With no `people:` block
 at all, they fall back to the semester org's `instructors` GitHub team - minus the sync's own bot
 account, which sits in that team for access and is not a member of staff. A 404'd member is
 skipped; any other lookup failure raises, rather than silently dropping an instructor.
@@ -760,7 +760,7 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `sync_roster` / `sync_teams` - reconcile the `students`+`auditors` teams / per-project teams
     from `students.csv` / `teams.csv` (one-way: the CSV is truth).
   - `sync_faculty` - reconcile `course-admin` from the course org's `people:` SSOT into the
-    course org + every semester; and, per semester, its own `people.yml` into that semester's
+    course org + every semester; and, per semester, its own `instructors.yml` into that semester's
     `instructors` team + a tag-scoped `instructors-<tag>` team on the course org.
   - `sync_membership` - the one consolidated entrypoint (roster + teams + faculty) behind the
     **Sync membership** button/cron/dispatch.
@@ -777,7 +777,7 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `welcome/` - the semester onboarding + team-formation workflows and their issue forms.
   - `classroom-config/` - that repo's README contract, its dispatch + schedule-validation
     workflows, and the **scaffold** half of every user-editable file: header-only
-    `students.csv` / `teams.csv`, tag-rendered `schedule.yml` / `people.yml` skeletons.
+    `students.csv` / `teams.csv`, tag-rendered `schedule.yml` / `instructors.yml` skeletons.
     The **sample** half (`<file>.sample`) is not authored here - it is injected from
     `example-course/cohort-org/` (`welcome.CLASSROOM_SAMPLES`), so the shipped worked
     examples and the documented ones are the same files.

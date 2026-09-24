@@ -144,7 +144,7 @@ def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
     # one. This test used to assert the opposite (that omitting base_tree was enough), with
     # a stub that let the POST succeed - so the real 409 went unnoticed until the first
     # semester org bootstrapped after the classroom-config scaffolds were batched, whose
-    # roster, schedule and people.yml never landed at all.
+    # roster, schedule and instructors.yml never landed at all.
     calls = []
 
     def fake_gh(*args, **kwargs):
@@ -317,7 +317,7 @@ def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
     monkeypatch, capsys
 ):
     # These log lines land in a PUBLIC course-org Actions log, and the line that breaks a
-    # people.yml is as often as not the one carrying somebody's address - which is what
+    # instructors.yml is as often as not the one carrying somebody's address - which is what
     # PyYAML renders into `str(exc)`.
     import yaml
 
@@ -327,10 +327,10 @@ def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
         lambda *a, **k: "people:\n  - email: jan@x.edu: typo\n",
     )
     with pytest.raises(yaml.YAMLError):
-        gh_contents.load_yaml_config("Org", "classroom-config", "people.yml")
+        gh_contents.load_yaml_config("Org", "classroom-config", "instructors.yml")
     err = capsys.readouterr().err
     assert "jan@x.edu" not in err
-    assert "malformed YAML in Org/classroom-config/people.yml: " in err
+    assert "malformed YAML in Org/classroom-config/instructors.yml: " in err
     assert "ScannerError: mapping values are not allowed here (line 2)" in err
 
 

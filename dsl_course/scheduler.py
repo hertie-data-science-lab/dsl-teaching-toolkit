@@ -757,7 +757,7 @@ def _preflight_sources(
     # Who to tell, asked ONCE and only if asked at all: the digest @mentions them and the
     # mail is addressed to them, so asking git twice would be two reads and two chances to
     # disagree - and `sync` calls this only on a tick with something to say, because the
-    # answer costs a blame query, a people.yml read and a commit lookup per repo.
+    # answer costs a blame query, a instructors.yml read and a commit lookup per repo.
     routing = notify.Routing()
 
     def whom() -> list[str]:
@@ -919,7 +919,7 @@ def _sync_config_digest(
 
     `route` is who to tell, for a digest that answers that differently: the COURSE-level
     one is addressed to the course admins out of an org secret rather than to a semester's
-    teaching team out of its people.yml. Everything else about the two is identical, which
+    teaching team out of its instructors.yml. Everything else about the two is identical, which
     is why it is one function and one parameter."""
     routing = notify.Routing()
     ask = route or (lambda: notify.route(semester_org, course_org, faults, local))
@@ -978,7 +978,7 @@ def _preflight_configs(
     The hourly floor under the push fast path. An edit that leaves students.csv unreadable
     fires the dispatcher and is mailed within the minute; this is what catches the one
     that was pushed before any of this existed, the one whose dispatch failed, and the
-    people.yml entry whose `end:` date lapsed while nobody was pushing anything.
+    instructors.yml entry whose `end:` date lapsed while nobody was pushing anything.
 
     Nothing here fails the run, at any rung, for the reason `_preflight_sources` does not:
     a file faculty have to fix is a CONTENT fault, and the exit code belongs to the run
@@ -1195,12 +1195,12 @@ def _archive_notice_body(
     the docs its own workflows are checked out at rather than on whatever `release`
     happens to hold."""
     # The mark goes in ONLY when a mail actually went. It is the whole of this issue's
-    # state, so stamping it on a tick that sent nothing - no address in people.yml, no
+    # state, so stamping it on a tick that sent nothing - no address in instructors.yml, no
     # mail transport wired up - would record a mail that never happened and every later
     # tick would read it and stay quiet. Unstamped, the fortnight goes on offering it, and
     # the tick after somebody fixes the transport sends it.
     told = (
-        f"The teaching team has been emailed this once.\n\n{_MAILED_MARK}\n"
+        f"The instructors have been emailed this once.\n\n{_MAILED_MARK}\n"
         if mailed
         else "No email went with this notice - see the run log.\n"
     )
@@ -1276,7 +1276,7 @@ def _archive_notice(
     repo = f"{semester_org}/{schedule.CONFIG_REPO}"
     title = teardown.archive_notice_title(when)
     if dry_run:
-        log(f"    DRY-RUN  open `{title}` in {repo} and mail the teaching team")
+        log(f"    DRY-RUN  open `{title}` in {repo} and mail the instructors")
         return 0
     try:
         found = issues.find_issue(repo, title)
@@ -1595,7 +1595,7 @@ def _release_phase(
         team_formation.window_faults(sched, windows),
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
-    # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not
+    # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
     errors += _preflight_configs(course_org, semester_org, sched, now, dry_run, listing)
@@ -1651,7 +1651,7 @@ def _release_phase(
     # mean carrying "the site owes a render" somewhere durable, which is a second piece of
     # semester state to write, read and get wrong for a page that is a day stale at worst.
     if (release_changed or lock_changed) and defer_site_sync:
-        # A run fired by a classroom-config push, which (for schedule.yml, people.yml or
+        # A run fired by a classroom-config push, which (for schedule.yml, instructors.yml or
         # teams.csv) started Sync site too: rendering here as well pushed the site repo
         # alongside it and lost the race. Queued behind Sync site's own concurrency group
         # instead, so the render lands after this release.

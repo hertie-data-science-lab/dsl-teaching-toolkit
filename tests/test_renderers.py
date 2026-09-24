@@ -846,6 +846,7 @@ def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
+        "instructors.yml",
         "people.yml",
         "schedule.yml",
         "students.csv",
@@ -854,11 +855,11 @@ def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
 
 
 def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_change():
-    # All three feed the site: schedule.yml its dates, people.yml its staff cards, and
+    # All three feed the site: schedule.yml its dates, instructors.yml its staff cards, and
     # teams.csv the teams an assignment inside its formation window lists. None of them may
     # have to wait for the daily cron - least of all teams.csv, which the Join-team workflow
     # commits to on every join, and which a student then expects to see themselves in.
-    # (people.yml and teams.csv also fire dispatch-sync.yml - a different workflow, event
+    # (instructors.yml and teams.csv also fire dispatch-sync.yml - a different workflow, event
     # type sync-membership - which is fine.)
     tmpl = (
         ROOT / "templates" / "classroom-config" / "dispatch-sync-site.yml"
@@ -866,6 +867,7 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_chan
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
+        "instructors.yml",
         "people.yml",
         "schedule.yml",
         "teams.csv",
@@ -887,6 +889,7 @@ def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     assert set(trigger) == {"push"}
     assert trigger["push"]["paths"] == [
         "schedule.yml",
+        "instructors.yml",
         "people.yml",
         "students.csv",
         "teams.csv",

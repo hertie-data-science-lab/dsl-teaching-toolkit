@@ -90,8 +90,8 @@ _RECORD_BANNER = (
 # toolkit; this list is the only place that says, in one breath, that together they ARE the
 # semester's record of assessment.
 _RETENTION_NOTE = f"""This repository is the semester's private record and is now read-only.
-It holds the roster (`students.csv`), the project teams (`teams.csv`), the teaching team
-(`people.yml`), the term plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
+It holds the roster (`students.csv`), the project teams (`teams.csv`), the instructors
+(`instructors.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
 the autograde detail (`autograde/`), what was sent to whom (`gradebook/distributed.csv`)
 and the registrar export (`{SEMESTER_CSV_NAME}`). Together those are this semester's record of
 assessment: delete the repository when your institution's retention period for that record

@@ -110,7 +110,7 @@ jobs:
                 creator: handle, labels: 'needs-review', per_page: 100,
               })).filter(i => !i.pull_request && i.number !== issue.number);
               if (unresolved.length >= 3) return fail(
-                `Thanks @${handle} - you have ${unresolved.length} unresolved Join course issues - contact the teaching team.`,
+                `Thanks @${handle} - you have ${unresolved.length} unresolved Join course issues - contact your instructors.`,
                 'needs-review');
 
               if (!process.env.HAS_BOT) {
@@ -155,7 +155,7 @@ jobs:
               const NO_MATCH =
                 `Thanks @${handle} - that enrolment code could not be matched to an unclaimed enrolment placement. ` +
                 `Check the code in your email; if you have already joined from another GitHub account, ` +
-                `or think this is a mistake, contact the teaching team.`;
+                `or think this is a mistake, contact your instructors.`;
               // Single-use: a code binds to the FIRST account that claims it. The one
               // exception is that account under a NEW NAME. A GitHub id is immutable and a
               // login is not, so a row whose `github_id` is this user's IS this user, whatever
@@ -196,7 +196,7 @@ jobs:
                   matched = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
                   if (!matched) return fail(
                     `Thanks @${handle} - your roster row disappeared while I was writing to it. ` +
-                    `Please re-open this issue, or contact the teaching team.`,
+                    `Please re-open this issue, or contact your instructors.`,
                     'needs-review');
                   // Re-check the single-use binding on the FRESH row, not only before the loop:
                   // two issues quoting the same code race here, and the loser must not overwrite

@@ -2,7 +2,7 @@
 
 Every file faculty edit by hand can be wrong in a way the toolkit can detect and a human
 must fix: a source the release plan names and nobody staged, a `;`-delimited students.csv,
-a people.yml handle with a typo in it, a schedule entry the parser had to drop. Each of
+a instructors.yml handle with a typo in it, a schedule entry the parser had to drop. Each of
 those used to reach people its own way - a rung ladder here, a `log_err` line in a public
 run log there, a red X on an unattended cron somewhere else - and three of the four
 reached nobody.
@@ -141,6 +141,7 @@ CONSEQUENCE = {
     "schedule.yml": (
         "that entry is not scheduled: nothing releases, hands out or grades from it"
     ),
+    "instructors.yml": "this person has no access and is not notified",
     "people.yml": "this person has no access and is not notified",
     "students.csv": (
         "the whole roster is skipped: nobody new is enrolled or sent a code"
@@ -175,6 +176,7 @@ FIX = {
         "correct the value on the line above; the run summary lists what the parser "
         "expected"
     ),
+    "instructors.yml": "fix the handle/email on the line above",
     "people.yml": "fix the handle/email on the line above",
     "students.csv": CSV_HEADER_FIX,
     "teams.csv": CSV_HEADER_FIX,

@@ -76,7 +76,7 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 # every re-run. The guard has to be per FILE, and it depends on who owns the file:
 #
 #   USER-owned - content faculty edit, or that the running system writes live state into.
-#   In a semester: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml} and
+#   In a semester: classroom-config/{students.csv, teams.csv, schedule.yml, instructors.yml} and
 #   welcome/README.md (the student landing page). On a course org: .github/dsl-course.yml
 #   (the faculty/course_admins SSOT). Seed these ONLY
 #   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
@@ -104,7 +104,7 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 def _tag_and_year(org: str) -> tuple[str, int]:
     """This semester's year tag (fYYYY/sYYYY) and year, derived from the org-name suffix.
 
-    Renders the seeded scaffolds' examples (schedule.yml repo names/dates, people.yml
+    Renders the seeded scaffolds' examples (schedule.yml repo names/dates, instructors.yml
     dates) copy-paste-correct for THIS semester. A name with no tag falls back to
     f2026-shaped examples - purely cosmetic, everything rendered from this is commented.
 
@@ -282,7 +282,7 @@ def grant_button_access(org: str) -> int:
 # Every org is tightened to default_repository_permission=none, so without these grants
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `classroom-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
-# people.yml, grading_sheets/), and `welcome` is where they triage `needs-review`
+# instructors.yml, grading_sheets/), and `welcome` is where they triage `needs-review`
 # onboarding issues. Course orgs have neither repo, so this is semester-only. Single-sourced
 # with the nightly sweep's floor (access.SEMESTER_WRITE_REPOS), so the two cannot disagree.
 SEMESTER_FACULTY_REPOS = sorted(SEMESTER_WRITE_REPOS - {".github"})
@@ -312,7 +312,7 @@ def add_course_admins(org: str, handles: str) -> int:
     added to a course they don't run). `handles` is a comma/space-separated list of GitHub
     logins; each gets an org invite they accept once (membership shows `pending` until
     then). Instructors/TAs are declared per semester in that semester's
-    classroom-config/people.yml, which Sync membership reconciles into the `instructors`
+    classroom-config/instructors.yml, which Sync membership reconciles into the `instructors`
     team - never added on the Teams page, which the next sync reverts.
 
     This is a direct, immediate team invite ONLY - it does not persist anywhere. On the
@@ -357,7 +357,7 @@ def add_course_admins(org: str, handles: str) -> int:
 # OPTIONAL open-courseware display cards (templates/course/people-cards.yml - the schema
 # site_repo._people_from_meta reads for the course-site headshots). A semester's real teaching team
 # - GitHub access AND semester-site cards - is declared per semester in that semester's own
-# classroom-config/people.yml (seeded alongside schedule.yml at Bootstrap semester).
+# classroom-config/instructors.yml (seeded alongside schedule.yml at Bootstrap semester).
 #
 # The preamble (people-header.yml) and card scaffold (people-cards.yml) are shared by both
 # variants below - fully-commented default and --admins-seeded - so the two can't drift.
@@ -670,7 +670,7 @@ def setup_semester_extras(
     else:
         # USER-owned files are create-only: this repo holds the semester's LIVE state - the
         # roster with enrol codes and onboarded handles, the schedule the scheduler
-        # releases from, this semester's people.yml, and returned grades. Re-running
+        # releases from, this semester's instructors.yml, and returned grades. Re-running
         # "Bootstrap semester" mid-semester must leave all of it exactly as faculty (and the
         # onboarding/enrol-code/grade flows) left it.
         tag, year = _tag_and_year(org)
@@ -843,7 +843,7 @@ def main() -> int:
         "the course-admin team (admin on .github) so they can run the workflows - and, on "
         "a course-org bootstrap, declared in dsl-course.yml's SSOT so a later sync doesn't "
         "revert it. Each accepts an org invite once. Instructors/TAs are declared per "
-        "semester, in that semester's classroom-config/people.yml (docs/05) - never on the "
+        "semester, in that semester's classroom-config/instructors.yml (docs/05) - never on the "
         "Teams page, which Sync membership reconciles away.",
     )
     args = parser.parse_args()
@@ -1124,7 +1124,7 @@ def _run(args: argparse.Namespace) -> int:
             '"Sync membership" reconciles the `course-admin` team FROM that file, so an '
             "undeclared manual addition gets reverted on the next sync). Instructors/TAs "
             "are declared per semester instead, in that semester's own "
-            "classroom-config/people.yml (see step 4)."
+            "classroom-config/instructors.yml (see step 4)."
         )
     else:
         admins_step = (
@@ -1132,7 +1132,7 @@ def _run(args: argparse.Namespace) -> int:
             f'{args.org}/.github/dsl-course.yml, then push - "Sync membership" reconciles '
             "the `course-admin` team automatically (here and into every semester's own "
             "course-admin team; no manual Teams-page edit needed). Instructors/TAs are "
-            "declared per semester instead, in that semester's own classroom-config/people.yml "
+            "declared per semester instead, in that semester's own classroom-config/instructors.yml "
             "(see step 4)."
         )
     headline = "complete" if failures == 0 else "INCOMPLETE"
@@ -1170,7 +1170,7 @@ then run bootstrap with --semester (seeds welcome + roster).
             f"- welcome repo (public): Join issue form + onboard workflow\n"
             f"- classroom-config repo (private): starter students.csv "
             f"(edit https://github.com/{args.org}/classroom-config/blob/HEAD/students.csv with registrar data), "
-            f"plus schedule.yml and people.yml (this semester's calendar/due-dates and "
+            f"plus schedule.yml and instructors.yml (this semester's calendar/due-dates and "
             f"instructors/TAs - both seeded mostly-commented, uncomment what you want)\n"
             f"- faculty access: instructors (write) + course-admin (admin) on welcome and "
             f"classroom-config, so non-owner faculty can edit the roster/schedule and "

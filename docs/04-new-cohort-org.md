@@ -31,7 +31,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
     - This seeds: 
       - **`welcome`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
       - its **`README.md`**, telling them how to join - public like the rest of the repo, yours to reword, and never overwritten
-      - **`classroom-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `people.yml`
+      - **`classroom-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `instructors.yml`
       - **`students` + `auditors` teams** (empty) - do not edit directly these, these will be populated by the workflow, 
       - **`course-admin` team** for this semester
       - **`hertie-dsl-demo-f2026.github.io`** auto-deployed website - what it shows, and what you must not hand-edit: [11](11-configure-cohort-site.md)
@@ -44,23 +44,25 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
     - Full schema for the schedule [here](DEPLOYMENT-CHECKLIST.md#scheduleyml)
 
 
-5. *(optional)* **Declare this semester's instructors/TAs** in `classroom-config/people.yml`.
+5. *(optional)* **Declare this semester's instructors/TAs** in `classroom-config/instructors.yml`.
     - This grants them push on this semester and on this year's course content repos, and supplies the semester site's cards.
 
    ```yaml
-   people:
-     instructors:
-       - github_handle: "janedoe"
-     teaching_assistants:
-       - github_handle: "anOther-user"
-         start: "2026-09-01"     # optional - omit for "active immediately"
-         end: "2027-01-31"       # optional - omit for "indefinite"
+   instructors:
+     - github_handle: "janedoe"
+       role: instructor
+       email: "jane@example.org"
+     - github_handle: "anOther-user"
+       role: teaching_assistant
+       email: "another@example.org"
+       start: "2026-09-01"     # optional - omit for "active immediately"
+       end: "2027-01-31"       # optional - omit for "indefinite"
    ```
 
     - `github_handle` grants access; a named entry with no `github_handle` is display-only (a site card, no access granted). 
-    - The optional `start`/`end` dates **bound when the access is live** - this is how you hand a guest lecturer or a fixed-term TA push access for one term. 
+    - The optional `start`/`end` dates **bound when the access is live** - this is how you hand a guest lecturer or a fixed-term TA push access for one semester. 
       - Course-wide admins are declared at the **course** level instead (course org → `.github` → `dsl-course.yml` → `course_admins`), not here. 
-      - Full guide, including removing people and how quickly changes land: [05 Manage the teaching team](05-manage-teaching-team.md).
+      - Full guide, including removing people and how quickly changes land: [05 Manage the instructors](05-manage-teaching-team.md).
 
 6. **Load the student roster.** 
   - Fill `classroom-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)

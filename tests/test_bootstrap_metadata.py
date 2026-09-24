@@ -115,10 +115,10 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
 
 
 def test_classroom_readme_documents_the_semester_files_it_holds():
-    # Instructors configure a semester HERE (people.yml, schedule.yml, the roster); the README
+    # Instructors configure a semester HERE (instructors.yml, schedule.yml, the roster); the README
     # must document those files and never send them back up to the course org.
     readme = welcome.template("classroom-config/README.md")
-    assert "people.yml" in readme
+    assert "instructors.yml" in readme
     assert "schedule.yml" in readme
     assert "schedule.csv" not in readme
     assert "course org's" not in readme

@@ -416,7 +416,7 @@ def _masked(addresses: tuple[str, ...]) -> str:
     apart, not enough to identify either.
 
     For `log_person` ONLY, which prints under `DSL_VERBOSE=1` and is set by no rendered
-    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's people.yml is a
+    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's instructors.yml is a
     name, and every one of these workflows runs in a PUBLIC repo. What the run log gets is
     a count."""
     return ", ".join(mask_email(a) for a in addresses)

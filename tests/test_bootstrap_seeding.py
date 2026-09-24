@@ -159,7 +159,7 @@ def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
     # The scaffolds link the runbooks by absolute URL. They named `main` whatever the org
     # ran, so a release semester read the schema of code nobody had promoted yet.
     bc.setup_semester_extras("Semester-f2026", "main")
-    for path in ("schedule.yml", "people.yml"):
+    for path in ("schedule.yml", "instructors.yml"):
         body = fake.files[("classroom-config", path)]
         assert f"{CENTRAL}/blob/main/docs/" in body, path
         assert f"{CENTRAL}/blob/release/docs/" not in body, path
@@ -203,7 +203,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         "students.csv": "email,github_handle,enrol_code\na@x.edu,ahandle,AB12CD\n",
         "teams.csv": "assignment,team,github_handle\na1,team-1,ahandle\n",
         "schedule.yml": "timezone: Europe/Berlin\nassignments:\n  - id: a1\n",
-        "people.yml": "people:\n  instructors:\n    - github_handle: profx\n",
+        "instructors.yml": "people:\n  instructors:\n    - github_handle: profx\n",
         "teams.csv.sample": "team,members\nstale,sample\n",
         "README.md": "# stale contract from an older engine\n",
         ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
@@ -273,14 +273,19 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     assert gh_contents.put_files(
         "Semester-f2026",
         "classroom-config",
-        {"students.csv": b"header only\n", "teams.csv": b"t\n", "people.yml": b"p\n"},
+        {
+            "students.csv": b"header only\n",
+            "teams.csv": b"t\n",
+            "instructors.yml": b"p\n",
+        },
         "init: scaffolds",
         create_only=True,
     )
     assert len(committed) == 1
-    assert {entry["path"] for entry in committed[0]} == {"teams.csv", "people.yml"}, (
-        "a file already present must be left exactly as faculty left it"
-    )
+    assert {entry["path"] for entry in committed[0]} == {
+        "teams.csv",
+        "instructors.yml",
+    }, "a file already present must be left exactly as faculty left it"
 
 
 def test_a_create_only_write_commits_nothing_when_every_file_is_already_there(
@@ -326,7 +331,7 @@ def test_seed_if_absent_returns_false_only_when_the_write_fails(monkeypatch):
 
 
 def test_seeded_scaffolds_render_this_semesters_tag(fake):
-    # people.yml's commented example carries THIS semester's dates, so the window a faculty
+    # instructors.yml's commented example carries THIS semester's dates, so the window a faculty
     # member uncomments is already the right one. The schedule.yml scaffold deliberately
     # ships key-only (no example values to render) - `schedule.yml.sample` is where a
     # filled, tag-correct term lives instead.
@@ -335,7 +340,7 @@ def test_seeded_scaffolds_render_this_semesters_tag(fake):
     # into a seeded file. A `{tag}` reaching a semester repo is a broken example, and it
     # would only be noticed by the faculty member who copy-pasted it.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
-    people = fake.files[("classroom-config", "people.yml")]
+    people = fake.files[("classroom-config", "instructors.yml")]
     assert '"2027-09-01"' in people and '"2028-01-31"' in people
     for (repo, path), content in fake.files.items():
         assert "{tag}" not in content and "{year" not in content, f"{repo}/{path}"
@@ -354,8 +359,8 @@ def test_the_seeded_people_stub_teaches_every_required_field(fake):
     # yield entries the real parser accepts with nothing missing - `email:` included,
     # since an entry without one is granted access but can never be notified.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
-    stub = fake.files[("classroom-config", "people.yml")]
-    block = "# people:" + stub.split("# people:", 1)[1]
+    stub = fake.files[("classroom-config", "instructors.yml")]
+    block = "# instructors:" + stub.split("# instructors:", 1)[1]
     uncommented = "\n".join(line.removeprefix("# ") for line in block.splitlines())
     faculty = sync_faculty.parse_faculty_from_meta(yaml.safe_load(uncommented) or {})
     assert faculty["instructors"] and faculty["teaching_assistants"]
@@ -382,7 +387,7 @@ def test_the_sample_set_is_the_whole_worked_example_semester():
         "students.csv.sample",
         "teams.csv.sample",
         "schedule.yml.sample",
-        "people.yml.sample",
+        "instructors.yml.sample",
         "grading_sheets/assignment-1.yml.sample",
         "grading_sheets/assignment-4-project.yml.sample",
     }
@@ -413,7 +418,7 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     assert sched.releases and sched.assignments and sched.events
 
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(welcome.example_semester_file("people.yml")) or {}
+        yaml.safe_load(welcome.example_semester_file("instructors.yml")) or {}
     )
     assert faculty["instructors"] and faculty["teaching_assistants"]
 
@@ -514,7 +519,7 @@ def test_the_people_sample_names_nobody_real():
     # only: either no handle at all (valid - the card is display-only) or the
     # demo-*-placeholder convention.
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(welcome.example_semester_file("people.yml")) or {}
+        yaml.safe_load(welcome.example_semester_file("instructors.yml")) or {}
     )
     for role, people in faculty.items():
         for person in people:
@@ -1709,7 +1714,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
     # THE no-clobber invariant. refresh_classroom_system_files runs nightly against LIVE
     # semesters, so every path it writes is a path overwritten from a template every night.
     # The semester's own config - students.csv (enrol codes + onboarded handles), teams.csv,
-    # schedule.yml, people.yml - is seeded create-if-missing at bootstrap and must stay
+    # schedule.yml, instructors.yml - is seeded create-if-missing at bootstrap and must stay
     # that way; adding one of them to the refresh set would destroy a live roster
     # (which is exactly what happened once, in hertie-dsl-demo-f2026).
     #
@@ -1734,7 +1739,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         ".github/workflows/validate-schedule.yml",
     }, (
         "the nightly refresh may only re-push SYSTEM-owned classroom-config files; a "
-        "USER-owned file here (students.csv, teams.csv, schedule.yml, people.yml) "
+        "USER-owned file here (students.csv, teams.csv, schedule.yml, instructors.yml) "
         "would be overwritten from the template every night"
     )
     assert {repo for repo, _ in written} == {roster.CONFIG_REPO}

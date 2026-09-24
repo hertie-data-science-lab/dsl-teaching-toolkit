@@ -316,7 +316,7 @@ def _grading_config(
         _setting(
             "visibility",
             visibility,
-            "private (the student and the teaching team) | public (the whole internet: "
+            "private (the student and the instructors) | public (the whole internet: "
             "portfolio work, no receipts issue) | student_choice (private, and the "
             "student is its admin: theirs to publish after the grading cutoff, and no "
             "receipts issue) - read at hand-out only",
@@ -599,7 +599,7 @@ _ARTEFACT_NOTE = {
 _CONTRIBUTIONS_STUB = """\
 # Contributions
 
-<!-- dsl-stub: replace this with who did what. The teaching team reads it at the
+<!-- dsl-stub: replace this with who did what. The instructors read it at the
      deadline, alongside your commit history, when deciding individual adjustments. -->
 
 | Member | What they did |

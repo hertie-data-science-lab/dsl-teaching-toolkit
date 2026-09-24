@@ -425,7 +425,9 @@ def data_files(hosted: dict) -> dict[str, str]:
     """The generated `_data/*.yml`, keyed by repo-relative path."""
     return {
         "_data/people.yml": site_repo.people_yaml(
-            SEMESTER_ORG, PEOPLE, edit_at=f"{SEMESTER_ORG}/classroom-config/people.yml"
+            SEMESTER_ORG,
+            PEOPLE,
+            edit_at=f"{SEMESTER_ORG}/classroom-config/instructors.yml",
         ),
         "_data/nav.yml": site_repo.nav_yaml(semester=True),
         "_data/materials.yml": site._materials_index(

@@ -115,7 +115,7 @@ def yaml_problem(exc: yaml.YAMLError) -> str:
     """The parser's own complaint about a file that does not parse, and nothing else.
 
     Not `str(exc)`, which is what these messages used to be: PyYAML renders the offending
-    source LINE into it, and the line that broke a people.yml is the one carrying somebody's
+    source LINE into it, and the line that broke a instructors.yml is the one carrying somebody's
     email address. Every message here travels to a public run log, a public issue and an
     email."""
     return " ".join(str(getattr(exc, "problem", "") or "").split())
@@ -601,7 +601,7 @@ def _commit_tree(
         #
         # This is not hypothetical tidying: batching the classroom-config scaffolds into one
         # commit moved them off Contents, and the first semester org bootstrapped afterwards
-        # could not seed that repo at all - the roster, schedule and people.yml never
+        # could not seed that repo at all - the roster, schedule and instructors.yml never
         # landed, and every later step that reads them failed in turn.
         return _seed_first_commit(org, repo, tree, message, person)
     payload: dict[str, Any] = {"tree": tree, "base_tree": parent[1]}

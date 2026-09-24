@@ -204,7 +204,7 @@ def render_dotgithub_readme(org: str, course_name: str, is_semester: bool) -> st
 
 This is the **`.github` repo** for the `{org}` semester org. **Students and instructors rarely need to touch anything in this repo directly.**
 
-_Teaching staff (instructors, TAs, faculty assistants): your action buttons aren't here - they live in the parent **course org's** `.github` control panel, on its Actions tab._
+_Instructors (TAs and faculty assistants included): your action buttons aren't here - they live in the parent **course org's** `.github` control panel, on its Actions tab._
 
 Built and kept in sync by the [DSL teaching toolkit](https://github.com/{CENTRAL}).
 """
@@ -217,7 +217,7 @@ to run and configure the course.
 
 ## Run an action
 
-Open the **[Actions tab](https://github.com/{org}/.github/actions)**, pick a workflow, and click **Run workflow**. Workflows only show if you have write access - i.e. you're either (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a semester's `instructors-<semester>` team (declared in that semester's own `classroom-config/people.yml` then back-propagated). The full, annotated list of actions is on the **[org home page](https://github.com/{org})**.
+Open the **[Actions tab](https://github.com/{org}/.github/actions)**, pick a workflow, and click **Run workflow**. Workflows only show if you have write access - i.e. you're either (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a semester's `instructors-<semester>` team (declared in that semester's own `classroom-config/instructors.yml` then back-propagated). The full, annotated list of actions is on the **[org home page](https://github.com/{org})**.
 
 ## Typical flow
 
@@ -268,7 +268,7 @@ Welcome! This is the course organisation for **{course_name}**.
 ## Course website
 
 **[{course_name} - course website](https://{org.lower()}.github.io/)** - schedule,
-lectures, assignments, and the teaching team. This is the recommended way to navigate
+lectures, assignments, and the instructors. This is the recommended way to navigate
 this organisation once enrolled.
 
 ## Getting started
@@ -372,7 +372,7 @@ The following are runnable by explicit ad hoc manual dispatch; course instructor
 
 | Action | What it does | Managed |
 | --- | --- | --- |
-| [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles org + `students`-team access (from `students.csv`), project teams (from `teams.csv`), `course_admins` (from this org's declared `people:` block, mirrored into every semester's own `course-admin` team), and each semester's own `instructors`/`teaching_assistants` (from its `classroom-config/people.yml`, reconciled into that semester's `instructors` team AND a course-org `instructors-<semester>` team).<br><br> Triggers on (1) push (editing any of those files takes effect immediately, including removals so that the file is the live truth) and (2) on a daily cron (catches a faculty entry's `start`/`end` rotation with no edit that day);`workflow_dispatch` is a manual escape hatch. | Auto-handled |
+| [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles org + `students`-team access (from `students.csv`), project teams (from `teams.csv`), `course_admins` (from this org's declared `people:` block, mirrored into every semester's own `course-admin` team), and each semester's own `instructors`/`teaching_assistants` (from its `classroom-config/instructors.yml`, reconciled into that semester's `instructors` team AND a course-org `instructors-<semester>` team).<br><br> Triggers on (1) push (editing any of those files takes effect immediately, including removals so that the file is the live truth) and (2) on a daily cron (catches a faculty entry's `start`/`end` rotation with no edit that day);`workflow_dispatch` is a manual escape hatch. | Auto-handled |
 | [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the semester/source-repo/assignment dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly, so this org stays in step with the central toolkit on its own. | Auto-handled |
 | [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Auto-releases whatever each semester's `classroom-config/schedule.yml` `releases:` plan says is now due. It ticks about every 15 minutes, so each entry's `event_datetime` / `deploy_datetime` is honoured to roughly that. Manual runs default to a dry-run preview ("what opens when"). The manual workflows above still work for early/ad-hoc release. | Auto-handled |
 | [**Console**](https://github.com/{org}/.github/actions/workflows/console.yml) | Runs what the Instructor Console asks for. Not for pressing by hand: the Console fills in the request and follows the run. | Auto-handled |

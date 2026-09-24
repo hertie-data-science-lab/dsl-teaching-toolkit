@@ -119,7 +119,7 @@ CONTRACT_STATUS = {
     "schema": "dsl.status/1",
     "inputs": {
         "schedule.yml": "a",
-        "people.yml": "b",
+        "instructors.yml": "b",
         "students.csv": "c",
         "teams.csv": "d",
         "grading_sheets": "e",

@@ -42,6 +42,8 @@ from pathspec import GitIgnoreSpec
 from . import schedule, status, teams
 from .course import (
     CUTOFF_SENTENCE,
+    INSTRUCTORS_FILE,
+    OLD_PEOPLE_FILE,
     PUBLISH_FILE,
     SELF_SELECT,
     assignment_slug,
@@ -115,6 +117,17 @@ def _semester_start(semester_org: str) -> date:
     if tag:
         return date(int(tag[1:]), 9 if tag[0] == "f" else 2, 1)
     return date(2026, 1, 1)
+
+
+def _instructors_meta(semester_org: str) -> tuple[dict, str]:
+    """A semester's instructors file and the path it came from: `instructors.yml`, else -
+    for one release - the old `people.yml`. `({}, instructors.yml)` when neither says
+    anything."""
+    for path in (INSTRUCTORS_FILE, OLD_PEOPLE_FILE):
+        meta = yaml_file(semester_org, "classroom-config", path)
+        if meta:
+            return meta, path
+    return {}, INSTRUCTORS_FILE
 
 
 def _semester_label(semester_org: str) -> str:
@@ -206,7 +219,7 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
     A file that is absent or empty is "nothing public", said deliberately, and the mirror
     may then delete what an earlier sync copied. A file that does not PARSE, or whose
     `public:` is not a list of patterns, stops the sync and reports - the same rule
-    `people.yml` follows next door, and for the same reason: read as "nothing public" it
+    `instructors.yml` follows next door, and for the same reason: read as "nothing public" it
     would unpublish a whole course's rendered decks over a typo, on a green run."""
     declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
     if declared is None:
@@ -1588,7 +1601,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
         meta = yaml_file(course_org, ".github", "dsl-course.yml")
         # Schedule is semester-specific (it varies by year), so it comes from the semester's
         # own classroom-config/schedule.yml. So do this semester's instructors/TAs - read
-        # from its own classroom-config/people.yml below, NOT the course org (whose
+        # from its own classroom-config/instructors.yml below, NOT the course org (whose
         # dsl-course.yml carries only the multi-year instructor cards).
         sched = schedule.load(semester_org)
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
@@ -1744,17 +1757,18 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 "Semester ends", sched.semester_end
             )
 
+        instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(
             config=config,
-            # People: this semester's own classroom-config/people.yml (instructors AND TAs -
+            # People: this semester's own classroom-config/instructors.yml (instructors AND TAs -
             # the per-semester teaching team; schema in
-            # templates/classroom-config/people.yml), else its instructors team.
+            # templates/classroom-config/instructors.yml), else its instructors team.
             files={
                 "README.md": site_readme(semester_org, semester=True),
                 "_data/people.yml": people_yaml(
                     semester_org,
-                    yaml_file(semester_org, "classroom-config", "people.yml"),
-                    edit_at=f"{semester_org}/classroom-config/people.yml",
+                    instructors_meta,
+                    edit_at=f"{semester_org}/classroom-config/{instructors_path}",
                 ),
                 "_data/nav.yml": nav_yaml(semester=True),
                 # The catch-all index behind the All Materials tab: every released file,
@@ -1859,7 +1873,7 @@ def main() -> int:
         log_err("pass --semester-org or --all-semesters.")
         return 1
     # A read helper that couldn't reach the API raises RuntimeError; a config file with
-    # one bad indent raises yaml.YAMLError out of load_yaml_config (people.yml is
+    # one bad indent raises yaml.YAMLError out of load_yaml_config (instructors.yml is
     # web-editable, so faculty author that fault directly). In an Actions log a one-line
     # error beats a traceback either way, and the run still goes red.
     try:
@@ -1875,7 +1889,7 @@ def main() -> int:
         if args.all_semesters:
             rc = 0
             for semester in live_semesters(args.course_org):
-                # One semester's raised failure (an unreachable API, a people.yml that
+                # One semester's raised failure (an unreachable API, a instructors.yml that
                 # doesn't parse) must not skip every LATER semester's site on the 06:00
                 # cron - log it, mark the batch failed, and carry on. The same per-semester
                 # isolation PR #151/#146 applied to the nightly refresh and the scheduler.
