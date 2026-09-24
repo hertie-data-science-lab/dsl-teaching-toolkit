@@ -143,7 +143,7 @@ def add_preview_flag(parser: argparse.ArgumentParser, help: str) -> None:
 # with `allow_abbrev=False`, none is prefix-matched onto one either (`--format` would
 # otherwise resolve to `--formats`, `--solution` to `--solution-datetime`). A command line
 # that spells one is refused as NOT_MIGRATED, naming the new flag - unless the CLI still
-# defines that spelling for a meaning of its own (`status --format`, `status --write`).
+# defines that spelling for a meaning of its own (`status --format`, `list_orgs --format`).
 OLD_FLAGS = {
     "--cohort-org": "--semester-org",
     "--all-cohorts": "--all-semesters",

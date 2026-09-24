@@ -18,7 +18,7 @@ Usage:
     python3 -m dsl_course.status --course-org COURSE --semester-org SEMESTER
     python3 -m dsl_course.status --course-org COURSE --semester-org SEMESTER --format json
     python3 -m dsl_course.status --course-org COURSE [--semester-org SEMESTER] --json-v1
-    python3 -m dsl_course.status --course-org COURSE [--semester-org SEMESTER] --write
+    python3 -m dsl_course.status --course-org COURSE [--semester-org SEMESTER] --no-preview
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ from .discovery import org_meta
 from .faults import Unusable
 from .gh_contents import put_file
 from .issues import open_titles
-from .log import CLIParser, Summary, log_err, log_ok, log_step, plural
+from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, log_step, plural
 from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
@@ -560,7 +560,7 @@ def main() -> int:
     parser.add_argument(
         "--semester-org",
         default=None,
-        help="Required for the checklist; optional with --json-v1/--write (course only).",
+        help="Required for the checklist; optional with --json-v1/--no-preview (course only).",
     )
     parser.add_argument("--format", choices=["md", "json"], default="md")
     parser.add_argument(
@@ -568,13 +568,14 @@ def main() -> int:
         action="store_true",
         help="Print the status.json document (dsl.status/1) instead of the checklist.",
     )
-    parser.add_argument(
-        "--write",
-        action="store_true",
-        help="Write status.json into classroom-config (semester) or .github (course).",
+    add_preview_flag(
+        parser,
+        "Print the checklist (or, with --json-v1, the document) and write nothing "
+        "(default). --no-preview writes status.json into classroom-config (semester) "
+        "or .github (course).",
     )
     args = parser.parse_args()
-    if args.write:
+    if not args.preview:
         return refresh(args.course_org, args.semester_org)
     if args.json_v1:
         try:

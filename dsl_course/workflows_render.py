@@ -1654,7 +1654,7 @@ on:
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
 {_MAIL_ENV}
         run: |
-          python3 -m dsl_course.status --course-org "$COURSE" --semester-org "$SEMESTER_ORG" >> "$GITHUB_STEP_SUMMARY"
+          python3 -m dsl_course.status --course-org "$COURSE" --semester-org "$SEMESTER_ORG" --preview >> "$GITHUB_STEP_SUMMARY"
 """
 
 

@@ -203,8 +203,9 @@ def _course_semester(request: Request) -> list[str]:
     return ["--course-org", request.course_org, "--semester-org", request.semester_org]
 
 
-def _status_write(request: Request) -> list[str]:
-    return [*_course_semester(request), "--write"]
+def _status_refresh(request: Request) -> list[str]:
+    # The check REFRESHES status.json: `status` previews unless told --no-preview.
+    return [*_course_semester(request), "--no-preview"]
 
 
 def _scheduler(request: Request) -> list[str]:
@@ -427,7 +428,7 @@ _OPS = (
         done_text="Status refreshed.",
         doc="docs/reference/actions-reference.md",
         module="status",
-        argv=_status_write,
+        argv=_status_refresh,
     ),
     Operation(
         name="cohort.preview_automation",

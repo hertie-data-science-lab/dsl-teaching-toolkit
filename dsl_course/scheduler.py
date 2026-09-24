@@ -58,13 +58,14 @@ Sources are always read from the course org and destinations always written to t
 org - the two orgs come from the invocation (`--course-org` / `--semester-org`), never from
 the schedule, which names repos only.
 
-Usage (the workflow's two jobs are the first two lines; --now is for testing):
-    python3 -m dsl_course.scheduler --course-org COURSE --all-semesters --skip-autograde
-    python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER --autograde-only
+Usage (the workflow's two jobs are the first two lines; --now is for testing). Bare, it
+PREVIEWS - prints what would fire and writes nothing - and acts only with --no-preview:
+    python3 -m dsl_course.scheduler --course-org COURSE --all-semesters --skip-autograde --no-preview
+    python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER --autograde-only --no-preview
     python3 -m dsl_course.scheduler --course-org COURSE --list-semesters
-    python3 -m dsl_course.scheduler --course-org COURSE --check-course-config
-    python3 -m dsl_course.scheduler --course-org COURSE --all-semesters
-    python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER --preview
+    python3 -m dsl_course.scheduler --course-org COURSE --check-course-config --no-preview
+    python3 -m dsl_course.scheduler --course-org COURSE --all-semesters --no-preview
+    python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER
     python3 -m dsl_course.scheduler --course-org COURSE --semester-org SEMESTER --now 2026-09-15T14:00
 """
 

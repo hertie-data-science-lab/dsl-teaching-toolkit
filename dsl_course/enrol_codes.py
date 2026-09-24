@@ -23,11 +23,13 @@ for every roster row without a `github_handle`, so the old codes stop working, a
 them. It previews with `--preview`, which counts and changes nothing (`resend_unjoined`).
 
 Usage:
-    python3 -m dsl_course.enrol_codes --semester-org hertie-dsl-demo-f2026
+    python3 -m dsl_course.enrol_codes --semester-org hertie-dsl-demo-f2026 --no-preview
     python3 -m dsl_course.enrol_codes --semester-org hertie-dsl-demo-f2026 \\
-        --resend-unjoined [--preview]
+        --resend-unjoined [--no-preview]
     python3 -m dsl_course.enrol_codes --semester-org hertie-dsl-demo-f2026 \\
-        --dispatched-by hertie-dsl-demo-course-e1234
+        --dispatched-by hertie-dsl-demo-course-e1234 --no-preview
+
+Bare, every one of these previews and sends nothing: acting takes `--no-preview`.
 """
 
 from __future__ import annotations

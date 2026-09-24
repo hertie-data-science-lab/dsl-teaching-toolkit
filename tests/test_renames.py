@@ -213,7 +213,7 @@ def test_a_cli_takes_only_the_new_flag(monkeypatch, capsys, flag):
     seen: list[tuple] = []
     monkeypatch.setattr(status, "refresh", lambda *a: seen.append(a) or 0)
     monkeypatch.setattr(
-        sys, "argv", ["status", "--course-org", "C", flag, "Sem", "--write"]
+        sys, "argv", ["status", "--course-org", "C", flag, "Sem", "--no-preview"]
     )
     if flag == "--cohort-org":
         with pytest.raises(SystemExit):
@@ -770,12 +770,28 @@ def test_no_old_flag_is_prefix_matched_onto_a_new_one(monkeypatch, capsys, argv)
     assert NOT_MIGRATED in capsys.readouterr().err
 
 
-def test_a_cli_that_still_owns_an_old_spelling_keeps_it(monkeypatch):
-    # `status --format` and `status --write` mean what they always meant there.
+def test_status_writes_only_when_told_no_preview(monkeypatch, capsys):
+    # `status --format` keeps its own meaning there; `--write` is now `--no-preview`.
     seen: list[tuple] = []
     monkeypatch.setattr(status, "refresh", lambda *a: seen.append(a) or 0)
-    monkeypatch.setattr(sys, "argv", ["status", "--course-org", "C", "--write"])
+    monkeypatch.setattr(sys, "argv", ["status", "--course-org", "C", "--no-preview"])
     assert status.main() == 0 and seen == [("C", None)]
+    monkeypatch.setattr(sys, "argv", ["status", "--course-org", "C", "--write"])
+    with pytest.raises(SystemExit):
+        status.main()
+    assert f"{NOT_MIGRATED}: `--write` is the old name of `--no-preview`" in (
+        capsys.readouterr().err
+    )
+
+
+def test_a_semester_template_description_converges_off_its_old_ending(monkeypatch):
+    from dsl_course import repos
+
+    patched: list[str] = []
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: patched.append(a[-1]) or (0, ""))
+    listing = [{"name": "a1", "description": "a1 - cohort assignment template"}]
+    assert repos.converge_descriptions("S", listing, "semester").changed == 1
+    assert patched == ["description=a1 - semester assignment template"]
 
 
 def test_no_rendered_workflow_spells_an_old_course_org_flag_or_variable():

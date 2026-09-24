@@ -288,7 +288,7 @@ jobs:
               // The formation WINDOW, which runs from the handout to the grading pin. Only
               // an explicit `pending` or `closed` refuses: a lock written by a toolkit older
               // than the window carries no such scalar at all (`window` is null), and that
-              // has to go on behaving exactly as it did - a semester mid-semester must not
+              // has to go on behaving exactly as it did - a semester that is running must not
               // lose team formation because its nightly sync has not run yet.
               // `pending` and `closed` are the two sides of the window and they must not
               // share a sentence: before the handout `closes` is still in the FUTURE, so

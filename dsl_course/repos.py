@@ -471,6 +471,11 @@ SUPERSEDED_SEMESTER_DESCRIPTIONS = {
     "student roster, teams, term schedule, and marking. Students never see it, and no "
     "PII leaves this repo.": _CONFIG_REPO_DESCRIPTION,
 }
+# Descriptions that carry the repo's own name, so no one literal can key them: the old
+# ENDING -> the new one. `assign` names each semester-side template `<slug> - ...`.
+SUPERSEDED_DESCRIPTION_ENDINGS = {
+    " - cohort assignment template": " - semester assignment template",
+}
 SUPERSEDED_COURSE_DESCRIPTIONS = {
     "Org profile and configuration": "[control panel]: Org profile & configuration",
 }
@@ -519,7 +524,15 @@ def converge_descriptions(
     for repo in repos:
         if repo.get("archived"):
             continue  # GitHub refuses the PATCH; a frozen semester logged one failure a night
-        want = superseded.get((repo.get("description") or "").strip())
+        said = (repo.get("description") or "").strip()
+        want = superseded.get(said) or next(
+            (
+                said[: -len(old)] + new
+                for old, new in SUPERSEDED_DESCRIPTION_ENDINGS.items()
+                if said.endswith(old)
+            ),
+            None,
+        )
         if not want:
             continue
         code, _ = gh(

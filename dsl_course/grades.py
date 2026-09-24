@@ -1840,7 +1840,8 @@ def grading_config_faults(
         template = entry.course_source_repo
         if not template:
             continue  # the plan itself is faulty; schedule.yml's own digest says so
-        fires = entry.grading_datetime or entry.due_datetime
+        # The window-less cutoff: the spec that holds the window is what is read next.
+        fires = schedule.grading_cutoff_datetime(sched, slug)
         text = _grading_text(course_org, template)
         if text is None:
             faults += _undeclared_faults(slug, template, course_org, fires)

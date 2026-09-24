@@ -17,8 +17,9 @@ this with prune=True - config is meant to be the live truth there; this module's
 off-by-default is only for ad-hoc/CLI use outside that workflow.
 
 Usage:
-    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026 --prune
+    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026   # previews
+    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026 --no-preview
+    python3 -m dsl_course.sync_roster --semester-org hertie-dsl-demo-f2026 --prune --no-preview
 """
 
 from __future__ import annotations

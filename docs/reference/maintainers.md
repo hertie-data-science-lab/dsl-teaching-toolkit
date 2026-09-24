@@ -710,7 +710,7 @@ an already-open issue carries.
 | copy "cohort", "term", "tag"; "staff", "teaching team"; "grading cutoff", "the cutoff" | "semester"; "instructors"; "late cutoff" | logs, mails, forms, docs |
 | workflow inputs `dry_run` (mixed defaults), `write` (Generate syllabus) | `preview`, default `true` on every button; only an explicit `false` acts | rendered workflows |
 | workflow input `silent` (Distribute grades) | `notify`, default `true` | rendered workflow |
-| CLI `--dry-run` / `--no-dry-run`, `syllabus --write` | `--preview` / `--no-preview`, preview ON by default on every CLI | every CLI; rendered workflows and console ops spell one explicitly |
+| CLI `--dry-run` / `--no-dry-run`, `syllabus --write`, `status --write` | `--preview` / `--no-preview`, preview ON by default on every CLI | every CLI; rendered workflows and console ops spell one explicitly |
 | log copy `DRY-RUN`, `[dry-run]`, "dry run" | `PREVIEW`, `[preview]`, "preview" | logs, the Distribute preview issue |
 | receipts issue label `dsl-feedback`, mark `<!-- dsl-course: feedback -->` | `dsl-receipts`, `<!-- dsl-course: receipts -->` on new issues; the old label and mark stay RECOGNISED (append-only chain) - nothing to migrate | submission repos |
 | copy "receipts issue", "receipts thread" | "Submission receipts" issue | logs, forms, docs |

@@ -261,7 +261,7 @@ def test_semester_check_writes_status_json():
                 )
             )
         )[-1]
-        == "--write"
+        == "--no-preview"
     )
 
 
