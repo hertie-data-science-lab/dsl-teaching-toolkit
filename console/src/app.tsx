@@ -32,6 +32,7 @@ import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
 import { StudentScreen, studentScreen } from './screens/Student';
+import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
@@ -125,6 +126,16 @@ export function App({ state: s }: { state: AppState }) {
   const sel = parseSearch(s.search.value);
   const title = s.mode.value === 'student' ? 'Student Console' : 'Instructor Console';
 
+  if (sel.join) {
+    return (
+      <EnvCtx.Provider value={s.env(user)}>
+        <Topbar user={user} title="Student Console" navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
+        <div class="shell" style="grid-template-columns:minmax(0,1fr)"><main id="view" tabindex={-1}><ScreenBoundary key={s.search.value}><JoinCourseScreen org={sel.join} /></ScreenBoundary></main></div>
+        <Footer />
+      </EnvCtx.Provider>
+    );
+  }
+
   const stu = studentContext(estate, sel, s.archivedOf);
   if (stu?.pending) {
     return (
@@ -145,7 +156,7 @@ export function App({ state: s }: { state: AppState }) {
             <StudentNav courses={courses} cohortStates={{}} semesters={semesters} semester={stu.semester} current={key} />
           </aside>
           <main id="view" tabindex={-1}>
-            <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} /></ScreenBoundary>
+            <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} entry={route.entry} now={s.now.value} /></ScreenBoundary>
           </main>
         </div>
         <Footer />

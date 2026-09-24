@@ -12,6 +12,8 @@ import type { Loaded } from '../model/status';
 import { studentHref } from '../router';
 import { Crumbs, Help, Probs, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
+import { StudentWeekHome } from './Student';
+import { JoinStart } from './StudentJoin';
 import type { HomeProps } from './types';
 
 interface Card {
@@ -80,8 +82,7 @@ function semesterCard(s: Semester): Card {
 }
 
 /** Your semesters, and the per-viewer choice of which of them show. */
-function SemestersGroup({ semesters, login, lead }: { semesters: Semester[]; login: string; lead: boolean }) {
-  const [hidden, setHidden] = useState(() => hiddenSemesters(login));
+function SemestersGroup({ semesters, login, lead, hidden, setHidden }: { semesters: Semester[]; login: string; lead: boolean; hidden: Set<string>; setHidden: (h: Set<string>) => void }) {
   const flip = (org: string) => {
     const next = new Set(hidden);
     if (!next.delete(org)) next.add(org);
@@ -114,20 +115,28 @@ function NothingFound({ kind }: { kind?: TokenKind }) {
     );
   }
   return (
+    <>
     <section class="panel section stub">
       <h2>No courses found</h2>
       <p>None of the GitHub organisations your account belongs to is a course or a semester. A course is an organisation whose <code>.github</code> repo carries the <code>dsl-course-hub</code> topic.</p>
     </section>
+    <JoinStart />
+    </>
   );
 }
 
-export function HomeScreen({ courses, semesters = [], kind, cohortStates, user }: HomeProps) {
+export function HomeScreen({ courses, semesters = [], kind, cohortStates, user, now }: HomeProps) {
+  const [hidden, setHidden] = useState(() => hiddenSemesters(user.login));
   if (!courses.length && semesters.length) {
     return (
       <>
         <Crumbs items={[{ t: 'Your semesters' }]} />
         <div class="page-head"><div><h1>Your semesters</h1><p class="lede">Every semester you are a student of; archived ones stay here as history</p></div></div>
-        <SemestersGroup semesters={semesters} login={user.login} lead />
+        <div class="stack">
+          <StudentWeekHome semesters={semesters.filter((x) => !hidden.has(x.org))} now={now} />
+          <SemestersGroup semesters={semesters} login={user.login} lead hidden={hidden} setHidden={setHidden} />
+          <JoinStart />
+        </div>
       </>
     );
   }
@@ -169,7 +178,7 @@ export function HomeScreen({ courses, semesters = [], kind, cohortStates, user }
               </ul>
             </section>
           ) : null}
-          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead={false} /> : null}
+          {semesters.length ? <SemestersGroup semesters={semesters} login={user.login} lead={false} hidden={hidden} setHidden={setHidden} /> : null}
         </div>
       )}
     </>

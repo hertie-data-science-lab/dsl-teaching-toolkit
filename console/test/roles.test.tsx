@@ -108,15 +108,15 @@ describe('mode and the student shell', () => {
     expect(modeOf(estate([], [NLP], [[NLP.org, 'student']]), parseSearch(''))).toBe('student');
   });
 
-  it('the student nav lists the six screens, each a placeholder for now', () => {
+  it('the student nav lists the seven screens', () => {
     const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[NLP]} semester={NLP} current="marks" />);
     const labels = [...nav.matchAll(/<li><a href="\?semester=hertie-nlp-f2026#(\w+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);
-    expect(labels).toEqual([['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['instructors', 'Instructors']]);
+    expect(labels).toEqual([['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['join', 'Join'], ['instructors', 'Instructors']]);
     expect(nav).toMatch(/#marks" aria-current="page"/);
     expect(nav).toContain('Your semesters');
     const t = text(<StudentScreen semester={NLP} screen="marks" studentView={false} />);
     expect(t).toContain('Marks');
-    expect(t).toContain('Coming in D3.');
+    expect(t).not.toContain('Coming in D3.');
     expect(t).not.toContain('Student view');
     expect(studentScreen('nonsense')).toBe('week');
   });

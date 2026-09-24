@@ -71,14 +71,72 @@ may hold both across organisations:
 Home shows **Your courses** (the instructor's course and cohort cards) and **Your semesters**
 (one card per semester the person is a student of, archived ones greyed), with a **Show these
 semesters** choice kept in this browser (`localStorage`, per account). A student-only account
-lands on Your semesters.
+lands on Your semesters, with This week across the semesters it shows.
 
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
-week, Schedule, Assignments, Marks, Materials, Instructors; placeholders until D3). For a
+week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
 semester the person teaches, that is the **Student view** (the Student view link in the
 cohort nav): the same screens with the instructor's own identity and a banner, never a
 student's repos or marks (rule 7). Anywhere else the console is in instructor mode for anyone
 who teaches somewhere, and in student mode otherwise.
+
+## Student screens and their sources
+
+The semester's `status.json` is private (`classroom-config`), so a student cannot read it.
+Each screen reads with the student's own account:
+
+| Screen | Shared facts (`StudentData`) | The student's own (GitHub, directly) |
+|---|---|---|
+| This week (per semester, and on Home across the semesters shown) | rows due, handed out, released or on in the next 7 days; releases of the last 7; open team formation | gradebook's last change (marks returned); whether they have a team |
+| Schedule | rows by week, coloured by kind | their state on hand-out and due rows; rows for their repos marked |
+| Assignments | dates, late cutoff, late rule, how to hand in, solution shown | `<slug>-<handle>`, a team repo they can push to (team from its name, members from the team), the drop box; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos) and its newest receipt |
+| Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
+| Materials | the materials repos | the repo's recursive tree; each file read when opened |
+| Join | assignments forming teams | their own Join course / Join team issues in `welcome` and the automation's last reply |
+| Instructors | the cards | none |
+
+The shared facts come through one interface, `StudentData` (`src/model/student.ts`). Today
+it is `SiteSource`: the public site repo's generated files, read through the API
+(`_lectures/`, `_events/`, `_assignments/` front matter, `kind` or the older `type`; `_data/people.yml`,
+`late_policy.yml`, `materials.yml`). Once the engine writes a public-safe
+`.github/.system/student-status.json`, a source reading that one file replaces it (WP-D4).
+In a Student view nothing of the student's own is read. An archived semester is listed
+with a link to its org and nothing of it is read.
+
+**Materials** open inside the console from the private copy: markdown and notebooks through
+GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
+text and images; an HTML page with its `<stem>_files/` bundle inlined (stylesheets as
+`<style>`, images and fonts as data: URLs) in a frame sandboxed with no permissions. The
+page's policy (no inline scripts, no `'unsafe-eval'`, no frames other than srcdoc) is inherited by every
+document made from the console page, so a deck that needs its scripts (reveal.js, Quarto) opens in
+the **deck viewer** instead: `deck.html`, a second document in the build with its own policy
+(`default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src
+data: blob:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'`). The
+console opens it with `noopener` and hands it the inlined deck over a `BroadcastChannel` named
+by a random id in its URL fragment (`src/model/deckTab.ts`); the viewer clears its session
+storage, drops the fragment and shows the deck in a frame sandboxed to `allow-scripts` only (an
+opaque origin: no storage, no cookies, `top.opener` null). The deck also downloads as one
+self-contained file. PDFs open in
+a new tab or download; anything else downloads. Files over 1 MB come from the blob API; the
+API serves nothing over 100 MB.
+
+**Join** fills the form in the console and opens GitHub's own issue form with the answers
+(text inputs by field id: `enrol_code`, `assignment`, `team`), so the issue and its body are
+exactly the seeded form's. The console cannot create the issue itself: GitHub drops labels
+on an issue created through the API by anyone without push, and the `welcome` workflows run
+only on the form's label. The Action dropdown is chosen on GitHub. The answer is polled from
+the student's issues every 15 s for up to 5 minutes while one still waits. `?join=<org>`
+(and Home's "Have an enrolment code?") opens Join course for a semester the person is not a
+member of yet.
+
+**Rate limit** (5,000 requests an hour per person; every read is ETag-cached, and an
+unchanged 304 costs nothing): opening a semester reads its site once, about 4 + one per
+generated file (about 40 on the demo; 1 once `student-status.json` exists), then the repo
+list, the gradebook and its last commit, and one call per team. Assignments adds two calls
+per private repo (receipts issue, comments). A file costs one call, a markdown file or notebook
+two, an HTML page one per bundle file it uses (at most 80); file bytes are kept by blob sha
+(up to 64 MB), so reopening costs nothing. Home's This week repeats the
+semester read for each semester shown.
 
 ## What it reads
 
@@ -149,3 +207,6 @@ step past the first unfinished one opens that one instead. `?template=<repo>#sch
 opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?semester=<org>` or `?course=<org>`.
+Student screens: `?semester=<org>#week` (and `#schedule`, `#assignments`, `#marks`,
+`#materials`, `#materials-<repo>/<path>` for an open file, `#join`, `#instructors`);
+`?join=<org>` for Join course.

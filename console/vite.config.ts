@@ -17,7 +17,8 @@ function csp(): Plugin {
       build = c.command === 'build';
       relay = c.env.VITE_AUTH_RELAY_URL;
     },
-    transformIndexHtml: (html) => withCsp(html, build, relay),
+    // deck.html carries its own fixed policy (the deck viewer); only index.html is filled or stripped.
+    transformIndexHtml: (html, ctx) => (ctx.path.endsWith('deck.html') ? html : withCsp(html, build, relay)),
   };
 }
 
@@ -51,6 +52,8 @@ function validators(): Plugin {
 export default defineConfig({
   base: '/dsl-teaching-toolkit/',
   plugins: [preact(), csp(), validators()],
+  // Two documents: the console, and the deck viewer it opens decks in (its own policy).
+  build: { rolldownOptions: { input: { main: 'index.html', deck: 'deck.html' } } },
   test: {
     environment: 'node',
     include: ['test/**/*.test.{ts,tsx}'],
