@@ -95,16 +95,17 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
 }
 
 /**
- * What the console's dsl_course schema refuses but the engine reads (research 07 section 5),
+ * What the console's dsl_course schema refuses but the engine accepts (research 07 section 5),
  * so a save goes ahead with a note: `start`/`end` on a course instructor card
  * (`site_repo._people_from_meta` honours them) and a course-level `teaching_assistants`
- * list (read by nothing: no site shows course-level assistants).
+ * list (the engine ignores it: no site shows course-level assistants).
  */
 function tolerated(e: ErrorObject): string | null {
   if (e.keyword !== 'additionalProperties') return null;
   const key = (e.params as { additionalProperty: string }).additionalProperty;
-  if (/^\/people\/instructors\/\d+$/.test(e.instancePath) && (key === 'start' || key === 'end')) return 'dates on a course instructor card';
-  if (e.instancePath === '/people' && key === 'teaching_assistants') return 'course-level teaching assistants';
+  if (/^\/people\/instructors\/\d+$/.test(e.instancePath) && (key === 'start' || key === 'end'))
+    return 'a course instructor card has start or end dates; the student site honours them';
+  if (e.instancePath === '/people' && key === 'teaching_assistants') return 'it lists course-level teaching assistants; the engine ignores them, since assistants are set per cohort under Staff';
   return null;
 }
 
@@ -116,7 +117,7 @@ export function courseFileAfter(text: string, before: Details, after: Details, m
   const errors = validCourse.errors ?? [];
   const known = errors.map(tolerated);
   if (known.some((k) => k === null)) return { error: invalidText('dsl-course.yml', { errors: errors.filter((_, i) => known[i] === null) }) };
-  return { text: out.text, warning: `Not checked: dsl-course.yml has ${[...new Set(known)].sort().join(' and ')}, which the engine reads but the console’s check does not know yet.` };
+  return { text: out.text, warning: `Saved without the console’s check, which does not know these yet: ${[...new Set(known)].sort().join('. Also, ')}.` };
 }
 
 /** The first new admin handle with no GitHub account, or null (a failed lookup counts as there). */
