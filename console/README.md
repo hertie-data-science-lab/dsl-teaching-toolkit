@@ -30,14 +30,14 @@ and the token stays in `sessionStorage`: it is gone when the tab closes.
   build sets both `VITE_GH_APP_CLIENT_ID` and `VITE_AUTH_RELAY_URL`; the App's callback URL
   must be the console's URL (for Hertie
   `https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/`), the App must be
-  installed on each course and cohort organisation, and its permissions must include the
+  installed on each course and semester organisation, and its permissions must include the
   organisation permission Members: read (discovery reads the person's memberships).
 - **Fine-grained token** (`PatAuth`): the no-server fallback, for an institution that runs no
   relay or when the App sign-in is blocked. It is owned by one organisation and reaches only
   that one; the sign-in probes the organisations it can check and names those the token
   cannot see. It needs the organisation permission Members: read, since both the probe and
   discovery read `GET /user/memberships/orgs/{org}`. The organisation must not require approval of fine-grained tokens (decision 0011
-  has the cohort set-up turn that off). Discovery finds its organisations another way (below).
+  has the semester set-up turn that off). Discovery finds its organisations another way (below).
 - **Classic token** (`PatAuth`): `repo` and `workflow` scopes, checked from the
   `X-OAuth-Scopes` header. Works everywhere the account does; the widest grant of the three.
 
@@ -68,7 +68,7 @@ may hold both across organisations:
 - **student** of a semester org: an active member with no push on its `.github`;
 - anything else is not shown (a course the person can read but not change still shows read only).
 
-Home shows **Your courses** (the instructor's course and cohort cards) and **Your semesters**
+Home shows **Your courses** (the instructor's course and semester cards) and **Your semesters**
 (one card per semester the person is a student of, archived ones greyed), with a **Show these
 semesters** choice kept in this browser (`localStorage`, per account). A student-only account
 lands on Your semesters, with This week across the semesters it shows.
@@ -76,13 +76,13 @@ lands on Your semesters, with This week across the semesters it shows.
 The mode picks the shell. `?semester=<org>` opens that semester's student screens (This
 week, Schedule, Assignments, Marks, Materials, Join, Instructors). For a
 semester the person teaches, that is the **Student view** (the Student view link in the
-cohort nav): the same screens with the instructor's own identity and a banner, never a
+semester nav): the same screens with the instructor's own identity and a banner, never a
 student's repos or marks (rule 7). Anywhere else the console is in instructor mode for anyone
 who teaches somewhere, and in student mode otherwise.
 
 ## Student screens and their sources
 
-The semester's `status.json` is private (`classroom-config`), so a student cannot read it.
+The semester's `status.json` is private (in `semester-config`), so a student cannot read it.
 Each screen reads with the student's own account:
 
 | Screen | Shared facts (`StudentData`) | The student's own (GitHub, directly) |
@@ -93,7 +93,7 @@ Each screen reads with the student's own account:
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
 | Materials | the materials repos; each session's readings | the repo's recursive tree; each file read when opened |
 | Set up | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`); clone commands, VS Code and github.dev links; their assignment repos to clone. The local folders are kept in this browser only |
-| Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `welcome` and the automation's last reply; after "You joined", the invitation's accept link |
+| Join | assignments forming teams, and each one's teams so far (name, headcount, cap; never who) with a Pick that fills in the team | their own Join course / Join team issues in `join` and the automation's last reply; after "You joined", the invitation's accept link |
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
 Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/memberships/{login}`
@@ -140,7 +140,7 @@ API serves nothing over 100 MB.
 **Join** fills the form in the console and opens GitHub's own issue form with the answers
 (text inputs by field id: `enrol_code`, `assignment`, `team`), so the issue and its body are
 exactly the seeded form's. The console cannot create the issue itself: GitHub drops labels
-on an issue created through the API by anyone without push, and the `welcome` workflows run
+on an issue created through the API by anyone without push, and the `join` workflows run
 only on the form's label. The Action dropdown is chosen on GitHub. The answer is polled from
 the student's issues every 15 s for up to 5 minutes while one still waits. `?join=<org>`
 (and Home's "Have an enrolment code?") opens Join course for a semester the person is not a
@@ -175,9 +175,9 @@ a first visit, mostly free 304s after).
   so on Home: add the organisations under Resource owner and grant Members: read when creating
   it. When every listing fails (GitHub not answering), Home says the courses could not be
   listed rather than showing an empty list.
-- Courses: organisations whose `.github` repo carries the `dsl-course-hub` topic; cohorts from
-  `.github/cohort-courses-pages.yml`; write access = push on `.github`.
-- Semesters: organisations whose `.github` carries `dsl-cohort` or `dsl-semester`; the course
+- Courses: organisations whose `.github` repo carries the `dsl-course-hub` topic; semesters from
+  `.github/semesters.yml`; write access = push on `.github`.
+- Semesters: organisations whose `.github` carries `dsl-semester`; the course
   from that repo's `dsl-course.yml` (`course:`), its name from the course's public `.github`;
   archived when that `.github` repo is archived. A semester known only from a course's
   registry has its `.github` read when its student screens open. Org names compare
@@ -187,14 +187,14 @@ a first visit, mostly free 304s after).
   `inputs` with one tree read. An absent file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
-  `students.csv`, `people.yml`, a template's `grading_config.yml`, the site's `index.md`.
+  `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
 - Materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and last
   changes; a materials repo's recursive tree, badged from `publish.yml` and `.releaseignore`.
 
 ## What it changes
 
 - Files, as the signed-in user, with a sha-conditional write (a file that moved on since it
-  was read is refused, never overwritten): `schedule.yml`, `people.yml`, `students.csv`,
+  was read is refused, never overwritten): `schedule.yml`, `instructors.yml`, `students.csv`,
   `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
   `grading_config.yml` (on `solution`), a materials repo's `publish.yml` and `.releaseignore`,
   the site's `index.md` and `_announcements/`. YAML is edited in place (`src/edit/yamlText.ts`):
@@ -215,6 +215,15 @@ a first visit, mostly free 304s after).
   New assignment writes the Advanced marking values `assignment.create` does not take into
   the new template's `grading_config.yml`.
 
+## Names and migration
+
+The instructor screens take every repo and path name from `src/model/names.ts`, which reads
+`schemas/names.json` when the engine exports it (decisions 0010 and 0012). The console reads
+the new names only. An org that still carries a retired one (the `classroom-config` or
+`welcome` repo, `people.yml`, `.dsl/`, the `dsl-cohort` topic, the old course registry) shows
+one screen, "This semester has not been migrated yet" (or course), with the engine's
+`NOT_MIGRATED` sentence for each, and nothing else of it loads (`src/model/migration.ts`).
+
 ## Schemas
 
 `schemas/` holds the JSON Schemas the engine exports with `python -m dsl_course.schemas`;
@@ -226,12 +235,16 @@ each record in it); read it rather than writing a literal.
 
 Hash tokens as in the design mockup: `#semester`, `#schedule-s5`, `#assignment-<slug>`,
 `#release-<id>`, `#template-<slug>`, `#marks-<slug>`, `#teams-<slug>`, `#materials-<repo>`;
-the schedule editor also opens `#schedule-new`, `#schedule-term` and `#schedule-archive`.
+the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
+The hashes decision 0012 renamed redirect: `#cohort` to `#semester`, `#staff` to
+`#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
+`#schedule-semester`.
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
 opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
-The course or semester rides in the query string: `?semester=<org>` or `?course=<org>`.
+The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`
+(`?semester=` opens the student screens).
 Student screens: `?semester=<org>#week` (and `#schedule`, `#assignments`, `#marks`,
 `#materials`, `#materials-<repo>/<path>` for an open file, `#setup`, `#join`, `#instructors`);
 `?join=<org>` for Join course.
