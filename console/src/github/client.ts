@@ -118,6 +118,8 @@ export interface GhIssue {
   comments: number;
   labels: { name: string }[];
   user?: { login: string } | null;
+  /** Present when the "issue" is a pull request (the issues listing returns both). */
+  pull_request?: object;
 }
 
 export interface GhComment {
@@ -189,6 +191,8 @@ export function decodeBytes(b64: string): Uint8Array {
 
 /** The contents API's base64 ceiling: above it a file's bytes come from the blob API. */
 export const ONE_MB = 1024 * 1024;
+/** How many bytes of file content the client keeps by blob sha. */
+export const BYTES_KEPT = 64 * ONE_MB;
 
 /** Resolve after `ms` milliseconds: the pause between polls. */
 export const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -199,6 +203,8 @@ function enc(path: string): string {
 
 export class GitHubClient {
   private cache = new Map<string, CacheEntry>();
+  private bytes = new Map<string, Uint8Array>();
+  private bytesHeld = 0;
   private readonly fetchFn: Fetch;
   private readonly base: string;
   rateLimit: RateLimit | null = null;
@@ -210,6 +216,8 @@ export class GitHubClient {
 
   clearCache(): void {
     this.cache.clear();
+    this.bytes.clear();
+    this.bytesHeld = 0;
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -509,9 +517,29 @@ export class GitHubClient {
 
   /**
    * A file's bytes, not kept in the ETag cache (a notebook or a PDF can run to megabytes):
-   * the contents API up to 1 MB, the blob API by `sha` above it (both stop at 100 MB).
+   * the contents API up to 1 MB, the blob API by `sha` above it (both stop at 100 MB). A blob
+   * is immutable, so its bytes are kept by sha (up to BYTES_KEPT, oldest dropped first):
+   * reopening a file or a deck's bundle costs no call.
    */
   async getBytes(owner: string, repo: string, path: string, sha: string, size: number): Promise<Uint8Array> {
+    const hit = this.bytes.get(sha);
+    if (hit) {
+      this.bytes.delete(sha); // most recently used last
+      this.bytes.set(sha, hit);
+      return hit;
+    }
+    const got = await this.fetchBytes(owner, repo, path, sha, size);
+    this.bytes.set(sha, got);
+    this.bytesHeld += got.length;
+    for (const [k, v] of this.bytes) {
+      if (this.bytesHeld <= BYTES_KEPT || k === sha) break;
+      this.bytes.delete(k);
+      this.bytesHeld -= v.length;
+    }
+    return got;
+  }
+
+  private async fetchBytes(owner: string, repo: string, path: string, sha: string, size: number): Promise<Uint8Array> {
     const url = this.url(size > ONE_MB ? `/repos/${owner}/${repo}/git/blobs/${sha}` : `/repos/${owner}/${repo}/contents/${enc(path)}`);
     const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(), cache: 'no-store' });
     this.noteRateLimit(res);

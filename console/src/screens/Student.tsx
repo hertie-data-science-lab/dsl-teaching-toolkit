@@ -191,7 +191,7 @@ export function StudentWeekHome({ semesters, now }: { semesters: Semester[]; now
 // --------------------------------------------------------------------------- Schedule
 
 export const ROW_CLASS: Record<string, string> = { lecture: 'lec', lab: 'lab', assignment: 'asg', due: 'asg', exam: 'exam', special_event: 'evt', term_date: 'term' };
-export const ROW_WORD: Record<string, string> = { lecture: 'lecture', lab: 'lab', assignment: 'hand out', due: 'due', exam: 'exam', special_event: 'event', term_date: 'term' };
+export const ROW_WORD: Record<string, string> = { lecture: 'lecture', lab: 'lab', assignment: 'hand out', due: 'due', exam: 'exam', special_event: 'event', term_date: 'term date' };
 
 /** Monday of the week `iso` falls in, as yyyy-mm-dd. */
 function mondayOf(iso: string, tz: string): string {
@@ -356,7 +356,7 @@ export function MarksView({ org, login, facts, gradebook, studentView, loaded = 
   const slugs = Object.keys(gradebook.entries);
   return (
     <div class="stack">
-      {gradebook.total ? <p class="lede"><b>Term total:</b> {gradebook.total}</p> : null}
+      {gradebook.total ? <p class="lede"><b>Semester total:</b> {gradebook.total}</p> : null}
       {!slugs.length ? <p class="footnote">No marks yet. They appear here when your instructors return them.</p> : null}
       {slugs.map((slug) => {
         const e = gradebook.entries[slug];

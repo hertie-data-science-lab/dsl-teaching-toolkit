@@ -80,7 +80,7 @@ export function parseSearch(search: string): Selection {
     cohort: q.get('cohort') ?? undefined,
     course: q.get('course') ?? undefined,
     semester: q.get('semester') ?? undefined,
-    join: q.get('join') ?? undefined,
+    join: ORG_RE.test(q.get('join') ?? '') ? q.get('join')! : undefined,
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
     template: q.get('template') ?? undefined,
   };
@@ -95,6 +95,9 @@ export const COHORT_SCREENS: Record<string, string> = {
 export const COURSE_SCREENS: Record<string, string> = {
   course: 'course', materials: 'materials', templates: 'templates', template: 'templates', details: 'details', website: 'website',
 };
+
+/** A GitHub organisation name, as `?join=` must spell one. */
+export const ORG_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
 const WIZARD_RE = /^new-(course|cohort|assignment)-[1-4]$/;
 

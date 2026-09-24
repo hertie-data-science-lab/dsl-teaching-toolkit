@@ -6,11 +6,11 @@
 // only where they can push to it (a demo org's public repos are readable by anyone).
 
 import { parse } from 'yaml';
-import type { GhRepo, GitHubClient } from '../github/client';
+import type { GhIssue, GhRepo, GitHubClient } from '../github/client';
 import type { SemesterAssignment } from './student';
 
-/** The receipts issue's label: the engine matches it (course.RECEIPTS_ISSUE_LABEL); the word is frozen. */
-export const RECEIPTS_LABEL = 'dsl-feedback';
+/** The receipts issue's labels, newest first: `dsl-receipts` since the rename, `dsl-feedback` on older issues (course.RECEIPTS_ISSUE_LABELS). */
+export const RECEIPTS_LABELS = ['dsl-receipts', 'dsl-feedback'];
 export const RECEIPTS_TITLE = 'Submission receipts';
 
 export interface MyUnit {
@@ -102,8 +102,27 @@ export function parseGradebook(text: string, updated: string | null = null): Gra
 /** Whether marks for `slug` have come back. */
 export const isMarked = (g: Gradebook | null, slug: string) => !!g?.entries[slug]?.finalGrade;
 
-/** The repo among `repos` that is the student's for assignment `a`, and its team. */
-export function unitOf(a: SemesterAssignment, repos: GhRepo[], login: string): Omit<MyUnit, 'members'> {
+/**
+ * The assignment a repo name belongs to: the LONGEST known slug it equals or starts with
+ * (`assignment-3-project-team-x` is assignment-3-project's, not assignment-3's), or null.
+ */
+export function ownerSlug(name: string, slugs: string[]): string | null {
+  const n = name.toLowerCase();
+  let best: string | null = null;
+  for (const s of slugs) {
+    const l = s.toLowerCase();
+    if ((n === l || n.startsWith(`${l}-`)) && (!best || l.length > best.length)) best = s;
+  }
+  return best;
+}
+
+/**
+ * The repo among `repos` that is the student's for assignment `a`, and its team. `slugs` is
+ * every assignment of the semester, so a team repo is matched to its own assignment and never
+ * by a bare prefix. The student's own `<slug>-<handle>` wins wherever it exists, a group
+ * assignment included (no team is looked for then).
+ */
+export function unitOf(a: SemesterAssignment, repos: GhRepo[], login: string, slugs: string[] = [a.slug]): Omit<MyUnit, 'members'> {
   const lc = (s: string) => s.toLowerCase();
   const none = { slug: a.slug, repo: null, team: null, shared: false };
   if (a.submitVia === 'external') return none;
@@ -112,10 +131,14 @@ export function unitOf(a: SemesterAssignment, repos: GhRepo[], login: string): O
     return { ...none, repo: box?.name ?? null, shared: true };
   }
   const own = repos.find((r) => lc(r.name) === lc(`${a.slug}-${login}`));
-  if (own && !a.group) return { ...none, repo: own.name };
+  if (own) return { ...none, repo: own.name };
   if (!a.group) return none;
-  // A team's repo: `<slug>-<team>`, one the student can push to (their team was granted push).
-  const team = repos.find((r) => lc(r.name).startsWith(lc(`${a.slug}-`)) && !lc(r.name).endsWith('-submissions') && r.permissions?.push === true);
+  // A team's repo: `<slug>-<team>` of THIS assignment, one the student can push to (their team was granted push).
+  const all = slugs.includes(a.slug) ? slugs : [...slugs, a.slug];
+  const team = repos.find((r) => {
+    const n = lc(r.name);
+    return n !== lc(a.slug) && ownerSlug(r.name, all) === a.slug && !n.endsWith('-submissions') && r.permissions?.push === true;
+  });
   return team ? { ...none, repo: team.name, team: team.name.slice(a.slug.length + 1) } : none;
 }
 
@@ -129,7 +152,7 @@ export async function readMine(client: GitHubClient, org: string, login: string,
   ]);
   const units: Record<string, MyUnit> = {};
   await Promise.all(assignments.map(async (a) => {
-    const u = unitOf(a, repos, login);
+    const u = unitOf(a, repos, login, assignments.map((x) => x.slug));
     const members = u.team ? await client.listTeamMembers(org, `${a.slug}-${u.team}`.toLowerCase()) : null;
     units[a.slug] = { ...u, members };
   }));
@@ -147,8 +170,16 @@ export const readable = (body: string) => body.replace(/<!--[\s\S]*?-->/g, '').t
 
 /** The Submission receipts issue of `repo` and its newest receipt; null when the repo has none. */
 export async function readReceipts(client: GitHubClient, org: string, repo: string): Promise<Receipts | null> {
-  const issues = await client.listIssues(org, repo, `labels=${RECEIPTS_LABEL}&state=all`);
-  const issue = issues[0] ?? (await client.listIssues(org, repo, 'state=all')).find((i) => i.title === RECEIPTS_TITLE);
+  const pick = (list: GhIssue[]) => {
+    const issues = list.filter((i) => !i.pull_request);
+    return issues.find((i) => i.title === RECEIPTS_TITLE) ?? issues[0];
+  };
+  let issue: GhIssue | undefined;
+  for (const label of RECEIPTS_LABELS) {
+    issue = pick(await client.listIssues(org, repo, `labels=${label}&state=all`));
+    if (issue) break;
+  }
+  issue ??= (await client.listIssues(org, repo, 'state=all')).find((i) => !i.pull_request && i.title === RECEIPTS_TITLE);
   if (!issue) return null;
   const comments = issue.comments ? await client.listIssueComments(org, repo, issue.number) : [];
   const receipts = comments.filter((c) => /<!-- dsl-receipt:/.test(c.body));

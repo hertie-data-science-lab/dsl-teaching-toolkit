@@ -15,6 +15,7 @@ import type { GhComment, GhIssue } from '../github/client';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
 import type { SemesterFacts } from '../model/student';
+import { ORG_RE } from '../router';
 import { Crumbs, Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 
@@ -201,7 +202,7 @@ export function JoinCourseScreen({ org }: { org: string }) {
 /** Where someone with a code but no semester yet starts: the semester's GitHub organisation name. */
 export function JoinStart() {
   const [org, setOrg] = useState('');
-  const ok = /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(org.trim());
+  const ok = ORG_RE.test(org.trim());
   return (
     <section class="panel section" aria-labelledby="h-join">
       <h2 id="h-join">Have an enrolment code?</h2>
