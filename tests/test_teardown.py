@@ -430,7 +430,7 @@ def test_the_record_names_what_was_frozen_and_why_it_is_being_kept():
     )
     assert text.startswith("<!-- SYSTEM-OWNED")
     assert "`assignment-1-ada-l`" in text and "`grades-ada-l`" in text
-    assert "| Repositories frozen | 2 (1 already were) |" in text
+    assert "| Repositories archived | 2 (1 already were) |" in text
     assert PR_URL in text
     assert "cohort-gradebook.csv, 30 student row(s)" in text
     assert "2027-02-16" in text

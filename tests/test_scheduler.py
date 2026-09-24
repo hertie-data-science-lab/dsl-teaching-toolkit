@@ -4237,11 +4237,14 @@ def test_the_notice_says_what_the_freeze_does_and_links_the_runbook(monkeypatch)
     body = scheduler._archive_notice_body(
         "Semester-Org", date(2027, 2, 16), True, "main"
     )
-    assert "write accesses are revoked and the org is frozen in place" in body
+    assert (
+        "write accesses are revoked and every repository is read-only from then on"
+        in body
+    )
     assert "un-archive it from its own Settings page" in body
     assert (
         "https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/"
-        "docs/10-grade-and-return-assignments.md#closing-the-semester-out"
+        "docs/10-grade-and-return-assignments.md#archiving-the-semester"
     ) in body
 
 
@@ -4280,7 +4283,7 @@ def test_a_notice_is_closed_when_the_archive_is_called_off(monkeypatch):
     ((title, comment),) = seen["notices_closed"]
     # Closed with a comment: closing it silently would read as "this happened".
     assert title == stale
-    assert "taken away" in comment and "Nothing was frozen" in comment
+    assert "taken away" in comment and "Nothing was archived" in comment
     # And nothing was frozen, mailed or re-opened on the way.
     assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
     # Idempotent: the tick after it finds nothing open and writes nothing.

@@ -2522,7 +2522,7 @@ def test_a_closed_out_semester_is_left_alone(monkeypatch, capsys):
     monkeypatch.setattr(grades, "put_file", boom)
     monkeypatch.setattr(grades, "_grading_text", boom)
     assert grades.sync_team_lock("COURSE", "SEMESTER", _sched(p="t")).ok
-    assert "semester closed out" in capsys.readouterr().out
+    assert "semester archived" in capsys.readouterr().out
 
 
 def test_no_log_line_from_the_lock_file_names_a_person(monkeypatch, capsys):

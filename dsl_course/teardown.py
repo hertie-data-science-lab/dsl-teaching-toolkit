@@ -1,4 +1,5 @@
-"""dsl-course teardown -- close a finished semester out.
+"""dsl-course archive -- archive a finished semester (`python3 -m dsl_course.archive`; this
+module keeps the frozen name `teardown`, which every org's Archive semester workflow ran).
 
 Runs on the semester's own archive date, fired by the scheduler - and only for a semester
 whose `schedule.yml` writes an `archive:` block (its `event_datetime:` defaults to `semester_end` +
@@ -46,8 +47,8 @@ as many words, which is what an early close-out - and a semester that never aske
 archived - needs.
 
 Usage:
-    python3 -m dsl_course.teardown --semester-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.teardown --course-org COURSE --semester-org SEMESTER --no-preview
+    python3 -m dsl_course.archive --semester-org hertie-dsl-demo-f2026
+    python3 -m dsl_course.archive --course-org COURSE --semester-org SEMESTER --no-preview
 """
 
 from __future__ import annotations
@@ -90,8 +91,8 @@ RECORD_PATH = "archive/teardown.md"
 WELCOME_REPO = "welcome"
 
 _RECORD_BANNER = (
-    "<!-- SYSTEM-OWNED - do not edit. Written by `python3 -m dsl_course.teardown` "
-    "when this semester was closed out. -->"
+    "<!-- SYSTEM-OWNED - do not edit. Written by `python3 -m dsl_course.archive` "
+    "when this semester was archived. -->"
 )
 
 # What the sealed repo holds, spelled out for whoever opens it years later with a retention
@@ -111,7 +112,7 @@ expires, and the archived student repos with it."""
 # release whose source was never staged - and closing them silently would read as "fixed".
 _CLOSING_COMMENT = (
     "This semester has been archived and is read-only. Nothing in it can be changed now, so "
-    "this notice is closed unresolved rather than fixed. The teardown record is in "
+    "this notice is closed unresolved rather than fixed. The archive record is in "
     f"`{RECORD_PATH}`."
 )
 
@@ -240,22 +241,22 @@ def render_record(
     due = (
         f"Its archive date was **{archive_date}**."
         if archive_date
-        else "`schedule.yml` declares no archive date - closed out with `--force`."
+        else "`schedule.yml` declares no archive date - archived early with `--force`."
     )
     frozen = sorted(closed.frozen + closed.already)
     rows = "\n".join(f"- `{name}`" for name in frozen) or "- (none)"
     return f"""{_RECORD_BANNER}
-# Teardown record - {semester_org}
+# Archive record - {semester_org}
 
-Closed out on **{sealed_on}** (UTC). {due}
+Archived on **{sealed_on}** (UTC). {due}
 
 | What | Detail |
 | --- | --- |
-| Repositories frozen | {len(frozen)} ({len(closed.already)} already were) |
+| Repositories archived | {len(frozen)} ({len(closed.already)} already were) |
 | Semester edits carried back | {propagated} |
 | Registrar export | {registrar} |
 
-**Nobody was revoked.** An archived repository is read-only for everyone, so freezing IS
+**Nobody was revoked.** An archived repository is read-only for everyone, so archiving IS
 the withdrawal of write access - and everyone who could read this semester still can, which
 is the point of closing it rather than deleting it. Org membership and teams are untouched.
 
@@ -265,7 +266,7 @@ what re-grants a student their access if one has to be reopened.
 
 {_RETENTION_NOTE}
 
-## Frozen
+## Archived
 
 {rows}
 """
@@ -449,7 +450,7 @@ def close_out(
         )
         return 1
     if config.get("archived"):
-        log_ok(f"{semester_org} is already closed out ({CONFIG_REPO} is archived)")
+        log_ok(f"{semester_org} is already archived ({CONFIG_REPO} is archived)")
         return Summary("This semester is already archived.", conclusion="nothing_to_do")
 
     sched = schedule.load(semester_org)
@@ -468,7 +469,7 @@ def close_out(
         if not dry_run:
             log_err(
                 f"{not_due} Wait for that date, change it, or re-run with --force to "
-                f"close the semester out now."
+                f"archive the semester now."
             )
             return 1
         # A dry run freezes nothing, and printing the counts is how somebody decides
@@ -486,13 +487,13 @@ def close_out(
     closed = _freeze(semester_org, listing, dry_run)
     if closed.errors:
         log_err(
-            f"{closed.errors} repo(s) could not be frozen - {semester_org} is NOT sealed. "
+            f"{closed.errors} repo(s) could not be archived - {semester_org} is NOT sealed. "
             f"Fix the cause and run this again; it resumes from wherever it stopped."
         )
         return 1
     if dry_run:
         log_ok(
-            f"preview: {len(closed.frozen)} repo(s) would be frozen "
+            f"preview: {len(closed.frozen)} repo(s) would be archived "
             f"({len(closed.already)} already are), then {CONFIG_REPO} sealed"
         )
         if errors:
@@ -516,10 +517,10 @@ def close_out(
         CONFIG_REPO,
         RECORD_PATH,
         record.encode(),
-        "docs: record the semester teardown",
+        "docs: record the semester archive",
     ):
         log_err(
-            f"the teardown record was not written - {CONFIG_REPO} is left LIVE rather "
+            f"the archive record was not written - {CONFIG_REPO} is left LIVE rather "
             f"than sealed over a missing record. Re-run to finish."
         )
         return 1
@@ -530,7 +531,7 @@ def close_out(
         )
         return 1
     log_ok(
-        f"{semester_org} closed out: {len(closed.frozen) + len(closed.already)} repo(s) "
+        f"{semester_org} archived: {len(closed.frozen) + len(closed.already)} repo(s) "
         f"frozen, {CONFIG_REPO} sealed"
     )
     if errors:
@@ -548,16 +549,16 @@ def main() -> int:
         "--course-org",
         default="",
         help="Course org - where this semester's edits are offered back before it is "
-        "frozen, and where its website is synced from. Omit and both are skipped.",
+        "archived, and where its website is synced from. Omit and both are skipped.",
     )
     parser.add_argument("--semester-org", required=True)
     # Default ON, like every other write button: the rendered workflow passes --preview /
     # --no-preview explicitly, so a bare local invocation cannot freeze a semester by accident.
-    add_preview_flag(parser, "Print the counts; freeze nothing (default).")
+    add_preview_flag(parser, "Print the counts; archive nothing (default).")
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Close out even though the archive date has not arrived (or is not set).",
+        help="Archive even though the archive date has not arrived (or is not set).",
     )
     args = parser.parse_args()
 

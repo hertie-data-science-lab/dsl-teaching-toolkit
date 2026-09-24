@@ -1190,7 +1190,7 @@ _MAILED_MARK = "<!-- dsl-archive-notice: mailed -->"
 # to reopen a repo afterwards. An absolute URL into this toolkit, so it resolves from a
 # semester's own `classroom-config` - see the doc-filenames table in
 # docs/reference/maintainers.md.
-_CLOSE_OUT_DOC = "docs/10-grade-and-return-assignments.md#closing-the-semester-out"
+_ARCHIVE_DOC = "docs/10-grade-and-return-assignments.md#archiving-the-semester"
 
 
 def _archive_notice_body(
@@ -1216,13 +1216,13 @@ def _archive_notice_body(
         f"This notice is opened automatically by the scheduler.\n\n"
         f"On **{when}** all the repositories in `{semester_org}` will be archived. Nothing "
         f"is deleted and all read access permissions remain as they are, write accesses "
-        f"are revoked and the org is frozen in place.\n\n"
+        f"are revoked and every repository is read-only from then on.\n\n"
         f"If there is anything you would like to make changes to, please make those "
         f"before then. To move this archiving date or remove it altogether, edit "
-        f"`{schedule.SCHEDULE_PATH}` in this repo. To reopen a repository after the "
-        f"freeze, un-archive it from its own Settings page - see "
-        f"[Closing the semester out]"
-        f"(https://github.com/{CENTRAL}/blob/{central_ref}/{_CLOSE_OUT_DOC}).\n\n"
+        f"`{schedule.SCHEDULE_PATH}` in this repo. To reopen a repository after it is "
+        f"archived, un-archive it from its own Settings page - see "
+        f"[Archiving the semester]"
+        f"(https://github.com/{CENTRAL}/blob/{central_ref}/{_ARCHIVE_DOC}).\n\n"
         f"{told}"
     )
 
@@ -1232,8 +1232,8 @@ def _archive_notice_body(
 _CALLED_OFF_COMMENT = (
     "This notice no longer matches `classroom-config/schedule.yml`: the archive date has "
     "been moved, or the `archive:` block taken away - and a semester with no block is "
-    "never archived automatically. Nothing was frozen. If the semester should still be "
-    "closed out, the **Archive semester** button does it."
+    "never archived automatically. Nothing was archived. If the semester should still be "
+    "archived, the **Archive semester** button does it."
 )
 
 

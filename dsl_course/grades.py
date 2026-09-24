@@ -2261,7 +2261,7 @@ def sync_team_lock(
     than at one call site because it is the same answer for all of them: a finished term
     forms no teams, so there is nothing for the mirror to say."""
     if repo_is_archived(semester_org, CONFIG_REPO):
-        log(f"  [skip] {TEAM_LOCK_PATH} in {semester_org} (semester closed out)")
+        log(f"  [skip] {TEAM_LOCK_PATH} in {semester_org} (semester archived)")
         return LockWrite(True, False)
     sched = sched if sched is not None else schedule.load(semester_org)
     if dry_run:

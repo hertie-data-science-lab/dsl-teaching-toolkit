@@ -125,7 +125,7 @@
 #     title: "Clinic drop-in"
 #     event_datetime:               # REQUIRED
 
-# archive the org (freezes in place): removes all write permissions, retains all read permissions
+# archive the org (every repo read-only): removes all write permissions, retains all read permissions
 archive:
   event_datetime:             # optional (default: semester_end + 60 days)
   title: Semester archived      # optional - the row's Title column

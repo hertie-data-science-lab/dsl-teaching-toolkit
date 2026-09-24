@@ -56,7 +56,7 @@ breaks a live link that faculty click:
 | `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS` |
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
 | `docs/README.md` | `profile_readme.py` |
-| `docs/10-grade-and-return-assignments.md` | `scheduler._CLOSE_OUT_DOC` (the archive notice) |
+| `docs/10-grade-and-return-assignments.md` | `scheduler._ARCHIVE_DOC` (the archive notice) |
 
 Every `Digest.doc` is one of these: each digest issue ends with a `Field reference:` link built
 from it, so the seven of them are the widest surface in this table.
@@ -71,7 +71,8 @@ Things whose *literal spelling* is depended on from outside Python:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `derive`, `enrol_codes`, `grades`,
   `list_orgs`, `notify`, `propagate`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`,
   `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
-  `sync_teams`, `team_formation`, `teardown`, `console`, `schemas` (the last two:
+  `sync_teams`, `team_formation`, `teardown`, `archive` (the documented name of `teardown`),
+  `console`, `schemas` (the last two:
   [The Instructor Console](#the-instructor-console)).
   A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
   parser rather than a subcommand, for the same reason: `--patch-path` switches it from
@@ -118,12 +119,12 @@ Things whose *literal spelling* is depended on from outside Python:
   refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
-- **An ARCHIVED `classroom-config`** is a semester's "finished" marker. `teardown` archives it
-  last, after everything else it freezes; `discovery.semester_is_live` is what every
+- **An ARCHIVED `classroom-config`** is a semester's "finished" marker. `archive` (`teardown`) archives it
+  last, after everything else it archives; `discovery.semester_is_live` is what every
   course-side sweep that WRITES asks (the scheduler, the faculty and membership syncs, the
   enrolment codes, the site build), and `seed.refresh` and `grades.sync_team_lock` read the
   same flag for themselves off listings they already hold. So archiving one closes a semester whether the person doing it meant
-  that or not, and anything that freezes a semester must do it in that order - the archived
+  that or not, and anything that archives a semester must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
 - **`.github/semesters.yml`** is the semester registry every dropdown reads, and
   **`.github/.last-refresh`** is the heartbeat that keeps an org's crons from GitHub's 60-day
@@ -717,6 +718,8 @@ an already-open issue carries.
 | site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
 | `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
+| CLI entry `python3 -m dsl_course.teardown` | `python3 -m dsl_course.archive` (the documented entry point; `teardown` stays as the frozen module name) | the Archive semester workflow and the console op |
+| copy "teardown", "close out", "freeze" (a semester) | "archive" | logs, the archive record and notices, forms, docs |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

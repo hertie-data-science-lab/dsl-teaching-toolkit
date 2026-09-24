@@ -416,7 +416,7 @@ def test_archive_semester_previews_by_default_and_never_deletes():
     assert inp["preview"]["default"] is True
     assert inp["force"]["default"] is False
     assert workflows_render._PREVIEW_GATE in rendered
-    assert "python3 -m dsl_course.teardown" in rendered
+    assert "python3 -m dsl_course.archive" in rendered
     # Faculty read the header before they click a button whose name sounds final: it has
     # to say there, in the file, that this freezes and never destroys.
     assert "NOTHING IS DELETED" in rendered

@@ -281,7 +281,7 @@ can knit). The run log says which, in counts. None of that ever reds the cutoff 
 submission with no fences in it, or one repo that could not be read, is counted and the
 freeze carries on.
 
-## Closing the semester out
+## Archiving the semester
 
 **Ask for it once and it happens on its own.** Write an `archive:` block in `schedule.yml`
 and the scheduler archives the whole semester org on its date. You do not have to remember
@@ -310,7 +310,7 @@ mails again. Students see it too, in the site's Updates box and on its schedule.
 3. the website is synced one last time, so it ships the archived state;
 4. **every repository in the org is archived** - students' work, the released materials,
    `welcome` (so nobody can still Join a term that is over), the website, `.github`;
-5. `archive/teardown.md` is written into `classroom-config`, recording what was frozen;
+5. `archive/teardown.md` (the archive record) is written into `classroom-config`, recording what was archived;
 6. `classroom-config` is archived last, which is what tells every nightly sync this semester
    is finished and to leave it alone.
 
@@ -323,10 +323,10 @@ project teams are untouched.
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive semester** is the button for closing a semester out early, or at all. `preview` is on
+**Archive semester** is the button for archiving a semester early, or at all. `preview` is on
 by default and prints the counts; the real run **refuses** until the archive date has
 arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
-so no date, is closed out. Run it again if it fails part-way - it picks up where it stopped,
+so no date, is archived. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.
 
 `classroom-config` is now the semester's whole record of assessment - roster, teams, schedule,

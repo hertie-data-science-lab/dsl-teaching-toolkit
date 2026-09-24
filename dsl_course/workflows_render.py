@@ -1318,7 +1318,7 @@ on:
     inputs:
 {_semester_dropdown(semester_orgs)}
       preview:
-        description: "Preview the teardown - freeze nothing, open no pull request"
+        description: "Preview the archive - archive nothing, open no pull request"
         type: boolean
         default: true
       force:
@@ -1341,7 +1341,7 @@ on:
           args=(--course-org "$COURSE_ORG" --semester-org "$SEMESTER_ORG")
 {_PREVIEW_GATE}
           [ "$FORCE" = "true" ] && args+=(--force)
-          python3 -m dsl_course.teardown "${{args[@]}}"
+          python3 -m dsl_course.archive "${{args[@]}}"
 """
 
 

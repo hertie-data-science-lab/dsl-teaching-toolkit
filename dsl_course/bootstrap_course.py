@@ -509,7 +509,7 @@ def validate_secret_presence(org: str, secret_name: str) -> bool:
 # The two lines of the seeded schedule.yml a course's `semester_defaults:` rewrites. Matched
 # as text, not re-emitted as YAML: the file is a commented skeleton faculty read.
 _TZ_LINE = "# timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin\n"
-_ARCHIVE_HEAD = "# archive the org (freezes in place)"
+_ARCHIVE_HEAD = "# archive the org (every repo read-only)"
 
 
 def _scaffold_text(

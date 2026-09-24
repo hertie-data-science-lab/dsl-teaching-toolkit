@@ -547,3 +547,15 @@ def test_no_rendered_workflow_spells_an_old_course_org_flag_or_variable():
     for name, rendered in ALL_RENDERED.items():
         for old in ("--master-org", "--source-org", "MASTER_ORG", "SRC_ORG"):
             assert old not in rendered, (name, old)
+
+
+# ------------------------------------------------ archive (teardown, freeze, close out)
+
+
+def test_archive_is_the_documented_entry_point_and_runs_teardown(monkeypatch):
+    from dsl_course import archive, teardown
+
+    monkeypatch.setattr(teardown, "main", lambda: 7)
+    assert archive.main() == 7
+    assert REGISTRY["cohort.archive"].module == "archive"
+    assert "python3 -m dsl_course.archive" in ALL_RENDERED["archive_semester"]

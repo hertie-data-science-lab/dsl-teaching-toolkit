@@ -241,7 +241,7 @@ events:
 
 ## `archive:`
 
-When this semester is frozen read-only: every repository in the org archived, nothing deleted, nobody removed. See [Closing the semester out](10-grade-and-return-assignments.md#closing-the-semester-out).
+When this semester is archived: every repository in the org archived, nothing deleted, nobody removed. See [Archiving the semester](10-grade-and-return-assignments.md#archiving-the-semester).
 
 **The block is the switch.** Write it and the semester is archived automatically; leave it out and nothing ever is. Every field inside it is optional. A new semester's seeded `schedule.yml` already carries the block, so filling in `semester_end` arms a freeze sixty days later; delete the block to opt out.
 
@@ -252,7 +252,7 @@ When this semester is frozen read-only: every repository in the org archived, no
 | `title` | no | `Semester archived` | the row's Title column |
 | `show_on_site` | no | `true` | a "Semester archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
 | `details` | no | *none* | the sentence that row and that notice say - all of it; `{date}` in it is filled in with the archive date |
-| `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**. **Display only** - the freeze still happens on the date above |
+| `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**. **Display only** - the archive still happens on the date above |
 
 ```yaml
 semester_end: 2026-12-18
@@ -264,14 +264,14 @@ archive:
 ```
 
 `details:` is where the sentence comes from, and the only place: there is no wording
-of the toolkit's own behind it, because what a freeze means for your students is yours to
+of the toolkit's own behind it, because what archiving means for your students is yours to
 say. Write none and the row still shows - "Semester archived", with its date - and says
 nothing under it, and nothing goes in the Updates box. The skeleton in a new semester's
 `schedule.yml` carries a suggested sentence ready to uncomment.
 
 `archive:` on its own means "yes, on the default date". With no block, or a block with
 neither an `event_datetime` nor a `semester_end` to count from, nothing is archived automatically and
-the semester's digest issue says so. Closing such a semester out is the **Archive semester**
+the semester's digest issue says so. Archiving such a semester is the **Archive semester**
 button with `force`.
 
 ---

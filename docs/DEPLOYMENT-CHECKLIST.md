@@ -426,7 +426,7 @@ the semester is archived automatically; left out, it never is.
 | `title` | no | `Semester archived` | the row's Title column |
 | `show_on_site` | no | `true` | a "Semester archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
 | `details` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing, and `{date}` in it is filled in with the archive date |
-| `tbc` | no | `false` | provisional date - shown "(TBC)". Display only - the freeze still happens on the date above |
+| `tbc` | no | `false` | provisional date - shown "(TBC)". Display only - the archive still happens on the date above |
 
 ```yaml
 archive:
@@ -438,7 +438,7 @@ archive:
 
 `archive:` with nothing under it means "yes, on the default date". With no block at all, or
 no `semester_end` to count from, nothing is archived automatically. A new semester's seeded
-`schedule.yml` already carries the block, so filling in `semester_end` arms a freeze sixty
+`schedule.yml` already carries the block, so filling in `semester_end` arms an archive sixty
 days later; delete the block to opt out.
 
 #### Schedule row types

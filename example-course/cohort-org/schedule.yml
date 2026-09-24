@@ -172,7 +172,7 @@ events:
     details: An industry speaker - announced nearer the time.
     event_datetime: tbc
 
-# archive the org (freezes in place): removes all write permissions, retains all read permissions
+# archive the org (every repo read-only): removes all write permissions, retains all read permissions
 archive:
   event_datetime: 2027-02-16  # optional (default: semester_end + 60 days)
   title: Semester archived      # optional - the row's Title column

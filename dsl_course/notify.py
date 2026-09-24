@@ -1109,7 +1109,7 @@ def _archive_message(semester_org: str, course_org: str, when: date) -> tuple[st
         f"{html.escape(_course_name(course_org))}.</p>\n"
         f"<p>On <b>{when}</b> all the repositories in {_anchor(org_at, semester_org)} will "
         f"be archived. Nothing is deleted and all read access permissions remain as they "
-        f"are, write accesses are revoked and the org is frozen in place.</p>\n"
+        f"are, write accesses are revoked and every repository is read-only from then on.</p>\n"
         f"<p>If there is anything you would like to make changes to, please make those "
         f"before then. To move this archiving date or remove it altogether, edit "
         f"{_anchor(edit_at, SCHEDULE_PATH)} in the "
