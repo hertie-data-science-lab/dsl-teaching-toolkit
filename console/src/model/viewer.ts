@@ -8,8 +8,9 @@
 // headless Chrome, no deck script runs in any of them. So a deck is shown in-app as a static
 // page (its `_files/` bundle inlined: stylesheets as <style>, images as data: URLs, which
 // the policy allows) in a frame sandboxed with no permissions, and a deck that needs its
-// scripts (reveal.js, Quarto) is offered as ONE self-contained file to download: every
-// bundle file inlined, scripts included, which opens from disk and runs.
+// scripts (reveal.js, Quarto) is inlined into ONE self-contained file, scripts included,
+// which the deck viewer (`deck.html`, its own policy; model/deckTab.ts) runs, or which
+// downloads and runs from disk.
 
 export type ViewKind = 'markdown' | 'notebook' | 'html' | 'pdf' | 'image' | 'text' | 'other';
 

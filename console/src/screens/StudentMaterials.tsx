@@ -6,6 +6,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { TreeEntry } from '../github/client';
 import { buildTree, type TreeNode } from '../edit/badges';
+import { openDeck } from '../model/deckTab';
 import { showFile, type Shown } from '../model/materials';
 import { studentHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
@@ -119,9 +120,12 @@ export function ShownView({ shown, name }: { shown: Shown; name: string }) {
       );
     case 'deck':
       return (
-        <div class="note">
-          <p><b>This deck runs scripts, which the console does not run.</b> Download it as one file (its bundle included) and open it in your browser.</p>
-          <p>{save}{shown.missing ? <span class="footnote"> {shown.missing} of its files could not be read.</span> : null}</p>
+        <div class="stack">
+          <p class="actions">
+            <button class="btn small" type="button" onClick={() => openDeck(shown.file, name)}>Open the deck</button>
+            {save}
+          </p>
+          <p class="footnote">It opens in a new tab, in the console’s deck viewer, where its scripts run shut off from your account.{shown.missing ? ` ${shown.missing} of its files could not be read.` : ''}</p>
         </div>
       );
     case 'file':

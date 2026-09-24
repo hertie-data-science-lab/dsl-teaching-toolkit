@@ -20,7 +20,7 @@ export type Shown =
   | { kind: 'rendered'; html: string }
   /** A static HTML page (no scripts), bundle inlined, for a frame with no permissions; `file` is the same, to download. */
   | { kind: 'page'; srcdoc: string; file: string; missing: number }
-  /** An HTML deck that needs its scripts: only the self-contained file to download. */
+  /** An HTML deck that needs its scripts: the self-contained file, for the deck viewer or to download. */
   | { kind: 'deck'; file: string; missing: number }
   | { kind: 'image'; bytes: Uint8Array; mime: string }
   | { kind: 'text'; text: string }
