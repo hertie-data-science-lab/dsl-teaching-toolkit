@@ -382,3 +382,34 @@ def test_an_old_include_solution_request_becomes_solution_datetime_now():
         "--solution-datetime",
         "now",
     ]
+
+
+# ------------------------------------------------------------------- formats (format)
+
+
+def test_formats_is_a_list_and_its_first_entry_is_the_runnable_one():
+    spec = grades.parse_grading_spec("formats: [py, ipynb]\n")
+    assert (spec.formats, spec.format, spec.dropped) == (("py", "ipynb"), "py", ())
+
+
+def test_the_old_format_key_is_read_with_a_line_naming_formats():
+    spec = grades.parse_grading_spec("format: ipynb\n")
+    assert spec.formats == ("ipynb",)
+    assert [d.field for d in spec.dropped] == ["format"]
+    assert "is now `formats:`" in spec.dropped[0]
+
+
+def test_a_course_default_format_is_read_under_its_old_name():
+    assert grades.parse_assignment_defaults({"format": "py"}) == {"formats": "py"}
+
+
+def test_an_old_format_request_arg_reaches_new_assignment_as_formats():
+    req = parse_request(
+        _request(
+            op="assignment.create",
+            args={"number": "1", "semester": "f2026", "format": "py"},
+            preview=False,
+        )
+    )
+    argv = REGISTRY["assignment.create"].argv(req)
+    assert argv[argv.index("--formats") + 1] == "py"

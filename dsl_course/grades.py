@@ -1037,6 +1037,55 @@ def _one_of(
     return default
 
 
+def _formats(value: object, where: str, dropped: list[str]) -> tuple[str, ...]:
+    """`formats:` - the starter formats, a YAML list (or, as the New assignment box types
+    it, a comma-separated string). The FIRST is the runnable one: the completion check and
+    the autograder run it. `none` stands alone. An unusable value is dropped with a warning
+    and reads as no starter at all."""
+    items = value if isinstance(value, list) else str(value or "").split(",")
+    named = tuple(
+        dict.fromkeys(str(t).strip().lower() for t in items if str(t).strip())
+    )
+    if all(t in FORMATS for t in named) and (
+        NO_STARTER not in named or len(named) == 1
+    ):
+        return () if named == (NO_STARTER,) else named
+    dropped.append(
+        Dropped(
+            where,
+            "formats",
+            f"`formats: {value}` is not a list of {'/'.join(FORMATS)} - no starter "
+            f"format is recorded",
+            FORMATS,
+        )
+    )
+    return ()
+
+
+# Settings RENAMED in place (decision 0012), old -> new: the old key is still read for one
+# release - moved onto the new one, with a line naming it - and nothing writes it.
+RENAMED_SETTINGS = {"format": "formats"}
+
+
+def _read_renamed(data: dict, where: str, dropped: list[str]) -> dict:
+    """`data` with every old key moved onto its new one, each move noted in `dropped`."""
+    out = dict(data)
+    for old, new in RENAMED_SETTINGS.items():
+        if old not in out:
+            continue
+        value = out.pop(old)
+        if new in out:
+            what = f"`{old}:` is the old name of `{new}:`, which is also set - ignored"
+        else:
+            out[new] = value
+            what = (
+                f"`{old}:` is now `{new}:` (a list; the first is the runnable one) - read "
+                f"under its old name for one release only; rename it"
+            )
+        dropped.append(Dropped(where, old, what))
+    return out
+
+
 def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
     """A YAML boolean, or one spelt as text. Anything else is false with a warning:
     `autograde: "false"` is a non-empty string, and reading it as truthy turned hidden
@@ -1190,7 +1239,7 @@ _READERS = {
         v, VISIBILITIES, "visibility", "private", w, d
     ),
     "submit_url": _submit_url,
-    "format": lambda v, w, d: _one_of(v, FORMATS, "format", NO_STARTER, w, d),
+    "formats": _formats,
     "questions": _questions,
     "late_window_days": _whole_days,
     "late_penalty_per_day": _penalty,
@@ -1210,7 +1259,7 @@ COURSE_DEFAULT_KEYS = (
     "max_team_size",
     "late_window_days",
     "late_penalty_per_day",
-    "format",
+    "formats",
     "submit_via",
     "team_formation",
     "visibility",
@@ -1241,7 +1290,8 @@ class GradingSpec(_Shape):
     # Where an `external` assignment is handed in (Moodle, Kaggle). Only the site reads it,
     # and only to put a button beside the brief.
     submit_url: str = ""
-    format: str = "none"
+    # The starter formats, in order; the FIRST is the runnable one (see `format`).
+    formats: tuple[str, ...] = ()
     questions: dict[str, str] | None = None
     # The Hertie standard from `course` unless this file says otherwise, so an assignment
     # nobody has written a late policy for is still graded by the one the syllabi state.
@@ -1263,6 +1313,12 @@ class GradingSpec(_Shape):
     # semester a second time at the cutoff, and most assignments are read in the browser.
     grader_pdf: bool = False
     dropped: tuple[str, ...] = ()
+
+    @property
+    def format(self) -> str:
+        """The runnable format: the first of `formats`, or `none`. What the completion
+        check and the autograder run; the other formats are there to be read."""
+        return self.formats[0] if self.formats else NO_STARTER
 
     @property
     def is_group(self) -> bool:
@@ -1331,30 +1387,32 @@ def parse_assignment_defaults(raw: object) -> dict:
     if not isinstance(raw, dict):
         log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
         return {}
-    # `format` here answers New assignment's box, which takes a comma-separated list of
-    # starters; an assignment's own `format:` is one value. Read as the box reads it, and
-    # dropped when unusable, so the toolkit's own answer applies rather than `none`.
-    starters = raw.get("format")
+    # `formats` here answers New assignment's box, which takes a comma-separated list of
+    # starters. Read as the box reads it, and dropped when unusable, so the toolkit's own
+    # answer applies rather than `none`.
+    raw = _read_renamed(raw, _DEFAULTS_WHERE, dropped)
+    starters = raw.get("formats")
     values = _read_settings(
-        {k: v for k, v in raw.items() if k != "format"},
+        {k: v for k, v in raw.items() if k != "formats"},
         COURSE_DEFAULT_KEYS,
         _DEFAULTS_WHERE,
         dropped,
     )
     if starters is not None:
-        named = [t.strip().lower() for t in str(starters).split(",") if t.strip()]
+        items = starters if isinstance(starters, list) else str(starters).split(",")
+        named = [str(t).strip().lower() for t in items if str(t).strip()]
         if (
             named
             and all(t in FORMATS for t in named)
             and (NO_STARTER not in named or len(named) == 1)
         ):
-            values["format"] = ",".join(dict.fromkeys(named))
+            values["formats"] = ",".join(dict.fromkeys(named))
         else:
             dropped.append(
                 Dropped(
                     _DEFAULTS_WHERE,
-                    "format",
-                    f"`format: {starters}` is not a comma-separated list of "
+                    "formats",
+                    f"`formats: {starters}` is not a list of "
                     f"{'/'.join(FORMATS)} - using the toolkit's default",
                     FORMATS,
                 )
@@ -1466,6 +1524,7 @@ def parse_grading_spec(text: str) -> GradingSpec:
     if not isinstance(data, dict):
         data = {}
     dropped: list[str] = []
+    data = _read_renamed(data, GRADING_FILE, dropped)
     values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
     _late_pair(values)
     _cross_check(values, dropped)

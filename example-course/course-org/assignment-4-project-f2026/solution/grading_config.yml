@@ -7,7 +7,7 @@ submit_via: assignment_repo   # assignment_repo (push to their repo) | external 
 # submit_via: shared_dropbox_repo # one private <slug>-submissions repo for the whole semester,
                               # a folder per team inside it, everyone able to read everyone
 visibility: private           # private | public | student_choice - who may read it
-format: py                    # ipynb | py | rmd | qmd | latex | none - the starter stub only
+formats: [py]                 # ipynb | py | rmd | qmd | latex | none - the starter stubs; the first is the runnable one
 
 questions:                    # the score skeleton, and the maximum shown beside each blank
   Q1: 15
@@ -19,5 +19,5 @@ late_window_days: 10          # 0 = nothing after the due date is accepted
 late_penalty_per_day: 10%     # of the EARNED grade, per day started
 
 autograde: false              # hand-marked, so no tests/ is seeded on the solution branch
-completion_check: false       # not a notebook assignment; the default for `format: py`
+completion_check: false       # not a notebook assignment; the default for `formats: [py]`
 grader_pdf: true              # hand-marked: archive each team's fenced questions for the graders

@@ -294,25 +294,27 @@ def test_a_notebook_among_the_starters_decides_the_notebook_machinery(
     assert "completion_check: true" in written["grading_config.yml"]
 
 
-def test_the_definition_records_the_starter_it_was_named_first_by(fake, monkeypatch):
-    # `grading_config.yml`'s `format:` is one word, because `grades` reads one - it is
-    # the vocabulary the file teaches, and the switch it stands behind is written out
-    # beside it either way. So several starters record the first, not a list no reader
-    # could use.
+def test_the_definition_records_every_starter_the_first_runnable(fake, monkeypatch):
+    # `formats:` lists every starter seeded, in the order it was named; the first is the
+    # runnable one, and the switch it stands behind is written out beside it either way.
     written = _solution_files(monkeypatch)
 
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["rmd", "ipynb"]) == 0
 
     spec = grades.parse_grading_spec(written["grading_config.yml"])
     assert spec.dropped == ()
+    assert spec.formats == ("rmd", "ipynb")
     assert spec.format == "rmd"
     assert spec.runs_completion_check  # the notebook in the list, said explicitly
-    # ...and the line SAYS the notebook is there, so `completion_check: true` beside
-    # `format: rmd` reads as the repo it describes rather than a hand-made override.
     (line,) = [
-        l for l in written["grading_config.yml"].splitlines() if l.startswith("format:")
+        l
+        for l in written["grading_config.yml"].splitlines()
+        if l.startswith("formats:")
     ]
-    assert "also seeded: ipynb" in line
+    assert line.startswith("formats: [rmd, ipynb]")
+    assert not any(
+        l.startswith("format:") for l in written["grading_config.yml"].splitlines()
+    )
 
 
 def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(

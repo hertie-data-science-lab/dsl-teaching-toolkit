@@ -234,11 +234,20 @@ def _yaml_scalar(value: object) -> str:
     return text
 
 
+class _Flow(list):
+    """A list `_setting` writes inline, `[a, b]`."""
+
+
 def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
     """One line of grading_config.yml: `key: value` padded to a common column, then its
     explanation. `live=False` comments the whole line out - the setting is documented and
     inert until an instructor uncomments it."""
-    line = f"{key}: {_yaml_scalar(value)}"
+    shown = (
+        f"[{', '.join(_yaml_scalar(v) for v in value)}]"
+        if isinstance(value, _Flow)
+        else _yaml_scalar(value)
+    )
+    line = f"{key}: {shown}"
     if not live:
         line = f"# {line}"
     return f"{line:<29} # {comment}".rstrip()
@@ -322,18 +331,14 @@ def _grading_config(
             "receipts issue) - read at hand-out only",
             live=creates_unit_repos(submit_via),
         ),
-        # ONE format, because `grades` reads one: the key is the vocabulary this file
-        # teaches, and the only thing it drives - the `completion_check` default - is
-        # written out explicitly below either way. A template seeded with several starters
-        # records the one it was named first by, and the comment NAMES THE REST: a grader
-        # reading `format: py` beside `completion_check: true` would otherwise take the
-        # switch for a hand-made override rather than the notebook that is also in the repo.
+        # EVERY starter seeded, in the order it was named: the FIRST is the runnable one
+        # (the completion check and the autograder run it), the rest are there to be read.
+        # Written as a flow list so the line keeps the file's one-setting-per-line shape.
         _setting(
-            "format",
-            formats[0] if formats else NO_STARTER,
-            "ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; "
-            "grading reads whatever is in the repo"
-            + (f" (also seeded: {', '.join(formats[1:])})" if len(formats) > 1 else ""),
+            "formats",
+            _Flow(formats or [NO_STARTER]),
+            "ipynb | py | rmd | qmd | latex | none - the starter stubs; the first is the "
+            "runnable one",
         ),
         "",
         _QUESTIONS_STUB.rstrip(),
@@ -1249,7 +1254,7 @@ def parse_formats(answer: str, autograde: bool = False) -> list[str]:
             )
         return []
     if clash := _collision(named, autograde):
-        raise ValueError(f"--format: {clash} - ask for one of the two, not both")
+        raise ValueError(f"--formats: {clash} - ask for one of the two, not both")
     return named
 
 
@@ -1283,7 +1288,7 @@ def _collision(named: list[str], autograde: bool) -> str:
 # course's `assignment_defaults:` does not say either. `ipynb` for the starter because that
 # is what the button pre-filled before the course could choose.
 _TOOLKIT_ANSWERS = {
-    "format": "ipynb",
+    "formats": "ipynb",
     "team_formation": "self_select",
     "submit_via": "assignment_repo",
     "visibility": "private",
@@ -1309,7 +1314,7 @@ def _not_a_format(problem: str) -> ValueError:
     typed - the box takes free text, so the answer to a bad one is the vocabulary."""
     listed = ", ".join(STARTER_FORMATS)
     return ValueError(
-        f"--format: {problem} - name any of {listed}, comma-separated, or "
+        f"--formats: {problem} - name any of {listed}, comma-separated, or "
         f"{NO_STARTER} on its own"
     )
 
@@ -1762,13 +1767,14 @@ def main() -> int:
     # Four boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
     # answers them, else the toolkit does (`resolve_answers`).
     pa.add_argument(
+        "--formats",
         "--format",
         dest="formats",
         default=COURSE_DEFAULT_CHOICE,
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "
-        f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all "
-        "(grading reads whatever is in the repo either way). Default: the course's "
-        "`assignment_defaults: format`, else ipynb",
+        f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all; "
+        "the first is the runnable one (the completion check and the autograder run "
+        "it). Default: the course's `assignment_defaults: formats`, else ipynb",
     )
     pa.add_argument(
         "--type",
@@ -1826,14 +1832,14 @@ def main() -> int:
         # A copy ignores these boxes, so it pays for no read of the course's defaults.
         answers = resolve_answers(
             {
-                "format": args.formats,
+                "formats": args.formats,
                 "team_formation": args.team_formation,
                 "submit_via": args.submit_via,
                 "visibility": args.visibility,
             },
             course_assignment_defaults(args.org),
         )
-        args.formats = answers["format"]
+        args.formats = answers["formats"]
         args.team_formation = answers["team_formation"]
         args.submit_via = answers["submit_via"]
         args.visibility = answers["visibility"]

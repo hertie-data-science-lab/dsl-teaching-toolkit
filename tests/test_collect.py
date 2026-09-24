@@ -70,12 +70,14 @@ def test_parse_grading_spec_defaults_and_overrides():
     )
     assert spec == grades.GradingSpec(
         type="group",
-        format="ipynb",
+        formats=("ipynb",),
         autograde=False,
         tests="solution/tests",
         dropped=spec.dropped,
     )
     assert [d for d in spec.dropped if "max_auto" in d]
+    # `format:` is the old name of `formats:`, still read, with a line naming the move.
+    assert [d for d in spec.dropped if "`format:` is now `formats:`" in d]
 
 
 def test_parse_grading_spec_reads_what_the_grading_sheet_needs():

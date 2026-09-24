@@ -20,7 +20,7 @@ SENTINEL = course.COURSE_DEFAULT_CHOICE
 
 def test_the_four_new_assignment_boxes_can_be_set_course_wide():
     block = {
-        "format": "py",
+        "formats": "py",
         "submit_via": "external",
         "team_formation": "assigned",
         "visibility": "public",
@@ -35,13 +35,13 @@ def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
 
 
 def test_a_course_default_format_is_a_list_of_starters_as_the_box_takes(capsys):
-    got = grades.parse_assignment_defaults({"format": "ipynb, py"})
-    assert got == {"format": "ipynb,py"}
+    got = grades.parse_assignment_defaults({"formats": "ipynb, py"})
+    assert got == {"formats": "ipynb,py"}
     # An unusable answer is dropped, so the toolkit's ipynb applies - never `none`.
     for bad in ("ipnb", "none,py", ""):
-        assert grades.parse_assignment_defaults({"format": bad}) == {}
+        assert grades.parse_assignment_defaults({"formats": bad}) == {}
         assert "format" in capsys.readouterr().err
-    assert scaffold.resolve_answers({"format": SENTINEL}, {}) == {"format": "ipynb"}
+    assert scaffold.resolve_answers({"formats": SENTINEL}, {}) == {"formats": "ipynb"}
 
 
 def test_the_legacy_submit_via_word_reads_as_its_new_name():
@@ -52,17 +52,17 @@ def test_the_legacy_submit_via_word_reads_as_its_new_name():
 
 def test_a_box_left_at_the_course_default_takes_the_courses_value():
     answers = {
-        "format": SENTINEL,
+        "formats": SENTINEL,
         "team_formation": SENTINEL,
         "submit_via": SENTINEL,
         "visibility": "public",
     }
     got = scaffold.resolve_answers(
-        answers, {"format": "rmd", "submit_via": "external", "visibility": "private"}
+        answers, {"formats": "rmd", "submit_via": "external", "visibility": "private"}
     )
     # A box somebody chose is kept; one they left falls to the course, then the toolkit.
     assert got == {
-        "format": "rmd",
+        "formats": "rmd",
         "team_formation": "self_select",
         "submit_via": "external",
         "visibility": "public",
@@ -71,10 +71,10 @@ def test_a_box_left_at_the_course_default_takes_the_courses_value():
 
 def test_with_no_course_defaults_the_toolkit_answers_as_the_form_used_to():
     answers = dict.fromkeys(
-        ("format", "team_formation", "submit_via", "visibility"), SENTINEL
+        ("formats", "team_formation", "submit_via", "visibility"), SENTINEL
     )
     assert scaffold.resolve_answers(answers, {}) == {
-        "format": "ipynb",
+        "formats": "ipynb",
         "team_formation": "self_select",
         "submit_via": "assignment_repo",
         "visibility": "private",
@@ -113,7 +113,7 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
         monkeypatch,
         [],
         {
-            "format": "py",
+            "formats": "py",
             "submit_via": "shared_dropbox_repo",
             "team_formation": "assigned",
         },
@@ -128,7 +128,7 @@ def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
     seen = _run_new_assignment(
         monkeypatch,
         ["--format", "qmd", "--visibility", "public"],
-        {"format": "py", "visibility": "private"},
+        {"formats": "py", "visibility": "private"},
     )
     assert seen["formats"] == ["qmd"] and seen["visibility"] == "public"
 

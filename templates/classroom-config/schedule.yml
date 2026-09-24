@@ -103,7 +103,7 @@
 #     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with solution_datetime: now). Pushes the `solution/` folder (from the template's `solution` branch) into every student/team repo. Must be AFTER handout_datetime, and needs it set
 #
 #   This file is TIMING ONLY. What an assignment IS - `type: individual | group`,
-#   `team_formation`, `max_team_size`, `submit_via`, `submit_url`, `format`, `questions`,
+#   `team_formation`, `max_team_size`, `submit_via`, `submit_url`, `formats`, `questions`,
 #   `late_window_days`, `late_penalty_per_day`, `autograde` - lives in that assignment's own
 #   `grading_config.yml`, on the course template's `solution` branch. `type:` and
 #   `max_team_size:` written HERE are flagged by "Validate schedule" and ignored.

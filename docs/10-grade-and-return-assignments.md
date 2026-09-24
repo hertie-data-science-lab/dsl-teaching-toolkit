@@ -237,7 +237,7 @@ one word into `info.completion`:
 Like `info.autograde` it is **information, never a mark**, and a student never sees it. The
 executed notebook is archived beside the result JSON as `autograde/<slug>/<key>.ipynb`.
 
-It is **on by default for `format: ipynb`** and off for everything else; `completion_check:
+It is **on by default when `formats:` starts with `ipynb`** and off for everything else; `completion_check:
 true` / `false` in `grading_config.yml` overrides either way. It is independent of
 `autograde`, and that is the point - most notebook assignments are marked by hand.
 

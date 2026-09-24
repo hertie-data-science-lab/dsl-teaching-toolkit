@@ -35,7 +35,8 @@ def test_file_schema_enums_are_the_engine_constants():
     assert _enum(spec, "properties", "team_formation") == list(course.TEAM_FORMATIONS)
     assert _enum(spec, "properties", "submit_via") == list(course.SUBMIT_VIA)
     assert _enum(spec, "properties", "visibility") == list(course.VISIBILITIES)
-    assert _enum(spec, "properties", "format") == list(course.FORMATS)
+    listed = spec["properties"]["formats"]["oneOf"][0]
+    assert _enum(listed, "items") == list(course.FORMATS)
     assert set(spec["properties"]) == set(grades.SPEC_KEYS)
 
     sched = schemas.schedule_schema()

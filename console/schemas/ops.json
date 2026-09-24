@@ -604,8 +604,8 @@
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           },
-          "format": {
-            "description": "Starter file(s), comma-separated",
+          "formats": {
+            "description": "Starter file(s), comma-separated; the first is the runnable one",
             "pattern": "^(?:none|(?:ipynb|py|rmd|qmd|latex)(?:,(?:ipynb|py|rmd|qmd|latex))*)$",
             "type": "string"
           },

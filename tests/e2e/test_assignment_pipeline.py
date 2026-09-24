@@ -420,7 +420,7 @@ def _scaffold(run_id: str) -> Stage:
                 "assignment_name": shapes.title(run_id, shape),
                 "assignment_number": cleanup.ASSIGNMENT_NUMBER,
                 "semester": f"{run_id}-{shape.name}",
-                "format": "py",
+                "formats": "py",
                 "type": "individual",
                 "team_formation": "self_select",
                 "submit_via": shape.submit_via,

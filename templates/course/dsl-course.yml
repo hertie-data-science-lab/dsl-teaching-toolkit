@@ -31,7 +31,7 @@ assignment_defaults:
   max_team_size: 5            # group assignments only
   late_window_days: 10        # 0 = nothing after the due date is accepted
   late_penalty_per_day: 10%   # of the EARNED grade, per day started
-  # format: ipynb               # ipynb | py | rmd | qmd | latex | none - the starter file
+  # formats: [ipynb]            # ipynb | py | rmd | qmd | latex | none - starters, first runnable
   # submit_via: assignment_repo # assignment_repo | external | shared_dropbox_repo
   # team_formation: self_select # self_select | assigned - group assignments only
   # visibility: private         # private | public | student_choice

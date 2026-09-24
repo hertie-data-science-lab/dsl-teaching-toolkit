@@ -52,6 +52,7 @@ RENAMED_REQUEST_ARGS = {
     "cohort_dest_repo": "semester_dest_repo",
     "cohort_dest_path": "semester_dest_path",
     "tag": "semester",
+    "format": "formats",
 }
 
 

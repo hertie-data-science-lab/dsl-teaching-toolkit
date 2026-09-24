@@ -11,7 +11,7 @@ Accompanies the e2e [worked example](../example-course/).
 | `[required]` | 1. Create the course org | course | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-<CODE>` (no year); invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
 | `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `org_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
 | `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `tag` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<tag>` with run-from-repo Release workflows |
-| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `tag` + `format` (one or more starters) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<tag>` template each, with its own run-from-repo Release assignment workflow |
+| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `tag` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<tag>` template each, with its own run-from-repo Release assignment workflow |
 | *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every semester, reconciled |
 | `[required]` | 6. Refresh | course | course `.github` → **Refresh actions** | none | dropdowns populated, secrets on content repos and assignment templates |
 
@@ -76,7 +76,7 @@ file is public, so an address written here is public too.
 
 `assignment_defaults:` is what **New assignment** stamps into each new assignment's
 `grading_config.yml`: `max_team_size`, `late_window_days` and `late_penalty_per_day`, plus
-`format`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
+`formats`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
 of the same name when they are left at `(course default)`.
 
 `semester_defaults:` is what **Bootstrap semester** writes into a new semester's `schedule.yml`:
@@ -227,7 +227,7 @@ course-materials-f2026/
 Live example: [`example-course/course-org/assignment-1-f2026`](../example-course/course-org/assignment-1-f2026).
 
 `assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
-`main` only. The **New assignment** workflow's `format` - a comma-separated list of
+`main` only. The **New assignment** workflow's `formats` - a comma-separated list of
 `ipynb`/`py`/`rmd`/`qmd`/`latex`, or `none` on its own - picks the starter stubs; `type`
 (individual/group) is recorded in `grading_config.yml`, and handout and grading obey
 `type: group` automatically. The autograder takes any format - it converts any `.ipynb`
@@ -241,13 +241,13 @@ solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; 
 
 `grading_config.yml`, on the `solution` branch, is the assignment's whole definition:
 `title`, `type`, `team_formation`, `max_team_size`, `submit_via`, `submit_url`,
-`visibility`, `format`, `questions`, `late_window_days`, `late_penalty_per_day`,
+`visibility`, `formats` (a list; the first is the runnable one), `questions`, `late_window_days`, `late_penalty_per_day`,
 `autograde`, `completion_check`, `grader_pdf`, `tests`. The
 button writes it from its ten inputs plus the course's `assignment_defaults:`; every key
 is documented inline in the generated file and in
 [Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:
 `autograde: true` runs `tests/` (or `tests/run.sh`, in any language), and `completion_check`
-(default: on for `format: ipynb`) executes the notebook and records whether it runs top to
+(default: on when `formats:` starts with `ipynb`) executes the notebook and records whether it runs top to
 bottom.
 
 ### `schedule.yml`

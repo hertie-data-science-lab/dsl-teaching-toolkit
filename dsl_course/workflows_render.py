@@ -1845,15 +1845,15 @@ on:
 # dropdowns arrive at `COURSE_DEFAULT_CHOICE`: the course's `assignment_defaults:` answers
 # them, else the toolkit's own (`scaffold.resolve_answers`).
 _STARTER_FORMATS_INPUT = f"""\
-      format:
-        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else ipynb"
+      formats:
+        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only. The first is the runnable one. {COURSE_DEFAULT_CHOICE} = the course's assignment_defaults, else ipynb"
         default: "{COURSE_DEFAULT_CHOICE}\""""
 
 
 def render_new_assignment(assignments: list[str] | None = None) -> str:
     """Scaffold an assignment-N-<semester> template repo (main + solution branch), then refresh.
 
-    TEN boxes, and between them they are the whole assignment: everything but `format`
+    TEN boxes, and between them they are the whole assignment: everything but `formats`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
     grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
     - the team cap, the late window, the penalty, the question maxima - comes from the
@@ -1908,7 +1908,7 @@ on:
           NUMBER: ${{{{ inputs.assignment_number }}}}
           SEMESTER: ${{{{ inputs.semester }}}}
           COPY_FROM: ${{{{ inputs.copy_from }}}}
-          FORMAT: ${{{{ inputs.format }}}}
+          FORMATS: ${{{{ inputs.formats }}}}
           TYPE: ${{{{ inputs.type }}}}
           TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
@@ -1917,7 +1917,7 @@ on:
         run: |
           gh auth setup-git
           args=(--org "$ORG" --number "$NUMBER" --semester "$SEMESTER" --name "$NAME" \\
-            --format "$FORMAT" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
+            --formats "$FORMATS" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
             --submit-via "$SUBMIT_VIA" --visibility "$VISIBILITY" \\
             --autograde "$AUTOGRADE")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""

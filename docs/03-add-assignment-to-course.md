@@ -23,7 +23,8 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         is this assignment's definition, and the run says so with a link to it. The name
         and the number are still used: they name the repo and describe it. A source with
         no `solution` branch is refused.
-      - `format` = which starter file(s) to seed, comma-separated: `ipynb`, `py`, `rmd`,
+      - `formats` = which starter file(s) to seed, comma-separated (the first is the
+        runnable one): `ipynb`, `py`, `rmd`,
         `qmd`, `latex` - or `none` on its own for the brief and nothing else. Picks the
         starters, and nothing else. Two that would land on one graded filename are
         refused (see [Formats](#formats-and-what-students-hand-in)).
@@ -84,7 +85,7 @@ Each format seeds one starter on `main`, and each one already builds: an `.Rmd` 
 knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs. Name several -
 `ipynb,py` - and each gets its own starter and its own model-answer stub on `solution`.
 
-| `format` | Starter on `main` | What the student commits |
+| `formats` | Starter on `main` | What the student commits |
 |---|---|---|
 | `ipynb` | `starter.ipynb` | the notebook, outputs saved, after **Restart kernel and run all** |
 | `py` | `starter.py` | the `.py` files, runnable from the repository root |

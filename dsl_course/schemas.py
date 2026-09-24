@@ -89,7 +89,7 @@ COURSE_TOP_KEYS = (
 )
 # The assignment_defaults keys New assignment reads as the course's defaults for the
 # questions it asks (contracts section 6); optional, beside COURSE_DEFAULT_KEYS.
-ASKED_DEFAULT_KEYS = ("format", "submit_via", "team_formation", "visibility")
+ASKED_DEFAULT_KEYS = ("formats", "submit_via", "team_formation", "visibility")
 
 
 def _obj(
@@ -448,7 +448,14 @@ _SPEC_TYPES = {
     "max_team_size": {"type": "integer"},
     "submit_via": _enum(SUBMIT_VIA),
     "visibility": _enum(VISIBILITIES),
-    "format": _enum(FORMATS),
+    # A list in grading_config.yml; the course's assignment_defaults may also give the
+    # New assignment box's comma-separated string.
+    "formats": {
+        "oneOf": [
+            {"type": "array", "items": _enum(FORMATS)},
+            {"type": "string"},
+        ]
+    },
     "questions": {
         "type": "object",
         "additionalProperties": {"type": ["string", "number"]},

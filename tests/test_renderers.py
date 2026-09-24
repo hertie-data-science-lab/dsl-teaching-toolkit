@@ -966,7 +966,7 @@ NEW_ASSIGNMENT_INPUTS = [
     "assignment_number",
     "semester",
     "copy_from",
-    "format",
+    "formats",
     "type",
     "team_formation",
     "submit_via",
@@ -1014,9 +1014,9 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     # Four boxes arrive at the course-default sentinel, which the scaffold resolves
     # against the course's `assignment_defaults:` (tests/test_scaffold.py).
     sentinel = course.COURSE_DEFAULT_CHOICE
-    assert "type" not in inputs["format"] and inputs["format"]["default"] == sentinel
-    assert ", ".join(course.STARTER_FORMATS) in inputs["format"]["description"]
-    assert course.NO_STARTER in inputs["format"]["description"]
+    assert "type" not in inputs["formats"] and inputs["formats"]["default"] == sentinel
+    assert ", ".join(course.STARTER_FORMATS) in inputs["formats"]["description"]
+    assert course.NO_STARTER in inputs["formats"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == [sentinel, *course.TEAM_FORMATIONS]
     assert inputs["submit_via"]["options"] == [sentinel, *course.SUBMIT_VIA]
@@ -1042,7 +1042,7 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
         ("NUMBER", "assignment_number"),
         ("SEMESTER", "semester"),
         ("COPY_FROM", "copy_from"),
-        ("FORMAT", "format"),
+        ("FORMATS", "formats"),
         ("TYPE", "type"),
         ("TEAM_FORMATION", "team_formation"),
         ("SUBMIT_VIA", "submit_via"),
