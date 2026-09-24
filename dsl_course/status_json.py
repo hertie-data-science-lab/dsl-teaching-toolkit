@@ -288,7 +288,7 @@ _FILES = {
     # The old file's name too, so a NOT_MIGRATED fault about it files under K3.
     **dict.fromkeys(
         (sync_faculty.SEMESTER_PEOPLE_PATH, sync_faculty.OLD_PEOPLE_FILE),
-        _Where("people", "semester", "K3", "staff", "PEOPLE"),
+        _Where("people", "semester", "K3", "instructors", "PEOPLE"),
     ),
     roster.ROSTER_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
     teams.TEAMS_PATH: _Where("teams", "semester", "K5", "teams", "TEAMS"),
@@ -1033,7 +1033,7 @@ def _no_email_problem(
                 "repo": f"{semester_org}/{schedule.CONFIG_REPO}",
                 "path": sync_faculty.SEMESTER_PEOPLE_PATH,
                 "line": None,
-                "screen": "staff",
+                "screen": "instructors",
                 "entry": None,
             },
         }

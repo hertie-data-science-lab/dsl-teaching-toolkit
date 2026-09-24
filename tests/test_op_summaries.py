@@ -545,7 +545,7 @@ def _open_window_request(preview: bool) -> request_mod.Request:
 
 def test_open_window_spells_the_open_team_formation_flags():
     op = REGISTRY["teams.open_window"]
-    assert (op.scope, op.required_team, op.via) == ("cohort", "instructors", "inline")
+    assert (op.scope, op.required_team, op.via) == ("semester", "instructors", "inline")
     base = [
         "--course-org",
         COURSE,

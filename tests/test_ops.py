@@ -83,7 +83,7 @@ def test_the_registry_is_every_dispatch_op_the_contract_lists():
 def test_every_op_targets_a_cli_with_a_main(name):
     op = REGISTRY[name]
     assert op.runs_as == "dispatch"
-    assert op.scope in ("course", "cohort")
+    assert op.scope in ("course", "semester")
     assert callable(importlib.import_module(f"dsl_course.{op.module}").main)
 
 

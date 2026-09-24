@@ -275,7 +275,7 @@ def main() -> int:
 
 
 def access_summary(changes: dict[str, int], dry_run: bool) -> Summary:
-    """Check staff access's sentence: how many team memberships moved (or would)."""
+    """Check instructor access's sentence: how many team memberships moved (or would)."""
     n = sum(changes.values())
     if not n:
         return Summary("Access checked: nothing needed changing.", changes)
