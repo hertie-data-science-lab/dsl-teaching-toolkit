@@ -436,6 +436,7 @@ def put_files(
     delete: Iterable[str] = (),
     create_only: bool = False,
     person: bool = False,
+    base: tuple[str, str] | None = None,
 ) -> bool:
     """Write `files` and remove `delete` in a SINGLE commit, via the git data API.
 
@@ -465,10 +466,15 @@ def put_files(
 
     Returns False if the tree could not be read, or if any leg of the commit failed - a
     partial write is impossible here, since the ref only moves once the whole tree is
-    built."""
+    built.
+
+    `base` is `head_commit`'s `(commit sha, tree sha)` for a caller whose `files` were
+    computed FROM that commit - a compare-and-set. The commit is built on exactly it, so
+    the non-forced ref update is refused if the branch has moved since the read, rather
+    than landing over whatever landed in between."""
     try:
         branch = default_branch(org, repo)
-        live = repo_blob_shas(org, repo, branch)
+        live = repo_blob_shas(org, repo, base[1] if base else branch)
     except RuntimeError as exc:
         _failed(
             person, f"could not read a repo in {org} before writing to it", str(exc)
@@ -491,7 +497,9 @@ def put_files(
             tree.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
     if not tree:
         return True
-    return _commit_tree(org, repo, branch, tree, message, person)
+    if base is None:
+        return _commit_tree(org, repo, branch, tree, message, person)
+    return _commit_tree(org, repo, branch, tree, message, person, parent=base)
 
 
 def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
@@ -513,6 +521,12 @@ def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
     if is_missing_resource(out) or "HTTP 409" in out:
         return None
     raise RuntimeError(f"could not read {org}/{repo}@{branch}: {out[:200]}")
+
+
+def head_commit(org: str, repo: str) -> tuple[str, str] | None:
+    """`(commit sha, tree sha)` of the default branch's head, or None for a repo with no
+    commits - the `base` a compare-and-set `put_files` is handed. Raises when unreadable."""
+    return _head(org, repo, default_branch(org, repo))
 
 
 def _seed_first_commit(
@@ -566,14 +580,16 @@ def _commit_tree(
     tree: list[dict[str, Any]],
     message: str,
     person: bool = False,
+    parent: tuple[str, str] | None = None,
 ) -> bool:
-    """Land `tree` (entries relative to `branch`'s current tree) as one commit.
+    """Land `tree` (entries relative to `branch`'s current tree, or to `parent`'s when the
+    caller names one) as one commit.
 
     The ref update is deliberately NOT forced: if a concurrent run moved the branch since
     we read its head, GitHub rejects the fast-forward and we report a failure the caller
     counts, rather than silently discarding whatever landed in between."""
     try:
-        parent = _head(org, repo, branch)
+        parent = parent or _head(org, repo, branch)
     except RuntimeError as exc:
         _failed(person, f"could not read a branch head in {org}", str(exc))
         return False

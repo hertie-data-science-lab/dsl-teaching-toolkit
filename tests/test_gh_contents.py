@@ -668,3 +668,34 @@ def test_path_commit_subjects_reads_the_whole_history_or_raises(monkeypatch):
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
     with pytest.raises(RuntimeError):
         gh_contents.path_commit_subjects("O", "c", "students.csv")
+
+
+def test_put_files_on_a_base_builds_on_that_commit_and_never_forces(monkeypatch):
+    # A compare-and-set: the files were computed from `base`, so the commit's parent is
+    # `base` whatever the branch head says now, and the ref move is not forced - GitHub
+    # refuses it (422, not a fast-forward) if anything landed since the read.
+    calls = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append((args, kwargs.get("stdin")))
+        url = args[1] if args[0] == "api" and args[1] != "--method" else args[3]
+        if url == "repos/org/repo":
+            return 0, _REPO_OBJECT
+        if "git/trees/read-tree" in url:
+            return 0, "false\na.yml\tstale"
+        if "commits/" in url:
+            raise AssertionError("the branch head must not be re-read")
+        if "git/refs/heads/main" in url:
+            return 1, "gh: Update is not a fast forward (HTTP 422)"
+        return 0, "new-sha\n"
+
+    _stub_gh(monkeypatch, fake_gh)
+    ok = gh_contents.put_files(
+        "org", "repo", {"a.yml": b"one\n"}, "m", base=("read-sha", "read-tree")
+    )
+    assert ok is False
+    posted = [json.loads(stdin) for args, stdin in calls if stdin]
+    assert posted[0]["base_tree"] == "read-tree"
+    assert posted[1]["parents"] == ["read-sha"]
+    (patch,) = [args for args, _ in calls if "PATCH" in args]
+    assert not any("force" in a for a in patch)
