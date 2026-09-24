@@ -179,7 +179,7 @@ FIX = {
     "students.csv": CSV_HEADER_FIX,
     "teams.csv": CSV_HEADER_FIX,
     "dsl-course.yml": "correct the line above",
-    "cohort-courses-pages.yml": "correct the line above",
+    "semesters.yml": "correct the line above",
 }
 
 

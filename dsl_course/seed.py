@@ -6,7 +6,7 @@ runs in is the default SOURCE; the action pushes into a chosen semester org/repo
 
 The semester org input is a GitHub `choice` dropdown. GitHub can't populate a dropdown
 live, so its options are rendered into the YAML from the semester registry and
-refreshed on demand: `refresh` reads the course org's .github/cohort-courses-pages.yml
+refreshed on demand: `refresh` reads the course org's .github/semesters.yml
 `semesters:` list (maintained by `bootstrap --semester --course X`, or by hand) and re-pushes
 the content actions to every course repo. No cron, no app.
 

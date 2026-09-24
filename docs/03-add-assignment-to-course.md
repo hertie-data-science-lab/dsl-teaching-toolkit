@@ -114,7 +114,7 @@ option.
 ### One notebook, not two: derive the starter
 
 Keeping the starter on `main` and the answer on `solution` by hand means writing the same
-notebook twice and keeping the two in step for the rest of the term.
+notebook twice and keeping the two in step for the rest of the semester.
 
 Write **one** notebook - the one you teach from - on the `solution` branch, in
 `solution/`, and fence the answers off in the vocabulary nbgrader and Otter already use:
@@ -157,7 +157,7 @@ content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are derived; anything els
 
 A value the toolkit cannot use costs that field and nothing else - grading falls back to
 the default, silently, which is how `submit_via: emial` turned a semester's late arithmetic
-off for a term. From 24 hours before the assignment's `grading_datetime` (its due date
+off for a semester. From 24 hours before the assignment's `grading_datetime` (its due date
 where it declares none) each such value opens the semester's *assignment grading_config.yml
 has values that will not grade as written* issue and emails whoever wrote the line, louder
 as the moment approaches. Earlier than that nothing is said.
@@ -175,7 +175,7 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
 | | `shared_dropbox_repo` | **One private repo for the whole semester**, `<slug>-submissions`, with a folder per student or team inside it. The cutoff and the late window apply per folder; there is no Submission receipts issue. |
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
-| `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
+| `visibility` | `private` (default) | Only the student and the instructors can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
 | | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |
 

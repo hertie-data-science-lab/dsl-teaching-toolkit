@@ -88,4 +88,4 @@ This semester's whole schedule in one file. Changing a date later is just commit
 
 Most semesters have different lecturers/TAs, so - unlike course admins (course-org level) - instructors/TAs are declared here, per semester.
 
-**Sync membership** reconciles them into this semester's own `instructors` team AND a course-org level `instructors-<tag>` team (push access scoped to just this year's content repos, plus the central `.github` repo so they can use the workflows too). It also supplies this semester's website instructor cards. 
+**Sync membership** reconciles them into this semester's own `instructors` team AND a course-org level `instructors-<semester>` team (push access scoped to just this year's content repos, plus the central `.github` repo so they can use the workflows too). It also supplies this semester's website instructor cards. 

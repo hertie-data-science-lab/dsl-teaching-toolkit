@@ -2,7 +2,7 @@
 
 Deploy any path - a session folder, a dataset, a syllabus file, a code subpackage - from the staging course-org repo into a student-facing semester repo.
 
-> NB: this is the manual ad hoc alternative to [pre-scheduling & automating](07-schedule-releases.md) the term's releases.
+> NB: this is the manual ad hoc alternative to [pre-scheduling & automating](07-schedule-releases.md) the semester's releases.
 
 ## Prerequisites
 
@@ -85,7 +85,7 @@ into.
 
 ## Carrying semester edits back
 
-A fix typed into the semester's copy is not in the course org, so it is not in next term's.
+A fix typed into the semester's copy is not in the course org, so it is not in next semester's.
 **Propagate semester edits** (course org → Actions) copies each released path back from the
 semester repo over its source in the course org, on a branch named for the semester, and opens
 one pull request per source repo for faculty to merge, cherry-pick or close. Run it with
@@ -102,7 +102,7 @@ What it does and does not carry:
 - the branch is regenerated on every run, so re-running after more edits refreshes the same
   pull request rather than stacking on it.
 
-Closing a semester runs it first, so the term's corrections are offered back before the repos
+Archiving a semester runs it first, so the semester's corrections are offered back before the repos
 are frozen.
 
 ## Students propose fixes by pull request

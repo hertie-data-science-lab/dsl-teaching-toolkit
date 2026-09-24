@@ -146,7 +146,7 @@ Things whose *literal spelling* is depended on from outside Python:
   and in the URL a student has bookmarked. `files/` cannot become `<repo>/` - `/materials/`
   is the All Materials page's own permalink. Seeded CREATE-ONLY and INSTRUCTOR-OWNED, and
   no workflow writes it after creation: a refresh that rewrote one would either unpublish a
-  term's decks or publish what faculty had just withdrawn, on a green run.
+  semester's decks or publish what faculty had just withdrawn, on a green run.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
@@ -317,7 +317,7 @@ Seeded files carry their owner on the first line, and the write site enforces it
 - **SYSTEM-OWNED** - written unconditionally on every bootstrap and refresh, so fixes reach
   running courses. Workflows, generated docs, `*.sample`.
 - **INSTRUCTOR-OWNED** - `gh_contents.seed_if_absent` only. Rewriting one destroys live state (roster
-  rows, enrol codes, the term's schedule). The code comments call this "USER-owned"; the shipped
+  rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
 - **`dsl-stub:`** is the third state: an instructor-owned file we seeded and they have not yet
   written. `gh_contents.STUB_MARKS` recognises it, and `deploy._is_withheld_stub` reads that to

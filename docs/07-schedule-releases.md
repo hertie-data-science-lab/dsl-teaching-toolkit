@@ -1,6 +1,6 @@
 # Schedule releases
 
-Write the term's plan into the semester's `classroom-config/schedule.yml` once, and the scheduler runs the term for you - every materials release, every assignment hand-out, every autograde run. 
+Write the semester's plan into the semester's `classroom-config/schedule.yml` once, and the scheduler runs the semester for you - every materials release, every assignment hand-out, every autograde run. 
 
 The schedule file can be updated throughout the semester.
 
@@ -10,19 +10,19 @@ The schedule file can be updated throughout the semester.
 - A bootstrapped [semester org](04-new-cohort-org.md) 
 - Source material repos to be released (staged in course-org, released to semester-org)
 
-## Write your term's plan
+## Write your semester's plan
 
-> For a fully worked example schedule.yml (a full term) see [here](../example-course/cohort-org/schedule.yml).
+> For a fully worked example schedule.yml (a full semester) see [here](../example-course/cohort-org/schedule.yml).
 
 > An example of the automatically generated schedule on the deployed `.github.io` site can also be seen live [here](https://hertie-dsl-demo-f2026.github.io/schedule/). 
 
-Three blocks carry the whole term, and each is defined by what it **does**:
+Three blocks carry the whole semester, and each is defined by what it **does**:
 
 - **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the semester org, where students can access them.
 - **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
 - **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the semester site.
 
-Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the term and render as rows of their own. An optional `archive:` block freezes the semester read-only - writing it is what turns that on.
+Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the semester and render as rows of their own. An optional `archive:` block freezes the semester read-only - writing it is what turns that on.
 
 ### One word per column
 
@@ -77,7 +77,7 @@ What is *not* withheld is where the files are going: session 4's row still names
 
 A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan).
 
-NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so (*"**Materials for session 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then picks up the links on release. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
+NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the semester up front publishes the whole semester. Until its files ship the row carries no links and says so (*"**Materials for session 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then picks up the links on release. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
 
 Nested under `deploy:` we have the following:
 
@@ -315,21 +315,21 @@ The run summary shows what the parser *understood*, not just what it rejected - 
 
 ```
 Parsed schedule.yml
-  term 2026-09-07 -> 2026-12-18  (Europe/Berlin)
+  semester 2026-09-07 -> 2026-12-18  (Europe/Berlin)
   11 release(s), 19 deploy(s) | 3 assignment(s) | 4 event(s)
 ```
 
 Three other ways to check, none of them required:
 
-1. **Read the counts.** **Check semester setup** reports the release plan and term dates, and flags `N entry/ies DROPPED`.
+1. **Read the counts.** **Check semester setup** reports the release plan and semester dates, and flags `N entry/ies DROPPED`.
 2. **Validate by hand.** `python3 -m dsl_course.schedule --semester-org hertie-dsl-demo-f2026 --validate`, or `--file schedule.yml --validate` against a local copy. Without `--validate` it prints the schedule *as parsed*, as JSON.
 3. **Preview it.** Run **Scheduled release** by hand; `preview` defaults to **`true`**, so it lists what *would* open and releases nothing.
 
 ## Sources that do not exist yet
 
-A dropped entry is a fault in the *file*. The other way a term quietly fails is a perfectly valid entry pointing at a folder that isn't there - `lectures/04_lecture` when the repo has `lectures/04_week-4`. Nothing detects that until the deploy fires and ships nothing.
+A dropped entry is a fault in the *file*. The other way a semester quietly fails is a perfectly valid entry pointing at a folder that isn't there - `lectures/04_lecture` when the repo has `lectures/04_week-4`. Nothing detects that until the deploy fires and ships nothing.
 
-So the sources are checked against the course org in two places: **Validate schedule**, whenever you commit a change to `schedule.yml`, and the **scheduler**, which is the one that catches a plan written in August and forgotten. Because a term written up front legitimately names folders nobody has authored yet, how loud that is depends on how close the deploy is:
+So the sources are checked against the course org in two places: **Validate schedule**, whenever you commit a change to `schedule.yml`, and the **scheduler**, which is the one that catches a plan written in August and forgotten. Because a semester written up front legitimately names folders nobody has authored yet, how loud that is depends on how close the deploy is:
 
 | Distance to the deploy | Severity | What you see |
 |---|---|---|
@@ -339,7 +339,7 @@ So the sources are checked against the course org in two places: **Validate sche
 | 6 hours or less | **critical** | it comments again, one rung louder, and the email copies the toolkit maintainer |
 | the moment has passed | **missed** | the copy did not ship. A last comment and a last email, and the fault stays listed until the source is staged |
 
-**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the semester's instructors. If git can name nobody in `instructors.yml` - the line was never edited by teaching staff, or the blame could not be read - the whole teaching team is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/instructors.yml`; the digest issue `cc`s the same people by handle. If nobody in `instructors.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
+**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the semester's instructors. If git can name nobody in `instructors.yml` - the line was never edited by instructors, or the blame could not be read - every instructor is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/instructors.yml`; the digest issue `cc`s the same people by handle. If nobody in `instructors.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
 
 **Nothing is emailed between 23:00 and 07:00** in the semester's own timezone. The issue still updates and comments immediately; the email is held and sent on the first tick after 07:00, as one message at the loudest rung it reached overnight.
 
@@ -357,7 +357,7 @@ One issue per semester, titled **"schedule.yml: planned releases cite sources no
 - it **comments** only when something crosses a rung - a fault appears at warning, escalates, or clears - and `cc`s the same people the email is addressed to.
 - it **closes itself** when nothing in the file is left to fix.
 
-A term written months ahead sits entirely at *advisory* and opens no issue at all.
+A semester written months ahead sits entirely at *advisory* and opens no issue at all.
 
 Don't close it by hand: closing changes nothing in the file, and the next tick reopens it without emailing everybody again.
 
@@ -375,7 +375,7 @@ By hand: add `--check-sources <course-org>` to either `--validate` form above. E
 
 ## Dropped entries
 
-An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it cannot be run, so the rest of the term parses without it. This is the one fault a green run hides, so every drop is named in the run log, counted on **Check semester setup**, and turned into a non-zero exit by `--validate`.
+An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it cannot be run, so the rest of the semester parses without it. This is the one fault a green run hides, so every drop is named in the run log, counted on **Check semester setup**, and turned into a non-zero exit by `--validate`.
 
 | Fault | What the semester loses |
 |---|---|

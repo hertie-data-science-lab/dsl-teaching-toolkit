@@ -817,7 +817,7 @@ def main() -> int:
         "--course",
         default=None,
         help="With --semester: the parent course org. Registers this semester in that "
-        "course's .github/cohort-courses-pages.yml so it appears in the faculty & "
+        "course's .github/semesters.yml so it appears in the faculty & "
         "instructors dropdowns.",
     )
     parser.add_argument(

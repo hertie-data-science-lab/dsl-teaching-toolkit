@@ -321,7 +321,7 @@ The substantive repos of this org are private (not accessible to enrolled studen
 ## Semesters
 
 List of semester orgs registered to receive releases from this course org. _Auto-discovered from the
-`cohort-courses-pages.yml` registry_:
+`semesters.yml` registry_:
 
 {semester_lines}
 

@@ -7,7 +7,7 @@ config to drift out of date.
 
 The semester registry is the one exception to "read it from the live org": semester orgs
 can't be found by naming convention (they're arbitrary), so they're listed explicitly in
-the course org's .github/cohort-courses-pages.yml (register_semester appends; faculty &
+the course org's .github/semesters.yml (register_semester appends; faculty &
 instructors can edit it by hand).
 
 The session-folder rule itself lives in course.session_dirs - this module is only the API

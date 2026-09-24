@@ -2,7 +2,7 @@
 
 A complete, ready-to-copy set of **dummy course materials**: incl a growing lecture package, placeholder lab materials, three
 assignments (one group project run by three teams of 3-4), a roster with an auditor, instructor/TA
-cards, and a full term's auto-release schedule. Follow the same steps to stand up your own course.
+cards, and a full semester's auto-release schedule. Follow the same steps to stand up your own course.
 
 Find the example materials in this markdown's parent directory.
 
@@ -36,7 +36,7 @@ example-course/
   cohort-org/
     students.csv                    # 10 students + 1 auditor (handles blank until they onboard)
     teams.csv                       # 3 project teams of 3-4 (auditors are refused from teams)
-    schedule.yml                    # the full term: releases + due dates + events
+    schedule.yml                    # the full semester: releases + due dates + events
     instructors.yml                      # this semester's own instructors/TAs (real push access)
     grading_sheets/*.yml            # one marking sheet per assignment (individual + group)
 ```

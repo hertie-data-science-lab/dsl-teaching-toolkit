@@ -10,7 +10,7 @@ later copies session folders from here into a semester. One repo per year: `cour
    1. `course-admin` membership (course org), or
    2. being declared an instructor/TA in a semester org's `classroom-config/instructors.yml`
 
-> see [Manage the teaching team](05-manage-teaching-team.md) for full access details.
+> see [Manage the instructors](05-manage-teaching-team.md) for full access details.
 
 ## Steps
 
@@ -18,7 +18,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
 1. **Scaffold the repo.** 
    - Course org → `.github` → **Actions** →
-   [New materials repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-materials.yml); input `tag` = `fYYYY`/`sYYYY` (e.g. `f2026`) 
+   [New materials repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-materials.yml); input `semester` = `fYYYY`/`sYYYY` (e.g. `f2026`) 
    - this creates **`course-materials-f2026`** - a private repo, pre-seeded with (edit as needed):
       - `lectures/01_session-1/`, 
       - `readings/01_session-1/`, 
@@ -78,7 +78,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 ## Next
 
 - [Add an assignment](03-add-assignment-to-course.md).
-- [Schedule releases](07-schedule-releases.md) - plan the term up front, the primary path.
+- [Schedule releases](07-schedule-releases.md) - plan the semester up front, the primary path.
 - [Release to a semester](08-release-materials-to-cohort.md) - open sessions up to students by hand.
 
 ---

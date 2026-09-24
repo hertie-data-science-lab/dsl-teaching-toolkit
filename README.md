@@ -21,7 +21,7 @@ A course lives once in a persistent **course** org and is delivered each year in
    - [Add materials](docs/02-add-materials-to-course.md) - lectures slides, readings, labs, other
    - [Add assignments](docs/03-add-assignment-to-course.md) - a template repo that is copied into student private response repos, optionally contains a solutions branch
 2. [**Set up a semester org**](docs/04-new-cohort-org.md) (per year)
-   - [Declare the teaching team](docs/05-manage-teaching-team.md) - this year's instructors & TAs, optionally with `start`/`end` dates so access lapses on its own
+   - [Declare the instructors](docs/05-manage-teaching-team.md) - this year's instructors & TAs, optionally with `start`/`end` dates so access lapses on its own
    - [Enrol students](docs/06-enrol-students-to-cohort.md)
    - [Set the schedule up front](docs/07-schedule-releases.md) - this automates release materials, assignments & grading runs from course org -> semester org 
 3. **Run the course**

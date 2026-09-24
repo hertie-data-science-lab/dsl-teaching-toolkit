@@ -207,7 +207,7 @@ def render_tree(orgs: list[dict], semesters: list[dict]) -> str:
     Those cannot nest anywhere, so they are listed at the end rather than dropped: an
     orphan is a fault to fix, and silently omitting it is how it stays unfixed.
 
-    A semester that exists but is NOT REGISTERED in its course's cohort-courses-pages.yml is
+    A semester that exists but is NOT REGISTERED in its course's semesters.yml is
     marked as such. It is a live org that every nightly sync is blind to - membership,
     faculty, site, scheduler all fan out from that registry - so it fails by doing nothing
     at all, which is the one failure mode nothing else here reports. Marked, never

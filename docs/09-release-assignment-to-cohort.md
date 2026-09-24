@@ -2,7 +2,7 @@
 
 Hand out one **private repo per student** from a course org assignment template.
 
-> NB: this is the manual ad hoc alternative to [pre-scheduling & automating](07-schedule-releases.md) the term's assignment releases.
+> NB: this is the manual ad hoc alternative to [pre-scheduling & automating](07-schedule-releases.md) the semester's assignment releases.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ The `release assignment` workflow can be found in the course org's:
 
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
-- It freezes a semester-level copy `<name>` of the chosen template (`semester_dest_repo` from the schedule entry when one names this repo, else the repo minus its tag)
+- It freezes a semester-level copy `<name>` of the chosen template (`semester_dest_repo` from the schedule entry when one names this repo, else the repo minus its semester)
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 
@@ -74,7 +74,7 @@ public before they push anything into it.
 
 No **model solution** is pushed into these repos, whatever
 `solution_datetime` says - publishing the answers is not something a later run could take
-back - so it stays on the template's `solution` branch for the teaching team.
+back - so it stays on the template's `solution` branch for the instructors.
 
 GitHub turns **secret scanning and push protection** on for a public repository itself, so
 every one of these repos has both from the moment it is created. If a student pushes
@@ -148,7 +148,7 @@ Full flow:
 
 ## Deadlines
 
-Set in the **semester's** `classroom-config/schedule.yml`, keyed by an assignment **slug** you choose - `course_source_repo` names the actual course-org repo (tag included):
+Set in the **semester's** `classroom-config/schedule.yml`, keyed by an assignment **slug** you choose - `course_source_repo` names the actual course-org repo (semester included):
 
 ```yaml
 assignments:
@@ -196,7 +196,7 @@ What a real run does:
   matches the frozen semester-side hand-out their repo was generated from;
 - patches that frozen hand-out too, so a student who onboards tomorrow is given the
   corrected file rather than the one everybody else was just patched off;
-- posts one note on each patched repo's **Submission receipts** issue: *"The teaching team updated
+- posts one note on each patched repo's **Submission receipts** issue: *"The instructors updated
   `starter.ipynb` in this repository on 2026-10-14; pull before you continue. Your own
   commits are untouched."* A second press that changes nothing says nothing.
 

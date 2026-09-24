@@ -5,14 +5,14 @@ Stand up the per-year, student-facing org:
 - the student roster, 
 - released materials, 
 - the semester website, 
-- and the schedule that runs the term.
+- and the schedule that runs the semester.
 
 Once each year; the [course org](01-new-course-org.md) it hangs off is permanent.
 
 ## Prerequisites
 
 - **(Recommended)**: You're in the course org's `course-admin` team.
-- Being in a prior semester's `instructors-<tag>` team also works. 
+- Being in a prior semester's `instructors-<semester>` team also works. 
 
 ## Steps
 
@@ -20,7 +20,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
 
 1. **Create the semester org** in the [web UI](https://github.com/account/organizations/new?plan=free&ref_cta=Create%2520a%2520free%2520organization&ref_loc=cards&ref_page=%2Forganizations%2Fplan), 
     - Named **`hertie-<course-slug>-<termtag>`**, termtag `fYYYY`/`sYYYY` - lowercase-kebab (e.g. `hertie-dsl-demo-f2026`). 
-      - The `fYYYY`/`sYYYY` tag is necessary; it drives the semester label ("Fall 2026") and which year's `assignment-*` templates the site lists.
+      - The `fYYYY`/`sYYYY` semester is necessary; it drives the semester label ("Fall 2026") and which year's `assignment-*` templates the site lists.
     - Select a business/institutional account, and enter `hertie-data-science-lab` into the text box.
 
 2. **Invite `hertie-dsl-bot` as Owner** (Org → People → Invite → role *Owner*).
@@ -39,7 +39,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
 
 ---
 
-4. **Fill in `classroom-config/schedule.yml` for the whole term** (edit locally or in the web UI → commit to `main`).
+4. **Fill in `classroom-config/schedule.yml` for the whole semester** (edit locally or in the web UI → commit to `main`).
     - Full guide for doing so covered in [07-schedule-releases.md](07-schedule-releases.md)
     - Full schema for the schedule [here](DEPLOYMENT-CHECKLIST.md#scheduleyml)
 
@@ -81,7 +81,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
 
 ## Next
 
-- [Manage the teaching team](05-manage-teaching-team.md) - the full version of step 5, incl.
+- [Manage the instructors](05-manage-teaching-team.md) - the full version of step 5, incl.
   fixed-term access and how to revoke it.
 - [Enrol students](06-enrol-students-to-cohort.md).
 - [Schedule releases](07-schedule-releases.md) - the full guide to the plan you started in step 4.

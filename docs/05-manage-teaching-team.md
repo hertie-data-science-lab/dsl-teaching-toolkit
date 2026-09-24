@@ -21,7 +21,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 | Role | You want them to… | Declare them in | Level | They get |
 |--- |---|---|---|---|
 | Faculty, FAs | Administer the **whole course**, every semester, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every semester org |
-| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `classroom-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<tag>`: push on `.github` and on every course-org repo named `*-<tag>` |
+| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `classroom-config/instructors.yml` → `instructors:` (`role: instructor` or `teaching_assistant`) | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>`: push on `.github` and on every course-org repo named `*-<semester>` |
 
 **Prefer the semester file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's instructor cards.
 
@@ -99,18 +99,18 @@ Worked example: [`example-course/cohort-org/instructors.yml`](../example-course/
 
 - **Time-boxed:** do nothing, or bring the `end` date forward.
 - **Immediately:** delete their entry (or set `end` to yesterday) and push. The dispatch on that push revokes within a minute or two.
-- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<tag>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth.
+- **Do not use the GitHub Teams UI.** A hand-add to `course-admin`, `instructors` or `instructors-<semester>` is reverted by the next sync, and a hand-*removal* of someone still named in the config is re-added. The file is the truth.
 
 ## What the access actually reaches
 
-`instructors-<tag>` gets:
+`instructors-<semester>` gets:
 1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check semester setup…) visible and runnable for them
-2. every course-org repo whose **name ends their associated `-<tag>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
+2. every course-org repo whose **name ends their associated `-<semester>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
 3. Semester-side they also get write on `classroom-config`, `welcome` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the semester: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
 
 So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the semester org ([08](08-release-materials-to-cohort.md)) themselves.
 
->The suffix match is the whole rule: a course-org repo **without** the year tag in its name is not covered. Name per-year content repos `<thing>-<tag>`. 
+>The suffix match is the whole rule: a course-org repo **without** the semester in its name is not covered. Name per-year content repos `<thing>-<semester>`. 
 >
 >A repo scaffolded by **New materials repo** / **New assignment** is granted as it is created - there is nothing to run afterwards.
 
@@ -119,7 +119,7 @@ So a TA on f2026 can `git push` labs into the course org level `course-materials
 `DSL_BOT_TOKEN` is mirrored as a repo secret onto every course-org content repo and assignment
 template (GitHub Free does not deliver org secrets to private repos), and a repo secret is
 readable by anyone with write on the repo. **Write on either is the bot token** - `instructors` and
-`instructors-<tag>` hold it, so put only instructors in them; a guest who needs to read
+`instructors-<semester>` hold it, so put only instructors in them; a guest who needs to read
 materials gets read on that one repo, by hand. This is rotation between trusted colleagues,
 not a security boundary.
 

@@ -295,10 +295,10 @@ archive:
 
 The block is the switch: `archive:` on its own is enough, and means sixty days after your
 `semester_end`. **Without the block, nothing is ever archived** - the semester stays live and
-writable, and its digest issue says so, term after term.
+writable, and its digest issue says so, semester after semester.
 
 **A fortnight before**, the semester gets one issue in `classroom-config` and one email to
-the teaching team saying what is about to happen. That is the moment to move the date if
+the instructors saying what is about to happen. That is the moment to move the date if
 you need longer - move it inside the fortnight and a notice for the new date opens and
 mails again. Students see it too, in the site's Updates box and on its schedule.
 
@@ -309,7 +309,7 @@ mails again. Students see it too, in the site's Updates box and on its schedule.
 2. the toolkit's own open notices in `classroom-config` are closed;
 3. the website is synced one last time, so it ships the archived state;
 4. **every repository in the org is archived** - students' work, the released materials,
-   `welcome` (so nobody can still Join a term that is over), the website, `.github`;
+   `welcome` (so nobody can still Join a semester that is over), the website, `.github`;
 5. `archive/teardown.md` (the archive record) is written into `classroom-config`, recording what was archived;
 6. `classroom-config` is archived last, which is what tells every nightly sync this semester
    is finished and to leave it alone.

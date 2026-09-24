@@ -10,8 +10,8 @@ Accompanies the e2e [worked example](../example-course/).
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the course org | course | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-<CODE>` (no year); invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
 | `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `org_name`, `course_code`; optional `admin` (your handle); `central_ref` defaults to `release` | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
-| `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `tag` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<tag>` with run-from-repo Release workflows |
-| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `tag` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<tag>` template each, with its own run-from-repo Release assignment workflow |
+| `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `semester` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<semester>` with run-from-repo Release workflows |
+| `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `semester` + `formats` (one or more starters, the first runnable) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<semester>` template each, with its own run-from-repo Release assignment workflow |
 | *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every semester, reconciled |
 | `[required]` | 6. Refresh | course | course `.github` → **Refresh actions** | none | dropdowns populated, secrets on content repos and assignment templates |
 
@@ -23,7 +23,7 @@ Accompanies the e2e [worked example](../example-course/).
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the semester org | semester | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-f/sYYYY`; invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
 | `[required]` | 2. Bootstrap | course → semester | course `.github` → **Bootstrap semester** | `semester_org` | `welcome` (Join course / Join team issues) + `classroom-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
-| `[do this first]` | 3. The term plan | semester | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole term; site dates; grading deadlines |
+| `[do this first]` | 3. The semester plan | semester | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole semester; site dates; grading deadlines |
 | `[required]` | 4. Roster | semester | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
 | *(optional)* | 5. Instructors | semester | edit [`classroom-config/instructors.yml`](#instructorsyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
 | `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
@@ -126,7 +126,7 @@ Live example: [`example-course/cohort-org/instructors.yml`](../example-course/co
 
 `classroom-config/instructors.yml` - this semester's instructors, one list. Grants the semester's `instructors`
 team necessary access permissions at both the course- and semester-org levels, including push
-from the course org into that year's content repos (`instructors-<tag>`), and supplies the
+from the course org into that year's content repos (`instructors-<semester>`), and supplies the
 semester site's cards. `github_handle`, `role` (`instructor` or `teaching_assistant`) and
 `email` are required on every entry; the rest are optional.
 
@@ -210,7 +210,7 @@ submissions:
 
 Live example: [`example-course/course-org/course-materials-f2026`](../example-course/course-org/course-materials-f2026).
 
-`course-materials-<tag>` - private; students only ever see what you release. Any top-level
+`course-materials-<semester>` - private; students only ever see what you release. Any top-level
 directory holding ordinal-prefixed subdirectories is a releasable section.
 
 ```
@@ -226,7 +226,7 @@ course-materials-f2026/
 
 Live example: [`example-course/course-org/assignment-1-f2026`](../example-course/course-org/assignment-1-f2026).
 
-`assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
+`assignment-N-<semester>` - a template repo with two branches. Student repos are generated from
 `main` only. The **New assignment** workflow's `formats` - a comma-separated list of
 `ipynb`/`py`/`rmd`/`qmd`/`latex`, or `none` on its own - picks the starter stubs; `type`
 (individual/group) is recorded in `grading_config.yml`, and handout and grading obey
@@ -254,7 +254,7 @@ bottom.
 
 Live example: [`example-course/cohort-org/schedule.yml`](../example-course/cohort-org/schedule.yml).
 
-`classroom-config/schedule.yml` - the term plan: the **auto-release plan** the scheduler
+`classroom-config/schedule.yml` - the semester plan: the **auto-release plan** the scheduler
 runs, and the **dates** that drive the website and grading. Times are read in `timezone`
 (default `Europe/Berlin`) unless given an offset; a bare **release** date = 00:00, a bare
 **due_datetime**/`grading_datetime` date = 23:59:59, a bare **events** date shows as 09:00. Times are
@@ -265,7 +265,7 @@ Blocks encode behaviour: **`releases:`** deploys materials, **`assignments:`** r
 handout/due/grading lifecycle, **`events:`** is display-only calendar rows. Colour is a
 display concern only - see [row types](#schedule-row-types) below.
 
-**`releases`** - the term calendar and release plan in one block: each entry is a
+**`releases`** - the semester calendar and release plan in one block: each entry is a
 label you choose, an `event_datetime:`, and the deploys it ships.
 Sources are read from the course org, destinations written to this semester, so entries name
 repos, never orgs. Every release is idempotent - re-runs are no-ops.
@@ -341,7 +341,7 @@ releases:
 ```
 
 **Dates** - the website schedule and the grading deadlines. Absent values are synthesised
-(semester from the tag, lectures weekly, assignments fortnightly, a MidTerm Exam and a
+(semester from its name, lectures weekly, assignments fortnightly, a MidTerm Exam and a
 Final Exam).
 
 Per assignment (`assignments.<slug>`); `due_datetime` and `course_source_repo` are required,
@@ -459,7 +459,7 @@ So lecture vs lab is decided by the deployed section folder, not by the entry la
 week with both a lecture and a lab renders two rows.
 
 **A malformed entry is dropped - and every drop is reported.** The parser never raises, so
-the rest of the term still runs, but nothing is silent: each drop is named in the run log,
+the rest of the semester still runs, but nothing is silent: each drop is named in the run log,
 counted by **Check semester setup**, and makes `--validate` exit non-zero. A push to
 `schedule.yml` runs **Validate schedule** in `classroom-config`; a file the scheduler cannot
 fully read goes red and opens an issue naming the bad entry.
@@ -481,7 +481,7 @@ Verify with `python3 -m dsl_course.schedule --semester-org <SEMESTER> --validate
 
 **What happens at the grading deadline.** The scheduler freezes each submission repo's
 commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
-then examines it **once** - the hidden tests where the `<slug>-<tag>` template's
+then examines it **once** - the hidden tests where the `<slug>-<semester>` template's
 `grading_config.yml` says `autograde: true`, the completion check where it asks for one (the
 `_graded.json` / `_skipped.json` record in `classroom-config/autograde/<slug>/` is the fired
 marker - delete it, or the whole folder, to re-grade). All of this happens whether or not the

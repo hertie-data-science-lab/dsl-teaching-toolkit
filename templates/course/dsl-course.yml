@@ -51,5 +51,5 @@ assignment_defaults:
 # course org.
 #
 # This is the persistent COURSE org - it spans many semesters (years). Semesters are
-# registered separately in .github/cohort-courses-pages.yml.
+# registered separately in .github/semesters.yml.
 
