@@ -527,8 +527,6 @@ def _preview_clis(monkeypatch) -> set[str]:
         except _Parsed as got:
             if "--preview" in got.parser._known_flags():
                 found.add(info.name)
-        except Exception:
-            continue
     return found
 
 
@@ -868,10 +866,14 @@ def test_ds01s_all_cohorts_is_a_deprecated_alias_and_cohort_org_is_still_refused
     run = step["run"]
     check = run[: run.index("# First, and never fatal")]
     env = {"PATH": os.environ["PATH"], "OLD_PAYLOAD": "", "DEPRECATED_ALL": "true"}
-    out = subprocess.run(["bash", "-c", check], env=env, capture_output=True, text=True)
+    out = subprocess.run(
+        ["bash", "-c", check], env=env, capture_output=True, text=True, check=False
+    )
     assert out.returncode == 0 and "deprecated" in out.stdout
     env |= {"OLD_PAYLOAD": "Sem-f2026", "DEPRECATED_ALL": "false"}
-    out = subprocess.run(["bash", "-c", check], env=env, capture_output=True, text=True)
+    out = subprocess.run(
+        ["bash", "-c", check], env=env, capture_output=True, text=True, check=False
+    )
     assert out.returncode == 1 and "NOT_MIGRATED" in out.stdout
 
 
