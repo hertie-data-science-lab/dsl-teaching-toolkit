@@ -3,7 +3,7 @@
 // signals so a screen re-renders when its file arrives.
 
 import { signal, type Signal } from '@preact/signals';
-import type { DirEntry, GitHubClient } from '../github/client';
+import type { DirEntry, GhRepo, GitHubClient } from '../github/client';
 
 export type FileState =
   | { kind: 'loading' }
@@ -14,13 +14,18 @@ export type FileState =
 export type DirState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; entries: DirEntry[] };
 
 /** A repo's whole tree at a ref: every path, with `dir` for folders. */
-export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; paths: { path: string; dir: boolean }[] };
+/** `truncated`: GitHub returned only part of the tree (its recursive listing has a size cap). */
+export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; paths: { path: string; dir: boolean }[]; truncated: boolean };
+
+/** An org's repos as the user sees them. */
+export type ReposState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'ready'; repos: GhRepo[] };
 
 export interface Files {
   file(owner: string, repo: string, path: string, ref?: string): FileState;
   dir(owner: string, repo: string, path: string): DirState;
   member(org: string, user: string): boolean | null | undefined; // undefined while loading
   tree(owner: string, repo: string, ref?: string): TreeState;
+  repos(org: string): ReposState;
   /** Record a file the console just wrote, so every screen shows the new text and sha. */
   put(owner: string, repo: string, path: string, ref: string | undefined, text: string | null, sha: string): void;
   /** Read a file again (after a conflict), and a directory listing. */
@@ -33,6 +38,7 @@ export class LiveFiles implements Files {
   private dirs = new Map<string, Signal<DirState>>();
   private members = new Map<string, Signal<boolean | null | undefined>>();
   private trees = new Map<string, Signal<TreeState>>();
+  private orgRepos = new Map<string, Signal<ReposState>>();
   constructor(private readonly client: GitHubClient) {}
 
   private fileKey(owner: string, repo: string, path: string, ref?: string) {
@@ -68,7 +74,21 @@ export class LiveFiles implements Files {
       this.trees.set(k, sig);
       this.client
         .listTree(owner, repo, ref, true)
-        .then((t) => (sig.value = t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree' })) } : { kind: 'absent' }))
+        .then((t) => (sig.value = t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree' })), truncated: t.truncated === true } : { kind: 'absent' }))
+        .catch(() => (sig.value = { kind: 'absent' }));
+    }
+    return s.value;
+  }
+
+  repos(org: string): ReposState {
+    let s = this.orgRepos.get(org);
+    if (!s) {
+      const sig = signal<ReposState>({ kind: 'loading' });
+      s = sig;
+      this.orgRepos.set(org, sig);
+      this.client
+        .listOrgRepos(org)
+        .then((repos) => (sig.value = { kind: 'ready', repos }))
         .catch(() => (sig.value = { kind: 'absent' }));
     }
     return s.value;
@@ -124,6 +144,7 @@ export class LiveFiles implements Files {
     this.dirs.clear();
     this.members.clear();
     this.trees.clear();
+    this.orgRepos.clear();
   }
 }
 
@@ -133,13 +154,18 @@ export class StaticFiles implements Files {
     private readonly map: Record<string, string> = {},
     private readonly dirMap: Record<string, string[]> = {},
     private readonly treeMap: Record<string, string[]> = {},
+    private readonly repoMap: Record<string, Partial<GhRepo>[]> = {},
   ) {}
+  repos(org: string): ReposState {
+    const r = this.repoMap[org];
+    return r ? { kind: 'ready', repos: r.map((x) => ({ full_name: `${org}/${x.name}`, private: true, default_branch: 'main', html_url: `https://github.com/${org}/${x.name}`, name: '', ...x })) } : { kind: 'absent' };
+  }
   tree(owner: string, repo: string): TreeState {
     const t = this.treeMap[`${owner}/${repo}`];
     if (!t) return { kind: 'absent' };
     const dirs = new Set<string>();
     for (const p of t) p.split('/').slice(0, -1).forEach((_, i, a) => dirs.add(a.slice(0, i + 1).join('/')));
-    return { kind: 'ready', paths: [...[...dirs].map((path) => ({ path, dir: true })), ...t.map((path) => ({ path, dir: false }))] };
+    return { kind: 'ready', paths: [...[...dirs].map((path) => ({ path, dir: true })), ...t.map((path) => ({ path, dir: false }))], truncated: false };
   }
   put(owner: string, repo: string, path: string, _ref: string | undefined, text: string | null): void {
     if (text === null) delete this.map[`${owner}/${repo}/${path}`];

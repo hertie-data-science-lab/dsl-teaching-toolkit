@@ -35,6 +35,8 @@ later without touching the screens.
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `students.csv`, `people.yml`, a template's `grading_config.yml`, the site's `index.md`.
+- Materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and last
+  changes; a materials repo's recursive tree, badged from `publish.yml` and `.releaseignore`.
 
 ## What it changes
 

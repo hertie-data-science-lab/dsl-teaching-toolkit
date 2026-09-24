@@ -33,6 +33,7 @@ export interface GhRepo {
   archived?: boolean;
   default_branch: string;
   topics?: string[];
+  pushed_at?: string | null;
   permissions?: { admin?: boolean; maintain?: boolean; push?: boolean; triage?: boolean; pull?: boolean };
   html_url: string;
 }
@@ -269,6 +270,17 @@ export class GitHubClient {
     const out: GhOrg[] = [];
     for (let page = 1; page < 20; page++) {
       const batch = await this.get<GhOrg[]>(`/user/orgs?per_page=100&page=${page}`);
+      out.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return out;
+  }
+
+  /** Every repo of an org the caller can see, every page (up to 1,900 repos: 19 pages of 100, a runaway guard). */
+  async listOrgRepos(org: string): Promise<GhRepo[]> {
+    const out: GhRepo[] = [];
+    for (let page = 1; page < 20; page++) {
+      const batch = await this.get<GhRepo[]>(`/orgs/${encodeURIComponent(org)}/repos?per_page=100&page=${page}`);
       out.push(...batch);
       if (batch.length < 100) break;
     }

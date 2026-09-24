@@ -15,7 +15,7 @@ import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
 import { validator } from '../model/validate';
 import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon, ghUrl } from '../ui/bits';
-import { Ext } from '../ui/icons';
+import { Check, Ext } from '../ui/icons';
 import { courseScope, newestScope } from './CourseEdit';
 import type { CourseProps } from './types';
 
@@ -32,6 +32,11 @@ export function courseView(p: CourseProps): { course: CourseStatus | null; probl
 function problemsOf(p: CourseProps, cohortOrg: string): number | null {
   const l = p.cohortStates[cohortOrg];
   return l && l.kind === 'ready' ? (l.status.problems ?? []).length : null;
+}
+
+/** A template's or materials repo's state as a chip: only `problem` is bad; `todo` is neutral. */
+export function StateChip({ state, todo }: { state: string; todo: string }) {
+  return state === 'problem' ? <span class="chip bad">Has a problem</span> : state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip">{todo}</span>;
 }
 
 export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
@@ -86,23 +91,42 @@ export function CourseScreen(p: CourseProps) {
         {showSetup && v.course ? (
           <section class="panel section"><div class="section-head"><h2>Setup</h2><Legend /></div><Rail scope="course" stages={v.course.stages} problems={v.problems} /></section>
         ) : null}
-        {v.computed ? (
-          <section class="section">
-            <div class="problems-head"><h2>Problems</h2><span class="footnote">Course problems also appear on every cohort they will affect.</span></div>
-            <ProblemCards list={v.problems} />
+        <div class="grid-2">
+          <section class="panel section">
+            <div class="problems-head"><h2>Course problems</h2><span class="footnote">They also appear on every cohort they will affect.</span></div>
+            {!v.computed ? <p class="footnote">Status not computed yet.</p> : v.problems.length ? <ProblemCards list={v.problems} /> : <div class="no-problems"><Check /><span>No course problems.</span></div>}
           </section>
-        ) : null}
+          <section class="panel section">
+            <h2>Cohorts</h2>
+            {course.cohorts.length ? (
+              <ul class="rows">
+                {course.cohorts.map((c) => {
+                  const l = p.cohortStates[c.org];
+                  const n = problemsOf(p, c.org);
+                  const live = l && l.kind === 'ready' ? l.status.cohort?.live !== false : true;
+                  return (
+                    <li>
+                      <span class="r-title">{c.termLabel} <span class={`chip ${live ? 'ok' : ''}`}>{live ? 'Live' : 'Archived'}</span></span>
+                      <span class="r-sub">{l && l.kind === 'ready' && l.status.cohort ? `Week ${l.status.cohort.week} of ${l.status.cohort.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
+                      <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#cohort`}>Open</a></span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : <p class="footnote">No cohorts yet.</p>}
+          </section>
+        </div>
         <div class="grid-2">
           <section class="panel section" id="sec-templates">
             <div class="section-head"><h2>Assignment templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
             {v.course?.templates?.length ? (
               <ul class="rows">
                 {v.course.templates.map((t) => {
-                  const bad = t.state !== 'ready';
+                  const bad = t.state === 'problem';
                   return (
                     <li>
-                      <span class="r-title">{assignmentIdent(t.slug)} <span class={`chip ${bad ? 'bad' : 'ok'}`}>{bad ? 'Has a problem' : 'Ready'}</span></span>
-                      <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.' : 'Brief written; settings check out.'} <span class="slug">{t.repo}</span></span>
+                      <span class="r-title">{assignmentIdent(t.slug)} <StateChip state={t.state} todo="Not written yet" /></span>
+                      <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.' : t.state === 'ready' ? 'Brief written; settings check out.' : 'The brief (README.md) is not written yet.'} <span class="slug">{t.repo}</span></span>
                       <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.slug}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                     </li>
                   );
@@ -116,8 +140,8 @@ export function CourseScreen(p: CourseProps) {
               <ul class="rows">
                 {v.course.materials.map((m) => (
                   <li>
-                    <span class="r-title">{m.repo} <span class={`chip ${m.state === 'ready' ? 'ok' : 'amber'}`}>{m.state === 'ready' ? 'Ready' : 'Not written'}</span></span>
-                    <span class="r-sub">{m.state === 'ready' ? 'Syllabus written.' : 'The syllabus is still the template text; students would see it at the first release.'}</span>
+                    <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" /></span>
+                    <span class="r-sub">{m.state === 'ready' ? 'Syllabus written.' : 'Not ready yet.'}</span>
                     <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 ))}
@@ -138,25 +162,6 @@ export function CourseScreen(p: CourseProps) {
             <Lives org={course.org} repo=".github" path="dsl-course.yml" />
           </section>
           <div class="stack">
-            <section class="panel section">
-              <h2>Cohorts</h2>
-              {course.cohorts.length ? (
-                <ul class="rows">
-                  {course.cohorts.map((c) => {
-                    const l = p.cohortStates[c.org];
-                    const n = problemsOf(p, c.org);
-                    const live = l && l.kind === 'ready' ? l.status.cohort?.live !== false : true;
-                    return (
-                      <li>
-                        <span class="r-title">{c.termLabel} <span class={`chip ${live ? 'ok' : ''}`}>{live ? 'Live' : 'Archived'}</span></span>
-                        <span class="r-sub">{l && l.kind === 'ready' && l.status.cohort ? `Week ${l.status.cohort.week} of ${l.status.cohort.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.org}</span>
-                        <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#cohort`}>Open</a></span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : <p class="footnote">No cohorts yet.</p>}
-            </section>
             <section class="panel section">
               <div class="section-head"><h2>Public website</h2><span class={`chip ${pub ? 'ok' : ''}`}>{pub ? 'Published' : 'Not published'}</span></div>
               <p style="color:var(--ink-2)">Optional: an open version of your materials for anyone, updated daily.</p>
