@@ -990,7 +990,8 @@ def _lecture_entry(
         flags += "readings_pending: true\n"
     return (
         f"---\n"
-        f"type: {kind}\n"
+        f"kind: {kind}\n"
+        f"type: {kind}\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(row.when)}\n"
         f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
@@ -1377,7 +1378,8 @@ def _assignment_entry(
     details_due = indent(details_fm, "    ")
     return (
         f"---\n"
-        f"type: assignment\n"
+        f"kind: assignment\n"
+        f"type: assignment\n"  # the pinned theme's key, until its next release
         f"date: {released}\n"
         f'title: "{q(title)}"\n'
         f"{sub_fm}"
@@ -1391,6 +1393,7 @@ def _assignment_entry(
         f"{note_fm}"
         f"{team_fm}"
         f"due_event:\n"
+        f"    kind: due\n"
         f"    type: due\n"
         f"    date: {due}\n"
         f'    title: "{q(title)}"\n'
@@ -1459,7 +1462,8 @@ def _event_row(
         flags = "tbc: true\n" + ("dateless: true\n" if dateless else "")
     return (
         f"---\n"
-        f"type: {kind}\n"
+        f"kind: {kind}\n"
+        f"type: {kind}\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(title)}"\n'
@@ -1477,7 +1481,7 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     `show_on_site: false` is the caller's business, not this function's: an event hidden
     from the schedule is one this is never called for."""
     return _event_row(
-        "exam" if event.type == "exam" else "special_event",
+        "exam" if event.kind == "exam" else "special_event",
         event.title or _pretty(event.label),
         event.when if event.when is not None else fallback,
         event.tbc,
@@ -1545,7 +1549,8 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
         flags += "announce: true\n"
     return (
         f"---\n"
-        f"type: special_event\n"
+        f"kind: special_event\n"
+        f"type: special_event\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(archive.title)}"\n'
@@ -1565,7 +1570,8 @@ def _term_date_entry(name: str, when: date) -> str:
     clock time - a term boundary is a whole day, not a 09:00 appointment."""
     return (
         f"---\n"
-        f"type: term_date\n"
+        f"kind: term_date\n"
+        f"type: term_date\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"hide_time: true\n"
         f'title: "{q(name)}"\n'
@@ -1730,7 +1736,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # Counted over EVERY event, hidden ones included: a semester that wrote its exams and
         # then took them off the site has said what its exams are, and answering that with
         # two invented ones would put back exactly what it asked to remove.
-        if not any(e.type == "exam" for e in sched.events):
+        if not any(e.kind == "exam" for e in sched.events):
             event_entries |= {
                 "midterm.md": _event_row(
                     "exam", "MidTerm Exam", start + timedelta(weeks=8)

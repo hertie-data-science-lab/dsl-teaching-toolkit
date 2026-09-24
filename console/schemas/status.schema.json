@@ -345,6 +345,12 @@
           "id": {
             "type": "string"
           },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "show_on_site": {
             "type": "boolean"
           },
@@ -380,12 +386,6 @@
           },
           "title": {
             "type": "string"
-          },
-          "type": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "when": {
             "type": [
@@ -538,6 +538,9 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "type": "string"
+          },
           "ref": {
             "type": "string"
           },
@@ -547,16 +550,13 @@
           "title": {
             "type": "string"
           },
-          "type": {
-            "type": "string"
-          },
           "when": {
             "type": "string"
           }
         },
         "required": [
           "when",
-          "type",
+          "kind",
           "ref",
           "state"
         ],

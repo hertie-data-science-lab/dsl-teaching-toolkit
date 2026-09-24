@@ -745,9 +745,9 @@ def release_state(
     return "planned"
 
 
-def _release_type(release: schedule.Release) -> str | None:
-    if release.type:
-        return release.type
+def _release_kind(release: schedule.Release) -> str | None:
+    if release.kind:
+        return release.kind
     if release.deploy:
         return row_kind(deploy_section(release.deploy[0]))
     return None
@@ -907,7 +907,7 @@ def render_releases(
             {
                 "id": r.label,
                 "when": _iso(r.when),
-                "type": _release_type(r),
+                "kind": _release_kind(r),
                 "title": r.title,
                 "state": release_state(r, facts, own, now),
                 "source": {
@@ -959,7 +959,7 @@ def this_week(
                     at,
                     {
                         "when": at.isoformat(),
-                        "type": kind,
+                        "kind": kind,
                         "ref": ref,
                         "title": title,
                         "state": state,
@@ -980,7 +980,7 @@ def this_week(
     for ev in sched.events:
         add(
             ev.when,
-            "exam" if ev.type == "exam" else "event",
+            "exam" if ev.kind == "exam" else "event",
             ev.label,
             ev.title,
             "planned",

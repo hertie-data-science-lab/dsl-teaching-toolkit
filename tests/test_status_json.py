@@ -135,7 +135,7 @@ CONTRACT_EXAMPLE = {
     "this_week": [
         {
             "when": "2026-09-24T10:00:00+02:00",
-            "type": "release",
+            "kind": "release",
             "ref": "s3",
             "title": "Session 3: Trees",
             "state": "planned",
@@ -145,7 +145,7 @@ CONTRACT_EXAMPLE = {
         {
             "id": "s5",
             "when": "2026-10-08T10:00:00+02:00",
-            "type": "lecture",
+            "kind": "lecture",
             "title": "Trees and ensembles",
             "state": "will_be_skipped",
             "source": {"repo": "course-materials-f2026", "path": "lectures/05_trees"},
@@ -414,7 +414,7 @@ def test_release_states_follow_the_destination():
     # s3's folder is in materials; s5 is still to come.
     assert states == {"s3": "released", "s5": "planned"}
     s3 = next(r for r in doc["releases"] if r["id"] == "s3")
-    assert (s3["type"], s3["dest"]) == (
+    assert (s3["kind"], s3["dest"]) == (
         "lecture",
         {"repo": "materials", "path": "lectures/03_trees"},
     )
@@ -454,7 +454,7 @@ events:
 
 def test_this_week_lists_releases_and_due_dates_in_order():
     doc = _render()
-    assert [(r["type"], r["ref"]) for r in doc["this_week"]] == [
+    assert [(r["kind"], r["ref"]) for r in doc["this_week"]] == [
         ("release", "s3"),
         ("due", "assignment-2"),
     ]

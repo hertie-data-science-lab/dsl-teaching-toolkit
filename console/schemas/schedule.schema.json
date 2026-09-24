@@ -82,6 +82,13 @@
           "event_datetime": {
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "exam",
+              "special_event"
+            ],
+            "type": "string"
+          },
           "show_on_site": {
             "type": "boolean"
           },
@@ -89,13 +96,6 @@
             "type": "boolean"
           },
           "title": {
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "exam",
-              "special_event"
-            ],
             "type": "string"
           }
         },
@@ -144,6 +144,14 @@
           "event_datetime": {
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "lab",
+              "lecture",
+              "readings"
+            ],
+            "type": "string"
+          },
           "show_on_site": {
             "type": "boolean"
           },
@@ -151,14 +159,6 @@
             "type": "boolean"
           },
           "title": {
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "lab",
-              "lecture",
-              "readings"
-            ],
             "type": "string"
           }
         },

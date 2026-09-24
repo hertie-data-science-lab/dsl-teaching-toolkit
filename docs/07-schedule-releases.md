@@ -47,7 +47,7 @@ Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows, and the default fire time for this entry's deploys |
 | `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
-| `type` | no | inferred from where the deploys land | `lecture` / `lab` / `readings` - which row this entry belongs to. Only needed when the destination path cannot say it (lab material that does not land under `labs/`); `readings` claims no row of its own - so a `title:` or `details:` written beside it has no row to appear on, and **Validate schedule** says so (write them on the entry that raises the session's row instead). The declaration travels with this entry's own deploy destination, so that destination must name the session's folder (`clinics/03_week-3`) rather than a parent holding it. An unrecognised value is flagged by **Validate schedule** and the row is placed as if you had declared none |
+| `kind` | no | inferred from where the deploys land | `lecture` / `lab` / `readings` - which row this entry belongs to. Only needed when the destination path cannot say it (lab material that does not land under `labs/`); `readings` claims no row of its own - so a `title:` or `details:` written beside it has no row to appear on, and **Validate schedule** says so (write them on the entry that raises the session's row instead). The declaration travels with this entry's own deploy destination, so that destination must name the session's folder (`clinics/03_week-3`) rather than a parent holding it. An unrecognised value is flagged by **Validate schedule** and the row is placed as if you had declared none |
 | `title` | no | - | the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the schedule, Lectures, Materials and Labs tabs |
 | `details` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown in the schedule's Details column AND under the session heading on the Lectures, Labs and Readings tabs; may run to several paragraphs (use a `>` or `\|` block) |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
@@ -215,7 +215,7 @@ Could be an exam, a drop-in clinic, a guest lecture, a revision session: anythin
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when it happens; as displayed on the deployed site schedule |
-| `type` | no | `special_event` | e.g. `exam` or `special_event` - affects which colour the row takes |
+| `kind` | no | `special_event` | e.g. `exam` or `special_event` - affects which colour the row takes |
 | `title` | no | prettified label | the row label on the site |
 | `details` | no | - | what the row's Details column says: the room, the format, what to bring. There is no default - an exam with no `details:` says nothing, rather than the "Details to be confirmed." the toolkit used to write into every one |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)** |
@@ -224,7 +224,7 @@ Could be an exam, a drop-in clinic, a guest lecture, a revision session: anythin
 ```yaml
 events:
   mid-term:
-    type: exam
+    kind: exam
     title: MidTerm Exam
     event_datetime: 2026-11-03
 

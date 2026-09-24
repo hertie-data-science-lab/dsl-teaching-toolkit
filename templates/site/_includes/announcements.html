@@ -37,11 +37,11 @@ would leave the box showing one real update out of seven, or none at all.
 <ul>
     {%- for n in all_events_sorted limit:7 -%}
     {%- capture bullet -%}
-        {%- if n.type == 'lecture' -%}
+        {%- if n.kind == 'lecture' -%}
             New Lecture is up: {{ n.title }} {% include lecture_links.html lecture=n %}
-        {%- elsif n.type == 'lab' -%}
+        {%- elsif n.kind == 'lab' -%}
             New Lab is up: {{ n.title }} {% include lecture_links.html lecture=n %}
-        {%- elsif n.type == 'assignment' -%}
+        {%- elsif n.kind == 'assignment' -%}
             New Assignment released: [<a href="{{ n.url | prepend: site.baseurl }}">{{ n.title }}</a>]
         {%- else -%}
             {%- comment -%}

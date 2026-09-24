@@ -44,9 +44,7 @@ def test_file_schema_enums_are_the_engine_constants():
     assert set(top) == set(schedule.KNOWN_TOP_LEVEL)
     release = top["releases"]["additionalProperties"]
     assert set(release["properties"]) == set(schedule.KNOWN_RELEASE)
-    assert set(release["properties"]["type"]["enum"]) == set(
-        schedule.KNOWN_RELEASE_TYPES
-    )
+    assert set(release["properties"]["kind"]["enum"]) == set(schedule.KNOWN_ROW_KINDS)
     assert set(release["properties"]["deploy"]["items"]["properties"]) == set(
         schedule.KNOWN_DEPLOY
     )
@@ -184,7 +182,7 @@ CONTRACT_STATUS = {
     "this_week": [
         {
             "when": "2026-09-24T10:00:00+02:00",
-            "type": "release",
+            "kind": "release",
             "ref": "s3",
             "title": "Session 3: Trees",
             "state": "planned",
@@ -194,7 +192,7 @@ CONTRACT_STATUS = {
         {
             "id": "s5",
             "when": "2026-10-08T10:00:00+02:00",
-            "type": "lecture",
+            "kind": "lecture",
             "title": "Trees and ensembles",
             "state": "will_be_skipped",
             "source": {"repo": "course-materials-f2026", "path": "lectures/05_trees"},

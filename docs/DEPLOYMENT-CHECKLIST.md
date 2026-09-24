@@ -278,7 +278,7 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
 and it is the default fire time), `title` and `details` (optional - the session's name,
 shown beside its ordinal, and a sentence about it in the schedule's Details column and on
-the Lectures tab), `type` (optional - which row it belongs to), and the `deploy`
+the Lectures tab), `kind` (optional - which row it belongs to), and the `deploy`
 actions. A deploy item may carry its own `deploy_datetime` to ship earlier or later than
 the calendar event.
 An assignment's whole lifecycle (handout_datetime/due_datetime/grading_datetime), grading
@@ -320,7 +320,7 @@ releases:
   session_2:
     event_datetime: 2026-09-15T10:00  # the class - what the site announces
     tbc: false                        # true = provisional date, shown "(TBC)"
-    type: lecture                     # optional override: lecture | lab | readings.
+    kind: lecture                     # optional override: lecture | lab | readings.
                                       # Default: worked out from where the deploy lands
     title: Linear regression          # the session's name, beside its "Session 2" ordinal
     details: Least squares by hand    # a sentence about it - the Details column, and
@@ -391,7 +391,7 @@ the row simply appears on the site's schedule.
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - (entry dropped without it) | when it happens; a bare date is a whole day, shown as 09:00 |
-| `type` | no | `special_event` | `exam` / `special_event` - which colour the row takes |
+| `kind` | no | `special_event` | `exam` / `special_event` - which colour the row takes |
 | `title` | no | prettified label | site row label |
 | `details` | no | - | the row's Details column: the room, the format, what to bring |
 | `tbc` | no | `false` | provisional date - shown "(TBC)" |
@@ -400,16 +400,16 @@ the row simply appears on the site's schedule.
 ```yaml
 events:
   mid-term:
-    type: exam
+    kind: exam
     title: MidTerm Exam
     event_datetime: 2026-11-03
     tbc: true   # provisional - shown "(TBC)"
   final-exam:
-    type: exam
+    kind: exam
     title: Final Exam
     event_datetime: 2026-12-15T14:00
   resit-exam:
-    type: exam
+    kind: exam
     title: Resit Exam
     event_datetime: tbc   # undated - shown as a TBC row
   project-clinic:         # no type -> special_event
@@ -451,8 +451,8 @@ type, and the type is never a field you set - it follows from where the row came
 | lecture | a released session folder under `lectures/` |
 | lab | a released session folder under `labs/` |
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
-| exam | an `events:` entry with `type: exam` |
-| special_event | an `events:` entry with no `type` (clinic, guest lecture, revision session), and the `archive` block's date - the "Semester archived" row |
+| exam | an `events:` entry with `kind: exam` |
+| special_event | an `events:` entry with no `kind` (clinic, guest lecture, revision session), and the `archive` block's date - the "Semester archived" row |
 | term_date | the `semester_start` / `semester_end` scalars |
 
 So lecture vs lab is decided by the deployed section folder, not by the entry label, and a

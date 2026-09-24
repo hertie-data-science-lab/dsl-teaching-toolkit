@@ -28,15 +28,15 @@ layout: default
 
         {%- comment -%}
         A branch per row type site.py emits, rather than an include filename built out of
-        `event.type`. A dynamic name means an unrecognised type - a schedule.yml typo, a row
+        `event.kind`. A dynamic name means an unrecognised type - a schedule.yml typo, a row
         kind added on the toolkit side before its template ships - asks Jekyll for a file
         that does not exist, which fails the WHOLE build and takes the live site down with
         it. Here an unknown type falls through to a neutral row instead: the schedule keeps
         rendering and the odd row is visibly plain.
         {%- endcomment -%}
         {% for event in all_events_sorted %}
-        <li class="table-row table-row-{{ event.type}}">
-            {% case event.type %}
+        <li class="table-row table-row-{{ event.kind}}">
+            {% case event.kind %}
             {% when "lecture" %}{% include schedule_row_lecture.html event=event %}
             {% when "lab" %}{% include schedule_row_lab.html event=event %}
             {% when "assignment" %}{% include schedule_row_assignment.html event=event %}
@@ -45,7 +45,7 @@ layout: default
             {% when "special_event" %}{% include schedule_row_special_event.html event=event %}
             {% when "term_date" %}{% include schedule_row_term_date.html event=event %}
             {% else %}
-            <div class="col col-1" data-label="Event">{{ event.type | default: "Event" }}</div>
+            <div class="col col-1" data-label="Event">{{ event.kind | default: "Event" }}</div>
             <div class="col col-1-2" data-label="Date">{{ event.date | date: site.dateformat }}</div>
             <div class="col col-2" data-label="Title"><b>{{ event.title }}</b></div>
             <div class="col col-4 markdown-content" data-label="Details">{%- include schedule_details.html details=event.details -%}{{ event.content }}</div>

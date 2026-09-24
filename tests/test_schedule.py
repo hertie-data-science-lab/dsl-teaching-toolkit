@@ -98,7 +98,7 @@ def test_parse_full_schedule():
             }
         },
         "events": {
-            "final": {"type": "exam", "title": "Final", "event_datetime": "2026-12-15"},
+            "final": {"kind": "exam", "title": "Final", "event_datetime": "2026-12-15"},
             "project-clinic": {
                 "title": "Project Clinic",
                 "event_datetime": "2026-10-14T10:00",
@@ -132,9 +132,9 @@ def test_parse_full_schedule():
             label="project-clinic",
             title="Project Clinic",
             when=datetime(2026, 10, 14, 10, 0, tzinfo=BERLIN),
-            type="special_event",
+            kind="special_event",
         ),
-        Event(label="final", title="Final", when=date(2026, 12, 15), type="exam"),
+        Event(label="final", title="Final", when=date(2026, 12, 15), kind="exam"),
     ]
 
 
@@ -209,8 +209,8 @@ def test_event_bare_date_stays_a_date_timed_event_becomes_aware_datetime():
     sched = parse(
         {
             "events": {
-                "mid-term": {"type": "exam", "event_datetime": "2026-11-03"},
-                "final": {"type": "exam", "event_datetime": "2026-12-15T14:00"},
+                "mid-term": {"kind": "exam", "event_datetime": "2026-11-03"},
+                "final": {"kind": "exam", "event_datetime": "2026-12-15T14:00"},
             }
         }
     )
@@ -269,16 +269,16 @@ def test_event_without_a_usable_date_is_dropped():
 def test_event_type_defaults_to_special_event_and_rejects_unknown_values():
     meta = {
         "events": {
-            "mid-term": {"type": "Exam", "event_datetime": "2026-11-03"},
+            "mid-term": {"kind": "Exam", "event_datetime": "2026-11-03"},
             "clinic": {"event_datetime": "2026-10-14T10:00"},
-            "typo": {"type": "examm", "event_datetime": "2026-10-20"},
+            "typo": {"kind": "examm", "event_datetime": "2026-10-20"},
         }
     }
     events = {e.label: e for e in parse(meta).events}
-    assert events["mid-term"].type == "exam"  # case-normalised
-    assert events["clinic"].type == "special_event"
+    assert events["mid-term"].kind == "exam"  # case-normalised
+    assert events["clinic"].kind == "special_event"
     assert (
-        events["typo"].type == "special_event"
+        events["typo"].kind == "special_event"
     )  # unknown value -> the display default
 
 
@@ -286,7 +286,7 @@ def test_events_sort_by_date_with_undated_last():
     meta = {
         "events": {
             "resit": {"event_datetime": "tbc"},
-            "final": {"type": "exam", "event_datetime": "2026-12-15T14:00"},
+            "final": {"kind": "exam", "event_datetime": "2026-12-15T14:00"},
             "clinic": {"event_datetime": date(2026, 10, 14)},
         }
     }
@@ -297,8 +297,8 @@ def test_events_sort_by_date_with_undated_last():
 def test_tbc_semantics_for_events():
     meta = {
         "events": {
-            "mid-term": {"type": "exam", "event_datetime": "2026-11-03", "tbc": True},
-            "resit": {"type": "exam", "event_datetime": "tbc"},
+            "mid-term": {"kind": "exam", "event_datetime": "2026-11-03", "tbc": True},
+            "resit": {"kind": "exam", "event_datetime": "tbc"},
             "broken": {"event_datetime": "not-a-date"},  # no date, no tbc -> dropped
         }
     }
@@ -871,7 +871,7 @@ def test_every_kind_of_dropped_entry_is_recorded_with_its_cost():
                 "a1": {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13"},
                 "a2": {"due_date": "2026-11-13"},
             },
-            "events": {"mid-term": {"type": "exam"}},
+            "events": {"mid-term": {"kind": "exam"}},
         }
     )
     # the well-formed entries still parse - one bad entry never poisons its neighbours
@@ -1320,11 +1320,11 @@ def test_an_unparseable_deploy_datetime_is_flagged():
 
 def test_an_unknown_event_type_is_flagged_like_an_unknown_assignment_type():
     sched = parse(
-        {"events": {"mid-term": {"type": "exma", "event_datetime": "2026-11-03"}}}
+        {"events": {"mid-term": {"kind": "exma", "event_datetime": "2026-11-03"}}}
     )
-    assert sched.events[0].type == "special_event"  # the row still shows
+    assert sched.events[0].kind == "special_event"  # the row still shows
     (line,) = sched.dropped
-    assert line.startswith("events.mid-term.type:")
+    assert line.startswith("events.mid-term.kind:")
     assert "'exma'" in line and "not an exam" in line
 
 
@@ -2661,7 +2661,7 @@ def test_an_event_carries_its_details_and_can_be_kept_off_the_site():
         {
             "events": {
                 "mid-term": {
-                    "type": "exam",
+                    "kind": "exam",
                     "title": "MidTerm",
                     "details": "Room A1. Two hours, open book.",
                     "event_datetime": "2026-11-03",
@@ -2740,7 +2740,7 @@ def test_a_release_can_declare_which_row_it_belongs_to():
             "releases": {
                 "week-1-clinic": {
                     "event_datetime": "2026-09-03T14:00",
-                    "type": "lab",
+                    "kind": "lab",
                     "deploy": [
                         {
                             "course_source_repo": "cm",
@@ -2751,7 +2751,7 @@ def test_a_release_can_declare_which_row_it_belongs_to():
             }
         }
     )
-    assert sched.releases[0].type == "lab"
+    assert sched.releases[0].kind == "lab"
     assert sched.dropped == []
 
 
@@ -2761,14 +2761,14 @@ def test_an_unknown_release_type_is_flagged_and_falls_back_to_inference():
     sched = parse(
         {
             "releases": {
-                "lecture-1": {"event_datetime": "2026-09-01T10:00", "type": "lecutre"}
+                "lecture-1": {"event_datetime": "2026-09-01T10:00", "kind": "lecutre"}
             }
         }
     )
-    assert sched.releases[0].type == ""
+    assert sched.releases[0].kind == ""
     (drop,) = sched.dropped
-    assert drop.startswith("releases.lecture-1.type: unusable value")
-    assert "as if no type were declared" in drop
+    assert drop.startswith("releases.lecture-1.kind: unusable value")
+    assert "as if no kind were declared" in drop
 
 
 def test_display_text_on_a_readings_entry_is_reported_rather_than_swallowed():
@@ -2784,7 +2784,7 @@ def test_display_text_on_a_readings_entry_is_reported_rather_than_swallowed():
             "releases": {
                 "readings-4": {
                     "event_datetime": "2026-09-15T09:00",
-                    "type": "readings",
+                    "kind": "readings",
                     **display,
                 }
             }
@@ -2796,7 +2796,7 @@ def test_display_text_on_a_readings_entry_is_reported_rather_than_swallowed():
     }
     assert all("claims no row of its own" in drop for drop in sched.dropped)
     # The entry itself survives, type and all - only the display text goes nowhere.
-    assert [(r.label, r.type) for r in sched.releases] == [("readings-4", "readings")]
+    assert [(r.label, r.kind) for r in sched.releases] == [("readings-4", "readings")]
     # And the same two fields on an entry that DOES raise a row are silent, as they must
     # be: this reports where the text has nowhere to go, not that it was written.
     same = parse(
@@ -2816,7 +2816,7 @@ def test_the_retired_spelling_on_a_readings_entry_is_reported_once_not_twice():
             "releases": {
                 "readings-4": {
                     "event_datetime": "2026-09-15T09:00",
-                    "type": "readings",
+                    "kind": "readings",
                     "description": "Two papers on attention.",
                 }
             }

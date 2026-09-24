@@ -111,10 +111,10 @@ def _declared_kind(release: schedule.Release) -> str | None:
     Through the same table a label head goes through, because they name the same thing:
     `type: lab` and the label `lab-3` both say "this is the week's lab row", and a second
     table would let the two disagree. Indexed rather than looked up with a default: the
-    parser writes only a `KNOWN_RELEASE_TYPES` value here (it flags a typo and blanks it),
+    parser writes only a `KNOWN_ROW_KINDS` value here (it flags a typo and blanks it),
     so a key this table does not hold is a toolkit bug, and one better raised than turned
     into a row placement nobody asked for."""
-    return _LABEL_ROW_KINDS[release.type] if release.type else ""
+    return _LABEL_ROW_KINDS[release.kind] if release.kind else ""
 
 
 def declared_dest_kinds(sched: schedule.Schedule) -> dict[str, str]:

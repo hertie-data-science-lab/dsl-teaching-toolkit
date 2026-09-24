@@ -449,7 +449,7 @@ def test_a_declared_type_places_a_row_its_path_would_not():
                 "clinic-1",
                 datetime(2026, 9, 3, 14, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "clinics/01_week-1", "materials", None)],
-                type="lab",
+                kind="lab",
             )
         ]
     )
@@ -460,7 +460,7 @@ def test_a_declared_type_overrides_the_label_fallback_too():
     # A row raised from its own label (nothing staged yet) is placed by the same rule as
     # one raised from a destination, or the row moves column the day its files ship.
     s = _sched(
-        [Release("lecture-4", datetime(2026, 10, 1, 14, 0, tzinfo=BERLIN), type="lab")]
+        [Release("lecture-4", datetime(2026, 10, 1, 14, 0, tzinfo=BERLIN), kind="lab")]
     )
     assert set(schedule_plan.planned_sessions(s)) == {("4", "lab")}
 
@@ -475,7 +475,7 @@ def test_a_readings_type_contributes_to_a_row_without_raising_one():
                 "week-1-papers",
                 datetime(2026, 8, 25, 9, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "readings/01_week-1", "materials", None)],
-                type="readings",
+                kind="readings",
                 title="Not this one",
             ),
             Release(

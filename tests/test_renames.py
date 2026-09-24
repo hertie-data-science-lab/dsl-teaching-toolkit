@@ -484,3 +484,42 @@ def test_distribute_says_notify_and_only_false_holds_the_mail():
     rendered = ALL_RENDERED["distribute_grades"]
     assert workflow_inputs(rendered)["notify"]["default"] is True
     assert '[ "$NOTIFY" = "false" ] && args+=(--no-notify)' in rendered
+
+
+# ------------------------------------------------------------------- kind (row type)
+
+
+def test_a_row_kind_is_read_from_kind_and_the_old_type_key_is_refused():
+    sched = schedule.parse(
+        {
+            "releases": {
+                "lab-1": {"event_datetime": "2026-09-08T09:00", "kind": "lab"},
+                "old-1": {"event_datetime": "2026-09-09T09:00", "type": "lab"},
+            },
+            "events": {
+                "mid": {"event_datetime": "2026-11-03", "kind": "exam"},
+                "old": {"event_datetime": "2026-11-04", "type": "exam"},
+            },
+        }
+    )
+    kinds = {r.label: r.kind for r in sched.releases}
+    assert kinds == {"lab-1": "lab", "old-1": ""}
+    assert {e.label: e.kind for e in sched.events} == {
+        "mid": "exam",
+        "old": "special_event",
+    }
+    assert sum(f.code == NOT_MIGRATED for f in sched.faults) == 2
+
+
+def test_the_site_emits_kind_beside_the_pinned_themes_type():
+    from datetime import date
+
+    out = site._event_entry(
+        schedule.Event("mid", "Mid", date(2026, 11, 3), kind="exam"), date(2026, 9, 1)
+    )
+    assert "kind: exam" in out and "type: exam" in out
+
+
+def test_status_json_rows_say_kind():
+    row = schemas.status_schema()["properties"]["releases"]["items"]["properties"]
+    assert "kind" in row and "type" not in row

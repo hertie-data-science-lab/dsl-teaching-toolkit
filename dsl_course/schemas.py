@@ -49,7 +49,7 @@ from .schedule import (
     KNOWN_DEPLOY,
     KNOWN_EVENT,
     KNOWN_RELEASE,
-    KNOWN_RELEASE_TYPES,
+    KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
 )
 from .teams import FIELDS as TEAMS_FIELDS
@@ -60,7 +60,7 @@ DEFAULT_OUT = Path("console/schemas")
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
 # named here is a string: the parsers read dates, paths and titles as text.
 _FLAGS = {"tbc", "show_on_site"}
-_EVENT_TYPES = ("exam", "special_event")
+_EVENT_KINDS = ("exam", "special_event")
 # instructors.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
 PEOPLE_ENTRY_KEYS = (
     "github_handle",
@@ -271,12 +271,12 @@ def status_schema() -> dict:
     week_item = _obj(
         {
             "when": _str(),
-            "type": _str(),
+            "kind": _str(),
             "ref": _str(),
             "title": _str(),
             "state": _str(),
         },
-        ("when", "type", "ref", "state"),
+        ("when", "kind", "ref", "state"),
     )
     # An entry with nothing to copy has no source or destination.
     place = {
@@ -287,7 +287,7 @@ def status_schema() -> dict:
         {
             "id": _str(),
             "when": nullable,
-            "type": nullable,
+            "kind": nullable,
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
@@ -383,14 +383,14 @@ def schedule_schema() -> dict:
         _keys(
             KNOWN_RELEASE,
             {
-                "type": _enum(KNOWN_RELEASE_TYPES),
+                "kind": _enum(KNOWN_ROW_KINDS),
                 "deploy": {"type": "array", "items": deploy},
                 "event_datetime": _str(),
             },
         )
     )
     assignment = _obj(_keys(KNOWN_ASSIGNMENT), ("due_datetime", "course_source_repo"))
-    event = _obj(_keys(KNOWN_EVENT, {"type": _enum(_EVENT_TYPES)}))
+    event = _obj(_keys(KNOWN_EVENT, {"kind": _enum(_EVENT_KINDS)}))
     archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
     top = _keys(
         KNOWN_TOP_LEVEL,

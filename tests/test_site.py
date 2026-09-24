@@ -165,7 +165,7 @@ def test_event_entry_renders_a_display_only_schedule_row():
 
 
 def test_event_entry_renders_an_exam_as_an_exam_row():
-    e = Event("mid-term", "MidTerm Exam", date(2026, 11, 3), type="exam")
+    e = Event("mid-term", "MidTerm Exam", date(2026, 11, 3), kind="exam")
     out = site._event_entry(e, END_OF_TERM)
     assert "type: exam" in out
     assert 'title: "MidTerm Exam"' in out
@@ -177,7 +177,7 @@ def test_event_entry_renders_an_exam_as_an_exam_row():
 
 
 def test_event_entry_title_falls_back_to_the_prettified_label():
-    e = Event("resit_exam", "", date(2026, 12, 20), type="exam")
+    e = Event("resit_exam", "", date(2026, 12, 20), kind="exam")
     assert 'title: "Resit Exam"' in site._event_entry(e, END_OF_TERM)
 
 
@@ -1480,7 +1480,7 @@ def test_a_declared_lab_row_keeps_one_row_once_its_files_ship(monkeypatch, tmp_p
                     "clinic-3",
                     datetime(2026, 9, 24, 14, 0, tzinfo=BERLIN),
                     deploy=[Deploy("cm", "clinics/03_week-3", "materials", None)],
-                    type="lab",
+                    kind="lab",
                 )
             ]
         ),
@@ -2627,7 +2627,7 @@ def test_an_events_details_fill_its_row_and_its_title_stays_the_title():
         "mid-term",
         "MidTerm Exam",
         date(2026, 11, 3),
-        type="exam",
+        kind="exam",
         details="Room A1. Two hours, open book.",
     )
     out = site._event_entry(e, END_OF_TERM)
@@ -2681,7 +2681,7 @@ def test_a_hidden_exam_still_answers_the_synthesised_exam_stubs(monkeypatch, tmp
                 "mid-term",
                 "MidTerm",
                 date(2026, 11, 3),
-                type="exam",
+                kind="exam",
                 show_on_site=False,
             )
         ],

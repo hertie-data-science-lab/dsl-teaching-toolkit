@@ -713,6 +713,9 @@ an already-open issue carries.
 | log copy `DRY-RUN`, `[dry-run]`, "dry run" | `PREVIEW`, `[preview]`, "preview" | logs, the Distribute preview issue |
 | receipts issue label `dsl-feedback`, mark `<!-- dsl-course: feedback -->` | `dsl-receipts`, `<!-- dsl-course: receipts -->` on new issues; the old label and mark stay RECOGNISED (append-only chain) - nothing to migrate | submission repos |
 | copy "receipts issue", "receipts thread" | "Submission receipts" issue | logs, forms, docs |
+| `schedule.yml` `type:` on a `releases:` entry or an `events:` entry | `kind:` (the template's `type:` individual/group is unchanged) | semester `schedule.yml` |
+| site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
+| `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

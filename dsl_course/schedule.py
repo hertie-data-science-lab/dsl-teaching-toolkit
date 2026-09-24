@@ -320,7 +320,7 @@ class Release:
     # (`schedule_plan.dest_row_kind`), so the plan and the discovered folder place the
     # same row rather than one each.
     # 'readings' names no row of its own, exactly as a `readings-N` label does.
-    type: str = ""
+    kind: str = ""
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
     tbc: bool = False
@@ -429,7 +429,7 @@ class Event:
     # (the site shows a TBC row). `tbc: true` next to a real date = provisional, "(TBC)".
     when: date | datetime | None
     # 'exam' | 'special_event'. Exams render as their own (red) row on the site.
-    type: str = "special_event"
+    kind: str = "special_event"
     tbc: bool = False
     # Display-only: the row's Details cell. `title` says which row this is, `details` what
     # there is to say about it - the same two words, and the same two columns, as on a
@@ -635,17 +635,20 @@ KNOWN_RELEASE = frozenset(
         "event_datetime",
         "deploy",
         "assignment",
-        "type",
+        "kind",
         "title",
         "details",
         "tbc",
         "show_on_site",
     }
 )
-# What `releases.<label>.type` may say. 'readings' is here and is not a row: it declares
+# The row kind's old key (decision 0012), on a release or an event: never read, noted as
+# NOT_MIGRATED - the row is placed as if it declared no kind.
+RENAMED_ROW_KEYS = {"type": "kind"}
+# What `releases.<label>.kind` may say. 'readings' is here and is not a row: it declares
 # that the entry belongs to no session row of its own, exactly as a `readings-N` label
 # does (`schedule_plan._LABEL_ROW_KINDS`, which is the one table both routes read).
-KNOWN_RELEASE_TYPES = frozenset({"lecture", "lab", "readings"})
+KNOWN_ROW_KINDS = frozenset({"lecture", "lab", "readings"})
 KNOWN_DEPLOY = frozenset(
     {
         "course_source_repo",
@@ -697,11 +700,16 @@ RENAMED_DEST_KEYS = {
 
 
 def not_migrated_keys(
-    drops: Drops, entry: dict, where: str, renames: dict[str, str]
+    drops: Drops,
+    entry: dict,
+    where: str,
+    renames: dict[str, str],
+    lines: dict[str, int] | None = None,
 ) -> bool:
     """Whether `entry` spells any old key, each noted as NOT_MIGRATED. Called before
-    `take_lines`, so the note can cite the old key's line."""
-    lines = entry.get(LINES) if isinstance(entry.get(LINES), dict) else {}
+    `take_lines` (or handed its `lines`), so the note can cite the old key's line."""
+    if lines is None:
+        lines = entry.get(LINES) if isinstance(entry.get(LINES), dict) else {}
     found = [old for old in renames if old in entry]
     for old in found:
         drops.note(
@@ -711,7 +719,7 @@ def not_migrated_keys(
 
 
 KNOWN_EVENT = frozenset(
-    {"type", "title", "details", "event_datetime", "tbc", "show_on_site"}
+    {"kind", "title", "details", "event_datetime", "tbc", "show_on_site"}
 )
 
 
@@ -965,8 +973,14 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 "event_datetime",
             )
             continue
+        not_migrated_keys(drops, entry, where, RENAMED_ROW_KEYS, lines)
         _flag_unknown_keys(
-            drops, entry, KNOWN_RELEASE, where, "that setting is ignored", lines
+            drops,
+            entry,
+            KNOWN_RELEASE | frozenset(RENAMED_ROW_KEYS),
+            where,
+            "that setting is ignored",
+            lines,
         )
         # `deploy:` written with nothing under it. YAML reads that as None, which is
         # indistinguishable from the key being ABSENT once it reaches _parse_deploy - and
@@ -988,18 +1002,18 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 lines,
             )
         assignment = entry.get("assignment")
-        kind = str(entry.get("type") or "").strip().lower()
-        if kind and kind not in KNOWN_RELEASE_TYPES:
+        kind = str(entry.get("kind") or "").strip().lower()
+        if kind and kind not in KNOWN_ROW_KINDS:
             # Flagged, not dropped, and not obeyed: the entry keeps its row, placed by
             # where its files land exactly as an entry that declared no type at all. A
             # typo'd override must not be able to take a session off the schedule.
             _flag_bad_value(
                 drops,
                 where,
-                "type",
+                "kind",
                 kind,
-                "the row is placed by where its deploys land, as if no type were "
-                f"declared (expected one of {', '.join(sorted(KNOWN_RELEASE_TYPES))})",
+                "the row is placed by where its deploys land, as if no kind were "
+                f"declared (expected one of {', '.join(sorted(KNOWN_ROW_KINDS))})",
                 lines,
             )
             kind = ""
@@ -1029,7 +1043,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 when=when,
                 deploy=_parse_deploy(entry.get("deploy"), tz, drops, str(label)),
                 assignment=str(assignment) if assignment else None,
-                type=kind,
+                kind=kind,
                 title=str(entry.get("title") or ""),
                 details=_flagged_details(entry, drops, where, lines) or "",
                 tbc=tbc,
@@ -1310,17 +1324,23 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
                 "event_datetime",
             )
             continue
+        not_migrated_keys(drops, entry, where, RENAMED_ROW_KEYS, lines)
         _flag_unknown_keys(
-            drops, entry, KNOWN_EVENT, where, "that setting is ignored", lines
+            drops,
+            entry,
+            KNOWN_EVENT | frozenset(RENAMED_ROW_KEYS),
+            where,
+            "that setting is ignored",
+            lines,
         )
-        kind = str(entry.get("type") or "").strip().lower()
+        kind = str(entry.get("kind") or "").strip().lower()
         if kind and kind not in ("exam", "special_event"):
-            # A typo'd `type` (e.g. `exma`) still shows the row, but as a plain special
+            # A typo'd `kind` (e.g. `exma`) still shows the row, but as a plain special
             # event - the exam styling, and "this is an exam", quietly disappear.
             _flag_bad_value(
                 drops,
                 where,
-                "type",
+                "kind",
                 kind,
                 "the row is shown as a plain special event, not an exam "
                 "(expected 'exam' or 'special_event')",
@@ -1343,7 +1363,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
                 when=when,
                 # anything other than the two known values -> the display-only default:
                 # a typo'd `type` still shows the row (flagged above, not silent)
-                type="exam" if kind == "exam" else "special_event",
+                kind="exam" if kind == "exam" else "special_event",
                 tbc=tbc,
             )
         )

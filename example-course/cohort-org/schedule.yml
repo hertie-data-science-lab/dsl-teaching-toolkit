@@ -153,12 +153,12 @@ assignments:
 
 events:
   mid-term:
-    type: exam
+    kind: exam
     title: MidTerm Exam                   # NB if empty, default -> would display as this anyway
     details: Ninety minutes, closed book. Everything up to and including week 5.
     event_datetime: tbc
   final-exam:
-    type: exam
+    kind: exam
     title: Final Exam                     # NB if empty, default -> would display as this anyway
     details: Two hours, closed book. Room confirmed nearer the time.
     event_datetime: 2026-12-15T14:00   
