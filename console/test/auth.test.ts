@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PatAuth, TOKEN_KEY, type TokenStore } from '../src/auth/pat';
+import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
+import type { TokenStore } from '../src/auth/types';
 import { FakeGitHub, json } from './fake';
 
 function store(): TokenStore & { map: Map<string, string> } {
@@ -28,9 +29,29 @@ describe('PatAuth', () => {
     await expect(new PatAuth({ fetch: gh.fetch, store: store() }).signIn('t')).rejects.toThrow(/workflow scope/);
   });
 
-  it('refuses a fine-grained token (no scopes header)', async () => {
-    const gh = new FakeGitHub().on('GET', '/user', () => json(user));
-    await expect(new PatAuth({ fetch: gh.fetch, store: store() }).signIn('t')).rejects.toThrow(/fine-grained/);
+  it('accepts a fine-grained token and says which organisations it cannot see', async () => {
+    const gh = new FakeGitHub()
+      .on('GET', '/user', () => json(user))
+      .on('GET', '/user/orgs?per_page=100', () => json([]))
+      .on('GET', '/users/octo/orgs?per_page=100', () => json([{ login: 'hertie-dsl-demo-f2026' }, { login: 'other-org' }]))
+      .on('GET', '/user/memberships/orgs/hertie-dsl-demo-f2026', () => json({ state: 'active', role: 'admin' }))
+      .on('GET', '/user/memberships/orgs/other-org', () => json({ message: 'Resource not accessible by personal access token' }, 403))
+      .on('GET', '/repos/other-org/.github', () => json({ name: '.github', private: false }));
+    const auth = new PatAuth({ fetch: gh.fetch, store: store() });
+    expect((await auth.signIn('github_pat_x')).login).toBe('octo');
+    expect(auth.token()).toBe('github_pat_x');
+    expect(auth.reach()).toEqual({ seen: ['hertie-dsl-demo-f2026'], unseen: ['other-org'] });
+    expect(gh.seen.every((r) => r.headers.Authorization === 'Bearer github_pat_x')).toBe(true);
+    auth.signOut();
+    expect(auth.reach()).toBeNull();
+  });
+
+  it('keeps the scope check for a classic token and probes nothing', async () => {
+    const gh = new FakeGitHub().on('GET', '/user', () => json(user, 200, { 'x-oauth-scopes': 'repo, workflow' }));
+    const auth = new PatAuth({ fetch: gh.fetch, store: store() });
+    await auth.signIn('ghp_x');
+    expect(auth.reach()).toBeNull();
+    expect(gh.seen).toHaveLength(1);
   });
 
   it('says so when GitHub rejects the token', async () => {

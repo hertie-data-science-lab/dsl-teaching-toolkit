@@ -16,14 +16,42 @@ Node 22 or newer (`.nvmrc` pins 26).
     npm run typecheck
     npm run build      # into dist/
 
-## Sign-in today
+## Sign-in
 
-Paste a **classic** personal access token with the `repo` and `workflow` scopes. The console
-checks it with `GET /user`, refuses fine-grained tokens and missing scopes, and keeps it in
-`sessionStorage` only: it is gone when the tab closes. Everything the console can read or
-change is what that account can read or change on GitHub. Sign-in sits behind the `Auth`
-interface in `src/auth/`; a GitHub App sign-in (`AppAuth`, decision 0002) replaces the token
-later without touching the screens.
+Three paths, all behind the `Auth` interface in `src/auth/` (`ConsoleAuth` holds them).
+Whichever is used, the console can read or change exactly what that account can on GitHub,
+and the token stays in `sessionStorage`: it is gone when the tab closes.
+
+- **Sign in with GitHub** (`AppAuth`, decisions 0002 and 0011): the default where an
+  institution runs the relay. The web flow goes to GitHub with a `state` and a PKCE
+  challenge, comes back to the console's own URL, and the relay (`relay/`) exchanges the code;
+  the console refreshes the 8-hour token five minutes before it runs out. Shown only when the
+  build sets both `VITE_GH_APP_CLIENT_ID` and `VITE_AUTH_RELAY_URL`; the App's callback URL
+  must be the console's URL (for Hertie
+  `https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/`), and the App must be
+  installed on each course and cohort organisation.
+- **Fine-grained token** (`PatAuth`): the no-server fallback, for an institution that runs no
+  relay or when the App sign-in is blocked. It is owned by one organisation and reaches only
+  that one; the sign-in probes the organisations it can check and names those the token
+  cannot see. The organisation must not require approval of fine-grained tokens (decision 0011
+  has the cohort set-up turn that off). GitHub lists no organisations to a fine-grained token
+  (`GET /user/orgs` is empty), so the course list finds nothing through it until discovery
+  learns another source.
+- **Classic token** (`PatAuth`): `repo` and `workflow` scopes, checked from the
+  `X-OAuth-Scopes` header. Works everywhere the account does; the widest grant of the three.
+
+Build-time settings, for `npm run build` or `npm run dev`:
+
+    VITE_GH_APP_CLIENT_ID=Iv23...    # the GitHub App's client id; empty hides the App button
+    VITE_AUTH_RELAY_URL=https://dsl-console-auth.<subdomain>.workers.dev
+
+The deployed console gets them in `.github/workflows/console-pages.yml`, as an `env:` on the
+`npm run build` step (not wired yet; D2 adds it), from repository variables:
+
+    - run: npm run build
+      env:
+        VITE_GH_APP_CLIENT_ID: ${{ vars.GH_APP_CLIENT_ID }}
+        VITE_AUTH_RELAY_URL: ${{ vars.AUTH_RELAY_URL }}
 
 ## What it reads
 

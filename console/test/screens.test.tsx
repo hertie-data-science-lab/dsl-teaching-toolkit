@@ -3,6 +3,8 @@
 import { options } from 'preact';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it, vi } from 'vitest';
+import { AppAuth } from '../src/auth/app';
+import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
@@ -85,11 +87,25 @@ const html = (v: preact.VNode) => render(v);
 const text = (v: preact.VNode) => html(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, '’').replace(/\s+/g, ' ');
 
 describe('S0 sign in', () => {
-  it('asks for a classic token with repo and workflow', () => {
-    const t = text(<SignInScreen auth={new PatAuth({ store: null })} onSignedIn={() => {}} />);
+  it('without a relay, asks only for a token', () => {
+    const auth = new ConsoleAuth(new PatAuth({ store: null }), null);
+    const t = text(<SignInScreen auth={auth} onSignedIn={() => {}} />);
     expect(t).toContain('GitHub token');
+    expect(t).not.toContain('Sign in with GitHub');
     expect(t).toMatch(/repo .*workflow/);
-    expect(html(<SignInScreen auth={new PatAuth({ store: null })} onSignedIn={() => {}} />)).toContain('scopes=repo,workflow');
+    expect(t).toContain('fine-grained token');
+    expect(t).toContain('without a sign-in relay');
+    expect(html(<SignInScreen auth={auth} onSignedIn={() => {}} />)).toContain('scopes=repo,workflow');
+  });
+
+  it('with the App, offers Sign in with GitHub first and the token second', () => {
+    const app = new AppAuth({ clientId: 'Iv1.x', relayUrl: 'https://relay.example', redirectUri: 'https://c.example/', store: null });
+    const auth = new ConsoleAuth(new PatAuth({ store: null }), app);
+    auth.notice = 'Sign-in was cancelled on GitHub.';
+    const t = text(<SignInScreen auth={auth} onSignedIn={() => {}} />);
+    expect(t.indexOf('Sign in with GitHub')).toBeGreaterThan(-1);
+    expect(t.indexOf('Sign in with GitHub')).toBeLessThan(t.indexOf('Use a token instead'));
+    expect(t).toContain('Sign-in was cancelled on GitHub.');
   });
 });
 
