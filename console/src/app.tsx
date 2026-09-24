@@ -1,11 +1,13 @@
-// The console's root: sign-in, discovery, the route, and which screen renders.
+// The console's root: sign-in, discovery, the route, and which screen renders: the
+// instructor screens, or a semester's student screens (a student's own, or an instructor's
+// Student view).
 
-import { signal } from '@preact/signals';
+import { computed, signal } from '@preact/signals';
 import { EnvCtx, type Env } from './env';
 import { useEffect } from 'preact/hooks';
 import { createAuth, type ConsoleAuth } from './auth/console';
 import { GitHubClient, type GhUser } from './github/client';
-import { discoverCourses, type Course } from './model/discovery';
+import { discoverEstate, studentSemesters, type Estate, type Mode } from './model/discovery';
 import { LiveFiles } from './model/files';
 import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
 import { StatusStore, type Loaded } from './model/status';
@@ -14,7 +16,7 @@ import { OpPanel } from './ops/Panel';
 import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, movedHash, parseHash, replaceHash, parseSearch, resolveContext, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
@@ -29,10 +31,11 @@ import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
+import { StudentScreen, studentScreen } from './screens/Student';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
-import { Footer, Sidenav, Topbar } from './ui/shell';
+import { Footer, Sidenav, StudentNav, Topbar } from './ui/shell';
 
 export interface AppDeps {
   auth: ConsoleAuth;
@@ -104,8 +107,8 @@ export function App({ state: s }: { state: AppState }) {
     );
   }
 
-  const courses = s.courses.value;
-  if (!courses) {
+  const estate = s.estate.value;
+  if (!estate) {
     return (
       <>
         <Topbar user={user} navOpen={false} onMenu={() => {}} onSignOut={s.signOut} />
@@ -117,9 +120,32 @@ export function App({ state: s }: { state: AppState }) {
     );
   }
 
+  const courses = estate.courses;
+  const semesters = studentSemesters(estate);
+  const sel = parseSearch(s.search.value);
+  const title = s.mode.value === 'student' ? 'Student Console' : 'Instructor Console';
+
+  const stu = studentContext(estate, sel);
+  if (stu) {
+    const key = studentScreen(route.screen);
+    return (
+      <EnvCtx.Provider value={s.env(user)}>
+        <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
+        <div class="shell">
+          <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
+            <StudentNav courses={courses} cohortStates={{}} semesters={semesters} semester={stu.semester} current={key} />
+          </aside>
+          <main id="view" tabindex={-1}>
+            <ScreenBoundary key={s.search.value + s.hash.value}><StudentScreen semester={stu.semester} screen={key} studentView={stu.studentView} /></ScreenBoundary>
+          </main>
+        </div>
+        <Footer />
+      </EnvCtx.Provider>
+    );
+  }
+
   const screen = route.screen || landing(courses);
   const r = { ...route, screen };
-  const sel = parseSearch(s.search.value);
   const ctx = resolveContext(courses, sel, r);
   const wiz = wizardOf(screen);
   const cohortStates: Record<string, Loaded> = {};
@@ -135,9 +161,9 @@ export function App({ state: s }: { state: AppState }) {
   } else if (screen === 'help') {
     body = <HelpScreen />;
   } else if (screen === 'home') {
-    body = <HomeScreen courses={courses} cohortStates={cohortStates} now={s.now.value} user={user} />;
+    body = <HomeScreen courses={courses} semesters={semesters} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
-    body = <HomeScreen courses={courses} cohortStates={cohortStates} now={s.now.value} user={user} />;
+    body = <HomeScreen courses={courses} semesters={semesters} kind={estate.kind} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course.write) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
@@ -176,10 +202,10 @@ export function App({ state: s }: { state: AppState }) {
 
   return (
     <EnvCtx.Provider value={s.env(user)}>
-      <Topbar user={user} course={ctx.course} cohort={ctx.cohort} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
+      <Topbar user={user} title={title} course={ctx.course} cohort={ctx.cohort} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} />
       <div class="shell">
         <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
-          <Sidenav courses={courses} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} />
+          <Sidenav courses={courses} semesters={semesters} course={ctx.course} cohort={ctx.cohort} cohortStates={cohortStates} current={navKey} problems={problems} />
         </aside>
         <main id="view" tabindex={-1}>
           {sel.wizard && ctx.course && !wiz ? <p class="note" style="margin-bottom:18px"><a href={`?course=${ctx.course.org}#${sel.wizard}`}>Back to the {sel.wizard.startsWith('new-cohort') ? 'New cohort' : 'wizard'}</a> when you are done here.</p> : null}
@@ -210,14 +236,19 @@ export function createState({ auth, client }: AppDeps) {
       void statuses.reload(def.courseOrg, '.github');
     },
   });
+  const estate = signal<Estate | null>(null);
+  const search = signal(typeof location !== 'undefined' ? location.search : '');
   const st = {
     auth,
     user: signal<GhUser | null>(null),
     restoring: signal(true),
-    courses: signal<Course[] | null>(null),
+    /** Every course and semester the person can see, and their role in each; null until discovered. */
+    estate,
+    /** Which shell renders: a semester's student screens, or the instructor screens. */
+    mode: computed<Mode>(() => (estate.value ? modeOf(estate.value, parseSearch(search.value)) : 'instructor')),
     error: signal<string | null>(null),
     hash: signal(typeof location !== 'undefined' ? location.hash : ''),
-    search: signal(typeof location !== 'undefined' ? location.search : ''),
+    search,
     now: signal(Date.now()),
     navOpen: signal(false),
     statuses,
@@ -238,9 +269,12 @@ export function createState({ auth, client }: AppDeps) {
       }
       return b.value;
     },
+    discover(): Promise<Estate> {
+      return discoverEstate(client, { kind: auth.kind() ?? 'classic', login: st.user.value?.login ?? '' });
+    },
     async rediscover() {
       try {
-        st.courses.value = await discoverCourses(client);
+        st.estate.value = await st.discover();
       } catch {
         /* the old list stays; the next sign-in reads it again */
       }
@@ -249,8 +283,8 @@ export function createState({ auth, client }: AppDeps) {
       st.user.value = u;
       st.restoring.value = false;
       st.error.value = null;
-      discoverCourses(client)
-        .then((c) => (st.courses.value = c))
+      st.discover()
+        .then((e) => (st.estate.value = e))
         .catch((e: unknown) => (st.error.value = `Could not list your courses: ${e instanceof Error ? e.message : String(e)}`));
     },
     signOut() {
@@ -262,7 +296,7 @@ export function createState({ auth, client }: AppDeps) {
       ops.current.value = null;
       env = null;
       st.user.value = null;
-      st.courses.value = null;
+      st.estate.value = null;
       st.restoring.value = false;
     },
     toggleNav() {

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'preact/hooks';
 import type { GhUser } from '../github/client';
-import { cohortName, type Course, type CohortRef } from '../model/discovery';
+import { cohortName, semesterName, type Course, type CohortRef, type Semester } from '../model/discovery';
+import { STUDENT_SCREENS, studentHref } from '../router';
 import type { Loaded } from '../model/status';
 import { ghUrl } from './bits';
 import { Bldg, Ext, Gh, Pin } from './icons';
@@ -47,8 +48,10 @@ export function HeaderLinks({ course, cohort }: { course?: Course; cohort?: Coho
   );
 }
 
-export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu }: {
+export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu, title = 'Instructor Console' }: {
   user: GhUser | null;
+  /** The app's name: Student Console in student mode. */
+  title?: string;
   course?: Course;
   cohort?: CohortRef;
   onSignOut?: () => void;
@@ -60,7 +63,7 @@ export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu }: {
     <header class="topbar">
       <div class="topbar-inner">
         {user ? <button class="pill-ghost menu-btn" type="button" aria-expanded={navOpen} aria-controls="sidenav-wrap" onClick={onMenu}>Menu</button> : null}
-        <a class="app-name" href="#home">Instructor Console <small>Data Science Lab</small></a>
+        <a class="app-name" href="#home">{title} <small>Data Science Lab</small></a>
         <nav class="hdr-links" aria-label="Open on the web"><HeaderLinks course={course} cohort={cohort} /></nav>
         <div class="topbar-right">
           {user ? (
@@ -100,11 +103,15 @@ export function Footer({ course, cohort }: { course?: Course; cohort?: CohortRef
   );
 }
 
-function Switcher({ courses, course, cohort, cohortStates }: {
+function Switcher({ courses, course, cohort, cohortStates, semesters = [], semester }: {
   courses: Course[];
   course?: Course;
   cohort?: CohortRef;
   cohortStates: Record<string, Loaded>;
+  /** The semesters the person is a student of, listed after the courses. */
+  semesters?: Semester[];
+  /** The semester whose student screens are open. */
+  semester?: Semester;
 }) {
   const [open, setOpen] = useState(false);
   const [sub, setSub] = useState<string | null>(course?.org ?? null);
@@ -121,7 +128,7 @@ function Switcher({ courses, course, cohort, cohortStates }: {
       document.removeEventListener('keydown', esc);
     };
   }, [open]);
-  const label = course ? (cohort ? cohortName({ course, cohort }) : course.name) : 'All courses';
+  const label = semester ? semesterName(semester) : course ? (cohort ? cohortName({ course, cohort }) : course.name) : courses.length ? 'All courses' : 'Your semesters';
   const sw = (l: Loaded | undefined, c: Course): string => {
     if (!c.write) return 'read only';
     if (!l || l.kind !== 'ready') return l?.kind === 'absent' ? 'not computed yet' : '';
@@ -135,9 +142,9 @@ function Switcher({ courses, course, cohort, cohortStates }: {
         <span>{label}</span><span class="caret" aria-hidden="true" />
       </button>
       <div class="popmenu" hidden={!open} role="menu" onClick={(e) => (e.target as Element).closest('a') && setOpen(false)}>
-        <a href="#home" role="menuitem">All courses</a>
-        <a href="#new-course-1" role="menuitem">New course</a>
-        {!course ? (
+        <a href="#home" role="menuitem">{courses.length ? 'All courses' : 'Your semesters'}</a>
+        {!courses.length ? null : <a href="#new-course-1" role="menuitem">New course</a>}
+        {!courses.length ? null : !course ? (
           <span class="disabled" role="menuitem" aria-disabled="true">New cohort<small>Select a course first</small></span>
         ) : !course.write ? (
           <span class="disabled" role="menuitem" aria-disabled="true">New cohort of {course.name}<small>You have no write access</small></span>
@@ -160,6 +167,17 @@ function Switcher({ courses, course, cohort, cohortStates }: {
             </div>
           </>
         ))}
+        {semesters.length ? (
+          <>
+            <hr />
+            <div class="nav-h">Your semesters</div>
+            {semesters.map((k) => (
+              <a href={studentHref(k.org)} role="menuitem" class={`${k.archived ? 'ro' : ''}${semester?.org === k.org ? ' cur' : ''}`}>
+                {semesterName(k)}<span class="pm-sub">{k.archived ? 'archived' : 'student'}</span>
+              </a>
+            ))}
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -197,8 +215,9 @@ function CohortsNav({ course, cohortStates }: { course: Course; cohortStates: Re
   );
 }
 
-export function Sidenav({ courses, course, cohort, cohortStates, current, problems }: {
+export function Sidenav({ courses, course, cohort, cohortStates, current, problems, semesters }: {
   courses: Course[];
+  semesters?: Semester[];
   course?: Course;
   cohort?: CohortRef;
   cohortStates: Record<string, Loaded>;
@@ -210,7 +229,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
   );
   return (
     <nav>
-      <Switcher courses={courses} course={course} cohort={cohort} cohortStates={cohortStates} />
+      <Switcher courses={courses} course={course} cohort={cohort} cohortStates={cohortStates} semesters={semesters} />
       {course && cohort && course.write ? (
         <>
           <ul>
@@ -241,17 +260,40 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
         </>
       ) : null}
       {course && !course.write ? <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p> : null}
-      {!course ? <p class="footnote" style="padding:4px 10px">Choose a course and term to see its pages.</p> : null}
+      {!course ? <p class="footnote" style="padding:4px 10px">{courses.length ? 'Choose a course and term to see its pages.' : 'Choose a semester to see its pages.'}</p> : null}
       {course ? (
         <div class="nav-links">
           <hr />
           <ul>
+            {cohort && course.write ? <li><a href={studentHref(cohort.org)}>Student view</a></li> : null}
             {cohort ? <li><a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Student site <Ext /></a></li> : null}
             {cohort ? <li><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Cohort on GitHub <Ext /></a></li> : null}
             <li><a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a></li>
           </ul>
         </div>
       ) : null}
+    </nav>
+  );
+}
+
+/** The student shell's nav: the switcher, one semester's screens, and the semester on GitHub. */
+export function StudentNav({ courses, cohortStates, semesters, semester, current }: {
+  courses: Course[];
+  cohortStates: Record<string, Loaded>;
+  semesters: Semester[];
+  semester: Semester;
+  current: string;
+}) {
+  return (
+    <nav>
+      <Switcher courses={courses} cohortStates={cohortStates} semesters={semesters} semester={semester} />
+      <ul>
+        {STUDENT_SCREENS.map(([k, t]) => <li><a href={studentHref(semester.org, k)} aria-current={k === current ? 'page' : undefined}>{t}</a></li>)}
+      </ul>
+      <div class="nav-links">
+        <hr />
+        <ul><li><a href={ghUrl(semester.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a></li></ul>
+      </div>
     </nav>
   );
 }

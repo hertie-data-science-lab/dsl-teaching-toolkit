@@ -26,6 +26,12 @@ export interface GhOrg {
   description?: string | null;
 }
 
+export interface OrgMembership {
+  state: string; // active | pending
+  role: string; // admin | member
+  organization: { login: string };
+}
+
 export interface GhRepo {
   name: string;
   full_name: string;
@@ -265,26 +271,58 @@ export class GitHubClient {
     return this.get<GhUser>('/user');
   }
 
-  /** The signed-in user's orgs, every page. */
-  async listUserOrgs(): Promise<GhOrg[]> {
-    const out: GhOrg[] = [];
+  /** Every page of a listing (up to 1,900 items: 19 pages of 100, a runaway guard); `pick` takes the items out of a page. */
+  async listPages<T>(path: string, pick: (page: unknown) => T[] = (p) => p as T[]): Promise<T[]> {
+    const out: T[] = [];
+    const sep = path.includes('?') ? '&' : '?';
     for (let page = 1; page < 20; page++) {
-      const batch = await this.get<GhOrg[]>(`/user/orgs?per_page=100&page=${page}`);
+      const batch = pick(await this.get<unknown>(`${path}${sep}per_page=100&page=${page}`));
       out.push(...batch);
       if (batch.length < 100) break;
     }
     return out;
   }
 
-  /** Every repo of an org the caller can see, every page (up to 1,900 repos: 19 pages of 100, a runaway guard). */
-  async listOrgRepos(org: string): Promise<GhRepo[]> {
-    const out: GhRepo[] = [];
-    for (let page = 1; page < 20; page++) {
-      const batch = await this.get<GhRepo[]>(`/orgs/${encodeURIComponent(org)}/repos?per_page=100&page=${page}`);
-      out.push(...batch);
-      if (batch.length < 100) break;
+  /** The signed-in user's orgs, every page. Empty for a fine-grained token (GitHub's rule). */
+  listUserOrgs(): Promise<GhOrg[]> {
+    return this.listPages<GhOrg>('/user/orgs');
+  }
+
+  /** The signed-in user's active org memberships, every page (classic and GitHub App tokens). */
+  listOrgMemberships(): Promise<OrgMembership[]> {
+    return this.listPages<OrgMembership>('/user/memberships/orgs?state=active');
+  }
+
+  /** The accounts of the App installations the user's App token can see, every page (GitHub App tokens only). */
+  async listInstallationAccounts(): Promise<{ login: string; type: string }[]> {
+    const list = await this.listPages<{ account?: { login?: string; type?: string } | null }>('/user/installations', (p) => (p as { installations: [] }).installations ?? []);
+    return list.flatMap((i) => (i.account?.login ? [{ login: i.account.login, type: i.account.type ?? '' }] : []));
+  }
+
+  /** The owners of the repos the token can reach, every page: the one listing a fine-grained token answers. */
+  async listRepoOwners(): Promise<{ login: string; type: string }[]> {
+    const repos = await this.listPages<{ owner: { login: string; type: string } }>('/user/repos');
+    return repos.map((r) => r.owner);
+  }
+
+  /** `login`'s public org memberships, every page. */
+  listPublicOrgs(login: string): Promise<GhOrg[]> {
+    return this.listPages<GhOrg>(`/users/${encodeURIComponent(login)}/orgs`);
+  }
+
+  /** The signed-in user's own membership of `org`, or null when the token cannot tell (not a member, or out of its reach). */
+  async getMyMembership(org: string): Promise<OrgMembership | null> {
+    try {
+      return await this.get<OrgMembership>(`/user/memberships/orgs/${encodeURIComponent(org)}`);
+    } catch (e) {
+      if (e instanceof GitHubError) return null;
+      throw e;
     }
-    return out;
+  }
+
+  /** Every repo of an org the caller can see, every page. */
+  listOrgRepos(org: string): Promise<GhRepo[]> {
+    return this.listPages<GhRepo>(`/orgs/${encodeURIComponent(org)}/repos`);
   }
 
   getRepo(owner: string, repo: string): Promise<GhRepo | null> {

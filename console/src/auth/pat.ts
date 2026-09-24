@@ -6,6 +6,7 @@ export const REQUIRED_SCOPES = ['repo', 'workflow'];
 export const NEW_TOKEN_URL =
   'https://github.com/settings/tokens/new?scopes=repo,workflow&description=DSL%20Instructor%20Console';
 export const NEW_FINE_GRAINED_URL = 'https://github.com/settings/personal-access-tokens/new';
+export const FINE_GRAINED_SETTINGS_URL = 'https://github.com/settings/personal-access-tokens';
 /** At most this many organisations are probed for a fine-grained token. */
 const PROBE_LIMIT = 50;
 

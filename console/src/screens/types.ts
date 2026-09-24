@@ -1,5 +1,5 @@
 import type { GhUser } from '../github/client';
-import type { Course, CohortRef } from '../model/discovery';
+import type { Course, CohortRef, Semester, TokenKind } from '../model/discovery';
 import type { Files } from '../model/files';
 import type { Heartbeat } from '../model/heartbeat';
 import type { Loaded } from '../model/status';
@@ -37,6 +37,9 @@ export interface CourseProps {
 
 export interface HomeProps {
   courses: Course[];
+  /** The semesters the person is a student of ("Your semesters"). */
+  semesters?: Semester[];
+  kind?: TokenKind;
   cohortStates: Record<string, Loaded>;
   now: number;
   user: GhUser;
