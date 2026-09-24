@@ -9,11 +9,15 @@ import { Md } from './bits';
 
 const rendered = new Map<string, Promise<string>>();
 
+/** Drop every rendering (sign-out). */
+export const forgetRendered = () => rendered.clear();
+
 export function GhMd({ src, context, class: cls }: { src: string; context?: string; class?: string }) {
   const env = useEnv();
   const key = `${context ?? ''}\n${src}`;
   const [html, setHtml] = useState<string | null>(null);
   useEffect(() => {
+    setHtml(null);
     if (!env || !src.trim()) return;
     let live = true;
     let p = rendered.get(key);

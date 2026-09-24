@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
-import { parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
-import { lastVisit, localPaths, resetVisits, saveLocalPaths, type PrefStore } from '../src/model/prefs';
+import { forgetMyTeams, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
+import { forgetStudentPrefs, lastVisit, localPaths, markVisit, resetVisits, saveLocalPaths, type PrefStore } from '../src/model/prefs';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { ArchivedSemester, AboutView, AssignmentsView, AuditorNote, InstructorsView, MarksView, ScheduleView, WeekList } from '../src/screens/Student';
@@ -158,15 +158,35 @@ describe('3. the whole receipts thread', () => {
     expect(patch(null)).toHaveLength(1);
   });
 
-  it('remembers the last visit per semester, the same answer all page load, and survives blocked storage', () => {
+  it('stores the visit only when marked, keeps this load’s answer, and survives blocked storage', () => {
     resetVisits();
     const store = memStore();
-    expect(lastVisit(LOGIN, ORG, 1000, store)).toBeNull();
-    expect(lastVisit(LOGIN, ORG, 2000, store)).toBeNull();
+    expect(lastVisit(LOGIN, ORG, store)).toBeNull();
     resetVisits();
-    expect(lastVisit(LOGIN, ORG, 3000, store)).toBe(1000);
+    expect(lastVisit(LOGIN, ORG, store)).toBeNull(); // never marked: a failed read stores nothing
+    markVisit(LOGIN, ORG, 1000, store);
+    expect(lastVisit(LOGIN, ORG, store)).toBeNull(); // same load, same answer
     resetVisits();
-    expect(lastVisit(LOGIN, 'other-f2026', 1, refusing)).toBeNull();
+    expect(lastVisit(LOGIN, ORG, store)).toBe(1000);
+    resetVisits();
+    expect(lastVisit(LOGIN, 'other-f2026', refusing)).toBeNull();
+    expect(() => markVisit(LOGIN, 'other-f2026', 1, refusing)).not.toThrow();
+    resetVisits();
+  });
+
+  it('forgets every visit time and folder of the signed-out person, and no one else’s', () => {
+    const data = new Map<string, string>([
+      [`dsl-console-visit:${LOGIN}:${ORG}`, '1'], [`dsl-console-visit:${LOGIN}:other-f2026`, '2'], [`dsl-console-paths:${LOGIN}`, '{}'],
+      ['dsl-console-visit:someone:x', '3'], ['dsl-console-paths:someone', '{}'], ['console-theme', 'dark'],
+    ]);
+    const store: PrefStore = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k), get length() { return data.size; }, key: (i) => [...data.keys()][i] ?? null };
+    resetVisits();
+    lastVisit(LOGIN, ORG, store);
+    forgetStudentPrefs(LOGIN, store);
+    expect([...data.keys()].sort()).toEqual(['console-theme', 'dsl-console-paths:someone', 'dsl-console-visit:someone:x']);
+    data.set(`dsl-console-visit:${LOGIN}:${ORG}`, '5');
+    expect(lastVisit(LOGIN, ORG, store)).toBe(5); // the in-memory answers went too
+    expect(() => forgetStudentPrefs(LOGIN, refusing)).not.toThrow();
     resetVisits();
   });
 });
@@ -236,6 +256,19 @@ describe('6. the team of a drop-box or external group', () => {
     const m = await readMine(client(fake), ORG, LOGIN, [box, { ...box, slug: 'assignment-7', submitVia: 'external' }]);
     expect(m.units['assignment-6']).toMatchObject({ repo: 'assignment-6-submissions', shared: true, team: 'team-x', members: [LOGIN, 'mate'] });
     expect(m.units['assignment-7'].team).toBeNull();
+  });
+
+  it('reads /user/teams once per session, not once per semester', async () => {
+    const fake = new FakeGitHub()
+      .on('GET', /^\/orgs\/[^/]+\/repos/, [])
+      .on('GET', /^\/user\/teams/, [team('assignment-6-team-x')]);
+    const c = client(fake);
+    await readMine(c, ORG, LOGIN, [box]);
+    await readMine(c, 'hertie-other-f2026', LOGIN, [box]);
+    expect(fake.seen.filter((s) => s.url.includes('/user/teams'))).toHaveLength(1);
+    forgetMyTeams(c);
+    await readMine(c, ORG, LOGIN, [box]);
+    expect(fake.seen.filter((s) => s.url.includes('/user/teams'))).toHaveLength(2);
   });
 });
 

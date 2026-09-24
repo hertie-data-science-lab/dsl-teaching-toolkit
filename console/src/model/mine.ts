@@ -161,6 +161,22 @@ export function teamOf(a: SemesterAssignment, teams: GhTeam[], org: string, slug
   return { team: t.name.toLowerCase().startsWith(pre) ? t.name.slice(pre.length) : t.slug.slice(pre.length), slug: t.slug };
 }
 
+const teamLists = new WeakMap<GitHubClient, Promise<GhTeam[]>>();
+
+/** The person's GitHub teams across every org (`/user/teams`), read once per session, not once per semester. A failed read is not kept. */
+export function myTeams(client: GitHubClient): Promise<GhTeam[]> {
+  let p = teamLists.get(client);
+  if (!p) {
+    p = client.listMyTeams();
+    teamLists.set(client, p);
+    p.catch(() => teamLists.delete(client));
+  }
+  return p;
+}
+
+/** Drop the session's team list (sign-out). */
+export const forgetMyTeams = (client: GitHubClient) => teamLists.delete(client);
+
 /** Everything the student's own screens need for one semester (a few calls: the repo list, the gradebook, the role, their teams, each team's members). */
 export async function readMine(client: GitHubClient, org: string, login: string, assignments: SemesterAssignment[]): Promise<Mine> {
   const book = `grades-${login}`;
@@ -170,7 +186,7 @@ export async function readMine(client: GitHubClient, org: string, login: string,
     client.getContents(org, book, 'grades.yml').catch(() => null),
     client.lastCommitDate(org, book, 'grades.yml').catch(() => null),
     client.getTeamMembership(org, AUDITORS_TEAM, login).catch(() => null),
-    groups ? client.listMyTeams().catch(() => [] as GhTeam[]) : ([] as GhTeam[]),
+    groups ? myTeams(client).catch(() => [] as GhTeam[]) : ([] as GhTeam[]),
   ]);
   const slugs = assignments.map((x) => x.slug);
   const units: Record<string, MyUnit> = {};

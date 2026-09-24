@@ -8,12 +8,13 @@
 // materials and the schedule, and nothing that promises a repo, a team or marks. An archived
 // semester is history: the student's own repos and marks, read-only, and nothing is run.
 
+import { useEffect } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
 import { semesterName, type Semester } from '../model/discovery';
 import { dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
 import { gradebookUrl, isMarked, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
-import { lastVisit } from '../model/prefs';
+import { lastVisit, markVisit } from '../model/prefs';
 import { DEFAULT_TZ, IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
 import { weekItems, type WeekItem } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
@@ -42,6 +43,9 @@ export const studentScreen = (key: string) => (STUDENT_SCREENS.some(([k]) => k =
 // --------------------------------------------------------------------------- loading
 
 const sources = new WeakMap<GitHubClient, StudentData>();
+
+/** Drop the session's shared facts (sign-out). */
+export const forgetStudentData = (client: GitHubClient) => sources.delete(client);
 
 /** The one `StudentData` the console reads a semester's shared facts through. */
 export function studentData(client: GitHubClient): StudentData {
@@ -85,12 +89,16 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   // The receipts threads feed Assignments and This week's "your instructors updated files" line.
   const threads = screen === 'week' || screen === 'assignments';
   const receipts = useLoad<Record<string, Receipts | null>>(env && f && m && threads && !m.auditor ? () => readAllReceipts(env.client, org, f.assignments, m) : null, [org, f, m, threads]);
+  const login = env?.user.login ?? '';
+  // The visit is stored only once the threads it is compared against were read.
+  useEffect(() => {
+    if (receipts.kind === 'ready' && login && !studentView) markVisit(login, org, now);
+  }, [receipts.kind, org, login]);
   if (facts.kind === 'loading') return <Loading what="Reading the semester" />;
   if (facts.kind === 'failed') return <CheckLine cls="bad">The semester’s schedule could not be read: {facts.error}</CheckLine>;
   if (!f) return <NoFacts org={org} />;
   const mineNote = studentView ? null : mine.kind === 'loading' ? <Loading what="Reading your repos and marks" /> : mine.kind === 'failed' ? <CheckLine cls="warn">Your repos and marks could not be read: {mine.error}</CheckLine> : null;
   const tz = f.timezone || DEFAULT_TZ;
-  const login = env?.user.login ?? '';
   const rc = receipts.kind === 'ready' ? receipts.value : undefined;
   const hasThreads = !!m && f.assignments.some((a) => a.privateRepo && m.units[a.slug]?.repo);
   const body =
@@ -103,7 +111,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
     : (
       <>
-        <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org, now))} tz={tz} org={org} />
+        <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org))} tz={tz} org={org} />
         <AboutView facts={f} org={org} tz={tz} now={now} />
       </>
     );
@@ -237,8 +245,10 @@ export function StudentWeekHome({ semesters, now }: { semesters: Semester[]; now
             if (!f) return [];
             const m = await readMine(env.client, s.org, env.user.login, f.assignments).catch(() => null);
             const rc = m && !m.auditor ? await readAllReceipts(env.client, s.org, f.assignments, m).catch(() => null) : null;
+            const seen = lastVisit(env.user.login, s.org);
+            if (rc) markVisit(env.user.login, s.org, now);
             // Each line keeps its own semester's timezone (weekItems sets it).
-            return weekItems(f, m, now, patchLines(f.assignments, m, rc), lastVisit(env.user.login, s.org, now)).map((i) => ({ ...i, org: s.org, semester: semesterName(s) }));
+            return weekItems(f, m, now, patchLines(f.assignments, m, rc), seen).map((i) => ({ ...i, org: s.org, semester: semesterName(s) }));
           }));
           return lists.flat().sort((a, b) => a.at - b.at);
         }
