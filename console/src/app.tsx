@@ -15,7 +15,7 @@ import { OpPanel } from './ops/Panel';
 import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, hashOf, landing, parseHash, parseSearch, resolveContext, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, movedHash, parseHash, replaceHash, parseSearch, resolveContext, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
@@ -77,13 +77,13 @@ export function App({ state: s }: { state: AppState }) {
 
   const route = parseHash(s.hash.value);
   // An old `#teams-<slug>` / `#marks-<slug>` link: show the tab, and write its new hash.
-  const canonical = s.hash.value && s.hash.value !== '#' ? hashOf(route) : null;
+  const moved = movedHash(s.hash.value);
   useEffect(() => {
-    if (canonical && decodeURIComponent(s.hash.value) !== canonical) {
-      history.replaceState(null, '', `${location.search}${canonical}`);
-      s.hash.value = canonical;
+    if (moved) {
+      replaceHash(moved);
+      s.hash.value = moved;
     }
-  }, [canonical]);
+  }, [moved]);
   useEffect(() => {
     document.body.classList.remove('nav-open');
     s.navOpen.value = false;

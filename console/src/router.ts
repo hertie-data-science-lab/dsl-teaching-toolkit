@@ -41,6 +41,18 @@ export function hashOf(r: Route): string {
   return `#${r.screen}${r.entry ? `-${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}`;
 }
 
+/** The hash to write instead of `hash` (an old Teams or Marks link), or null when it is already canonical. */
+export function movedHash(hash: string): string | null {
+  if (!hash || hash === '#') return null;
+  const canonical = hashOf(parseHash(hash));
+  return decodeURIComponent(hash) === canonical ? null : canonical;
+}
+
+/** Rewrite the address bar's hash in place (no history entry), keeping the query string. */
+export function replaceHash(hash: string): void {
+  history.replaceState(null, '', `${location.search}${hash}`);
+}
+
 /** The link to one tab of an assignment. */
 export function tabHref(slug: string, tab: AssignmentTab): string {
   return `#assignment-${slug}/${tab}`;

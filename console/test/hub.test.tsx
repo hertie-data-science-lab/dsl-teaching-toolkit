@@ -7,7 +7,7 @@ import type { Course } from '../src/model/discovery';
 import { LiveFiles, StaticFiles } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
-import { hashOf, parseHash } from '../src/router';
+import { hashOf, movedHash, parseHash, replaceHash } from '../src/router';
 import { AssignmentScreen, AssignmentsScreen, defaultTab } from '../src/screens/Assignments';
 import { MarksOverviewScreen } from '../src/screens/Marking';
 import { gradebookWrites, readSheet, returnedOn } from '../src/model/marks';
@@ -40,6 +40,23 @@ describe('the assignment hub', () => {
     expect(parseHash('#teams')).toEqual({ screen: 'assignments' });
     expect(hashOf(parseHash('#teams-assignment-3'))).toBe('#assignment-assignment-3/teams');
     expect(hashOf(parseHash('#schedule-s5'))).toBe('#schedule-s5');
+  });
+
+  it('rewrites an old Teams or Marks hash in the address bar, keeping the query string', () => {
+    const replaceState = vi.fn();
+    vi.stubGlobal('history', { replaceState });
+    vi.stubGlobal('location', { search: `?cohort=${COHORT_ORG}` });
+    try {
+      for (const [old, now] of [['#teams-assignment-3', '#assignment-assignment-3/teams'], ['#marks-assignment-2', '#assignment-assignment-2/marks'], ['#teams', '#assignments']]) {
+        const to = movedHash(old);
+        expect(to).toBe(now);
+        replaceHash(to!);
+        expect(replaceState).toHaveBeenLastCalledWith(null, '', `?cohort=${COHORT_ORG}${now}`);
+      }
+      for (const same of ['', '#', '#marks', '#assignment-assignment-3/teams', '#schedule-s5']) expect(movedHash(same)).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('opens on Teams while teams form, on Marks once marking starts, else Overview', () => {
