@@ -224,7 +224,7 @@ real config lives in `semester-config`.
 
 Every user-editable file in `semester-config` is a minimal commented scaffold, seeded once and
 never rewritten, so faculty edits are safe; each links its filled twin in
-`example-course/cohort-org/`. Everything the engine writes there lives under `.system/`
+`example-course/semester-org/`. Everything the engine writes there lives under `.system/`
 (`records.path`). The SYSTEM-owned half - the README
 contract and the workflows under `.github/` (`welcome.CONFIG_SYSTEM_FILES`) - is
 re-converged the same way, so a dispatcher fix reaches running semesters without re-bootstrapping. Partial provisioning fails the run
@@ -585,7 +585,7 @@ actions** regenerates them from live state and re-pushes the workflows (no cron,
 same run re-seeds the run-from-repo buttons, propagates the repo secret, and rebuilds the profile
 READMEs.
 
-- **semester_org** - from the `.github/cohort-courses-pages.yml` registry.
+- **semester_org** - from the `.github/semesters.yml` registry.
 - **course_source_repo** (central only) / **assignment** - the course org's content / `assignment-*` repos.
 - Every list-taking dropdown **pre-selects the newest term year** rather than letting GitHub
   select the alphabetically-first option, which used to pre-select last year's semester. The one
@@ -781,7 +781,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     workflows, and the **scaffold** half of every user-editable file: header-only
     `students.csv` / `teams.csv`, tag-rendered `schedule.yml` / `instructors.yml` skeletons.
     The filled versions are not seeded: each scaffold links its twin in
-    `example-course/cohort-org/`.
+    `example-course/semester-org/`.
   - `course/` - the course org's `.github/dsl-course.yml` (identity + the `people:` block,
     assembled from the `people-*.yml` fragments).
   - `semester/` - a semester's pointer back to its course org (`semester-config/.system/dsl-course.yml`).

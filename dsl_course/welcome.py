@@ -32,7 +32,7 @@ EXAMPLE_COURSE = ROOT / "example-course" / "course-org"
 
 # Every user-editable file in semester-config is seeded as a minimal commented scaffold,
 # once, and never rewritten. Filled examples are not seeded (decision 0010): each scaffold
-# links the worked example semester in `example-course/cohort-org/` instead. `{tag}`/`{year}`/`{year_next}` are
+# links the worked example semester in `example-course/semester-org/` instead. `{tag}`/`{year}`/`{year_next}` are
 # rendered for this semester, so every example in a scaffold is copy-paste-correct.
 CONFIG_SCAFFOLDS = {
     "students.csv": "semester-config/students.csv",

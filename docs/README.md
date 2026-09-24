@@ -107,10 +107,10 @@ from:
 | [01](01-new-course-org.md) course identity, `course_admins`, instructor cards | [`course-org/dsl-course.yml`](../example-course/course-org/dsl-course.yml) |
 | [02](02-add-materials-to-course.md) materials tree | [`course-materials-f2026/`](../example-course/course-org/course-materials-f2026/) - `lectures/`, `readings/`, `labs/`, `SYLLABUS.md` |
 | [03](03-add-assignment-to-course.md) assignment `main/` + `solution/` | [`assignment-1`](../example-course/course-org/assignment-1-f2026/) (`.py`), [`assignment-2`](../example-course/course-org/assignment-2-f2026/) (notebook), [`assignment-4-project`](../example-course/course-org/assignment-4-project-f2026/) (**group**) - each with `grading_config.yml` + hidden `tests/` |
-| [05](05-manage-teaching-team.md) the instructors, time-boxed | [`instructors.yml`](../example-course/cohort-org/instructors.yml) - two TAs with `start`/`end` dates |
-| [06](06-enrol-students-to-cohort.md) roster + project teams | [`students.csv`](../example-course/cohort-org/students.csv) (incl. an auditor), [`teams.csv`](../example-course/cohort-org/teams.csv) |
-| [07](07-schedule-releases.md) the whole semester's plan | [`schedule.yml`](../example-course/cohort-org/schedule.yml) - `releases` with `event_datetime`s + `deploy_datetime`s, `assignments` + `grading_datetime`, `events` (exams, a clinic) |
-| [10](10-grade-and-return-assignments.md) grading sheets | [`grading_sheets/assignment-1.yml`](../example-course/cohort-org/grading_sheets/assignment-1.yml), [`grading_sheets/assignment-4-project.yml`](../example-course/cohort-org/grading_sheets/assignment-4-project.yml) (team marks) |
+| [05](05-manage-teaching-team.md) the instructors, time-boxed | [`instructors.yml`](../example-course/semester-org/instructors.yml) - two TAs with `start`/`end` dates |
+| [06](06-enrol-students-to-cohort.md) roster + project teams | [`students.csv`](../example-course/semester-org/students.csv) (incl. an auditor), [`teams.csv`](../example-course/semester-org/teams.csv) |
+| [07](07-schedule-releases.md) the whole semester's plan | [`schedule.yml`](../example-course/semester-org/schedule.yml) - `releases` with `event_datetime`s + `deploy_datetime`s, `assignments` + `grading_datetime`, `events` (exams, a clinic) |
+| [10](10-grade-and-return-assignments.md) grading sheets | [`grading_sheets/assignment-1.yml`](../example-course/semester-org/grading_sheets/assignment-1.yml), [`grading_sheets/assignment-4-project.yml`](../example-course/semester-org/grading_sheets/assignment-4-project.yml) (team marks) |
 | [08](08-release-materials-to-cohort.md) a growing package | [`lecture-code-f2026/mlpkg/`](../example-course/course-org/lecture-code-f2026/) - disclosed subpackage by subpackage |
 
 Field-by-field rules for all of these: [`DEPLOYMENT-CHECKLIST.md`](DEPLOYMENT-CHECKLIST.md).

@@ -101,10 +101,10 @@ linked from nowhere. That site always lists each session folder's root files.
 
 ### `students.csv`
 
-Live example: [`example-course/cohort-org/students.csv`](../example-course/cohort-org/students.csv).
+Live example: [`example-course/semester-org/students.csv`](../example-course/semester-org/students.csv).
 
 `semester-config/students.csv` - one row per student, straight from the registrar (seeded
-header-only; a filled one is in the [worked example](../example-course/cohort-org/students.csv)). Leave the onboarding-owned
+header-only; a filled one is in the [worked example](../example-course/semester-org/students.csv)). Leave the onboarding-owned
 columns blank (`github_handle`, `github_id`, `enrol_code`). Deleting a row off-boards that student on the next push.
 
 ```csv
@@ -126,7 +126,7 @@ Add any other column you want (a registrar id, a lecture section, notes) - the e
 
 ### `instructors.yml`
 
-Live example: [`example-course/cohort-org/instructors.yml`](../example-course/cohort-org/instructors.yml).
+Live example: [`example-course/semester-org/instructors.yml`](../example-course/semester-org/instructors.yml).
 
 `semester-config/instructors.yml` - this semester's instructors, one list. Grants the semester's `instructors`
 team necessary access permissions at both the course- and semester-org levels, including push
@@ -175,7 +175,7 @@ cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 
 ### `teams.csv`
 
-Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
+Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).
 
 `semester-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
 1. Students self-select via the `join` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/.system/assignments.lock.yml`,
@@ -190,7 +190,7 @@ assignment-4-project,team-x,ben-baker
 
 ### `grading_sheets/<slug>.yml`
 
-Live example: [`example-course/cohort-org/grading_sheets/assignment-1.yml`](../example-course/cohort-org/grading_sheets/assignment-1.yml).
+Live example: [`example-course/semester-org/grading_sheets/assignment-1.yml`](../example-course/semester-org/grading_sheets/assignment-1.yml).
 
 `semester-config/grading_sheets/<slug>.yml` - one per assignment, created at handout with
 every row in it. Everything under `info:` is the toolkit's and refreshes until the cutoff;
@@ -256,7 +256,7 @@ bottom.
 
 ### `schedule.yml`
 
-Live example: [`example-course/cohort-org/schedule.yml`](../example-course/cohort-org/schedule.yml).
+Live example: [`example-course/semester-org/schedule.yml`](../example-course/semester-org/schedule.yml).
 
 `semester-config/schedule.yml` - the semester plan: the **auto-release plan** the scheduler
 runs, and the **dates** that drive the website and grading. Times are read in `timezone`

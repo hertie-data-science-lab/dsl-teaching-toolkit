@@ -48,7 +48,7 @@ Re-releasing is safe - copies are additive and idempotent.
 The same workflow releases **code**, because code is just another path. Keep a growing package in a course-org repo (e.g. `lecture-code-f2026`) and disclose it topic by topic as you teach: 
 - `course_source_path` = `mlpkg/simulation` (a subpackage folder) or `mlpkg/train/warmup.py` (a single module). 
 - Copies are additive, so each release extends what students already have 
-- release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/cohort-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
+- release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/semester-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
 
 ## Fixing something you have already released
 

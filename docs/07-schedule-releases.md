@@ -14,7 +14,7 @@ The schedule file can be updated throughout the semester.
 
 ## Write your semester's plan
 
-> For a fully worked example schedule.yml (a full semester) see [here](../example-course/cohort-org/schedule.yml).
+> For a fully worked example schedule.yml (a full semester) see [here](../example-course/semester-org/schedule.yml).
 
 > An example of the automatically generated schedule on the deployed `.github.io` site can also be seen live [here](https://hertie-dsl-demo-f2026.github.io/schedule/). 
 

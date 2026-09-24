@@ -93,7 +93,7 @@ instructors:
 
 >Because every sync is a full reconcile, a lapsed `end` prunes them exactly as a deleted entry would - no manual removal step needed. Leave the entry in the file afterwards: it doubles as the record of who taught what, and re-granting next year is a date edit.
 
-Worked example: [`example-course/cohort-org/instructors.yml`](../example-course/cohort-org/instructors.yml).
+Worked example: [`example-course/semester-org/instructors.yml`](../example-course/semester-org/instructors.yml).
 
 ## Remove someone / end access early
 

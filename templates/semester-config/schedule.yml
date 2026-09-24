@@ -3,7 +3,7 @@
 # This semester's schedule + auto-release plan. Instructors edit it directly.
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/docs/07-schedule-releases.md
-# - worked example: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/cohort-org/schedule.yml
+# - worked example: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/semester-org/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
 # Times are Europe/Berlin unless you set `timezone:`. Scheduled release ticks about every

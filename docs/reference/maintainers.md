@@ -359,7 +359,7 @@ repo path to a file under `templates/`. Adding a file like this is four places:
 4. a test that the nightly loop reaches every live semester, beside the pointer's
    (`tests/test_bootstrap_seeding.py`).
 
-It is absent from `example-course/cohort-org/`: nobody edits it, so there is nothing in it
+It is absent from `example-course/semester-org/`: nobody edits it, so there is nothing in it
 for a person to copy.
 
 `.system/status.json` (`dsl.status/1`, built by `status_json`, written by `status.write`) is the
@@ -744,7 +744,7 @@ Promote.
 | `semester-config/assignments.lock.yml`, `snapshots/`, `autograde/` (with the `_graded.json` / `_skipped.json` markers), `solutions/`, `gradebook/` (with `distributed.csv`), `team-formation/` | the same under `semester-config/.system/` (`records.path`) | MOVED by the tool, by blob sha, in one commit: each fire-once marker exists exactly once |
 | `semester-config/cohort-gradebook.csv`, `semester-config/archive/teardown.md` | `semester-config/.system/semester-gradebook.csv`, `semester-config/.system/archive.md` | semester org (the archive record is only ever written into a live semester) |
 | semester `.github/dsl-course.yml` (the course pointer) | `semester-config/.system/dsl-course.yml` | semester org; the four dispatchers read it there |
-| `semester-config/*.sample`, `grading_sheets/*.yml.sample` | none - the scaffolds and docs link `example-course/cohort-org/` | deleted by the tool |
+| `semester-config/*.sample`, `grading_sheets/*.yml.sample` | none - the scaffolds and docs link `example-course/semester-org/` | deleted by the tool |
 | course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
 | materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
 | semester topic `dsl-cohort` on an ARCHIVED semester | kept for ever: archived semesters are never migrated, and every sweep skips them (`discovery.semester_is_live`, `seed.refresh`) | - |

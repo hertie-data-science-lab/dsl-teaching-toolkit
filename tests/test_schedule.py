@@ -1108,7 +1108,7 @@ def test_load_file_parses_and_surfaces_drops(tmp_path):
 @pytest.mark.parametrize(
     "path",
     [
-        "example-course/cohort-org/schedule.yml",
+        "example-course/semester-org/schedule.yml",
         "templates/semester-config/schedule.yml",
     ],
 )
@@ -1126,7 +1126,7 @@ def test_the_worked_example_shows_the_archive_block():
     # The sample is what faculty copy; a field only the skeleton mentions is a field nobody
     # sets. Its date is the default spelled out, so the example and the rule agree.
     full = (
-        Path(__file__).resolve().parents[1] / "example-course/cohort-org/schedule.yml"
+        Path(__file__).resolve().parents[1] / "example-course/semester-org/schedule.yml"
     )
     sched, _ = schedule.load_file(str(full))
     assert sched.archive.when == date(2027, 2, 16)

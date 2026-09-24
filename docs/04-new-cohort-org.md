@@ -16,7 +16,7 @@ Once each year; the [course org](01-new-course-org.md) it hangs off is permanent
 
 ## Steps
 
-Live example of every file below: [`example-course/cohort-org/`](../example-course/cohort-org).
+Live example of every file below: [`example-course/semester-org/`](../example-course/semester-org).
 
 1. **Create the semester org** in the [web UI](https://github.com/account/organizations/new?plan=free&ref_cta=Create%2520a%2520free%2520organization&ref_loc=cards&ref_page=%2Forganizations%2Fplan), 
     - Named **`hertie-<course-slug>-<termtag>`**, termtag `fYYYY`/`sYYYY` - lowercase-kebab (e.g. `hertie-dsl-demo-f2026`). 
@@ -35,7 +35,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
       - **`students` + `auditors` teams** (empty) - do not edit directly these, these will be populated by the workflow, 
       - **`course-admin` team** for this semester
       - **`hertie-dsl-demo-f2026.github.io`** auto-deployed website - what it shows, and what you must not hand-edit: [11](11-configure-cohort-site.md)
-    - It also **registers the semester** in the course org's `.github/cohort-courses-pages.yml`. That file is the registry every semester dropdown reads, so an unregistered semester is invisible to every workflow; a registered org that is later deleted is pruned from it automatically by the nightly refresh.
+    - It also **registers the semester** in the course org's `.github/semesters.yml`. That file is the registry every semester dropdown reads, so an unregistered semester is invisible to every workflow; a registered org that is later deleted is pruned from it automatically by the nightly refresh.
 
 ---
 
@@ -68,7 +68,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
   - Fill `semester-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
   - Leave `github_handle, github_id` blank - onboarding fills them. 
   - Add `role: auditor` for anyone who should get the released materials but no assignments and no grades. 
-  - The [worked example](../example-course/cohort-org/students.csv) shows a filled row of each kind, and that repo's `README.md` documents every column.
+  - The [worked example](../example-course/semester-org/students.csv) shows a filled row of each kind, and that repo's `README.md` documents every column.
   - Full details found in [06-enrol-students-to-cohort.md](06-enrol-students-to-cohort.md)
 
 7. *(only for `visibility: student_choice` assignments)* **Set the org's member privileges.**

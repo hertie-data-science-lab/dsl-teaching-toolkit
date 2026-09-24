@@ -10,7 +10,7 @@
 
 ## Steps for initial enrolment
 
-Live example roster: [`example-course/cohort-org/students.csv`](../example-course/cohort-org/students.csv).
+Live example roster: [`example-course/semester-org/students.csv`](../example-course/semester-org/students.csv).
 
 1. **Add the students to the roster.**
    - Edit `semester-config/students.csv` in the **semester** org

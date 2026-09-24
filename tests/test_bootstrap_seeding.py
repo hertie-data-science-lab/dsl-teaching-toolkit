@@ -14,7 +14,7 @@ first-run guard - the guard has to be per file. These tests pin the split:
   course pointer): re-pushed on every run so fixes reach running semesters.
 
 Every user-editable semester-config file is a scaffold seeded once; the filled examples
-are the worked example semester in example-course/cohort-org/, which the scaffolds link
+are the worked example semester in example-course/semester-org/, which the scaffolds link
 and these tests parse with the engine's own readers.
 
 The COURSE tier of example-course/ is validated here too. Only its SYLLABUS.md is a seeded
@@ -56,7 +56,9 @@ from dsl_course.grades import LockWrite
 from dsl_course.repos import Converged
 from tests.conftest import repo_row, stub_bootstrap
 
-EXAMPLE_SEMESTER = Path(__file__).resolve().parents[1] / "example-course" / "cohort-org"
+EXAMPLE_SEMESTER = (
+    Path(__file__).resolve().parents[1] / "example-course" / "semester-org"
+)
 
 
 def example_semester_file(rel: str) -> str:
@@ -490,7 +492,7 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
 
 
 def test_samples_carry_nothing_that_only_makes_sense_inside_this_repo():
-    # example-course/cohort-org/ is SHIPPING reference material: each file is pushed into
+    # example-course/semester-org/ is SHIPPING reference material: each file is pushed into
     # every semester's private config repo, where a repo-relative `docs/...` link resolves to
     # nothing. Full URLs only, as the seeded README already does.
     for path in sorted(EXAMPLE_SEMESTER.rglob("*")):

@@ -33,7 +33,7 @@ example-course/
     assignment-1-f2026/             # individual (.py)      main/ + solution/
     assignment-2-f2026/             # individual (notebook) main/ + solution/
     assignment-4-project-f2026/     # GROUP project         main/ + solution/
-  cohort-org/
+  semester-org/
     students.csv                    # 10 students + 1 auditor (handles blank until they onboard)
     teams.csv                       # 3 project teams of 3-4 (auditors are refused from teams)
     schedule.yml                    # the full semester: releases + due dates + events
@@ -47,7 +47,7 @@ example-course/
 > the worked example because there is nothing in it for a person to copy. (It lives under
 > `.system/`, with every other file the toolkit writes.)
 
-> NB: **`cohort-org/` is the worked example every scaffold links.** Each file a semester's
+> NB: **`semester-org/` is the worked example every scaffold links.** Each file a semester's
 > `semester-config` is seeded with (a commented scaffold) points here for the filled version,
 > by absolute URL at the org's own tier. Keep the contents fictional and self-contained: no
 > real accounts, and links written as full URLs.

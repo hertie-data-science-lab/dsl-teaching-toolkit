@@ -10,7 +10,7 @@ Instructors/TAs edit these files; the toolkit's workflows read them and apply th
 
 
 **Your files and the toolkit's.**
-- The files you edit (roster, teams, schedule, instructors, grading sheets) are INSTRUCTOR-OWNED - yours. A filled example of each is in the [worked example semester](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/cohort-org/).
+- The files you edit (roster, teams, schedule, instructors, grading sheets) are INSTRUCTOR-OWNED - yours. A filled example of each is in the [worked example semester](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/semester-org/).
 - `.system/` is the toolkit's: its status, its records and the markers that stop anything being sent or graded twice. Leave it alone - deleting a marker repeats what it records.
 
 ## `students.csv` - the roster (required)
@@ -36,7 +36,7 @@ A push to this file triggers **Sync membership** automatically, reconciling the 
 One file per assignment, created at handout with every row already in it. It is the ONE
 place you type: scores, feedback, an `adjustment_individual` where you need one, and notes
 that never leave this repo. Worked examples of both shapes are in the
-[worked example semester](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/cohort-org/grading_sheets).
+[worked example semester](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/semester-org/grading_sheets).
 
 Everything under `info:` is the toolkit's - when the work came in, how late it was, what
 `CONTRIBUTIONS.md` said, the autograde count, and `checked`, the minute the row was last

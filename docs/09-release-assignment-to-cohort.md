@@ -122,7 +122,7 @@ repos nothing else is looking for. To change the shape, edit `grading_config.yml
 
 ## Group assignments: creating the teams
 
-Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
+Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).
 
 Teams are formed in one of two ways - both end up in `semester-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a GitHub team on push. A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
 

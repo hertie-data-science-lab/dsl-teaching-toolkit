@@ -76,7 +76,7 @@ def test_example_dataset_roster_declares_roles_and_ships_an_auditor():
     path = (
         Path(__file__).resolve().parents[1]
         / "example-course"
-        / "cohort-org"
+        / "semester-org"
         / "students.csv"
     )
     students = roster.load_path(str(path))
