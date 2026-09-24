@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 
 from . import mailer
-from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
+from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pausable, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
     CONFIG_REPO,
@@ -74,8 +74,9 @@ def for_placement(rendered: str, central_ref: str) -> str:
     new renderer cannot ship without either, and `central_ref` is a required argument, so
     a caller that places a workflow cannot forget to say which ref it is placing it at.
     `discovery.central_ref_for` is where that ref comes from; `central.pin_central_ref`
-    refuses a ref the central repo does not have."""
-    return SYSTEM_OWNED_BANNER + pin_central_ref(rendered, central_ref)
+    refuses a ref the central repo does not have. Every job is gated on the org's pause
+    variable here too (`central.pausable`)."""
+    return SYSTEM_OWNED_BANNER + pausable(pin_central_ref(rendered, central_ref))
 
 
 # Workflow-level permissions for every rendered workflow. Each one authenticates with
