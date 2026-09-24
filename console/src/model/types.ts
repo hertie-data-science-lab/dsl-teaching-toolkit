@@ -120,7 +120,8 @@ export interface Outcome {
   summary: string;
   counts?: Record<string, number>;
   reasons?: { code: string; text: string; fix?: Fix }[];
-  details?: string[]; // what the op produced or would produce, line by line (a file list, a generated block)
+  details?: string[]; // what the op did or would do, one line each (e.g. the files derive wrote)
+  block?: string; // a generated text to paste (e.g. the syllabus session list)
   people?: { handle: string; text: string }[]; // private file only
   started?: string;
   finished?: string;
