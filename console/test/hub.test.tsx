@@ -7,7 +7,7 @@ import { StaticFiles } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
 import { hashOf, parseHash } from '../src/router';
-import { AssignmentScreen, defaultTab } from '../src/screens/Assignments';
+import { AssignmentScreen, AssignmentsScreen, defaultTab } from '../src/screens/Assignments';
 import { MarksOverviewScreen } from '../src/screens/Marking';
 import { gradebookWrites, readSheet, returnedOn } from '../src/model/marks';
 import type { CohortProps } from '../src/screens/types';
@@ -116,5 +116,21 @@ describe('the cohort nav', () => {
     expect(names).toEqual(['This week', 'Schedule', 'Assignments', 'Marks', 'Students', 'Staff', 'Site', 'Archive', 'Operations']);
     expect(nav).toContain('href="#marks" aria-current="page"');
     expect(nav).not.toContain('href="#teams"');
+  });
+});
+
+describe('the Assignments index', () => {
+  it('shows teams formed and students without a team, marked of total and returned', () => {
+    const roster = 'hertie_email,name,role,github_handle\na@x.org,A,enrolled,anna-a\nb@x.org,B,enrolled,ben-b\nc@x.org,C,enrolled,\n';
+    const f = new StaticFiles({
+      [`${COHORT_ORG}/classroom-config/students.csv`]: roster,
+      [`${COHORT_ORG}/classroom-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,Anna-A\nassignment-2,x,ben-b\n',
+    });
+    const back = { ...solo, marks: { filled: 40, total: 48 }, returned: true };
+    const out = render(<AssignmentsScreen {...props({ files: f, loaded: { kind: 'ready', status: { ...status, assignments: [back, team] }, sha: 's', stale: [] } })} />);
+    expect(out).toContain('<th>Teams</th><th>Marked</th><th>Returned</th>');
+    expect(out).toContain('1 formed<br/><span class="footnote">1 without a team</span>');
+    expect(out).toContain('<td class="num">40 / 48</td>');
+    expect(out).toContain('<span class="chip ok">Yes</span>');
   });
 });

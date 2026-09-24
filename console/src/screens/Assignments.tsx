@@ -1,6 +1,8 @@
 // S16 Assignments index and S10 Assignment detail: the hub, with tabs Overview | Teams |
 // Marks (decision 0008). Teams shows only when the template says teams.
 
+import { readTable } from '../edit/csv';
+import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, AssignmentState, Status } from '../model/types';
 import { Check } from '../ui/icons';
@@ -27,6 +29,20 @@ function nextDate(a: Assignment, tz: string, year: number): string {
   }
 }
 
+/** Joined students in no team of `slug`, as the Teams tab counts them; null until both files are read. */
+function teamless(p: ReadyProps, slug: string): number | null {
+  const roster = p.files.file(p.cohort.org, 'classroom-config', 'students.csv');
+  const teams = p.files.file(p.cohort.org, 'classroom-config', 'teams.csv');
+  if (roster.kind === 'loading' || teams.kind === 'loading') return null;
+  const joined = roster.kind === 'ready' ? parseRoster(roster.text).rows.filter((s) => s.handle) : [];
+  const placed = new Set(
+    (teams.kind === 'ready' ? readTable(teams.text).rows : [])
+      .filter((r) => (r.assignment ?? '').trim() === slug && (r.github_handle ?? '').trim())
+      .map((r) => r.github_handle.trim().toLowerCase()),
+  );
+  return joined.filter((s) => !placed.has(s.handle.toLowerCase())).length;
+}
+
 function Index(p: ReadyProps) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
@@ -49,10 +65,12 @@ function Index(p: ReadyProps) {
         <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; settings live on the assignment template.</p>
       </Help>
       <div class="table-wrap">
-        <table class="grid" style="min-width:720px">
-          <thead><tr><th>Assignment</th><th>State</th><th>Next date</th><th>Progress</th><th>Problem</th></tr></thead>
+        <table class="grid" style="min-width:960px">
+          <thead><tr><th>Assignment</th><th>State</th><th>Next date</th><th>Progress</th><th>Teams</th><th>Marked</th><th>Returned</th><th>Problem</th></tr></thead>
           <tbody>
-            {list.map((a) => (
+            {list.map((a) => {
+              const free = isGroup(a) ? teamless(p, a.slug) : null;
+              return (
               <tr>
                 <td>
                   <a class="rowlink" href={`#assignment-${a.slug}`}>{assignmentTitle(a)}</a><br />
@@ -61,9 +79,13 @@ function Index(p: ReadyProps) {
                 <td><span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span></td>
                 <td class="num">{nextDate(a, tz, year)}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
+                <td class="num">{isGroup(a) ? <>{a.teams} formed{free !== null ? <><br /><span class="footnote">{free} without a team</span></> : null}</> : <span class="footnote">—</span>}</td>
+                <td class="num">{a.marks.total ? `${a.marks.filled} / ${a.marks.total}` : <span class="footnote">No marks yet</span>}</td>
+                <td>{a.returned ? <span class="chip ok">Yes</span> : 'No'}</td>
                 <td>{a.problem ? <span class="chip bad">Assignment template has a problem</span> : <span class="footnote">None</span>}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
