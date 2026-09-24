@@ -55,7 +55,13 @@ from .schedule import (
     KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
 )
-from .settings import ASSIGNMENT_DEFAULTS_KEY, COURSE_DEFAULT_KEYS, SPEC_KEYS
+from .settings import (
+    ASSIGNMENT_DEFAULTS_KEY,
+    COURSE_DEFAULT_KEYS,
+    RUN_KEYS,
+    SOURCES,
+    SPEC_KEYS,
+)
 from .teams import FIELDS as TEAMS_FIELDS
 
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
@@ -319,6 +325,21 @@ def status_schema() -> dict:
             ),
             "returned": {"type": "boolean"},
             "problem": {"type": "boolean"},
+            # Each run setting's effective value and the layer that gave it (`settings`).
+            "settings": _obj(
+                {
+                    key: _obj(
+                        {
+                            "value": {
+                                "type": ["string", "integer", "null"],
+                            },
+                            "source": _enum(SOURCES),
+                        },
+                        ("value", "source"),
+                    )
+                    for key in RUN_KEYS
+                }
+            ),
         },
         # The four moments are always present (null when unset), so the console can move
         # an assignment from open to late window to marking on its own clock.

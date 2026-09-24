@@ -42,6 +42,168 @@
           "returned": {
             "type": "boolean"
           },
+          "settings": {
+            "additionalProperties": false,
+            "properties": {
+              "late_penalty_per_day": {
+                "additionalProperties": false,
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "assignment",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "late_window_days": {
+                "additionalProperties": false,
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "assignment",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "max_team_size": {
+                "additionalProperties": false,
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "assignment",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "submit_url": {
+                "additionalProperties": false,
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "assignment",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "team_formation": {
+                "additionalProperties": false,
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "assignment",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "visibility": {
+                "additionalProperties": false,
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "assignment",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
           "slug": {
             "type": "string"
           },

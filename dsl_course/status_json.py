@@ -44,7 +44,16 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from . import grades, records, roster, schedule, sync_faculty, team_formation, teams
+from . import (
+    grades,
+    records,
+    roster,
+    schedule,
+    settings,
+    sync_faculty,
+    team_formation,
+    teams,
+)
 from .course import (
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
@@ -837,6 +846,16 @@ def _problem_entries(problems: list[dict]) -> set[str]:
     return {p["fix"].get("entry") for p in problems if p["fix"].get("entry")}
 
 
+def run_settings(spec: grades.GradingSpec) -> dict[str, dict]:
+    """Each run setting's effective value and the layer it came from (`settings`), so the
+    console shows "5 days, this course's default" without a cascade of its own."""
+    sources = dict(spec.sources)
+    return {
+        key: {"value": getattr(spec, key), "source": sources.get(key, "institution")}
+        for key in settings.RUN_KEYS
+    }
+
+
 def render_assignments(
     facts: SemesterFacts, problems: list[dict], now: datetime
 ) -> list[dict]:
@@ -890,6 +909,7 @@ def render_assignments(
                 "returned": returned,
                 "problem": slug in flagged
                 or assignment_slug(entry.course_source_repo) in flagged,
+                "settings": run_settings(spec),
             }
         )
     return rows
