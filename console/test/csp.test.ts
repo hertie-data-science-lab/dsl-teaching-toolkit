@@ -13,6 +13,9 @@ describe('Content-Security-Policy', () => {
     expect(cspPolicy('')).toContain("connect-src 'self' https://api.github.com https://github.com;");
     expect(relayOrigin('not a url')).toBe('');
     expect(relayOrigin('javascript:alert(1)')).toBe('');
+    expect(relayOrigin('http://relay.example')).toBe('');
+    expect(p).not.toContain('unsafe-eval');
+    expect(p).not.toContain('script-src');
   });
 
   it('is filled into index.html on a build and taken out for the dev server', () => {

@@ -2,17 +2,16 @@
 // origin, calls only to GitHub and the sign-in relay, images from GitHub's avatars, fonts
 // from Google Fonts, no frames. `vite.config.ts` fills the relay's origin into index.html at
 // build time; the dev server drops the meta, since its live reload needs a websocket.
-// `'unsafe-eval'` is there for Ajv alone: it compiles each schema into a function with
-// `new Function`, at module load. Precompiling the validators (Ajv standalone) would let it go.
+// No 'unsafe-eval': the schema validators are compiled at build time (`virtual:validators`).
 
 export const CSP_PLACEHOLDER = '%CONSOLE_CSP%';
 
-/** The relay's origin (scheme, host, port) for connect-src; '' when the build has none or it does not parse. */
+/** The relay's https origin for connect-src; '' when the build has none, it does not parse, or it is not https. */
 export function relayOrigin(url: string | undefined): string {
   if (!url) return '';
   try {
     const u = new URL(url);
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin : '';
+    return u.protocol === 'https:' ? u.origin : '';
   } catch {
     return '';
   }
@@ -22,7 +21,6 @@ export function cspPolicy(relayUrl?: string): string {
   const relay = relayOrigin(relayUrl);
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-eval'",
     `connect-src 'self' https://api.github.com https://github.com${relay ? ` ${relay}` : ''}`,
     "img-src 'self' https://avatars.githubusercontent.com https://github.com data:",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
