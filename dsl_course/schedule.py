@@ -406,7 +406,7 @@ class AssignmentEntry:
     # announced somewhere other than the site.
     show_on_site: bool = True
     # When to push the template's `solution/` folder into every provisioned repo - the
-    # scheduled twin of Release assignment's `include_solution` tick. Deliberately NOT
+    # scheduled twin of Release assignment's `solution_datetime: now`. Deliberately NOT
     # defaulted to the due date: a solution released the moment submissions close is a
     # gift to anyone who pushes late, so faculty name the moment or it never fires.
     # None = release the solution by hand, or not at all.
@@ -1204,7 +1204,7 @@ def _parse_assignments(
             drops,
             where,
             "the model solution NEVER ships automatically - it stays on the "
-            "template's solution branch until someone ticks include_solution by hand",
+            "template's solution branch until someone hands it out by hand with `solution_datetime: now`",
             lines,
         )
         # The solution rides on the handout release, so these two dates are only meaningful

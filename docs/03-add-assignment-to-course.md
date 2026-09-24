@@ -60,7 +60,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
 2. **Push your content** 
    - Brief + starter → `main`
    - Model solution and `grading_config.yml` → `solution`
-   - Student repos are generated from **`main` only**, unless you tick `include_solution` at release time. 
+   - Student repos are generated from **`main` only**, unless you set `solution_datetime` to `now` at release time. 
    - A purely hand-marked assignment needs nothing further: `autograde` defaults to **false**,
      and a template with no `solution` branch at all is hand-marked too. The cutoff still
      freezes the sheet and records the decision not to machine-mark it, and the grading sheet,

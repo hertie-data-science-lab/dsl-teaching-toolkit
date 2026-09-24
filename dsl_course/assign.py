@@ -79,6 +79,8 @@ from .course import (
     CUTOFF_SENTENCE,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
+    SOLUTION_NOW,
+    SOLUTION_WARNING,
     github_visibility,
     shape_note,
     shared_repo,
@@ -1242,10 +1244,14 @@ def main() -> int:
         help="Local students.csv (default: semester classroom-config)",
     )
     parser.add_argument(
-        "--solution",
-        action="store_true",
-        help="Also push the solution (template's `solution` branch) into each student repo",
+        "--solution-datetime",
+        default="",
+        help=f"`{SOLUTION_NOW}` = also push the solution (the template's `solution` branch) "
+        f"into each student repo. {SOLUTION_WARNING} A later moment belongs on the "
+        f"assignment's schedule.yml entry, as `solution_datetime:`.",
     )
+    # The old switch, read for one release: `--solution` is `--solution-datetime now`.
+    parser.add_argument("--solution", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--slug",
         default="",
@@ -1275,6 +1281,16 @@ def main() -> int:
         "--dry-run", action=argparse.BooleanOptionalAction, default=None
     )
     args = parser.parse_args()
+    if args.solution:
+        log("  [moved] --solution is now --solution-datetime now")
+        args.solution_datetime = args.solution_datetime or SOLUTION_NOW
+    when = args.solution_datetime.strip().lower()
+    if when not in ("", SOLUTION_NOW):
+        parser.error(
+            f"--solution-datetime takes `{SOLUTION_NOW}` on a manual hand out; a later "
+            f"moment belongs on the assignment's schedule.yml entry, as "
+            f"`solution_datetime:`"
+        )
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
@@ -1293,7 +1309,7 @@ def main() -> int:
             args.template,
             args.semester_org,
             roster_path=args.roster,
-            solution=args.solution,
+            solution=when == SOLUTION_NOW,
             dry_run=bool(args.dry_run),
             slug=args.slug,
             # ONE listing of the semester for this press, taken here because there is no
@@ -1316,7 +1332,7 @@ def solution_released(semester_org: str, slug: str) -> bool:
     """Whether the model solution for `slug` has already been pushed to this semester.
 
     Read by the scheduler, so a passed `solution_datetime` fires exactly once. The manual
-    Release assignment path does NOT consult it - an operator ticking include_solution is
+    Release assignment path does NOT consult it - an operator asking for `solution_datetime: now` is
     asking for it now, and push_solution is an idempotent overwrite anyway."""
     return file_exists(semester_org, CONFIG_REPO, solution_record_path(slug))
 

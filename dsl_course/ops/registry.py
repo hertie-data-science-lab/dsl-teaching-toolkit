@@ -29,6 +29,8 @@ from ..course import (
     PUBLIC_DIRS,
     PUBLIC_HTML_PDF,
     PUBLIC_TYPES,
+    SOLUTION_NOW,
+    SOLUTION_WARNING,
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -235,8 +237,8 @@ def _assign_base(request: Request) -> list[str]:
 
 def _handout(request: Request) -> list[str]:
     argv = _assign_base(request)
-    if _a(request, "include_solution"):
-        argv.append("--solution")
+    if _a(request, "solution_datetime"):
+        argv += ["--solution-datetime", _a(request, "solution_datetime")]
     return argv
 
 
@@ -477,7 +479,10 @@ _OPS = (
         args_schema=_args(
             {
                 "course_source_repo": _TEMPLATE,
-                "include_solution": _boolean("Also push the solution branch"),
+                "solution_datetime": _enum(
+                    (SOLUTION_NOW,),
+                    f"`{SOLUTION_NOW}` also pushes the solution branch. {SOLUTION_WARNING}",
+                ),
             },
             required=("course_source_repo",),
         ),

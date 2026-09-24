@@ -1488,8 +1488,8 @@ def scaffold_assignment(
             "moment. Needs `handout_datetime:` set too - the schedule can only push a "
             "solution into repos it provisioned. There is no default: leave it out and "
             "the solution never ships automatically.\n"
-            "- **By hand** - run **Release assignment** with **include_solution** "
-            "ticked.\n\n"
+            "- **By hand** - run **Release assignment** with `solution_datetime` set to "
+            "`now`.\n\n"
             "Both do the same thing, idempotently, so a scheduled release you then "
             "re-run by hand changes nothing.\n"
         )

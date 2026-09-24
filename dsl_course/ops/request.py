@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import re
 
-from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM
+from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM, SOLUTION_NOW
 from ..discovery import discover_semesters
 from ..gh_teams import get_team_members, list_teams
 from .registry import (
@@ -160,6 +160,11 @@ def parse_request(text: str) -> Request:
         raise RequestError(code, f"The request is malformed: {'; '.join(problems)}.")
     raw = _renamed(raw, RENAMED_REQUEST_FIELDS, "$")
     raw["args"] = _renamed(raw["args"], RENAMED_REQUEST_ARGS, "$.args")
+    # `include_solution: true` is the old spelling of `solution_datetime: now`.
+    if isinstance(raw["args"], dict) and "include_solution" in raw["args"]:
+        raw["args"] = dict(raw["args"])
+        if raw["args"].pop("include_solution") is True:
+            raw["args"].setdefault("solution_datetime", SOLUTION_NOW)
     op = REGISTRY[raw["op"]]
     problems = validate(raw["args"], op.args_schema, "$.args")
     if problems:

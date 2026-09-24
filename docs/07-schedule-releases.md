@@ -417,7 +417,7 @@ Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_date
 
 ### Releasing the model solution
 
-`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
+`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing.
 
 It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
 

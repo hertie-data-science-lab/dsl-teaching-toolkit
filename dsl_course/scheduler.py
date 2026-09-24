@@ -40,7 +40,7 @@ Assignment handouts are declared with the rest of the assignment's lifecycle -
 `assignments.<slug>.handout_datetime` - and synthesised into releases here
 (_handout_releases), so they fire through the exact machinery a deploy does. The model
 solution rides on that same release once `assignments.<slug>.solution_datetime` has
-passed - Release assignment's `include_solution` tick, on a clock.
+passed - Release assignment's `solution_datetime: now`, on a clock.
 
 Every tick also drives each assignment's grading deadline (`grading_datetime`, else
 `due_datetime`), whether or not the semester uses `releases` at all:

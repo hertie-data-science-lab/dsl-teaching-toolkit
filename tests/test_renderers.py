@@ -332,7 +332,7 @@ def test_refresh_re_seeds_itself_nightly_without_a_gate():
 RELEASE_ASSIGNMENT_INPUTS = [
     "course_source_repo",
     "semester_org",
-    "include_solution",
+    "solution_datetime",
     "dry_run",
 ]
 
@@ -349,7 +349,8 @@ def test_the_hand_out_button_asks_what_where_and_two_switches():
         assert inp[name]["description"].startswith(f"{n}. ")
     # The template it is seeded into is still the one it opens on.
     assert inp["course_source_repo"]["default"] == ASSIGNMENTS_2[0]
-    assert inp["include_solution"]["default"] is False
+    assert inp["solution_datetime"]["default"] == ""
+    assert course.SOLUTION_WARNING in inp["solution_datetime"]["description"]
     assert inp["dry_run"]["default"] is False
 
 

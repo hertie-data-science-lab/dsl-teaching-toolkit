@@ -704,6 +704,7 @@ hand migration of the live orgs' files). Nothing may write an old spelling again
 | copy "staff", "teaching team" | "instructors" | logs, mails, forms, docs | now |
 | `status.json` `late_until`; `schedule.grading_datetime_at` + `grades.cutoff_at` | `grading_cutoff_datetime`; one resolver, `schedule.grading_cutoff_datetime` | `dsl.status/1` (the console follows in WP-A3); engine | now |
 | copy "grading cutoff", "grading deadline", "the cutoff" | "late cutoff" | logs, mails, receipts, forms | now |
+| Release assignment input `include_solution`; `assign --solution`; op arg `include_solution` | `solution_datetime` (`now` = include; a later moment goes in `schedule.yml`); `--solution-datetime now`; op arg `solution_datetime` | rendered workflow (now); CLI alias and request arg (next release) | next release |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from dsl_course import (
+    assign,
     bootstrap_course,
     discovery,
     grades,
@@ -24,6 +25,7 @@ from dsl_course import (
     welcome,
 )
 from dsl_course.course import INSTRUCTOR_ROLES, people_by_role
+from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import RequestError, parse_request
 
 # ------------------------------------------------------------------ semester (cohort)
@@ -321,3 +323,62 @@ def test_status_json_names_the_cutoff_grading_cutoff_datetime():
     row = schemas.status_schema()["properties"]["assignments"]["items"]
     assert "grading_cutoff_datetime" in row["required"]
     assert "late_until" not in row["properties"]
+
+
+# ------------------------------------------- solution_datetime (include_solution, --solution)
+
+
+def _hand_out(monkeypatch, *flags: str) -> list[bool]:
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        assign,
+        "provision_all",
+        lambda *a, solution=False, **k: seen.append(solution) or (0, 0),
+    )
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    base = [
+        "assign",
+        "--master-org",
+        "C",
+        "--course-source-repo",
+        "a1",
+        "--semester-org",
+        "S",
+    ]
+    monkeypatch.setattr(sys, "argv", [*base, *flags])
+    assert assign.main() == 0
+    return seen
+
+
+@pytest.mark.parametrize(
+    "flags, pushed",
+    [
+        ((), False),
+        (("--solution-datetime", "now"), True),
+        (("--solution",), True),
+    ],
+)
+def test_the_manual_hand_out_includes_the_solution_only_when_asked(
+    monkeypatch, flags, pushed
+):
+    assert _hand_out(monkeypatch, *flags) == [pushed]
+
+
+def test_a_later_solution_moment_is_refused_on_a_manual_hand_out(monkeypatch):
+    with pytest.raises(SystemExit):
+        _hand_out(monkeypatch, "--solution-datetime", "2026-12-01")
+
+
+def test_an_old_include_solution_request_becomes_solution_datetime_now():
+    req = parse_request(
+        _request(
+            op="assignment.handout_now",
+            semester_org="S",
+            args={"course_source_repo": "a1", "include_solution": True},
+        )
+    )
+    assert req.args == {"course_source_repo": "a1", "solution_datetime": "now"}
+    assert REGISTRY["assignment.handout_now"].argv(req)[-2:] == [
+        "--solution-datetime",
+        "now",
+    ]

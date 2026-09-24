@@ -416,7 +416,7 @@ Add more sections freely (e.g. `labs/01_.../`, `datasets/01_.../`).
 
 `assignment-N-<year>` (an `is_template` repo) - the source for Release assignment:
 - **`main` branch** - the starter code only (no tests, no autograder). This is exactly what students receive (native template-generate copies `main` only).
-- **`solution` branch** - the model solution (`solution/`), plus **`grading_config.yml`** and the **hidden tests** the autograder runs faculty-side at the cutoff. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **include_solution** ticked (a separate, later commit); the hidden tests and `grading_config.yml` never do.
+- **`solution` branch** - the model solution (`solution/`), plus **`grading_config.yml`** and the **hidden tests** the autograder runs faculty-side at the cutoff. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **solution_datetime** `now` (a separate, later commit); the hidden tests and `grading_config.yml` never do.
 
 ## Further details on how the actions behave
 
@@ -436,7 +436,7 @@ released appears, and re-releasing changes nothing.
 **Release assignment** - two stages: (1) it freezes a semester-level template repo
 `<assignment>` from your `assignment-*-<year>` template; (2) it generates one private
 `<assignment>-<handle>` repo per onboarded student **from that semester template**, adding
-each as collaborator. After the assignment deadline, rerun with **include_solution** to push the
+each as collaborator. After the assignment deadline, rerun with **solution_datetime** `now` to push the
 template's `solution` branch into every student repo. Solutions stay on the `solution`
 branch so a normal release never leaks them. A template's `submit_via` can change stage
 (2) instead: `external` creates no repo at all, and `shared_dropbox_repo` creates one

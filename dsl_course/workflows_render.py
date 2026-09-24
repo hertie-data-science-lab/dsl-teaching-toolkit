@@ -38,6 +38,8 @@ from .course import (
     PUBLIC_TYPES,
     SANDBOX_USER,
     SCOPED_RUN_TITLE,
+    SOLUTION_NOW,
+    SOLUTION_WARNING,
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -931,10 +933,10 @@ on:
     inputs:
 {_assignment_input(assignments or [], "1. Course-org repo to hand out from", source_repo)}
 {_choice_input("semester_org", "2. Target semester org", semester_orgs)}
-      include_solution:
-        description: "3. Also push the model solution from the template's solution branch into every student repo"
-        type: boolean
-        default: false
+      solution_datetime:
+        description: "3. Type {SOLUTION_NOW} to also push the model solution from the template's solution branch. {SOLUTION_WARNING} Leave empty otherwise; a later moment belongs in schedule.yml"
+        required: false
+        default: ""
       dry_run:
         description: "4. Preview only - list the repos that would be created, create nothing"
         type: boolean
@@ -949,12 +951,12 @@ on:
           MASTER_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          INC_SOL: ${{{{ inputs.include_solution }}}}
+          SOLUTION_DATETIME: ${{{{ inputs.solution_datetime }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
           gh auth setup-git
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG")
-          [ "$INC_SOL" = "true" ] && args+=(--solution)
+          [ -n "$SOLUTION_DATETIME" ] && args+=(--solution-datetime "$SOLUTION_DATETIME")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.assign "${{args[@]}}"
 """

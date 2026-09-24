@@ -320,6 +320,14 @@ SHAPE_NOTES = {
 # the assignment's page (`site._assignment_entry`, then the layout) and the About line of
 # every submission repo (`assign._about`). ONE constant, because the two are read minutes
 # apart by the same student, and a cutoff worded twice is a cutoff with two answers.
+# The manual hand out's solution switch (decision 0012): `solution_datetime`, the schedule's
+# own key, where the one value a press can act on is SOLUTION_NOW. Every surface that offers
+# it carries SOLUTION_WARNING, because what it does cannot be taken back.
+SOLUTION_NOW = "now"
+SOLUTION_WARNING = (
+    "Pushes the model answer and rubric into every student's repo. This is not returning "
+    "marks, and cannot be undone for reuse."
+)
 CUTOFF_SENTENCE = "What is on main at the late cutoff is what is marked."
 # GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
 # the cutoff sentence plus the note, so a note that grew past this would be TRUNCATED by

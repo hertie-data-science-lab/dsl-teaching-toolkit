@@ -29,8 +29,9 @@ Pick the `course_source_repo` - the same field a scheduled handout names in `sch
 collaborator.
 
 Four boxes, in the order you answer them: `course_source_repo`, `semester_org`, then
-- `include_solution` (**off** by default; also push the template's `solution`
-branch into each student repo). Schedulable instead, as `solution_datetime:` on the
+- `solution_datetime` (empty by default; `now` also pushes the template's `solution`
+branch into each student repo - the model answer and rubric, which is not returning marks
+and cannot be undone for reuse). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
 - `dry_run` (**off** by default; list the repos that *would* be created).
 
@@ -71,8 +72,8 @@ it; the marks were never going here anyway), and the
 assignment's page on the semester site - and the repo's own About line - says the repo is
 public before they push anything into it.
 
-No **model solution** is pushed into these repos, whatever `include_solution` or
-`solution_datetime:` says - publishing the answers is not something a later run could take
+No **model solution** is pushed into these repos, whatever
+`solution_datetime` says - publishing the answers is not something a later run could take
 back - so it stays on the template's `solution` branch for the teaching team.
 
 GitHub turns **secret scanning and push protection** on for a public repository itself, so

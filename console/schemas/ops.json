@@ -236,9 +236,12 @@
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
             "type": "string"
           },
-          "include_solution": {
-            "description": "Also push the solution branch",
-            "type": "boolean"
+          "solution_datetime": {
+            "description": "`now` also pushes the solution branch. Pushes the model answer and rubric into every student's repo. This is not returning marks, and cannot be undone for reuse.",
+            "enum": [
+              "now"
+            ],
+            "type": "string"
           }
         },
         "required": [
