@@ -1,7 +1,7 @@
-"""dsl-course roster -- read the per-cohort students.csv.
+"""dsl-course roster -- read the per-semester students.csv.
 
-The single durable roster artifact is a PRIVATE per-cohort `students.csv`, kept in
-the cohort org's `classroom-config` repo. Columns:
+The single durable roster artifact is a PRIVATE per-semester `students.csv`, kept in
+the semester org's `classroom-config` repo. Columns:
 
     hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at
 
@@ -19,10 +19,10 @@ skipped by provisioning.
 Blank means "not yet emailed", which is what the codes send selects on - without it,
 every re-run re-mailed every student who had not yet opened a Join issue.
 
-`role` splits the cohort into `enrolled` (the default - full participants) and `auditor`
+`role` splits the semester into `enrolled` (the default - full participants) and `auditor`
 (read-only: released materials, but no assignment repos and no gradebook). A roster
 written before the column existed has no `role` cell at all, so a missing or blank value
-means `enrolled` - never break onboarding for a deployed cohort's roster.
+means `enrolled` - never break onboarding for a deployed semester's roster.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ FIELDS = (
     "code_sent_at",
 )
 # The columns no roster may lack. `enrol_code` and `role` were added later and stay
-# optional so an older cohort keeps parsing; these two are what every consumer keys on.
+# optional so an older semester keeps parsing; these two are what every consumer keys on.
 REQUIRED_FIELDS = ("hertie_email", "github_handle")
 
 
@@ -98,7 +98,7 @@ def normalise_role(value: str) -> str:
     """Map a raw `role` cell to `enrolled` / `auditor`.
 
     Blank (or a column that isn't there at all - a roster seeded before the column
-    existed) means `enrolled`, so no deployed cohort breaks. Anything unrecognised also
+    existed) means `enrolled`, so no deployed semester breaks. Anything unrecognised also
     reads as `enrolled`, but says so on stderr rather than silently mis-classifying."""
     role = value.strip().lower()
     if role == ROLE_AUDITOR:
@@ -179,8 +179,8 @@ def enrolled(students: list[Student]) -> list[Student]:
 
 
 @cache
-def _roster_text(cohort_org: str) -> str | None:
-    """students.csv's text, read ONCE per cohort per process.
+def _roster_text(semester_org: str) -> str | None:
+    """students.csv's text, read ONCE per semester per process.
 
         A single CLI run asks for the roster several times over - `collect` reads it per
         assignment, `assign` beside the schedule and teams.csv.
@@ -197,7 +197,7 @@ def _roster_text(cohort_org: str) -> str | None:
         The TEXT is memoised rather than `load`'s rows, so every caller still gets its own
         parse (nobody can mutate another's list) and the loud "roster missing" line is still
         printed where it happens. Cleared between tests (tests/conftest.py)."""
-    return get_file_content(cohort_org, CONFIG_REPO, ROSTER_PATH)
+    return get_file_content(semester_org, CONFIG_REPO, ROSTER_PATH)
 
 
 def reread() -> None:
@@ -208,26 +208,26 @@ def reread() -> None:
 
 
 def load(
-    cohort_org: str, faults: list[ConfigFault] | None = None
+    semester_org: str, faults: list[ConfigFault] | None = None
 ) -> list[Student] | None:
-    """Fetch + parse students.csv from the cohort's PRIVATE classroom-config repo.
+    """Fetch + parse students.csv from the semester's PRIVATE classroom-config repo.
 
     Returns None (after logging why) when the file can't be fetched at all - callers
     can then distinguish "roster missing/unreadable" (an error) from a roster that
-    exists but has no rows yet (a valid state for a freshly bootstrapped cohort).
+    exists but has no rows yet (a valid state for a freshly bootstrapped semester).
 
     An ABSENT file is a fault like any other row this parser cannot use: nobody is
     enrolled and nobody is sent a code, which is the same cost as a header nobody can
     read, and the only difference is that there is no line to point at. Recording it is
     what stops the digest reporting an absent roster as a healthy one - an empty fault
-    list closes the issue and tells the cohort the file is fine. A read that FAILED does
+    list closes the issue and tells the semester the file is fine. A read that FAILED does
     not come through here at all: `get_file_content` returns None only for a 404 and
     raises on everything else, so "we could not look" still reds the run that asked."""
-    content = _roster_text(cohort_org)
+    content = _roster_text(semester_org)
     if content is None:
         log_err(
-            f"Could not find {ROSTER_PATH} in {cohort_org}/{CONFIG_REPO} - "
-            f"bootstrap the cohort first (bootstrap_course --cohort)."
+            f"Could not find {ROSTER_PATH} in {semester_org}/{CONFIG_REPO} - "
+            f"bootstrap the semester first (bootstrap_course --semester)."
         )
         if faults is not None:
             faults.append(

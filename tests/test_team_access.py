@@ -2,7 +2,7 @@
 scaffolded course repo - so a non-owner instructor can push content to a repo they just
 scaffolded (previously only `.github` was granted, leaving content repos unwritable).
 
-The same policy covers a cohort org's infra repos (welcome, classroom-config): the cohort
+The same policy covers a semester org's infra repos (welcome, classroom-config): the semester
 is `default_repository_permission=none`, so before this only org owners could edit the
 roster/schedule or triage onboarding issues."""
 
@@ -52,7 +52,7 @@ def scaffold_grants(monkeypatch):
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: [])
     monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
     monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 0)
 
@@ -75,7 +75,7 @@ def test_a_scaffolded_materials_repo_is_granted_to_the_faculty_teams(scaffold_gr
     repo = "course-materials-f2026"
     for team, perm in access.COURSE_TEAM_ACCESS.items():
         assert (team, repo, perm) in scaffold_grants
-    # ...and the cohort-declared instructors team for that tag, scoped to its own content.
+    # ...and the semester-declared instructors team for that tag, scoped to its own content.
     assert ("instructors-f2026", repo, "push") in scaffold_grants
 
 
@@ -95,30 +95,33 @@ def test_faculty_teams_are_only_instructors_and_admin():
     assert "students" not in slugs and "auditors" not in slugs
 
 
-def test_cohort_teams_are_students_and_auditors():
-    assert {t[0] for t in course.COHORT_TEAMS} == {"students", "auditors"}
+def test_semester_teams_are_students_and_auditors():
+    assert {t[0] for t in course.SEMESTER_TEAMS} == {"students", "auditors"}
 
 
-def test_faculty_and_cohort_team_sets_are_disjoint():
+def test_faculty_and_semester_team_sets_are_disjoint():
     faculty = {t[0] for t in course.FACULTY_TEAMS}
-    cohort = {t[0] for t in course.COHORT_TEAMS}
-    assert not (faculty & cohort)
+    semester = {t[0] for t in course.SEMESTER_TEAMS}
+    assert not (faculty & semester)
 
 
-def test_cohort_infra_repos_get_the_faculty_grant():
-    # A cohort org is default_repository_permission=none, so a non-owner instructor could
+def test_semester_infra_repos_get_the_faculty_grant():
+    # A semester org is default_repository_permission=none, so a non-owner instructor could
     # not open classroom-config (schedule.yml/students.csv/teams.csv/people.yml, and the
     # grading sheets)
     # or triage welcome's needs-review onboarding issues without these.
-    assert set(bootstrap_course.COHORT_FACULTY_REPOS) == {"welcome", "classroom-config"}
+    assert set(bootstrap_course.SEMESTER_FACULTY_REPOS) == {
+        "welcome",
+        "classroom-config",
+    }
     # ...and single-sourced with the nightly sweep's write floor, so a repo cannot be
     # granted push at bootstrap and then read by the sweep (or the reverse).
-    assert set(bootstrap_course.COHORT_FACULTY_REPOS) | {".github"} == set(
-        access.COHORT_WRITE_REPOS
+    assert set(bootstrap_course.SEMESTER_FACULTY_REPOS) | {".github"} == set(
+        access.SEMESTER_WRITE_REPOS
     )
 
 
-def test_cohort_faculty_grant_uses_the_shared_policy(monkeypatch):
+def test_semester_faculty_grant_uses_the_shared_policy(monkeypatch):
     granted = []
 
     def fake_grant(org, team, repo, perm):
@@ -126,7 +129,7 @@ def test_cohort_faculty_grant_uses_the_shared_policy(monkeypatch):
         return True
 
     monkeypatch.setattr(bootstrap_course, "grant_team_repo_access", fake_grant)
-    bootstrap_course.grant_cohort_faculty_access("Course-f2026")
+    bootstrap_course.grant_semester_faculty_access("Course-f2026")
     assert set(granted) == {
         ("Course-f2026", "instructors", "welcome", "push"),
         ("Course-f2026", "course-admin", "welcome", "admin"),
@@ -135,23 +138,25 @@ def test_cohort_faculty_grant_uses_the_shared_policy(monkeypatch):
     }
 
 
-def test_cohort_setup_grants_faculty_access_even_when_nothing_is_seeded(monkeypatch):
+def test_semester_setup_grants_faculty_access_even_when_nothing_is_seeded(monkeypatch):
     # The grant must sit OUTSIDE the `if create_repo(...)` seeding blocks: "Bootstrap
-    # cohort" re-runs this on an existing org, and that re-run is the repair path for a
-    # cohort bootstrapped before the grant existed.
+    # semester" re-runs this on an existing org, and that re-run is the repair path for a
+    # semester bootstrapped before the grant existed.
     granted = []
     monkeypatch.setattr(bootstrap_course, "gh", lambda *a, **k: (0, ""))
-    monkeypatch.setattr(bootstrap_course, "create_cohort_teams", lambda org: 0)
+    monkeypatch.setattr(bootstrap_course, "create_semester_teams", lambda org: 0)
     monkeypatch.setattr(bootstrap_course, "create_repo", lambda *a, **k: False)
     monkeypatch.setattr(bootstrap_course, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(bootstrap_course.scaffold, "scaffold_site", lambda org: 0)
-    monkeypatch.setattr(bootstrap_course, "grant_cohort_faculty_access", granted.append)
-    bootstrap_course.setup_cohort_extras("Course-f2026", "release")
+    monkeypatch.setattr(
+        bootstrap_course, "grant_semester_faculty_access", granted.append
+    )
+    bootstrap_course.setup_semester_extras("Course-f2026", "release")
     assert granted == ["Course-f2026"]
 
 
 def test_the_two_faculty_levels_differ_only_in_the_instructors_grant():
-    # course-admin is the cohort's owner of last resort either way: read access cannot fix
+    # course-admin is the semester's owner of last resort either way: read access cannot fix
     # a broken repo. The distinction is whether an INSTRUCTOR should be editing.
     assert access.COURSE_TEAM_ACCESS == {"instructors": "push", "course-admin": "admin"}
     assert access.FACULTY_READ_ACCESS == {
@@ -162,17 +167,17 @@ def test_the_two_faculty_levels_differ_only_in_the_instructors_grant():
 
 
 def test_the_floor_is_write_where_faculty_author_and_read_elsewhere():
-    # Every repo of a COURSE org is faculty-authored staging. In a COHORT org only the three
+    # Every repo of a COURSE org is faculty-authored staging. In a SEMESTER org only the three
     # repos faculty edit (and `.github`, which workflow_dispatch needs write on) get write;
     # released content, submission repos and gradebooks each have their source of truth
     # elsewhere and are overwritten wholesale, so write there invites an edit that vanishes.
     for repo in (".github", "course-materials-f2026", "assignment-1"):
         assert access.faculty_floor(repo, "course") is access.COURSE_TEAM_ACCESS
-    for repo in access.COHORT_WRITE_REPOS:
-        assert access.faculty_floor(repo, "cohort") is access.COURSE_TEAM_ACCESS
+    for repo in access.SEMESTER_WRITE_REPOS:
+        assert access.faculty_floor(repo, "semester") is access.COURSE_TEAM_ACCESS
     for repo in ("materials", "assignment-1-ada", "grades-ada", "x.github.io"):
-        assert access.faculty_floor(repo, "cohort") is access.FACULTY_READ_ACCESS
-    # An unplaceable listing reads as a cohort: only a listing that positively says
+        assert access.faculty_floor(repo, "semester") is access.FACULTY_READ_ACCESS
+    # An unplaceable listing reads as a semester: only a listing that positively says
     # "course" earns the write-everywhere floor.
     assert access.faculty_floor("materials", None) is access.FACULTY_READ_ACCESS
     # A PUBLIC submission repo (`visibility: public`) is a student repo like any other:
@@ -184,7 +189,8 @@ def test_the_floor_is_write_where_faculty_author_and_read_elsewhere():
     ]
     assert "assignment-1-ada" in discovery.student_repo_names(listing)
     assert (
-        access.faculty_floor("assignment-1-ada", "cohort") is access.FACULTY_READ_ACCESS
+        access.faculty_floor("assignment-1-ada", "semester")
+        is access.FACULTY_READ_ACCESS
     )
     # And a protected repo takes read whatever the tier says.
     assert (
@@ -281,14 +287,14 @@ def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeyp
         ),
     }
     repos = [{"name": n} for n in (".github", "classroom-config", "materials")]
-    changed, granted = _sweep(monkeypatch, listings, repos, "cohort")
+    changed, granted = _sweep(monkeypatch, listings, repos, "semester")
     assert (changed, granted) == (0, [])
 
 
 def test_the_sweep_leaves_a_released_dest_at_the_push_a_release_gave_it(monkeypatch):
     # A release grants the instructors PUSH on its dest, because an edit made in the
-    # cohort repo now survives the next release (deploy merges rather than copies over).
-    # The floor stays at read - a cohort dest is not a repo faculty author - and the two
+    # semester repo now survives the next release (deploy merges rather than copies over).
+    # The floor stays at read - a semester dest is not a repo faculty author - and the two
     # only agree because the sweep raises and never lowers. Demote here and every
     # instructor loses the write the release just handed them, nightly.
     listings = {
@@ -297,17 +303,19 @@ def test_the_sweep_leaves_a_released_dest_at_the_push_a_release_gave_it(monkeypa
         ),
         "course-admin": _listing(_admin_row("materials")),
     }
-    changed, granted = _sweep(monkeypatch, listings, [{"name": "materials"}], "cohort")
+    changed, granted = _sweep(
+        monkeypatch, listings, [{"name": "materials"}], "semester"
+    )
     assert (changed, granted) == (0, [])
-    assert access.faculty_floor("materials", "cohort") is access.FACULTY_READ_ACCESS
+    assert access.faculty_floor("materials", "semester") is access.FACULTY_READ_ACCESS
 
 
 def test_the_sweep_grants_the_per_repo_floor_where_a_team_holds_nothing(monkeypatch):
-    # Nothing granted anywhere: a cohort's write repos converge at push, the rest at pull,
+    # Nothing granted anywhere: a semester's write repos converge at push, the rest at pull,
     # course-admin at admin throughout. A course org converges at push everywhere.
     listings = {"instructors": _listing(), "course-admin": _listing()}
     repos = [{"name": n} for n in ("welcome", "assignment-1-ada", "grades-ada")]
-    changed, granted = _sweep(monkeypatch, listings, repos, "cohort")
+    changed, granted = _sweep(monkeypatch, listings, repos, "semester")
     assert changed == 6
     assert set(granted) == {
         ("instructors", "welcome", "push"),
@@ -348,7 +356,7 @@ def test_the_sweep_leaves_a_maintain_or_triage_grant_exactly_as_it_is(monkeypatc
         "course-admin": _listing(_admin_row(".github"), _admin_row("grades-ada")),
     }
     repos = [{"name": n} for n in (".github", "grades-ada")]
-    assert _sweep(monkeypatch, listings, repos, "cohort") == (0, [])
+    assert _sweep(monkeypatch, listings, repos, "semester") == (0, [])
 
 
 def test_the_sweep_raises_a_grant_below_its_floor_but_leaves_one_above(monkeypatch):
@@ -381,7 +389,7 @@ def test_the_sweep_raises_a_grant_below_its_floor_but_leaves_one_above(monkeypat
         ),
     }
     repos = [{"name": ".github"}, {"name": "assignment-1-ada"}]
-    changed, granted = _sweep(monkeypatch, listings, repos, "cohort")
+    changed, granted = _sweep(monkeypatch, listings, repos, "semester")
     assert (changed, granted) == (1, [("instructors", ".github", "push")])
 
 
@@ -395,16 +403,16 @@ def test_the_sweep_fails_closed_on_a_grant_it_cannot_rank(monkeypatch):
         ),
         "course-admin": _listing(json.dumps({"name": "odd", "permissions": {}})),
     }
-    changed, granted = _sweep(monkeypatch, listings, [{"name": "odd"}], "cohort")
+    changed, granted = _sweep(monkeypatch, listings, [{"name": "odd"}], "semester")
     assert (changed, granted) == (0, [])
 
 
 def test_the_sweep_skips_archived_repos(monkeypatch):
-    # GitHub refuses a PUT on an archived repo, so a frozen cohort (every repo archived)
+    # GitHub refuses a PUT on an archived repo, so a frozen semester (every repo archived)
     # would otherwise fail 2 writes per repo every night, forever.
     listings = {"instructors": _listing(), "course-admin": _listing()}
     repos = [{"name": "old", "archived": True}, {"name": "live", "archived": False}]
-    _, granted = _sweep(monkeypatch, listings, repos, "cohort")
+    _, granted = _sweep(monkeypatch, listings, repos, "semester")
     assert {r for _, r, _ in granted} == {"live"}
 
 
@@ -426,12 +434,12 @@ def test_an_absent_team_is_none_and_an_unreadable_one_raises(monkeypatch):
 
 def test_an_absent_team_stops_the_sweep_for_that_team_only(monkeypatch):
     listings = {"course-admin": _listing()}  # instructors -> 404 from the fake
-    _, granted = _sweep(monkeypatch, listings, [{"name": "welcome"}], "cohort")
+    _, granted = _sweep(monkeypatch, listings, [{"name": "welcome"}], "semester")
     assert granted == [("course-admin", "welcome", "admin")]
 
 
 def test_the_listing_is_paginated_in_pages_of_100(monkeypatch):
-    # Every other paginated read here asks for 100 a page; a cohort org holds a repo per
+    # Every other paginated read here asks for 100 a page; a semester org holds a repo per
     # student per assignment plus a gradebook each.
     seen = []
     monkeypatch.setattr(access, "gh", lambda *a, **k: seen.append(a) or (0, ""))
@@ -463,7 +471,7 @@ def test_a_protected_repo_takes_the_read_floor_whatever_the_tier_says(monkeypatc
 
 def test_a_team_grant_waits_out_a_just_flipped_repo(monkeypatch):
     # Live 2026-09-17: flipping an assignment repo to public locks it, and the team grant
-    # a second later was refused outright - the cohort could not see its own handout. The
+    # a second later was refused outright - the semester could not see its own handout. The
     # PUT goes through `repos.gh_settled`, so it waits the lock out.
     answers = iter(
         [
@@ -474,14 +482,14 @@ def test_a_team_grant_waits_out_a_just_flipped_repo(monkeypatch):
     )
     monkeypatch.setattr(repos_mod, "gh", lambda *a, **k: next(answers))
     monkeypatch.setattr(repos_mod.time, "sleep", lambda s: None)
-    assert access.grant_team_repo_access("Cohort", "students", "a1", "pull") is True
+    assert access.grant_team_repo_access("Semester", "students", "a1", "pull") is True
 
 
 def test_a_missing_team_is_a_note_but_any_other_failure_is_an_error(
     monkeypatch, capsys
 ):
     # grant_read_teams used to print "team not found" for EVERY failure, so a 5xx or a
-    # rate limit read as a cohort that had not made its teams yet.
+    # rate limit read as a semester that had not made its teams yet.
     # The grant PUT goes through `repos.gh_settled`, which waits out a just-created or
     # just-flipped repo; neither of these answers is that, so neither is retried.
     monkeypatch.setattr(
@@ -514,12 +522,12 @@ def _public_sweep(monkeypatch, listing_rows, put_ok):
     monkeypatch.setattr(access, "gh_settled", fake_gh)
     repos = [repo_row("grades-ada-l"), repo_row("assignment-1-ada-l")]
     return access.converge_faculty_access(
-        "COHORT", repos, "cohort", protected=frozenset(r["name"] for r in repos)
+        "SEMESTER", repos, "semester", protected=frozenset(r["name"] for r in repos)
     )
 
 
 def test_the_faculty_sweep_names_no_student_repo_in_a_public_log(monkeypatch, capsys):
-    # The sweep walks EVERY repo in the cohort org, so its per-repo narration named a
+    # The sweep walks EVERY repo in the semester org, so its per-repo narration named a
     # gradebook and a submission repo on the happy path, once a night, in a PUBLIC log.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     swept = _public_sweep(monkeypatch, (), put_ok=True)
@@ -537,7 +545,7 @@ def test_a_failed_faculty_grant_names_no_student_repo(monkeypatch, capsys):
     assert swept.failures == 4
     captured = capsys.readouterr()
     assert "ada-l" not in captured.out + captured.err
-    assert "could not grant instructors pull on a repo in COHORT" in captured.err
+    assert "could not grant instructors pull on a repo in SEMESTER" in captured.err
 
 
 def test_an_unrankable_grant_is_counted_not_named(monkeypatch, capsys):
@@ -560,7 +568,7 @@ def test_an_unrankable_grant_is_counted_not_named(monkeypatch, capsys):
 def test_the_verbose_sweep_still_says_which_repo_it_was(monkeypatch, capsys):
     monkeypatch.setenv("DSL_VERBOSE", "1")
     _public_sweep(monkeypatch, (), put_ok=True)
-    assert "COHORT/grades-ada-l" in capsys.readouterr().out
+    assert "SEMESTER/grades-ada-l" in capsys.readouterr().out
 
 
 # ------------------------------------------------------------ converge_topics
@@ -587,7 +595,7 @@ def _converge(monkeypatch, repos, ok=True):
             stamped.append((repo, topics, person)) or ok
         ),
     )
-    swept = access.converge_topics("Cohort-f2026", repos, "cohort")
+    swept = access.converge_topics("Semester-f2026", repos, "semester")
     # Every repo this sweep tags is a submission repo or a gradebook, so every stamp is a
     # person write and no failure line may name one.
     assert all(person for _repo, _topics, person in stamped)
@@ -674,24 +682,24 @@ def test_repo_teams_answers_which_teams_already_see_one_repo(monkeypatch):
         return 0, "Assignment-3-Alpha\ninstructors\n"
 
     monkeypatch.setattr(access, "gh", fake_gh)
-    assert access.repo_teams("Cohort", "assignment-3-submissions") == frozenset(
+    assert access.repo_teams("Semester", "assignment-3-submissions") == frozenset(
         {"assignment-3-alpha", "instructors"}
     )
-    assert "repos/Cohort/assignment-3-submissions/teams" in asked[0][2]
+    assert "repos/Semester/assignment-3-submissions/teams" in asked[0][2]
 
 
 def test_repo_teams_cannot_answer_when_the_listing_fails(monkeypatch, capsys):
     # None, never the empty set: "we could not look" must not read as "nobody is granted",
     # which is the answer that would leave a team without access and say nothing.
     monkeypatch.setattr(access, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
-    assert access.repo_teams("Cohort", "assignment-3-submissions") is None
+    assert access.repo_teams("Semester", "assignment-3-submissions") is None
     assert "could not read which teams can see" in capsys.readouterr().err
 
 
 def test_a_shared_drop_box_takes_the_read_floor_like_any_student_repo():
-    # `<slug>-submissions` derives from the frozen cohort template by NAME, so the rule
+    # `<slug>-submissions` derives from the frozen semester template by NAME, so the rule
     # that recognises a student repo already covers it - no new rule, and therefore no
-    # rule to forget. The floor is what keeps faculty off a push on the cohort's work:
+    # rule to forget. The floor is what keeps faculty off a push on the semester's work:
     # marking happens in classroom-config, so a commit here would reach no gradebook.
     listing = [
         repo_row("assignment-3", isTemplate=True),
@@ -700,7 +708,7 @@ def test_a_shared_drop_box_takes_the_read_floor_like_any_student_repo():
     protected = discovery.student_repo_names(listing)
     assert "assignment-3-submissions" in protected
     assert (
-        access.faculty_floor("assignment-3-submissions", "cohort", protected)
+        access.faculty_floor("assignment-3-submissions", "semester", protected)
         is access.FACULTY_READ_ACCESS
     )
     # And the same rule is what keeps it off the public org landing page and out of the

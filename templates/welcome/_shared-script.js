@@ -1,6 +1,6 @@
 // The half of the two onboarding workflows' github-script bodies that is the same in both.
 // Not a workflow of its own: dsl_course.welcome splices it in at their `// {shared_script}`
-// line, so a cohort receives one file per workflow as before. It was written out twice, in
+// line, so a semester receives one file per workflow as before. It was written out twice, in
 // two files, against one file format, with a test comparing the copies byte for byte to
 // catch the day they stopped agreeing.
 //

@@ -1,6 +1,6 @@
-# Configure the cohort website
+# Configure the semester website
 
-Every cohort has an auto-deployed site at `<cohort-org>.github.io`, regenerated from the org's config files.
+Every semester has an auto-deployed site at `<semester-org>.github.io`, regenerated from the org's config files.
 
 You never edit what the site shows - you edit the file it reads, and it re-syncs itself.
 
@@ -10,16 +10,16 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 |---|---|---|
 | Course blurb under the title | course org `.github/dsl-course.yml` | `course_description` |
 | Course title + code | course org `.github/dsl-course.yml` | `course_name`, `course_code` - **not** `org_name` |
-| Semester + year | *nothing to set* | inferred from the cohort org's `fYYYY`/`sYYYY` tag (`hertie-dsl-demo-f2026` → "Fall 2026") |
-| Instructor / TA cards | cohort `classroom-config/people.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
-| Instructor photos | site repo `<cohort-org>.github.io` | commit the image under `_images/pp/`, then `photo: /_images/pp/jane.jpg`. Can also use a URL that allows hotlinking |
-| Schedule rows, exams, assignment due dates | cohort `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `releases`, `events`, `assignments` (there is no `exams:` key - an exam is an `events:` entry with `type: exam`) |
+| Semester + year | *nothing to set* | inferred from the semester org's `fYYYY`/`sYYYY` tag (`hertie-dsl-demo-f2026` → "Fall 2026") |
+| Instructor / TA cards | semester `classroom-config/people.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
+| Instructor photos | site repo `<semester-org>.github.io` | commit the image under `_images/pp/`, then `photo: /_images/pp/jane.jpg`. Can also use a URL that allows hotlinking |
+| Schedule rows, exams, assignment due dates | semester `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `releases`, `events`, `assignments` (there is no `exams:` key - an exam is an `events:` entry with `type: exam`) |
 | A hand-written entry in the **Updates** box | site repo | add a file under `_announcements/` with `date:` + `details:` front matter (the file's body works too). The box shows the newest 7 items (releases feed it automatically, and only once they have actually shipped); older ones roll off as new ones arrive - delete the file to pull one early |
 | Materials links | *nothing to set* | the row appears as soon as `schedule.yml` names the session, marked "not released yet"; the links fill in as you [release](08-release-materials-to-cohort.md) |
-| A session's name + blurb | cohort `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `details` on the `releases:` entry - the Hertie syllabus's session title and learning objectives. `details` may run to several paragraphs, and shows in the schedule's Details column as well as on the session's tab |
+| A session's name + blurb | semester `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `details` on the `releases:` entry - the Hertie syllabus's session title and learning objectives. `details` may run to several paragraphs, and shows in the schedule's Details column as well as on the session's tab |
 | Readings on the **Readings** tab | course materials repo | drop the readings into `readings/NN_.../` and **every file is listed and linked automatically** for enrolled students - nothing to write. `READINGS.md` (or `.txt`/`.bib`) beside them is OPTIONAL, for what a file cannot say: a URL, pointers for what to focus on, or clean citation-style metadata. It is published as written (this site is public, so it never hosts a reading itself directly, rather links to the GH-hosted files (with their permission restrictions enforced there))|
-| The **All Materials** tab | *nothing to set* | every file released to the cohort, grouped by section and nested exactly as its repo has it - a folder opens in the page itself, at any depth, rather than only counting its contents. The only page not keyed on a session ordinal, so a released `SYLLABUS.md` or a flat `datasets/` appears here rather than on a session tab. A released syllabus is *also* pinned on the home page (found by name at the repo root, in any format) |
-| Rendered decks (an HTML deck opening in the browser instead of showing as source) | course materials repo `publish.yml` | patterns, `.gitignore` syntax, of what the site may host publicly - seeded by the **New materials repo** form and yours to edit afterwards. They are matched against the path in the cohort's copy, which is the path in this repo unless a release renamed it with `cohort_dest_path`. A matched `<name>.html` brings its `<name>_files/` bundle; the file's name then opens the hosted copy, with `source` and `render` buttons beside it, and everything unmatched is unchanged. `solution/`, `tests/`, grading files and `.env` are never hosted. Remove a pattern and the copy goes on the next sync (the site repo's git history keeps the old bytes - purge by hand) |
+| The **All Materials** tab | *nothing to set* | every file released to the semester, grouped by section and nested exactly as its repo has it - a folder opens in the page itself, at any depth, rather than only counting its contents. The only page not keyed on a session ordinal, so a released `SYLLABUS.md` or a flat `datasets/` appears here rather than on a session tab. A released syllabus is *also* pinned on the home page (found by name at the repo root, in any format) |
+| Rendered decks (an HTML deck opening in the browser instead of showing as source) | course materials repo `publish.yml` | patterns, `.gitignore` syntax, of what the site may host publicly - seeded by the **New materials repo** form and yours to edit afterwards. They are matched against the path in the semester's copy, which is the path in this repo unless a release renamed it with `semester_dest_path`. A matched `<name>.html` brings its `<name>_files/` bundle; the file's name then opens the hosted copy, with `source` and `render` buttons beside it, and everything unmatched is unchanged. `solution/`, `tests/`, grading files and `.env` are never hosted. Remove a pattern and the copy goes on the next sync (the site repo's git history keeps the old bytes - purge by hand) |
 | Open files in your local copy (a file link opening in a student's own fork or clone) | *nothing to set* | every file row carries `source` and, where the site hosts a rendered copy, `render`. A student who works through the site's **Your Profile** tab - handle, fork, clone, folders, editor - gets `online` and `local` beside those two on every row; on each assignment page they also get their own repo by name, with Edit online and Edit locally, under which sits the clone command that `Edit locally` needs. The profile is saved in that student's own browser and sent nowhere, so nobody, faculty included, can see it |
 | Which files each session links | course org `.github/dsl-course.yml` | *nothing to set* by default: a session lists its root files plus one link per subfolder, so a rendered deck lists the deck and not its assets. `site_link_extensions: [pdf, html]` narrows it further. Everything you release ships either way |
 
@@ -36,7 +36,7 @@ commit still holds the change, to be copied back out and made at the source.
 | `_data/people.yml` | overwritten from `classroom-config/people.yml` |
 | `lectures.md`, `labs.md`, `readings.md`, `materials.md`, `assignments.md`, `profile.md` | front-matter stubs pointing at the layouts below - generated wrappers, so put your own words in `index.md` |
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
-| `_data/materials.yml` | the All Materials index, rebuilt from what each cohort repo actually holds |
+| `_data/materials.yml` | the All Materials index, rebuilt from what each semester repo actually holds |
 | `files/<repo>/` | the public copies of whatever `publish.yml` names - **deleted and rebuilt** per repo every sync |
 | `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders - shipped from `templates/site/` in the toolkit, so a rendering change reaches every course site at once |
 | `.github/workflows/deploy.yml` | the Pages build - shipped from `templates/site/` too |
@@ -44,7 +44,7 @@ commit still holds the change, to be copied back out and made at the source.
 | `_config.yml` keys `remote_theme`, `dateformat`, `collections`, `defaults` | the pinned theme and the settings the layouts above depend on |
 | `README.md` | rewritten every sync - it is the repo's own "do not edit this repository" notice |
 
-**Faculty are not expected to hand-edit the cohort site at all.** Everything it shows comes
+**Faculty are not expected to hand-edit the semester site at all.** Everything it shows comes
 from the files in the table at the top of this page; edit those. What is left over -
 `index.md`, `schedule.md`, any other page of your own, `_announcements/`,
 further `_data/*.yml`, assets, `_images/`, `Gemfile`, `.gitignore` - is seeded once when the site
@@ -63,7 +63,7 @@ every site pins at a fixed ref.
 | Push to `classroom-config/schedule.yml` or `people.yml` | immediate |
 | **Release materials** / **Release assignment** workflow | immediate, in the same run |
 | A scheduled release firing | within that tick ([about every 15 minutes](07-schedule-releases.md#what-drives-the-scheduler)) |
-| Push to course org `.github/dsl-course.yml` | immediate - and re-syncs **every** cohort site |
+| Push to course org `.github/dsl-course.yml` | immediate - and re-syncs **every** semester site |
 | **Sync site** workflow, course org `.github` | on demand |
 | Anything else (e.g. editing a file inside an already-released repo) | the daily cron, **06:41 UTC** |
 

@@ -75,7 +75,7 @@ PEOPLE_ENTRY_KEYS = (
 PEOPLE_REQUIRED = ("github_handle", "email")
 COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
 COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url")
-# dsl-course.yml keys beyond `people`, `assignment_defaults` and `cohort_defaults`.
+# dsl-course.yml keys beyond `people`, `assignment_defaults` and `semester_defaults`.
 COURSE_TOP_KEYS = (
     "org",
     "org_name",
@@ -193,7 +193,7 @@ ASSIGNMENT_STATES = (
     "returned",
 )
 RELEASE_STATES = ("planned", "will_be_skipped", "released", "late")
-PROBLEM_SCOPES = ("course", "cohort")
+PROBLEM_SCOPES = ("course", "semester")
 
 
 def status_schema() -> dict:
@@ -234,15 +234,15 @@ def status_schema() -> dict:
             "ready": {"type": "boolean"},
             "materials": {"type": "array", "items": repo_state},
             "templates": {"type": "array", "items": repo_state},
-            "cohorts": {"type": "array", "items": _str()},
+            "semesters": {"type": "array", "items": _str()},
         },
         ("org", "stages"),
     )
-    cohort = _obj(
+    semester = _obj(
         {
             "org": _str(),
-            "term": nullable,
-            "term_label": nullable,
+            "key": nullable,
+            "label": nullable,
             "timezone": _str(),
             "week": {"type": ["integer", "null"]},
             "weeks": {"type": ["integer", "null"]},
@@ -328,7 +328,7 @@ def status_schema() -> dict:
                 "schema": {"type": "string", "enum": [STATUS_SCHEMA]},
                 "inputs": {"type": "object", "additionalProperties": nullable},
                 "course": course,
-                "cohort": cohort,
+                "semester": semester,
                 "problems": {"type": "array", "items": problem},
                 "this_week": {"type": "array", "items": week_item},
                 "releases": {"type": "array", "items": release},
@@ -457,7 +457,7 @@ def dsl_course_schema() -> dict:
         }
     )
     defaults = _obj(_keys((*COURSE_DEFAULT_KEYS, *ASKED_DEFAULT_KEYS), _SPEC_TYPES))
-    cohort_defaults = _obj(
+    semester_defaults = _obj(
         {
             "timezone": _str(),
             "archive": _obj(
@@ -480,7 +480,7 @@ def dsl_course_schema() -> dict:
     top |= {
         "people": people,
         "assignment_defaults": defaults,
-        "cohort_defaults": cohort_defaults,
+        "semester_defaults": semester_defaults,
     }
     return _doc(".github/dsl-course.yml", _obj(top, ("org",)))
 

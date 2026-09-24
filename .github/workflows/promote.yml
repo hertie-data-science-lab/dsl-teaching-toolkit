@@ -19,7 +19,7 @@ name: Promote to release
 # because the gate is not a second click: press this ONLY after a manual end-to-end
 # INSPECTION of the demo course org - which tracks `main`, so it has been running this code
 # since it merged - has passed. A person reads the issues, the comments, the mails that went
-# out, the run logs and the cohort site. A green test suite is not that inspection and does
+# out, the run logs and the semester site. A green test suite is not that inspection and does
 # not stand in for it.
 
 on:

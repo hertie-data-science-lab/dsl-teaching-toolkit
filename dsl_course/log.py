@@ -62,7 +62,7 @@ def log_person(msg: str) -> None:
     Named for the rule rather than for the mechanism, so a reviewer can see at the call
     site that the line is a per-person one. Every faculty workflow runs in the course org's
     PUBLIC `.github`, so its Actions log is world-readable, and a line naming one student's
-    handle, their `<slug>-<handle>` repo, or a team's roster publishes who is in the cohort
+    handle, their `<slug>-<handle>` repo, or a team's roster publishes who is in the semester
     and who is grouped with whom. Those lines are INFORMATIONAL; what a faculty member
     actually reads is the aggregate `Done - {...}` summary, which stays. So they go here:
     printed when someone runs the CLI locally with `DSL_VERBOSE=1`, absent from every

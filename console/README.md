@@ -1,7 +1,7 @@
 # Instructor Console
 
 A static web app (Vite + TypeScript + Preact) that shows an instructor their courses and
-cohorts as the lifecycle model describes them, and a student their semesters, reading GitHub
+semesters as the lifecycle model describes them, and a student their semesters, reading GitHub
 with the person's own token.
 Deployed by `.github/workflows/console-pages.yml` to
 https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/.
@@ -101,7 +101,7 @@ who teaches somewhere, and in student mode otherwise.
   archived when that `.github` repo is archived. A semester known only from a course's
   registry has its `.github` read when its student screens open. Org names compare
   case-insensitively.
-- Status: `classroom-config/.dsl/status.json` (cohort) and `.github/.dsl/status.json`
+- Status: `classroom-config/.dsl/status.json` (semester) and `.github/.dsl/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
   `inputs` with one tree read. An absent file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
@@ -125,7 +125,7 @@ who teaches somewhere, and in student mode otherwise.
   private outcome file. Hand out, return marks, archive, update every copy and send new codes
   unlock only after a preview in the same session; publishing the public website, which has no
   engine preview, asks for a confirmation instead.
-- Wizards: New course, New cohort, New assignment, New materials. Each step checks live state
+- Wizards: New course, New semester, New assignment, New materials. Each step checks live state
   before it lets you continue (the org exists, `hertie-dsl-bot` is an owner, the set-up left
   its repos, the template has both branches and a settings file that parses), and unfinished
   answers stay in this browser so leaving loses nothing. Setting up a course is the one
@@ -141,11 +141,11 @@ a Python test fails when they drift. Never edit them by hand.
 
 ## Routes
 
-Hash tokens as in the design mockup: `#cohort`, `#schedule-s5`, `#assignment-<slug>`,
+Hash tokens as in the design mockup: `#semester`, `#schedule-s5`, `#assignment-<slug>`,
 `#release-<id>`, `#template-<slug>`, `#marks-<slug>`, `#teams-<slug>`, `#materials-<repo>`;
 the schedule editor also opens `#schedule-new`, `#schedule-term` and `#schedule-archive`.
-Wizards: `#new-course-1..4`, `#new-cohort-1..3`, `#new-assignment-1..4`, `#new-materials`; a
+Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
-opens a new assignment entry for that template; `?wizard=new-cohort-3` adds a link back.
+opens a new assignment entry for that template; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
-The course or cohort rides in the query string: `?cohort=<org>` or `?course=<org>`.
+The course or semester rides in the query string: `?semester=<org>` or `?course=<org>`.

@@ -289,7 +289,7 @@
 
 /* A command the reader runs themselves, and the button that takes it: the only way to
    clone into an EXACT folder, since no clone URL can carry one and no page can run
-   anything. It wraps rather than scrolls - a path with a cohort org in it is long, and a
+   anything. It wraps rather than scrolls - a path with a semester org in it is long, and a
    clipped command reads as a broken one. */
 .cmd {
     display: flex;
@@ -459,7 +459,7 @@
         margin: 0 0 1.4em 0;
     }
     /* One field: its box and its own Save, side by side. The two folder boxes hold an
-       absolute path with the cohort org in it, so they run the width of the page; the
+       absolute path with the semester org in it, so they run the width of the page; the
        handle box is capped to the size of the thing it holds. */
     .profile-entry {
         display: flex;

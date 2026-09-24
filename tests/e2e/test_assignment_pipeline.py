@@ -7,7 +7,7 @@ called in-process, because what this is testing is the wiring between a click, a
 token and a repo - the part unit tests deliberately do not touch.
 
 The five shapes (`shapes.SHAPES`) run SERIALLY in one pipeline, over one roster and one
-cohort: each has its own slug, its own schedule entry and its own grading sheet, and they
+semester: each has its own slug, its own schedule entry and its own grading sheet, and they
 share every tick. That is what keeps the run inside an hour - the expensive part of a
 stage is the Actions run, not the assignment, so one handout pass hands out all five.
 
@@ -17,7 +17,7 @@ Run it after the merge to main has refreshed the demo org, and before Promote:
     DSL_ORG_ALLOWLIST=hertie-dsl-demo-course-e1234,hertie-dsl-demo-f2026 \\
     GH_TOKEN=<maintainer classic PAT, incl. delete_repo> \\
     DSL_E2E_STUDENT=<handle> \\
-    DSL_E2E_STUDENT_TOKEN=<fine-grained PAT on the cohort org: Contents R/W, \\
+    DSL_E2E_STUDENT_TOKEN=<fine-grained PAT on the semester org: Contents R/W, \\
                            Administration R/W> \\
     python3 -m pytest tests/e2e -q
 
@@ -29,9 +29,9 @@ Optional: `DSL_E2E_ORGS` narrows the scope (never widens it); `DSL_VERBOSE=1` ma
 harness print repo and handle names locally. Budget ~60-75 minutes of wall clock, almost
 all of it waiting on Actions - run it under `nohup`.
 
-One-off setup: every onboarded enrolled student in the demo cohort must already have their
+One-off setup: every onboarded enrolled student in the demo semester must already have their
 `grades-<handle>` gradebook - run
-`python3 -c "from dsl_course import grades; grades.ensure_gradebooks('<cohort>')"` once.
+`python3 -c "from dsl_course import grades; grades.ensure_gradebooks('<semester>')"` once.
 The handout provisions them otherwise, and a repo this run created is estate drift the
 teardown cannot take back - it is the student's namespace, not the run's.
 
@@ -74,9 +74,9 @@ pytestmark = pytest.mark.e2e
 
 # Named here rather than derived from the frozenset, because the two orgs play different
 # parts: the template and the buttons live in the course org, the students and their
-# submissions in the cohort org.
+# submissions in the semester org.
 COURSE_ORG = "hertie-dsl-demo-course-e1234"
-COHORT_ORG = "hertie-dsl-demo-f2026"
+SEMESTER_ORG = "hertie-dsl-demo-f2026"
 
 # Every seeded workflow lives in the course org's `.github` repo.
 CONTROL_REPO = f"{COURSE_ORG}/.github"
@@ -93,7 +93,7 @@ EXPECTED_TIERS = ("main", "preview")
 
 SUBMISSION = "submission.py"
 
-# Where the cohort site keeps one page per assignment (`site.sync_site`'s collections).
+# Where the semester site keeps one page per assignment (`site.sync_site`'s collections).
 ASSIGNMENT_PAGES = "_assignments"
 
 # Ruff-clean on purpose (double quotes, trailing newline). Hooks are off for the student's
@@ -155,8 +155,10 @@ class Pipeline:
 # ------------------------------------------------------------------------- preflight
 
 
-def _cohort_timezone() -> ZoneInfo:
-    text = gh_contents.get_file_content(COHORT_ORG, course.CONFIG_REPO, "schedule.yml")
+def _semester_timezone() -> ZoneInfo:
+    text = gh_contents.get_file_content(
+        SEMESTER_ORG, course.CONFIG_REPO, "schedule.yml"
+    )
     return ZoneInfo(
         (yaml.safe_load(text or "") or {}).get("timezone") or "Europe/Berlin"
     )
@@ -242,12 +244,12 @@ def _preflight(run_id: str) -> None:
     trunk that is not this checkout tests somebody else's; a workflow file in
     the org that is not the one this tip renders means the buttons this run
     presses are not the buttons under review; a missing roster row hands out to nobody;
-    a cohort short of a gradebook ends in drift the teardown cannot undo;
+    a semester short of a gradebook ends in drift the teardown cannot undo;
     and a namespace that is not empty means a previous run is still lying around and its
     repos would be read as this one's.
     """
     allowlist.assert_fence()
-    for org in (COURSE_ORG, COHORT_ORG):
+    for org in (COURSE_ORG, SEMESTER_ORG):
         allowlist.assert_allowed(org)
 
     # Before anything is created, not after: a token that cannot delete leaves every repo
@@ -283,27 +285,27 @@ def _preflight(run_id: str) -> None:
         "run Refresh actions"
     )
 
-    students = roster.load(COHORT_ORG) or []
+    students = roster.load(SEMESTER_ORG) or []
     assert student.handle() in {s.github_handle for s in students}, (
-        f"{student.handle()} has no row in {COHORT_ORG}'s students.csv"
+        f"{student.handle()} has no row in {SEMESTER_ORG}'s students.csv"
     )
 
     # The handout provisions a missing gradebook now, and a repo it created is estate drift
     # no namespace sweep can undo (it is not this run's namespace - it is the student's).
     # Run `grades.ensure_gradebooks` once by hand and this passes for ever after.
-    listed = {row["name"] for row in discovery.list_org_repos(COHORT_ORG)}
+    listed = {row["name"] for row in discovery.list_org_repos(SEMESTER_ORG)}
     assert f"{course.GRADEBOOK_PREFIX}{student.handle()}" in listed, (
         "the test student has no gradebook yet - the handout would create it and the "
         "teardown could not take it back; run grades.ensure_gradebooks once"
     )
     short = missing_gradebooks(students, listed)
     assert not short, (
-        f"{short} onboarded student(s) in {COHORT_ORG} have no gradebook - the handout "
+        f"{short} onboarded student(s) in {SEMESTER_ORG} have no gradebook - the handout "
         f"would create them and the teardown could not take them back; run "
-        f"grades.ensure_gradebooks('{COHORT_ORG}') once"
+        f"grades.ensure_gradebooks('{SEMESTER_ORG}') once"
     )
 
-    for org in (COURSE_ORG, COHORT_ORG):
+    for org in (COURSE_ORG, SEMESTER_ORG):
         clash = [
             row["name"]
             for row in discovery.list_org_repos(org)
@@ -321,7 +323,7 @@ def _schedule_block(
     slug: str, handout: datetime, due: datetime, cutoff: datetime
 ) -> str:
     """One assignment, as `assignments:` wants it - the template repo in the course org,
-    and a `cohort_dest_repo` that defaults to the key, so every repo this makes falls
+    and a `semester_dest_repo` that defaults to the key, so every repo this makes falls
     inside the run's namespace.
 
     `cutoff` is separate from `due` because the two drive different passes: from the due
@@ -357,24 +359,26 @@ def _schedule_blocks(
 def _write_schedule(
     run_id: str, handout: datetime, due: datetime, cutoff: datetime
 ) -> Stage:
-    """Put (or move) this run's fenced block into the cohort's schedule.yml.
+    """Put (or move) this run's fenced block into the semester's schedule.yml.
 
     One fenced block for all five assignments, replaced whole on every move: the fence is
     keyed on the run, so removing it at teardown takes the whole run out in one edit
     whatever it got as far as adding.
 
-    The push is itself a driver now: the cohort's seeded `dispatch-scheduled-release.yml`
+    The push is itself a driver now: the semester's seeded `dispatch-scheduled-release.yml`
     fires the course org's Scheduled release from every schedule.yml push, so the edit
     starts a real tick. It is waited out here rather than raced, so the pass dispatched
     next is the one whose log and artefacts the stage after it reads."""
-    read = gh_contents.get_file_with_sha(COHORT_ORG, course.CONFIG_REPO, "schedule.yml")
-    assert read is not None, f"{COHORT_ORG} has no schedule.yml"
+    read = gh_contents.get_file_with_sha(
+        SEMESTER_ORG, course.CONFIG_REPO, "schedule.yml"
+    )
+    assert read is not None, f"{SEMESTER_ORG} has no schedule.yml"
     text, sha = read
     edited = schedule_edit.insert_block(
         text, run_id, _schedule_blocks(run_id, handout, due, cutoff)
     )
     before = drive.run_ids(CONTROL_REPO, SCHEDULED_RELEASE)
-    assert schedule_edit.put_schedule(COHORT_ORG, edited, sha)
+    assert schedule_edit.put_schedule(SEMESTER_ORG, edited, sha)
     driven = drive.wait_for_push_driven_tick(CONTROL_REPO, SCHEDULED_RELEASE, before)
     return Stage(
         "schedule",
@@ -389,7 +393,7 @@ def _dispatch_scheduler(name: str) -> Stage:
     already past its deadline BEFORE it hands anything out - so the pass that hands out
     can never be the pass that collects - and the due date and the cutoff drive different
     passes. Each dispatch reaches both of the workflow's jobs: the release job walks every
-    cohort, the autograde job one matrix leg per cohort."""
+    semester, the autograde job one matrix leg per semester."""
     drive.wait_for_idle(CONTROL_REPO, SCHEDULED_RELEASE)
     run_id = drive.dispatch(CONTROL_REPO, SCHEDULED_RELEASE, {"dry_run": False})
     conclusion = drive.wait_for_run(CONTROL_REPO, run_id)
@@ -415,7 +419,7 @@ def _scaffold(run_id: str) -> Stage:
             {
                 "assignment_name": shapes.title(run_id, shape),
                 "assignment_number": cleanup.ASSIGNMENT_NUMBER,
-                "semester_tag": f"{run_id}-{shape.name}",
+                "semester": f"{run_id}-{shape.name}",
                 "format": "py",
                 "type": "individual",
                 "team_formation": "self_select",
@@ -451,7 +455,7 @@ def _sheet(slug: str) -> str:
     """This assignment's grading sheet, as classroom-config holds it right now."""
     return (
         gh_contents.get_file_content(
-            COHORT_ORG, course.CONFIG_REPO, grades.sheet_path(slug)
+            SEMESTER_ORG, course.CONFIG_REPO, grades.sheet_path(slug)
         )
         or ""
     )
@@ -462,7 +466,7 @@ def _receipts_issue(repo: str):
     there is none (a repo with no issue, and a shape with no repo alike), or the
     `LOOKUP_FAILED` sentinel - which is deliberately NOT collapsed into None, because
     "there is no issue" is exactly what four of the five shapes are asserting."""
-    return grades.find_receipts_issue(COHORT_ORG, repo) if repo else None
+    return grades.find_receipts_issue(SEMESTER_ORG, repo) if repo else None
 
 
 def _issue_comments(repo: str) -> list[str]:
@@ -472,7 +476,7 @@ def _issue_comments(repo: str) -> list[str]:
         return []
     return ghcli.gh_json(
         "api",
-        f"repos/{COHORT_ORG}/{repo}/issues/{found[0]}/comments?per_page=100",
+        f"repos/{SEMESTER_ORG}/{repo}/issues/{found[0]}/comments?per_page=100",
         "--jq",
         "[.[].body]",
     )
@@ -489,7 +493,7 @@ def _role(repo: str, handle: str) -> str:
     a raw `admin` is not JSON."""
     code, out = ghcli.gh(
         "api",
-        f"repos/{COHORT_ORG}/{repo}/collaborators/{handle}/permission",
+        f"repos/{SEMESTER_ORG}/{repo}/collaborators/{handle}/permission",
         "--jq",
         ".role_name",
     )
@@ -509,7 +513,7 @@ def _ruleset_names(repo: str) -> list[str]:
     try:
         return ghcli.gh_json(
             "api",
-            f"repos/{COHORT_ORG}/{repo}/rulesets?per_page=100",
+            f"repos/{SEMESTER_ORG}/{repo}/rulesets?per_page=100",
             "--jq",
             "[.[].name]",
         )
@@ -520,15 +524,15 @@ def _ruleset_names(repo: str) -> list[str]:
 
 
 def _site_page(slug: str) -> str:
-    """One assignment's page on the cohort site, as the handout's site sync wrote it.
+    """One assignment's page on the semester site, as the handout's site sync wrote it.
 
     Found by listing the collection rather than by composing the filename: the page is
     named `<ordinal>-<slug>.md`, and the ordinal is this assignment's position among ALL
-    of the cohort's, which nothing here can know."""
-    pages = course.pages_repo(COHORT_ORG)
+    of the semester's, which nothing here can know."""
+    pages = course.pages_repo(SEMESTER_ORG)
     names = ghcli.gh_json(
         "api",
-        f"repos/{COHORT_ORG}/{pages}/contents/{ASSIGNMENT_PAGES}",
+        f"repos/{SEMESTER_ORG}/{pages}/contents/{ASSIGNMENT_PAGES}",
         "--jq",
         "[.[].name]",
     )
@@ -536,7 +540,7 @@ def _site_page(slug: str) -> str:
     assert len(found) == 1, f"{slug} has {len(found)} page(s) in {pages}"
     return (
         gh_contents.get_file_content(
-            COHORT_ORG, pages, f"{ASSIGNMENT_PAGES}/{found[0]}"
+            SEMESTER_ORG, pages, f"{ASSIGNMENT_PAGES}/{found[0]}"
         )
         or ""
     )
@@ -549,8 +553,8 @@ def _per_shape(what) -> dict[str, object]:
 
 
 def _listing() -> dict[str, dict]:
-    """The cohort org's repos right now, keyed by name - visibility included."""
-    return {row["name"]: row for row in discovery.list_org_repos(COHORT_ORG)}
+    """The semester org's repos right now, keyed by name - visibility included."""
+    return {row["name"]: row for row in discovery.list_org_repos(SEMESTER_ORG)}
 
 
 def _visibility(listing: dict[str, dict], repo: str) -> str:
@@ -565,7 +569,7 @@ def _mark_the_sheet(slug: str, feedback: str) -> str:
     makes one - not a re-dump from the parsed sheet, because half of what is being tested
     is that the toolkit leaves a hand-edited file alone."""
     read = gh_contents.get_file_with_sha(
-        COHORT_ORG, course.CONFIG_REPO, grades.sheet_path(slug)
+        SEMESTER_ORG, course.CONFIG_REPO, grades.sheet_path(slug)
     )
     assert read is not None, f"{slug}'s grading sheet is not there to mark"
     text, sha = read
@@ -579,7 +583,7 @@ def _mark_the_sheet(slug: str, feedback: str) -> str:
     )
     assert marked != text, f"{slug}'s sheet had no blank cells to type into"
     assert gh_contents.put_file(
-        COHORT_ORG,
+        SEMESTER_ORG,
         course.CONFIG_REPO,
         grades.sheet_path(slug),
         marked.encode(),
@@ -600,25 +604,25 @@ def _shared_state(student_handle: str) -> dict[str, bytes | None]:
     gradebook = f"{course.GRADEBOOK_PREFIX}{student_handle}"
     return {
         "registrar": cleanup.file_bytes(
-            COHORT_ORG, course.CONFIG_REPO, grades.COHORT_CSV_NAME
+            SEMESTER_ORG, course.CONFIG_REPO, grades.SEMESTER_CSV_NAME
         ),
         "distributed": cleanup.file_bytes(
-            COHORT_ORG, course.CONFIG_REPO, grades.DISTRIBUTED_PATH
+            SEMESTER_ORG, course.CONFIG_REPO, grades.DISTRIBUTED_PATH
         ),
-        "grades_yml": cleanup.file_bytes(COHORT_ORG, gradebook, "grades.yml"),
-        "readme": cleanup.file_bytes(COHORT_ORG, gradebook, "README.md"),
+        "grades_yml": cleanup.file_bytes(SEMESTER_ORG, gradebook, "grades.yml"),
+        "readme": cleanup.file_bytes(SEMESTER_ORG, gradebook, "README.md"),
     }
 
 
 def _lock_state() -> bytes | None:
-    """`assignments.lock.yml` as it stands, or None if the cohort has none yet.
+    """`assignments.lock.yml` as it stands, or None if the semester has none yet.
 
     Read BEFORE the walk, unlike everything in `_shared_state`: the handout is what moves
     this file (`assign.provision_all` ends in `grades.sync_team_lock`, and every schedule
     push dispatches the membership sync, which writes it too), so by the time distribute
     runs it already carries this run's assignments. Recording it at step 12 would hand back
     the drift instead of the file."""
-    return cleanup.file_bytes(COHORT_ORG, course.CONFIG_REPO, grades.TEAM_LOCK_PATH)
+    return cleanup.file_bytes(SEMESTER_ORG, course.CONFIG_REPO, grades.TEAM_LOCK_PATH)
 
 
 def _config_restore(
@@ -631,13 +635,13 @@ def _config_restore(
     starts, the distribute pair at step 12. A walk that died before step 12 still has a
     lock to put back, so `recorded` may be None and the lock is unconditional.
 
-    A value of None is a file that was ABSENT - a cohort bootstrapped before the lock
+    A value of None is a file that was ABSENT - a semester bootstrapped before the lock
     existed - and `cleanup.restore_files` deletes those rather than writing them;
     `gh_contents.put_files` in turn drops a delete for a path that is not there, so an
     absent-then-still-absent file costs no commit."""
     files: dict[str, bytes | None] = {grades.TEAM_LOCK_PATH: lock}
     if recorded is not None:
-        files[grades.COHORT_CSV_NAME] = recorded.detail["registrar"]
+        files[grades.SEMESTER_CSV_NAME] = recorded.detail["registrar"]
         files[grades.DISTRIBUTED_PATH] = recorded.detail["distributed"]
     return files
 
@@ -660,13 +664,13 @@ def _distribute(name: str, dry_run: bool) -> Stage:
     """One real Distribute grades press, waited out. `silent` always: a live e2e run must
     not put a real message in a real inbox.
 
-    ONE press covers all five shapes: the button walks the cohort's assignments, so the
+    ONE press covers all five shapes: the button walks the semester's assignments, so the
     shapes differ in what it does per assignment and not in how often it is pressed."""
     drive.wait_for_idle(CONTROL_REPO, DISTRIBUTE_GRADES)
     run_id = drive.dispatch(
         CONTROL_REPO,
         DISTRIBUTE_GRADES,
-        {"cohort_org": COHORT_ORG, "dry_run": dry_run, "silent": True},
+        {"semester_org": SEMESTER_ORG, "dry_run": dry_run, "silent": True},
     )
     return Stage(
         name,
@@ -707,7 +711,7 @@ def _push_submissions(run_id: str, who: str) -> Stage:
         path = f"{shape.folder(who)}{SUBMISSION}"
         with tempfile.TemporaryDirectory() as tmp:
             sha = student.push_file(
-                f"{COHORT_ORG}/{repo}",
+                f"{SEMESTER_ORG}/{repo}",
                 Path(tmp) / "clone",
                 path,
                 SUBMISSION_BODY,
@@ -723,7 +727,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     The caller's dict, not a fresh one, because the teardown reads it: a walk that dies
     after distribute has run still has to hand back the files distribute wrote."""
     who = student.handle()
-    tz = _cohort_timezone()
+    tz = _semester_timezone()
     now = datetime.now(tz)
     private_slug = shapes.slug(run_id, PRIVATE)
 
@@ -766,7 +770,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     choice_repo = CHOICE.repo(run_id, who)
     stages["published_early"] = Stage(
         "published_early",
-        detail={"ok": student.set_visibility(COHORT_ORG, choice_repo, "public")},
+        detail={"ok": student.set_visibility(SEMESTER_ORG, choice_repo, "public")},
     )
 
     # 7. Move the DUE date into the past but leave the cutoff ahead - the only way to
@@ -792,13 +796,13 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     )
 
     # 9. Collect submissions, twice: the button is the refresh on demand, and pressing it
-    #    over an unchanged cohort must write nothing at all.
+    #    over an unchanged semester must write nothing at all.
     before_button = _sheet(private_slug)
     pressed = drive.dispatch(
         CONTROL_REPO,
         COLLECT_SUBMISSIONS,
         {
-            "cohort_org": COHORT_ORG,
+            "semester_org": SEMESTER_ORG,
             "course_source_repo": private_slug,
             "dry_run": False,
         },
@@ -822,7 +826,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
     )
     stages["published_late"] = Stage(
         "published_late",
-        detail={"ok": student.set_visibility(COHORT_ORG, choice_repo, "public")},
+        detail={"ok": student.set_visibility(SEMESTER_ORG, choice_repo, "public")},
     )
     stages["grading"] = _dispatch_scheduler("grading")
 
@@ -833,14 +837,14 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
             "listing": _listing(),
             "snapshots": _per_shape(
                 lambda s: gh_contents.get_file_content(
-                    COHORT_ORG,
+                    SEMESTER_ORG,
                     course.CONFIG_REPO,
                     collect.snapshot_path(shapes.slug(run_id, s)),
                 ),
             ),
             "markers": _per_shape(
                 lambda s: gh_contents.get_file_content(
-                    COHORT_ORG,
+                    SEMESTER_ORG,
                     course.CONFIG_REPO,
                     f"{collect.AUTOGRADE_DIR}/{shapes.slug(run_id, s)}/_graded.json",
                 ),
@@ -849,7 +853,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
             "collaborators": _per_shape(
                 lambda s: (
                     sorted(
-                        repos.direct_collaborators(COHORT_ORG, s.repo(run_id, who))
+                        repos.direct_collaborators(SEMESTER_ORG, s.repo(run_id, who))
                         or ()
                     )
                     if s.repo(run_id, who)
@@ -896,7 +900,7 @@ def pipeline():
     which the run's own templates rewrote and cleanup re-renders."""
     run_id = cleanup.new_run_id()
     _preflight(run_id)
-    before = {org: estate.fingerprint(org) for org in (COURSE_ORG, COHORT_ORG)}
+    before = {org: estate.fingerprint(org) for org in (COURSE_ORG, SEMESTER_ORG)}
     # Recorded at the same instant as the fingerprint, because that is what the assertion
     # below measures against: the handout adds this run's assignments to the lock file, and
     # cleanup cannot sweep a file no run id owns. In production the removal push dispatches
@@ -917,7 +921,7 @@ def pipeline():
         recorded = stages_recorded.get("shared_before")
         assert (
             cleanup.restore_files(
-                COHORT_ORG, course.CONFIG_REPO, _config_restore(lock_before, recorded)
+                SEMESTER_ORG, course.CONFIG_REPO, _config_restore(lock_before, recorded)
             )
             == 0
         )
@@ -925,7 +929,7 @@ def pipeline():
             book = f"{course.GRADEBOOK_PREFIX}{student.handle()}"
             assert (
                 cleanup.restore_files(
-                    COHORT_ORG,
+                    SEMESTER_ORG,
                     book,
                     {
                         "grades.yml": recorded.detail["grades_yml"],
@@ -936,7 +940,7 @@ def pipeline():
             )
         drift = {
             org: estate.diff(before[org], estate.fingerprint(org))
-            for org in (COURSE_ORG, COHORT_ORG)
+            for org in (COURSE_ORG, SEMESTER_ORG)
         }
         assert not any(drift.values()), f"the run changed the estate: {drift}"
 
@@ -973,7 +977,7 @@ def test_the_grading_pass_succeeded(pipeline):
 @pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
 def test_the_handout_created_exactly_the_repos_the_shape_promises(pipeline, shape):
     # THE difference between the shapes, in one assertion: a repo per unit, one drop box
-    # for the cohort, or nothing at all.
+    # for the semester, or nothing at all.
     listing = pipeline.stages["at_handout"].detail["listing"]
     slug = pipeline.slug(shape)
     mine = sorted(n for n in listing if n == slug or n.startswith(f"{slug}-"))
@@ -981,8 +985,8 @@ def test_the_handout_created_exactly_the_repos_the_shape_promises(pipeline, shap
     if not repo:
         assert mine == [], f"an external assignment created {mine}"
         return
-    # The frozen cohort-side template the brief lives in, plus the one repo this shape
-    # hands the student - and in a two-student demo cohort, the other student's.
+    # The frozen semester-side template the brief lives in, plus the one repo this shape
+    # hands the student - and in a two-student demo semester, the other student's.
     assert slug in mine
     assert repo in mine
 
@@ -1006,7 +1010,7 @@ def test_a_feedback_issue_exists_only_where_the_shape_has_one(pipeline, shape):
 @pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
 def test_every_shape_gets_a_grading_sheet_with_the_students_row(pipeline, shape):
     # Including `external`, which creates no repo at all: the sheet is how it is marked,
-    # and a shape with nothing to clone still has a cohort to grade.
+    # and a shape with nothing to clone still has a semester to grade.
     sheet = grades.parse_sheet(
         pipeline.stages["at_handout"].detail["sheets"][shape.name]
     )
@@ -1159,7 +1163,7 @@ def test_only_a_shape_with_a_thread_gets_a_receipt(pipeline):
         assert pipeline.stages["after_due"].detail["comments"][shape.name] == []
 
 
-def test_collect_submissions_over_an_unchanged_cohort_writes_nothing(pipeline):
+def test_collect_submissions_over_an_unchanged_semester_writes_nothing(pipeline):
     # The button is the refresh on demand. Pressing it must be free - byte for byte - or
     # nobody can lean on it, and every press would churn a commit in classroom-config.
     stage = pipeline.stages["collect_button"]
@@ -1186,14 +1190,14 @@ def test_a_public_assignment_hands_out_a_public_repo(pipeline):
     # it - the one step between "the config says public" and a repo anybody can read.
     listing = pipeline.stages["at_handout"].detail["listing"]
     assert _visibility(listing, pipeline.repo(PUBLIC)) == "public"
-    # And its cohort-side template is not: the frozen hand-out carries the brief and, for
+    # And its semester-side template is not: the frozen hand-out carries the brief and, for
     # an autograded assignment, would carry the tests.
     assert _visibility(listing, pipeline.slug(PUBLIC)) == "private"
 
 
 def test_a_public_assignments_page_says_which_shape_it_is(pipeline):
     # ONE word in the front matter, because the theme `case`s on it: a page that said
-    # nothing told a public cohort exactly what it told a private one.
+    # nothing told a public semester exactly what it told a private one.
     page = pipeline.stages["at_handout"].detail["pages"][PUBLIC.name]
     assert f'submit_shape: "{PUBLIC.key}"' in page
     assert PUBLIC.key == "assignment-repo-public"
@@ -1221,7 +1225,7 @@ def test_the_student_is_admin_of_their_own_student_choice_repo(pipeline):
     # student `admin` on anything. The grant itself is the direct collaborator row; the
     # role is GitHub's effective answer, which an org owner reads as `admin` regardless -
     # see `_role`. Both are asserted because between them they exclude the two ways this
-    # can be wrong in a cohort of ordinary members.
+    # can be wrong in a semester of ordinary members.
     assert (
         pipeline.student.casefold()
         in (pipeline.stages["artefacts"].detail["collaborators"][CHOICE.name])
@@ -1230,7 +1234,7 @@ def test_the_student_is_admin_of_their_own_student_choice_repo(pipeline):
 
 
 def test_publishing_before_the_cutoff_is_undone_by_the_next_tick(pipeline):
-    # The promise the assignment page makes to the REST of the cohort: until the grading
+    # The promise the assignment page makes to the REST of the semester: until the grading
     # cutoff, a repo the world can read is a repo they can copy from. The student really
     # published it, with their own token, and the tick really closed it again.
     assert pipeline.stages["published_early"].detail["ok"]
@@ -1250,7 +1254,7 @@ def test_publishing_after_the_cutoff_stands(pipeline):
 
 
 def test_an_external_assignment_creates_nothing(pipeline):
-    # The bug this shape exists to fix: 33 private repos in a live cohort that held
+    # The bug this shape exists to fix: 33 private repos in a live semester that held
     # nothing but a receipts issue, for an assignment handed in on Moodle.
     assert pipeline.repo(EXTERNAL) == ""
     listing = pipeline.stages["at_handout"].detail["listing"]
@@ -1272,7 +1276,7 @@ def test_an_external_assignments_page_carries_the_submit_button(pipeline):
     # The host is computed for the button's label, so the page says where it is sending
     # them rather than printing a URL at them.
     assert 'submit_host: "example.org"' in page
-    # And no repo: there is none, so a page that named one would send the cohort looking
+    # And no repo: there is none, so a page that named one would send the semester looking
     # for a repo nobody will ever create.
     assert "repo_name:" not in page
 
@@ -1293,13 +1297,13 @@ def test_an_external_assignments_feedback_reaches_the_gradebook(pipeline):
 # ------------------------------------------------------------- one drop box, one folder
 
 
-def test_the_drop_box_is_one_private_repo_for_the_whole_cohort(pipeline):
+def test_the_drop_box_is_one_private_repo_for_the_whole_semester(pipeline):
     listing = pipeline.stages["at_handout"].detail["listing"]
     box = pipeline.repo(SHARED)
     assert box == course.shared_repo(pipeline.slug(SHARED))
     assert _visibility(listing, box) == "private"
     # ONE, not one per student: everything else named off this slug is the frozen
-    # cohort-side template the brief lives in.
+    # semester-side template the brief lives in.
     slug = pipeline.slug(SHARED)
     assert sorted(n for n in listing if n.startswith(f"{slug}-")) == [box]
 
@@ -1314,8 +1318,8 @@ def test_the_student_may_push_into_the_drop_box(pipeline):
 
 
 def test_the_drop_box_cannot_be_force_pushed_or_deleted(pipeline):
-    # Every student in the cohort has push on this one repo. Without the ruleset, one of
-    # them can erase the whole cohort's work - and the frozen snapshot then pins commits
+    # Every student in the semester has push on this one repo. Without the ruleset, one of
+    # them can erase the whole semester's work - and the frozen snapshot then pins commits
     # that no longer exist.
     names = pipeline.stages["artefacts"].detail["rulesets"]
     # Free orgs cannot carry a ruleset on a private repo; the toolkit warns and the

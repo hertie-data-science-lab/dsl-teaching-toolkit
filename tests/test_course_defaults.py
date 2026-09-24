@@ -1,6 +1,6 @@
 """Course-level defaults in `dsl-course.yml`: `assignment_defaults:` answers the New
-assignment boxes left at the course-default choice, and `cohort_defaults:` shapes the
-`schedule.yml` Bootstrap cohort seeds."""
+assignment boxes left at the course-default choice, and `semester_defaults:` shapes the
+`schedule.yml` Bootstrap semester seeds."""
 
 from __future__ import annotations
 
@@ -133,11 +133,11 @@ def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
     assert seen["formats"] == ["qmd"] and seen["visibility"] == "public"
 
 
-# ------------------------------------------------------------- cohort_defaults
+# ------------------------------------------------------------- semester_defaults
 
 
-def test_cohort_defaults_parse_a_zone_and_an_archive_switch():
-    got = schedule.parse_cohort_defaults(
+def test_semester_defaults_parse_a_zone_and_an_archive_switch():
+    got = schedule.parse_semester_defaults(
         {"timezone": "America/New_York", "archive": {"auto": True, "grace_days": 30}}
     )
     assert got == {
@@ -146,8 +146,8 @@ def test_cohort_defaults_parse_a_zone_and_an_archive_switch():
     }
 
 
-def test_unusable_cohort_defaults_are_dropped_with_a_warning(capsys):
-    got = schedule.parse_cohort_defaults(
+def test_unusable_semester_defaults_are_dropped_with_a_warning(capsys):
+    got = schedule.parse_semester_defaults(
         {"timezone": "Mars/Olympus", "archive": {"auto": "maybe"}, "colour": "red"}
     )
     assert got == {}
@@ -156,7 +156,7 @@ def test_unusable_cohort_defaults_are_dropped_with_a_warning(capsys):
 
 
 def _seeded(defaults: dict) -> str:
-    """The schedule.yml Bootstrap cohort writes, through the real render path."""
+    """The schedule.yml Bootstrap semester writes, through the real render path."""
     return bootstrap_course._scaffold_text(
         "schedule.yml", "classroom-config/schedule.yml", "main", "f2026", 2026, defaults
     ).decode()
@@ -168,7 +168,7 @@ def _parsed(text: str, **extra) -> schedule.Schedule:
     return schedule.parse(meta)
 
 
-def test_no_cohort_defaults_seed_todays_skeleton():
+def test_no_semester_defaults_seed_todays_skeleton():
     plain = pin_central_ref(template("classroom-config/schedule.yml"), "main").format(
         tag="f2026", year=2026, year_next=2027
     )
@@ -209,6 +209,6 @@ def test_an_unusable_grace_days_is_flagged_and_the_sixty_days_stand():
 
 def test_the_course_template_documents_both_blocks():
     text = template("course/dsl-course.yml")
-    assert "cohort_defaults" in text
+    assert "semester_defaults" in text
     for key in ("format", "submit_via", "team_formation", "visibility"):
         assert key in text

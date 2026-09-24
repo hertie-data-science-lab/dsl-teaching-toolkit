@@ -42,7 +42,7 @@ from .ops.registry import (
 from .ops.request import RequestError, check_access, parse_request
 
 # The ops that release a named schedule entry: the console may send just the entry, and the
-# deploy fields are read off the cohort's schedule.yml here.
+# deploy fields are read off the semester's schedule.yml here.
 _ENTRY_OPS = ("release.now", "release.early", "release.rerun")
 
 _REFRESH_FAILED = {
@@ -50,7 +50,7 @@ _REFRESH_FAILED = {
     "text": "Done, but the buttons were not all refreshed; the nightly refresh adds them.",
 }
 
-# The op that archives the cohort's classroom-config, where its own record would go.
+# The op that archives the semester's classroom-config, where its own record would go.
 _ARCHIVE_OP = "cohort.archive"
 
 _FALLBACK = {
@@ -96,21 +96,22 @@ def run_cli(module: str, argv: list[str]) -> tuple[int, Summary | None, bool]:
 
 def entry_requests(request: Request) -> list[Request]:
     """One request per source repo for a named schedule entry, the deploy fields filled in
-    from the cohort's schedule.yml. A request that already carries them passes through.
+    from the semester's schedule.yml. A request that already carries them passes through.
     Raises `RequestError` for an entry the schedule does not have."""
     if request.op not in _ENTRY_OPS or request.args.get("course_source_repo"):
         return [request]
     entry = request.args["entry"]
-    sched = schedule.load(request.cohort_org)
+    sched = schedule.load(request.semester_org)
     found = next((r for r in sched.releases if r.label == entry), None)
     if found is None:
         raise RequestError(
-            "ENTRY_NOT_FOUND", f"{entry} is not an entry in this cohort's schedule.yml."
+            "ENTRY_NOT_FOUND",
+            f"{entry} is not an entry in this semester's schedule.yml.",
         )
     groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for d in found.deploy:
-        key = (d.course_source_repo, d.cohort_dest_repo or "materials")
-        dest = d.cohort_dest_path or d.course_source_path
+        key = (d.course_source_repo, d.semester_dest_repo or "materials")
+        dest = d.semester_dest_path or d.course_source_path
         groups.setdefault(key, []).append((d.course_source_path, dest))
     return [
         replace(
@@ -119,8 +120,8 @@ def entry_requests(request: Request) -> list[Request]:
                 "entry": entry,
                 "course_source_repo": repo,
                 "course_source_path": ",".join(src for src, _ in pairs),
-                "cohort_dest_repo": dest_repo,
-                "cohort_dest_path": ",".join(dst for _, dst in pairs),
+                "semester_dest_repo": dest_repo,
+                "semester_dest_path": ",".join(dst for _, dst in pairs),
             },
         )
         for (repo, dest_repo), pairs in groups.items()
@@ -262,8 +263,8 @@ def _finish(outcome: Outcome, request: Request | None) -> None:
     if request is None:
         return
     if _sealed(outcome, request):
-        log("  the cohort is archived now, so the annotation is its only record")
-    elif not write_private(outcome, request.cohort_org, request.course_org):
+        log("  the semester is archived now, so the annotation is its only record")
+    elif not write_private(outcome, request.semester_org, request.course_org):
         raise Broken("the outcome could not be recorded")
     status.write_after_op(vars(request))
 
@@ -336,7 +337,7 @@ def run(text: str) -> int:
         return 0
     refusal = check_access(request)
     if refusal:
-        # Not recorded privately either: the refusal may be that the cohort is not this
+        # Not recorded privately either: the refusal may be that the semester is not this
         # course's, and a refused caller must not be able to write into any org.
         _finish(_refuse("NOT_ALLOWED", refusal, raw, started), None)
         return 0

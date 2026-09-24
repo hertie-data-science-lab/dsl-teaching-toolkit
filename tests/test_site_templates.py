@@ -1,6 +1,6 @@
 """The Jekyll templates in `templates/site/` against the front matter site.py writes.
 
-The two halves of the cohort site live in one repo now, and this is what holds them
+The two halves of the semester site live in one repo now, and this is what holds them
 together: every key a template READS must be a key the sync WRITES, and every flag the
 sync writes must be read by something. Neither side fails loudly on its own - a template
 reading `page.due` (which never existed) prints an empty string, and a flag nothing reads
@@ -8,7 +8,7 @@ is dead weight that looks live. Both went unnoticed for a term.
 
 The generated side is the real fixture site (tests/fixtures/site/build_fixture.py), the
 same one the `jekyll-contract` CI job builds with Jekyll - so the offline key check here
-and the build there cannot disagree about what a cohort site contains.
+and the build there cannot disagree about what a semester site contains.
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ def _field_paths(value: object, prefix: str = "") -> set[str]:
 
 @pytest.fixture(scope="module")
 def generated() -> dict:
-    """The whole generated cohort site, once."""
+    """The whole generated semester site, once."""
     return build_fixture.generated()
 
 
@@ -197,10 +197,12 @@ def test_every_shipped_template_states_that_the_sync_owns_it(rel):
         assert STAMP in " ".join(head.replace("#", " ").split()), rel
 
 
-def test_the_sync_ships_every_template_to_both_kinds_of_site(cohort_plan, public_plan):
-    # A template that reaches the cohort sites but not the public course site is how the
+def test_the_sync_ships_every_template_to_both_kinds_of_site(
+    semester_plan, public_plan
+):
+    # A template that reaches the semester sites but not the public course site is how the
     # open-courseware build breaks on a layout it never received.
-    for plan in (cohort_plan, public_plan):
+    for plan in (semester_plan, public_plan):
         missing = set(_templates()) - set(plan.files)
         assert not missing
 
@@ -498,8 +500,8 @@ def _external_arm(text: str, opens: str, closes: str) -> str:
 
 def test_an_external_assignment_is_never_told_to_push(generated):
     # The page and the due row both printed "Submit by pushing to `main` in <repo>" off
-    # `repo_url` alone, so a Moodle cohort was told to push to a repo that does not exist.
-    # Nor may either arm claim no repository was created: a cohort handed out before this
+    # `repo_url` alone, so a Moodle semester was told to push to a repo that does not exist.
+    # Nor may either arm claim no repository was created: a semester handed out before this
     # shipped has the repos it was given, and the page would deny them.
     layout = _liquid_templates()["_layouts/assignment.html"]
     due_row = _liquid_templates()["_includes/schedule_row_due.html"]
@@ -804,7 +806,7 @@ def test_the_shape_note_is_the_one_place_a_repos_catch_is_named(generated):
         (
             "07-assignment-7.md",
             "shared-dropbox-repo",
-            "NB: everyone in the cohort can read the whole repo",
+            "NB: everyone in the semester can read the whole repo",
         ),
     ],
 )
@@ -871,12 +873,12 @@ def test_a_pending_external_assignments_page_offers_nowhere_to_go(generated):
 # plan.retire
 # ---------------------------------------------------------------------------
 
-ORG = "Cohort-f2026"
+ORG = "Semester-f2026"
 
 
 @pytest.fixture
-def cohort_plan(monkeypatch, tmp_path):
-    """The `_SitePlan` a real cohort sync builds, against a faked org."""
+def semester_plan(monkeypatch, tmp_path):
+    """The `_SitePlan` a real semester sync builds, against a faked org."""
     captured: dict = {}
     monkeypatch.setattr(
         site,
@@ -1042,7 +1044,7 @@ def test_every_page_that_shows_a_file_link_goes_through_the_one_include(rel):
 
 
 def test_render_is_offered_only_where_the_site_hosts_a_copy():
-    # `render` opens the cohort site's own copy, which exists only for a published file a
+    # `render` opens the semester site's own copy, which exists only for a published file a
     # browser draws (html, pdf). Rendered unconditionally it is a button to a 404 on every
     # other row of every site.
     body = _strip_comments(_templates()["_includes/file_link.html"])
@@ -1185,16 +1187,16 @@ def test_the_control_takes_what_it_needs_from_data_attributes():
 def test_the_control_parses_the_url_shape_the_sync_writes():
     # THE contract between dsl_course/site.py and the script: `_gh_url` writes the link,
     # the script reads it back off the rendered page. A change to either alone turns every
-    # control on every cohort site off, silently.
+    # control on every semester site off, silently.
     literal = re.search(r"var SOURCE = /(.+?)/;", _open_in()).group(1)
     pattern = re.compile(literal.replace("\\/", "/"))
     url = site._gh_url(
-        "cohort-f2026", "materials", "main", "blob", "labs/01/lab one.ipynb"
+        "semester-f2026", "materials", "main", "blob", "labs/01/lab one.ipynb"
     )
     m = pattern.match(url)
     assert m, url
     assert m.groups() == (
-        "cohort-f2026",
+        "semester-f2026",
         "materials",
         "blob",
         "main",
@@ -1202,7 +1204,7 @@ def test_the_control_parses_the_url_shape_the_sync_writes():
     )
     # A directory link is the same shape with `tree`, and is offered too - "local" opens
     # the folder.
-    tree = site._gh_url("cohort-f2026", "materials", "main", "tree", "labs/01")
+    tree = site._gh_url("semester-f2026", "materials", "main", "tree", "labs/01")
     assert pattern.match(tree).group(3) == "tree"
     # Another org's repo is left alone by the script; the shape still has to parse for the
     # comparison to happen at all.
@@ -1261,11 +1263,11 @@ def test_the_profile_page_is_four_numbered_steps_in_the_order_they_happen():
     ]
 
 
-def test_the_folder_fields_default_to_one_folder_per_repo_under_this_cohort():
+def test_the_folder_fields_default_to_one_folder_per_repo_under_this_semester():
     # The path a student is most likely to want, spelt out rather than described: the
     # clone itself, not the folder it sits in. `localUrl` accepts either - a folder that
     # already ends in the repo name does not get it twice - so the placeholder can be the
-    # more useful of the two. It sits under a folder named for the cohort org, so a
+    # more useful of the two. It sits under a folder named for the semester org, so a
     # student on two courses is not steered into cloning two `materials` into one place.
     body = _strip_comments(_profile())
     placeholders = dict(
@@ -1343,7 +1345,7 @@ def test_the_boxes_hold_an_editable_value_and_save_leaves_it_there():
 
 
 def test_the_folder_boxes_run_the_width_of_the_page():
-    # An absolute path with the cohort org in it does not fit a 26em box; only the handle
+    # An absolute path with the semester org in it does not fit a 26em box; only the handle
     # box, which holds a username, stays capped.
     scss = _templates()["_sass/_course.scss"]
     entry = scss.split(".profile-entry {")[1].split("}")[0]
@@ -1463,7 +1465,7 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     assert "[data-dsl-repo]" in body and "[data-dsl-repo-url]" in body
     page = _strip_comments(_templates()["_layouts/assignment.html"])
     # The `shared` sentence names a REAL repo and not a shape: there is a single drop box
-    # for the whole cohort, so there is nothing in that name to substitute a handle into
+    # for the whole semester, so there is nothing in that name to substitute a handle into
     # and rewriting it would point every reader at a repo that does not exist. It carries
     # no `data-dsl-repo` of its own; the two the arm SHARES with every other shape - the
     # button and the closing line - are written under `repo_name_is_shape`, which site.py
@@ -1645,7 +1647,7 @@ def test_a_shared_page_names_the_drop_box_and_the_folder(generated):
         in flat
     )
     # Who else can read it is the shape note's half, under the brief, not the callout's.
-    assert "everyone in the cohort can read the whole repo" in page["shape_note"]
+    assert "everyone in the semester can read the whole repo" in page["shape_note"]
     # And the due row says at a glance that the reader's own work goes in a folder.
     due_row = _liquid_templates()["_includes/schedule_row_due.html"]
     assert (
@@ -1670,7 +1672,7 @@ def test_a_shared_page_s_repo_name_is_never_rewritten_per_reader(generated):
 def test_a_shared_page_s_edit_buttons_open_the_readers_own_folder(generated):
     # The drop box was the one shape whose page offered no `Edit online` / `Edit locally`
     # at all: the strip builds both off a repo the reader owns, and here the repo is the
-    # whole cohort's. What is theirs is a folder in it, so the layout hands the strip the
+    # whole semester's. What is theirs is a folder in it, so the layout hands the strip the
     # REAL name as a fact and the folder as a shape, and only the shape is substituted.
     layout = _strip_comments(_templates()["_layouts/assignment.html"])
     marked = layout.split("{% elsif page.repo_url %}")[1].split("{% endunless %}")[0]
@@ -1831,7 +1833,7 @@ def test_the_term_date_row_names_its_kind_and_not_its_entry():
     body = _strip_comments(_templates()["_includes/schedule_row_term_date.html"])
     _, _, rest = body.partition('data-label="Event">')
     cell, _, _ = rest.partition("</div>")
-    assert cell.strip() == "Term"
+    assert cell.strip() == "Semester"
 
 
 def test_the_team_steps_come_first_and_number_the_submission_box(generated):

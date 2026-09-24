@@ -1,7 +1,7 @@
 """A session's reading list: which file in a `readings/NN_.../` folder is prose to inline,
 which are files to list, and how the prose nests under the heading above it.
 
-The rule in one place, because the cohort site, the public course site and the generated
+The rule in one place, because the semester site, the public course site and the generated
 syllabus all render the same folder and used to each decide it for themselves.
 """
 
@@ -42,7 +42,7 @@ def is_reading_overlay(name: str) -> bool:
 def readings_block(names: list[str], read_overlay: Callable[[str], str | None]) -> str:
     """A session's reading list: its overlay prose, then every OTHER file by name.
 
-    THE rule, in one place, because its three readers - the cohort site, the public course
+    THE rule, in one place, because its three readers - the semester site, the public course
     site and the generated syllabus - each used to decide it for themselves and disagreed. A
     folder holding only PDFs rendered as links on one site, as a name list on another, and as
     nothing whatsoever in the syllabus, where a session came out an empty heading.

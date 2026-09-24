@@ -4,9 +4,9 @@
 #
 #   course_admins        GRANTS ACCESS. Course admins keep every button for this
 #                        course across years; a term's instructors are set per
-#                        cohort in people.yml. The single source of truth for course-wide
+#                        semester in people.yml. The single source of truth for course-wide
 #                        admin rights - the `course-admin` team here, mirrored into
-#                        every cohort org. A handle added any other way is reverted
+#                        every semester org. A handle added any other way is reverted
 #                        on the next sync unless it's declared here; removing a
 #                        handle here revokes their access.
 #
@@ -14,7 +14,7 @@
 #                        the OPTIONAL public open-courseware course website (the
 #                        "Publish course website" action). They grant NO GitHub
 #                        access. TAs are NOT declared here - they change every
-#                        cohort, so a cohort's whole teaching team (instructors &
-#                        TAs, their GitHub access AND their cohort-site cards) is
-#                        declared PER COHORT in that cohort's classroom-config/people.yml.
+#                        semester, so a semester's whole teaching team (instructors &
+#                        TAs, their GitHub access AND their semester-site cards) is
+#                        declared PER SEMESTER in that semester's classroom-config/people.yml.
 # ---------------------------------------------------------------------------

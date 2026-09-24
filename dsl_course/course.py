@@ -14,19 +14,24 @@ from datetime import date, datetime
 from pathlib import Path
 
 # The per-org identity/config file, at the root of every org's `.github` repo: a course
-# org's declares its name and its faculty SSOT, a cohort org's is a pointer back to it.
+# org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
 COURSE_CONFIG = "dsl-course.yml"
-# The private per-cohort config repo: roster, teams, schedule, grades, autograde records.
-# Every cohort org has exactly one, under exactly this name.
+# The private per-semester config repo: roster, teams, schedule, grades, autograde records.
+# Every semester org has exactly one, under exactly this name.
 CONFIG_REPO = "classroom-config"
 # The per-student gradebook repo: grades-<handle> (grades.py creates them, discovery reads
 # them back). Named here so the reader and the writer cannot drift.
 GRADEBOOK_PREFIX = "grades-"
 # Topics on an org's `.github` repo that say which TIER the org is (bootstrap_course stamps
 # them; list_orgs enumerates orgs by them). The repo listing carries them, so a sweep can
-# tell a course org from a cohort without another read.
+# tell a course org from a semester without another read.
 COURSE_HUB_TOPIC = "dsl-course-hub"
-COHORT_TOPIC = "dsl-cohort"
+SEMESTER_TOPIC = "dsl-semester"
+# The semester topic's old spelling: still RECOGNISED for one release (a semester
+# bootstrapped before the rename carries it until Bootstrap semester is re-run), never
+# written. Every reader matches SEMESTER_TOPICS.
+OLD_SEMESTER_TOPIC = "dsl-cohort"
+SEMESTER_TOPICS = (SEMESTER_TOPIC, OLD_SEMESTER_TOPIC)
 # How `scaffold_materials` names every materials repo (`course-materials-<tag>`) - the New
 # materials repo workflow takes only the tag, so this prefix is guaranteed by the toolkit
 # rather than a convention faculty could deviate from. Named here because `seed.refresh`
@@ -52,10 +57,10 @@ SOLUTION_BRANCH = "solution"
 SOLUTION_DIR = "solution"
 
 # The two branches the TOOLKIT owns, as opposed to the ones faculty author. A release lands
-# on `UPSTREAM_BRANCH` in each cohort dest and is merged from there into the branch students
-# read, so a cohort-side edit survives the next release instead of being copied over
-# (`deploy` is its only writer; every reader resolves the default branch). A cohort's own
-# edits are proposed back to the course repo on `<PROPOSAL_BRANCH_PREFIX><cohort-org>`
+# on `UPSTREAM_BRANCH` in each semester dest and is merged from there into the branch students
+# read, so a semester-side edit survives the next release instead of being copied over
+# (`deploy` is its only writer; every reader resolves the default branch). A semester's own
+# edits are proposed back to the course repo on `<PROPOSAL_BRANCH_PREFIX><semester-org>`
 # (`propagate`, which regenerates it on every run). Named here rather than re-spelled per
 # module because `scaffold` has to recognise both to leave them behind when it copies a repo
 # forward, and a rename reaching only one side would quietly copy them again.
@@ -86,7 +91,7 @@ SANDBOX_USER = "dsl-sandbox"
 # back - and a dropdown offering a word the reader would refuse is a form that lies.
 # Named for where the work LANDS. `assignment_repo` = one repo per unit, pushed to;
 # `external` = handed in off GitHub (Moodle, Kaggle, in class), so no repo is created at
-# all; `shared_dropbox_repo` = ONE private drop box for the whole cohort, one folder per
+# all; `shared_dropbox_repo` = ONE private drop box for the whole semester, one folder per
 # unit, every student pushing into their own and reading everyone else's. A word is added
 # here when the engine can ACT on it, because this same tuple is what the New assignment
 # dropdown offers, and a form offering a word the reader would refuse is a form that lies.
@@ -112,7 +117,7 @@ def canonical_submit_via(value: object) -> str:
 
 # THE `shared_dropbox_repo` rationale, written down once so the five places that act on it
 # can point here instead of arguing it out again and drifting: a drop box is ONE repo that
-# the whole cohort reads, and no student can opt out of being in it. Everything that would
+# the whole semester reads, and no student can opt out of being in it. Everything that would
 # otherwise be written per unit therefore has nowhere private to go - no receipts issue
 # at all (`has_receipts_issue`), no model solution (`can_hold_solution`), and no
 # `visibility:` to choose (v1 keeps it private, because `public` would publish every
@@ -145,7 +150,7 @@ DEFAULT_MAX_TEAM_SIZE = 5
 # stops. A course that accepts nothing after the deadline writes `late_window_days: 0`.
 # Here, beside the team cap, because the same three places have to agree on it: the
 # `grading_config.yml` New assignment writes, the spec every reader parses, and the rule
-# the site and the receipts quote to a cohort.
+# the site and the receipts quote to a semester.
 DEFAULT_LATE_WINDOW_DAYS = 10
 DEFAULT_LATE_PENALTY_PER_DAY = "10%"
 # Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever
@@ -157,7 +162,7 @@ NO_STARTER = "none"
 # The stand-in the scaffold seeds where a setting has no sensible default but a shape worth
 # showing (`submit_url`). Here because two layers have to agree on it: `scaffold` writes it
 # into the file and `grades` refuses to act on a line still carrying it, which is what a
-# commented example turning into a live one otherwise costs a cohort.
+# commented example turning into a live one otherwise costs a semester.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
 # The answer New assignment's format, team_formation, submit_via and visibility boxes
@@ -223,7 +228,7 @@ def creates_unit_repos(submit_via: str) -> bool:
     NAME to print, link to and grant on.
 
     Not the same question as `collects_commits`: a shared drop box collects commits into
-    one repo for the whole cohort, not one per unit."""
+    one repo for the whole semester, not one per unit."""
     return submit_via == "assignment_repo"
 
 
@@ -236,7 +241,7 @@ def can_hold_solution(submit_via: str, visibility: str) -> bool:
     `shared_dropbox_repo` assignment was scheduled a release the handout silently declined.
 
     It takes a repo of the unit's OWN (`external` has none, and a shared drop box is one
-    repo the whole cohort reads) AND a repo the toolkit can promise is private (`public`
+    repo the whole semester reads) AND a repo the toolkit can promise is private (`public`
     publishes the answers to the internet, `student_choice` lets any student publish
     them). Neither can be taken back, which is why this is a refusal and not a warning."""
     return creates_unit_repos(submit_via) and visibility == "private"
@@ -244,7 +249,7 @@ def can_hold_solution(submit_via: str, visibility: str) -> bool:
 
 def creates_repos(submit_via: str) -> bool:
     """Whether the handout creates ANYTHING for the work to land in - a repo per unit, or
-    the one drop box the whole cohort pushes into.
+    the one drop box the whole semester pushes into.
 
     The third question, and the one the two above cannot answer between them: a shared
     assignment makes no repo per unit and still makes a repo, so everything that asks "is
@@ -255,7 +260,7 @@ def creates_repos(submit_via: str) -> bool:
 
 
 def submit_shape(submit_via: str, visibility: str) -> str:
-    """The ONE word the cohort site branches an assignment on.
+    """The ONE word the semester site branches an assignment on.
 
     `assignment-repo-private`, `assignment-repo-public`, `assignment-repo-student-choice`,
     `external`, `shared-dropbox-repo`. The two axes are orthogonal in the config and are
@@ -278,7 +283,7 @@ def submit_shape(submit_via: str, visibility: str) -> str:
 
 # WHO CAN READ the repo a student was just handed. One text per shape and one place for
 # it, because two readers need the same words at two different moments: the assignment's
-# page on the cohort site (`site._assignment_entry` writes it into the front matter, the
+# page on the semester site (`site._assignment_entry` writes it into the front matter, the
 # layout prints it under the brief) and the repo's own About line on GitHub, which is what
 # a student reads when they open the repo rather than the page (`assign.provision_one`,
 # and the drop box). Written apart they drifted, and the About line said nothing at all.
@@ -307,7 +312,7 @@ SHAPE_NOTES = {
         "your portfolio."
     ),
     "shared-dropbox-repo": (
-        "NB: everyone in the cohort can read the whole repo, so commit nothing you "
+        "NB: everyone in the semester can read the whole repo, so commit nothing you "
         "would not show the class."
     ),
 }
@@ -356,7 +361,7 @@ PUBLIC_TYPES = (PUBLIC_HTML, PUBLIC_HTML_PDF, PUBLIC_ALL_FILES)
 
 
 # The four ROLE teams every org's access is expressed in: the two faculty teams, created
-# in course and cohort orgs alike, and the two cohort-only student teams. Named here
+# in course and semester orgs alike, and the two semester-only student teams. Named here
 # because the grants (access), the reconciles (sync_faculty, sync_roster), the bootstrap
 # that creates them and the slugs the student-written Join-team form may never claim
 # (sync_teams) all address them by these exact strings.
@@ -366,17 +371,17 @@ STUDENTS_TEAM = "students"
 AUDITORS_TEAM = "auditors"
 
 # Each role team as `(slug, description, privacy)` - what bootstrap creates and what the
-# nightly refresh converges a cohort's existing teams back to. One table, because a
+# nightly refresh converges a semester's existing teams back to. One table, because a
 # privacy asserted only at creation is a privacy every org bootstrapped before the
 # decision never gets.
 #
-# Faculty teams are created in EVERY org (course + cohort): instructors run the workflows
+# Faculty teams are created in EVERY org (course + semester): instructors run the workflows
 # and push content (write); course-admin manage the org (admin).
 FACULTY_TEAMS = (
     (INSTRUCTORS_TEAM, "Instructors and TAs", "closed"),
     (COURSE_ADMIN_TEAM, "Course administrators - DSL team", "closed"),
 )
-# Cohort-only role teams: enrolled students + read-only auditors. The persistent course org
+# Semester-only role teams: enrolled students + read-only auditors. The persistent course org
 # never gets these - it holds unreleased materials, model solutions, and hidden tests, so
 # students/auditors must not be near it. Auditors are read-only: assignment release is
 # roster-driven (onboarded students only), so auditors never receive assignment repos.
@@ -386,7 +391,7 @@ FACULTY_TEAMS = (
 # rather than enrolled - a classmate's academic status, published to the class by the
 # scaffolding. A secret team is visible only to its own members and to org owners, which
 # costs the students nothing (nobody needs to browse the roster to do the course).
-COHORT_TEAMS = (
+SEMESTER_TEAMS = (
     (STUDENTS_TEAM, "Enrolled students", "secret"),
     (
         AUDITORS_TEAM,
@@ -394,7 +399,7 @@ COHORT_TEAMS = (
         "secret",
     ),
 )
-ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
+ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *SEMESTER_TEAMS))
 
 
 # ------------------------------------------------------------------ the receipts issue
@@ -491,7 +496,7 @@ def late_rule(window_days: int | None, penalty: str | None) -> str:
     course that turned late work off, not one that has yet to choose.
 
     The rule itself, spelt once. It is the deadline half of an assignment's page on the
-    cohort site, and a second spelling of it elsewhere is how one cohort comes to read two
+    semester site, and a second spelling of it elsewhere is how one semester comes to read two
     different rules for one deadline.
 
     NOT `grades.late_policy`, which answers a different question: that is this rule against
@@ -575,8 +580,8 @@ def shared_repo(slug: str) -> str:
     """The ONE repo a `submit_via: shared_dropbox_repo` assignment hands out:
     `<slug>-submissions`, a private drop box with a folder per unit inside it.
 
-    Never the bare slug - that is the frozen cohort TEMPLATE the brief lives in
-    (`assign.ensure_cohort_template`). The suffix earns two things for free: the name
+    Never the bare slug - that is the frozen semester TEMPLATE the brief lives in
+    (`assign.ensure_semester_template`). The suffix earns two things for free: the name
     derives from the template, so `discovery.classify_repos` reads it as a student repo and
     the faculty READ floor and the public-page exclusion both apply with no new rule; and
     it carries no handle, so it is the one submission-repo name a public workflow log may
@@ -590,7 +595,7 @@ def submission_suffix(repo: str, template: str) -> str:
     return repo[len(template) + 1 :]
 
 
-def term_tag(name: str) -> str | None:
+def semester_of(name: str) -> str | None:
     """The fYYYY / sYYYY term tag in an org or repo name (`course-materials-F2026` ->
     'f2026'), or None. Case-insensitive and lowercased, so the same name cannot yield a tag
     on one code path and nothing on another - which two of the three copies of this regex
@@ -599,8 +604,8 @@ def term_tag(name: str) -> str | None:
     return m.group(0) if m else None
 
 
-def term_label(tag: str | None) -> str | None:
-    """`f2026` -> `Fall 2026`, `s2027` -> `Spring 2027`: how a cohort is displayed."""
+def semester_label(tag: str | None) -> str | None:
+    """`f2026` -> `Fall 2026`, `s2027` -> `Spring 2027`: how a semester is displayed."""
     if not tag:
         return None
     return f"{'Fall' if tag[0] == 'f' else 'Spring'} {tag[1:]}"
@@ -615,7 +620,7 @@ def pages_repo(org: str) -> str:
 
 
 def assignment_slug(template: str) -> str:
-    """assignment-1-f2026 -> assignment-1 (drop a trailing cohort suffix)."""
+    """assignment-1-f2026 -> assignment-1 (drop a trailing semester suffix)."""
     return re.sub(r"-[fs]\d{4}$", "", template)
 
 
@@ -629,9 +634,9 @@ def resolve_is_group(*, force: bool, template_type: str | None) -> bool:
     re-derives its own precedence (and none re-trusts student-writable teams.csv to decide
     the kind).
 
-    The cohort's `schedule.yml` used to sit between the two and no longer does. The two
+    The semester's `schedule.yml` used to sit between the two and no longer does. The two
     files are orthogonal now - schedule.yml is WHEN, grading_config.yml is WHAT - and a
-    cohort that could override the shape got one assignment provisioned per student while
+    semester that could override the shape got one assignment provisioned per student while
     its own grading config, its team cap and its Join-team form all said per team."""
     if force:
         return True
@@ -671,7 +676,7 @@ def active_today(start: str | date | None, end: str | date | None, today: str) -
 
 
 def is_repo_root(path: str) -> bool:
-    """Whether a plan's `course_source_path` / `cohort_dest_path` names the whole repo.
+    """Whether a plan's `course_source_path` / `semester_dest_path` names the whole repo.
 
     `""`, `/` and `.` are all the "release everything" spelling, and faculty write all
     three. Stated once because two readers act on it: `deploy._resolve_within` resolves
@@ -819,9 +824,9 @@ def row_name(declared: str, identifier: str) -> str:
     return name
 
 
-# The `run-name` prefix of a Scheduled release run scoped to ONE cohort
-# (`workflows_render._SCOPED_COHORT`), which `cadence` reads off the runs listing's
+# The `run-name` prefix of a Scheduled release run scoped to ONE semester
+# (`workflows_render._SCOPED_SEMESTER`), which `cadence` reads off the runs listing's
 # `display_title`. Such a run is neither a driver firing nor a tick of the whole course:
-# counted, a push in cohort A would shrink the gap a late release in cohort B is measured
+# counted, a push in semester A would shrink the gap a late release in semester B is measured
 # by, and hide it.
 SCOPED_RUN_TITLE = "Scheduled release for cohort"

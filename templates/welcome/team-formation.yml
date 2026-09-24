@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Form team
 
-# Seed this into a cohort's public `welcome` repo as
+# Seed this into a semester's public `welcome` repo as
 # .github/workflows/team-formation.yml. Students open a "Join team" issue here; the issue
 # AUTHOR is the authenticated GitHub handle (unspoofable). We verify they are an onboarded
 # ENROLLED student - auditors are read-only (released materials, no assignment repos) so they
@@ -18,10 +18,10 @@ name: Form team
 # is refused here.
 #
 # teams.csv is PRIVATE, so the teams that exist - names and counts only - are listed on
-# the assignment's page on the cohort site, which a push to teams.csv re-syncs. The lock
+# the assignment's page on the semester site, which a push to teams.csv re-syncs. The lock
 # carries that page's URL (`team_formation_page:`) for the refusals below to link.
 #
-# Runs under secrets.DSL_BOT_TOKEN, which needs, on the cohort org: Contents R/W on
+# Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
 # classroom-config, Issues R/W on welcome.
 
 on:
@@ -58,7 +58,7 @@ jobs:
         with:
           github-token: ${{ secrets.DSL_BOT_TOKEN || github.token }}
           script: |
-            const org    = context.repo.owner;            // the cohort org
+            const org    = context.repo.owner;            // the semester org
             const issue  = context.payload.issue;
             const handle = issue.user.login;              // authenticated identity
             const CONFIG = 'classroom-config';
@@ -124,11 +124,11 @@ jobs:
               // not carry.
               //
               // `window` is null when the entry carries no `team_formation_window:` at
-              // all, which is what a cohort last synced by a toolkit older than the window
-              // looks like. That reads as OPEN below - the behaviour those cohorts have
+              // all, which is what a semester last synced by a toolkit older than the window
+              // looks like. That reads as OPEN below - the behaviour those semesters have
               // had since the form existed - never as closed.
               //
-              // `page` is the assignment's page on the cohort site, which lists the teams
+              // `page` is the assignment's page on the semester site, which lists the teams
               // that exist - "" where the lock carries none, and the refusal then names
               // the page without linking it.
               const LOCK = 'assignments.lock.yml';
@@ -162,7 +162,7 @@ jobs:
               };
               // The close date is written as a bare ISO day and read by a student, so it is
               // spoken as one - `26th Oct`, dsl_course.grades.spoken_day's spelling, which
-              // the mail and the cohort site use too. Anything that is not one is printed
+              // the mail and the semester site use too. Anything that is not one is printed
               // as it stands rather than guessed at.
               const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
               const spokenDate = (iso) => {
@@ -204,7 +204,7 @@ jobs:
               const slug = `${assignment}-${team}`;
               // ONE reason-free message for every unavailable name. This issue is public, so a
               // message that said WHY ("a team can't be named after a GitHub handle") answered,
-              // for any name anyone cared to try, whether that person is in this cohort.
+              // for any name anyone cared to try, whether that person is in this semester.
               const NAME_TAKEN =
                 `Thanks @${handle} - that assignment + team combination isn't available. ` +
                 `[Open a new Join team issue](${newIssue('')}) with another team name.`;
@@ -218,7 +218,7 @@ jobs:
               const iRosterHandle = rosterHeader.indexOf('github_handle');
               // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
               // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
-              // required, so an older cohort's students keep forming teams.
+              // required, so an older semester's students keep forming teams.
               const iRole = rosterHeader.indexOf('role');
               if (iRosterHandle < 0) return fail(
                 `Thanks @${handle} - the roster's header is missing a \`github_handle\` column. ` +
@@ -270,11 +270,11 @@ jobs:
               // to be refused, and only one of them is the student's to fix.
               const lock = await lockEntry(assignment);
               if (lock === undefined) return fail(
-                `Thanks @${handle} - I can't read this cohort's assignment list ` +
+                `Thanks @${handle} - I can't read this semester's assignment list ` +
                 `(\`classroom-config/${LOCK}\` isn't there). A maintainer will action this.`,
                 'needs-review');
               if (lock === null) return refuse(
-                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort. ` +
+                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this semester. ` +
                 `Check the slug on the course site, then [open a new Join team issue](${newIssue(team)}).`);
               if (lock.formation === 'none') return refuse(
                 `Thanks @${handle} - \`${assignment}\` is an individual assignment, so there are no teams ` +
@@ -288,7 +288,7 @@ jobs:
               // The formation WINDOW, which runs from the handout to the grading pin. Only
               // an explicit `pending` or `closed` refuses: a lock written by a toolkit older
               // than the window carries no such scalar at all (`window` is null), and that
-              // has to go on behaving exactly as it did - a cohort mid-semester must not
+              // has to go on behaving exactly as it did - a semester mid-semester must not
               // lose team formation because its nightly sync has not run yet.
               // `pending` and `closed` are the two sides of the window and they must not
               // share a sentence: before the handout `closes` is still in the FUTURE, so

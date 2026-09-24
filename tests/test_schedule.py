@@ -1,5 +1,5 @@
 """dsl_course.schedule pure core - classroom-config/schedule.yml is the single home for a
-cohort's release plan (releases), due dates (assignments), and display-only calendar rows
+semester's release plan (releases), due dates (assignments), and display-only calendar rows
 (events); a wrong parse here silently mis-times a release or mis-pins a grading deadline,
 so it's the bit that must be right. Times are timezone-aware (naive -> Europe/Berlin by
 default).
@@ -55,13 +55,13 @@ def test_coerce_datetime_bare_date_start_or_end_of_day():
     assert (end.hour, end.minute, end.second) == (23, 59, 59)
 
 
-def test_coerce_datetime_naive_gets_the_cohort_tz_and_an_offset_is_converted_to_it():
+def test_coerce_datetime_naive_gets_the_semester_tz_and_an_offset_is_converted_to_it():
     naive = _coerce_datetime("2026-09-15T14:00", BERLIN)
     assert naive.tzinfo is not None
     assert naive.utcoffset() == BERLIN.utcoffset(naive.replace(tzinfo=None))
     # An explicit offset names an INSTANT; it is honoured as that instant, but stored in
-    # the cohort's own clock - 14:00 UTC is 16:00 in Berlin in September. Every consumer
-    # then reads a cohort wall-clock time without re-deriving the zone (the site used to
+    # the semester's own clock - 14:00 UTC is 16:00 in Berlin in September. Every consumer
+    # then reads a semester wall-clock time without re-deriving the zone (the site used to
     # convert at print time, and anything that forgot printed the wrong hour).
     aware = _coerce_datetime("2026-09-15T14:00+00:00", BERLIN)
     assert aware == datetime(2026, 9, 15, 14, 0, tzinfo=ZoneInfo("UTC"))  # same instant
@@ -80,8 +80,8 @@ def test_parse_full_schedule():
                     {
                         "course_source_repo": "cm-f2026",
                         "course_source_path": "lectures/02_intro",
-                        "cohort_dest_repo": "materials",
-                        "cohort_dest_path": "lectures/02_intro",
+                        "semester_dest_repo": "materials",
+                        "semester_dest_path": "lectures/02_intro",
                     }
                 ],
             },
@@ -153,7 +153,7 @@ def test_release_without_when_is_dropped():
     assert [r.label for r in parse(meta).releases] == ["ok"]
 
 
-def test_deploy_accepts_single_mapping_defaults_cohort_dest_path_none():
+def test_deploy_accepts_single_mapping_defaults_semester_dest_path_none():
     meta = {
         "releases": {
             "s": {
@@ -183,7 +183,7 @@ def test_deploy_entry_missing_source_is_skipped():
 
 
 def test_deploy_entry_using_the_old_unprefixed_keys_is_skipped():
-    # The org prefixes are a hard rename with no alias handling, so a cohort whose
+    # The org prefixes are a hard rename with no alias handling, so a semester whose
     # schedule.yml predates it must lose the copy outright rather than half-parse it.
     meta = {
         "releases": {
@@ -235,7 +235,7 @@ def test_event_yaml_native_date_and_datetime_objects():
     assert sched.events[1].when == datetime(2026, 12, 15, 14, 0, tzinfo=BERLIN)
 
 
-def test_event_explicit_offset_keeps_its_instant_and_is_stored_in_the_cohort_tz():
+def test_event_explicit_offset_keeps_its_instant_and_is_stored_in_the_semester_tz():
     sched = parse(
         {
             "timezone": "Europe/Berlin",
@@ -244,10 +244,10 @@ def test_event_explicit_offset_keeps_its_instant_and_is_stored_in_the_cohort_tz(
     )
     when = sched.events[0].when
     assert when == datetime(2026, 12, 15, 14, 0, tzinfo=ZoneInfo("UTC"))  # same instant
-    assert when.hour == 15 and when.tzinfo == BERLIN  # ...on the cohort's clock (CET)
+    assert when.hour == 15 and when.tzinfo == BERLIN  # ...on the semester's clock (CET)
 
 
-def test_event_timezone_comes_from_the_cohort_setting():
+def test_event_timezone_comes_from_the_semester_setting():
     sched = parse(
         {
             "timezone": "Pacific/Niue",
@@ -392,7 +392,7 @@ def test_malformed_deploy_datetime_falls_back_to_the_event_datetime():
 
 
 def test_the_settings_that_moved_to_grading_config_are_flagged_by_name():
-    # The clean break. A cohort still carrying `type: group` is not making a typo, it is
+    # The clean break. A semester still carrying `type: group` is not making a typo, it is
     # declaring the shape in a file that no longer reads it - so the entry is KEPT (its
     # dates are still good) and the message says which file the declaration moved to.
     meta = {
@@ -655,7 +655,7 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
             writes.append(content.decode()) or True
         ),
     )
-    S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
     (new,) = writes
     sched = S.parse(yaml.safe_load(new))
     assert (
@@ -665,11 +665,11 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
     )
     # second call sees the recorded value and is a no-op
     store["text"] = new
-    S.record_handout("Cohort-f2026", "assignment-1", "2026-09-23T09:00")
+    S.record_handout("Semester-f2026", "assignment-1", "2026-09-23T09:00")
     assert len(writes) == 1
 
 
-def test_the_plan_is_read_once_per_cohort_and_a_handout_reopens_it(monkeypatch):
+def test_the_plan_is_read_once_per_semester_and_a_handout_reopens_it(monkeypatch):
     # An hourly tick reads the plan in the scheduler and again inside every handout and
     # collection it fires - one GET each, for a file that only a person or record_handout
     # changes. record_handout IS that writer, so it drops the memo.
@@ -679,32 +679,32 @@ def test_the_plan_is_read_once_per_cohort_and_a_handout_reopens_it(monkeypatch):
         "get_file_content",
         lambda org, repo, path: reads.append(org) or "timezone: Europe/Berlin\n",
     )
-    schedule.load("Cohort-f2026")
-    schedule.load("Cohort-f2026")
-    assert reads == ["Cohort-f2026"], "the plan was re-read within one run"
+    schedule.load("Semester-f2026")
+    schedule.load("Semester-f2026")
+    assert reads == ["Semester-f2026"], "the plan was re-read within one run"
 
-    schedule.load("Cohort-f2027")
-    assert len(reads) == 2, "one cohort's plan answered for another"
+    schedule.load("Semester-f2027")
+    assert len(reads) == 2, "one semester's plan answered for another"
 
     monkeypatch.setattr(schedule, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(
         schedule, "get_file_with_sha", lambda org, repo, path: ("", "sha0")
     )
-    schedule.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
-    schedule.load("Cohort-f2026")
+    schedule.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
+    schedule.load("Semester-f2026")
     assert len(reads) == 3, "the memo survived a write to schedule.yml"
 
 
 # --------------------------------------------------- a deprecated enrolment: block
 # `enrolment:` was the window in which the hourly cron mailed enrolment codes. A push to
-# students.csv does that now, so the block does nothing - but every live cohort's
+# students.csv does that now, so the block does nothing - but every live semester's
 # INSTRUCTOR-OWNED schedule.yml still carries one until it is swept out by hand, and
 # `--validate` reds on anything in `Schedule.dropped`. So it stays a recognised key.
 
 
 def test_a_deprecated_enrolment_block_is_ignored_without_reddening_validate(capsys):
     # The gap this exists for: the block is gone from the engine and still on disk in
-    # every cohort, and `validate-schedule` runs on their every commit to schedule.yml.
+    # every semester, and `validate-schedule` runs on their every commit to schedule.yml.
     sched = parse(
         {
             "semester_start": "2026-09-07",
@@ -735,7 +735,7 @@ def test_a_genuinely_unknown_top_level_key_is_still_flagged(capsys):
 #
 # The incident: a faculty member left an unclosed flow mapping in schedule.yml, so
 # `yaml.safe_load` raised inside `schedule.load` and took down BOTH the hourly Scheduled
-# release run AND Sync site for that cohort - the site kept showing the template's
+# release run AND Sync site for that semester - the site kept showing the template's
 # placeholders. `load` now treats an unparseable file exactly as an absent one (empty
 # Schedule) and says so loudly.
 #
@@ -760,14 +760,14 @@ def test_unparseable_schedule_loads_as_empty_and_says_so_loudly(monkeypatch, cap
         S, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
     )
 
-    sched = S.load("Cohort-f2026")
+    sched = S.load("Semester-f2026")
 
     # same shape a missing schedule.yml yields - nothing scheduled, nothing raised - but
     # flagged, and carrying the one fault that says so (see the test below)
     assert sched.unparseable and not sched.releases and not sched.assignments
     err = capsys.readouterr().err
-    # self-diagnosing: which cohort, which file, the parser's own line/column, what to do
-    assert "Cohort-f2026/classroom-config/schedule.yml is NOT valid YAML" in err
+    # self-diagnosing: which semester, which file, the parser's own line/column, what to do
+    assert "Semester-f2026/classroom-config/schedule.yml is NOT valid YAML" in err
     assert "line 5" in err and "flow mapping" in err
     assert "fix classroom-config/schedule.yml on main" in err
     assert "NOTHING is scheduled" in err
@@ -788,7 +788,7 @@ def test_a_wellformed_schedule_is_untouched_by_the_yaml_guard(monkeypatch, capsy
     )
     monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: good)
 
-    sched = S.load("Cohort-f2026")
+    sched = S.load("Semester-f2026")
 
     assert sched.semester_start == date(2026, 9, 7)
     assert [r.label for r in sched.releases] == ["lab-1"]
@@ -805,7 +805,7 @@ def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch, capsys):
     monkeypatch.setattr(
         S, "get_file_content", lambda org, repo, path: "- just\n- a list\n"
     )
-    sched = S.load("Cohort-f2026")
+    sched = S.load("Semester-f2026")
     assert sched.unparseable and not sched.releases
     (fault,) = sched.faults
     assert fault.what.startswith("this file parses as list, not a mapping")
@@ -825,7 +825,7 @@ def test_an_unparseable_plan_is_one_fault_not_an_empty_plan(monkeypatch):
         S, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
     )
 
-    (fault,) = S.load("Cohort-f2026").faults
+    (fault,) = S.load("Semester-f2026").faults
 
     assert fault.where == fault.file == S.SCHEDULE_PATH
     assert fault.field == "schedule"
@@ -845,7 +845,7 @@ def test_a_comment_only_schedule_is_empty_not_unparseable(monkeypatch, capsys):
     monkeypatch.setattr(
         S, "get_file_content", lambda org, repo, path: "# nothing yet\n"
     )
-    assert S.load("Cohort-f2026") == Schedule()
+    assert S.load("Semester-f2026") == Schedule()
     assert capsys.readouterr().err == ""
 
 
@@ -886,7 +886,7 @@ def test_every_kind_of_dropped_entry_is_recorded_with_its_cost():
         "assignments.a2",
         "events.mid-term",
     ]
-    # each line names the field at fault AND what the cohort loses by it
+    # each line names the field at fault AND what the semester loses by it
     assert (
         "`course_source_repo`" in sched.dropped[0] and "never ships" in sched.dropped[0]
     )
@@ -923,8 +923,8 @@ def test_an_assignment_without_a_course_source_repo_is_dropped():
     assert "no autograding" in sched.dropped[0]
 
 
-def test_cohort_dest_repo_parses_and_defaults_to_the_slug():
-    from dsl_course.schedule import cohort_name
+def test_semester_dest_repo_parses_and_defaults_to_the_slug():
+    from dsl_course.schedule import semester_name
 
     sched = parse(
         {
@@ -932,21 +932,21 @@ def test_cohort_dest_repo_parses_and_defaults_to_the_slug():
                 "hw": {"course_source_repo": "a-f2026-1", "due_datetime": "2026-10-13"},
                 "named": {
                     "course_source_repo": "a-f2026-2",
-                    "cohort_dest_repo": "homework-1",
+                    "semester_dest_repo": "homework-1",
                     "due_datetime": "2026-10-20",
                 },
                 "blank": {
                     "course_source_repo": "a-f2026-3",
-                    "cohort_dest_repo": "  ",
+                    "semester_dest_repo": "  ",
                     "due_datetime": "2026-10-27",
                 },
             }
         }
     )
-    # unset (and blank) -> the slug IS the cohort-side name; set -> it wins
-    assert cohort_name("hw", sched.assignments["hw"]) == "hw"
-    assert cohort_name("named", sched.assignments["named"]) == "homework-1"
-    assert cohort_name("blank", sched.assignments["blank"]) == "blank"
+    # unset (and blank) -> the slug IS the semester-side name; set -> it wins
+    assert semester_name("hw", sched.assignments["hw"]) == "hw"
+    assert semester_name("named", sched.assignments["named"]) == "homework-1"
+    assert semester_name("blank", sched.assignments["blank"]) == "blank"
 
 
 def test_entry_for_repo_matches_on_course_source_repo_not_the_slug():
@@ -1001,7 +1001,7 @@ def test_an_absent_term_date_is_not_flagged(key):
 def test_a_dangling_deploy_key_is_flagged_but_an_explicit_empty_list_is_not():
     # `deploy:` with nothing under it parses to None, indistinguishable from the key being
     # absent by the time _parse_deploy sees it - and absent is legitimate (a display-only
-    # session row). Both demo cohorts carried three of these on live sessions, each looking
+    # session row). Both demo semesters carried three of these on live sessions, each looking
     # for all the world like it should ship something.
     def drops(entry):
         return parse({"releases": {"lecture-9": entry}}).dropped
@@ -1060,12 +1060,12 @@ def test_load_logs_every_dropped_entry_loudly(monkeypatch, capsys):
         ),
     )
 
-    sched = S.load("Cohort-f2026")
+    sched = S.load("Semester-f2026")
 
     assert sched.assignments == {}
     err = capsys.readouterr().err
-    # which cohort, which file, which entry, which field, and what it costs
-    assert "Cohort-f2026/classroom-config/schedule.yml" in err
+    # which semester, which file, which entry, which field, and what it costs
+    assert "Semester-f2026/classroom-config/schedule.yml" in err
     assert "DROPPED" in err
     assert "assignments.assignment-2" in err
     assert "`due_datetime`" in err
@@ -1114,7 +1114,7 @@ def test_load_file_parses_and_surfaces_drops(tmp_path):
 )
 def test_shipped_schedules_parse_with_nothing_dropped(path):
     # The CI gate. The example is what faculty copy and the template is what every new
-    # cohort is seeded with, so either one silently dropping an entry would teach the
+    # semester is seeded with, so either one silently dropping an entry would teach the
     # mistake rather than catch it.
     full = Path(__file__).resolve().parents[1] / path
     sched, error = schedule.load_file(str(full))
@@ -1158,7 +1158,7 @@ def test_load_never_raises_when_a_block_is_a_list(monkeypatch, capsys):
         "get_file_content",
         lambda org, repo, path: "releases:\n  - event_datetime: 2026-09-01\n",
     )
-    sched = S.load("Cohort-f2026")  # must not raise
+    sched = S.load("Semester-f2026")  # must not raise
     assert sched.releases == []
     assert "DROPPED" in capsys.readouterr().err
 
@@ -1434,7 +1434,7 @@ def test_record_handout_says_so_loudly_when_the_file_shape_defeats_the_edit(
         lambda *a, **k: pytest.fail("must not write into a shape it cannot parse"),
     )
 
-    S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
 
     err = capsys.readouterr().err
     assert "could NOT record the assignment-1 handout" in err
@@ -1452,7 +1452,7 @@ def test_record_handout_says_so_loudly_when_the_write_itself_fails(monkeypatch, 
     monkeypatch.setattr(S, "get_file_with_sha", lambda org, repo, path: (good, "sha0"))
     monkeypatch.setattr("dsl_course.schedule.put_file", lambda *a, **k: False)
 
-    S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
 
     err = capsys.readouterr().err
     assert "could NOT record the assignment-1 handout" in err
@@ -1495,41 +1495,45 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
 
     monkeypatch.setattr(S, "get_file_with_sha", moving_read)
 
-    S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
 
     (final,) = writes
     assert "assignment-2" in final, "a concurrent edit was reverted"
     assert "handout_datetime: 2026-09-22T14:05" in final
 
 
-def test_validate_is_invalid_for_a_cohort_plan_that_does_not_parse(monkeypatch, capsys):
-    # `--file` returned 1 for a file that does not parse while `--cohort-org` printed "OK:
+def test_validate_is_invalid_for_a_semester_plan_that_does_not_parse(
+    monkeypatch, capsys
+):
+    # `--file` returned 1 for a file that does not parse while `--semester-org` printed "OK:
     # nothing dropped" and exited 0 - because `load` hands back an empty Schedule so the
-    # hourly cron cannot be frozen by one cohort's typo, and the validator read the
+    # hourly cron cannot be frozen by one semester's typo, and the validator read the
     # fallback as a verdict. The two forms answer the same question and must agree.
     monkeypatch.setattr(
         schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
     )
     monkeypatch.setattr(
-        "sys.argv", ["schedule", "--cohort-org", "Cohort-f2026", "--validate"]
+        "sys.argv", ["schedule", "--semester-org", "Semester-f2026", "--validate"]
     )
     assert schedule.main() == 1
     out = capsys.readouterr()
-    assert "INVALID: Cohort-f2026/schedule.yml could not be parsed" in out.out
+    assert "INVALID: Semester-f2026/schedule.yml could not be parsed" in out.out
     assert "OK: nothing dropped" not in out.out
     assert "is NOT valid YAML" in out.err  # what load already said, not said again
 
 
-def test_validate_cli_reports_an_unreadable_cohort_schedule(monkeypatch, capsys):
+def test_validate_cli_reports_an_unreadable_semester_schedule(monkeypatch, capsys):
     # An absent schedule.yml is an empty Schedule (valid: nothing planned yet), but a read
     # that failed outright now raises - the CLI turns that into a line and a red run,
     # rather than a traceback or a false "OK: nothing dropped".
-    def boom(cohort_org):
-        raise RuntimeError("could not read Cohort-f2026/classroom-config/schedule.yml")
+    def boom(semester_org):
+        raise RuntimeError(
+            "could not read Semester-f2026/classroom-config/schedule.yml"
+        )
 
     monkeypatch.setattr(schedule, "load", boom)
     monkeypatch.setattr(
-        "sys.argv", ["schedule", "--cohort-org", "Cohort-f2026", "--validate"]
+        "sys.argv", ["schedule", "--semester-org", "Semester-f2026", "--validate"]
     )
     assert schedule.main() == 1
     assert "could not read" in capsys.readouterr().err
@@ -1832,7 +1836,7 @@ def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
         "  lecture_01:\n"
         "    event_datetime: 2026-09-08T10:00\n"
         "    deploy:\n"
-        "      - cohort_dest_repo: materials\n"
+        "      - semester_dest_repo: materials\n"
         "        deploy_datetime: 2026-09-08T09:00\n"
         "        course_source_path: lectures/01\n"
         "        course_source_repo: cm\n",
@@ -1874,7 +1878,7 @@ def test_the_line_stamp_never_reaches_the_parsed_plan(tmp_path):
 
 
 def test_a_commented_out_entry_is_not_read_as_a_real_one(tmp_path):
-    # The seeded schedule.yml ships its whole schema commented out, and a cohort that has
+    # The seeded schedule.yml ships its whole schema commented out, and a semester that has
     # not written a plan yet has nothing else in the file.
     sched = _parsed(
         tmp_path,
@@ -2109,7 +2113,7 @@ def test_a_plan_with_every_source_staged_says_so_rather_than_saying_nothing(
 def test_run_by_hand_the_annotations_still_work_with_no_step_output(
     monkeypatch, capsys, tmp_path
 ):
-    # `--annotate` has to stay usable off a runner: a maintainer checking a cohort's plan
+    # `--annotate` has to stay usable off a runner: a maintainer checking a semester's plan
     # locally must not need to invent a GITHUB_OUTPUT for it.
     _org(monkeypatch, {"cm": ["lectures"]})
     _annotated(monkeypatch, tmp_path, _imminent(tmp_path))
@@ -2171,19 +2175,19 @@ def test_two_assignments_cannot_hand_out_the_same_repo():
 
 
 def test_two_assignments_may_share_a_template_when_both_name_their_own_repos():
-    # A resit off the same brief, or one template handed out to two halves of a cohort.
-    # Legitimate only because `cohort_dest_repo` is what every cohort-side artefact keys
+    # A resit off the same brief, or one template handed out to two halves of a semester.
+    # Legitimate only because `semester_dest_repo` is what every semester-side artefact keys
     # on, so the two never touch each other's repos, snapshots, sheets or marks.
     meta = {
         "assignments": {
             "assignment-2": {
                 "course_source_repo": "a2-f2026",
-                "cohort_dest_repo": "assignment-2",
+                "semester_dest_repo": "assignment-2",
                 "due_datetime": "2026-10-13",
             },
             "assignment-2-resit": {
                 "course_source_repo": "a2-f2026",
-                "cohort_dest_repo": "assignment-2-resit",
+                "semester_dest_repo": "assignment-2-resit",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -2197,7 +2201,7 @@ def test_two_assignments_may_share_a_template_when_both_name_their_own_repos():
     ]
 
 
-def test_one_entry_leaving_the_cohort_repo_to_default_re_breaks_the_pair():
+def test_one_entry_leaving_the_semester_repo_to_default_re_breaks_the_pair():
     # All-or-nothing: with one of them defaulting to its slug, the two are ambiguous
     # again for every reader that starts from the template.
     meta = {
@@ -2208,7 +2212,7 @@ def test_one_entry_leaving_the_cohort_repo_to_default_re_breaks_the_pair():
             },
             "assignment-2-resit": {
                 "course_source_repo": "a2-f2026",
-                "cohort_dest_repo": "assignment-2-resit",
+                "semester_dest_repo": "assignment-2-resit",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -2216,7 +2220,7 @@ def test_one_entry_leaving_the_cohort_repo_to_default_re_breaks_the_pair():
     sched = parse(meta)
     assert set(sched.assignments) == {"assignment-2"}
     (drop,) = [d for d in sched.dropped if "assignments.assignment-2-resit" in d]
-    assert "EVERY one of them sets its own `cohort_dest_repo`" in drop
+    assert "EVERY one of them sets its own `semester_dest_repo`" in drop
 
 
 def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
@@ -2226,12 +2230,12 @@ def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
         "assignments": {
             "assignment-2": {
                 "course_source_repo": "a2-f2026",
-                "cohort_dest_repo": "assignment-2",
+                "semester_dest_repo": "assignment-2",
                 "due_datetime": "2026-10-13",
             },
             "assignment-2-resit": {
                 "course_source_repo": "a2-f2026",
-                "cohort_dest_repo": "assignment-2-resit",
+                "semester_dest_repo": "assignment-2-resit",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -2240,7 +2244,7 @@ def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
     refusal = schedule.resolve_target(sched, "a2-f2026")
     assert isinstance(refusal, str)
     assert "assignment-2" in refusal and "assignment-2-resit" in refusal
-    # Named, it answers with the KEY and the cohort-side NAME - the only two things a
+    # Named, it answers with the KEY and the semester-side NAME - the only two things a
     # caller starting from a template wants, and never one standing in for the other.
     assert schedule.resolve_target(sched, "a2-f2026", "assignment-2-resit") == (
         "assignment-2-resit",
@@ -2256,8 +2260,8 @@ def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
     )
 
 
-def test_two_assignments_cannot_resolve_to_one_cohort_name():
-    # `cohort_dest_repo`, else the slug, names every cohort-side artefact. Two entries
+def test_two_assignments_cannot_resolve_to_one_semester_name():
+    # `semester_dest_repo`, else the slug, names every semester-side artefact. Two entries
     # landing on one name is the same collision as a duplicate source, one hop later:
     # the second handout finds the first's repos and skips them, and both assignments
     # then read and freeze the same snapshot. The second claimant is dropped, naming the
@@ -2270,7 +2274,7 @@ def test_two_assignments_cannot_resolve_to_one_cohort_name():
             },
             "assignment-1-resit": {
                 "course_source_repo": "a1-resit-f2026",
-                "cohort_dest_repo": "assignment-1",
+                "semester_dest_repo": "assignment-1",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -2278,28 +2282,28 @@ def test_two_assignments_cannot_resolve_to_one_cohort_name():
     sched = parse(meta)
     assert set(sched.assignments) == {"assignment-1"}
     (drop,) = [d for d in sched.dropped if "assignments.assignment-1-resit" in d]
-    assert "cohort-side name of assignments.assignment-1" in drop
+    assert "semester-side name of assignments.assignment-1" in drop
 
 
-def test_two_cohort_dest_repos_that_match_each_other_are_refused():
+def test_two_semester_dest_repos_that_match_each_other_are_refused():
     # The same collision written the other way round - neither entry uses its slug.
     meta = {
         "assignments": {
             "week-3": {
                 "course_source_repo": "a3-f2026",
-                "cohort_dest_repo": "homework",
+                "semester_dest_repo": "homework",
                 "due_datetime": "2026-10-13",
             },
             "week-4": {
                 "course_source_repo": "a4-f2026",
-                "cohort_dest_repo": "homework",
+                "semester_dest_repo": "homework",
                 "due_datetime": "2026-11-10",
             },
         }
     }
     sched = parse(meta)
     assert set(sched.assignments) == {"week-3"}
-    assert any("cohort-side name of assignments.week-3" in d for d in sched.dropped)
+    assert any("semester-side name of assignments.week-3" in d for d in sched.dropped)
 
 
 # ------------------------------------------- what was dropped, as the notifier sees it
@@ -2375,7 +2379,7 @@ def test_a_clean_plan_has_no_faults():
 # ------------------------------------------------------------------ archive:
 
 
-def test_a_cohort_that_writes_no_block_is_never_archived():
+def test_a_semester_that_writes_no_block_is_never_archived():
     # Archiving is opt-in: a whole org going read-only, and a site row announcing it, may
     # not happen off a date nobody typed - not even a term end.
     for meta in ({}, {"semester_end": "2026-12-18"}):
@@ -2397,7 +2401,7 @@ def test_writing_the_block_at_all_turns_archiving_on():
 
 def test_the_block_can_say_what_the_site_says():
     # The row and the Updates box are the two places students read about the freeze, and
-    # a cohort that wants to say it in its own words says it once, here.
+    # a semester that wants to say it in its own words says it once, here.
     said = "Everything here goes read-only on the 16th. Grab what you want first."
     sched = parse({"archive": {"event_datetime": "2027-02-16", "details": said}})
     assert sched.archive.details == said
@@ -2407,7 +2411,7 @@ def test_the_block_can_say_what_the_site_says():
 def test_an_unusable_details_value_is_dropped_rather_than_printed():
     # A list reaching the deployed site as `['a', 'b']` is a hand edit that did not take -
     # flagged, never raised, and never printed. The row then reads as it does for a
-    # cohort that wrote no details at all.
+    # semester that wrote no details at all.
     for said in (["a", "b"], {"text": "x"}, 7):
         sched = parse({"semester_end": "2026-12-18", "archive": {"details": said}})
         assert sched.archive.details is None
@@ -2457,7 +2461,7 @@ def test_a_block_with_no_term_end_and_no_date_has_no_archive_date():
     assert sched.archive.when is None
 
 
-def test_a_cohort_with_no_term_end_can_still_name_its_own_archive_date():
+def test_a_semester_with_no_term_end_can_still_name_its_own_archive_date():
     assert parse({"archive": {"event_datetime": "2027-01-15"}}).archive.when == date(
         2027, 1, 15
     )
@@ -2534,7 +2538,7 @@ def test_an_unusable_details_is_flagged_on_every_block_that_takes_one():
             "archive": {"event_datetime": "2027-02-16", "details": ["a", "b"]},
         }
     )
-    # Every row reads as it does for a cohort that wrote no sentence at all.
+    # Every row reads as it does for a semester that wrote no sentence at all.
     assert sched.releases[0].details == ""
     assert sched.assignments["a1"].details == ""
     assert sched.events[0].details == ""
@@ -2550,7 +2554,7 @@ def test_an_unusable_details_is_flagged_on_every_block_that_takes_one():
 
 
 def test_an_unreadable_archive_date_falls_back_and_is_flagged():
-    # A date nobody can read must not freeze the cohort on a day they did not choose, and
+    # A date nobody can read must not freeze the semester on a day they did not choose, and
     # must not crash the tick that reads the file either: it falls back to the default and
     # is reported through the digest issue like any other unusable value.
     sched = parse(
@@ -2581,7 +2585,7 @@ def test_a_stray_key_under_archive_is_flagged_and_ignored():
 
 
 def test_archive_is_a_known_top_level_key():
-    # Not in KNOWN_TOP_LEVEL, the whole block reads as a typo and every cohort that writes
+    # Not in KNOWN_TOP_LEVEL, the whole block reads as a typo and every semester that writes
     # one gets a red `Validate schedule` run for a key the parser now understands.
     assert parse({"archive": {"event_datetime": "2027-02-16"}}).dropped == []
 
@@ -2589,14 +2593,14 @@ def test_archive_is_a_known_top_level_key():
 # ---------------------------------------- one word per column (title / details / type)
 # The four display fields every block takes, one per column of the site's schedule table.
 # Two of them are renames - `details:` was `description:`, and `archive.event_datetime:`
-# was `archive.date:`. Every live cohort has been migrated and the dual-key shim is gone,
+# was `archive.date:`. Every live semester has been migrated and the dual-key shim is gone,
 # so the old spellings are now ordinary unknown keys with nothing special behind them.
 
 
 def test_the_old_spelling_is_now_an_unknown_key_like_any_other_typo():
     # No special casing and no bespoke message: `description:` and `archive.date:` reach
     # `_flag_unknown_keys` exactly as `grading_dateime:` would, and the row falls back to
-    # what a cohort that wrote no sentence at all gets.
+    # what a semester that wrote no sentence at all gets.
     sched = parse(
         {
             "semester_end": "2026-12-18",
@@ -2842,13 +2846,13 @@ def test_the_archive_row_can_be_named_and_marked_provisional():
 
 def test_an_archive_block_with_no_title_carries_the_default_one():
     assert parse({"archive": {}}).archive.title == schedule.ARCHIVE_TITLE
-    # And a cohort that wrote no block at all has no row to name.
+    # And a semester that wrote no block at all has no row to name.
     assert parse({}).archive is None
 
 
 def test_assignment_pages_are_numbered_as_the_site_numbers_them():
     # The ONE numbering the site names its pages by and every link to one is built from:
-    # this term's templates plus the plan's entries, sorted by cohort-side name, hidden
+    # this term's templates plus the plan's entries, sorted by semester-side name, hidden
     # ones keeping their ordinal so hiding one moves nobody else's URL.
     sched = schedule.Schedule(
         assignments={
@@ -2860,20 +2864,20 @@ def test_assignment_pages_are_numbered_as_the_site_numbers_them():
             "project": schedule.AssignmentEntry(
                 course_source_repo="assignment-4-f2026",
                 due_datetime=None,
-                cohort_dest_repo="team-project",
+                semester_dest_repo="team-project",
             ),
         }
     )
     templates = ["assignment-1-f2026", "assignment-2-f2026", "assignment-9-s2025"]
-    pages = schedule.assignment_pages("Cohort-F2026", sched, templates)
+    pages = schedule.assignment_pages("Semester-F2026", sched, templates)
     assert [(p.number, p.name, p.key) for p in pages] == [
         (1, "assignment-1", ""),  # off-plan template: a page, and no schedule key
         (2, "assignment-2", "assignment-2"),  # hidden, and still numbered
         (3, "team-project", "project"),  # the plan's own, before its template exists
     ]
     assert pages[2].stem == "03-team-project"
-    assert pages[2].url("Cohort-F2026") == (
-        "https://cohort-f2026.github.io/assignments/03-team-project.html"
+    assert pages[2].url("Semester-F2026") == (
+        "https://semester-f2026.github.io/assignments/03-team-project.html"
     )
 
 
@@ -2889,4 +2893,4 @@ def test_pages_by_key_that_could_not_be_listed_are_none_rather_than_wrong(monkey
             )
         }
     )
-    assert schedule.assignment_pages_by_key("Course", "Cohort-f2026", sched) == {}
+    assert schedule.assignment_pages_by_key("Course", "Semester-f2026", sched) == {}

@@ -64,12 +64,12 @@ def _verdict(
 
 @pytest.fixture(autouse=True)
 def tick_listings(monkeypatch):
-    """The ONE listing of the cohort `run` takes at the start of each tick, stubbed empty.
+    """The ONE listing of the semester `run` takes at the start of each tick, stubbed empty.
 
     A real paginated `gh api`, which `conftest` refuses - so every `run` test below would
     otherwise fail on the listing rather than on what it is about. Tests that care what is
     IN it stub the consumer's own name; this fixture hands back the orgs it was taken for,
-    in order, which is how "once per cohort, never once per assignment" is asserted."""
+    in order, which is how "once per semester, never once per assignment" is asserted."""
     listed: list[str] = []
     monkeypatch.setattr(
         scheduler.discovery,
@@ -84,14 +84,14 @@ def cadence_calls(monkeypatch):
     """Stub the whole cadence surface and hand the test what was asked of it.
 
     The check reads this workflow's own run history and files two issues, all real gh I/O -
-    and `conftest` refuses a live `gh`, so every `--all-cohorts` test below would otherwise
+    and `conftest` refuses a live `gh`, so every `--all-semesters` test below would otherwise
     fail on the read rather than on what it is about. `late_items` is deliberately left
     real: it is pure, and it is the half the wiring can get wrong."""
     calls: dict[str, list] = {
         "fetch_runs": [],
         "evaluate": [],
         "report_course": [],
-        "report_cohort": [],
+        "report_semester": [],
     }
 
     def _record(name: str, answer):
@@ -104,7 +104,9 @@ def cadence_calls(monkeypatch):
     monkeypatch.setattr(scheduler.cadence, "fetch_runs", _record("fetch_runs", []))
     monkeypatch.setattr(scheduler.cadence, "evaluate", _record("evaluate", _verdict()))
     monkeypatch.setattr(scheduler.cadence, "report_course", _record("report_course", 0))
-    monkeypatch.setattr(scheduler.cadence, "report_cohort", _record("report_cohort", 0))
+    monkeypatch.setattr(
+        scheduler.cadence, "report_semester", _record("report_semester", 0)
+    )
     return calls
 
 
@@ -125,7 +127,7 @@ def _grading_spec_defaults(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_open_notices(monkeypatch):
-    """Every tick asks the cohort's `classroom-config` which archive notices are open, so
+    """Every tick asks the semester's `classroom-config` which archive notices are open, so
     it can close one whose date has moved or been taken away
     (`scheduler._stale_archive_notices`) - real gh I/O, on a path these tests are not
     about. Answered with "none open", which is the ordinary case; the tests that ARE
@@ -146,7 +148,7 @@ def _no_source_preflight(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def team_lock_writes(monkeypatch):
-    """Every tick now mirrors the team-formation window into the cohort's lock file
+    """Every tick now mirrors the team-formation window into the semester's lock file
     (`scheduler._team_formation_phase`), which is three API calls on a path most of these
     tests are not about. Stubbed to "wrote it, nothing moved" - the ordinary tick - and the
     list it hands back is what the tests that ARE about it assert on. Setting it on
@@ -154,8 +156,8 @@ def team_lock_writes(monkeypatch):
     name."""
     calls: list[tuple] = []
 
-    def stub(course_org, cohort_org, sched=None, *, now=None, dry_run=False):
-        calls.append((course_org, cohort_org, now, dry_run))
+    def stub(course_org, semester_org, sched=None, *, now=None, dry_run=False):
+        calls.append((course_org, semester_org, now, dry_run))
         return LockWrite(True, False)
 
     monkeypatch.setattr(scheduler, "sync_team_lock", stub)
@@ -199,8 +201,8 @@ def formation_mail(monkeypatch):
     calls are what the tests that ARE about the wiring assert on."""
     calls: list[tuple] = []
 
-    def stub(course_org, cohort_org, sched, windows, now, *, dry_run=False):
-        calls.append((course_org, cohort_org, windows, now, dry_run))
+    def stub(course_org, semester_org, sched, windows, now, *, dry_run=False):
+        calls.append((course_org, semester_org, windows, now, dry_run))
         return 0
 
     monkeypatch.setattr(scheduler.team_formation, "notify_windows", stub)
@@ -337,14 +339,14 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
-        lambda source_org, cohort_org, deploys, sync=True: (
-            calls.append((source_org, cohort_org, list(deploys), sync)) or (0, True)
+        lambda source_org, semester_org, deploys, sync=True: (
+            calls.append((source_org, semester_org, list(deploys), sync)) or (0, True)
         ),
     )
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _sched_with(
+        lambda semester: _sched_with(
             [
                 _r(
                     "w1",
@@ -369,20 +371,20 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
         "dsl_course.site.sync_site", lambda c, o: synced.append((c, o)) or 0
     )
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now) == 0
     # exactly ONE deploy_many call, carrying all 3 deploys across both releases, sync=False
     assert len(calls) == 1
-    source_org, cohort_org, deploys, sync = calls[0]
-    assert (source_org, cohort_org, sync) == ("Course-Org", "Cohort-Org", False)
+    source_org, semester_org, deploys, sync = calls[0]
+    assert (source_org, semester_org, sync) == ("Course-Org", "Semester-Org", False)
     assert len(deploys) == 3
     # the scheduler syncs the site exactly once, itself (deploy_many was told not to)
-    assert synced == [("Course-Org", "Cohort-Org")]
+    assert synced == [("Course-Org", "Semester-Org")]
 
 
 def test_a_tick_that_provisions_nothing_does_not_re_render_the_site(monkeypatch):
     # `due_releases` is CUMULATIVE: a handed-out assignment is due again on every hourly
     # tick for the rest of the term. Marking the tick as having assigned regardless of what
-    # provisioning actually did meant a full cohort website re-render, once an hour, off a
+    # provisioning actually did meant a full semester website re-render, once an hour, off a
     # pass in which every repo was skipped.
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
@@ -391,34 +393,34 @@ def test_a_tick_that_provisions_nothing_does_not_re_render_the_site(monkeypatch)
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _sched_with([_r("w1", WHEN, assignment="assignment-2-f2026")]),
+        lambda semester: _sched_with([_r("w1", WHEN, assignment="assignment-2-f2026")]),
     )
     synced = []
     monkeypatch.setattr(
         "dsl_course.site.sync_site", lambda c, o: synced.append((c, o)) or 0
     )
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now) == 0
     assert synced == [], "an unchanged tick re-rendered the site"
 
     # ... and a tick that DID provision something still syncs, exactly once.
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all", lambda *a, **kw: (0, True)
     )
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
-    assert synced == [("Course-Org", "Cohort-Org")]
+    assert scheduler.run("Course-Org", "Semester-Org", now) == 0
+    assert synced == [("Course-Org", "Semester-Org")]
 
 
 # ------------------------------------------------- the team-formation window on the tick
 
 
 def _formation_tick(monkeypatch, sync_team_lock):
-    """One cohort with a single handed-out assignment, provisioning nothing, and the given
+    """One semester with a single handed-out assignment, provisioning nothing, and the given
     `sync_team_lock` in place of the fixture's. Hands back the list the site sync records
     itself in - which on such a tick is empty unless the LOCK moved.
 
     The plan carries the assignment under `assignments:` as well as a release for it: the
-    lock is written only for a cohort whose plan HAS assignments, and a cohort holding a
+    lock is written only for a semester whose plan HAS assignments, and a semester holding a
     group assignment declares it there. A release alone was a shape no real schedule.yml
     produces."""
     monkeypatch.setattr(
@@ -437,7 +439,7 @@ def _formation_tick(monkeypatch, sync_team_lock):
             )
         },
     )
-    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: plan)
+    monkeypatch.setattr(scheduler.schedule, "load", lambda semester: plan)
     # The plan names a template, so the handout synthesis resolves it; the tick under test
     # is about the lock and the render, not about what is in the course org.
     monkeypatch.setattr(
@@ -458,18 +460,18 @@ def test_the_tick_mirrors_the_team_formation_window_itself(monkeypatch):
     # it now, and it is handed this tick's `now` so --now previews the window it asks about.
     calls: list[tuple] = []
 
-    def lock(course_org, cohort_org, sched=None, *, now=None, dry_run=False):
-        calls.append((course_org, cohort_org, sched, now, dry_run))
+    def lock(course_org, semester_org, sched=None, *, now=None, dry_run=False):
+        calls.append((course_org, semester_org, sched, now, dry_run))
         return LockWrite(True, False)
 
     _formation_tick(monkeypatch, lock)
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 0
     assert len(calls) == 1
-    course_org, cohort_org, sched, asked_now, dry_run = calls[0]
-    assert (course_org, cohort_org, asked_now, dry_run) == (
+    course_org, semester_org, sched, asked_now, dry_run = calls[0]
+    assert (course_org, semester_org, asked_now, dry_run) == (
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         now,
         False,
     )
@@ -480,31 +482,31 @@ def test_the_tick_mirrors_the_team_formation_window_itself(monkeypatch):
 
 
 def test_a_team_lock_that_could_not_be_written_reds_the_tick(monkeypatch):
-    # The Join-team form answers off this file: a cohort whose lock is stale opens or shuts
+    # The Join-team form answers off this file: a semester whose lock is stale opens or shuts
     # nobody's window, and that has to show up in the run's exit code.
     _formation_tick(monkeypatch, lambda *a, **k: LockWrite(False, False))
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 1
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 1
 
 
 def test_only_a_tick_whose_team_lock_MOVED_re_renders_the_site(monkeypatch):
     # THE render budget. The tick fires every handed-out assignment every quarter of an
     # hour for the rest of the term, and it now writes the lock on every one of them - so
     # rendering off the WRITE rather than off the blob compare would re-render every
-    # cohort's whole website four times an hour until the term ended. The lock's content
+    # semester's whole website four times an hour until the term ended. The lock's content
     # moves on exactly two ticks per assignment: the one that opens the window and the one
     # that shuts it.
     moved = False
     synced = _formation_tick(monkeypatch, lambda *a, **k: LockWrite(True, moved))
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
 
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 0
     assert synced == [], "a tick that changed nothing re-rendered the site"
 
     # ... and the tick the window actually opens on renders it, exactly once.
     moved = True
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
-    assert synced == [("Course-Org", "Cohort-Org")]
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 0
+    assert synced == [("Course-Org", "Semester-Org")]
 
 
 def test_the_site_render_sees_the_lock_this_tick_just_wrote(monkeypatch):
@@ -522,7 +524,7 @@ def test_the_site_render_sees_the_lock_this_tick_just_wrote(monkeypatch):
         "dsl_course.site.sync_site", lambda c, o: order.append("site") or 0
     )
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 0
     assert order == ["lock", "site"]
 
 
@@ -541,7 +543,7 @@ def test_a_config_push_run_queues_its_site_render_behind_sync_site(monkeypatch):
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-Org", now, autograde=False, defer_site_sync=True
+            "Course-Org", "Semester-Org", now, autograde=False, defer_site_sync=True
         )
         == 0
     )
@@ -554,7 +556,7 @@ def test_a_config_push_run_queues_its_site_render_behind_sync_site(monkeypatch):
             "-f",
             "event_type=sync-site",
             "-f",
-            "client_payload[cohort_org]=Cohort-Org",
+            "client_payload[semester_org]=Semester-Org",
         )
     ]
 
@@ -565,14 +567,14 @@ def test_a_site_render_nobody_could_ask_for_is_a_failed_action(monkeypatch):
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-Org", now, autograde=False, defer_site_sync=True
+            "Course-Org", "Semester-Org", now, autograde=False, defer_site_sync=True
         )
         == 1
     )
 
 
-def test_a_cohort_with_nothing_planned_is_not_charged_for_the_lock(monkeypatch):
-    # Most cohorts, for most of a term's planning, carry an empty `assignments:` block -
+def test_a_semester_with_nothing_planned_is_not_charged_for_the_lock(monkeypatch):
+    # Most semesters, for most of a term's planning, carry an empty `assignments:` block -
     # and each was paying a repo probe and a contents read every quarter of an hour, ~192
     # a day, to write `assignments:\n  {}` over itself.
     calls: list[tuple] = []
@@ -580,19 +582,19 @@ def test_a_cohort_with_nothing_planned_is_not_charged_for_the_lock(monkeypatch):
         monkeypatch, lambda *a, **k: calls.append(a) or LockWrite(True, True)
     )
     monkeypatch.setattr(
-        scheduler.schedule, "load", lambda cohort: Schedule(assignments={})
+        scheduler.schedule, "load", lambda semester: Schedule(assignments={})
     )
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 0
     assert calls == []
 
 
 def test_the_lock_is_written_for_a_plan_that_declares_no_self_select_assignment(
     monkeypatch,
 ):
-    # The gate is the PLAN, deliberately, and not the tighter "does this cohort have a
+    # The gate is the PLAN, deliberately, and not the tighter "does this semester have a
     # self-select assignment". `team_formation` is declared in the COURSE org's
-    # grading_config.yml and no cohort-side dispatcher watches that file - so on the
+    # grading_config.yml and no semester-side dispatcher watches that file - so on the
     # tighter gate, a course switching its only self-select assignment to `assigned` would
     # leave the tick with nothing to write, the lock still saying `self_select`, and the
     # Join-team form still accepting the self-selection faculty had just turned off, until
@@ -605,7 +607,7 @@ def test_the_lock_is_written_for_a_plan_that_declares_no_self_select_assignment(
         scheduler.team_formation, "self_select_keys", lambda course_org, sched: []
     )
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 0
     assert len(calls) == 1
 
 
@@ -623,7 +625,7 @@ def test_a_lock_change_with_nothing_due_still_re_renders_the_site(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: Schedule(
+        lambda semester: Schedule(
             assignments={
                 "assignment-2": AssignmentEntry(
                     course_source_repo="assignment-2-f2026",
@@ -644,11 +646,11 @@ def test_a_lock_change_with_nothing_due_still_re_renders_the_site(monkeypatch):
         "dsl_course.site.sync_site", lambda c, o: synced.append((c, o)) or 0
     )
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 0
-    assert synced == [("Course-Org", "Cohort-Org")]
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 0
+    assert synced == [("Course-Org", "Semester-Org")]
 
 
-# ------------------------------------------- the cohort that has not formed a team yet
+# ------------------------------------------- the semester that has not formed a team yet
 
 
 def _formation_window(waiting: int, teams: int = 0, enrolled: int = 4):
@@ -714,19 +716,21 @@ def _formation_release_phase(monkeypatch, windows):
         }
     )
     rc = scheduler._release_phase(
-        "Course-Org", "Cohort-Org", sched, WHEN, False, None, {}
+        "Course-Org", "Semester-Org", sched, WHEN, False, None, {}
     )
     return rc, seen, asked
 
 
-def test_a_cohort_still_without_teams_earns_a_fault_on_the_schedule_digest(monkeypatch):
+def test_a_semester_still_without_teams_earns_a_fault_on_the_schedule_digest(
+    monkeypatch,
+):
     # THE gap this closes. `assign.provision_all` logs `[wait] no teams` and returns 0, so
     # a parked group handout was a green run with no fault, no issue and no mail - which is
     # how Maths assignment-2 sat blocked until somebody asked on Slack.
     rc, seen, _asked = _formation_release_phase(
         monkeypatch, [_formation_window(waiting=4)]
     )
-    assert rc == 0, "a cohort that has not teamed up yet must not red the tick"
+    assert rc == 0, "a semester that has not teamed up yet must not red the tick"
     (fault,) = [f for f in seen["faults"] if f.where == "assignments.assignment-2"]
     assert fault.fires == WHEN + timedelta(hours=8)
     assert fault.severity(WHEN) is faults_mod.Severity.URGENT
@@ -738,18 +742,18 @@ def test_the_students_are_mailed_about_the_window_the_tick_just_opened(
 ):
     windows = [_formation_window(waiting=3)]
     errors, changed = scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, windows
+        "Course-Org", "Semester-Org", _planned(), WHEN, False, windows
     )
     assert (errors, changed) == (0, False)
     # The SAME list the fault was filed off, and this tick's own `now` - a mail rendered
     # against a different moment would name a different closing day.
     (call,) = formation_mail
-    assert call == ("Course-Org", "Cohort-Org", windows, WHEN, False)
+    assert call == ("Course-Org", "Semester-Org", windows, WHEN, False)
     assert call[2] is windows
 
 
 def _planned() -> Schedule:
-    """A plan with an assignment in it - the only shape a cohort with a team-formation
+    """A plan with an assignment in it - the only shape a semester with a team-formation
     window ever has, and what the lock write is gated on."""
     return _assignments(**{"assignment-2": _due(20)})
 
@@ -769,7 +773,7 @@ def test_the_lock_is_written_before_the_students_are_told(monkeypatch):
         lambda *a, **k: order.append("mail") or 0,
     )
     scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Semester-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
     assert order == ["lock", "mail"]
 
@@ -777,7 +781,7 @@ def test_the_lock_is_written_before_the_students_are_told(monkeypatch):
 def test_a_send_that_failed_reds_the_tick(monkeypatch):
     monkeypatch.setattr(scheduler.team_formation, "notify_windows", lambda *a, **k: 1)
     errors, _changed = scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Semester-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
     assert errors == 1
 
@@ -792,16 +796,16 @@ def test_a_send_that_RAISED_reds_the_tick_and_does_not_abort_it(monkeypatch, cap
 
     monkeypatch.setattr(scheduler.team_formation, "notify_windows", boom)
     errors, changed = scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Semester-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
     assert errors == 1 and changed is False
     assert "Graph token request failed" in capsys.readouterr().err
 
 
-def test_a_certificate_that_expired_does_not_stop_the_cohort_s_releases(monkeypatch):
-    # The whole cost of the missing try. Everything the tick does for this cohort after the
+def test_a_certificate_that_expired_does_not_stop_the_semester_s_releases(monkeypatch):
+    # The whole cost of the missing try. Everything the tick does for this semester after the
     # mail - the releases, the archive sweep, the autograde - would stop until somebody
-    # rotated a certificate, and nothing between here and the cohort loop would have caught
+    # rotated a certificate, and nothing between here and the semester loop would have caught
     # it. Red, and the hand-out still ships.
     def boom(*a, **k):
         raise RuntimeError("Microsoft Graph token request failed")
@@ -815,7 +819,7 @@ def test_a_certificate_that_expired_does_not_stop_the_cohort_s_releases(monkeypa
         lambda *a, **kw: fired.append("handout") or (0, True),
     )
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, autograde=False) == 1
+    assert scheduler.run("Course-Org", "Semester-Org", now, autograde=False) == 1
     assert fired, "the releases never fired behind the failed mail"
 
 
@@ -830,18 +834,18 @@ def test_the_tick_that_moves_the_lock_moves_the_join_team_form_too(
         scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, True)
     )
     scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Semester-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
-    assert join_form_writes == ["Cohort-Org"]
+    assert join_form_writes == ["Semester-Org"]
 
 
 def test_a_tick_whose_lock_did_not_move_leaves_the_join_team_form_alone(
     monkeypatch, join_form_writes, team_lock_writes
 ):
     # The other 190-odd ticks a day. `put_file` would compare blobs and write nothing, but
-    # the lock read to build the form is real I/O on a cohort where nothing turned.
+    # the lock read to build the form is real I/O on a semester where nothing turned.
     scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Semester-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
     assert join_form_writes == []
 
@@ -854,7 +858,7 @@ def test_a_join_team_form_that_could_not_be_written_reds_the_tick(
     )
     monkeypatch.setattr(scheduler.welcome, "refresh_join_team_form", lambda org: 1)
     errors, _changed = scheduler._team_formation_phase(
-        "Course-Org", "Cohort-Org", _planned(), WHEN, False, [_formation_window(1)]
+        "Course-Org", "Semester-Org", _planned(), WHEN, False, [_formation_window(1)]
     )
     assert errors == 1
 
@@ -868,7 +872,7 @@ def test_the_window_still_turns_overnight_and_only_the_mail_is_held(
     small_hours = WHEN.replace(hour=2)
     scheduler._team_formation_phase(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         _planned(),
         small_hours,
         False,
@@ -884,17 +888,17 @@ def test_the_tick_reads_who_is_waiting_once_and_hands_it_to_both_passes(monkeypa
     windows = [_formation_window(waiting=1, teams=2)]
     _, seen, asked = _formation_release_phase(monkeypatch, windows)
     assert len(asked) == 1, "the roster and teams.csv were read more than once a tick"
-    assert asked[0][:2] == ("Course-Org", "Cohort-Org") and asked[0][3] == WHEN
+    assert asked[0][:2] == ("Course-Org", "Semester-Org") and asked[0][3] == WHEN
     # The SAME list, not an equal one: the lock pass gets it without paying for the read.
     assert seen["handed"] == (windows,) and seen["handed"][0] is windows
 
 
-def test_a_cohort_that_could_not_be_read_leaves_the_schedule_digest_alone(
+def test_a_semester_that_could_not_be_read_leaves_the_schedule_digest_alone(
     monkeypatch, capsys
 ):
     # None, not []: `open_windows` says "we could not look", and syncing the digest without
     # an answer is the guess that hurts. An empty list CLOSES the issue, so a rate limit on
-    # teams.csv would post Cleared and mail a cohort whose thirty students are still
+    # teams.csv would post Cleared and mail a semester whose thirty students are still
     # unteamed, then file the very same fault as New an hour later. The digest is not
     # touched at all, and the standing fault stays exactly as it was.
     rc, seen, _asked = _formation_release_phase(monkeypatch, None)
@@ -920,14 +924,14 @@ def test_a_dry_run_previews_the_team_lock_and_renders_nothing(monkeypatch):
     # sees what the window would be told to say.
     calls: list[bool] = []
 
-    def lock(course_org, cohort_org, sched=None, *, now=None, dry_run=False):
+    def lock(course_org, semester_org, sched=None, *, now=None, dry_run=False):
         calls.append(dry_run)
         return LockWrite(True, False)
 
     synced = _formation_tick(monkeypatch, lock)
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
     assert (
-        scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True, autograde=False)
+        scheduler.run("Course-Org", "Semester-Org", now, dry_run=True, autograde=False)
         == 0
     )
     assert calls == [True]
@@ -938,13 +942,13 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
+        lambda master_org, template, semester_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
             (
                 calls.append(
                     (
                         master_org,
                         template,
-                        cohort_org,
+                        semester_org,
                         solution,
                         touch_existing,
                         scheduled,
@@ -956,7 +960,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r, None) == (
+    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r, None) == (
         0,
         True,
     )
@@ -966,7 +970,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     assert calls[0] == (
         "Course-Org",
         "assignment-2-f2026",
-        "Cohort-Org",
+        "Semester-Org",
         False,
         False,
         True,
@@ -977,14 +981,14 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
     r.assignment_solution = True
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r, None) == (
+    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r, None) == (
         0,
         True,
     )
     assert calls[1] == (
         "Course-Org",
         "assignment-2-f2026",
-        "Cohort-Org",
+        "Semester-Org",
         True,
         False,
         True,
@@ -1052,12 +1056,12 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
         Deploy("cm", "lectures/01_z", "lectures", None),
     ]
     errors, changed = deploy.deploy_many(
-        "Course-Org", "Cohort-Org", deploys, sync=False
+        "Course-Org", "Semester-Org", deploys, sync=False
     )
     assert (errors, changed) == (0, True)
     assert clones.count("Course-Org/cm") == 1  # source cloned once for all 3 copies
-    assert clones.count("Cohort-Org/lectures") == 1
-    assert clones.count("Cohort-Org/labs") == 1
+    assert clones.count("Semester-Org/lectures") == 1
+    assert clones.count("Semester-Org/labs") == 1
     assert len(clones) == 3  # 1 source + 2 dests, not 6
 
 
@@ -1080,7 +1084,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/does-not-exist", "materials", None)],
         sync=False,
     )
@@ -1113,7 +1117,7 @@ def _no_io(monkeypatch, fake_gh):
 
 
 def test_a_released_repo_grants_the_instructors_push(monkeypatch):
-    # Write, because an edit made in the cohort repo is now durable: the release lands on
+    # Write, because an edit made in the semester repo is now durable: the release lands on
     # `upstream` and is merged in, so a correction typed here survives the next tick. It
     # was read for exactly as long as a re-release copied straight over it.
     _no_io(monkeypatch, _clone_failing("Course-Org/cm"))
@@ -1121,11 +1125,11 @@ def test_a_released_repo_grants_the_instructors_push(monkeypatch):
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: faculty.append(a))
     deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
-    assert faculty == [("Cohort-Org", "materials", deploy.COURSE_TEAM_ACCESS)]
+    assert faculty == [("Semester-Org", "materials", deploy.COURSE_TEAM_ACCESS)]
     assert deploy.COURSE_TEAM_ACCESS[access.INSTRUCTORS_TEAM] == "push"
 
 
@@ -1138,11 +1142,11 @@ def test_a_released_repo_is_made_forkable(monkeypatch):
     monkeypatch.setattr(deploy, "allow_forking", lambda *a: forkable.append(a) or True)
     deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
-    assert forkable == [("Cohort-Org", "materials")]
+    assert forkable == [("Semester-Org", "materials")]
 
 
 def test_a_dest_that_could_not_be_made_forkable_still_releases(monkeypatch):
@@ -1160,16 +1164,16 @@ def test_a_dest_that_could_not_be_made_forkable_still_releases(monkeypatch):
 
     assert deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     ) == (0, True)
 
 
 def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
-    # A closed cohort still has `deploy:` entries in its schedule. Every write into an
+    # A closed semester still has `deploy:` entries in its schedule. Every write into an
     # archived repo 403s, so the release used to fail its grants and its push every
-    # quarter of an hour, for ever, for a cohort that is deliberately finished.
+    # quarter of an hour, for ever, for a semester that is deliberately finished.
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: True)
@@ -1185,7 +1189,7 @@ def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
 
     assert deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     ) == (0, False)
@@ -1208,7 +1212,7 @@ def test_a_live_dest_beside_an_archived_one_still_releases(monkeypatch):
 
     assert deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [
             Deploy("cm", "lectures/00_x", "last-term", None),
             Deploy("cm", "lectures/00_x", "materials", None),
@@ -1219,7 +1223,7 @@ def test_a_live_dest_beside_an_archived_one_still_releases(monkeypatch):
 
 def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatch):
     # `repo_is_archived` fails OPEN, and this is the call site that makes that matter: a
-    # rate-limited read must not silently skip a live cohort's release. Guess wrong that
+    # rate-limited read must not silently skip a live semester's release. Guess wrong that
     # way and the write itself fails loudly, which is the alarm we want.
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502 - bad gateway"))
@@ -1232,7 +1236,7 @@ def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatc
 
     assert deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     ) == (0, True)
@@ -1241,10 +1245,10 @@ def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatc
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
     # Source AND dest clone both fail: that is ONE copy lost, not two errors (a
     # double-count made `deploy` report 2 failures for a single deploy).
-    _no_io(monkeypatch, _clone_failing("Course-Org/cm", "Cohort-Org/materials"))
+    _no_io(monkeypatch, _clone_failing("Course-Org/cm", "Semester-Org/materials"))
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
@@ -1253,13 +1257,13 @@ def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
 
 def test_deploy_many_counts_each_unrunnable_deploy_once(monkeypatch):
     # 3 deploys: the shared source fails AND one dest fails - still 3 lost copies.
-    _no_io(monkeypatch, _clone_failing("Course-Org/cm", "Cohort-Org/labs"))
+    _no_io(monkeypatch, _clone_failing("Course-Org/cm", "Semester-Org/labs"))
     deploys = [
         Deploy("cm", "lectures/00_x", "lectures", None),
         Deploy("cm", "labs/00_y", "labs", None),
         Deploy("cm", "lectures/01_z", "lectures", None),
     ]
-    assert deploy.deploy_many("Course-Org", "Cohort-Org", deploys, sync=False) == (
+    assert deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False) == (
         3,
         False,
     )
@@ -1324,7 +1328,7 @@ def test_deploy_many_releases_the_whole_repo_from_a_root_source_path(monkeypatch
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "/", "materials", None)],
         sync=False,
     )
@@ -1352,7 +1356,7 @@ def test_a_copied_in_gitignore_cannot_swallow_released_files(monkeypatch):
     monkeypatch.setattr(deploy, "git", recording_git)
 
     errors, changed = deploy.deploy_many(
-        "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
+        "Course-Org", "Semester-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
     assert (errors, changed) == (0, True)
     add = next(c for c in calls if "add" in c)
@@ -1363,7 +1367,7 @@ def test_deploy_many_rejects_a_dotdot_escaping_source_path(monkeypatch):
     _no_io(monkeypatch, _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "../../etc/passwd", "materials", None)],
         sync=False,
     )
@@ -1392,7 +1396,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
@@ -1412,7 +1416,7 @@ def _release(monkeypatch, tree: dict[str, str], deploys, staged: list[str]):
     """One deploy_many run over `tree`, recording what reached the dest at `git add`."""
     _no_io(monkeypatch, _clone_with_tree(tree))
     monkeypatch.setattr(deploy, "git", _git_spying_staged(staged))
-    return deploy.deploy_many("Course-Org", "Cohort-Org", deploys, sync=False)
+    return deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False)
 
 
 def test_a_whole_repo_release_honours_a_releaseignore(monkeypatch):
@@ -1513,7 +1517,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
@@ -1539,7 +1543,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
@@ -1559,13 +1563,13 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    def boom(course, cohort):
+    def boom(course, semester):
         raise RuntimeError("tree read failed")
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
     errors, changed = deploy.deploy_many(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=True,
     )
@@ -1693,7 +1697,7 @@ def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
     monkeypatch.setattr(scheduler, "snapshot_assignment", lambda *a, **k: None)
     scheduler._refresh_sheets(
         "COURSE",
-        "COHORT",
+        "SEMESTER",
         sched,
         datetime(2026, 10, 17, tzinfo=timezone.utc),
         False,
@@ -1742,32 +1746,32 @@ def test_run_snapshots_a_passed_deadline_that_has_no_snapshot_yet(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now) == 0
     org, slug, deadline, _key = taken[0]
-    assert (org, slug) == ("Cohort-Org", "assignment-1")
+    assert (org, slug) == ("Semester-Org", "assignment-1")
     assert deadline.startswith("2026-10-13T23:59:59")
 
 
-def test_the_snapshot_is_named_by_the_cohort_name_and_keyed_by_the_schedule_slug(
+def test_the_snapshot_is_named_by_the_semester_name_and_keyed_by_the_schedule_slug(
     monkeypatch,
 ):
-    # TWO names, and they are not interchangeable. `cohort_dest_repo` makes them differ:
-    # the repos (and so the snapshot) are named after the cohort NAME, while teams.csv is
+    # TWO names, and they are not interchangeable. `semester_dest_repo` makes them differ:
+    # the repos (and so the snapshot) are named after the semester NAME, while teams.csv is
     # keyed on the SCHEDULE SLUG - the Join-team form writes what schedule.yml declares.
     # Freezing a group assignment under the name found no teams and froze nothing at all.
     taken = _stub_snapshots(monkeypatch, existing=set())
     entry = _due(13)
-    entry.cohort_dest_repo = "group-project"
+    entry.semester_dest_repo = "group-project"
     monkeypatch.setattr(
-        scheduler.schedule, "load", lambda cohort: _assignments(project=entry)
+        scheduler.schedule, "load", lambda semester: _assignments(project=entry)
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now) == 0
     org, slug, _deadline, teams_key = taken[0]
-    assert (org, slug, teams_key) == ("Cohort-Org", "group-project", "project")
+    assert (org, slug, teams_key) == ("Semester-Org", "group-project", "project")
 
 
 def test_run_never_re_snapshots_an_assignment_already_frozen(monkeypatch):
@@ -1777,11 +1781,11 @@ def test_run_never_re_snapshots_an_assignment_already_frozen(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-Org", datetime(2026, 12, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-Org", datetime(2026, 12, 1, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -1793,11 +1797,11 @@ def test_run_does_not_snapshot_before_the_deadline_passes(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-Org", datetime(2026, 10, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-Org", datetime(2026, 10, 1, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -1805,17 +1809,17 @@ def test_run_does_not_snapshot_before_the_deadline_passes(monkeypatch):
 
 
 def test_run_snapshots_even_with_no_releases(monkeypatch):
-    # A cohort can pin due dates without using the auto-release plan at all - the old
+    # A semester can pin due dates without using the auto-release plan at all - the old
     # early-return on `not sched.releases` would have skipped its snapshots forever.
     taken = _stub_snapshots(monkeypatch, existing=set())
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-Org", datetime(2026, 11, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-Org", datetime(2026, 11, 1, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -1827,10 +1831,10 @@ def test_run_dry_run_snapshots_nothing(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now, dry_run=True) == 0
     assert taken == []
 
 
@@ -1847,11 +1851,11 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-Org", datetime(2026, 11, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-Org", datetime(2026, 11, 1, tzinfo=timezone.utc)
         )
         == 1
     )
@@ -1949,7 +1953,7 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
 
 
 def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
-    """The grading-sheet pass, stubbed to a recorder of `(slug, cohort name)`.
+    """The grading-sheet pass, stubbed to a recorder of `(slug, semester name)`.
 
     It sits between the freeze and the autograde and reads the template's grading_config.yml, so
     every `run()` test would otherwise reach the API for a file it does not care about."""
@@ -1957,7 +1961,7 @@ def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
     monkeypatch.setattr(
         scheduler,
         "sync_sheet",
-        lambda course, cohort, sched, key, slug, template, **kw: (
+        lambda course, semester, sched, key, slug, template, **kw: (
             refreshed.append((key, slug)) or collect_mod.SheetWrite(True)
         ),
     )
@@ -1992,7 +1996,7 @@ def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(
+        lambda semester: _assignments(
             **{
                 "assignment-1": _due(13, grading_day=20),  # due passed, cutoff has not
                 "assignment-2": _due(30),  # not due yet
@@ -2000,7 +2004,7 @@ def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
         ),
     )
     scheduler.run(
-        "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+        "Course-Org", "Semester-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
     )
     assert refreshed == [("assignment-1", "assignment-1")]
 
@@ -2010,17 +2014,19 @@ def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
     [
         {"a-ada": {"name": "a-ada", "visibility": "private"}},
         # A listing that could not be READ reaches every one of them as None, never as an
-        # empty org: `{}` says this cohort holds no repos, and a pass that read a failure
+        # empty org: `{}` says this semester holds no repos, and a pass that read a failure
         # as that answer would post no receipt into a repo it could have, flip nothing
         # back to private, and report a handed-out assignment as never handed out.
         None,
     ],
 )
-def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch, rows):
+def test_a_tick_takes_one_semester_listing_and_hands_it_to_every_pass(
+    monkeypatch, rows
+):
     # The freeze's `pushed_at`, the sheet refresh's receipts, the grading-config digest's
     # "what did this assignment actually hand out?" and both arms of every handout all ask
     # the same org the same question. Each used to take a listing of its own, so the cost
-    # grew with the number of ASSIGNMENTS a cohort carries; it is now one per cohort per
+    # grew with the number of ASSIGNMENTS a semester carries; it is now one per semester per
     # tick, and it is the SAME rows every pass reads.
     taken: list[str] = []
     monkeypatch.setattr(
@@ -2034,11 +2040,11 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch,
         seen["snapshot"] = listing
         return scheduler.SnapshotResult.WRITTEN
 
-    def _sheet(course, cohort, sched, key, slug, template, **kw):
+    def _sheet(course, semester, sched, key, slug, template, **kw):
         seen["sheet"] = kw.get("listing")
         return collect_mod.SheetWrite(True)
 
-    def _provision(master, template, cohort, **kw):
+    def _provision(master, template, semester, **kw):
         seen["handout"] = kw.get("listing")
         return 0, False
 
@@ -2049,12 +2055,12 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch,
     monkeypatch.setattr(
         scheduler,
         "grading_config_faults",
-        lambda course, cohort, sched, found, listing: seen.update(digest=listing),
+        lambda course, semester, sched, found, listing: seen.update(digest=listing),
     )
     monkeypatch.setattr(
         scheduler,
         "_reprivatise_student_repos",
-        lambda course, cohort, sched, now, dry_run, listing: (
+        lambda course, semester, sched, now, dry_run, listing: (
             seen.update(reprivatise=listing) or 0
         ),
     )
@@ -2068,7 +2074,7 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch,
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(
+        lambda semester: _assignments(
             **{
                 "assignment-1": _due(5),  # deadline passed: frozen this tick
                 "assignment-2": _due(13, grading_day=20),  # due passed, cutoff has not
@@ -2077,9 +2083,11 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch,
         ),
     )
     scheduler.run(
-        "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+        "Course-Org", "Semester-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
     )
-    assert taken == ["Cohort-f2026"], "one listing per cohort, not one per assignment"
+    assert taken == ["Semester-f2026"], (
+        "one listing per semester, not one per assignment"
+    )
     assert set(seen) == {"snapshot", "sheet", "digest", "handout", "reprivatise"}
     assert all(v is rows for v in seen.values())
 
@@ -2095,10 +2103,10 @@ def test_a_frozen_assignments_sheet_is_left_to_the_cutoff(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     scheduler.run(
-        "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+        "Course-Org", "Semester-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
     )
     assert refreshed == []
 
@@ -2109,15 +2117,15 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-f2026", now) == 0
-    ((course, template, cohort, deadline, group, scheduled, slug),) = graded
-    assert (course, template, cohort) == (
+    assert scheduler.run("Course-Org", "Semester-f2026", now) == 0
+    ((course, template, semester, deadline, group, scheduled, slug),) = graded
+    assert (course, template, semester) == (
         "Course-Org",
         "assignment-1-f2026",
-        "Cohort-f2026",
+        "Semester-f2026",
     )
     # graded at exactly the instant the snapshot froze, and never guessed as a group run
     assert deadline.startswith("2026-10-13T23:59:59") and group is False
@@ -2136,11 +2144,11 @@ def test_run_never_autogrades_twice_the_marker_is_the_state(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-f2026", datetime(2026, 12, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-f2026", datetime(2026, 12, 1, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -2153,11 +2161,11 @@ def test_run_does_not_autograde_before_the_grading_deadline(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13, grading_day=15)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13, grading_day=15)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+            "Course-Org", "Semester-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -2172,11 +2180,11 @@ def test_run_skips_an_assignment_with_no_template_repo(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"reading-week": _due(13)}),
+        lambda semester: _assignments(**{"reading-week": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-f2026", datetime(2026, 11, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-f2026", datetime(2026, 11, 1, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -2193,11 +2201,11 @@ def test_run_treats_a_non_autogradable_template_as_a_skip(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-f2026", datetime(2026, 11, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-f2026", datetime(2026, 11, 1, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -2210,11 +2218,11 @@ def test_run_reports_a_failed_autograde(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-f2026", datetime(2026, 11, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-f2026", datetime(2026, 11, 1, tzinfo=timezone.utc)
         )
         == 1
     )
@@ -2226,10 +2234,10 @@ def test_run_dry_run_autogrades_nothing(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-f2026", now, dry_run=True) == 0
+    assert scheduler.run("Course-Org", "Semester-f2026", now, dry_run=True) == 0
     assert graded == []
 
 
@@ -2246,25 +2254,25 @@ def test_run_autogrades_at_the_explicit_grading_deadline(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": entry}),
+        lambda semester: _assignments(**{"assignment-1": entry}),
     )
     # past grading_datetime (10-15) but well before what due_datetime alone would imply
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-f2026", datetime(2026, 10, 16, tzinfo=timezone.utc)
+            "Course-Org", "Semester-f2026", datetime(2026, 10, 16, tzinfo=timezone.utc)
         )
         == 0
     )
     assert graded[0][3].startswith("2026-10-15T23:59:59")
 
 
-def test_main_all_cohorts_with_none_registered_is_a_noop(monkeypatch):
-    # A freshly bootstrapped course org runs the hourly cron before any cohort is
+def test_main_all_semesters_with_none_registered_is_a_noop(monkeypatch):
+    # A freshly bootstrapped course org runs the hourly cron before any semester is
     # registered - that gap must be a quiet no-op, not a red run (and a failure
     # email to the bot owner) every hour.
-    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scheduler.discovery, "discover_semesters", lambda org: [])
     monkeypatch.setattr(
-        sys, "argv", ["scheduler", "--course-org", "Course-Org", "--all-cohorts"]
+        sys, "argv", ["scheduler", "--course-org", "Course-Org", "--all-semesters"]
     )
     assert scheduler.main() == 0
 
@@ -2312,7 +2320,7 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
             ),
         }
     )
-    (r,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, WHEN)
+    (r,) = scheduler._handout_releases("Course-Org", "Semester-f2026", sched, WHEN)
     assert r.label == "assignment-1-handout"
     assert r.assignment == "a-f2026"
     assert r.when == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
@@ -2349,7 +2357,7 @@ def test_the_solution_rides_on_the_handout_release_once_its_datetime_passes(
     )
 
     def one(now):
-        (r,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, now)
+        (r,) = scheduler._handout_releases("Course-Org", "Semester-f2026", sched, now)
         return r
 
     # between handout and solution time: exactly one release, carrying no solution
@@ -2388,7 +2396,9 @@ def test_a_solution_datetime_without_a_handout_never_synthesises_a_release(monke
             )
         }
     )
-    assert scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, WHEN) == []
+    assert (
+        scheduler._handout_releases("Course-Org", "Semester-f2026", sched, WHEN) == []
+    )
 
 
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
@@ -2417,7 +2427,7 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
             )
         },
     )
-    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: sched)
+    monkeypatch.setattr(scheduler.schedule, "load", lambda semester: sched)
     ordered = []
     monkeypatch.setattr(
         scheduler,
@@ -2426,7 +2436,7 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     )
     assert (
         scheduler.run(
-            "Course-Org", "Cohort-f2026", datetime(2027, 1, 1, tzinfo=timezone.utc)
+            "Course-Org", "Semester-f2026", datetime(2027, 1, 1, tzinfo=timezone.utc)
         )
         == 0
     )
@@ -2443,8 +2453,8 @@ def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_ope
     monkeypatch, capsys
 ):
     # The original incident: an unparseable schedule.yml raised inside schedule.load and
-    # killed the hourly tick for the cohort. It must still not RAISE - one cohort's typo
-    # cannot be allowed to abort the others under --all-cohorts, which is why load falls
+    # killed the hourly tick for the semester. It must still not RAISE - one semester's typo
+    # cannot be allowed to abort the others under --all-semesters, which is why load falls
     # back to an empty Schedule.
     #
     # Nor may it red the run. A file faculty have to fix is a CONTENT fault: the exit code
@@ -2469,7 +2479,7 @@ def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_ope
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
 
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now) == 0
 
     unreadable, no_archive = synced["faults"]
     assert unreadable.file == "schedule.yml" and "not valid YAML" in unreadable.what
@@ -2493,7 +2503,7 @@ def test_a_dry_run_of_an_unparseable_plan_is_green_too(monkeypatch):
         lambda org, repo, path: MALFORMED_SCHEDULE,
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now, dry_run=True) == 0
 
 
 def test_dropped_entries_alone_stay_advisory(monkeypatch):
@@ -2506,65 +2516,67 @@ def test_dropped_entries_alone_stay_advisory(monkeypatch):
         lambda org, repo, path: "releases:\n  lab-1:\n    title: no date at all\n",
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Semester-Org", now) == 0
 
 
-# ---------------------------------------------- per-cohort isolation (--all-cohorts)
+# ---------------------------------------------- per-semester isolation (--all-semesters)
 
 
 def test_the_release_phase_counts_a_raised_site_sync(monkeypatch):
     # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). The phase that
     # calls it must catch it, count it, and return non-zero - not let the traceback abort
-    # the tick (and, under --all-cohorts, every cohort scheduled after it).
+    # the tick (and, under --all-semesters, every semester scheduled after it).
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
         lambda *a, **k: (0, True),  # something changed
     )
 
-    def boom(course, cohort):
+    def boom(course, semester):
         raise RuntimeError("tree read failed")
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
     due = [_r("wk1", WHEN, deploy=[Deploy("cm", "lectures/01", "materials", None)])]
     # The pass itself is green and says the site moved; the sync beside it is what fails.
-    assert scheduler._run_releases("Course-Org", "Cohort-Org", due, WHEN, None) == (
+    assert scheduler._run_releases("Course-Org", "Semester-Org", due, WHEN, None) == (
         0,
         True,
     )
     monkeypatch.setattr(
         scheduler, "sync_team_lock", lambda *a, **k: LockWrite(True, False)
     )
-    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: _sched_with(due))
-    assert scheduler.run("Course-Org", "Cohort-Org", WHEN, autograde=False) == 1
+    monkeypatch.setattr(scheduler.schedule, "load", lambda semester: _sched_with(due))
+    assert scheduler.run("Course-Org", "Semester-Org", WHEN, autograde=False) == 1
 
 
-def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
-    # The lesson PR #151/#146 applied to the nightly refresh: one cohort's raised failure
-    # (unreachable API, a blown-up site sync) must not abort the remaining cohorts' work.
-    # `_registered_cohorts` filters the registry through `discovery.live_cohorts`, so
+def test_all_semesters_loop_survives_one_semesters_raised_failure(monkeypatch, capsys):
+    # The lesson PR #151/#146 applied to the nightly refresh: one semester's raised failure
+    # (unreachable API, a blown-up site sync) must not abort the remaining semesters' work.
+    # `_registered_semesters` filters the registry through `discovery.live_semesters`, so
     # the registry read itself is what a test replaces.
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery,
+        "discover_semesters",
+        lambda org: ["Semester-A", "Semester-B"],
     )
     seen: list[str] = []
 
     def fake_run(
-        course, cohort, now, dry_run=False, release=True, autograde=True, verdict=None
+        course, semester, now, dry_run=False, release=True, autograde=True, verdict=None
     ):
-        seen.append(cohort)
-        if cohort == "Cohort-A":
-            raise RuntimeError("Cohort-A: gh: HTTP 502")
+        seen.append(semester)
+        if semester == "Semester-A":
+            raise RuntimeError("Semester-A: gh: HTTP 502")
         return 0
 
     monkeypatch.setattr(scheduler, "run", fake_run)
     monkeypatch.setattr(
         "sys.argv",
-        ["scheduler", "--course-org", "Course-Org", "--all-cohorts"],
+        ["scheduler", "--course-org", "Course-Org", "--all-semesters"],
     )
-    # Cohort-A raises, Cohort-B must still run, and the batch reports failure.
+    # Semester-A raises, Semester-B must still run, and the batch reports failure.
     assert scheduler.main() == 1
-    assert seen == ["Cohort-A", "Cohort-B"]
-    assert "Cohort-A" in capsys.readouterr().err
+    assert seen == ["Semester-A", "Semester-B"]
+    assert "Semester-A" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------- the two phase flags
@@ -2573,7 +2585,7 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
 def _phase_spies(monkeypatch, sched: Schedule):
     """Record which phases a run reaches, with none of their I/O."""
     calls: list[str] = []
-    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: sched)
+    monkeypatch.setattr(scheduler.schedule, "load", lambda semester: sched)
     monkeypatch.setattr(
         scheduler,
         "_snapshot_passed_deadlines",
@@ -2608,7 +2620,7 @@ def test_skip_autograde_releases_without_grading(monkeypatch):
     # submission); leaving it in this job is what made a queued release wait on it.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
     monkeypatch.setattr(
         sys,
@@ -2617,7 +2629,7 @@ def test_skip_autograde_releases_without_grading(monkeypatch):
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--all-cohorts",
+            "--all-semesters",
             "--skip-autograde",
             "--now",
             WHEN.isoformat(),
@@ -2628,11 +2640,11 @@ def test_skip_autograde_releases_without_grading(monkeypatch):
 
 
 def test_autograde_only_grades_without_releasing_anything(monkeypatch):
-    # The grading job's invocation, one cohort per matrix leg. It must not re-snapshot
+    # The grading job's invocation, one semester per matrix leg. It must not re-snapshot
     # (the freeze is deadline-pinned in the release job) and must release nothing.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
     monkeypatch.setattr(
         sys,
@@ -2641,8 +2653,8 @@ def test_autograde_only_grades_without_releasing_anything(monkeypatch):
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--cohort-org",
-            "Cohort-A",
+            "--semester-org",
+            "Semester-A",
             "--autograde-only",
             "--now",
             WHEN.isoformat(),
@@ -2655,15 +2667,15 @@ def test_autograde_only_grades_without_releasing_anything(monkeypatch):
 def test_autograde_only_waits_for_the_snapshot_file(monkeypatch):
     # The phases run in different jobs, so the handoff is the snapshot FILE. Absent means
     # "not frozen yet": grading then would pin on student-controlled committer dates, or
-    # write permanent zeros for a cohort whose repos do not exist yet.
+    # write permanent zeros for a semester whose repos do not exist yet.
     graded = _stub_collect(monkeypatch, marked=set(), templates={"assignment-1-f2026"})
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
     monkeypatch.setattr(
         sys,
@@ -2672,8 +2684,8 @@ def test_autograde_only_waits_for_the_snapshot_file(monkeypatch):
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--cohort-org",
-            "Cohort-A",
+            "--semester-org",
+            "Semester-A",
             "--autograde-only",
             "--now",
             "2026-11-01",
@@ -2697,7 +2709,7 @@ def test_the_two_phase_flags_are_refused_together(monkeypatch):
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--all-cohorts",
+            "--all-semesters",
             "--skip-autograde",
             "--autograde-only",
         ],
@@ -2712,7 +2724,7 @@ def test_the_two_phase_flags_are_refused_together(monkeypatch):
 # state of the drivers.
 
 
-def _all_cohorts_argv(monkeypatch, *extra: str, now: datetime = WHEN) -> None:
+def _all_semesters_argv(monkeypatch, *extra: str, now: datetime = WHEN) -> None:
     monkeypatch.setattr(
         sys,
         "argv",
@@ -2720,7 +2732,7 @@ def _all_cohorts_argv(monkeypatch, *extra: str, now: datetime = WHEN) -> None:
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--all-cohorts",
+            "--all-semesters",
             "--skip-autograde",
             "--now",
             now.isoformat(),
@@ -2729,22 +2741,27 @@ def _all_cohorts_argv(monkeypatch, *extra: str, now: datetime = WHEN) -> None:
     )
 
 
-def test_the_cadence_is_read_once_per_course_not_once_per_cohort(
+def test_the_cadence_is_read_once_per_course_not_once_per_semester(
     monkeypatch, cadence_calls
 ):
     # One request for the whole course: the run history it reads is the WORKFLOW's, which is
-    # one workflow per course org however many cohorts it serves.
+    # one workflow per course org however many semesters it serves.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery,
+        "discover_semesters",
+        lambda org: ["Semester-A", "Semester-B"],
     )
-    _all_cohorts_argv(monkeypatch)
+    _all_semesters_argv(monkeypatch)
     assert scheduler.main() == 0
     assert len(cadence_calls["fetch_runs"]) == 1
     assert len(cadence_calls["evaluate"]) == 1
     assert len(cadence_calls["report_course"]) == 1
-    # lateness, though, is per cohort - it is that cohort's plan that was late
-    assert [c[1] for c in cadence_calls["report_cohort"]] == ["Cohort-A", "Cohort-B"]
+    # lateness, though, is per semester - it is that semester's plan that was late
+    assert [c[1] for c in cadence_calls["report_semester"]] == [
+        "Semester-A",
+        "Semester-B",
+    ]
 
 
 def test_a_dry_run_never_reads_or_writes_the_cadence(monkeypatch, cadence_calls):
@@ -2752,20 +2769,20 @@ def test_a_dry_run_never_reads_or_writes_the_cadence(monkeypatch, cadence_calls)
     # live alarm, arm a disarmed org, or comment on anything.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
-    _all_cohorts_argv(monkeypatch, "--dry-run")
+    _all_semesters_argv(monkeypatch, "--dry-run")
     assert scheduler.main() == 0
     assert cadence_calls["fetch_runs"] == []
-    assert cadence_calls["report_course"] == cadence_calls["report_cohort"] == []
+    assert cadence_calls["report_course"] == cadence_calls["report_semester"] == []
 
 
 def test_the_autograde_job_never_touches_the_cadence(monkeypatch, cadence_calls):
-    # Cadence belongs to the release phase: the grading job is one cohort, runs after it,
+    # Cadence belongs to the release phase: the grading job is one semester, runs after it,
     # and would measure the gap against the run it is itself part of.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
     monkeypatch.setattr(
         sys,
@@ -2774,8 +2791,8 @@ def test_the_autograde_job_never_touches_the_cadence(monkeypatch, cadence_calls)
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--cohort-org",
-            "Cohort-A",
+            "--semester-org",
+            "Semester-A",
             "--autograde-only",
             "--now",
             WHEN.isoformat(),
@@ -2783,19 +2800,19 @@ def test_the_autograde_job_never_touches_the_cadence(monkeypatch, cadence_calls)
     )
     assert scheduler.main() == 0
     assert cadence_calls["fetch_runs"] == []
-    assert cadence_calls["report_course"] == cadence_calls["report_cohort"] == []
+    assert cadence_calls["report_course"] == cadence_calls["report_semester"] == []
 
 
-def test_a_single_cohort_invocation_never_touches_the_cadence(
+def test_a_single_semester_invocation_never_touches_the_cadence(
     monkeypatch, cadence_calls
 ):
     # A laptop, or a break-glass run during an Actions outage. It knows nothing about the
-    # other cohorts and must not report on the drivers' behalf.
+    # other semesters and must not report on the drivers' behalf.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
-    monkeypatch.setattr(scheduler.status, "refresh", lambda course, cohort=None: 0)
+    monkeypatch.setattr(scheduler.status, "refresh", lambda course, semester=None: 0)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -2803,15 +2820,15 @@ def test_a_single_cohort_invocation_never_touches_the_cadence(
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--cohort-org",
-            "Cohort-A",
+            "--semester-org",
+            "Semester-A",
             "--now",
             WHEN.isoformat(),
         ],
     )
     assert scheduler.main() == 0
     assert cadence_calls["fetch_runs"] == []
-    assert cadence_calls["report_cohort"] == []
+    assert cadence_calls["report_semester"] == []
 
 
 def test_lateness_is_asked_about_the_whole_plan_not_just_what_is_due(
@@ -2821,16 +2838,16 @@ def test_lateness_is_asked_about_the_whole_plan_not_just_what_is_due(
     # (`releases:` entries plus the synthesised handouts) and the verdict's previous tick.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
     late = _verdict(now=WHEN + timedelta(hours=3), prev=WHEN - timedelta(hours=1))
     monkeypatch.setattr(scheduler.cadence, "evaluate", lambda *a: late)
     # An hour of queue between GitHub accepting this run and the runner starting it: the
     # window is measured off the verdict's instants, so the lateness is 3h, not 4.
-    _all_cohorts_argv(monkeypatch, now=WHEN + timedelta(hours=4))
+    _all_semesters_argv(monkeypatch, now=WHEN + timedelta(hours=4))
     assert scheduler.main() == 0
-    (_course, cohort, verdict, items, _dry) = cadence_calls["report_cohort"][0]
-    assert cohort == "Cohort-A" and verdict is late
+    (_course, semester, verdict, items, _dry) = cadence_calls["report_semester"][0]
+    assert semester == "Semester-A" and verdict is late
     assert [i.label for i in items] == ["releases.wk1 -> deploy[0]"]
     assert items[0].late == timedelta(hours=3)
 
@@ -2839,21 +2856,21 @@ def test_a_cadence_read_that_fails_reddens_the_run_and_releases_anyway(
     monkeypatch, cadence_calls
 ):
     # This is the check that watches the drivers, so its own failure is worth a red X - and
-    # worth nothing more: every cohort's release still fires, and nothing is reported off a
+    # worth nothing more: every semester's release still fires, and nothing is reported off a
     # reading that was never taken.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
 
     def boom(org):
         raise RuntimeError("gh: HTTP 502")
 
     monkeypatch.setattr(scheduler.cadence, "fetch_runs", boom)
-    _all_cohorts_argv(monkeypatch)
+    _all_semesters_argv(monkeypatch)
     assert scheduler.main() == 1
     assert calls == ["snapshot", "preflight", "release"]
-    assert cadence_calls["report_course"] == cadence_calls["report_cohort"] == []
+    assert cadence_calls["report_course"] == cadence_calls["report_semester"] == []
 
 
 def test_a_lateness_check_that_raises_reddens_the_run_and_releases_anyway(
@@ -2861,20 +2878,20 @@ def test_a_lateness_check_that_raises_reddens_the_run_and_releases_anyway(
 ):
     # `late_items` is the one piece of the check that used to be evaluated OUTSIDE the
     # try - as an argument to the reporter - so a raise there escaped the release phase and
-    # cost the cohort its releases, which is the one thing the cadence check may never do.
+    # cost the semester its releases, which is the one thing the cadence check may never do.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
 
     def boom(*a):
         raise RuntimeError("a plan this reader cannot walk")
 
     monkeypatch.setattr(scheduler.cadence, "late_items", boom)
-    _all_cohorts_argv(monkeypatch)
+    _all_semesters_argv(monkeypatch)
     assert scheduler.main() == 1
     assert calls == ["snapshot", "preflight", "release"]
-    assert cadence_calls["report_cohort"] == []
+    assert cadence_calls["report_semester"] == []
 
 
 def test_a_cadence_report_that_fails_reddens_the_run_and_releases_anyway(
@@ -2882,69 +2899,71 @@ def test_a_cadence_report_that_fails_reddens_the_run_and_releases_anyway(
 ):
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
-    monkeypatch.setattr(scheduler.cadence, "report_cohort", lambda *a: 1)
+    monkeypatch.setattr(scheduler.cadence, "report_semester", lambda *a: 1)
     monkeypatch.setattr(scheduler.cadence, "report_course", lambda *a: 1)
-    _all_cohorts_argv(monkeypatch)
+    _all_semesters_argv(monkeypatch)
     assert scheduler.main() == 1
     assert calls == ["snapshot", "preflight", "release"]
 
 
-def test_list_cohorts_prints_json_and_nothing_else(monkeypatch, capsys):
+def test_list_semesters_prints_json_and_nothing_else(monkeypatch, capsys):
     # It IS the grading matrix: the workflow captures stdout and hands it to fromJSON, so
     # one stray log line on stdout would take grading out for the whole course.
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery,
+        "discover_semesters",
+        lambda org: ["Semester-A", "Semester-B"],
     )
     monkeypatch.setattr(
         sys,
         "argv",
-        ["scheduler", "--course-org", "Course-Org", "--list-cohorts"],
+        ["scheduler", "--course-org", "Course-Org", "--list-semesters"],
     )
     assert scheduler.main() == 0
-    assert json.loads(capsys.readouterr().out) == ["Cohort-A", "Cohort-B"]
+    assert json.loads(capsys.readouterr().out) == ["Semester-A", "Semester-B"]
 
 
-def test_list_cohorts_keeps_a_retry_notice_off_stdout(monkeypatch, capsys):
+def test_list_semesters_keeps_a_retry_notice_off_stdout(monkeypatch, capsys):
     # `ghcli.gh` prints its retry notices to STDOUT before a successful retry. A second
     # line in the captured output writes a step-output line with no `=`, GitHub rejects
     # the whole outputs file, and because the listing runs first the release step is then
     # skipped - one transient rate-limit costing a whole release tick.
     def noisy(org):
         print("  [wait] rate-limited, retry 1/3 in 30s")
-        return ["Cohort-A"]
+        return ["Semester-A"]
 
-    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", noisy)
+    monkeypatch.setattr(scheduler.discovery, "discover_semesters", noisy)
     monkeypatch.setattr(
-        sys, "argv", ["scheduler", "--course-org", "Course-Org", "--list-cohorts"]
+        sys, "argv", ["scheduler", "--course-org", "Course-Org", "--list-semesters"]
     )
     assert scheduler.main() == 0
     out = capsys.readouterr()
-    assert out.out == '["Cohort-A"]\n'
+    assert out.out == '["Semester-A"]\n'
     assert "[wait]" in out.err  # not swallowed - just off the answer's channel
 
 
-@pytest.mark.parametrize("flag", ["--all-cohorts", "--list-cohorts"])
-def test_a_cohort_listing_that_cannot_be_read_says_so_and_goes_red(
+@pytest.mark.parametrize("flag", ["--all-semesters", "--list-semesters"])
+def test_a_semester_listing_that_cannot_be_read_says_so_and_goes_red(
     monkeypatch, capsys, flag
 ):
     # The listing is the first read of every tick and sat outside any try, so one transient
     # fault ended the run in a raw traceback - nothing a faculty member could act on. It is
-    # also not "no cohorts": the run must go red so the failure issue still files.
+    # also not "no semesters": the run must go red so the failure issue still files.
     def boom(org):
         raise RuntimeError("gh: Internal Server Error (HTTP 500)")
 
-    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler.discovery, "discover_semesters", boom)
     monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
     assert scheduler.main() == 1
     out = capsys.readouterr()
-    assert "[err] could not list cohorts for Course-Org" in out.err
+    assert "[err] could not list semesters for Course-Org" in out.err
     assert "Traceback" not in out.err
-    assert out.out == ""  # never a half-written cohort matrix on stdout
+    assert out.out == ""  # never a half-written semester matrix on stdout
 
 
-@pytest.mark.parametrize("flag", ["--all-cohorts", "--list-cohorts"])
+@pytest.mark.parametrize("flag", ["--all-semesters", "--list-semesters"])
 def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
     monkeypatch, capsys, flag
 ):
@@ -2954,16 +2973,16 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
     # edit. `_preflight_course` has already put it on the course digest and mailed the
     # admins, so the listing lists nothing and the tick is green.
     def boom(org):
-        raise Unusable("malformed cohort registry in Course-Org/.github")
+        raise Unusable("malformed semester registry in Course-Org/.github")
 
-    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler.discovery, "discover_semesters", boom)
     monkeypatch.setattr(scheduler, "_preflight_course", lambda *a: 0)
     monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
     assert scheduler.main() == 0
     out = capsys.readouterr()
-    assert "malformed cohort registry" in out.err
+    assert "malformed semester registry" in out.err
     assert "this run stays green" in out.err
-    if flag == "--list-cohorts":
+    if flag == "--list-semesters":
         assert out.out == "[]\n"  # an empty grading matrix, never a half-written one
     else:
         assert "nothing to release" in out.out
@@ -2972,7 +2991,7 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
 # ----------------------------------------------------- source pre-flight (unattended)
 
 
-# A cohort's archive date, far enough out that the notice window is not open.
+# A semester's archive date, far enough out that the notice window is not open.
 ARCHIVES = date(2027, 2, 16)
 
 
@@ -3003,11 +3022,11 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=
         "notify_source_transitions",
         lambda *a, **k: seen.update(mailed=a, mail_kw=k) or notify.Unsent(),
     )
-    # A cohort that names no archive date earns an advisory of its own, which is not
+    # A semester that names no archive date earns an advisory of its own, which is not
     # what any of these tests is about - see the archive-phase section.
     rc = scheduler._preflight_sources(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         Schedule(archive=ArchiveRow(when=ARCHIVES)),
         now,
         dry_run,
@@ -3055,11 +3074,15 @@ def test_a_mail_that_did_not_go_out_puts_the_digests_record_back(monkeypatch):
     )
     assert (
         scheduler._preflight_sources(
-            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+            "Course-Org", "Semester-Org", Schedule(), WHEN, False
         )
         == 0
     )
-    assert held == {"org": "Cohort-Org", "keys": {fault.key: "warning"}, "clock": None}
+    assert held == {
+        "org": "Semester-Org",
+        "keys": {fault.key: "warning"},
+        "clock": None,
+    }
 
 
 def test_a_dry_run_holds_nothing(monkeypatch):
@@ -3078,7 +3101,7 @@ def test_a_dry_run_holds_nothing(monkeypatch):
     monkeypatch.setattr(
         scheduler.source_digest, "hold", lambda *a, **k: calls.append(a) or 0
     )
-    scheduler._preflight_sources("Course-Org", "Cohort-Org", Schedule(), WHEN, True)
+    scheduler._preflight_sources("Course-Org", "Semester-Org", Schedule(), WHEN, True)
     assert calls == []
 
 
@@ -3093,7 +3116,7 @@ def test_a_digest_error_is_reported_but_never_returned(monkeypatch):
     )
     assert (
         scheduler._preflight_sources(
-            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+            "Course-Org", "Semester-Org", Schedule(), WHEN, False
         )
         == 0
     )
@@ -3118,7 +3141,7 @@ def test_a_digest_that_cannot_be_written_never_stops_a_release(monkeypatch):
     monkeypatch.setattr(scheduler.source_digest, "sync", boom)
     assert (
         scheduler._preflight_sources(
-            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+            "Course-Org", "Semester-Org", Schedule(), WHEN, False
         )
         == 0
     )
@@ -3132,7 +3155,7 @@ def test_a_source_check_that_cannot_run_is_not_read_as_everything_missing(monkey
     monkeypatch.setattr(scheduler.schedule, "source_faults", boom)
     assert (
         scheduler._preflight_sources(
-            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+            "Course-Org", "Semester-Org", Schedule(), WHEN, False
         )
         == 0
     )
@@ -3189,7 +3212,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
-        "Course-Org", "Cohort-Org", deploys, sync=False
+        "Course-Org", "Semester-Org", deploys, sync=False
     )
     return errors, landed
 
@@ -3253,12 +3276,12 @@ def test_a_section_release_never_guards_that_sections_own_readme(monkeypatch):
     assert landed == {"lectures/README.md"} and errors == 0
 
 
-def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
+def test_withholding_the_stub_never_deletes_the_semesters_own_readme(monkeypatch):
     # The sequel to the incident: the placeholder leaked, faculty fixed it by editing the
-    # README in the COHORT repo (the fastest fix students see), and the course-org source
+    # README in the SEMESTER repo (the fastest fix students see), and the course-org source
     # is still the stub. Withholding by deleting after the copy would stage that fix as a
     # deletion on the next whole-repo release - while the log said everything else shipped.
-    good = "# Foundations of ML\n\nWritten by faculty, in the cohort repo.\n"
+    good = "# Foundations of ML\n\nWritten by faculty, in the semester repo.\n"
     landed: dict[str, str] = {}
 
     def fake_gh(*args):
@@ -3269,7 +3292,9 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
             if spec.startswith("Course-Org/"):
                 _seed_source(path, UNEDITED)
             else:
-                (path / "README.md").write_text(good)  # the cohort's existing good one
+                (path / "README.md").write_text(
+                    good
+                )  # the semester's existing good one
             return (0, "")
         return (0, "")
 
@@ -3295,7 +3320,7 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
-        "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
+        "Course-Org", "Semester-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
     assert errors == 0  # reported, not failed
     assert landed["README.md"] == good  # untouched, not replaced and not removed
@@ -3406,7 +3431,7 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
 def test_a_snapshot_that_froze_nothing_does_not_licence_autograding(monkeypatch):
     # Nobody onboarded yet: snapshot_assignment writes nothing and is green. Reading that
     # as frozen let the tick autograde, and collect then wrote write-once ZEROS for the
-    # whole cohort and marked the assignment graded - green, and unrecoverable.
+    # whole semester and marked the assignment graded - green, and unrecoverable.
     assert _real_snapshot_then_autograde(monkeypatch, targets=[]) == (0, [])
 
 
@@ -3445,13 +3470,13 @@ def test_who_to_tell_is_asked_once_and_handed_to_both_channels(monkeypatch):
     fault = source_fault("releases.a", fires=WHEN + timedelta(hours=3))
     digest = source_digest.DigestResult(faults_by_key={fault.key: fault})
     _, seen = _preflight(monkeypatch, [fault], digest=digest)
-    assert seen["route"][:2] == ("Cohort-Org", "Course-Org")
+    assert seen["route"][:2] == ("Semester-Org", "Course-Org")
     assert seen["mention"] == ["JanG"]
     assert seen["mailed"][2] is digest
     assert seen["mailed"][4].logins == ["JanG"]
 
 
-def test_every_phase_reads_the_clock_in_the_cohorts_own_zone(monkeypatch):
+def test_every_phase_reads_the_clock_in_the_semesters_own_zone(monkeypatch):
     # The tick is UTC; the deadline faculty wrote and the window where mail is held are
     # both local. A quiet-hours decision made in UTC holds the wrong five hours.
     sched = Schedule(timezone="Australia/Sydney")
@@ -3466,7 +3491,7 @@ def test_every_phase_reads_the_clock_in_the_cohorts_own_zone(monkeypatch):
     monkeypatch.setattr(
         scheduler.notify, "notify_source_transitions", lambda *a, **k: notify.Unsent()
     )
-    scheduler._preflight_sources("Course-Org", "Cohort-Org", sched, WHEN, False)
+    scheduler._preflight_sources("Course-Org", "Semester-Org", sched, WHEN, False)
     assert str(seen["now"].tzinfo) == "Australia/Sydney"
     assert seen["now"] == WHEN  # the same instant, told differently
 
@@ -3486,7 +3511,7 @@ def test_a_notifier_that_raised_never_changes_the_exit_code(monkeypatch, capsys)
     monkeypatch.setattr(scheduler.notify, "notify_source_transitions", boom)
     assert (
         scheduler._preflight_sources(
-            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+            "Course-Org", "Semester-Org", Schedule(), WHEN, False
         )
         == 0
     )
@@ -3495,7 +3520,7 @@ def test_a_notifier_that_raised_never_changes_the_exit_code(monkeypatch, capsys)
 
 def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
     # Blame is a nicety - it decides WHO hears. Losing it must not lose the issue, which
-    # falls back to @mentioning the cohort's instructors team.
+    # falls back to @mentioning the semester's instructors team.
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
     seen: dict = {}
     monkeypatch.setattr(
@@ -3513,7 +3538,7 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
     monkeypatch.setattr(scheduler.notify, "route", boom)
     assert (
         scheduler._preflight_sources(
-            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+            "Course-Org", "Semester-Org", Schedule(), WHEN, False
         )
         == 0
     )
@@ -3547,7 +3572,7 @@ def _config_preflight(
     synced: dict = {}
     mailed: list = []
 
-    def _roster(cohort, found=None):
+    def _roster(semester, found=None):
         if found is not None:
             found.extend(roster_faults or [])
             # What the real loader records for an absent file, so the digest sees the
@@ -3562,25 +3587,25 @@ def _config_preflight(
             raise roster_raises
         return None if roster_absent else []
 
-    def _teams(cohort, found=None, known=None):
+    def _teams(semester, found=None, known=None):
         if vetted_against is not None:
             vetted_against.append(known)
         return {}
 
     monkeypatch.setattr(scheduler.roster, "load", _roster)
     monkeypatch.setattr(
-        scheduler.sync_faculty, "read_cohort_people", lambda cohort, found: {}
+        scheduler.sync_faculty, "read_semester_people", lambda semester, found: {}
     )
     monkeypatch.setattr(scheduler.teams, "load", _teams)
     monkeypatch.setattr(
         scheduler,
-        "cohort_sheet_faults",
-        lambda course, cohort, sched, found: found.extend(sheet_faults or []),
+        "semester_sheet_faults",
+        lambda course, semester, sched, found: found.extend(sheet_faults or []),
     )
     monkeypatch.setattr(
         scheduler,
         "grading_config_faults",
-        lambda course, cohort, sched, found, listing: found.extend(spec_faults or []),
+        lambda course, semester, sched, found, listing: found.extend(spec_faults or []),
     )
     monkeypatch.setattr(
         scheduler.config_digest,
@@ -3595,7 +3620,7 @@ def _config_preflight(
         lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
     )
     rc = scheduler._preflight_configs(
-        "Course-Org", "Cohort-Org", Schedule(), WHEN, False, None
+        "Course-Org", "Semester-Org", Schedule(), WHEN, False, None
     )
     return rc, synced, mailed
 
@@ -3630,7 +3655,7 @@ def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch)
 
 
 def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
-    # Syncing an empty list CLOSES the issue and tells the cohort the file is fine. A rate
+    # Syncing an empty list CLOSES the issue and tells the semester the file is fine. A rate
     # limit is not that, so the file drops out of the tick.
     _rc, synced, mailed = _config_preflight(
         monkeypatch, roster_raises=RuntimeError("rate limited")
@@ -3652,8 +3677,8 @@ def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch)
 
 
 def test_an_absent_roster_is_a_fault_of_its_own_not_a_healthy_empty_one(monkeypatch):
-    # An empty fault list CLOSES the digest issue and tells the cohort students.csv is
-    # fine. A cohort with no students.csv at all enrols nobody, which is the loudest thing
+    # An empty fault list CLOSES the digest issue and tells the semester students.csv is
+    # fine. A semester with no students.csv at all enrols nobody, which is the loudest thing
     # this file can be wrong about.
     _rc, synced, _mailed = _config_preflight(monkeypatch, roster_absent=True)
     (fault,) = synced["students.csv"]
@@ -3686,16 +3711,16 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
     )
     monkeypatch.setattr(scheduler.config_digest, "sync", boom)
     rc = scheduler._preflight_configs(
-        "Course-Org", "Cohort-Org", Schedule(), WHEN, False, None
+        "Course-Org", "Semester-Org", Schedule(), WHEN, False, None
     )
     assert rc == 0
 
 
 # ---------------------------------------------- the COURSE org's own config (unattended)
 #
-# dsl-course.yml and the cohort registry belong to the course, not to a cohort: one issue
+# dsl-course.yml and the semester registry belong to the course, not to a semester: one issue
 # for the whole course, once per tick, addressed to the admins rather than to a teaching
-# team. What matters is that it never reds the tick, that it is reported BEFORE the cohort
+# team. What matters is that it never reds the tick, that it is reported BEFORE the semester
 # listing a malformed registry makes raise, and that "we could not look" leaves the issue
 # alone.
 
@@ -3716,7 +3741,7 @@ def _course_preflight(
     monkeypatch.setattr(scheduler.sync_faculty, "read_course_config", _config)
     monkeypatch.setattr(
         scheduler.discovery,
-        "read_cohort_registry",
+        "read_semester_registry",
         lambda org, found: found.extend(registry_faults or []) or [],
     )
     monkeypatch.setattr(
@@ -3746,7 +3771,7 @@ def _course_fault(file: str = "dsl-course.yml"):
 
 
 def test_both_course_files_reach_the_one_course_digest(monkeypatch):
-    registry = _course_fault("cohort-courses-pages.yml")
+    registry = _course_fault("semesters.yml")
     config = _course_fault()
     rc, seen = _course_preflight(
         monkeypatch, config_faults=[config], registry_faults=[registry]
@@ -3755,7 +3780,7 @@ def test_both_course_files_reach_the_one_course_digest(monkeypatch):
     assert seen["spec"] is config_digest.COURSE
     assert seen["faults"] == [config, registry]
     assert seen["mailed"] is config_digest.COURSE
-    # Course admins, not a cohort's teaching team - and git's answer on the @mention.
+    # Course admins, not a semester's teaching team - and git's answer on the @mention.
     assert seen["mention"] == ["JanG"]
 
 
@@ -3785,7 +3810,7 @@ def test_the_course_preflight_never_touches_the_exit_code(monkeypatch):
     assert scheduler._preflight_course("Course-Org", WHEN, False) == 0
 
 
-def test_the_course_config_is_checked_before_the_cohort_listing(monkeypatch):
+def test_the_course_config_is_checked_before_the_semester_listing(monkeypatch):
     # A registry nobody can parse is one of the faults this reports AND what makes the
     # listing raise. Reported first, or never.
     order: list[str] = []
@@ -3795,7 +3820,7 @@ def test_the_course_config_is_checked_before_the_cohort_listing(monkeypatch):
 
     # None is what an unreadable listing looks like, which is exactly this case.
     monkeypatch.setattr(
-        scheduler, "_registered_cohorts", lambda org: order.append("listing")
+        scheduler, "_registered_semesters", lambda org: order.append("listing")
     )
     monkeypatch.setattr(
         "sys.argv",
@@ -3803,7 +3828,7 @@ def test_the_course_config_is_checked_before_the_cohort_listing(monkeypatch):
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--all-cohorts",
+            "--all-semesters",
             "--skip-autograde",
         ],
     )
@@ -3812,14 +3837,16 @@ def test_the_course_config_is_checked_before_the_cohort_listing(monkeypatch):
 
 
 def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
-    # One issue per COURSE per tick. The autograde job runs once per cohort, and each leg
-    # opening (or commenting on) the course's digest would be one notification per cohort
+    # One issue per COURSE per tick. The autograde job runs once per semester, and each leg
+    # opening (or commenting on) the course's digest would be one notification per semester
     # about one file.
     called: list = []
     monkeypatch.setattr(
         scheduler, "_preflight_course", lambda *a: called.append(a) or 0
     )
-    monkeypatch.setattr(scheduler, "_registered_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(
+        scheduler, "_registered_semesters", lambda org: ["Semester-f2026"]
+    )
     monkeypatch.setattr(scheduler, "run", lambda *a, **k: 0)
     monkeypatch.setattr(
         "sys.argv",
@@ -3827,7 +3854,7 @@ def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
             "scheduler",
             "--course-org",
             "Course-Org",
-            "--all-cohorts",
+            "--all-semesters",
             "--autograde-only",
         ],
     )
@@ -3850,110 +3877,116 @@ def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
     assert [a[0] for a in called] == ["Course-Org"]
 
 
-# ------------------------------------------------------ a cohort that is closed out
+# ------------------------------------------------------ a semester that is closed out
 
 
-def test_a_closed_out_cohort_is_not_released_into(monkeypatch, capsys):
+def test_a_closed_out_semester_is_not_released_into(monkeypatch, capsys):
     # Its whole org is read-only, so every release, snapshot and digest write this tick
-    # would 403 - four times an hour, for the rest of the course's life. The live cohort
+    # would 403 - four times an hour, for the rest of the course's life. The live semester
     # beside it still ticks.
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery,
+        "discover_semesters",
+        lambda org: ["Semester-A", "Semester-B"],
     )
     monkeypatch.setattr(
-        scheduler.discovery, "repo_is_archived", lambda org, name: org == "Cohort-A"
+        scheduler.discovery, "repo_is_archived", lambda org, name: org == "Semester-A"
     )
     seen: list[str] = []
     monkeypatch.setattr(
-        scheduler, "run", lambda course, cohort, now, **k: seen.append(cohort) or 0
+        scheduler, "run", lambda course, semester, now, **k: seen.append(semester) or 0
     )
     monkeypatch.setattr(
-        "sys.argv", ["scheduler", "--course-org", "Course-Org", "--all-cohorts"]
+        "sys.argv", ["scheduler", "--course-org", "Course-Org", "--all-semesters"]
     )
     assert scheduler.main() == 0
-    assert seen == ["Cohort-B"]
-    assert "archived cohort - left frozen" in capsys.readouterr().out
+    assert seen == ["Semester-B"]
+    assert "archived semester - left frozen" in capsys.readouterr().out
 
 
-def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch):
-    # `--cohort-org` is the by-hand path, and it takes the same answer as the loop: a
-    # frozen cohort has nothing to release and the tick would be spent on 403s.
+def test_the_break_glass_single_semester_run_skips_a_closed_out_semester(monkeypatch):
+    # `--semester-org` is the by-hand path, and it takes the same answer as the loop: a
+    # frozen semester has nothing to release and the tick would be spent on 403s.
     monkeypatch.setattr(scheduler.discovery, "repo_is_archived", lambda org, name: True)
 
     def boom(*a, **k):
-        raise AssertionError("a frozen cohort must not be run")
+        raise AssertionError("a frozen semester must not be run")
 
     monkeypatch.setattr(scheduler, "run", boom)
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
     monkeypatch.setattr(
         "sys.argv",
-        ["scheduler", "--course-org", "Course-Org", "--cohort-org", "Cohort-A"],
+        ["scheduler", "--course-org", "Course-Org", "--semester-org", "Semester-A"],
     )
     assert scheduler.main() == 0
 
 
-def _one_cohort_argv(monkeypatch, cohort, *extra):
+def _one_semester_argv(monkeypatch, semester, *extra):
     monkeypatch.setattr(
         "sys.argv",
-        ["scheduler", "--course-org", "Course-Org", "--cohort-org", cohort, *extra],
+        ["scheduler", "--course-org", "Course-Org", "--semester-org", semester, *extra],
     )
 
 
-def test_a_cohort_the_registry_does_not_list_is_never_run(monkeypatch, capsys):
-    # A config push's run names its cohort in a repository_dispatch payload, which anyone
-    # holding a cohort's bot token writes - so the course's own registry decides.
+def test_a_semester_the_registry_does_not_list_is_never_run(monkeypatch, capsys):
+    # A config push's run names its semester in a repository_dispatch payload, which anyone
+    # holding a semester's bot token writes - so the course's own registry decides.
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
 
     def boom(*a, **k):
-        raise AssertionError("an unregistered cohort must not be run")
+        raise AssertionError("an unregistered semester must not be run")
 
     monkeypatch.setattr(scheduler, "run", boom)
-    _one_cohort_argv(monkeypatch, "Someone-Else", "--skip-autograde")
+    _one_semester_argv(monkeypatch, "Someone-Else", "--skip-autograde")
     assert scheduler.main() == 1
     assert "Someone-Else is not registered under Course-Org" in capsys.readouterr().err
 
 
-def test_a_dispatched_cohort_runs_under_the_registry_spelling(monkeypatch):
+def test_a_dispatched_semester_runs_under_the_registry_spelling(monkeypatch):
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+        scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
-    monkeypatch.setattr(scheduler.discovery, "cohort_is_live", lambda org: True)
+    monkeypatch.setattr(scheduler.discovery, "semester_is_live", lambda org: True)
     seen: list[tuple] = []
     monkeypatch.setattr(
         scheduler,
         "run",
-        lambda course, cohort, now, **k: seen.append((cohort, k)) or 0,
+        lambda course, semester, now, **k: seen.append((semester, k)) or 0,
     )
     refreshed: list = []
     monkeypatch.setattr(
         scheduler.status, "refresh", lambda *a: refreshed.append(a) or 1
     )
-    _one_cohort_argv(monkeypatch, "cohort-a", "--skip-autograde", "--defer-site-sync")
+    _one_semester_argv(
+        monkeypatch, "semester-a", "--skip-autograde", "--defer-site-sync"
+    )
     assert scheduler.main() == 0
-    assert [c for c, _ in seen] == ["Cohort-A"]
-    # A config push's run ends by refreshing that cohort's status.json, under the
+    assert [c for c, _ in seen] == ["Semester-A"]
+    # A config push's run ends by refreshing that semester's status.json, under the
     # registry's spelling - and a write that failed does not red the release.
-    assert refreshed == [("Course-Org", "Cohort-A")]
+    assert refreshed == [("Course-Org", "Semester-A")]
     assert seen[0][1]["defer_site_sync"] is True
     assert seen[0][1]["autograde"] is False
 
 
-def test_listing_one_cohort_prints_only_a_registered_one(monkeypatch, capsys):
-    # The grading matrix of a config push's run: that cohort alone, and only if the
+def test_listing_one_semester_prints_only_a_registered_one(monkeypatch, capsys):
+    # The grading matrix of a config push's run: that semester alone, and only if the
     # registry lists it - an unregistered name fails the listing, which skips the release
     # step behind it as well.
     monkeypatch.setattr(
-        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery,
+        "discover_semesters",
+        lambda org: ["Semester-A", "Semester-B"],
     )
-    monkeypatch.setattr(scheduler.discovery, "cohort_is_live", lambda org: True)
-    _one_cohort_argv(monkeypatch, "Cohort-B", "--list-cohorts")
+    monkeypatch.setattr(scheduler.discovery, "semester_is_live", lambda org: True)
+    _one_semester_argv(monkeypatch, "Semester-B", "--list-semesters")
     assert scheduler.main() == 0
-    assert capsys.readouterr().out == '["Cohort-B"]\n'
-    _one_cohort_argv(monkeypatch, "Cohort-Z", "--list-cohorts")
+    assert capsys.readouterr().out == '["Semester-B"]\n'
+    _one_semester_argv(monkeypatch, "Semester-Z", "--list-semesters")
     assert scheduler.main() == 1
     assert capsys.readouterr().out == ""
 
@@ -3992,8 +4025,8 @@ def _archive(
     monkeypatch.setattr(
         scheduler.teardown,
         "close_out",
-        lambda course, cohort, dry_run=True, today=None: (
-            seen["closed"].append(cohort) or seen["gate"].append(today) or 0
+        lambda course, semester, dry_run=True, today=None: (
+            seen["closed"].append(semester) or seen["gate"].append(today) or 0
         ),
     )
     monkeypatch.setattr(scheduler.issues, "find_issue", lambda repo, title: existing)
@@ -4006,12 +4039,12 @@ def _archive(
     )
     monkeypatch.setattr(
         scheduler.notify,
-        "notify_cohort_archiving",
-        lambda cohort, course, when, at: seen["mailed"].append(cohort) or mails,
+        "notify_semester_archiving",
+        lambda semester, course, when, at: seen["mailed"].append(semester) or mails,
     )
     rc = scheduler._archive_phase(
         "Course-Org",
-        "Cohort-Org",
+        "Semester-Org",
         Schedule(archive=ArchiveRow(when=archive_date) if archive_date else None),
         now,
         dry_run,
@@ -4019,23 +4052,23 @@ def _archive(
     return rc, seen
 
 
-def test_a_cohort_is_closed_out_on_its_archive_date(monkeypatch):
+def test_a_semester_is_closed_out_on_its_archive_date(monkeypatch):
     when = date(2027, 2, 16)
     _, seen = _archive(monkeypatch, when, datetime(2027, 2, 16, 6, tzinfo=timezone.utc))
-    assert seen["closed"] == ["Cohort-Org"]
+    assert seen["closed"] == ["Semester-Org"]
 
 
 def test_the_close_out_is_decided_off_this_ticks_clock(monkeypatch):
     # `close_out` re-derived the real today for its own archive-date gate, so a tick run
     # with `--now` past the date fired a close-out that then refused it: the run decided
-    # to archive the cohort and archived nothing.
+    # to archive the semester and archived nothing.
     when = date(2027, 2, 16)
     _, seen = _archive(monkeypatch, when, datetime(2027, 2, 20, 6, tzinfo=timezone.utc))
-    assert seen["closed"] == ["Cohort-Org"]
+    assert seen["closed"] == ["Semester-Org"]
     assert seen["gate"] == [date(2027, 2, 20)]
 
 
-def test_a_cohort_is_not_closed_out_the_day_before(monkeypatch):
+def test_a_semester_is_not_closed_out_the_day_before(monkeypatch):
     when = date(2027, 2, 16)
     _, seen = _archive(
         monkeypatch, when, datetime(2027, 2, 15, 23, tzinfo=timezone.utc)
@@ -4043,21 +4076,21 @@ def test_a_cohort_is_not_closed_out_the_day_before(monkeypatch):
     assert seen["closed"] == []
 
 
-def test_a_cohort_with_no_archive_date_is_never_closed_out(monkeypatch):
+def test_a_semester_with_no_archive_date_is_never_closed_out(monkeypatch):
     # Freezing a whole org off a synthesised term end is the worst possible use of a
-    # guess: such a cohort is closed out by hand, with --force.
+    # guess: such a semester is closed out by hand, with --force.
     _, seen = _archive(monkeypatch, None, datetime(2099, 1, 1, tzinfo=timezone.utc))
     assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
 
 
-def test_a_fortnight_out_the_cohort_is_told_once(monkeypatch):
+def test_a_fortnight_out_the_semester_is_told_once(monkeypatch):
     when = date(2027, 2, 16)
     edge = datetime(2027, 2, 2, 9, tzinfo=timezone.utc)  # exactly 14 days
     rc, seen = _archive(monkeypatch, when, edge)
     assert rc == 0
-    assert seen["mailed"] == ["Cohort-Org"]
+    assert seen["mailed"] == ["Semester-Org"]
     ((title, body),) = seen["issues"]
-    assert title == "Cohort archives on 2027-02-16"
+    assert title == "Semester archives on 2027-02-16"
     assert scheduler._MAILED_MARK in body
     assert "read-only" not in title  # the date is the whole identity of this issue
     assert seen["closed"] == []
@@ -4103,7 +4136,7 @@ def test_an_unchanged_notice_is_not_rewritten_every_tick(monkeypatch):
     # `upsert_issue` edits unconditionally, and this body changes exactly once in the
     # fortnight. Four ticks an hour for a fortnight is ~1,300 identical edits otherwise.
     when = date(2027, 2, 16)
-    standing = scheduler._archive_notice_body("Cohort-Org", when, True, "main")
+    standing = scheduler._archive_notice_body("Semester-Org", when, True, "main")
     _, seen = _archive(
         monkeypatch,
         when,
@@ -4121,7 +4154,9 @@ def test_a_dry_run_neither_freezes_nor_notifies(monkeypatch):
     assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
 
 
-def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monkeypatch):
+def test_a_semester_with_no_archive_date_earns_an_advisory_in_its_own_digest(
+    monkeypatch,
+):
     # A fault with no clock: there is no moment it bites at, which is exactly what is
     # wrong with it. Not a parser drop, so `Validate schedule` stays green in August.
     (fault,) = scheduler._no_archive_date(Schedule())
@@ -4130,14 +4165,14 @@ def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monke
     assert fault.fires is None and fault.file == "schedule.yml"
     # And it stays a LINE. An undated fault sits at the notify bar by default, so without
     # the cap this would be mailed to the teaching team and re-mailed by the digest's age
-    # ladder every term, about a cohort whose term end nobody has typed yet.
+    # ladder every term, about a semester whose term end nobody has typed yet.
     assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
     assert scheduler._no_archive_date(Schedule(archive=ArchiveRow(when=ARCHIVES))) == []
 
 
 def test_a_block_no_date_can_be_derived_from_says_that_instead(monkeypatch):
     # Not writing the block is a decision; writing one nothing can date is a mistake, and
-    # telling a cohort to write a block it already wrote helps nobody.
+    # telling a semester to write a block it already wrote helps nobody.
     (fault,) = scheduler._no_archive_date(Schedule(archive=ArchiveRow()))
     assert "archive date cannot be derived" in fault.what
     assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
@@ -4147,7 +4182,9 @@ def test_both_notice_surfaces_give_the_same_instruction(monkeypatch):
     # Moving or removing the date is the thing a reader is most likely to DO about the
     # notice, so the issue and the mail beside it say it in the same words - and say only
     # that, rather than teaching the block's defaults to somebody holding a date.
-    body = scheduler._archive_notice_body("Cohort-Org", date(2027, 2, 16), True, "main")
+    body = scheduler._archive_notice_body(
+        "Semester-Org", date(2027, 2, 16), True, "main"
+    )
     assert body.count("To move this archiving date or remove it altogether, edit ") == 1
     assert "`schedule.yml` in this repo." in body
     assert "sixty days" not in body
@@ -4157,18 +4194,20 @@ def test_the_notice_says_what_the_freeze_does_and_links_the_runbook(monkeypatch)
     # What the freeze does to access is the question the fortnight's warning has to
     # answer, and the one thing a reader may want afterwards - reopening a repo - is a
     # Settings-page click the runbook spells out. The link is pinned to the tier this
-    # cohort's course org runs, not to whatever `release` holds.
-    body = scheduler._archive_notice_body("Cohort-Org", date(2027, 2, 16), True, "main")
+    # semester's course org runs, not to whatever `release` holds.
+    body = scheduler._archive_notice_body(
+        "Semester-Org", date(2027, 2, 16), True, "main"
+    )
     assert "write accesses are revoked and the org is frozen in place" in body
     assert "un-archive it from its own Settings page" in body
     assert (
         "https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/"
-        "docs/10-grade-and-return-assignments.md#closing-the-cohort-out"
+        "docs/10-grade-and-return-assignments.md#closing-the-semester-out"
     ) in body
 
 
 def test_an_unreadable_central_ref_still_files_the_notice(monkeypatch):
-    # The ref is read from the course org's own `dsl-course.yml`. A cohort must still be
+    # The ref is read from the course org's own `dsl-course.yml`. A semester must still be
     # warned that it freezes in a fortnight when that file cannot be read, so the link
     # falls back to the default tier rather than the notice failing.
     def boom(org):
@@ -4188,10 +4227,10 @@ def test_an_unreadable_central_ref_still_files_the_notice(monkeypatch):
 
 def test_a_notice_is_closed_when_the_archive_is_called_off(monkeypatch):
     # The `archive:` block was taken away after the notice went out. Nothing will freeze
-    # this cohort now, and nothing else would ever close the issue: a cohort that is never
+    # this semester now, and nothing else would ever close the issue: a semester that is never
     # archived is never sealed, so `teardown._close_notices` never runs on it. Until this
     # swept, it stood open all term naming a date on which nothing would happen.
-    stale = "Cohort archives on 2027-02-16"
+    stale = "Semester archives on 2027-02-16"
     rc, seen = _archive(
         monkeypatch,
         None,
@@ -4232,10 +4271,10 @@ def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
         monkeypatch,
         date(2027, 3, 16),
         datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
-        open_notices=("Cohort archives on 2027-02-16",),
+        open_notices=("Semester archives on 2027-02-16",),
     )
     assert [title for title, _ in seen["notices_closed"]] == [
-        "Cohort archives on 2027-02-16"
+        "Semester archives on 2027-02-16"
     ]
     assert seen["issues"] == []
 
@@ -4244,7 +4283,7 @@ def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
 #
 # `visibility: student_choice` makes the student `admin` of their own repo so that they
 # can put their work in a portfolio once it has been marked. Until the grading cutoff a
-# published repo is one the rest of the cohort can copy from - so the tick closes it
+# published repo is one the rest of the semester can copy from - so the tick closes it
 # again, off the listing it already holds, and after the cutoff never touches it again.
 
 CUTOFF = datetime(2026, 10, 30, 23, 59, 59, tzinfo=BERLIN)
@@ -4291,7 +4330,7 @@ def _reprivatise(
     )
     listing = None if rows is None else {r["name"]: r for r in rows}
     rc = scheduler._reprivatise_student_repos(
-        "Course-Org", "Cohort-f2026", sched, now, dry_run, listing
+        "Course-Org", "Semester-f2026", sched, now, dry_run, listing
     )
     return rc, patched
 
@@ -4360,7 +4399,7 @@ def test_no_other_shape_has_its_visibility_touched(monkeypatch, visibility):
 
 def test_a_listing_that_could_not_be_read_flips_nothing(monkeypatch):
     # "We could not look" is not "nothing is public": guessing either way costs a PATCH
-    # per student per tick, or a cohort's work left open.
+    # per student per tick, or a semester's work left open.
     assert _reprivatise(monkeypatch, None) == (0, [])
 
 
@@ -4391,7 +4430,7 @@ def test_a_failed_patch_is_counted(monkeypatch):
     assert (
         scheduler._reprivatise_student_repos(
             "Course-Org",
-            "Cohort-f2026",
+            "Semester-f2026",
             sched,
             datetime(2026, 10, 14, tzinfo=BERLIN),
             False,
@@ -4423,7 +4462,7 @@ def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
     rows = _choice_rows(("assignment-1-ada-l", "public"))
     scheduler._reprivatise_student_repos(
         "Course-Org",
-        "Cohort-f2026",
+        "Semester-f2026",
         sched,
         datetime(2026, 10, 14, tzinfo=BERLIN),
         False,
@@ -4435,7 +4474,7 @@ def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
 def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
     # The shape decides WHICH repos are frozen and whether each pin is narrowed to a
     # folder. Off the same memoised read that answers group-vs-individual, and never
-    # guessed downstream: a wrong answer freezes the cohort against repos that do not
+    # guessed downstream: a wrong answer freezes the semester against repos that do not
     # exist and cannot be corrected afterwards, because the snapshot is write-once.
     taken: list[dict] = []
     monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
@@ -4453,7 +4492,7 @@ def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
-        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+        lambda semester: _assignments(**{"assignment-1": _due(13)}),
     )
     for submit_via, shared in (
         ("shared_dropbox_repo", True),
@@ -4470,7 +4509,9 @@ def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
         )
         assert (
             scheduler.run(
-                "Course-Org", "Cohort-Org", datetime(2026, 10, 14, tzinfo=timezone.utc)
+                "Course-Org",
+                "Semester-Org",
+                datetime(2026, 10, 14, tzinfo=timezone.utc),
             )
             == 0
         )
@@ -4491,10 +4532,10 @@ def test_the_dry_run_ends_with_its_decisions_and_a_real_run_takes_none(
 
     monkeypatch.setattr(scheduler, "dry_run_decisions", decisions)
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True, autograde=False)
+    scheduler.run("Course-Org", "Semester-Org", now, dry_run=True, autograde=False)
     out = capsys.readouterr().out
     line = "Decision: w1 not released: ALREADY_DONE Every copy is out."
     assert line in out
     assert out.rindex("DRY-RUN  [") < out.index(line)
-    scheduler.run("Course-Org", "Cohort-Org", now, dry_run=False, autograde=False)
+    scheduler.run("Course-Org", "Semester-Org", now, dry_run=False, autograde=False)
     assert asked == [True]

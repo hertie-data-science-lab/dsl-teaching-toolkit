@@ -1,9 +1,9 @@
-"""Adding and removing this run's assignment in a cohort's `schedule.yml`.
+"""Adding and removing this run's assignment in a semester's `schedule.yml`.
 
-The harness has to put a real assignment into a real cohort's schedule and take it out
+The harness has to put a real assignment into a real semester's schedule and take it out
 again, in a file faculty own and hand-edit. So the edit is FENCED - `# dsl-e2e:<run> begin`
 / `# dsl-e2e:<run> end` - rather than parsed and re-emitted: a YAML round trip would
-reformat and de-comment the whole file, and an interrupted run would leave the cohort's
+reformat and de-comment the whole file, and an interrupted run would leave the semester's
 schedule rewritten by a machine. With fences, removal is exact, and anything a human wrote
 around the block is untouched to the byte.
 
@@ -28,7 +28,7 @@ def _rejoin(lines: list[str], text: str) -> str:
 
     The edit is fenced so that what faculty wrote is untouched TO THE BYTE, and a forced
     trailing newline broke that promise for a schedule.yml that had none: the run put the
-    block in, took it out again, and handed the cohort back a file one byte longer than it
+    block in, took it out again, and handed the semester back a file one byte longer than it
     borrowed - which the teardown's fidelity check reads as drift, because a blob sha
     cannot tell a harmless newline from a real edit. Observable only since
     `gh_contents.get_file_content` stopped stripping what it reads."""
@@ -67,7 +67,7 @@ def insert_block(text: str, run_id: str, block: str) -> str:
     if where is None:
         raise ValueError(
             f"this schedule.yml has no `{_ASSIGNMENTS}` key to put the run's assignment "
-            "under - the cohort is not set up for the e2e pipeline"
+            "under - the semester is not set up for the e2e pipeline"
         )
     lines[where + 1 : where + 1] = fenced.splitlines()
     return _rejoin(lines, text)
@@ -85,14 +85,14 @@ def remove_block(text: str, run_id: str) -> str:
     return _rejoin(lines, text)
 
 
-def put_schedule(cohort: str, text: str, sha: str) -> bool:
+def put_schedule(semester: str, text: str, sha: str) -> bool:
     """Write the edited schedule back, refusing if it moved since it was read.
 
     `expected_sha` is the whole point: the seeded workflows write this file too (the
     scheduler records handouts in it), so a blind write could revert a commit that landed
     between the read and the edit."""
     return gh_contents.put_file(
-        cohort,
+        semester,
         course.CONFIG_REPO,
         schedule.SCHEDULE_PATH,
         text.encode(),

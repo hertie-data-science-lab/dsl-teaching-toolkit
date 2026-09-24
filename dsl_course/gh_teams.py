@@ -80,7 +80,7 @@ def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
 
     A team keeps the privacy it was made with, and nothing else revisits it - `students`
     and `auditors` are `secret` so a student cannot read the class list off the team page,
-    and every cohort created before that decision still has them `closed`. Converged here,
+    and every semester created before that decision still has them `closed`. Converged here,
     at the one place a duplicate is seen. The read comes first because create_team runs
     once per team per sync, every hour: an unconditional PATCH spent that whole allowance
     of the write governor re-setting privacy that was already right."""
@@ -150,7 +150,7 @@ def _is_refusal(out: str) -> bool:
 
 # The two org settings the toolkit READS and never writes. Both are web-only: they are
 # reported by `GET /orgs/{org}` and absent from `PATCH /orgs/{org}`, so the maintainer sets
-# them once per cohort org by hand (docs/DEPLOYMENT-CHECKLIST.md) and the digest says so
+# them once per semester org by hand (docs/DEPLOYMENT-CHECKLIST.md) and the digest says so
 # while either is wrong. Named here, beside the settings this module DOES converge, so it
 # is one list of "what an org has to be" rather than two.
 MEMBERS_CAN_DELETE = "members_can_delete_repositories"
@@ -186,8 +186,8 @@ def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     solutions and the `solution` branches.
 
     `private_forks` is the third setting, and the odd one out: it LOOSENS - so it is
-    asked for, not assumed, sent in a PATCH of its own (see below), and only a COHORT
-    asks. A cohort's materials repo is
+    asked for, not assumed, sent in a PATCH of its own (see below), and only a SEMESTER
+    asks. A semester's materials repo is
     private, and GitHub refuses a fork of a private repo unless its org allows it, so
     the Fork button students are told to press was simply absent; there it grants
     nothing, because a fork carries the reader's own access and a student who can fork
@@ -197,7 +197,7 @@ def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     uncontrolled copy of the solutions in somebody's personal account, gaining nobody
     anything.
 
-    Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
+    Base permissions matter in BOTH org kinds. A semester holds students; a COURSE org holds
     the materials students must not see, and at GitHub's default of `read` every member of
     it (every TA, every visiting instructor, anyone ever added for one semester) could read
     all of it. Faculty access comes from the team grants (access.converge_faculty_access),

@@ -41,7 +41,7 @@ flowchart TD
   A["`1 · Create hertie-dsl-bot
 own email + 2FA`"] --> B["`2 · Mint classic PAT
 repo + admin:org + workflow`"]
-  B --> C["`3 · Invite bot as Owner of each course/cohort org
+  B --> C["`3 · Invite bot as Owner of each course/semester org
 + MEMBER of hertie-data-science-lab (bot accepts)`"]
   C --> D["`4 · Set DSL_BOT_TOKEN = bot PAT
 in the CENTRAL repo (UI)`"]
@@ -74,7 +74,7 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 
 - Create the org by hand in the GitHub web UI (there is no org-creation API).
 - Invite the bot as an **Owner** and have it **accept** before Bootstrap runs - an unaccepted
-  invite makes the run fail. Same for cohort orgs.
+  invite makes the run fail. Same for semester orgs.
 - Walkthroughs: [01-new-course-org.md](../docs/01-new-course-org.md) and
   [04-new-cohort-org.md](../docs/04-new-cohort-org.md).
 
@@ -83,7 +83,7 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 Enrolment-code and grade emails go through `dsl_course.mailer` under a **tenant-level mail
 credential** - a one-time central setup, not per course. `dry_run` previews need nothing.
 
-The same mailbox sends two **fault** emails, which nobody presses a button for. A cohort's
+The same mailbox sends two **fault** emails, which nobody presses a button for. A semester's
 teaching team is emailed about a planned release whose materials are not staged, addressed to
 whoever git says wrote the line (`notify.notify_source_transitions`, HTML); and the maintainer
 is emailed the log tail of any cron that fails (`notify.notify_run_failed`, plain text), to
@@ -122,20 +122,20 @@ acquires a token after printing its preview, so a credential that is SET but wro
 run. An org with no secrets at all still previews green, saying the preview proves nothing.
 
 A fifth value, `DSL_MAINTAINER_EMAIL`, is not part of the transport: the four `GRAPH_*`
-secrets say *how* to send, this one says *who hears* when a release or a cohort's schedule
+secrets say *how* to send, this one says *who hears* when a release or a semester's schedule
 breaks. It is the toolkit maintainer's inbox, not a course's.
 
 Centrally it is a repository **variable** on the toolkit, not a secret - an address is not a
 credential, and a masked secret cannot be read back to check it. `bootstrap-org.yml` passes
 it into the run's env, and Bootstrap propagates it onto the new course org as an org secret
 (the only route that reaches a Free-plan org's public `.github`, where the scheduler runs);
-Bootstrap cohort forwards it down to a cohort. Unset on an org, fault mail goes to
+Bootstrap semester forwards it down to a semester. Unset on an org, fault mail goes to
 `GRAPH_SENDER` instead, so a gap is a mail in the wrong inbox rather than a mail lost.
 Nothing converges it onto an org bootstrapped before it existed - that is one command, in
 [maintainers.md](../docs/reference/maintainers.md#secrets-an-org-carries).
 
 A sixth, `DSL_COURSE_ADMIN_EMAILS`, answers the same *who hears* question one level down: a
-fault in a COURSE org's own `dsl-course.yml` or cohort registry stops that course being
+fault in a COURSE org's own `dsl-course.yml` or semester registry stops that course being
 synced at all, and the people who can fix it are its course admins. Comma-separated, and the
 fallback: an admin's optional `email:` in `dsl-course.yml` wins when any admin has one (that
 file is public, so the secret keeps an address private). It travels the same route (a
@@ -153,13 +153,13 @@ ref an org runs **is** that org's engine. Three tiers, three branches:
 
 | Tier | Branch | Runs on |
 |---|---|---|
-| trunk | `main` | the demo course org and its cohorts. PRs squash-merge here |
+| trunk | `main` | the demo course org and its semesters. PRs squash-merge here |
 | release | `release` | every real org, and the default for one that declares nothing |
 | preview | `preview` | the demo course org, and only while a PR is being looked at. Force-pushed from a PR tip; never promoted from |
 
 `release` never carries commits of its own: it is always a fast-forward of `main`. An org's
-tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`; cohorts inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
-**Check cohort setup** shows it per cohort.
+tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`; semesters inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
+**Check semester setup** shows it per semester.
 
 `release` does not exist until someone makes it, and `central.CENTRAL_REF` is already
 `release`. **Order, on first setup:**
@@ -210,14 +210,14 @@ rendered against takes its whole Actions tab down.
 **This inspection is the gate to `release`.** There is no approval environment on Promote,
 and a green test suite is not a substitute: a person has to read what the demo org actually
 did. The merge has already deployed to the demo course org (`hertie-dsl-demo-course-e1234`)
-and both its cohorts (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`), end to end - issues,
-issue comments, the mails that went out, the run logs and the cohort site. A day covers one
+and both its semesters (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`), end to end - issues,
+issue comments, the mails that went out, the run logs and the semester site. A day covers one
 nightly refresh:
 
 - [ ] **Deploy main** green, and so is the org's own next nightly **Refresh actions**
 - [ ] one **Scheduled release** tick green (a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
-- [ ] **Check cohort setup**'s mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a cohort)
+- [ ] **Check semester setup**'s mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a semester)
 - [ ] `DSL_E2E=1 pytest tests/e2e -q` green (the end-to-end harness - run against the demo org before promoting, never instead of reading it; see [maintainers.md](../docs/reference/maintainers.md#end-to-end-harness) for the env it needs)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
 
@@ -307,7 +307,7 @@ been. Required checks are named by hand and a job can only be named after it has
 `central_ref:` is documented (commented out) in every course org's `.github/dsl-course.yml`.
 To put the demo course on the trunk, set **`central_ref: main`** in
 `hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
-its cohorts follow. Valid values are `main`, `release`, `preview`, or a full 40-character commit
+its semesters follow. Valid values are `main`, `release`, `preview`, or a full 40-character commit
 SHA on `main`'s history; anything else is refused, and the org keeps the workflows it already
 has until someone fixes the key.
 
@@ -328,15 +328,15 @@ every merge the moment it lands: an org that really belongs there is bootstrappe
 `release` and then moved by hand, as above.
 
 The CLI is wider than the button - `--central-ref` takes any tier or SHA - but it is refused
-together with `--cohort`: a cohort inherits its course org's tier, so the nightly refresh
+together with `--semester`: a semester inherits its course org's tier, so the nightly refresh
 would undo it.
 
 ## What orgs exist
 
 **[Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml)** renders the live list into its own job
 summary: one nested tree, each course org (topic `dsl-course-hub`) with the toolkit tier it
-runs and the cohort orgs (topic `dsl-cohort`) that point at it listed underneath. A cohort
-GitHub shows but the course's registry does not is marked **not registered**; a cohort
+runs and the semester orgs (topic `dsl-cohort`) that point at it listed underneath. A semester
+GitHub shows but the course's registry does not is marked **not registered**; a semester
 pointing at no discovered course org is **orphaned** and listed at the end. It runs
 **Mondays 06:00 UTC** and on demand, and goes red rather than reporting a partial estate as
 complete. A missing org means a failed or never-run bootstrap.

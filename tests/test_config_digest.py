@@ -25,7 +25,7 @@ from dsl_course.faults import ConfigFault
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 8, 12, 0, tzinfo=BERLIN)
 NIGHT = NOW.replace(hour=2)
-COHORT = cd.Context("Course", "Cohort")
+SEMESTER = cd.Context("Course", "Semester")
 ROSTER = cd.ROSTER
 
 
@@ -47,7 +47,7 @@ def _fault(where: str = "row 4", field: str = "role") -> ConfigFault:
 
 def _open(*faults, state=None, since=None, sent=None):
     """An OPEN digest whose body is what a previous tick would have written."""
-    body = cd.render_body(ROSTER, list(faults), NOW, COHORT, state, since)
+    body = cd.render_body(ROSTER, list(faults), NOW, SEMESTER, state, since)
     if sent is not None:
         body += "\n" + cd._write_marker(cd._CLOCK, {"sent": sent})
     return [issue_row(7, ROSTER.title, body)]
@@ -61,7 +61,7 @@ def _state(body: str) -> dict:
 
 
 def test_the_body_names_the_file_and_its_own_docs():
-    body = cd.render_body(ROSTER, [_fault()], NOW, COHORT)
+    body = cd.render_body(ROSTER, [_fault()], NOW, SEMESTER)
     assert "`classroom-config/students.csv` has broken entries" in body
     assert "/docs/06-enrol-students-to-cohort.md" in body
     assert "**Do not close or edit this issue by hand.**" in body
@@ -70,7 +70,7 @@ def test_the_body_names_the_file_and_its_own_docs():
 def test_an_immediate_fault_is_filed_under_how_long_it_has_stood():
     fault = _fault()
     seen = {fault.key: (NOW - timedelta(days=3)).isoformat()}
-    body = cd.render_body(ROSTER, [fault], NOW, COHORT, since=seen)
+    body = cd.render_body(ROSTER, [fault], NOW, SEMESTER, since=seen)
     assert "### unfixed for 3 days" in body
     assert "_first seen Sat 05 Sep 2026_" in body
     # No rung heading: WARNING (24h) would promise a deadline this fault does not have.
@@ -78,7 +78,7 @@ def test_an_immediate_fault_is_filed_under_how_long_it_has_stood():
 
 
 def test_a_fault_that_has_just_turned_up_says_so_rather_than_a_number_of_days():
-    body = cd.render_body(ROSTER, [_fault()], NOW, COHORT)
+    body = cd.render_body(ROSTER, [_fault()], NOW, SEMESTER)
     assert "### needs fixing" in body
     assert "first seen just now" in body
 
@@ -87,7 +87,7 @@ def test_the_body_carries_the_rung_and_the_moment_it_was_first_seen():
     fault = _fault()
     seen = {fault.key: NOW.isoformat()}
     state = cd._state_marker(cd.current_state([fault], NOW), seen)
-    body = cd.render_body(ROSTER, [fault], NOW, COHORT, state, seen)
+    body = cd.render_body(ROSTER, [fault], NOW, SEMESTER, state, seen)
     assert _state(body) == {fault.key: {"rung": "warning", "since": NOW.isoformat()}}
     assert cd._rungs(_state(body)) == {fault.key: "warning"}
 
@@ -110,7 +110,7 @@ def test_a_since_stamp_nobody_can_read_is_ignored_not_compared(monkeypatch):
     assert cd.oldest_seen([a, b], seen) == NOW - timedelta(days=2)
     assert cd.oldest_seen([b], seen) is None  # nothing readable: no clock at all
     assert "### unfixed for 2 days" in cd.render_body(
-        ROSTER, [a, b], NOW, COHORT, since=seen
+        ROSTER, [a, b], NOW, SEMESTER, since=seen
     )
 
 
@@ -120,7 +120,7 @@ def test_a_since_stamp_nobody_can_read_is_ignored_not_compared(monkeypatch):
 def test_a_fault_that_appears_is_mailed_and_commented_once(gh):
     fault = _fault()
     fake = gh([])
-    out = cd.sync(ROSTER, "Cohort", "Course", [fault], NOW)
+    out = cd.sync(ROSTER, "Semester", "Course", [fault], NOW)
     assert out.mail == {fault.key: cd.Severity.WARNING}
     assert out.reminder is None
     # The issue is CREATED, which notifies on its own - so no comment beside it.
@@ -132,7 +132,7 @@ def test_a_standing_fault_says_nothing_at_all_on_the_next_tick(gh):
     seen = {fault.key: NOW.isoformat()}
     state = cd._state_marker(cd.current_state([fault], NOW), seen)
     fake = gh(_open(fault, state=state, since=seen))
-    out = cd.sync(ROSTER, "Cohort", "Course", [fault], NOW + timedelta(hours=1))
+    out = cd.sync(ROSTER, "Semester", "Course", [fault], NOW + timedelta(hours=1))
     assert out.mail == {} and out.reminder is None
     assert not fake.did("issue", "comment")
 
@@ -152,7 +152,7 @@ def test_the_reminder_ladder_says_it_twice_and_then_stops(gh, age, sent, expecte
     seen = {fault.key: (NOW - age).isoformat()}
     state = cd._state_marker(cd.current_state([fault], NOW), seen)
     gh(_open(fault, state=state, since=seen, sent=sent))
-    out = cd.sync(ROSTER, "Cohort", "Course", [fault], NOW)
+    out = cd.sync(ROSTER, "Semester", "Course", [fault], NOW)
     assert out.reminder == expected
     # A reminder mails everything still open, not just what changed - nothing changed.
     assert bool(out.mail) is bool(expected)
@@ -163,7 +163,7 @@ def test_a_reminder_comments_that_nothing_has_been_fixed(gh):
     seen = {fault.key: (NOW - timedelta(days=3)).isoformat()}
     state = cd._state_marker(cd.current_state([fault], NOW), seen)
     fake = gh(_open(fault, state=state, since=seen, sent=0))
-    cd.sync(ROSTER, "Cohort", "Course", [fault], NOW)
+    cd.sync(ROSTER, "Semester", "Course", [fault], NOW)
     comment = fake.body_of("issue", "comment")
     assert "**Escalated** (unfixed for 2 days)" in comment
     assert f"- `{fault.key}`" in comment
@@ -188,12 +188,12 @@ def test_a_reminder_names_only_the_faults_on_its_own_clock(gh):
     }
     state = cd._state_marker(cd.current_state([dropped, later], NOW), seen)
     body = (
-        cd.render_body(schedule_digest, [dropped, later], NOW, COHORT, state, seen)
+        cd.render_body(schedule_digest, [dropped, later], NOW, SEMESTER, state, seen)
         + "\n"
         + cd._write_marker(cd._CLOCK, {"sent": 0})
     )
     fake = gh([issue_row(7, schedule_digest.title, body)])
-    out = cd.sync(schedule_digest, "Cohort", "Course", [dropped, later], NOW)
+    out = cd.sync(schedule_digest, "Semester", "Course", [dropped, later], NOW)
     assert out.reminder == "2 days"
     assert set(out.mail) == {dropped.key}
     comment = fake.body_of("issue", "comment")
@@ -209,14 +209,14 @@ def test_one_clock_per_issue_counted_from_the_oldest_fault(gh):
     }
     state = cd._state_marker(cd.current_state([old, new], NOW), seen)
     gh(_open(old, new, state=state, since=seen, sent=0))
-    out = cd.sync(ROSTER, "Cohort", "Course", [old, new], NOW)
+    out = cd.sync(ROSTER, "Semester", "Course", [old, new], NOW)
     assert out.reminder == "2 days"
     assert set(out.mail) == {old.key, new.key}
 
 
 def test_the_clock_resets_when_the_issue_closes_itself(gh):
     fake = gh(_open(_fault(), sent=2))
-    cd.sync(ROSTER, "Cohort", "Course", [], NOW)
+    cd.sync(ROSTER, "Semester", "Course", [], NOW)
     body = fake.body_of("issue", "edit")
     assert cd._read_marker(body, cd._CLOCK, {}) == {}
     assert "Every entry in `classroom-config/students.csv` was usable" in body
@@ -235,14 +235,14 @@ def test_an_immediate_fault_is_never_held_overnight(gh):
     # the one moment it is cheap to fix for a quieter night.
     fault = _fault()
     gh([])
-    out = cd.sync(ROSTER, "Cohort", "Course", [fault], NIGHT)
+    out = cd.sync(ROSTER, "Semester", "Course", [fault], NIGHT)
     assert out.mail == {fault.key: cd.Severity.WARNING}
 
 
 def test_a_scheduled_digest_still_holds(gh):
     fault = source_fault(fires=NIGHT + timedelta(hours=3))
     gh([])
-    out = source_digest.sync("Cohort", "Course", [fault], NIGHT)
+    out = source_digest.sync("Semester", "Course", [fault], NIGHT)
     assert out.mail == {}
 
 
@@ -254,17 +254,17 @@ def test_a_reminder_whose_mail_failed_is_owed_again_next_tick(gh):
     seen = {fault.key: (NOW - timedelta(days=3)).isoformat()}
     state = cd._state_marker(cd.current_state([fault], NOW), seen)
     gh(_open(fault, state=state, since=seen, sent=0))
-    out = cd.sync(ROSTER, "Cohort", "Course", [fault], NOW)
+    out = cd.sync(ROSTER, "Semester", "Course", [fault], NOW)
     assert (out.reminder, out.reminder_was) == ("2 days", 0)
 
     # The mail did not go out. `hold` puts the counter back where it was.
     body = (
-        cd.render_body(ROSTER, [fault], NOW, COHORT, state, seen)
+        cd.render_body(ROSTER, [fault], NOW, SEMESTER, state, seen)
         + "\n"
         + (cd._write_marker(cd._CLOCK, {"sent": 1}))
     )
     fake = gh([issue_row(7, ROSTER.title, body)])
-    assert cd.hold(ROSTER, "Cohort", {fault.key: "warning"}, out.reminder_was) == 0
+    assert cd.hold(ROSTER, "Semester", {fault.key: "warning"}, out.reminder_was) == 0
     put_back = fake.body_of("issue", "edit")
     assert cd._read_marker(put_back, cd._CLOCK, {}) == {"sent": 0}
 
@@ -283,11 +283,11 @@ def _sheet(slug: str, lineno: int) -> ConfigFault:
 
 
 def test_every_grading_sheet_is_one_issue_and_each_line_links_its_own_sheet():
-    # A cohort marks half a dozen assignments at once, so an issue per sheet would be six
+    # A semester marks half a dozen assignments at once, so an issue per sheet would be six
     # threads about one grader's afternoon - but the digest's label for the folder must
     # not become the link, or every line would point at the wrong file.
     body = cd.render_body(
-        cd.GRADING_SHEETS, [_sheet("a1", 5), _sheet("a2", 9)], NOW, COHORT
+        cd.GRADING_SHEETS, [_sheet("a1", 5), _sheet("a2", 9)], NOW, SEMESTER
     )
     assert "`classroom-config/grading_sheets/` has broken entries" in body
     assert "/grading_sheets/a1.yml#L5" in body
@@ -316,9 +316,9 @@ def _spec_fault(fires) -> ConfigFault:
 
 
 def test_the_grading_config_issue_names_the_file_without_claiming_it_is_here():
-    # The issue is the COHORT's and the file is in the course org, on a template's
+    # The issue is the SEMESTER's and the file is in the course org, on a template's
     # solution branch: `classroom-config/grading_config.yml` is a path that does not exist.
-    body = cd.render_body(cd.GRADING_CONFIG, [_spec_fault(NOW)], NOW, COHORT)
+    body = cd.render_body(cd.GRADING_CONFIG, [_spec_fault(NOW)], NOW, SEMESTER)
     assert "`<assignment template>/grading_config.yml` has broken entries" in body
 
 
@@ -326,7 +326,7 @@ def test_a_fault_with_a_moment_is_filed_under_its_rung_whatever_file_it_is_in():
     # The clock is the FAULT's answer, never the issue's. Filed by age it would sit under
     # "unfixed for N days", which promises no deadline and hides the one it has.
     body = cd.render_body(
-        cd.GRADING_CONFIG, [_spec_fault(NOW + timedelta(hours=8))], NOW, COHORT
+        cd.GRADING_CONFIG, [_spec_fault(NOW + timedelta(hours=8))], NOW, SEMESTER
     )
     assert "### URGENT (12h)" in body
     assert "unfixed for" not in body and "needs fixing" not in body
@@ -339,7 +339,7 @@ def test_a_fault_with_a_moment_is_held_overnight_like_every_other_deadline(gh):
     gh([])
     out = cd.sync(
         cd.GRADING_CONFIG,
-        "Cohort",
+        "Semester",
         "Course",
         [_spec_fault(NIGHT + timedelta(hours=8))],
         NIGHT,
@@ -353,13 +353,13 @@ def test_a_fault_with_a_moment_earns_no_age_reminder(gh):
     fault = _spec_fault(NOW + timedelta(hours=8))
     seen = {fault.key: (NOW - timedelta(days=9)).isoformat()}
     state = cd._state_marker(cd.current_state([fault], NOW), seen)
-    body = cd.render_body(cd.GRADING_CONFIG, [fault], NOW, COHORT, state, seen)
+    body = cd.render_body(cd.GRADING_CONFIG, [fault], NOW, SEMESTER, state, seen)
     gh([issue_row(7, cd.GRADING_CONFIG.title, body)])
-    out = cd.sync(cd.GRADING_CONFIG, "Cohort", "Course", [fault], NOW)
+    out = cd.sync(cd.GRADING_CONFIG, "Semester", "Course", [fault], NOW)
     assert out.reminder is None
 
 
-# ------------------------------------------------- the one digest that is not a cohort's
+# ------------------------------------------------- the one digest that is not a semester's
 
 
 COURSE = cd.COURSE
@@ -396,9 +396,9 @@ def test_the_course_digest_falls_back_to_the_course_admin_team(gh):
 def test_both_course_files_sit_in_the_one_issue(gh):
     # dsl-course.yml and the registry are one failure - either unreadable and the sync
     # walks past the whole course - so they are one issue, each fault citing its own file.
-    faults = [_course_fault(), _course_fault("cohort-courses-pages.yml", "cohorts")]
+    faults = [_course_fault(), _course_fault("semesters.yml", "semesters")]
     body = cd.render_body(COURSE, faults, NOW, COURSE_CTX)
-    assert "`dsl-course.yml`" in body and "`cohort-courses-pages.yml`" in body
+    assert "`dsl-course.yml`" in body and "`semesters.yml`" in body
 
 
 def test_the_course_digest_survives_the_very_file_it_reports_on(gh, monkeypatch):

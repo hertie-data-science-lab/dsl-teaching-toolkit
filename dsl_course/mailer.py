@@ -111,7 +111,7 @@ MAINTAINER_ENV = "DSL_MAINTAINER_EMAIL"
 # one (see `course_admin_addresses`). Held centrally as a repository variable on the toolkit
 # and propagated onto each course org by `bootstrap_course`, exactly as MAINTAINER_ENV is.
 # COURSE orgs only: every course-level mail is sent from the course org's `.github`, and
-# no workflow seeded into a cohort may wire the mail env at all (see maintainers.md).
+# no workflow seeded into a semester may wire the mail env at all (see maintainers.md).
 COURSE_ADMIN_ENV = "DSL_COURSE_ADMIN_EMAILS"
 
 
@@ -292,7 +292,7 @@ _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _MAX_SEND_ATTEMPTS = 3
 _RETRY_AFTER_DEFAULT = 5.0  # when the header is absent or unreadable
 _RETRY_AFTER_CAP = 60.0  # a header we cannot vet must not park the whole batch
-# Graph allows ~30 messages/minute per mailbox. 2.5s leaves headroom: a 126-row cohort takes
+# Graph allows ~30 messages/minute per mailbox. 2.5s leaves headroom: a 126-row semester takes
 # ~5min, where the same batch sent back-to-back starts 429-ing around message 30 and then
 # pays up to _MAX_SEND_ATTEMPTS x _RETRY_AFTER_CAP per recipient, serially.
 _SEND_INTERVAL = 2.5
@@ -394,7 +394,7 @@ def _graph_send_one(
         if status in _RETRY_STATUSES and attempt < _MAX_SEND_ATTEMPTS:
             # A throttle (429) or a brief 5xx is not a bad recipient - it is Graph asking
             # to be asked again. Un-retried, one throttled minute silently cost a whole
-            # cohort their enrolment codes, and the log said only "failed (429)".
+            # semester their enrolment codes, and the log said only "failed (429)".
             wait = retry_after_seconds(response_headers)
             log(
                 f"  [wait] send to {len(to)} recipient(s) got {status}, "
@@ -416,7 +416,7 @@ def _masked(addresses: tuple[str, ...]) -> str:
     apart, not enough to identify either.
 
     For `log_person` ONLY, which prints under `DSL_VERBOSE=1` and is set by no rendered
-    workflow. A mask is not anonymity: `j***@pm.me` beside a cohort's people.yml is a
+    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's people.yml is a
     name, and every one of these workflows runs in a PUBLIC repo. What the run log gets is
     a count."""
     return ", ".join(mask_email(a) for a in addresses)

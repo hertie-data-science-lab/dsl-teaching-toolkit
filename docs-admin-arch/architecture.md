@@ -20,7 +20,7 @@ rotating the bot.** Everything faculty do is covered by the
 - [Failure semantics](#failure-semantics)
 - [Dynamic dropdowns](#dynamic-dropdowns)
 - [Repo discovery](#repo-discovery)
-- [Cohort website](#cohort-website)
+- [Semester website](#semester-website)
 - [Course website (open courseware)](#course-website-open-courseware)
 - [Bot lifecycle - setup & rotation](#bot-lifecycle---setup--rotation)
 - [Code map](#code-map)
@@ -42,13 +42,13 @@ code + Bootstrap action`"]
 service account · Owner of every org`"])
   subgraph course["COURSE org - persistent"]
     cg["`.github
-profile + faculty & instructors buttons + cohort registry`"]
+profile + faculty & instructors buttons + semester registry`"]
     mat["`course-materials-fYYYY
 lectures/ + readings/`"]
     asg["`assignment-N-fYYYY
 is_template: main + solution branch`"]
   end
-  subgraph cohort["COHORT org - per year"]
+  subgraph semester["SEMESTER org - per year"]
     wel["`welcome
 Join course issue → onboard`"]
     ros["`classroom-config
@@ -61,22 +61,22 @@ one private repo per student`"]
 auto-deployed website`"]
   end
   repo -->|"Bootstrap Course Org"| course
-  cg -->|"Bootstrap cohort"| cohort
-  course -->|"Release materials / assignment"| cohort
+  cg -->|"Bootstrap semester"| semester
+  course -->|"Release materials / assignment"| semester
   bot -.->|"operates via DSL_BOT_TOKEN"| course
-  bot -.->|"operates via DSL_BOT_TOKEN"| cohort
+  bot -.->|"operates via DSL_BOT_TOKEN"| semester
 ```
 
-Every button and cron lives in the **course** org's `.github`; cohort orgs hold no org-level
+Every button and cron lives in the **course** org's `.github`; semester orgs hold no org-level
 buttons of their own, only the `welcome` onboarding workflows and `classroom-config`'s
 dispatchers/validator. Sources are always read course-ward, state is always written
-cohort-ward, and the orgs come from the invocation - never from `schedule.yml`, which names
+semester-ward, and the orgs come from the invocation - never from `schedule.yml`, which names
 repos only.
 
 ## The bot identity
 
 Every button runs server-side under **one** credential, `DSL_BOT_TOKEN` - the shared service
-account **`hertie-dsl-bot`**, Owner of every course and cohort org. Faculty and instructors
+account **`hertie-dsl-bot`**, Owner of every course and semester org. Faculty and instructors
 never hold or see it; they click buttons, which run as the bot. Which account and its exact PAT
 scopes: [ADMIN-SETUP](admin-setup.md#the-bot-account). Standing it up and rotating it:
 [Bot lifecycle](#bot-lifecycle---setup--rotation).
@@ -125,7 +125,7 @@ Why three paths, and why `selected` visibility:
   `classroom-config`.
 - An org secret with the gh-default `private` visibility doesn't reach **public** repos either,
   and `.github` / `welcome` are public. So the **org** secret is scoped
-  **`visibility=selected → .github`** (plus `welcome` + `classroom-config` on cohort orgs, each
+  **`visibility=selected → .github`** (plus `welcome` + `classroom-config` on semester orgs, each
   scoped only if it exists), which reaches the public infra repos while keeping the org-admin
   token **out of** student repos. `visibility=all` would expose it to every workflow in the org.
 - The value always goes over **stdin**, never argv, so it never appears in `ps`. Both writers
@@ -151,9 +151,9 @@ faculty / instructors / admin teams`"] -->|"write/admin on"| cr["central repo"] 
   subgraph run["2 · Run a course's buttons (per-course)"]
     ca["`course org people: → course-admin
 (course-wide, admin)`"] -->|"mirrored to"| gh["`course org .github
-+ every cohort org`"]
-    it["`cohort people.yml → instructors-<tag>
-(per-cohort, push)`"] -->|"granted on"| ghtag["`course org .github
++ every semester org`"]
+    it["`semester people.yml → instructors-<tag>
+(per-semester, push)`"] -->|"granted on"| ghtag["`course org .github
 + that tag's own content repos`"]
     gh --> rb["run Release / Refresh / Sync membership / ..."]
     ghtag --> rb
@@ -164,16 +164,16 @@ faculty / instructors / admin teams`"] -->|"write/admin on"| cr["central repo"] 
 - **Provisioning** is a DSL-wide authority: the central `faculty`/`instructors`/`admin` teams, granted
   write/admin on the central repo, may run **Bootstrap Course Org**. Nothing else.
 - **Running a course's buttons** is **per-course**: `course_admins` (course-wide admin) and each
-  cohort's own `instructors`/`teaching_assistants` (per-cohort push).
+  semester's own `instructors`/`teaching_assistants` (per-semester push).
 - GitHub shows "Run workflow" only to **write+** users, and the seeded `check-team` job re-checks
   repo permission at run time. It is scoped `if: github.event_name == 'workflow_dispatch'` -
   cron and `repository_dispatch` runs have no actor to check, so those entry points are ungated
   by design and instead validate their **payload** (see
   [Failure semantics](#failure-semantics)). Teams are org-scoped (no cross-org grant exists), so
   `sync_faculty` runs two independent flows: `course_admins` mirrors the same desired membership
-  into the course org AND every cohort; each cohort's people.yml reconciles into that cohort's
+  into the course org AND every semester; each semester's people.yml reconciles into that semester's
   `instructors` team AND a **parallel**, tag-scoped `instructors-<tag>` team on the course org -
-  no merge across cohorts. Who-to-declare-where:
+  no merge across semesters. Who-to-declare-where:
   [access-reference](../docs/reference/access-reference.md); the runbook for changing it:
   [05 Manage the teaching team](../docs/05-manage-teaching-team.md).
 - Each person entry takes optional `start`/`end` ISO dates (`course.active_today`), applied by
@@ -182,7 +182,7 @@ faculty / instructors / admin teams`"] -->|"write/admin on"| cr["central repo"] 
   `students.csv` / `teams.csv` dispatches Sync membership on the push; a *date* rolling over
   pushes nothing, so it lands on the daily cron.
 
-Cohort-side, students land on `students` or `auditors` per their roster `role`. Both get read on
+Semester-side, students land on `students` or `auditors` per their roster `role`. Both get read on
 released materials; only `students` gets assignment repos and a gradebook.
 
 ## Core workflows
@@ -212,45 +212,45 @@ of truth (SSOT) `sync_faculty` reconciles against. **Anything not in the SSOT ge
 so an admin added via the Teams UI or a one-off `gh api` call must also be declared in
 `dsl-course.yml`.
 
-A **cohort** is bootstrapped from the course org's own **Bootstrap cohort** button (not the
-central action), given the empty cohort org's name. It runs the same `bootstrap_course` with
-`--cohort`: seeds `welcome` + `classroom-config` (roster, teams, `schedule.yml`,
+A **semester** is bootstrapped from the course org's own **Bootstrap semester** button (not the
+central action), given the empty semester org's name. It runs the same `bootstrap_course` with
+`--semester`: seeds `welcome` + `classroom-config` (roster, teams, `schedule.yml`,
 `people.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
-website, applies the course's current `course_admins`, registers the cohort in the course's
+website, applies the course's current `course_admins`, registers the semester in the course's
 `cohort-courses-pages.yml`, and writes a small `.github/dsl-course.yml` **pointer** (`course:`,
-`org:`) so the cohort-side dispatchers know which course org to fire at. All of this cohort's
+`org:`) so the semester-side dispatchers know which course org to fire at. All of this semester's
 real config lives in `classroom-config`.
 
 Every user-editable file in `classroom-config` ships as a **pair**: `<file>` is a minimal
 commented scaffold, seeded once and never rewritten, so faculty edits are safe; `<file>.sample`
 is a filled worked example, re-converged on every refresh. The SYSTEM-owned half - the README
 contract and the workflows under `.github/` (`welcome.CLASSROOM_SYSTEM_FILES`) - is
-re-converged the same way, so a dispatcher fix reaches running cohorts without re-bootstrapping. Partial provisioning fails the run
+re-converged the same way, so a dispatcher fix reaches running semesters without re-bootstrapping. Partial provisioning fails the run
 loudly rather than leaving a half-built org.
 
 ### Release
 
 **Materials** copies `course_source_path` - a folder, a single file, or a comma-separated list of
-either - from a course-org `course_source_repo` into the cohort's `cohort_dest_repo` at
-`cohort_dest_path` (default: mirror `course_source_path`). The repo is private, with read for both
+either - from a course-org `course_source_repo` into the semester's `semester_dest_repo` at
+`semester_dest_path` (default: mirror `course_source_path`). The repo is private, with read for both
 the `students` and `auditors` teams. Those four fields are deliberately the same ones a
 `schedule.yml` `deploy` entry carries, and both routes execute through the same
 `deploy.deploy_many`, which clones each source and each destination once per batch. Only released
-paths exist cohort-side; everything is idempotent and additive, so re-releasing is a no-op.
+paths exist semester-side; everything is idempotent and additive, so re-releasing is a no-op.
 
 A source path of `/`, `.` or empty releases the **whole repo**. It skips `.git` at any depth and,
 **at the repo root only**, `.github` and `MAINTAINING.md` - naming either explicitly still ships
 it. A path escaping the clone is refused before any file is touched.
 
-**Assignment** is two stages: freeze a cohort-level template from the course template's `main`
-(so a mid-term edit to the course template can't change what a cohort was handed), then generate
+**Assignment** is two stages: freeze a semester-level template from the course template's `main`
+(so a mid-term edit to the course template can't change what a semester was handed), then generate
 one private `<slug>-<handle>` repo per onboarded, **enrolled** student *from the frozen copy*.
 Solutions live on the course template's `solution` branch and are never shipped unless
 `include_solution` is ticked. Whether a release fans out per student or per team resolves
 through **one** precedence chain, `course.resolve_is_group`: the workflow's `group` checkbox
-(force) → the cohort's `assignments.<slug>.type` in schedule.yml → the template's own
+(force) → the semester's `assignments.<slug>.type` in schedule.yml → the template's own
 `grading_config.yml` `type:` (the design-time default the scaffold wrote) → individual. Read-side only -
-the cohort setting never writes back into the course org. Group repos are granted to the
+the semester setting never writes back into the course org. Group repos are granted to the
 materialised project Team; individual repos get the student as a direct collaborator.
 
 After a handout, `schedule.record_handout` writes the date back into `schedule.yml` by
@@ -306,12 +306,12 @@ the two answers it needs into `classroom-config/assignments.lock.yml` - SYSTEM-O
 assignment in `schedule.yml` - and the form reads that and nothing else. It is rewritten by
 **Sync membership** (whose dispatcher fires on a `schedule.yml` push), by every **Release
 assignment**, and by the nightly **Refresh actions**; `put_file` blob-compares, so an
-unchanged cohort is written nothing. An assignment whose template does not exist yet locks
+unchanged semester is written nothing. An assignment whose template does not exist yet locks
 to `none`, because the alternative is guessing a shape for an assignment nobody has
 described - and a wrong guess of `group` lets any student mint a real GitHub team, granted
 `maintain` on the repo, under a name of their choosing.
 
-Before the lock file the form scraped `type:` and `max_team_size:` out of the cohort's own
+Before the lock file the form scraped `type:` and `max_team_size:` out of the semester's own
 `schedule.yml`, which no longer carries either.
 
 ```mermaid
@@ -333,7 +333,7 @@ fan-out. A typo'd or squatted handle is an error, not an invitation into the pri
 
 ## The schedule
 
-Each cohort's `classroom-config/schedule.yml` is the single home for its timed plan. Three
+Each semester's `classroom-config/schedule.yml` is the single home for its timed plan. Three
 top-level blocks, each encoding a **behaviour**, plus `timezone`, `semester_start`,
 `semester_end`.
 
@@ -356,27 +356,27 @@ exam · special_event`"]
 
 | Block | Key fields | Fires |
 | --- | --- | --- |
-| `releases.<label>` | `event_datetime`, `deploy[]` of `course_source_repo` + `course_source_path` (required), `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror), `deploy_datetime` | a deploy per entry |
-| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due + the template's `late_window_days`), `handout_datetime`, `solution_datetime` (default: never), `cohort_dest_repo` (default: the slug), `title` | handout, then snapshot + autograde. TIMING ONLY - the shape and the team cap live in the template's `grading_config.yml` |
+| `releases.<label>` | `event_datetime`, `deploy[]` of `course_source_repo` + `course_source_path` (required), `semester_dest_repo` (default `materials`), `semester_dest_path` (default: mirror), `deploy_datetime` | a deploy per entry |
+| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due + the template's `late_window_days`), `handout_datetime`, `solution_datetime` (default: never), `semester_dest_repo` (default: the slug), `title` | handout, then snapshot + autograde. TIMING ONLY - the shape and the team cap live in the template's `grading_config.yml` |
 | `events.<label>` | `type` (`exam` \| `special_event`), `title`, `event_datetime` | nothing - display-only site rows |
 
   `enrolment:` was a fourth block, mailing the codes on a window. A push to `students.csv`
   does that now (see [Student onboarding](#student-onboarding)), so the key is recognised and IGNORED rather
-  than removed: live cohorts' instructor-owned files still carry it, and flagging it as
+  than removed: live semesters' instructor-owned files still carry it, and flagging it as
   unknown would red their **Validate schedule** runs. `parse` logs it as deprecated.
 
 - **Parsing is total but never silent.** An entry that is valid YAML yet not a valid schedule
   entry is dropped (or kept on a documented fallback) and recorded in `Schedule.dropped`, so the
   rest of the term still parses. `load` logs the list, `--validate` fails on it, and **Check
-  cohort setup** counts it.
-- **Validated where it is edited.** `validate-schedule.yml`, seeded into each cohort's
+  semester setup** counts it.
+- **Validated where it is edited.** `validate-schedule.yml`, seeded into each semester's
   `classroom-config`, runs the *same* parser from central on every push touching `schedule.yml`.
   Free private repos have no branch protection, so it cannot block the commit: instead it goes
   red and opens (or comments on) an issue assigned to the pusher, auto-closed by the next clean
   push. CI gates the same parser centrally.
 - **Times are normalised at parse.** A naive datetime is read in `timezone` (default
   `Europe/Berlin`); an explicit offset names the same instant and is *converted into* it - so
-  every datetime downstream is already the cohort's own wall clock, and what the site shows is
+  every datetime downstream is already the semester's own wall clock, and what the site shows is
   what it fires at.
 - **`tbc`**: `event_datetime: tbc` gives a dateless site row that can never fire; `tbc: true`
   beside a real date fires normally and marks the row.
@@ -389,18 +389,18 @@ and there is no "already released" state to track. Grading is the exception: it 
 so its state lives in the artefacts it writes (see [Autograding](#autograding--containment)).
 Manual `workflow_dispatch` runs default to `dry_run=true`; a driver-fired run passes no inputs and
 so releases for real. Like the other crons it is ungated - neither a cron nor a
-`repository_dispatch` has an actor to check. A course org with **no registered cohorts** is a
+`repository_dispatch` has an actor to check. A course org with **no registered semesters** is a
 quiet no-op that exits 0 - the normal state between bootstrapping a course org and its first
-cohort.
+semester.
 
 It is two jobs, and the concurrency sits on each of them rather than on the workflow. `release`
 holds the group `scheduled-release` (queued, not cancelled), because a pass can outlive a tick and
 two overlapping passes could double-fire whatever the first has not yet marked; a manual dry-run
 takes a per-run group instead, so a queued real run can never cancel it. `autograde` fans out per
-cohort behind `scheduled-autograde-<cohort>`, so a two-hour grading pass holds up neither that
-cohort's releases nor any other cohort's.
+semester behind `scheduled-autograde-<semester>`, so a two-hour grading pass holds up neither that
+semester's releases nor any other semester's.
 
-Each tick, per cohort:
+Each tick, per semester:
 
 1. **Freeze passed deadlines** - for every assignment whose grading deadline (`grading_datetime`,
    else `due_datetime`) has passed and has no snapshot yet, record the commit each submission
@@ -413,8 +413,8 @@ Each tick, per cohort:
    snapshot *file* rather than on what this pass just froze, and run from the course-org
    template; skipped when there is no such repo, no `solution` branch, or `autograde: false`.
 
-Phases 1 and 3 run whether or not the cohort uses `releases` at all. A cohort that raises is
-caught, logged and OR'd into the exit code, so one bad cohort cannot skip the rest.
+Phases 1 and 3 run whether or not the semester uses `releases` at all. A semester that raises is
+caught, logged and OR'd into the exit code, so one bad semester cannot skip the rest.
 
 ## Autograding & containment
 
@@ -450,7 +450,7 @@ committed link cycle would otherwise hang the run); tests and the junit report l
 runspace that the submission is appended *after* on `sys.path`; every subprocess starts its own
 session under POSIX rlimits (address space, CPU, nproc, file size) and a wall-clock timeout that
 SIGKILLs the whole **process group**, so a fork or memory bomb scores a recorded zero instead of
-OOM-killing the job and blocking the cohort's grading forever. Known, accepted residual: there is
+OOM-killing the job and blocking the semester's grading forever. Known, accepted residual: there is
 **no network isolation**, and graded code running in-process can forge its own report - which is
 why `autograde_score` is faculty-reviewed before distribution and never shown to students directly.
 
@@ -467,7 +467,7 @@ student.
 
 Seeded workflow YAML is frozen in each org at seed time, while the engine it calls is always
 checked out from central at **that org's** ref - `central_ref:` in its course org's
-`.github/dsl-course.yml`, defaulting to `central.CENTRAL_REF` (`release`); cohorts inherit
+`.github/dsl-course.yml`, defaulting to `central.CENTRAL_REF` (`release`); semesters inherit
 their course org's. A merge to `main` changes nothing in a REAL course: it deploys to the
 demo org, which runs `main`, and promoting it to `release` is a deliberate second act. A
 rollback is a revert on `main` promoted forward, which every org picks up on its next run with
@@ -490,7 +490,7 @@ cron 05:27, ungated`"| sr["seed refresh (per course org)"]
 maintainer guide + syllabus example
 + seeded stubs`"]
   sr --> pr["profile READMEs + dropdowns"]
-  sr --> coh["`each registered cohort:
+  sr --> coh["`each registered semester:
 welcome workflows + classroom-config
 system files + config samples`"]
   sr --> hb[".github/.last-refresh heartbeat"]
@@ -507,8 +507,8 @@ system files + config samples`"]
   Contents-API writes across a whole org. Deliberately *not* shared with the buttons that end in
   a refresh: an Actions group holds only one pending run, so a third arrival cancels the second,
   and an operator's click silently doing nothing is worse than a visible 409.
-- Cohort orgs run **no cron of their own** - their convergence is entirely driven by the parent
-  course org's refresh. A deleted cohort org (404) or an archived `classroom-config` is skipped
+- Semester orgs run **no cron of their own** - their convergence is entirely driven by the parent
+  course org's refresh. A deleted semester org (404) or an archived `classroom-config` is skipped
   with a hint rather than reddening the run forever.
 
 ## Failure semantics
@@ -531,17 +531,17 @@ file · tree · team · repo list`"]
 - One helper, `ghcli.is_missing_resource`, owns the 404-vs-failure split; `get_file_content`,
   `repo_tree`, `load_yaml_config` and `delete_file` all go through it. A returned `None`/`[]`/`{}`
   therefore means *genuinely absent*, never *couldn't read*. Before this, a rate limit could
-  republish a cohort site with every session row deleted, green.
+  republish a semester site with every session row deleted, green.
 - **Absent vs empty** is the anti-eviction invariant: a missing `people.yml` / `students.csv`
   makes the sync refuse and return 1; an empty one legitimately empties the team.
 - `reconcile_team_members` is the single prune guard: unreadable current membership aborts the
   reconcile entirely, an unreadable owner list still adds but skips the prune pass, and org
   owners plus the acting token are never pruned.
-- **Batch isolation**: `sync_membership` and `site --all-cohorts` catch per cohort and OR into
-  the exit code, so one bad cohort cannot skip the rest.
-- **Payloads are not trusted.** A `repository_dispatch` naming a cohort org absent from the
+- **Batch isolation**: `sync_membership` and `site --all-semesters` catch per semester and OR into
+  the exit code, so one bad semester cannot skip the rest.
+- **Payloads are not trusted.** A `repository_dispatch` naming a semester org absent from the
   course org's registry is refused by `sync_membership` and `site.main` - the registry, not the
-  payload, is the authority on which cohorts a course org may reconcile.
+  payload, is the authority on which semesters a course org may reconcile.
 - **Unattended failures are visible.** The five crons (Scheduled release, Sync membership, Sync
   site, Refresh actions, Publish course website) open - or comment on - an issue titled
   *"\<workflow\> is failing"* in the course org's `.github`, and close it on the next success. An
@@ -554,7 +554,7 @@ file · tree · team · repo list`"]
   the workflow file - always the bot.
 - **A content fault is not a run fault.** A `schedule.yml` entry citing a source nobody has
   staged never touches an exit code, at any rung on its ladder (`schedule.Severity`): it is
-  faculty's to fix, so it is delivered on the channel faculty watch - the cohort's source digest
+  faculty's to fix, so it is delivered on the channel faculty watch - the semester's source digest
   issue, plus an email to the people git names for that line (`notify.route`: the planner of the
   line and the last committer of the repo, the whole teaching team as fallback, and below that
   the course admins and then the maintainer). Spending the red X on it instead meant up to eight
@@ -562,7 +562,7 @@ file · tree · team · repo list`"]
   left the run's own health unreadable.
 - **A notification is not worth a release.** `notify` and `source_digest` both count their own
   failures and return them; `_preflight_sources` logs the count and still returns 0, and wraps
-  each in its own `except`. The mail is also **held between 22:00 and 07:00** in the cohort's
+  each in its own `except`. The mail is also **held between 22:00 and 07:00** in the semester's
   zone - and a hold is not a queue: nothing records a debt, the crossing is simply written back
   at the rung it was already reported at, so the next tick recomputes the same transition and
   the first one after 07:00 says it once. A send that FAILED is held the same way
@@ -583,19 +583,19 @@ actions** regenerates them from live state and re-pushes the workflows (no cron,
 same run re-seeds the run-from-repo buttons, propagates the repo secret, and rebuilds the profile
 READMEs.
 
-- **cohort_org** - from the `.github/cohort-courses-pages.yml` registry.
+- **semester_org** - from the `.github/cohort-courses-pages.yml` registry.
 - **course_source_repo** (central only) / **assignment** - the course org's content / `assignment-*` repos.
 - Every list-taking dropdown **pre-selects the newest term year** rather than letting GitHub
-  select the alphabetically-first option, which used to pre-select last year's cohort. The one
+  select the alphabetically-first option, which used to pre-select last year's semester. The one
   deliberate exception is Sync membership, pinned to a `(faculty only)` placeholder so acting on
   membership stays opt-in.
-- **course_source_path / cohort_dest_path** - free text. Both accept a comma-separated list,
-  paired by index; a blank `cohort_dest_path` mirrors every `course_source_path`, and a count
+- **course_source_path / semester_dest_path** - free text. Both accept a comma-separated list,
+  paired by index; a blank `semester_dest_path` mirrors every `course_source_path`, and a count
   mismatch fails the run loudly (`deploy.parse_path_pairs`) rather than guessing. Comma-separated
   lists exist because `workflow_dispatch` has no array input and its string fields are
   single-line, so a multi-line YAML blob cannot be entered.
-- **cohort_dest_repo** - free text and **required on the button**: a defaulted destination
-  quietly creates a second materials repo the cohort never sees. `schedule.yml` `deploy:` entries
+- **semester_dest_repo** - free text and **required on the button**: a defaulted destination
+  quietly creates a second materials repo the semester never sees. `schedule.yml` `deploy:` entries
   may still omit it and take the executor's `materials` fallback.
 - Sections are **not an input**. The button takes five fixed inputs whatever the repo's shape,
   well inside `workflow_dispatch`'s 10-input limit. The `<section>/<NN>_.../` convention still
@@ -610,18 +610,18 @@ and scans - so a repo type added on one side can't leak into the other. It exclu
 - anything ending `.github.io` (the generated site repos - critical, since content repos are
   handed the org-admin token as a repo secret and would publish it to a public repo);
 - any repo carrying a topic in `INFRA_TOPICS` = `submission`, `assignment-template`, `gradebook`
-  (per-student submission repos, frozen cohort-side templates, private `grades-<handle>` repos).
+  (per-student submission repos, frozen semester-side templates, private `grades-<handle>` repos).
 
 On top of that, `discover_content_repos` also drops `assignment-*` (equipping a template with
 the faculty workflows would copy them into every generated student repo), and
 `discover_assignments` selects `assignment-*` that are `isTemplate`. Listing is
-paginated (`orgs/<org>/repos?per_page=100`), because a cohort org holds a repo per student per
+paginated (`orgs/<org>/repos?per_page=100`), because a semester org holds a repo per student per
 assignment plus a gradebook each.
 
-## Cohort website
+## Semester website
 
-Every cohort gets an **auto-deployed website** at `<cohort-org>.github.io`. `scaffold_site`
-creates the repo EMPTY during Bootstrap cohort and seeds only its Pages build; the whole site
+Every semester gets an **auto-deployed website** at `<semester-org>.github.io`. `scaffold_site`
+creates the repo EMPTY during Bootstrap semester and seeds only its Pages build; the whole site
 then ships from `templates/site/` (rewritten every sync) and `templates/site-seed/` (written
 once, into any path the site lacks). `site.sync_site` regenerates its content from the live
 org structure.
@@ -640,9 +640,9 @@ course identity`"] --> sync
 rebuilt from scratch each run`"]
 ```
 
-**Triggers**: a push to the cohort's `schedule.yml` or `people.yml` (a `repository_dispatch` from
+**Triggers**: a push to the semester's `schedule.yml` or `people.yml` (a `repository_dispatch` from
 `classroom-config`), a push to the course org's `dsl-course.yml`, a daily 06:00 cron, manual
-**Sync site**, and every release - `deploy`, `assign`, the scheduler and Bootstrap cohort all
+**Sync site**, and every release - `deploy`, `assign`, the scheduler and Bootstrap semester all
 call `sync_site` in-process when they change something.
 
 **Row types.** The three collections are rebuilt from scratch each run, so a de-released row
@@ -658,10 +658,10 @@ the day it is written, whether or not it has shipped - so the schedule publishes
 What release adds is the row's CONTENT: a session picks up its file links (`unreleased: true` /
 `readings_pending: true` until then) and an assignment its brief and its README-given title
 (`handout_pending: true` until then, and the README is not read at all while it holds - the
-template repo exists weeks early and the cohort site is public).
+template repo exists weeks early and the semester site is public).
 
-**People.** Cards come from that cohort's `classroom-config/people.yml`. With no `people:` block
-at all, they fall back to the cohort org's `instructors` GitHub team - minus the sync's own bot
+**People.** Cards come from that semester's `classroom-config/people.yml`. With no `people:` block
+at all, they fall back to the semester org's `instructors` GitHub team - minus the sync's own bot
 account, which sits in that team for access and is not a member of staff. A 404'd member is
 skipped; any other lookup failure raises, rather than silently dropping an instructor.
 
@@ -674,7 +674,7 @@ comments on, a single stably-titled issue in the site repo linking each discarde
 naming where the edit belongs. Detection and filing are wrapped so that any failure logs and
 leaves the sync's exit code alone.
 
-**Archived repos are a quiet skip.** A past cohort's site repo clones and commits fine and only
+**Archived repos are a quiet skip.** A past semester's site repo clones and commits fine and only
 403s on the push, so an archived `<org>.github.io` is skipped like a missing one instead of
 failing the daily cron forever.
 
@@ -682,7 +682,7 @@ failing the daily cron forever.
 
 A course can **optionally** publish a **public** site at `<course-org>.github.io` via the
 **Publish course website** action (`public_site.sync_public_site`). It reuses the same
-`scaffold_site`, but differs from the cohort site in one decisive way: the cohort site *links* to files in private repos (404 for non-members, by design),
+`scaffold_site`, but differs from the semester site in one decisive way: the semester site *links* to files in private repos (404 for non-members, by design),
 whereas the course `course-materials-*` repos are private too, so the public site **hosts the
 shared files itself** under `public-materials/<source-repo>/session-N/...` (Jekyll serves any
 path not starting with `_`) and links to those site-relative URLs. Only that source's subtree is
@@ -716,57 +716,57 @@ Self-contained - workflows and their Python implementation both live in this rep
 
 - `.github/workflows/` - `bootstrap-org` (the one central button) + `refresh-inventory`
   (weekly cron rendering the live estate into its job summary) + `ci`. The faculty workflows are
-  *rendered* and seeded into the course/cohort orgs, not kept here.
+  *rendered* and seeded into the course/semester orgs, not kept here.
 - `dsl_course/`:
   - `central` - the one definition of which repo/ref every seeded workflow checks out; imported
     by both the renderers and the generated READMEs so the two can't disagree.
-  - `bootstrap_course` - configure a course or (`--cohort`) cohort org; tighten BOTH kinds to
+  - `bootstrap_course` - configure a course or (`--semester`) semester org; tighten BOTH kinds to
     `default_repository_permission=none` (a course org holds the unreleased materials and the
     assignment `solution` branches, so members must not read it by default either); create
-    teams; grant button access on `.github` and, cohort-side, on the infra repos faculty
-    actually work in (`grant_cohort_faculty_access` / `COHORT_FACULTY_REPOS` = `welcome`,
+    teams; grant button access on `.github` and, semester-side, on the infra repos faculty
+    actually work in (`grant_semester_faculty_access` / `SEMESTER_FACULTY_REPOS` = `welcome`,
     `classroom-config`, so non-owner instructors get write and course-admin gets admin);
     propagate the secret.
   - `seed` - place the workflows (central + run-from-repo) and the `refresh` CLI, whose nightly
-    run also loops every registered cohort (orgs missing two runs running pruned with a hint, archived ones left
+    run also loops every registered semester (orgs missing two runs running pruned with a hint, archived ones left
     frozen) re-converging its welcome workflows, classroom-config system files and samples; it
     delegates to four modules and re-exports a few of their names (see `__all__`; new code
     imports from the owner):
     - `workflows_render` - the workflow YAML templates + every `render_*` function, plus the
       shared preamble policy (gating, permissions, timeouts, concurrency, cron failure notices);
-    - `discovery` - the cohort registry and all live org/repo/section/session discovery,
+    - `discovery` - the semester registry and all live org/repo/section/session discovery,
       including the shared infra-repo predicate;
     - `profile_readme` - the org landing page + the `.github` repo's own README;
-    - `welcome` - the SYSTEM-owned cohort seeding (onboarding workflows, issue forms,
+    - `welcome` - the SYSTEM-owned semester seeding (onboarding workflows, issue forms,
       `classroom-config` scaffolds, samples and system files), split out so `seed.refresh` can
       re-push it without importing `bootstrap_course` back.
   - `scheduler` - each tick: freeze passed deadlines, then fire due releases; autograde runs in a
-    separate per-cohort job.
+    separate per-semester job.
   - `schedule` - parse and validate `schedule.yml` (the three blocks, timezone normalisation,
     dropped-entry reporting, write-once handout records).
   - `cadence` - the scheduler's own watchdog: reads that workflow's run history and files a
-    driver-health issue (course `.github`) or a late-delivery issue (cohort `classroom-config`).
+    driver-health issue (course `.github`) or a late-delivery issue (semester `classroom-config`).
   - `deploy` - the single release executor (`deploy_many`): copy each source path into its
-    cohort repo additively, cloning every repo once per run. Shared by the button and the scheduler.
-  - `assign` - freeze a cohort assignment template, then fan out per-student (or per-team) repos.
+    semester repo additively, cloning every repo once per run. Shared by the button and the scheduler.
+  - `assign` - freeze a semester assignment template, then fan out per-student (or per-team) repos.
   - `collect` - the faculty-side autograder: deadline snapshots, pinned checkout, contained test
     run, fire-once sentinels, the autograde count into the grading sheet.
   - `grades` - the grading sheet, gradebook repos, fan-out + email (`distribute`).
   - `enrol_codes` / `mailer` - generate + email enrolment codes; Graph (certificate-signed
     JWT assertion, no client secret).
-  - `scaffold` - create structured materials / assignment repos + the website (cohort or course).
-  - `site` - regenerate the cohort website (`sync_site`) and the public course website
+  - `scaffold` - create structured materials / assignment repos + the website (semester or course).
+  - `site` - regenerate the semester website (`sync_site`) and the public course website
     (`sync_public_site` / `resync_public_site`).
   - `sync_roster` / `sync_teams` - reconcile the `students`+`auditors` teams / per-project teams
     from `students.csv` / `teams.csv` (one-way: the CSV is truth).
   - `sync_faculty` - reconcile `course-admin` from the course org's `people:` SSOT into the
-    course org + every cohort; and, per cohort, its own `people.yml` into that cohort's
+    course org + every semester; and, per semester, its own `people.yml` into that semester's
     `instructors` team + a tag-scoped `instructors-<tag>` team on the course org.
   - `sync_membership` - the one consolidated entrypoint (roster + teams + faculty) behind the
     **Sync membership** button/cron/dispatch.
   - `roster` / `teams` - read `students.csv` / `teams.csv`.
-  - `status` - the **Check cohort setup** per-cohort checklist.
-  - `list_orgs` - enumerate DSL course and cohort orgs by topic; drives `refresh-inventory.yml`.
+  - `status` - the **Check semester setup** per-semester checklist.
+  - `list_orgs` - enumerate DSL course and semester orgs by topic; drives `refresh-inventory.yml`.
   - `ghcli` - the shared `gh`/git subprocess wrappers, their timeouts and rate-limit
     backoff, and the fail-loud read contract (`is_missing_resource`).
   - `gh_teams` - team reads/writes, including the prune guard (`reconcile_team_members`).
@@ -774,7 +774,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     `upsert_issue`, `close_issues_titled`), shared by `source_digest` and `cadence`.
 - `templates/` - the files bootstrap seeds into a fresh org, verbatim from disk
   (`welcome.template`), one subdirectory per destination:
-  - `welcome/` - the cohort onboarding + team-formation workflows and their issue forms.
+  - `welcome/` - the semester onboarding + team-formation workflows and their issue forms.
   - `classroom-config/` - that repo's README contract, its dispatch + schedule-validation
     workflows, and the **scaffold** half of every user-editable file: header-only
     `students.csv` / `teams.csv`, tag-rendered `schedule.yml` / `people.yml` skeletons.
@@ -783,7 +783,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     examples and the documented ones are the same files.
   - `course/` - the course org's `.github/dsl-course.yml` (identity + the `people:` block,
     assembled from the `people-*.yml` fragments).
-  - `cohort/` - a cohort org's `.github/dsl-course.yml` pointer back to its course org.
+  - `semester/` - a semester org's `.github/dsl-course.yml` pointer back to its course org.
   - `site/` - the course-specific Jekyll layouts, includes and `_sass/_course.scss` that
     the sync writes into every `<org>.github.io` (`site_repo.site_templates`).
     Not seeded once like the rest of this directory - converged, so a rendering change

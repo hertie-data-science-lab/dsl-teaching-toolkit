@@ -25,9 +25,9 @@ from dsl_course.schedule import Severity, SourceFault
 
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 7, 12, 0, tzinfo=BERLIN)
-COHORT = "Cohort-f2026"
+SEMESTER = "Semester-f2026"
 COURSE = "Course-Org"
-ISSUE = "https://github.com/Cohort-f2026/classroom-config/issues/7"
+ISSUE = "https://github.com/Semester-f2026/classroom-config/issues/7"
 # The real `send_bulk`, kept before the `wired` fixture replaces it, so one test can put
 # it back and exercise the log lines the transport itself prints.
 _REAL_SEND_BULK = mailer.send_bulk
@@ -133,7 +133,7 @@ def wired(monkeypatch):
         )
         monkeypatch.setattr(
             notify.sync_faculty,
-            "load_cohort_faculty",
+            "load_semester_faculty",
             lambda *a, **k: (
                 notify.sync_faculty.parse_faculty_from_meta(people)
                 if people is not None
@@ -173,7 +173,7 @@ def _run(faults, rung, routing, dry_run=False):
 
 def _unsent(faults, rung, routing, dry_run=False) -> notify.Unsent:
     return notify.notify_source_transitions(
-        COHORT, COURSE, _digest(faults, rung), NOW, routing, dry_run=dry_run
+        SEMESTER, COURSE, _digest(faults, rung), NOW, routing, dry_run=dry_run
     )
 
 
@@ -184,7 +184,7 @@ def test_the_planner_of_the_line_and_the_repos_committer_are_both_told(wired):
     # The two people who can act: one wrote the plan, the other is writing the materials.
     # Telling the whole teaching team about every entry is how a channel stops being read.
     wired(blame={131: "JanG"}, committer="cpj97")
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert routing.by_key[_KEY].to == (
         "jan@x.edu",
         "cam@x.edu",
@@ -196,22 +196,22 @@ def test_a_mail_to_a_ta_copies_the_instructors(wired):
     # A TA staging a lecture folder is doing it on somebody's behalf, and that somebody
     # needs to know the release is at risk without being the one asked to fix it.
     wired(blame={131: "cpj97"}, committer="cpj97")
-    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY]
+    routed = notify.route(SEMESTER, COURSE, [_fault()], NOW).by_key[_KEY]
     assert routed.to == ("cam@x.edu",)
     assert routed.cc == ("jan@x.edu",)
 
 
 def test_a_mail_to_an_instructor_copies_nobody(wired):
     wired(blame={131: "JanG"}, committer="JanG")
-    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY]
+    routed = notify.route(SEMESTER, COURSE, [_fault()], NOW).by_key[_KEY]
     assert routed == (("jan@x.edu",), ())
 
 
 def test_a_committer_who_is_not_teaching_staff_falls_back_to_the_team(wired):
     # A course admin, or somebody who has left. There is no address for them, so the
-    # people who can act are whoever is teaching the cohort now.
+    # people who can act are whoever is teaching the semester now.
     wired(blame={131: "a-stranger"}, committer=None)
-    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY]
+    routed = notify.route(SEMESTER, COURSE, [_fault()], NOW).by_key[_KEY]
     assert set(routed.to) == {"jan@x.edu", "cam@x.edu"}
     # Nobody in particular to copy - everybody is already addressed.
     assert routed.cc == ()
@@ -221,7 +221,7 @@ def test_a_fault_with_no_line_number_falls_back_to_the_team(wired):
     # The parser records no line for an entry it could not place (`schedule._LineLoader`),
     # and blaming line `None` would address the mail to whoever happens to own line 1.
     wired(blame={131: "JanG"}, committer=None)
-    routed = notify.route(COHORT, COURSE, [_fault(lineno=None)], NOW).by_key[_KEY]
+    routed = notify.route(SEMESTER, COURSE, [_fault(lineno=None)], NOW).by_key[_KEY]
     assert set(routed.to) == {"jan@x.edu", "cam@x.edu"}
 
 
@@ -229,7 +229,7 @@ def test_the_bot_is_never_the_person_to_tell(wired):
     # The bot writes handout_datetime back into schedule.yml and seeds every repo, so on a
     # file it has touched it is the blame answer for lines nobody at the school wrote.
     wired(blame={131: "dsl-bot"}, committer="dsl-bot")
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert set(routing.by_key[_KEY].to) == {
         "jan@x.edu",
         "cam@x.edu",
@@ -239,7 +239,7 @@ def test_the_bot_is_never_the_person_to_tell(wired):
 
 def test_the_same_person_named_twice_is_addressed_once(wired):
     wired(blame={131: "JanG"}, committer="jang")
-    assert notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY].to == (
+    assert notify.route(SEMESTER, COURSE, [_fault()], NOW).by_key[_KEY].to == (
         "jan@x.edu",
     )
 
@@ -253,57 +253,57 @@ def test_blame_that_could_not_be_read_is_not_read_as_nobody(monkeypatch, capsys,
         raise RuntimeError("API rate limit exceeded")
 
     monkeypatch.setattr(notify, "blame_logins", boom)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert set(routing.by_key[_KEY].to) == {"jan@x.edu", "cam@x.edu"}
     assert "[skip] could not read who wrote schedule.yml" in capsys.readouterr().out
 
 
 def test_an_addressee_with_no_email_is_counted_not_named(wired, capsys):
     wired(blame={131: "Nobody"}, committer=None)
-    notify.route(COHORT, COURSE, [_fault()], NOW)
+    notify.route(SEMESTER, COURSE, [_fault()], NOW)
     out = capsys.readouterr().out
     assert "[skip] 1 addressee(s) without email" in out
     assert "Nobody" not in out  # the handle rides log_person, not the public log
 
 
-def test_a_cohort_no_address_can_be_found_for_falls_to_the_course_admins(
+def test_a_semester_no_address_can_be_found_for_falls_to_the_course_admins(
     wired, admins, capsys
 ):
     # A people.yml with no `email:` anywhere used to leave the digest's @mention as the
-    # only channel until the 48h rung copied the maintainer. The course this cohort
-    # belongs to has admins, and a cohort that will ship nothing is theirs to chase.
+    # only channel until the 48h rung copied the maintainer. The course this semester
+    # belongs to has admins, and a semester that will ship nothing is theirs to chase.
     admins(", ".join(ADMINS))
     sent = wired(blame={}, committer=None, people={"people": {}})
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert routing.by_key[_KEY] == (ADMINS, ())
     _run([_fault()], Severity.URGENT, routing)
     assert sent.one["to"] == list(ADMINS)
     out = capsys.readouterr().out
     # A count and which fallback it was, in a public log - never an address.
-    assert "[fallback] no cohort address - mailing 2 course admin(s)" in out
+    assert "[fallback] no semester address - mailing 2 course admin(s)" in out
     assert "@x.edu" not in out
 
 
 def test_a_course_with_no_admins_either_falls_to_the_maintainer(wired, admins, capsys):
     admins(None)
     sent = wired(blame={}, committer=None, people={"people": {}})
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     _run([_fault()], Severity.URGENT, routing)
     assert sent.one["to"] == ["maint@x.edu"]
     assert sent.calls == 1
     out = capsys.readouterr().out
-    assert "[fallback] no cohort address - mailing the maintainer" in out
+    assert "[fallback] no semester address - mailing the maintainer" in out
     assert "@x.edu" not in out
 
 
-def test_a_cohort_that_can_be_addressed_never_reaches_for_the_admins(
+def test_a_semester_that_can_be_addressed_never_reaches_for_the_admins(
     wired, admins, capsys
 ):
-    # The fallback is for a cohort nobody can be written to, not a second Cc list on
+    # The fallback is for a semester nobody can be written to, not a second Cc list on
     # every fault the teaching team is already reading about.
     admins(", ".join(ADMINS))
     wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert routing.by_key[_KEY] == (("jan@x.edu",), ())
     assert "[fallback]" not in capsys.readouterr().out
 
@@ -315,8 +315,8 @@ def test_a_distant_fault_is_routed_to_nobody_and_costs_no_api_call(monkeypatch):
         raise AssertionError("no read should happen for an advisory-only plan")
 
     monkeypatch.setattr(notify, "blame_logins", boom)
-    monkeypatch.setattr(notify.sync_faculty, "load_cohort_faculty", boom)
-    assert notify.route(COHORT, COURSE, [_fault(fires=timedelta(days=40))], NOW) == (
+    monkeypatch.setattr(notify.sync_faculty, "load_semester_faculty", boom)
+    assert notify.route(SEMESTER, COURSE, [_fault(fires=timedelta(days=40))], NOW) == (
         notify.Routing()
     )
 
@@ -327,12 +327,12 @@ def test_a_distant_fault_is_routed_to_nobody_and_costs_no_api_call(monkeypatch):
 def test_the_maintainer_is_copied_only_at_the_last_two_rungs(wired):
     for rung in (Severity.WARNING, Severity.URGENT):
         sent = wired(blame={131: "JanG"}, committer=None)
-        routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+        routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
         _run([_fault()], rung, routing)
         assert sent.one["cc"] == [], rung
     for rung in (Severity.CRITICAL, Severity.MISSED):
         sent = wired(blame={131: "JanG"}, committer=None)
-        routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+        routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
         _run([_fault()], rung, routing)
         assert sent.one["cc"] == ["maint@x.edu"], rung
 
@@ -343,7 +343,7 @@ def test_two_committers_in_one_tick_get_a_mail_each(wired):
     a = _fault("releases.lecture_02", lineno=131)
     b = _fault("releases.lecture_03", lineno=140)
     sent = wired(blame={131: "JanG", 140: "cpj97"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [a, b], NOW)
+    routing = notify.route(SEMESTER, COURSE, [a, b], NOW)
     _run([a, b], Severity.URGENT, routing)
     assert sorted(m["to"] for m in sent.batches) == [["cam@x.edu"], ["jan@x.edu"]]
     # ...in ONE batch, so the Graph token is minted once however many groups a tick has.
@@ -354,7 +354,7 @@ def test_a_whole_recipient_group_is_one_message(wired):
     # The fault mail is the same text for everybody on the line, and a copy per recipient
     # pays the rate limiter's send slot for each - so the group goes on one To line.
     sent = wired(blame={131: "a-stranger"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     _run([_fault()], Severity.URGENT, routing)
     assert sorted(sent.one["to"]) == ["cam@x.edu", "jan@x.edu"]
 
@@ -363,7 +363,7 @@ def test_two_faults_from_one_person_share_a_single_mail(wired):
     a = _fault("releases.lecture_02", lineno=131)
     b = _fault("releases.lecture_03", lineno=140)
     sent = wired(blame={131: "JanG", 140: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [a, b], NOW)
+    routing = notify.route(SEMESTER, COURSE, [a, b], NOW)
     _run([a, b], Severity.URGENT, routing)
     assert sent.one["to"] == ["jan@x.edu"]
     assert "Missing materials: 2 releases, next fires" in sent.one["subject"]
@@ -387,11 +387,11 @@ def test_the_subject_says_which_entry_and_how_long_is_left(
     wired, rung, fires, expected
 ):
     # The subject is what decides whether this gets opened today. It names the course and
-    # cohort a reader teaches, the entry, the deadline, and how much of it is left - the
+    # semester a reader teaches, the entry, the deadline, and how much of it is left - the
     # zone lives in the body, where the same moment is spelled out in full.
     fault = _fault(fires=fires)
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    routing = notify.route(SEMESTER, COURSE, [fault], NOW)
     _run([fault], rung, routing)
     assert sent.one["subject"] == (
         f"[Course Name f2026] Missing materials: lecture_02 {expected}"
@@ -400,7 +400,7 @@ def test_the_subject_says_which_entry_and_how_long_is_left(
 
 def test_the_body_names_the_line_the_content_the_deadline_and_both_links(wired):
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     _run([_fault()], Severity.URGENT, routing)
     body = sent.one["body"]
     assert body.startswith(
@@ -409,7 +409,7 @@ def test_the_body_names_the_line_the_content_the_deadline_and_both_links(wired):
     # The intro links the course org the materials belong in.
     assert f'<a href="https://github.com/{COURSE}">course org</a> yet.' in body
     # The line reference IS the deep link, then the entry and the field it names.
-    line = f"https://github.com/{COHORT}/classroom-config/blob/main/schedule.yml#L131"
+    line = f"https://github.com/{SEMESTER}/classroom-config/blob/main/schedule.yml#L131"
     assert (
         f'<b>error line:</b></td><td style="padding:0 0 0.25em 0">'
         f'<a href="{line}">schedule.yml:131</a> - releases.lecture_02 -&gt; '
@@ -443,7 +443,7 @@ def test_a_missed_release_is_told_in_the_past_tense(wired):
     # the past tense below is read off (see `_block`).
     fired = _fault(fires=-timedelta(hours=1))
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [fired], NOW)
+    routing = notify.route(SEMESTER, COURSE, [fired], NOW)
     _run([fired], Severity.MISSED, routing)
     body = sent.one["body"]
     assert "<b>fired:</b>" in body
@@ -466,7 +466,7 @@ def test_a_deadline_that_has_passed_is_past_tense_whatever_the_rung(wired):
         path="lectures/02",
     )
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    routing = notify.route(SEMESTER, COURSE, [fault], NOW)
     _run([fault], Severity.WARNING, routing)
     assert "<b>fired:</b>" in sent.one["body"]
     assert "<b>fix by date:</b>" not in sent.one["body"]
@@ -481,7 +481,7 @@ def test_a_missing_assignment_template_says_to_create_the_repo(wired):
         path="",
     )
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    routing = notify.route(SEMESTER, COURSE, [fault], NOW)
     _run([fault], Severity.URGENT, routing)
     body = sent.one["body"]
     assert (
@@ -503,7 +503,7 @@ def test_a_release_whose_source_repo_is_missing_links_the_org_too(wired):
     # path as well, and the path is not somewhere that can be linked either.
     fault = _fault(field="course_source_repo")
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    routing = notify.route(SEMESTER, COURSE, [fault], NOW)
     _run([fault], Severity.URGENT, routing)
     assert f'<a href="https://github.com/{COURSE}">' in sent.one["body"]
     assert "tree/main" not in sent.one["body"]
@@ -514,7 +514,7 @@ def test_a_value_a_faculty_member_typed_cannot_break_out_of_the_html(wired):
     # the rest of the mail - or worse, the fix line and the links.
     fault = _fault(where="releases.<script>x</script>", path="a<b")
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    routing = notify.route(SEMESTER, COURSE, [fault], NOW)
     _run([fault], Severity.URGENT, routing)
     body = sent.one["body"]
     assert "<script>" not in body
@@ -529,20 +529,20 @@ def test_nothing_owed_sends_nothing(wired):
     digest = source_digest.DigestResult(faults_by_key={}, mail={})
     assert (
         notify.notify_source_transitions(
-            COHORT, COURSE, digest, NOW, notify.Routing(), dry_run=False
+            SEMESTER, COURSE, digest, NOW, notify.Routing(), dry_run=False
         )
         == notify.Unsent()
     )
     assert sent.batches == []
 
 
-def test_a_cohort_with_no_addresses_at_all_says_so_once(wired, admins, capsys):
+def test_a_semester_with_no_addresses_at_all_says_so_once(wired, admins, capsys):
     # ...and holds nothing: no address is a standing state, and a held crossing would be
     # recomputed - and commented on - every tick for the rest of the term. Nobody means
     # nobody here: no admin secret and no maintainer either, so both fallbacks are spent.
     admins(None)
     sent = wired(blame={}, committer=None, people={"people": {}}, maintainer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent()
     assert sent.batches == []
     assert "[skip] no notification address for" in capsys.readouterr().out
@@ -550,7 +550,7 @@ def test_a_cohort_with_no_addresses_at_all_says_so_once(wired, admins, capsys):
 
 def test_an_org_with_no_mail_transport_says_so_once(wired, capsys):
     sent = wired(blame={131: "JanG"}, committer=None, configured=False)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent()
     assert sent.batches == []
     assert "[skip] mail not configured - issue @mention only" in capsys.readouterr().out
@@ -558,7 +558,7 @@ def test_an_org_with_no_mail_transport_says_so_once(wired, capsys):
 
 def test_a_dry_run_previews_and_sends_nothing(wired, capsys):
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert _unsent([_fault()], Severity.URGENT, routing, dry_run=True) == (
         notify.Unsent()
     )
@@ -574,7 +574,7 @@ def test_a_transport_that_raised_is_counted_not_propagated(monkeypatch, wired, c
         raise RuntimeError("Graph said no")
 
     monkeypatch.setattr(notify.mailer, "send_bulk", boom)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     # Nothing went out, so everything this tick owed is handed back to be owed again.
     assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent(1, (_KEY,))
     assert "could not mail" in capsys.readouterr().err
@@ -587,7 +587,7 @@ def test_a_message_that_did_not_land_is_reported_and_handed_back(
     # owed once, failed once and would never be owed again. The keys go back.
     wired(blame={131: "JanG"}, committer=None)
     monkeypatch.setattr(notify.mailer, "send_bulk", lambda *a, **k: [])
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent(1, (_KEY,))
     err = capsys.readouterr().err
     assert "were not reached - held for the next tick" in err
@@ -601,7 +601,7 @@ def test_one_group_failing_does_not_hold_the_group_that_landed(monkeypatch, wire
     b = _fault("releases.lecture_03", lineno=140)
     wired(blame={131: "JanG", 140: "cpj97"}, committer=None)
     monkeypatch.setattr(notify.mailer, "send_bulk", lambda ms, **k: ["jan@x.edu"])
-    routing = notify.route(COHORT, COURSE, [a, b], NOW)
+    routing = notify.route(SEMESTER, COURSE, [a, b], NOW)
     out = _unsent([a, b], Severity.URGENT, routing)
     assert out.keys == (b.key,)
     assert out.addressees == 1
@@ -614,7 +614,7 @@ def test_no_line_this_module_prints_carries_an_address(wired, capsys):
     # Every faculty workflow runs in a PUBLIC repo, so its Actions log is world-readable.
     # A count is what a reader needs; an address is a roster entry.
     sent = wired(blame={131: "cpj97"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     _run([_fault()], Severity.CRITICAL, routing)
     printed = capsys.readouterr()
     for line in (printed.out + printed.err).splitlines():
@@ -637,11 +637,11 @@ def test_a_people_yml_that_will_not_parse_never_prints_the_line_it_broke_on(
     def boom(*a, **k):
         yaml.safe_load("people:\n  instructors:\n  - email: jan@x.edu: typo\n")
 
-    monkeypatch.setattr(notify.sync_faculty, "load_cohort_faculty", boom)
-    notify.route(COHORT, COURSE, [_fault()], NOW)
+    monkeypatch.setattr(notify.sync_faculty, "load_semester_faculty", boom)
+    notify.route(SEMESTER, COURSE, [_fault()], NOW)
     err = capsys.readouterr().err
     assert "jan@x.edu" not in err
-    assert f"could not read {COHORT}'s people.yml" in err
+    assert f"could not read {SEMESTER}'s people.yml" in err
     assert "ScannerError: mapping values are not allowed here (line 3)" in err
 
 
@@ -660,7 +660,7 @@ def test_the_transport_itself_names_nobody_in_the_log(monkeypatch, capsys, wired
     monkeypatch.setattr(notify.mailer, "send_bulk", _REAL_SEND_BULK)
     monkeypatch.setattr(notify.mailer, "_graph_token", lambda cfg: "tok")
     monkeypatch.setattr(notify.mailer, "_graph_send_one", _post)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert _unsent([_fault()], Severity.CRITICAL, routing) == notify.Unsent()
     printed = capsys.readouterr()
     for line in (printed.out + printed.err).splitlines():
@@ -715,7 +715,7 @@ def test_with_no_maintainer_address_the_failure_issue_is_the_only_channel(
 # clock the digest keeps - and the file it is about is full of personal data, so what the
 # mail may say about a row is the row number and the column.
 
-CSV_ISSUE = "https://github.com/Cohort-f2026/classroom-config/issues/12"
+CSV_ISSUE = "https://github.com/Semester-f2026/classroom-config/issues/12"
 
 
 def _row_fault(lineno: int = 4, field: str = "role") -> notify.ConfigFault:
@@ -753,7 +753,7 @@ def _config_digest_result(faults, reminder=None) -> source_digest.DigestResult:
 def _mail_config(faults, routing, reminder=None, spec=None, dry_run=False):
     return notify.notify_config_faults(
         spec or config_digest.ROSTER,
-        COHORT,
+        SEMESTER,
         COURSE,
         _config_digest_result(faults, reminder),
         NOW,
@@ -766,7 +766,7 @@ def test_a_csv_fault_is_addressed_to_whoever_pushed_the_file(wired):
     # NOT blame: the bot writes `enrol_code` and `code_sent_at` back into rows faculty
     # typed, so half the roster blames to an account that cannot fix anything.
     wired(blame={4: "dsl-bot"}, pushers=("dsl-bot", "JanG"))
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     (routed,) = routing.by_key.values()
     assert routed.to == ("jan@x.edu",)
     assert routing.logins == ["JanG"]
@@ -774,7 +774,7 @@ def test_a_csv_fault_is_addressed_to_whoever_pushed_the_file(wired):
 
 def test_a_yaml_fault_is_addressed_by_blame_of_its_own_file(wired):
     wired(blame={6: "cpj97"})
-    routing = notify.route(COHORT, COURSE, [_people_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_people_fault()], NOW)
     (routed,) = routing.by_key.values()
     assert routed.to == ("cam@x.edu",)
     assert routed.cc == ("jan@x.edu",)  # a TA's mail copies the instructors
@@ -782,14 +782,14 @@ def test_a_yaml_fault_is_addressed_by_blame_of_its_own_file(wired):
 
 def test_git_naming_nobody_falls_back_to_the_whole_teaching_team(wired):
     wired(pushers=("dsl-bot",))
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     (routed,) = routing.by_key.values()
     assert routed.to == ("jan@x.edu", "cam@x.edu")
 
 
-def test_the_mail_says_what_the_file_is_costing_the_cohort(wired):
+def test_the_mail_says_what_the_file_is_costing_the_semester(wired):
     sent = wired(pushers=("JanG",))
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     _mail_config([_row_fault()], routing)
     assert sent.one["subject"] == (
         "[Course Name f2026] students.csv has 1 entry the toolkit cannot use"
@@ -816,7 +816,7 @@ def test_a_dated_fault_is_not_introduced_as_a_recent_edit(wired):
         ref="solution",
     )
     sent = wired(blame={4: "JanG"})
-    routing = notify.route(COHORT, COURSE, [dated], NOW)
+    routing = notify.route(SEMESTER, COURSE, [dated], NOW)
     _mail_config([dated], routing, spec=config_digest.GRADING_CONFIG)
     body = sent.one["body"]
     assert "A recent edit" not in body
@@ -847,7 +847,7 @@ def test_a_fault_that_carries_its_own_consequence_says_that_one(wired):
     # and has fired. A letter that led with it would tell a reader to go and look for a
     # release that already happened.
     sent = wired(blame={12: "JanG"})
-    routing = notify.route(COHORT, COURSE, [_window_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_window_fault()], NOW)
     _mail_config([_window_fault()], routing, spec=source_digest.SCHEDULE)
     body = sent.one["body"]
     assert "Until they are fixed: no repos are provisioned for that assignment" in body
@@ -860,7 +860,7 @@ def test_a_window_short_of_teams_is_not_called_an_unusable_entry(wired):
     # entry the toolkit cannot use sends its owner hunting for a syntax error that is not
     # there, which is the opposite of the one thing they should go and do.
     sent = wired(blame={12: "JanG"})
-    routing = notify.route(COHORT, COURSE, [_window_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_window_fault()], NOW)
     _mail_config([_window_fault()], routing, spec=source_digest.SCHEDULE)
     assert sent.one["subject"].endswith(
         "schedule.yml has 1 assignment whose teams have not formed"
@@ -885,7 +885,7 @@ def test_a_mixed_letter_claims_nothing_about_the_file(wired):
     )
     sent = wired(blame={12: "JanG", 30: "JanG"})
     both = [_window_fault(), dropped]
-    routing = notify.route(COHORT, COURSE, both, NOW)
+    routing = notify.route(SEMESTER, COURSE, both, NOW)
     _mail_config(both, routing, spec=source_digest.SCHEDULE)
     assert "2 things to fix" in sent.one["subject"]
     assert "cannot use" not in sent.one["subject"]
@@ -910,7 +910,7 @@ def test_a_mixed_letter_says_nothing_at_all_about_the_consequence(wired):
     )
     sent = wired(blame={12: "JanG", 30: "JanG"})
     both = [_window_fault(), dropped]
-    routing = notify.route(COHORT, COURSE, both, NOW)
+    routing = notify.route(SEMESTER, COURSE, both, NOW)
     _mail_config(both, routing, spec=source_digest.SCHEDULE)
     body = sent.one["body"]
     assert "Until they are fixed" not in body
@@ -933,7 +933,7 @@ def test_two_faults_with_no_consequence_of_their_own_still_get_the_file_s(wired)
         for n, line in ((8, 12), (9, 30))
     ]
     sent = wired(blame={12: "JanG", 30: "JanG"})
-    routing = notify.route(COHORT, COURSE, faults_in, NOW)
+    routing = notify.route(SEMESTER, COURSE, faults_in, NOW)
     _mail_config(faults_in, routing, spec=source_digest.SCHEDULE)
     assert "Until they are fixed: that entry is not scheduled" in sent.one["body"]
 
@@ -941,14 +941,14 @@ def test_two_faults_with_no_consequence_of_their_own_still_get_the_file_s(wired)
 def test_two_faults_are_one_message_and_the_subject_counts_them(wired):
     sent = wired(pushers=("JanG",))
     faults = [_row_fault(4), _row_fault(9, field="github_handle")]
-    routing = notify.route(COHORT, COURSE, faults, NOW)
+    routing = notify.route(SEMESTER, COURSE, faults, NOW)
     _mail_config(faults, routing)
     assert "2 entries the toolkit cannot use" in sent.one["subject"]
 
 
 def test_the_mail_carries_the_row_the_column_and_the_fix_and_nothing_else(wired):
     sent = wired(pushers=("JanG",))
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     _mail_config([_row_fault()], routing)
     body = sent.one["body"]
     assert "students.csv:4" in body and "row 4 -&gt; role" in body
@@ -960,14 +960,14 @@ def test_the_mail_carries_the_row_the_column_and_the_fix_and_nothing_else(wired)
 
 def test_the_first_mail_does_not_copy_the_maintainer(wired):
     sent = wired(pushers=("JanG",))
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     _mail_config([_row_fault()], routing)
     assert sent.one["cc"] == []
 
 
 def test_a_reminder_changes_the_first_line_and_copies_the_maintainer(wired):
     sent = wired(pushers=("JanG",))
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     _mail_config([_row_fault()], routing, reminder="2 days")
     assert "Still unfixed after 2 days:" in sent.one["body"]
     assert sent.one["cc"] == ["maint@x.edu"]
@@ -976,22 +976,22 @@ def test_a_reminder_changes_the_first_line_and_copies_the_maintainer(wired):
 def test_the_maintainer_as_the_fallback_addressee_is_not_copied_as_well(
     wired, admins, capsys
 ):
-    # The 48h rung copies the maintainer, and on a cohort no address could be found for
+    # The 48h rung copies the maintainer, and on a semester no address could be found for
     # the To line already IS the maintainer. One mailbox, one line.
     admins(None)
     sent = wired(pushers=("dsl-bot",), people={"people": {}})
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     _mail_config([_row_fault()], routing, reminder="2 days")
     assert sent.one["to"] == ["maint@x.edu"]
     assert sent.one["cc"] == []
-    assert "[fallback] no cohort address - mailing the maintainer" in (
+    assert "[fallback] no semester address - mailing the maintainer" in (
         capsys.readouterr().out
     )
 
 
 def test_a_people_fault_names_its_own_file(wired):
     sent = wired(blame={6: "JanG"})
-    routing = notify.route(COHORT, COURSE, [_people_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_people_fault()], NOW)
     _mail_config([_people_fault()], routing, spec=config_digest.PEOPLE)
     assert "people.yml has 1 entry the toolkit cannot use" in sent.one["subject"]
     assert "this person has no access and is not notified" in sent.one["body"]
@@ -1012,10 +1012,10 @@ def _sheet_fault() -> notify.ConfigFault:
 
 
 def test_a_grading_sheet_fault_links_the_sheet_it_is_in_not_the_folder(wired):
-    # ONE issue and one letter for every sheet in the cohort, and every line in it links
+    # ONE issue and one letter for every sheet in the semester, and every line in it links
     # the sheet it is about: the digest names the folder, the fault names the file.
     sent = wired(blame={5: "JanG"})
-    routing = notify.route(COHORT, COURSE, [_sheet_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_sheet_fault()], NOW)
     _mail_config([_sheet_fault()], routing, spec=config_digest.GRADING_SHEETS)
     assert sent.one["subject"] == (
         "[Course Name f2026] grading_sheets/ has 1 entry the toolkit cannot use"
@@ -1027,14 +1027,14 @@ def test_a_grading_sheet_fault_links_the_sheet_it_is_in_not_the_folder(wired):
 
 def test_a_grading_sheet_mail_never_names_the_student_it_is_about(wired):
     sent = wired(blame={5: "JanG"})
-    routing = notify.route(COHORT, COURSE, [_sheet_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_sheet_fault()], NOW)
     _mail_config([_sheet_fault()], routing, spec=config_digest.GRADING_SHEETS)
     assert "ada-l" not in sent.one["body"] and "ada-l" not in sent.one["subject"]
 
 
 def _grading_config_fault() -> notify.ConfigFault:
     """A value in an assignment's definition that will not grade as written - the one
-    hand-edited file whose faults have a MOMENT, and the one that is not in the cohort org
+    hand-edited file whose faults have a MOMENT, and the one that is not in the semester org
     at all."""
     return notify.ConfigFault(
         "assignments.a3",
@@ -1053,8 +1053,8 @@ def _grading_config_fault() -> notify.ConfigFault:
 def test_a_grading_config_fault_asks_the_template_who_wrote_the_line(
     wired, monkeypatch
 ):
-    # Blaming the cohort's classroom-config for a file in the course org would name
-    # nobody, and the cohort would be told by its instructors team instead of by the
+    # Blaming the semester's classroom-config for a file in the course org would name
+    # nobody, and the semester would be told by its instructors team instead of by the
     # person who typed it.
     wired()
     asked: list = []
@@ -1065,7 +1065,7 @@ def test_a_grading_config_fault_asks_the_template_who_wrote_the_line(
             asked.append((org, repo, path, ref)) or {3: "JanG"}
         ),
     )
-    routing = notify.route(COHORT, COURSE, [_grading_config_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_grading_config_fault()], NOW)
     assert asked == [
         (COURSE, "assignment-3-f2026", "grading_config.yml", "refs/heads/solution")
     ]
@@ -1076,7 +1076,7 @@ def test_a_grading_config_fault_asks_the_template_who_wrote_the_line(
 def test_a_grading_config_mail_says_when_the_value_is_used(wired):
     sent = wired(blame={3: "JanG"})
     fault = _grading_config_fault()
-    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    routing = notify.route(SEMESTER, COURSE, [fault], NOW)
     _mail_config([fault], routing, spec=config_digest.GRADING_CONFIG)
     body = sent.one["body"]
     assert "grading uses the toolkit&#x27;s default for that value" in body
@@ -1088,14 +1088,14 @@ def test_a_grading_config_mail_says_when_the_value_is_used(wired):
 
 def test_no_mail_transport_says_so_once_and_never_raises(wired, capsys):
     wired(pushers=("JanG",), configured=False)
-    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_row_fault()], NOW)
     assert _mail_config([_row_fault()], routing).addressees == 0
     assert "mail not configured" in capsys.readouterr().out
 
 
 # --------------------------------------------- a fault in the COURSE org's own config
 #
-# The course org's dsl-course.yml and cohort registry decide whether the course is synced
+# The course org's dsl-course.yml and semester registry decide whether the course is synced
 # at all. Their addressees are the course ADMINS, out of an org secret - never out of the
 # public file half these faults are in - so there is no handle to address one of them by,
 # and git's answer goes to the digest's @mention instead of to the To line.
@@ -1183,7 +1183,7 @@ def test_a_line_the_bot_wrote_falls_through_to_whoever_pushed_it(wired, admins):
 
 
 def test_the_maintainer_is_copied_on_the_very_first_course_mail(wired, admins):
-    # Not at 48 hours as a cohort's file is: the course admins in the To line are the same
+    # Not at 48 hours as a semester's file is: the course admins in the To line are the same
     # small group who may have written the line, so there is nobody else to notice.
     admins(",".join(ADMINS))
     sent = wired(blame={8: "JanG"})
@@ -1193,12 +1193,12 @@ def test_the_maintainer_is_copied_on_the_very_first_course_mail(wired, admins):
     assert sent.one["to"] == list(ADMINS)
 
 
-def test_the_course_subject_names_the_course_and_no_cohort(wired, admins):
+def test_the_course_subject_names_the_course_and_no_semester(wired, admins):
     admins(ADMINS[0])
     sent = wired(blame={8: "JanG"})
     routing = notify.route_course(COURSE, [_course_fault()], NOW)
     _mail_course([_course_fault()], routing)
-    # No term tag: this is the course org's own file, not a cohort's.
+    # No term tag: this is the course org's own file, not a semester's.
     assert sent.one["subject"] == (
         "[Course Name] dsl-course.yml has 1 entry the toolkit cannot use"
     )
@@ -1256,14 +1256,14 @@ def test_a_dsl_course_yml_nobody_can_parse_still_sends_its_mail(
 # ------------------------------------------- an edit the site sync rebuilt over
 
 
-SITE = "cohort-f2026.github.io"
-SITE_ISSUE = "https://github.com/Cohort-f2026/cohort-f2026.github.io/issues/3"
+SITE = "semester-f2026.github.io"
+SITE_ISSUE = "https://github.com/Semester-f2026/semester-f2026.github.io/issues/3"
 SHA = "a1b2c3d4e5f67890"
 
 
 def _overwritten(by_login, dry_run=False) -> notify.Unsent:
     return notify.notify_overwritten_edits(
-        COHORT, SITE, COURSE, by_login, SITE_ISSUE, NOW, dry_run=dry_run
+        SEMESTER, SITE, COURSE, by_login, SITE_ISSUE, NOW, dry_run=dry_run
     )
 
 
@@ -1290,7 +1290,7 @@ def test_the_mail_says_what_was_lost_where_it_is_and_what_to_do(wired):
     )
     assert "generated files are rebuilt every run" in body
     # The commit is the only place the change still exists, so it is linked.
-    assert f"https://github.com/{COHORT}/{SITE}/commit/{SHA}" in body
+    assert f"https://github.com/{SEMESTER}/{SITE}/commit/{SHA}" in body
     assert "a1b2c3d" in body
     assert "move the change to the file the docs name as yours" in body
     assert SITE_ISSUE in body
@@ -1357,7 +1357,7 @@ def test_an_unreadable_people_file_never_raises_into_the_sync(wired, monkeypatch
     def boom(*a, **k):
         raise RuntimeError("HTTP 502")
 
-    monkeypatch.setattr(notify.sync_faculty, "load_cohort_faculty", boom)
+    monkeypatch.setattr(notify.sync_faculty, "load_semester_faculty", boom)
     assert _overwritten({"JanG": [("_data/people.yml", SHA)]}) == notify.Unsent()
 
 
@@ -1369,7 +1369,7 @@ def test_no_address_reaches_the_public_run_log(wired, capsys):
     assert sent.one["to"] == ["jan@x.edu"]
 
 
-# ------------------------------------------------- a cohort about to be frozen
+# ------------------------------------------------- a semester about to be frozen
 
 
 ARCHIVES = date(2027, 2, 16)
@@ -1378,7 +1378,9 @@ ARCHIVES = date(2027, 2, 16)
 def _archiving(wired, **kw):
     """The archive notice's mail, and whether the notifier says it went."""
     sent = wired(**kw)
-    went = notify.notify_cohort_archiving("Cohort-f2026", "Course-Org", ARCHIVES, NOW)
+    went = notify.notify_semester_archiving(
+        "Semester-f2026", "Course-Org", ARCHIVES, NOW
+    )
     return went, sent
 
 
@@ -1388,7 +1390,7 @@ def test_the_archive_notice_mails_the_whole_teaching_team(wired):
     # One batch addressed to the group, instructors and TAs alike: the date is everybody's.
     assert sent.one["to"] == ["jan@x.edu", "cam@x.edu"]
     assert str(ARCHIVES) in sent.one["subject"]
-    assert "Cohort-f2026" in sent.one["subject"]
+    assert "Semester-f2026" in sent.one["subject"]
     assert sent.one["html"] is True
 
 
@@ -1397,21 +1399,21 @@ def test_the_archive_notice_links_the_file_that_moves_the_date(wired):
     # move or remove the date.
     _, sent = _archiving(wired)
     body = sent.one["body"]
-    assert '<a href="https://github.com/Cohort-f2026">Cohort-f2026</a>' in body
-    assert "Cohort-f2026/classroom-config/edit/main/schedule.yml" in body
+    assert '<a href="https://github.com/Semester-f2026">Semester-f2026</a>' in body
+    assert "Semester-f2026/classroom-config/edit/main/schedule.yml" in body
     assert "all read access permissions remain as they are" in body
     # In the ONE sentence the notice issue beside it also ends on, so the two surfaces
     # do not hand the reader two different recipes for the same edit. The mail says
     # WHICH repo, because it is read outside the repo the issue lives in.
     assert (
         "To move this archiving date or remove it altogether, edit "
-        '<a href="https://github.com/Cohort-f2026/classroom-config/edit/main/'
+        '<a href="https://github.com/Semester-f2026/classroom-config/edit/main/'
         'schedule.yml">schedule.yml</a> in the '
         "<code>classroom-config</code> repo." in body
     )
 
 
-def test_a_cohort_with_no_mail_transport_says_so_rather_than_claiming_it_told_anyone(
+def test_a_semester_with_no_mail_transport_says_so_rather_than_claiming_it_told_anyone(
     wired,
 ):
     # `False` is what stops the scheduler stamping "mailed" into the notice issue, so a
@@ -1420,7 +1422,7 @@ def test_a_cohort_with_no_mail_transport_says_so_rather_than_claiming_it_told_an
     assert (went, sent.calls) == (False, 0)
 
 
-def test_a_cohort_with_no_address_anywhere_mails_nobody(wired):
+def test_a_semester_with_no_address_anywhere_mails_nobody(wired):
     went, sent = _archiving(wired, people={"people": {}}, maintainer=None)
     assert (went, sent.calls) == (False, 0)
 
@@ -1430,7 +1432,7 @@ def test_a_partly_delivered_archive_notice_is_not_recorded_as_sent(wired, monkey
     _archiving(wired)
     monkeypatch.setattr(notify.mailer, "send_bulk", lambda ms, **k: ["jan@x.edu"])
     assert (
-        notify.notify_cohort_archiving("Cohort-f2026", "Course-Org", ARCHIVES, NOW)
+        notify.notify_semester_archiving("Semester-f2026", "Course-Org", ARCHIVES, NOW)
         is False
     )
 
@@ -1453,8 +1455,8 @@ def test_an_admin_email_in_dsl_course_yml_beats_the_org_secret(wired, admins):
     assert routed.to == ("lonny@own.edu",)
 
 
-def test_a_cohort_with_no_address_falls_back_to_the_declared_admins(wired, admins):
+def test_a_semester_with_no_address_falls_back_to_the_declared_admins(wired, admins):
     admins(", ".join(ADMINS))
     wired(blame={131: "JanG"}, people={"people": {}}, course_people=DECLARED)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert routing.by_key[_KEY].to == ("lonny@own.edu",)

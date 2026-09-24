@@ -10,7 +10,7 @@ from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import course, grades, roster, workflows_render
 
-COHORT = "Cohort-f2026"
+SEMESTER = "Semester-f2026"
 SPEC = grades.SheetSpec(slug="assignment-1", title="Regression", is_group=False)
 EXTERNAL = grades.SheetSpec(
     slug="assignment-2", title="Kaggle", is_group=False, submit_via="external"
@@ -80,8 +80,8 @@ def test_a_rerun_posts_the_note_once(monkeypatch):
     monkeypatch.setattr(grades, "find_receipts_issue", lambda org, repo: (7, "open"))
     units = [(SPEC, "assignment-1-ada")]
     listed = {"assignment-1-ada": {"visibility": "private", "private": True}}
-    assert grades._post_returned_notes(COHORT, units, listed) == 1
-    assert grades._post_returned_notes(COHORT, units, listed) == 1
+    assert grades._post_returned_notes(SEMESTER, units, listed) == 1
+    assert grades._post_returned_notes(SEMESTER, units, listed) == 1
     (posted,) = thread.posted
     assert course.MARKS_RETURNED_NOTE in posted
     assert course.marks_returned_marker("assignment-1") in posted
@@ -91,7 +91,9 @@ def test_no_note_where_the_repo_has_no_receipts_issue(monkeypatch):
     thread = _Thread([])
     monkeypatch.setattr(grades, "gh", thread)
     monkeypatch.setattr(grades, "find_receipts_issue", lambda org, repo: None)
-    assert grades._post_returned_notes(COHORT, [(SPEC, "assignment-1-ada")], None) == 0
+    assert (
+        grades._post_returned_notes(SEMESTER, [(SPEC, "assignment-1-ada")], None) == 0
+    )
     assert thread.posted == []
 
 
@@ -137,8 +139,8 @@ def _sent(monkeypatch) -> list:
 
 def test_feedback_goes_into_the_email_only_when_asked(monkeypatch):
     sent = _sent(monkeypatch)
-    grades._email_updates(COHORT, ["ada"], feedback={"ada": "Regression:\nGood."})
-    grades._email_updates(COHORT, ["ada"])
+    grades._email_updates(SEMESTER, ["ada"], feedback={"ada": "Regression:\nGood."})
+    grades._email_updates(SEMESTER, ["ada"])
     with_feedback, without = (m[2] for m in sent)
     assert "Regression:\nGood." in with_feedback
     assert "Good." not in without
@@ -155,15 +157,15 @@ def test_feedback_text_is_one_paragraph_per_assignment():
 
 
 def test_the_preview_sample_carries_a_placeholder_not_feedback():
-    assert "<feedback>" in grades.sample_body(COHORT, "ML", feedback=True)
-    assert "<feedback>" not in grades.sample_body(COHORT, "ML")
+    assert "<feedback>" in grades.sample_body(SEMESTER, "ML", feedback=True)
+    assert "<feedback>" not in grades.sample_body(SEMESTER, "ML")
 
 
 # ------------------------------------------------------------- the button
 
 
 def test_the_button_offers_both_channels_off_by_default():
-    rendered = workflows_render.render_distribute_grades([COHORT])
+    rendered = workflows_render.render_distribute_grades([SEMESTER])
     inputs = workflow_inputs(rendered)
     for name in ("receipt_note", "include_feedback"):
         assert inputs[name]["type"] == "boolean" and inputs[name]["default"] is False

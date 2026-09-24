@@ -4,19 +4,19 @@ Sets up org-level infrastructure that persists across semesters:
 - DSL_BOT_TOKEN secret (required for all workflows), and DSL_MAINTAINER_EMAIL where the
   run's env carries it (where the seeded workflows mail a fault); on a COURSE org,
   DSL_COURSE_ADMIN_EMAILS too (who hears about a fault in the course's own config)
-- Faculty teams (instructors, course-admin); cohort bootstrap adds students + auditors
+- Faculty teams (instructors, course-admin); semester bootstrap adds students + auditors
 - Org settings (base permissions, member repo creation, 2FA where every member has it)
 - Profile README (.github repo with description)
-- Org-level workflows in .github (sync-membership, bootstrap-cohort, refresh-actions)
+- Org-level workflows in .github (sync-membership, bootstrap-semester, refresh-actions)
 - Central faculty & instructors workflows seeded into .github (Release materials/assignment +
-  Sync membership/Bootstrap-cohort/Refresh); the run-from-repo copies are equipped by Refresh
+  Sync membership/Bootstrap-semester/Refresh); the run-from-repo copies are equipped by Refresh
 
-With --cohort, instead seeds the student-facing welcome (onboard)
+With --semester, instead seeds the student-facing welcome (onboard)
 and classroom-config (roster) repos.
 
 Usage:
     python3 -m dsl_course.bootstrap_course --org hertie-dsl-demo-course-e1234
-    python3 -m dsl_course.bootstrap_course --org hertie-dsl-demo-f2026 --cohort
+    python3 -m dsl_course.bootstrap_course --org hertie-dsl-demo-f2026 --semester
 """
 
 from __future__ import annotations
@@ -26,17 +26,17 @@ import os
 import sys
 
 from . import mailer, scaffold, schedule, seed, site, sync_faculty
-from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
+from .access import COURSE_TEAM_ACCESS, SEMESTER_WRITE_REPOS, grant_team_repo_access
 from .central import pin_central_ref, resolve_central_ref
 from .course import (
-    COHORT_TEAMS,
-    COHORT_TOPIC,
     COURSE_ADMIN_TEAM,
     COURSE_HUB_TOPIC,
     FACULTY_TEAMS,
-    term_tag,
+    SEMESTER_TEAMS,
+    SEMESTER_TOPIC,
+    semester_of,
 )
-from .discovery import COHORTS_PATH, central_ref_for, org_meta, register_cohort
+from .discovery import SEMESTERS_PATH, central_ref_for, org_meta, register_semester
 from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
@@ -52,12 +52,13 @@ from .welcome import (
 )
 
 
-def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
+def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
     """Topics for an org's .github repo. list_orgs.py enumerates COURSE orgs by
-    dsl-course-hub, so a cohort org must NOT carry it (it would show up in the
-    course-org inventory as a course); cohorts get dsl-cohort, a human-facing marker."""
-    if is_cohort:
-        return [COHORT_TOPIC]
+    dsl-course-hub, so a semester org must NOT carry it (it would show up in the
+    course-org inventory as a course); semesters get dsl-semester, a human-facing marker (re-running Bootstrap
+    replaces the old dsl-cohort)."""
+    if is_semester:
+        return [SEMESTER_TOPIC]
     topics = [COURSE_HUB_TOPIC]
     if course_code:
         topics.append(f"course-{course_code.lower()}")
@@ -67,7 +68,7 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 # ---------------------------------------------------------------------------------------
 # Seeded content: USER-owned vs SYSTEM-owned
 #
-# Bootstrap (both "Bootstrap course" and "Bootstrap cohort") is re-run on EXISTING orgs as
+# Bootstrap (both "Bootstrap course" and "Bootstrap semester") is re-run on EXISTING orgs as
 # the documented idempotent-repair path - e.g. to apply new team grants or refresh
 # workflows mid-semester. So every write it makes has to be re-run-safe. `create_repo` is
 # NOT a first-run guard: it treats an already-existing repo as success (repos.create_repo
@@ -75,7 +76,7 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 # every re-run. The guard has to be per FILE, and it depends on who owns the file:
 #
 #   USER-owned - content faculty edit, or that the running system writes live state into.
-#   In a cohort: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml} and
+#   In a semester: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml} and
 #   welcome/README.md (the student landing page). On a course org: .github/dsl-course.yml
 #   (the faculty/course_admins SSOT). Seed these ONLY
 #   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
@@ -85,7 +86,7 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 #   in place: everything under `.github/` in the seeded repos (welcome/onboard.yml,
 #   welcome/team-formation.yml, the ISSUE_TEMPLATE join forms those workflows parse - they
 #   must stay in lockstep with them - and classroom-config's dispatch-sync*.yml), a
-#   cohort's `.github/dsl-course.yml` (a wholly generated course pointer with no
+#   semester's `.github/dsl-course.yml` (a wholly generated course pointer with no
 #   faculty-authored content), classroom-config's README.md (the schema contract - it went
 #   stale as USER-owned), and every `*.sample` (worked examples the engine never ingests;
 #   activation = copying rows into the real file, so refreshing them is safe).
@@ -101,15 +102,15 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 
 
 def _tag_and_year(org: str) -> tuple[str, int]:
-    """This cohort's year tag (fYYYY/sYYYY) and year, derived from the org-name suffix.
+    """This semester's year tag (fYYYY/sYYYY) and year, derived from the org-name suffix.
 
     Renders the seeded scaffolds' examples (schedule.yml repo names/dates, people.yml
-    dates) copy-paste-correct for THIS cohort. A name with no tag falls back to
+    dates) copy-paste-correct for THIS semester. A name with no tag falls back to
     f2026-shaped examples - purely cosmetic, everything rendered from this is commented.
 
-    Through `course.term_tag`, the toolkit's one spelling of that rule: three copies of
+    Through `course.semester_of`, the toolkit's one spelling of that rule: three copies of
     this regex once disagreed about which names carried a tag."""
-    tag = term_tag(org)
+    tag = semester_of(org)
     return (tag, int(tag[1:])) if tag else ("f2026", 2026)
 
 
@@ -201,7 +202,7 @@ def propagate_course_admin_emails(org: str) -> int:
     """Copy `DSL_COURSE_ADMIN_EMAILS` from this run's env onto `org`. Failure count.
 
     Who hears about a fault in the COURSE org's own config - `dsl-course.yml` and the
-    cohort registry, the two files that decide whether the course is synced at all (see
+    semester registry, the two files that decide whether the course is synced at all (see
     `notify.route_course`). A comma-separated address list, travelling exactly as
     `DSL_MAINTAINER_EMAIL` does and for the same two reasons: an address is not a
     credential, so centrally it is a repository VARIABLE on the toolkit; and a seeded
@@ -210,9 +211,9 @@ def propagate_course_admin_emails(org: str) -> int:
     An address list rather than an `email:` in `dsl-course.yml`, because that file is
     PUBLIC and is itself one of the files these mails are about.
 
-    COURSE orgs only, which is why this is called under `not args.cohort`: every
+    COURSE orgs only, which is why this is called under `not args.semester`: every
     course-level mail is sent from the course org's own `.github`, and no workflow seeded
-    into a cohort may wire the mail env at all (see maintainers.md).
+    into a semester may wire the mail env at all (see maintainers.md).
 
     Unset is a normal state and never fails a bootstrap - the digest issue's
     `cc @<course>/course-admin` is then the only channel - so this logs one `[skip]` and
@@ -231,25 +232,25 @@ def propagate_course_admin_emails(org: str) -> int:
 
 
 def create_default_teams(org: str) -> int:
-    """Create the faculty role teams (course.FACULTY_TEAMS) - in both course and cohort
-    orgs. The cohort-only teams (students, auditors) are created separately by
-    create_cohort_teams."""
+    """Create the faculty role teams (course.FACULTY_TEAMS) - in both course and semester
+    orgs. The semester-only teams (students, auditors) are created separately by
+    create_semester_teams."""
     log_step("Creating faculty teams")
     return create_role_teams(org, FACULTY_TEAMS)
 
 
-def create_cohort_teams(org: str) -> int:
-    """Create the cohort-only role teams (course.COHORT_TEAMS): enrolled students +
-    read-only auditors. Called at cohort bootstrap only - never on the persistent course
+def create_semester_teams(org: str) -> int:
+    """Create the semester-only role teams (course.SEMESTER_TEAMS): enrolled students +
+    read-only auditors. Called at semester bootstrap only - never on the persistent course
     org.
 
     Both are SECRET teams, so their membership is not browsable by the students in them
-    (see course.COHORT_TEAMS). The cost is that a non-owner instructor cannot read the
+    (see course.SEMESTER_TEAMS). The cost is that a non-owner instructor cannot read the
     enrolment off the GitHub members view either: the roster CSV
     (`classroom-config/students.csv`) is the SSOT for who is enrolled, and it always
     was - the members view only ever showed who had finished onboarding."""
-    log_step("Creating cohort teams (students, auditors)")
-    return create_role_teams(org, COHORT_TEAMS)
+    log_step("Creating semester teams (students, auditors)")
+    return create_role_teams(org, SEMESTER_TEAMS)
 
 
 # The course-org teams that may run the seeded workflows, and their grant on `.github`:
@@ -277,26 +278,26 @@ def grant_button_access(org: str) -> int:
     return failures
 
 
-# The COHORT infra repos the faculty teams need the same standing grant on as `.github`.
+# The SEMESTER infra repos the faculty teams need the same standing grant on as `.github`.
 # Every org is tightened to default_repository_permission=none, so without these grants
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `classroom-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
 # people.yml, grading_sheets/), and `welcome` is where they triage `needs-review`
-# onboarding issues. Course orgs have neither repo, so this is cohort-only. Single-sourced
-# with the nightly sweep's floor (access.COHORT_WRITE_REPOS), so the two cannot disagree.
-COHORT_FACULTY_REPOS = sorted(COHORT_WRITE_REPOS - {".github"})
+# onboarding issues. Course orgs have neither repo, so this is semester-only. Single-sourced
+# with the nightly sweep's floor (access.SEMESTER_WRITE_REPOS), so the two cannot disagree.
+SEMESTER_FACULTY_REPOS = sorted(SEMESTER_WRITE_REPOS - {".github"})
 
 
-def grant_cohort_faculty_access(org: str) -> None:
-    """Give this cohort's faculty teams their standing access (COURSE_TEAM_ACCESS:
-    instructors write, course-admin admin) on the cohort infra repos - `.github` is
+def grant_semester_faculty_access(org: str) -> None:
+    """Give this semester's faculty teams their standing access (COURSE_TEAM_ACCESS:
+    instructors write, course-admin admin) on the semester infra repos - `.github` is
     granted separately by grant_button_access, in both org kinds.
 
     Idempotent, and deliberately outside the `if create_repo(...)` seeding blocks in
-    setup_cohort_extras, so re-running "Bootstrap cohort" on an org bootstrapped before
+    setup_semester_extras, so re-running "Bootstrap semester" on an org bootstrapped before
     this existed repairs the missing grants."""
-    log_step("Granting cohort faculty access (welcome, classroom-config)")
-    for repo in COHORT_FACULTY_REPOS:
+    log_step("Granting semester faculty access (welcome, classroom-config)")
+    for repo in SEMESTER_FACULTY_REPOS:
         for team, perm in COURSE_TEAM_ACCESS.items():
             if grant_team_repo_access(org, team, repo, perm):
                 log_ok(f"  {team} -> {perm} on {org}/{repo}")
@@ -310,7 +311,7 @@ def add_course_admins(org: str, handles: str) -> int:
     """Add this course's admin(s) to its `course-admin` team (per-course, so nobody is
     added to a course they don't run). `handles` is a comma/space-separated list of GitHub
     logins; each gets an org invite they accept once (membership shows `pending` until
-    then). Instructors/TAs are declared per cohort in that cohort's
+    then). Instructors/TAs are declared per semester in that semester's
     classroom-config/people.yml, which Sync membership reconciles into the `instructors`
     team - never added on the Teams page, which the next sync reverts.
 
@@ -318,7 +319,7 @@ def add_course_admins(org: str, handles: str) -> int:
     course org, `_course_metadata` also seeds these same handles into
     `dsl-course.yml`'s `people.course_admins` (the SSOT `sync_faculty` reconciles
     against), so the next sync doesn't undo this invite by pruning them right back out
-    for not being declared. On a cohort org there's no SSOT to write to (course_admins
+    for not being declared. On a semester org there's no SSOT to write to (course_admins
     stays exclusively course-level) - this invite is real but only until the next sync
     mirrors the course org's actual roster over it."""
     logins = _parse_handles(handles)
@@ -347,16 +348,16 @@ def add_course_admins(org: str, handles: str) -> int:
 
 # course_admins are declared ONCE on the persistent COURSE org - the single source of truth
 # for admin access, reconciled into this org's own `course-admin` GitHub team AND mirrored
-# into every cohort org's own `course-admin` team. `github_handle` is the only required
+# into every semester org's own `course-admin` team. `github_handle` is the only required
 # field (it's what actually grants access); `start`/`end` are optional ISO dates - omit
 # either for open-ended, or set both to bound access to one window (auto-rotates, no manual
 # removal needed).
 #
-# TAs are never declared here (they change every cohort); instructors appear here only as
+# TAs are never declared here (they change every semester); instructors appear here only as
 # OPTIONAL open-courseware display cards (templates/course/people-cards.yml - the schema
-# site_repo._people_from_meta reads for the course-site headshots). A cohort's real teaching team
-# - GitHub access AND cohort-site cards - is declared per cohort in that cohort's own
-# classroom-config/people.yml (seeded alongside schedule.yml at Bootstrap cohort).
+# site_repo._people_from_meta reads for the course-site headshots). A semester's real teaching team
+# - GitHub access AND semester-site cards - is declared per semester in that semester's own
+# classroom-config/people.yml (seeded alongside schedule.yml at Bootstrap semester).
 #
 # The preamble (people-header.yml) and card scaffold (people-cards.yml) are shared by both
 # variants below - fully-commented default and --admins-seeded - so the two can't drift.
@@ -387,9 +388,9 @@ def _course_metadata(
     central_ref: str | None = None,
 ) -> str:
     """dsl-course.yml for the persistent COURSE org: identity + course_admins (the
-    single source of truth for course-wide admin access, mirrored into every cohort
+    single source of truth for course-wide admin access, mirrored into every semester
     org's own course-admin team by sync_faculty). Instructors/TAs and the schedule
-    both stay per-cohort instead (they change year to year and, for instructors/TAs,
+    both stay per-semester instead (they change year to year and, for instructors/TAs,
     usually the people too).
 
     `central_ref` writes the deployment tier this course runs (--central-ref) as a live
@@ -413,9 +414,9 @@ def _course_metadata(
     return identity + tier + _course_admins_block(admins)
 
 
-def _cohort_metadata(org: str, course: str) -> str:
-    """dsl-course.yml for a COHORT org's .github repo: a pointer back to its persistent
-    course org. This is the single source the cohort's classroom-config dispatchers
+def _semester_metadata(org: str, course: str) -> str:
+    """dsl-course.yml for a SEMESTER org's .github repo: a pointer back to its persistent
+    course org. This is the single source the semester's classroom-config dispatchers
     (dispatch-sync / dispatch-sync-site) read to find where to fire Sync membership /
     Sync site - so without it those auto-triggers can't resolve the course org."""
     return template("cohort/dsl-course.yml").format(course=course, org=org)
@@ -427,7 +428,7 @@ def create_profile_repo(
     course_name: str,
     course_code: str = "",
     *,
-    is_cohort: bool = False,
+    is_semester: bool = False,
     admins: list[str] | None = None,
     central_ref: str | None = None,
 ) -> int:
@@ -436,9 +437,9 @@ def create_profile_repo(
 
     Also tags the repo with `dsl-course-hub` so `list_orgs.py` can discover it.
 
-    The course org's dsl-course.yml carries identity + the faculty roster. A cohort org
+    The course org's dsl-course.yml carries identity + the faculty roster. A semester org
     instead gets a tiny `.github/dsl-course.yml` pointer back to its course org (written
-    in main()'s cohort wiring via _cohort_metadata, once --course is known) - the
+    in main()'s semester wiring via _semester_metadata, once --course is known) - the
     classroom-config dispatchers read its `course:` line. Its schedule lives in
     classroom-config/schedule.yml. `admins` (course org only) seeds dsl-course.yml's
     people.course_admins live from the start - see _course_admins_block.
@@ -448,7 +449,7 @@ def create_profile_repo(
     the site, and an untagged `.github` is invisible to `list_orgs`. Both are counted.
     """
     log_step("Setting up .github profile repo")
-    # Opposite instructions to the same reader, so the description says which: a cohort
+    # Opposite instructions to the same reader, so the description says which: a semester
     # org's `.github` is machine-owned scaffolding, a course org's is where faculty work -
     # it holds dsl-course.yml and every workflow they run.
     if not create_repo(
@@ -457,14 +458,14 @@ def create_profile_repo(
         private=False,
         description=(
             "[do not touch]: Org profile and configuration"
-            if is_cohort
+            if is_semester
             else "[control panel]: Org profile & configuration"
         ),
     ):
         return 1
 
     failures = 0
-    if not is_cohort:
+    if not is_semester:
         # Course metadata - canonical machine-readable source for discovery tooling, and
         # the SSOT faculty edit (people.course_admins / instructor cards), so it is
         # USER-owned: seeded once, never rewritten by a later repair run.
@@ -483,7 +484,7 @@ def create_profile_repo(
             failures += 1
             log_err(f"could not seed {org}/.github/dsl-course.yml (the faculty SSOT)")
 
-    if not set_repo_topics(org, ".github", _profile_topics(is_cohort, course_code)):
+    if not set_repo_topics(org, ".github", _profile_topics(is_semester, course_code)):
         failures += 1
 
     if not failures:
@@ -504,7 +505,7 @@ def validate_secret_presence(org: str, secret_name: str) -> bool:
     return exists
 
 
-# The two lines of the seeded schedule.yml a course's `cohort_defaults:` rewrites. Matched
+# The two lines of the seeded schedule.yml a course's `semester_defaults:` rewrites. Matched
 # as text, not re-emitted as YAML: the file is a commented skeleton faculty read.
 _TZ_LINE = "# timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin\n"
 _ARCHIVE_HEAD = "# archive the org (freezes in place)"
@@ -516,31 +517,31 @@ def _scaffold_text(
     central_ref: str,
     tag: str,
     year: int,
-    cohort_defaults: dict | None,
+    semester_defaults: dict | None,
 ) -> bytes:
-    """One classroom-config scaffold, rendered for this cohort. Pinned first, formatted
+    """One classroom-config scaffold, rendered for this semester. Pinned first, formatted
     second: the scaffolds link the runbooks, and an org must be sent to the docs for the
     engine it actually runs."""
     text = pin_central_ref(template(rel), central_ref).format(
         tag=tag, year=year, year_next=year + 1
     )
     if path == schedule.SCHEDULE_PATH:
-        text = seed_schedule(text, cohort_defaults or {})
+        text = seed_schedule(text, semester_defaults or {})
     return text.encode()
 
 
 def seed_schedule(text: str, defaults: dict) -> str:
-    """The seeded `schedule.yml` with the course's `cohort_defaults:` applied
-    (`schedule.parse_cohort_defaults`). No defaults, no change - today's skeleton.
+    """The seeded `schedule.yml` with the course's `semester_defaults:` applied
+    (`schedule.parse_semester_defaults`). No defaults, no change - today's skeleton.
 
     `timezone` becomes a live line. `archive.auto: false` comments the live `archive:`
-    block out, since the block's presence is what archives a cohort; `auto: true` keeps it
+    block out, since the block's presence is what archives a semester; `auto: true` keeps it
     and writes `grace_days:` into it when the course gives one."""
     tz = defaults.get("timezone")
     if tz:
         text = text.replace(
             _TZ_LINE,
-            f"timezone: {tz}                    # from the course's cohort_defaults\n",
+            f"timezone: {tz}                    # from the course's semester_defaults\n",
         )
     archive = defaults.get("archive")
     head = text.find(_ARCHIVE_HEAD)
@@ -552,8 +553,8 @@ def seed_schedule(text: str, defaults: dict) -> str:
                 for line in block.splitlines(keepends=True)
             )
             block = (
-                "# The course's cohort_defaults turn automatic archiving OFF: uncomment the "
-                "block below to archive this cohort.\n" + block
+                "# The course's semester_defaults turn automatic archiving OFF: uncomment the "
+                "block below to archive this semester.\n" + block
             )
         elif archive.get("grace_days") is not None:
             block = block.replace(
@@ -566,49 +567,56 @@ def seed_schedule(text: str, defaults: dict) -> str:
     return text
 
 
-def course_cohort_defaults(course_org: str) -> dict:
-    """The course's `cohort_defaults:`, or `{}` when there is none or it cannot be read -
-    a new cohort then gets today's skeleton, never a failed bootstrap."""
+def course_semester_defaults(course_org: str) -> dict:
+    """The course's `semester_defaults:`, or `{}` when there is none or it cannot be read -
+    a new semester then gets today's skeleton, never a failed bootstrap."""
     if not course_org:
         return {}
     try:
         meta = org_meta(course_org)
     except Exception as exc:
-        log_err(f"  ! could not read {course_org}'s cohort_defaults ({exc})")
+        log_err(f"  ! could not read {course_org}'s semester_defaults ({exc})")
         return {}
-    return schedule.parse_cohort_defaults(meta.get("cohort_defaults"))
+    raw = meta.get("semester_defaults")
+    if raw is None and "cohort_defaults" in meta:
+        # The block's old name, read for one release (decision 0012).
+        log(
+            f"  [moved] {course_org}'s cohort_defaults: is now semester_defaults: - rename it"
+        )
+        raw = meta.get("cohort_defaults")
+    return schedule.parse_semester_defaults(raw)
 
 
-def setup_cohort_extras(
-    org: str, central_ref: str, cohort_defaults: dict | None = None
+def setup_semester_extras(
+    org: str, central_ref: str, semester_defaults: dict | None = None
 ) -> int:
-    """Cohort-only: seed the student-facing repos.
+    """Semester-only: seed the student-facing repos.
 
-    Layered on top of the common bootstrap when --cohort is passed (the safe-by-default
+    Layered on top of the common bootstrap when --semester is passed (the safe-by-default
     org permissions both org kinds get are in gh_teams.converge_org_settings):
     - public `welcome` repo with the Join issue form + onboard workflow;
     - private `classroom-config` repo with a starter students.csv;
     - the faculty teams' standing grant on both of those repos.
     The `materials` repo is created on the first release, so it's not made here.
 
-    Safe to re-run on a LIVE cohort: the USER-owned classroom-config files (roster,
+    Safe to re-run on a LIVE semester: the USER-owned classroom-config files (roster,
     schedule, people, grades) are only ever created, never rewritten, while the
     SYSTEM-owned workflows refresh. See the ownership note at the top of this file.
 
-    Returns the number of student-facing workflow/sample writes that failed, so a cohort
+    Returns the number of student-facing workflow/sample writes that failed, so a semester
     left half-seeded (onboarding workflow or config samples never landed) reds the
     bootstrap rather than reporting success.
     """
-    log_step("Cohort setup: seed welcome/classroom-config")
+    log_step("Semester setup: seed welcome/classroom-config")
 
-    failures = create_cohort_teams(org)
+    failures = create_semester_teams(org)
 
     # NB: this block (and the classroom-config one below) runs on EVERY bootstrap, re-runs
     # included - create_repo reports an existing repo as success. That is deliberate for
-    # SYSTEM-owned files (they refresh so fixes reach running cohorts); USER-owned files are
+    # SYSTEM-owned files (they refresh so fixes reach running semesters); USER-owned files are
     # protected per-file by gh_contents.seed_if_absent. See the ownership note at the top of this file.
     # A failed create_repo (post-PR1, a genuine failure, not the idempotent 422) leaves the
-    # cohort with no student-facing front door, so it must red the bootstrap and skip the
+    # semester with no student-facing front door, so it must red the bootstrap and skip the
     # seeding rather than the create's False being silently dropped by a bare `if`.
     if not create_repo(
         org,
@@ -626,11 +634,11 @@ def setup_cohort_extras(
             failures += welcome_failures
             log_err(
                 f"the welcome repo in {org} is not fully seeded - re-run Bootstrap "
-                f"cohort (or wait for the nightly Refresh) once the cause is cleared"
+                f"semester (or wait for the nightly Refresh) once the cause is cleared"
             )
         # The landing page a student sees on this public repo: what to do, and how. Its
         # link back to the issue chooser is org-specific, so the template carries `{org}`.
-        # USER-owned (it is the cohort's front door, and faculty may reword it), so
+        # USER-owned (it is the semester's front door, and faculty may reword it), so
         # create-only - a repair re-run must not clobber their edits.
         if not seed_if_absent(
             org,
@@ -641,29 +649,29 @@ def setup_cohort_extras(
         ):
             failures += 1
 
-    # A failed create_repo here leaves the cohort with no roster/schedule/dispatcher repo -
+    # A failed create_repo here leaves the semester with no roster/schedule/dispatcher repo -
     # membership sync never triggers - so count it and skip the seeding rather than drop the
     # False on a bare `if`.
     if not create_repo(
         org,
         "classroom-config",
         private=True,
-        # Instructors and course-admin hold it and nobody else does: the cohort org sets
+        # Instructors and course-admin hold it and nobody else does: the semester org sets
         # default_repository_permission=none, so a student is not a reader of this by
         # default - it does not appear in their repo list at all.
         description=(
-            "[visible to instructors only]: Everything you configure for this cohort "
-            "is here - student roster, teams, term schedule, and marking. Students "
-            "never see it, and no PII leaves this repo."
+            "[visible to instructors only]: Everything you configure for this semester "
+            "is here - student roster, teams, schedule, and marking. Students never see "
+            "it, and no PII leaves this repo."
         ),
     ):
         failures += 1
         log_err(f"could not create the classroom-config repo in {org}")
     else:
-        # USER-owned files are create-only: this repo holds the cohort's LIVE state - the
+        # USER-owned files are create-only: this repo holds the semester's LIVE state - the
         # roster with enrol codes and onboarded handles, the schedule the scheduler
-        # releases from, this cohort's people.yml, and returned grades. Re-running
-        # "Bootstrap cohort" mid-semester must leave all of it exactly as faculty (and the
+        # releases from, this semester's people.yml, and returned grades. Re-running
+        # "Bootstrap semester" mid-semester must leave all of it exactly as faculty (and the
         # onboarding/enrol-code/grade flows) left it.
         tag, year = _tag_and_year(org)
         # The scaffolds: minimal, mostly-commented skeletons faculty fill in. Header-only
@@ -671,9 +679,9 @@ def setup_cohort_extras(
         # carry structure + one-line field notes. Every filled example lives in the
         # `.sample` twin seeded below, so none of these has to double as documentation.
         # Rendering is uniform - the CSV scaffolds carry no `{placeholders}`, so one
-        # `.format` over the whole table keeps the YAML examples tag-aware (this cohort's
+        # `.format` over the whole table keeps the YAML examples tag-aware (this semester's
         # fYYYY/sYYYY, so they are copy-paste-correct) without a per-file special case.
-        # One commit for the set: seeding a cohort's config is a single act, and writing it
+        # One commit for the set: seeding a semester's config is a single act, and writing it
         # file by file put a burst of near-identical `init:`/`docs: seed` commits at the top
         # of a repo faculty then work in by hand. Create-only is unchanged and still per
         # file - a re-run that finds three of the four present writes only the fourth.
@@ -681,7 +689,9 @@ def setup_cohort_extras(
             org,
             "classroom-config",
             {
-                path: _scaffold_text(path, rel, central_ref, tag, year, cohort_defaults)
+                path: _scaffold_text(
+                    path, rel, central_ref, tag, year, semester_defaults
+                )
                 for path, rel in CLASSROOM_SCAFFOLDS.items()
             },
             "init: classroom-config scaffolds (roster, teams, schedule, people)",
@@ -689,7 +699,7 @@ def setup_cohort_extras(
         ):
             failures += 1
         # SYSTEM-owned documentation, refreshed on every run so it never goes stale: a
-        # `.sample` twin for every file in the worked example cohort. Samples keep the
+        # `.sample` twin for every file in the worked example semester. Samples keep the
         # `.sample` suffix so the engine (sync_membership, sync_teams, distribute) never
         # ingests them - only the real names; activation = copying rows into the real file.
         sample_failures = refresh_classroom_samples(org)
@@ -697,19 +707,19 @@ def setup_cohort_extras(
             failures += sample_failures
             log_err(
                 f"the classroom-config samples in {org} are not fully seeded - re-run "
-                f"Bootstrap cohort (or wait for the nightly Refresh)"
+                f"Bootstrap semester (or wait for the nightly Refresh)"
             )
         # SYSTEM-owned contract + dispatchers: refreshed on every run so fixes reach
-        # running cohorts - and, since they live in welcome.py, on every nightly
-        # seed.refresh too, so a cohort no longer waits for someone to run this by hand.
+        # running semesters - and, since they live in welcome.py, on every nightly
+        # seed.refresh too, so a semester no longer waits for someone to run this by hand.
         # A failed dispatcher write means membership/site sync never triggers, so count it.
         failures += refresh_classroom_system_files(org, central_ref)
 
     # Faculty access on the two repos just seeded - unconditional (not inside the
     # create_repo blocks above), so a re-run repairs an org that predates this.
-    grant_cohort_faculty_access(org)
+    grant_semester_faculty_access(org)
 
-    # Public, auto-deployed cohort website.
+    # Public, auto-deployed semester website.
     failures += scaffold.scaffold_site(org)
 
     return failures
@@ -717,7 +727,7 @@ def setup_cohort_extras(
 
 def seed_workflows(org: str, central_ref: str) -> int:
     """Seed the org-level workflows into the course org's .github repo. The full set
-    (central Release materials/assignment + Sync membership/Bootstrap-cohort/Refresh) is
+    (central Release materials/assignment + Sync membership/Bootstrap-semester/Refresh) is
     rendered by dsl_course.seed (single source of truth).
 
     Returns the number of writes that failed - a workflow that never landed (e.g. the token
@@ -796,15 +806,16 @@ def main() -> int:
         "If provided, sets the org secret. Otherwise, validates presence only.",
     )
     parser.add_argument(
+        "--semester",
         "--cohort",
         action="store_true",
-        help="Also do cohort student-facing setup: seed the "
+        help="Also do semester student-facing setup: seed the "
         "welcome (onboard) + classroom-config (roster) repos.",
     )
     parser.add_argument(
         "--course",
         default=None,
-        help="With --cohort: the parent course org. Registers this cohort in that "
+        help="With --semester: the parent course org. Registers this semester in that "
         "course's .github/cohort-courses-pages.yml so it appears in the faculty & "
         "instructors dropdowns.",
     )
@@ -813,7 +824,7 @@ def main() -> int:
         default=None,
         help="Which tier of the central toolkit this course org's seeded workflows run "
         "the engine from: main, release (default), or a full commit SHA. Written "
-        "to .github/dsl-course.yml as `central_ref:`. Course orgs only - a cohort inherits "
+        "to .github/dsl-course.yml as `central_ref:`. Course orgs only - a semester inherits "
         "its course org's, so the two flags together are refused. Only the demo course "
         "should sit anywhere but release.",
     )
@@ -832,17 +843,17 @@ def main() -> int:
         "the course-admin team (admin on .github) so they can run the workflows - and, on "
         "a course-org bootstrap, declared in dsl-course.yml's SSOT so a later sync doesn't "
         "revert it. Each accepts an org invite once. Instructors/TAs are declared per "
-        "cohort, in that cohort's classroom-config/people.yml (docs/05) - never on the "
+        "semester, in that semester's classroom-config/people.yml (docs/05) - never on the "
         "Teams page, which Sync membership reconciles away.",
     )
     args = parser.parse_args()
-    # A cohort has no tier of its own: central_ref_for follows its `course:` pointer, and
-    # the nightly refresh re-renders every cohort at whatever the COURSE org declares. So
-    # this pair looks like it pins the cohort and in fact holds for one night at most -
+    # A semester has no tier of its own: central_ref_for follows its `course:` pointer, and
+    # the nightly refresh re-renders every semester at whatever the COURSE org declares. So
+    # this pair looks like it pins the semester and in fact holds for one night at most -
     # refused outright rather than silently undone hours later.
-    if args.central_ref and args.cohort:
+    if args.central_ref and args.semester:
         log_err(
-            "--central-ref is a COURSE org's setting: a cohort inherits its course org's "
+            "--central-ref is a COURSE org's setting: a semester inherits its course org's "
             "tier, and tonight's refresh would re-render this one at that tier anyway. "
             f"Set `central_ref:` in {args.course or 'the course org'}/.github/"
             "dsl-course.yml instead."
@@ -865,7 +876,7 @@ def _outcome_lines(steps: list[tuple[int, str]]) -> str:
     operator "DONE (automated): ...". The failure count at the very bottom was the only
     hint, and it named no step.
 
-    A step with an empty summary (the cohort pointer, the registry write, the faculty
+    A step with an empty summary (the semester pointer, the registry write, the faculty
     sync, the README) still counts towards the exit code; it just has nothing to say
     here."""
     return "\n".join(
@@ -881,7 +892,7 @@ def _run(args: argparse.Namespace) -> int:
     admin_logins = _parse_handles(args.admins)
     # Which tier of the toolkit everything seeded below runs: the flag when given (a
     # course org's own dsl-course.yml does not exist yet on a first bootstrap), else what
-    # the org already declares - and for a cohort that is its COURSE org's declaration,
+    # the org already declares - and for a semester that is its COURSE org's declaration,
     # which is the file central_ref_for reads through the pointer anyway.
     central_ref = (
         resolve_central_ref(args.central_ref, source="--central-ref")
@@ -909,7 +920,7 @@ def _run(args: argparse.Namespace) -> int:
     log_step("Configuring org settings")
     steps.append(
         (
-            converge_org_settings(args.org, private_forks=args.cohort),
+            converge_org_settings(args.org, private_forks=args.semester),
             "Org settings: base permission none, no member repo creation",
         )
     )
@@ -920,12 +931,12 @@ def _run(args: argparse.Namespace) -> int:
             create_default_teams(args.org),
             (
                 "Faculty teams: instructors, course-admin (students + auditors "
-                "are created per cohort)"
+                "are created per semester)"
             ),
         )
     )
 
-    # 3. Profile repo (course org only - identity + faculty roster; a cohort org
+    # 3. Profile repo (course org only - identity + faculty roster; a semester org
     # gets no dsl-course.yml, its config all lives in classroom-config). --admins is
     # seeded into the SSOT here (course org only - see _course_admins_block) as well
     # as given a one-time direct team invite below (add_course_admins), so the next
@@ -935,8 +946,8 @@ def _run(args: argparse.Namespace) -> int:
         org_name,
         course_name,
         args.course_code,
-        is_cohort=args.cohort,
-        admins=admin_logins if not args.cohort else None,
+        is_semester=args.semester,
+        admins=admin_logins if not args.semester else None,
         # The validated value, and only when the flag was actually given: an
         # undeclared course runs central.CENTRAL_REF, and writing that in would freeze
         # every new org against a default it should simply follow.
@@ -944,22 +955,22 @@ def _run(args: argparse.Namespace) -> int:
     )
     steps.append((profile_failures, ".github profile repo with README"))
 
-    # 3b. Course vs cohort wiring.
+    # 3b. Course vs semester wiring.
     workflow_failures = 0
-    if args.cohort:
-        # Cohort: student-facing welcome + roster + tightened perms.
-        workflow_failures = setup_cohort_extras(
-            args.org, central_ref, course_cohort_defaults(args.course)
+    if args.semester:
+        # Semester: student-facing welcome + roster + tightened perms.
+        workflow_failures = setup_semester_extras(
+            args.org, central_ref, course_semester_defaults(args.course)
         )
         if args.course:
-            # Pointer back to the course org, in this cohort's .github/dsl-course.yml -
+            # Pointer back to the course org, in this semester's .github/dsl-course.yml -
             # the classroom-config dispatchers read its `course:` line to know where to
             # fire Sync membership / Sync site. Without it those auto-triggers fail.
             #
             # SYSTEM-owned (see the ownership note at the top of this file): the file is
             # wholly generated from --org/--course and carries no faculty-authored content
-            # (a cohort's identity lives in the course org's dsl-course.yml, its schedule in
-            # classroom-config/schedule.yml), so refreshing it is what repairs a cohort
+            # (a semester's identity lives in the course org's dsl-course.yml, its schedule in
+            # classroom-config/schedule.yml), so refreshing it is what repairs a semester
             # bootstrapped before this pointer existed. Unlike the COURSE org's
             # dsl-course.yml, which is the faculty SSOT and therefore create-only.
             # A failed write leaves the classroom-config dispatchers unable to resolve the
@@ -968,33 +979,33 @@ def _run(args: argparse.Namespace) -> int:
                 args.org,
                 ".github",
                 "dsl-course.yml",
-                _cohort_metadata(args.org, args.course).encode(),
-                "ci: seed cohort -> course pointer (dispatchers read this)",
+                _semester_metadata(args.org, args.course).encode(),
+                "ci: seed semester -> course pointer (dispatchers read this)",
             ):
                 steps.append((1, ""))
                 log_err(
-                    f"could not seed the cohort -> course pointer in {args.org}/.github - "
+                    f"could not seed the semester -> course pointer in {args.org}/.github - "
                     f"the classroom-config dispatchers cannot resolve {args.course}"
                 )
-            # register_cohort returns False on a failed registry write. A cohort that is
-            # invisible to discover_cohorts is invisible to every nightly sync, so a claimed
-            # -but-unregistered cohort must red the bootstrap rather than proceed silently.
-            if not register_cohort(args.course, args.org):
+            # register_semester returns False on a failed registry write. A semester that is
+            # invisible to discover_semesters is invisible to every nightly sync, so a claimed
+            # -but-unregistered semester must red the bootstrap rather than proceed silently.
+            if not register_semester(args.course, args.org):
                 steps.append((1, ""))
                 log_err(
-                    f"could not register {args.org} in {args.course}'s cohort registry - "
+                    f"could not register {args.org} in {args.course}'s semester registry - "
                     f"it will be missing from the faculty dropdowns and every nightly sync"
                 )
-            # Give this cohort the course's current, currently-active faculty roster
+            # Give this semester the course's current, currently-active faculty roster
             # from day one (instructors/course-admin), rather than waiting for the
-            # next push/cron sync. Scoped to just this cohort (cohorts=[args.org]) so
-            # bootstrapping one more cohort doesn't re-touch every already-registered one.
-            steps.append((sync_faculty.sync(args.course, cohorts=[args.org]), ""))
+            # next push/cron sync. Scoped to just this semester (semesters=[args.org]) so
+            # bootstrapping one more semester doesn't re-touch every already-registered one.
+            steps.append((sync_faculty.sync(args.course, semesters=[args.org]), ""))
             # Populate + prune + wire the freshly-scaffolded site from the org structure.
             # This ONE sync is what replaces the website template's placeholders ("Fall
-            # 2025", "Course Name (Code)") with this course's identity and the cohort's
+            # 2025", "Course Name (Code)") with this course's identity and the semester's
             # inferred semester - an empty/commented schedule.yml is enough, dates are
-            # synthesised. Without it a fresh cohort site shows the template until the
+            # synthesised. Without it a fresh semester site shows the template until the
             # first successful "Sync site", which may be a while (or never).
             #
             # Best effort: Pages provisioning can lag right behind repo creation, and a
@@ -1014,7 +1025,7 @@ def _run(args: argparse.Namespace) -> int:
         else:
             log(
                 f"  (no --course given - add {args.org} to its course org's "
-                f".github/{COHORTS_PATH} to show it in the faculty & instructors dropdowns)"
+                f".github/{SEMESTERS_PATH} to show it in the faculty & instructors dropdowns)"
             )
     else:
         # Course: seed the org-level workflows (incl. the central Release actions) into .github.
@@ -1029,7 +1040,7 @@ def _run(args: argparse.Namespace) -> int:
             workflow_failures,
             (
                 "Workflows in .github: Release materials, Release assignment, "
-                "Sync membership,\n  Bootstrap cohort, Refresh actions"
+                "Sync membership,\n  Bootstrap semester, Refresh actions"
             ),
         )
     )
@@ -1090,8 +1101,8 @@ def _run(args: argparse.Namespace) -> int:
         steps.append((propagate_maintainer_email(args.org), ""))
         # ...and who hears about a fault in a COURSE org's own config. Course orgs only:
         # the course-level digest and the mail beside it are written from the course org's
-        # `.github`, and nothing in a cohort reads this.
-        if not args.cohort:
+        # `.github`, and nothing in a semester reads this.
+        if not args.semester:
             steps.append((propagate_course_admin_emails(args.org), ""))
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).
@@ -1105,23 +1116,23 @@ def _run(args: argparse.Namespace) -> int:
     )
     failures = sum(failed for failed, _ in steps)
 
-    if admin_logins and not args.cohort:
+    if admin_logins and not args.semester:
         admins_step = (
             f"2. Course admins ({', '.join(admin_logins)}) are already declared in the "
             f"`people:` block of {args.org}/.github/dsl-course.yml - nothing to do here. "
             "Add more later by editing that file directly (not the Teams page - "
             '"Sync membership" reconciles the `course-admin` team FROM that file, so an '
             "undeclared manual addition gets reverted on the next sync). Instructors/TAs "
-            "are declared per cohort instead, in that cohort's own "
+            "are declared per semester instead, in that semester's own "
             "classroom-config/people.yml (see step 4)."
         )
     else:
         admins_step = (
             f"2. Declare THIS course's course_admins in the `people:` block of "
             f'{args.org}/.github/dsl-course.yml, then push - "Sync membership" reconciles '
-            "the `course-admin` team automatically (here and into every cohort's own "
+            "the `course-admin` team automatically (here and into every semester's own "
             "course-admin team; no manual Teams-page edit needed). Instructors/TAs are "
-            "declared per cohort instead, in that cohort's own classroom-config/people.yml "
+            "declared per semester instead, in that semester's own classroom-config/people.yml "
             "(see step 4)."
         )
     headline = "complete" if failures == 0 else "INCOMPLETE"
@@ -1145,21 +1156,21 @@ NEXT STEPS (manual):
    assignment-N-f2026 template repos, then run "Refresh actions" so they appear in the
    dropdowns. Run Release materials/assignment from inside the materials repo's Actions tab.
 
-4. Add a cohort: create the empty cohort org, add the bot as owner, then run the
-   "Bootstrap cohort" action here with its name (configures + registers + refreshes).
+4. Add a semester: create the empty semester org, add the bot as owner, then run the
+   "Bootstrap semester" action here with its name (configures + registers + refreshes).
 
-NB: cohort orgs are made the same way - create the empty org, add the bot as owner,
-then run bootstrap with --cohort (seeds welcome + roster).
+NB: semester orgs are made the same way - create the empty org, add the bot as owner,
+then run bootstrap with --semester (seeds welcome + roster).
 ============================================================
 """)
 
-    if args.cohort:
+    if args.semester:
         log(
-            "COHORT extras done:\n"
+            "SEMESTER extras done:\n"
             f"- welcome repo (public): Join issue form + onboard workflow\n"
             f"- classroom-config repo (private): starter students.csv "
             f"(edit https://github.com/{args.org}/classroom-config/blob/HEAD/students.csv with registrar data), "
-            f"plus schedule.yml and people.yml (this cohort's calendar/due-dates and "
+            f"plus schedule.yml and people.yml (this semester's calendar/due-dates and "
             f"instructors/TAs - both seeded mostly-commented, uncomment what you want)\n"
             f"- faculty access: instructors (write) + course-admin (admin) on welcome and "
             f"classroom-config, so non-owner faculty can edit the roster/schedule and "

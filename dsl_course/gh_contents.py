@@ -403,7 +403,7 @@ def create_blob(org: str, repo: str, content: bytes) -> str | None:
     API: a tree entry's `content` field is text, so anything that is not UTF-8 has to be
     posted as a blob first and referenced by sha. Without it a corrected image or dataset
     under a patched folder raised `UnicodeDecodeError` out of a `.decode()`, past the
-    `RuntimeError` the caller catches, and abandoned a patch run mid-cohort."""
+    `RuntimeError` the caller catches, and abandoned a patch run mid-semester."""
     code, out = gh(
         "api",
         "--method",
@@ -600,7 +600,7 @@ def _commit_tree(
         # goes file by file through Contents, and every later write takes the batched path.
         #
         # This is not hypothetical tidying: batching the classroom-config scaffolds into one
-        # commit moved them off Contents, and the first cohort org bootstrapped afterwards
+        # commit moved them off Contents, and the first semester org bootstrapped afterwards
         # could not seed that repo at all - the roster, schedule and people.yml never
         # landed, and every later step that reads them failed in turn.
         return _seed_first_commit(org, repo, tree, message, person)
@@ -729,7 +729,7 @@ def _decoded(encoded: str) -> str:
     Decoded HERE rather than by jq's `@base64d`, because `ghcli.gh` hands its caller
     `(stdout + stderr).strip()` - so a file read through jq arrived without its trailing
     newline, and a CRLF file without its leading and trailing `\\r`. Written straight back
-    that is a different blob: the e2e teardown's fidelity check saw a cohort's
+    that is a different blob: the e2e teardown's fidelity check saw a semester's
     hand-edited `schedule.yml` "drift" by exactly one newline on every run. Base64 is the
     one payload that strip cannot damage - the API wraps it at 60 columns, and
     `b64decode` ignores whitespace anywhere in it."""
@@ -790,7 +790,7 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
     the answer is a file or a folder - one fetch rather than two of the same tree.
 
     An absent or empty tree is `()` - see `_tree`, which also owns the fail-loud rule that
-    keeps an unreadable tree from republishing a cohort site with every material link and
+    keeps an unreadable tree from republishing a semester site with every material link and
     every session row deleted, silently and green.
     """
     select = f' | select(.type=="{kind}")' if kind else ""

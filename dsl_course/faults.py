@@ -132,7 +132,7 @@ _FIX: dict[tuple[FaultKind, bool, bool], str] = {
     ),
 }
 
-# What the cohort LOSES while an immediate fault stands, one sentence per file. The mail
+# What the semester LOSES while an immediate fault stands, one sentence per file. The mail
 # leads with it ("Until they are fixed: ...") because "students.csv has 1 entry the
 # toolkit cannot use" says nothing about whether anybody's term is affected, and the
 # answer differs sharply per file: a bad roster header stops every enrolment, a bad
@@ -147,7 +147,7 @@ CONSEQUENCE = {
     ),
     "teams.csv": "that row is ignored: the team is not created or the member not added",
     # Keyed on the DIGEST's label for the folder, not on one sheet's path: every grading
-    # sheet in the cohort is carried by one issue and one letter.
+    # sheet in the semester is carried by one issue and one letter.
     "grading_sheets/": "that sheet is not refreshed, and nothing on it is sent",
     "grading_config.yml": "grading uses the toolkit's default for that value",
     # The COURSE org's own two files share one digest and therefore one sentence, keyed on
@@ -155,7 +155,7 @@ CONSEQUENCE = {
     # course whose identity file or whose registry cannot be read is a course the sync
     # walks past entirely.
     "dsl-course.yml": (
-        "the sync skips this course: admins and cohorts are not reconciled"
+        "the sync skips this course: admins and semesters are not reconciled"
     ),
 }
 
@@ -233,9 +233,9 @@ class ConfigFault:
     # blame query that decides who is told.
     file: str = ""
     in_repo: str = CONFIG_REPO
-    # Where that repo IS, and on which branch, when it is not the cohort org's `main`. An
+    # Where that repo IS, and on which branch, when it is not the semester org's `main`. An
     # assignment's `grading_config.yml` lives in the course org, on the template's
-    # `solution` branch, while the digest that carries the fault is the cohort's - so the
+    # `solution` branch, while the digest that carries the fault is the semester's - so the
     # deep link and the blame query would otherwise both go looking in the wrong place.
     # "" = wherever the caller is asking from, which is every other file.
     in_org: str = ""
@@ -261,11 +261,11 @@ class ConfigFault:
     # it is the fix. Set where the parser knows the words; "" = `status_json` derives one
     # from `what`. The digest issue and the mail keep `what`.
     plain: str = ""
-    # A fault about how ONE cohort uses a course file, not about the file: the repos this
-    # cohort handed out, this cohort's org settings, this cohort's schedule entry. The
-    # fix may still be in the course's template, but only this cohort pays for it, so
-    # `status_json` files it under the cohort and keeps it off the course's own stages.
-    per_cohort: bool = False
+    # A fault about how ONE semester uses a course file, not about the file: the repos this
+    # semester handed out, this semester's org settings, this semester's schedule entry. The
+    # fix may still be in the course's template, but only this semester pays for it, so
+    # `status_json` files it under the semester and keeps it off the course's own stages.
+    per_semester: bool = False
 
     @property
     def is_source(self) -> bool:
@@ -318,10 +318,10 @@ class ConfigFault:
         """The GitHub URL of the exact line to edit, or None when the line - or the org it
         is in - is not known.
 
-        `org` is where the CALLER is asking from - the cohort, for every file in its
+        `org` is where the CALLER is asking from - the semester, for every file in its
         classroom-config. A fault that knows better says so (`in_org`, `ref`): an
         assignment's definition is a file in the course org on a `solution` branch, and
-        the cohort's digest is still the issue that carries it."""
+        the semester's digest is still the issue that carries it."""
         org = self.in_org or org
         if not org or not self.lineno or not self.file:
             return None

@@ -1,4 +1,4 @@
-"""dsl-course status.json -- one machine-readable account of a course and a cohort.
+"""dsl-course status.json -- one machine-readable account of a course and a semester.
 
 `status.py`'s checklist answers "which files have I filled in?" for a person reading a run
 summary. This answers the lifecycle's question for a program: which stage each scope is
@@ -9,25 +9,25 @@ the stages, predicates and states are `design/lifecycle.md`'s, and every sentenc
 
 TWO HALVES, so the model can be tested without a single `gh` call:
 
-- `gather_course` / `gather_cohort` read live GitHub state into `CourseFacts` /
-  `CohortFacts`, through the loaders the rest of the toolkit already uses (the digest
+- `gather_course` / `gather_semester` read live GitHub state into `CourseFacts` /
+  `SemesterFacts`, through the loaders the rest of the toolkit already uses (the digest
   parsers, `schedule.load`, `roster.load`, the grading-spec reader) - nothing is
   re-derived here that a loader already answers.
-- `render_course` / `render_cohort` turn facts into the document. Pure.
+- `render_course` / `render_semester` turn facts into the document. Pure.
 
-`collect_course` / `collect_cohort` are the two together. The writer is `status.write`,
+`collect_course` / `collect_semester` are the two together. The writer is `status.write`,
 which puts the rendered file where the console reads it.
 
 NO TIMESTAMP of its own. The file carries `inputs` - the blob shas of the files it was
 computed from - so a reader tells a stale status from a current one with one tree read,
 and a render that matches the file byte for byte makes no commit. The moments inside it
-(a release's `when`, the site's last update) are facts about the cohort, not about when
+(a release's `when`, the site's last update) are facts about the semester, not about when
 this was written.
 Nothing that moves on every scheduler tick is in it - the automation heartbeat
-included, which the console reads off the workflow's run list - or every cohort's
+included, which the console reads off the workflow's run list - or every semester's
 classroom-config would take a commit every quarter hour.
 
-PUBLIC AND PRIVATE. The cohort file lives in the private `classroom-config`; the course
+PUBLIC AND PRIVATE. The semester file lives in the private `classroom-config`; the course
 file lives in the course org's PUBLIC `.github`, so `render_course` puts nothing in it but
 repo names, counts and the course-side problems that already stand in that repo's own
 digest issue - never a handle, an email or a student repo name.
@@ -56,15 +56,15 @@ from .course import (
     assignment_slug,
     is_repo_root,
     pages_repo,
-    term_label,
-    term_tag,
+    semester_label,
+    semester_of,
 )
 from .discovery import (
-    COHORTS_PATH,
+    SEMESTERS_PATH,
     assignment_rows,
     list_org_repos,
     org_meta,
-    read_cohort_registry,
+    read_semester_registry,
 )
 from .faults import ConfigFault, FaultKind, Unusable
 from .gh_contents import (
@@ -81,9 +81,9 @@ from .repos import default_branch
 from .schedule_plan import deploy_dest, deploy_section, row_kind
 from .sync_teams import known_handles
 
-# Where each file lives, inside `classroom-config` (cohort) or `.github` (course).
+# Where each file lives, inside `classroom-config` (semester) or `.github` (course).
 STATUS_PATH = ".dsl/status.json"
-# How many recent operations the cohort file lists.
+# How many recent operations the semester file lists.
 RECENT_OPERATIONS = 10
 
 SYLLABUS_FILE = "SYLLABUS.md"
@@ -92,7 +92,7 @@ SITE_HOME = "index.md"
 
 # Stage identifiers, in lifecycle order.
 COURSE_STAGES = ("C1", "C2", "C3", "C4", "C5", "C6")
-COHORT_STAGES = ("K1", "K2", "K3", "K4", "K5", "K6", "K7")
+SEMESTER_STAGES = ("K1", "K2", "K3", "K4", "K5", "K6", "K7")
 # A stage that is not done while one of these is not done either is `blocked`, not
 # `todo`: there is nothing the instructor can do about it yet.
 PREREQUISITES = {
@@ -113,8 +113,8 @@ WAITING_FOR = {
     "C1": "the course org",
     "C2": "the course to be set up",
     "C4": "the course's materials to be ready",
-    "K1": "the cohort org",
-    "K2": "the cohort to be set up",
+    "K1": "the semester org",
+    "K2": "the semester to be set up",
 }
 
 
@@ -148,7 +148,7 @@ class CourseFacts:
     # `.github`'s tree, `{path: sha}`; None when the org could not be read at all.
     github_paths: dict[str, str] | None = None
     registry: list[str] = field(default_factory=list)
-    # What is wrong with dsl-course.yml and the cohort registry - the COURSE digest's list.
+    # What is wrong with dsl-course.yml and the semester registry - the COURSE digest's list.
     faults: list[ConfigFault] = field(default_factory=list)
     materials: list[MaterialsFacts] = field(default_factory=list)
     templates: list[TemplateFacts] = field(default_factory=list)
@@ -156,13 +156,13 @@ class CourseFacts:
 
 
 @dataclass
-class CohortFacts:
-    """Everything the cohort half of the document is computed from. Built by
-    `gather_cohort`; a test builds one by hand."""
+class SemesterFacts:
+    """Everything the semester half of the document is computed from. Built by
+    `gather_semester`; a test builds one by hand."""
 
     org: str
     listing: dict[str, dict] = field(default_factory=dict)
-    # classroom-config's tree, `{path: sha}` - the cohort half of `inputs`.
+    # classroom-config's tree, `{path: sha}` - the semester half of `inputs`.
     config_paths: dict[str, str] = field(default_factory=dict)
     sched: schedule.Schedule = field(default_factory=schedule.Schedule)
     # schedule.yml's whole digest list: sources not found, entries the parser dropped,
@@ -175,17 +175,17 @@ class CohortFacts:
     teams: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     teams_faults: list[ConfigFault] = field(default_factory=list)
     sheet_faults: list[ConfigFault] = field(default_factory=list)
-    # The cohort's view of the course-side templates it cites: every value in their
+    # The semester's view of the course-side templates it cites: every value in their
     # grading_config.yml that will not grade as written. Rolled up as COURSE problems.
     template_faults: list[ConfigFault] = field(default_factory=list)
     specs: dict[str, grades.GradingSpec] = field(
         default_factory=dict
     )  # by schedule key
-    sheets: dict[str, dict] = field(default_factory=dict)  # by cohort-side name
+    sheets: dict[str, dict] = field(default_factory=dict)  # by semester-side name
     # `{handle, casefolded: when its gradebook was last written}`, off distributed.csv.
     # A gradebook holds every assignment, so its record names none.
     returned_at: dict[str, datetime] = field(default_factory=dict)
-    # `{cohort-side name: when its grading sheet last changed}`; None = not known.
+    # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
     site_home: str | None = None
@@ -197,7 +197,7 @@ class CohortFacts:
 
     @property
     def archived(self) -> bool:
-        """The finished marker (`discovery.cohort_is_live`): an archived classroom-config."""
+        """The finished marker (`discovery.semester_is_live`): an archived classroom-config."""
         row = self.listing.get(schedule.CONFIG_REPO) or {}
         return bool(row.get("archived"))
 
@@ -217,8 +217,8 @@ def _sentence(text: str, capitalise: bool = True) -> str:
 
 
 def _day(when: datetime | date) -> str:
-    """`Thu 8 Oct` - how a sentence names a day. No zone: every date in a cohort's
-    sentences is in the cohort's own zone, which the file states once (`timezone`)."""
+    """`Thu 8 Oct` - how a sentence names a day. No zone: every date in a semester's
+    sentences is in the semester's own zone, which the file states once (`timezone`)."""
     return f"{when:%a} {when.day} {when:%b}"
 
 
@@ -244,7 +244,7 @@ STOPS = {
     schedule.SCHEDULE_PATH: (
         "That entry is not scheduled: nothing is released, handed out or marked from it."
     ),
-    sync_faculty.COHORT_PEOPLE_PATH: (
+    sync_faculty.SEMESTER_PEOPLE_PATH: (
         "This person has no access and is not told about problems."
     ),
     roster.ROSTER_PATH: (
@@ -256,10 +256,10 @@ STOPS = {
     grades.SHEETS_DIR: "That sheet is not updated, and none of its marks are returned.",
     grades.GRADING_FILE: "Marking uses the toolkit's default for that value.",
     COURSE_CONFIG: (
-        "Automation skips this course: staff access and cohorts are not updated."
+        "Automation skips this course: staff access and semesters are not updated."
     ),
-    COHORTS_PATH: (
-        "Automation skips this course: staff access and cohorts are not updated."
+    SEMESTERS_PATH: (
+        "Automation skips this course: staff access and semesters are not updated."
     ),
 }
 
@@ -281,12 +281,14 @@ class _Where:
 
 
 _FILES = {
-    schedule.SCHEDULE_PATH: _Where("schedule", "cohort", "K4", "schedule", "SCHEDULE"),
-    sync_faculty.COHORT_PEOPLE_PATH: _Where(
-        "people", "cohort", "K3", "staff", "PEOPLE"
+    schedule.SCHEDULE_PATH: _Where(
+        "schedule", "semester", "K4", "schedule", "SCHEDULE"
     ),
-    roster.ROSTER_PATH: _Where("roster", "cohort", "K5", "roster", "ROSTER"),
-    teams.TEAMS_PATH: _Where("teams", "cohort", "K5", "teams", "TEAMS"),
+    sync_faculty.SEMESTER_PEOPLE_PATH: _Where(
+        "people", "semester", "K3", "staff", "PEOPLE"
+    ),
+    roster.ROSTER_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
+    teams.TEAMS_PATH: _Where("teams", "semester", "K5", "teams", "TEAMS"),
     grades.GRADING_FILE: _Where(
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
@@ -294,23 +296,23 @@ _FILES = {
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
     COURSE_CONFIG: _Where("course", "course", "C3", "course", "COURSE"),
-    COHORTS_PATH: _Where("registry", "course", "C2", "course", "COURSE"),
+    SEMESTERS_PATH: _Where("registry", "course", "C2", "course", "COURSE"),
 }
 # A grading sheet belongs to the running phase, not to a setup stage: its stage is the
 # marking phase, and the assignment is the entry in its id.
 MARKING = "marking"
-_SHEET = _Where("sheet", "cohort", MARKING, "marks", "GRADING_SHEETS")
-# Any other classroom-config file: the cohort's own setup.
-_OTHER = _Where("config", "cohort", "K2", "", "CONFIG")
-# A template fault only one cohort pays for (`ConfigFault.per_cohort`): the repos it
-# handed out, or its schedule entry. The cohort's, in the phase after hand out.
+_SHEET = _Where("sheet", "semester", MARKING, "marks", "GRADING_SHEETS")
+# Any other classroom-config file: the semester's own setup.
+_OTHER = _Where("config", "semester", "K2", "", "CONFIG")
+# A template fault only one semester pays for (`ConfigFault.per_semester`): the repos it
+# handed out, or its schedule entry. The semester's, in the phase after hand out.
 HANDED_OUT = "open"
-_COHORT_TEMPLATE = _Where(
-    "template", "cohort", HANDED_OUT, "template", "GRADING_CONFIG"
+_SEMESTER_TEMPLATE = _Where(
+    "template", "semester", HANDED_OUT, "template", "GRADING_CONFIG"
 )
-# The cohort org's own member privileges: part of setting the cohort up, fixed on a
+# The semester org's own member privileges: part of setting the semester up, fixed on a
 # GitHub settings page rather than in a file.
-_ORG = _Where("org", "cohort", "K2", "", "ORG_SETTINGS")
+_ORG = _Where("org", "semester", "K2", "", "ORG_SETTINGS")
 
 _SOURCE_CODES = {
     FaultKind.MISSING_PATH: "SOURCE_MISSING",
@@ -399,7 +401,7 @@ def _subject(fault: ConfigFault, filed: _Where, entry: str) -> str:
         "roster": "The roster",
         "teams": "The teams file",
         "course": "Course details",
-        "registry": "The course's list of cohorts",
+        "registry": "The course's list of semesters",
     }.get(filed.kind, fault.file)
 
 
@@ -416,8 +418,8 @@ def plain_text(fault: ConfigFault, filed: _Where, entry: str) -> str:
 def _where_filed(fault: ConfigFault) -> _Where:
     if fault.where == grades.ORG_SETTINGS:
         return _ORG
-    if fault.per_cohort:
-        return _COHORT_TEMPLATE
+    if fault.per_semester:
+        return _SEMESTER_TEMPLATE
     if fault.file.startswith(f"{grades.SHEETS_DIR}/"):
         return _SHEET
     return _FILES.get(fault.file, _OTHER)
@@ -457,7 +459,7 @@ def _source_sentences(fault: ConfigFault, now: datetime) -> tuple[str, str]:
 
 def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
     """One `problems[]` entry for one fault. `org` is where the fault's file is when the
-    fault does not say otherwise (the cohort, for everything in classroom-config).
+    fault does not say otherwise (the semester, for everything in classroom-config).
 
     The fix pointer names the repo, path and line to edit and the console screen that
     edits it; a file on a branch other than `main` (a template's `solution`) says which."""
@@ -600,8 +602,8 @@ def render_course(
     facts: CourseFacts, now: datetime, rolled_up: list[dict] = ()
 ) -> tuple[dict, list[dict]]:
     """`(the course block, the course-side problems)`. `rolled_up` is the course-scope
-    problems a cohort has already built from its own view of the templates it cites, so the
-    course block inside a cohort's file marks the same stages its problem list does.
+    problems a semester has already built from its own view of the templates it cites, so the
+    course block inside a semester's file marks the same stages its problem list does.
 
     Stage predicates (lifecycle, course stages):
     - C1 the org resolves (`app_installed` is a stub until decision 0002);
@@ -610,7 +612,7 @@ def render_course(
     - C4 at least one materials repo, every one of them `ready`;
     - C5 at least one template, every one of them `ready`;
     - C6 the public website repo exists.
-    `ready` is C1-C5 done: nothing on the course side would stop a cohort."""
+    `ready` is C1-C5 done: nothing on the course side would stop a semester."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
@@ -638,7 +640,7 @@ def render_course(
             }
             for t in facts.templates
         ],
-        "cohorts": list(facts.registry),
+        "semesters": list(facts.registry),
     }
     return block, problems
 
@@ -699,7 +701,7 @@ def course_checks(facts: CourseFacts) -> dict[str, str | None]:
     return out
 
 
-def term_weeks(
+def semester_weeks(
     start: date | None, end: date | None, today: date
 ) -> tuple[int | None, int | None]:
     """`(week, weeks)` of the term: week 1 starts on `semester_start`, 0 is before it, and
@@ -712,15 +714,15 @@ def term_weeks(
     return min((today - start).days // 7 + 1, weeks), weeks
 
 
-def _dest_present(facts: CohortFacts, d: schedule.Deploy) -> bool:
-    paths = facts.dest_paths.get(d.cohort_dest_repo) or set()
+def _dest_present(facts: SemesterFacts, d: schedule.Deploy) -> bool:
+    paths = facts.dest_paths.get(d.semester_dest_repo) or set()
     dest = deploy_dest(d)
     return bool(paths) if is_repo_root(dest) else dest in paths
 
 
 def release_state(
     release: schedule.Release,
-    facts: CohortFacts,
+    facts: SemesterFacts,
     faults: list[ConfigFault],
     now: datetime,
 ) -> str:
@@ -833,13 +835,13 @@ def _problem_entries(problems: list[dict]) -> set[str]:
 
 
 def render_assignments(
-    facts: CohortFacts, problems: list[dict], now: datetime
+    facts: SemesterFacts, problems: list[dict], now: datetime
 ) -> list[dict]:
     """One row per assignment the schedule declares."""
     flagged = _problem_entries(problems)
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():
-        name = schedule.cohort_name(k, e)
+        name = schedule.semester_name(k, e)
         gspec = facts.specs.get(k, grades.GradingSpec())
         sheet_specs[name] = grades.sheet_spec(
             facts.sched, k, name, gspec, gspec.is_group
@@ -847,7 +849,7 @@ def render_assignments(
     rows = []
     for slug, entry in facts.sched.assignments.items():
         spec = facts.specs.get(slug, grades.GradingSpec())
-        name = schedule.cohort_name(slug, entry)
+        name = schedule.semester_name(slug, entry)
         cutoff = grades.cutoff_at(facts.sched, slug, spec)
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
         sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
@@ -889,7 +891,7 @@ def render_assignments(
 
 
 def render_releases(
-    facts: CohortFacts, faults: list[ConfigFault], now: datetime
+    facts: SemesterFacts, faults: list[ConfigFault], now: datetime
 ) -> list[dict]:
     """One row per `releases:` entry. Source and destination are the entry's FIRST copy;
     `copies` says how many it has."""
@@ -910,7 +912,7 @@ def render_releases(
                 }
                 if first
                 else None,
-                "dest": {"repo": first.cohort_dest_repo, "path": deploy_dest(first)}
+                "dest": {"repo": first.semester_dest_repo, "path": deploy_dest(first)}
                 if first
                 else None,
                 "copies": len(r.deploy),
@@ -932,7 +934,7 @@ def this_week(
     now: datetime,
 ) -> list[dict]:
     """What happens from the start of today to the same moment seven days on, in the
-    cohort's zone: releases, hand-outs, due dates and events. The start is included and the
+    semester's zone: releases, hand-outs, due dates and events. The start is included and the
     end is not, so a moment belongs to exactly one week."""
     tz = ZoneInfo(sched.timezone)
     start = _local_midnight(now, tz)
@@ -1008,7 +1010,7 @@ def _staff_counts(people: dict[str, list[dict]] | None) -> tuple[int, int]:
 
 
 def _no_email_problem(
-    cohort_org: str, people: dict[str, list[dict]] | None
+    semester_org: str, people: dict[str, list[dict]] | None
 ) -> list[dict]:
     """K3's "every entry has an email" as a problem: a count, never the handles."""
     missing = sync_faculty.without_email(people or {}, date.today().isoformat())
@@ -1017,14 +1019,14 @@ def _no_email_problem(
     return [
         {
             "id": "people:staff:NO_EMAIL",
-            "scope": "cohort",
+            "scope": "semester",
             "stage": "K3",
             "text": f"{len(missing)} staff entr{'y' if len(missing) == 1 else 'ies'} in "
             f"people.yml ha{'s' if len(missing) == 1 else 've'} no email.",
-            "stops": "They are not told about problems in this cohort.",
+            "stops": "They are not told about problems in this semester.",
             "fix": {
-                "repo": f"{cohort_org}/{schedule.CONFIG_REPO}",
-                "path": sync_faculty.COHORT_PEOPLE_PATH,
+                "repo": f"{semester_org}/{schedule.CONFIG_REPO}",
+                "path": sync_faculty.SEMESTER_PEOPLE_PATH,
                 "line": None,
                 "screen": "staff",
                 "entry": None,
@@ -1033,36 +1035,36 @@ def _no_email_problem(
     ]
 
 
-def cohort_checks(
-    facts: CohortFacts, course: CourseFacts, instructors: int
+def semester_checks(
+    facts: SemesterFacts, course: CourseFacts, instructors: int
 ) -> dict[str, str | None]:
-    """Each cohort stage's predicate: None when it is met, else the one sentence that
-    says what is still missing (lifecycle, cohort stages)."""
+    """Each semester stage's predicate: None when it is met, else the one sentence that
+    says what is still missing (lifecycle, semester stages)."""
     sched = facts.sched
     students = facts.students or []
     site = pages_repo(facts.org)
-    out: dict[str, str | None] = dict.fromkeys(COHORT_STAGES)
+    out: dict[str, str | None] = dict.fromkeys(SEMESTER_STAGES)
     if not facts.listing:
-        out["K1"] = "The cohort org could not be read, or holds no repos yet."
+        out["K1"] = "The semester org could not be read, or holds no repos yet."
     missing = [
         r for r in (schedule.CONFIG_REPO, "welcome", site) if r not in facts.listing
     ]
     if missing:
-        out["K2"] = f"The cohort has no {' or '.join(missing)} repo yet."
+        out["K2"] = f"The semester has no {' or '.join(missing)} repo yet."
     elif facts.org.casefold() not in {c.casefold() for c in course.registry}:
-        out["K2"] = "The course does not list this cohort yet."
+        out["K2"] = "The course does not list this semester yet."
     if facts.people is None:
-        out["K3"] = f"{sync_faculty.COHORT_PEOPLE_PATH} could not be read."
+        out["K3"] = f"{sync_faculty.SEMESTER_PEOPLE_PATH} could not be read."
     elif instructors == 0:
         out["K3"] = (
-            f"No instructor is declared in {sync_faculty.COHORT_PEOPLE_PATH} yet."
+            f"No instructor is declared in {sync_faculty.SEMESTER_PEOPLE_PATH} yet."
         )
     if schedule.SCHEDULE_PATH not in facts.config_paths:
         out["K4"] = f"There is no {schedule.SCHEDULE_PATH} yet."
     elif sched.unparseable:
         out["K4"] = f"{schedule.SCHEDULE_PATH} does not parse."
     elif sched.semester_start is None or sched.semester_end is None:
-        out["K4"] = "The schedule has no term start or end date yet."
+        out["K4"] = "The schedule has no semester start or end date yet."
     elif not (sched.releases or sched.assignments):
         out["K4"] = "The schedule plans no releases or assignments yet."
     unsent = sum(not s.code_sent_at.strip() for s in students)
@@ -1074,7 +1076,7 @@ def cohort_checks(
             f"code yet."
         )
     if site not in facts.listing:
-        out["K6"] = "The cohort has no student site yet."
+        out["K6"] = "The semester has no student site yet."
     elif not _written(facts.site_home):
         out["K6"] = "The student site's home page is still the placeholder."
     if not facts.archived:
@@ -1087,12 +1089,12 @@ def cohort_checks(
     return out
 
 
-def cohort_inputs(facts: CohortFacts, course: CourseFacts) -> dict[str, str | None]:
+def semester_inputs(facts: SemesterFacts, course: CourseFacts) -> dict[str, str | None]:
     """The blob (or, for the sheets, tree) shas this status was computed from."""
     paths = facts.config_paths
     return {
         schedule.SCHEDULE_PATH: paths.get(schedule.SCHEDULE_PATH),
-        sync_faculty.COHORT_PEOPLE_PATH: paths.get(sync_faculty.COHORT_PEOPLE_PATH),
+        sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH),
         roster.ROSTER_PATH: paths.get(roster.ROSTER_PATH),
         teams.TEAMS_PATH: paths.get(teams.TEAMS_PATH),
         grades.SHEETS_DIR: paths.get(grades.SHEETS_DIR),
@@ -1105,7 +1107,7 @@ def course_inputs(course: CourseFacts) -> dict[str, str | None]:
     paths = course.github_paths or {}
     return {
         COURSE_CONFIG: paths.get(COURSE_CONFIG),
-        COHORTS_PATH: paths.get(COHORTS_PATH),
+        SEMESTERS_PATH: paths.get(SEMESTERS_PATH),
     }
 
 
@@ -1121,14 +1123,14 @@ def render_course_file(course: CourseFacts, now: datetime) -> dict:
     }
 
 
-def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dict:
-    """The COHORT document, for the private classroom-config.
+def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) -> dict:
+    """The SEMESTER document, for the private classroom-config.
 
-    Problems: every fault in the cohort's own files, the course's own two files (every
-    cohort pays for those), and the templates THIS cohort's schedule cites - a template
-    fault is shown on every cohort it will affect, tagged `scope: course`.
+    Problems: every fault in the semester's own files, the course's own two files (every
+    semester pays for those), and the templates THIS semester's schedule cites - a template
+    fault is shown on every semester it will affect, tagged `scope: course`.
 
-    Stage predicates (lifecycle, cohort stages):
+    Stage predicates (lifecycle, semester stages):
     - K1 the org resolves (`app_installed` is a stub until decision 0002);
     - K2 classroom-config, welcome and the site repo exist, and the course registry lists it;
     - K3 people.yml is read, grants at least one instructor, and every entry has an email;
@@ -1136,7 +1138,7 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
     - K5 the roster has rows and every row has been sent a code;
     - K6 the site repo exists and its home page is written;
     - K7 classroom-config is archived.
-    `live` is the finished marker's opposite (`discovery.cohort_is_live`), not K1-K5."""
+    `live` is the finished marker's opposite (`discovery.semester_is_live`), not K1-K5."""
     faults = [
         *facts.schedule_faults,
         *facts.people_faults,
@@ -1157,12 +1159,12 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
     students = facts.students or []
     instructors, tas = _staff_counts(facts.people)
     site = pages_repo(facts.org)
-    todo = cohort_checks(facts, course, instructors)
-    done = {stage: todo[stage] is None for stage in COHORT_STAGES}
-    stages = _stage_states(COHORT_STAGES, done, problems)
+    todo = semester_checks(facts, course, instructors)
+    done = {stage: todo[stage] is None for stage in SEMESTER_STAGES}
+    stages = _stage_states(SEMESTER_STAGES, done, problems)
     today = now.astimezone(ZoneInfo(sched.timezone)).date()
-    week, weeks = term_weeks(sched.semester_start, sched.semester_end, today)
-    tag = term_tag(facts.org)
+    week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
+    tag = semester_of(facts.org)
     releases = render_releases(facts, facts.schedule_faults, now)
     assignments = render_assignments(facts, problems, now)
     stale = facts.site_last_update is None or (
@@ -1171,12 +1173,12 @@ def render_cohort(course: CourseFacts, facts: CohortFacts, now: datetime) -> dic
     )
     return {
         "schema": STATUS_SCHEMA,
-        "inputs": cohort_inputs(facts, course),
+        "inputs": semester_inputs(facts, course),
         "course": course_block,
-        "cohort": {
+        "semester": {
             "org": facts.org,
-            "term": tag,
-            "term_label": term_label(tag),
+            "key": tag,
+            "label": semester_label(tag),
             "timezone": sched.timezone,
             "week": week,
             "weeks": weeks,
@@ -1234,7 +1236,7 @@ def gather_course(course_org: str) -> CourseFacts:
     except (yaml.YAMLError, Unusable):
         facts.meta = {}  # the COURSE digest's faults below say what is wrong with it
     sync_faculty.read_course_config(course_org, facts.faults)
-    facts.registry = read_cohort_registry(course_org, facts.faults)
+    facts.registry = read_semester_registry(course_org, facts.faults)
     for name in sorted(listing):
         row = listing[name]
         if row.get("archived"):
@@ -1261,12 +1263,12 @@ def gather_course(course_org: str) -> CourseFacts:
     return facts
 
 
-def _outcomes(cohort_org: str, paths: dict[str, str]) -> list[dict]:
+def _outcomes(semester_org: str, paths: dict[str, str]) -> list[dict]:
     out = []
     for path in sorted(
         p for p in paths if p.startswith(f"{OUTCOMES_DIR}/") and p.endswith(".json")
     ):
-        text = get_file_content(cohort_org, schedule.CONFIG_REPO, path)
+        text = get_file_content(semester_org, schedule.CONFIG_REPO, path)
         try:
             out.append(json.loads(text or ""))
         except json.JSONDecodeError:
@@ -1274,8 +1276,8 @@ def _outcomes(cohort_org: str, paths: dict[str, str]) -> list[dict]:
     return out
 
 
-def _returned_at(cohort_org: str) -> dict[str, datetime]:
-    text = get_file_content(cohort_org, schedule.CONFIG_REPO, grades.DISTRIBUTED_PATH)
+def _returned_at(semester_org: str) -> dict[str, datetime]:
+    text = get_file_content(semester_org, schedule.CONFIG_REPO, grades.DISTRIBUTED_PATH)
     if not text:
         return {}
     try:
@@ -1294,38 +1296,38 @@ def _returned_at(cohort_org: str) -> dict[str, datetime]:
     return out
 
 
-def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFacts:
-    """Read one cohort, through the same loaders its digest issues are built by, so a
+def gather_semester(course_org: str, semester_org: str, now: datetime) -> SemesterFacts:
+    """Read one semester, through the same loaders its digest issues are built by, so a
     problem here is the fault that issue lists. A read that fails raises."""
-    facts = CohortFacts(org=cohort_org)
-    facts.listing = {r["name"]: r for r in list_org_repos(cohort_org)}
-    branch = default_branch(cohort_org, schedule.CONFIG_REPO, fallback="main")
-    facts.config_paths = repo_path_shas(cohort_org, schedule.CONFIG_REPO, branch)
-    sched = facts.sched = schedule.load(cohort_org)
+    facts = SemesterFacts(org=semester_org)
+    facts.listing = {r["name"]: r for r in list_org_repos(semester_org)}
+    branch = default_branch(semester_org, schedule.CONFIG_REPO, fallback="main")
+    facts.config_paths = repo_path_shas(semester_org, schedule.CONFIG_REPO, branch)
+    sched = facts.sched = schedule.load(semester_org)
     # The schedule.yml digest's own three sources (`scheduler._preflight_sources`): the
     # sources the plan cites, the entries the parser dropped, and the team-formation
     # windows somebody is still waiting on (None = the roster could not be read).
-    windows = team_formation.open_windows(course_org, cohort_org, sched, now)
+    windows = team_formation.open_windows(course_org, semester_org, sched, now)
     facts.schedule_faults = [
         *schedule.source_faults(sched, course_org),
         *sched.faults,
         *(team_formation.window_faults(sched, windows) or []),
     ]
-    facts.people = sync_faculty.read_cohort_people(cohort_org, facts.people_faults)
+    facts.people = sync_faculty.read_semester_people(semester_org, facts.people_faults)
     try:
-        facts.students = roster.load(cohort_org, facts.roster_faults)
+        facts.students = roster.load(semester_org, facts.roster_faults)
     except Unusable:
         facts.students = None  # the header fault is already in roster_faults
     known = known_handles(facts.students) if facts.students is not None else None
     try:
-        facts.teams = teams.load(cohort_org, facts.teams_faults, known)
+        facts.teams = teams.load(semester_org, facts.teams_faults, known)
     except Unusable:
         facts.teams = {}
-    # `grades.cohort_sheet_faults`, with each sheet read once for the faults and the marks.
+    # `grades.semester_sheet_faults`, with each sheet read once for the faults and the marks.
     sheet_specs = grades.sheet_specs(course_org, sched)
     sheet_texts = {
         name: get_file_content(
-            cohort_org, schedule.CONFIG_REPO, grades.sheet_path(name)
+            semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
         )
         for name in sorted(sheet_specs)
     }
@@ -1333,13 +1335,13 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
         if text is not None:
             facts.sheet_faults += grades.sheet_faults(name, text, sheet_specs[name])
     grades.grading_config_faults(
-        course_org, cohort_org, sched, facts.template_faults, facts.listing
+        course_org, semester_org, sched, facts.template_faults, facts.listing
     )
     for slug, entry in sched.assignments.items():
         facts.specs[slug] = grades.load_grading_spec(
             course_org, entry.course_source_repo
         )
-        name = schedule.cohort_name(slug, entry)
+        name = schedule.semester_name(slug, entry)
         text = sheet_texts[name]
         if text:
             try:
@@ -1347,26 +1349,30 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
             except grades.SheetUnreadable:
                 pass  # its fault is in sheet_faults
             facts.sheet_changed[name] = _last_commit_at(
-                cohort_org, schedule.CONFIG_REPO, grades.sheet_path(name)
+                semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
             )
-    facts.returned_at = _returned_at(cohort_org)
-    for repo in sorted({d.cohort_dest_repo for r in sched.releases for d in r.deploy}):
+    facts.returned_at = _returned_at(semester_org)
+    for repo in sorted(
+        {d.semester_dest_repo for r in sched.releases for d in r.deploy}
+    ):
         if repo in facts.listing:
             facts.dest_paths[repo] = set(
                 repo_tree(
-                    cohort_org, repo, default_branch(cohort_org, repo, fallback="main")
+                    semester_org,
+                    repo,
+                    default_branch(semester_org, repo, fallback="main"),
                 )
             )
-    site = pages_repo(cohort_org)
+    site = pages_repo(semester_org)
     if site in facts.listing:
-        facts.site_home = get_file_content(cohort_org, site, SITE_HOME)
-        facts.site_last_update = _last_commit_at(cohort_org, site)
+        facts.site_home = get_file_content(semester_org, site, SITE_HOME)
+        facts.site_last_update = _last_commit_at(semester_org, site)
     moments = [
-        _last_commit_at(cohort_org, schedule.CONFIG_REPO, p)
-        for p in (schedule.SCHEDULE_PATH, sync_faculty.COHORT_PEOPLE_PATH)
+        _last_commit_at(semester_org, schedule.CONFIG_REPO, p)
+        for p in (schedule.SCHEDULE_PATH, sync_faculty.SEMESTER_PEOPLE_PATH)
     ]
     facts.config_last_update = max((m for m in moments if m), default=None)
-    members = get_team_members(cohort_org, INSTRUCTORS_TEAM)
+    members = get_team_members(semester_org, INSTRUCTORS_TEAM)
     if members is not None and facts.people is not None:
         want = sync_faculty.desired_team_members(
             facts.people, date.today().isoformat()
@@ -1374,7 +1380,7 @@ def gather_cohort(course_org: str, cohort_org: str, now: datetime) -> CohortFact
         facts.staff_synced = {m.casefold() for m in members} == {
             w.casefold() for w in want
         }
-    facts.outcomes = _outcomes(cohort_org, facts.config_paths)
+    facts.outcomes = _outcomes(semester_org, facts.config_paths)
     return facts
 
 
@@ -1384,13 +1390,13 @@ def collect_course(course_org: str, now: datetime | None = None) -> dict:
     return render_course_file(gather_course(course_org), now)
 
 
-def collect_cohort(
-    course_org: str, cohort_org: str, now: datetime | None = None
+def collect_semester(
+    course_org: str, semester_org: str, now: datetime | None = None
 ) -> dict:
-    """The cohort document (`dsl.status/1`), for `classroom-config/.dsl/status.json`."""
+    """The semester document (`dsl.status/1`), for `classroom-config/.dsl/status.json`."""
     now = now or datetime.now(UTC)
-    return render_cohort(
-        gather_course(course_org), gather_cohort(course_org, cohort_org, now), now
+    return render_semester(
+        gather_course(course_org), gather_semester(course_org, semester_org, now), now
     )
 
 

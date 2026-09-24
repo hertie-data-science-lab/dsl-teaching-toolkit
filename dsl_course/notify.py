@@ -9,8 +9,8 @@ Two mails, each about a fault whose own channel reaches nobody in time:
 - `notify_overwritten_edits` mails whoever hand-edited a generated file in a site repo
   that the sync has just rebuilt over. The issue the sync files there is the record; the
   mail is what tells a person their work is in a commit and not on the site.
-- `notify_cohort_archiving` mails the cohort's teaching team the fortnight before the
-  whole cohort org is frozen read-only. The notice issue in `classroom-config` is the
+- `notify_semester_archiving` mails the semester's teaching team the fortnight before the
+  whole semester org is frozen read-only. The notice issue in `classroom-config` is the
   record; the mail is what reaches somebody who is not reading GitHub notifications in the
   weeks after a term ends, which is exactly when this fires.
 - `notify_run_failed` mails the MAINTAINER when an unattended run genuinely broke. The
@@ -22,7 +22,7 @@ WHO IS TOLD is decided by git, not by a mailing list (`route`): the planner of t
 schedule.yml line and the last committer of the materials repo it names are the two people
 who can act, and telling the whole teaching team about every entry is how a notification
 stops being read. The whole team is the FALLBACK, for a line nobody can be named for, and
-below it the course admins and then the maintainer (`_fallback_to`), for a cohort whose
+below it the course admins and then the maintainer (`_fallback_to`), for a semester whose
 people.yml can address nobody at all.
 
 A fault in the COURSE org's own config is the one exception (`route_course`). Its
@@ -56,7 +56,7 @@ from typing import NamedTuple
 
 from . import faults, ghcli, mailer, sync_faculty
 from .config_digest import Digest, DigestResult
-from .course import CONFIG_REPO, term_tag
+from .course import CONFIG_REPO, semester_of
 from .discovery import course_name_of
 from .faults import (
     NOTIFY_FROM,
@@ -130,7 +130,7 @@ class Routing:
 
     `logins` is what the digest comment mentions - the same people the mail is addressed
     to, so the two channels reach one set of humans. Empty means git could name nobody in
-    people.yml, and the digest falls back to the cohort's instructors team."""
+    people.yml, and the digest falls back to the semester's instructors team."""
 
     by_key: dict[str, Routed] = field(default_factory=dict)
     logins: list[str] = field(default_factory=list)
@@ -154,9 +154,9 @@ def _blame(org: str, repo: str, path: str, ref: str = "main") -> dict[int, str]:
     A blame that failed must not read as "nobody wrote this": absence here degrades to
     mailing the whole teaching team, which is noisier but never wrong.
 
-    `org` and `ref` because not every file a cohort's digest carries is in the cohort org
+    `org` and `ref` because not every file a semester's digest carries is in the semester org
     on `main`: an assignment's `grading_config.yml` is in the course org, on the
-    template's `solution` branch, and blaming the cohort for it would name nobody."""
+    template's `solution` branch, and blaming the semester for it would name nobody."""
     try:
         return blame_logins(org, repo, path, f"refs/heads/{ref}")
     except Exception as exc:
@@ -167,23 +167,23 @@ def _blame(org: str, repo: str, path: str, ref: str = "main") -> dict[int, str]:
         return {}
 
 
-def _pushed(cohort_org: str, repo: str, path: str) -> tuple[str, ...]:
+def _pushed(semester_org: str, repo: str, path: str) -> tuple[str, ...]:
     """Who last pushed one file, newest first. `()` when it cannot be read.
 
     For a CSV, where blame is the wrong question: the bot writes two columns of
     students.csv back into rows faculty typed, so half the roster blames to an account
     that cannot fix anything - see `gh_contents.path_committers`."""
     try:
-        return path_committers(cohort_org, repo, path)
+        return path_committers(semester_org, repo, path)
     except Exception as exc:
         log(
-            f"  [skip] could not read who last pushed {path} in {cohort_org} "
+            f"  [skip] could not read who last pushed {path} in {semester_org} "
             f"({type(exc).__name__}) - notifying the whole teaching team"
         )
         return ()
 
 
-def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
+def _wrote_it(semester_org: str, fault: ConfigFault, bot: str) -> str | None:
     """The one login git holds responsible for this fault's line, or None.
 
     A CSV is asked who PUSHED it and a YAML who wrote the LINE, because a CSV's rows are
@@ -196,11 +196,11 @@ def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
     if not fault.file:
         return None
     if fault.file.endswith(".csv"):
-        return _last_pusher(cohort_org, fault, bot)
+        return _last_pusher(semester_org, fault, bot)
     if not fault.lineno:
         return None
     wrote = _blame(
-        fault.in_org or cohort_org, fault.in_repo, fault.file, fault.ref
+        fault.in_org or semester_org, fault.in_repo, fault.file, fault.ref
     ).get(fault.lineno)
     return wrote if wrote and wrote.lower() != bot else None
 
@@ -262,13 +262,13 @@ def _declared_admin_emails(course_org: str, now: datetime) -> list[str]:
 
 
 def _fallback_to(course_org: str, now: datetime) -> tuple[str, ...]:
-    """The To line for a cohort fault its own people.yml can address nobody for: the course
+    """The To line for a semester fault its own people.yml can address nobody for: the course
     ADMINS, then the MAINTAINER, then nobody.
 
-    A cohort with no `email:` anywhere is not a cohort with nothing to hear: its releases
+    A semester with no `email:` anywhere is not a semester with nothing to hear: its releases
     still ship nothing, and its digest issue is still open. Left to the @mention alone the
     fault stood for two days before the 48h rung copied the maintainer - so it falls one
-    level up instead, to the admins whose course this cohort is, and past them to the
+    level up instead, to the admins whose course this semester is, and past them to the
     maintainer, who is the last person who can act on an org that declares neither.
 
     A count and which fallback it was, never an address: this runs in a PUBLIC repo."""
@@ -276,33 +276,33 @@ def _fallback_to(course_org: str, now: datetime) -> tuple[str, ...]:
         mailer.course_admin_addresses(_declared_admin_emails(course_org, now))
     )
     if admins:
-        log(f"  [fallback] no cohort address - mailing {len(admins)} course admin(s)")
+        log(f"  [fallback] no semester address - mailing {len(admins)} course admin(s)")
         return admins
     maintainer = mailer.maintainer_address()
     if maintainer:
-        log("  [fallback] no cohort address - mailing the maintainer")
+        log("  [fallback] no semester address - mailing the maintainer")
         return (maintainer,)
     return ()
 
 
-def _teaching_contacts(cohort_org: str, now: datetime) -> list[sync_faculty.Contact]:
-    """This cohort's instructors and TAs active `now`, or none when people.yml is
+def _teaching_contacts(semester_org: str, now: datetime) -> list[sync_faculty.Contact]:
+    """This semester's instructors and TAs active `now`, or none when people.yml is
     unreadable.
 
-    Guarded, because `load_cohort_faculty` raises on a file it cannot parse - and every
+    Guarded, because `load_semester_faculty` raises on a file it cannot parse - and every
     caller here is about to TELL somebody something. An empty list falls through to
     `_fallback_to`, which is a worse address than the right one and a great deal better
     than a traceback out of the notifier."""
     try:
-        faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
+        faculty = sync_faculty.load_semester_faculty(semester_org) or {}
     except Exception as exc:
-        log_err(f"could not read {cohort_org}'s people.yml ({read_error(exc)})")
+        log_err(f"could not read {semester_org}'s people.yml ({read_error(exc)})")
         faculty = {}
     return sync_faculty.teaching_contacts(faculty, now.date().isoformat())
 
 
 def route(
-    cohort_org: str, course_org: str, faults: list[SourceFault], now: datetime
+    semester_org: str, course_org: str, faults: list[SourceFault], now: datetime
 ) -> Routing:
     """Work out who hears about each fault, once per tick.
 
@@ -315,13 +315,13 @@ def route(
     said on either channel, so nothing needs addressing and a quiet tick costs no API
     calls at all.
 
-    A cohort whose people.yml holds no address at all falls through to `_fallback_to` -
+    A semester whose people.yml holds no address at all falls through to `_fallback_to` -
     the course admins, then the maintainer - so the To line is empty only for a course
     that declares neither."""
     loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
     if not loud:
         return Routing()
-    contacts = _teaching_contacts(cohort_org, now)
+    contacts = _teaching_contacts(semester_org, now)
     by_handle = {c.handle.lower(): c for c in contacts}
     everyone = _addresses(c.email for c in contacts)
     instructors = _addresses(c.email for c in contacts if not c.is_ta)
@@ -338,7 +338,7 @@ def route(
             committers[f.repo] = _last_committer(course_org, f.repo)
         named: list[str] = []
         for login in (
-            _wrote_it(cohort_org, f, bot),
+            _wrote_it(semester_org, f, bot),
             committers.get(f.repo),
         ):
             if login and login.lower() != bot and login not in named:
@@ -370,7 +370,7 @@ def route(
         # people.yml holds no address at all, so `everyone` is empty and so is every group
         # git could name from it - all of this tick's faults or none. One fallback set for
         # the lot, and the @mention (`mention`) is untouched: who wrote the line does not
-        # change because nobody in the cohort can be written to.
+        # change because nobody in the semester can be written to.
         fallback = _fallback_to(course_org, now)
         routed = {key: Routed(fallback, ()) for key in routed}
     return Routing(routed, sorted(dict.fromkeys(mention)))
@@ -385,7 +385,7 @@ def route_course(
     """Who hears about a fault in the COURSE org's own config. `route`'s course-level twin.
 
     Two things differ, and both follow from the file being the course's rather than a
-    cohort's. The addresses are the course ADMINS' - their own `email:` in
+    semester's. The addresses are the course ADMINS' - their own `email:` in
     `dsl-course.yml` when any admin declares one, else the org SECRET
     (`mailer.course_admin_addresses`) - and every admin gets every course mail, so there
     is no handle-to-address routing here. And the person git names is @mentioned on the
@@ -487,7 +487,7 @@ def _rows(rows: list[tuple[str, str]]) -> str:
 
 
 def _block(
-    cohort_org: str,
+    semester_org: str,
     course_org: str,
     fault: SourceFault,
     rung: Severity,
@@ -501,7 +501,7 @@ def _block(
     and the date has still gone by, so "fix by: release fires <yesterday>" is not an
     instruction anybody can follow."""
     fired = fault.fires is not None and fault.fires <= now
-    line_url = fault.link(cohort_org)
+    line_url = fault.link(semester_org)
     where = html.escape(f" - {fault.label}")
     at = _anchor(line_url, fault.at) if line_url else html.escape(fault.at)
     fix = fault.fix(course_org, rung)
@@ -540,15 +540,15 @@ def _course_name(course_org: str) -> str:
         return course_org
 
 
-def _course_label(course_org: str, cohort_org: str) -> str:
-    """`Deep Learning (Demo) f2026`: the course's display name and the cohort's term tag,
-    which is how a reader tells two cohorts of one course apart in a subject line. The
+def _course_label(course_org: str, semester_org: str) -> str:
+    """`Deep Learning (Demo) f2026`: the course's display name and the semester's term tag,
+    which is how a reader tells two semesters of one course apart in a subject line. The
     org slug stands in for a course that declares no name."""
     name = _course_name(course_org)
-    # A COURSE-level fault is the course org's own, so there is no cohort and no term to
+    # A COURSE-level fault is the course org's own, so there is no semester and no term to
     # name - and a course org whose slug happens to carry one would otherwise put a
-    # cohort's tag on a subject line that is not about that cohort.
-    tag = None if cohort_org == course_org else term_tag(cohort_org)
+    # semester's tag on a subject line that is not about that semester.
+    tag = None if semester_org == course_org else semester_of(semester_org)
     return f"{name} {tag}" if tag else name
 
 
@@ -577,7 +577,7 @@ def _subject(
 
 
 def _mail(
-    cohort_org: str,
+    semester_org: str,
     course_org: str,
     digest: DigestResult,
     keys: list[str],
@@ -586,7 +586,7 @@ def _mail(
 ) -> tuple[str, str]:
     """The (subject, HTML body) of one message: who sends it, why, and a table per fault
     that ends on the issue holding the history."""
-    label = _course_label(course_org, cohort_org)
+    label = _course_label(course_org, semester_org)
     org_url = f"https://github.com/{course_org}"
     sender = html.escape(_course_name(course_org))
     parts = [
@@ -597,14 +597,14 @@ def _mail(
     for key, fault in zip(keys, faults, strict=True):
         parts.append(
             _block(
-                cohort_org, course_org, fault, digest.mail[key], digest.issue_url, now
+                semester_org, course_org, fault, digest.mail[key], digest.issue_url, now
             )
         )
     return _subject(label, faults, loudest, now), "\n".join(parts) + "\n"
 
 
 def _deliver(
-    cohort_org: str,
+    semester_org: str,
     groups: dict[Routed, list[str]],
     message: Callable[[Routed, list[str]], tuple[str, str]],
     copy_maintainer: Callable[[list[str]], bool],
@@ -629,7 +629,7 @@ def _deliver(
     # it again each time.
     if not any(g.to for g in groups):
         log(
-            f"  [skip] no notification address for {cohort_org} - the digest "
+            f"  [skip] no notification address for {semester_org} - the digest "
             f"@mention is the only channel"
         )
         return Unsent()
@@ -643,7 +643,7 @@ def _deliver(
             continue
         subject, body = message(routed, keys)
         copies = list(routed.cc)
-        # Not twice: a cohort no address of its own could be found for is addressed TO the
+        # Not twice: a semester no address of its own could be found for is addressed TO the
         # maintainer (`_fallback_to`), and the rung that copies them must not then put the
         # same mailbox on the Cc line - the same mailbox written two ways included.
         addressed_to = {a.lower() for a in routed.to}
@@ -710,7 +710,7 @@ def _groups(
 
 
 def notify_source_transitions(
-    cohort_org: str,
+    semester_org: str,
     course_org: str,
     digest: DigestResult,
     now: datetime,
@@ -740,11 +740,11 @@ def notify_source_transitions(
         def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
             keys.sort(key=lambda k: (-digest.mail[k], k))
             return _mail(
-                cohort_org, course_org, digest, keys, digest.mail[keys[0]], now
+                semester_org, course_org, digest, keys, digest.mail[keys[0]], now
             )
 
         return _deliver(
-            cohort_org,
+            semester_org,
             groups,
             message,
             # The maintainer is copied at the two rungs where a release is about to ship
@@ -759,7 +759,7 @@ def notify_source_transitions(
         # credential Graph refused - the release itself is the job. Nothing went out, so
         # everything this tick owed is held.
         log_err(
-            f"could not mail {cohort_org}'s source faults ({type(exc).__name__}): {exc}"
+            f"could not mail {semester_org}'s source faults ({type(exc).__name__}): {exc}"
         )
         return Unsent(1, tuple(events))
 
@@ -851,7 +851,7 @@ def _immediate_intro(
 
 def notify_config_faults(
     spec: Digest,
-    cohort_org: str,
+    semester_org: str,
     course_org: str,
     digest: DigestResult,
     now: datetime,
@@ -874,7 +874,7 @@ def notify_config_faults(
             return Unsent()
         # Both read the course org's identity file, so they are taken ONCE and not once
         # per recipient group - `message` is called per group by `_deliver`.
-        label = _course_label(course_org, cohort_org)
+        label = _course_label(course_org, semester_org)
         sender = html.escape(_course_name(course_org))
 
         def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
@@ -885,18 +885,20 @@ def notify_config_faults(
                 _immediate_intro(spec, faults_in, digest.reminder),
             ]
             parts += [
-                _block(cohort_org, course_org, f, digest.mail[k], digest.issue_url, now)
+                _block(
+                    semester_org, course_org, f, digest.mail[k], digest.issue_url, now
+                )
                 for k, f in zip(keys, faults_in, strict=True)
             ]
             subject = f"[{label}] {spec.file} has {_counted(faults_in)}"
             return subject, "\n".join(parts) + "\n"
 
         return _deliver(
-            cohort_org,
+            semester_org,
             groups,
             message,
             # The maintainer joins once the file has been unusable for two days: by then
-            # it is not a slip somebody is about to fix, and somebody outside the cohort
+            # it is not a slip somebody is about to fix, and somebody outside the semester
             # has to know its enrolment (or its teams, or its plan) is not running. On a
             # COURSE-level digest they are on it from the first mail (`cc_maintainer`):
             # the course admins it goes to are the same small group who may have written
@@ -907,7 +909,7 @@ def notify_config_faults(
         )
     except Exception as exc:
         log_err(
-            f"could not mail {cohort_org}'s {spec.file} faults "
+            f"could not mail {semester_org}'s {spec.file} faults "
             f"({type(exc).__name__}): {exc}"
         )
         return Unsent(1, tuple(events))
@@ -993,14 +995,14 @@ def notify_overwritten_edits(
 
     `by_login` is `{committer login: [(path, commit sha)]}`, keyed "" for a commit whose
     git email is linked to no GitHub account - those fall back to the whole teaching team,
-    which is the same fallback a blame nobody could read gets. `site_org` is a cohort org
-    for a cohort site and the course org itself for the public one; the latter declares no
+    which is the same fallback a blame nobody could read gets. `site_org` is a semester org
+    for a semester site and the course org itself for the public one; the latter declares no
     people.yml, so nobody is addressable there and the issue's cc is the only channel."""
     shas: dict[str, str] = {}
     faults_by_key: dict[str, ConfigFault] = {}
     groups: dict[Routed, list[str]] = {}
     try:
-        faculty = sync_faculty.load_cohort_faculty(site_org) or {}
+        faculty = sync_faculty.load_semester_faculty(site_org) or {}
     except Exception as exc:
         log_err(f"could not read {site_org}'s people.yml ({read_error(exc)})")
         faculty = {}
@@ -1082,26 +1084,28 @@ def notify_overwritten_edits(
         return Unsent(1, tuple(faults_by_key))
 
 
-# --------------------------------------------------- a cohort about to be frozen
+# --------------------------------------------------- a semester about to be frozen
 
 
-def _archive_message(cohort_org: str, course_org: str, when: date) -> tuple[str, str]:
+def _archive_message(semester_org: str, course_org: str, when: date) -> tuple[str, str]:
     """The (subject, HTML body) of the archive notice, in the teaching team's own words.
 
-    It links the cohort org and `schedule.yml`, and not the notice issue: the two things
+    It links the semester org and `schedule.yml`, and not the notice issue: the two things
     a reader might want to DO about this are look over what is about to freeze and move
     or remove the date, and the second is an edit to that file - which is the one
     sentence it ends on, in the same words as the notice issue beside it
     (`scheduler._archive_notice_body`). The two must not offer two different recipes for
     one edit; only the repo is named differently, because the mail is read outside the
     repo the issue sits in."""
-    label = _course_label(course_org, cohort_org)
-    org_at = f"https://github.com/{cohort_org}"
-    edit_at = f"https://github.com/{cohort_org}/{CONFIG_REPO}/edit/main/{SCHEDULE_PATH}"
+    label = _course_label(course_org, semester_org)
+    org_at = f"https://github.com/{semester_org}"
+    edit_at = (
+        f"https://github.com/{semester_org}/{CONFIG_REPO}/edit/main/{SCHEDULE_PATH}"
+    )
     body = (
         f"<p>This is an automated email sent on behalf of "
         f"{html.escape(_course_name(course_org))}.</p>\n"
-        f"<p>On <b>{when}</b> all the repositories in {_anchor(org_at, cohort_org)} will "
+        f"<p>On <b>{when}</b> all the repositories in {_anchor(org_at, semester_org)} will "
         f"be archived. Nothing is deleted and all read access permissions remain as they "
         f"are, write accesses are revoked and the org is frozen in place.</p>\n"
         f"<p>If there is anything you would like to make changes to, please make those "
@@ -1109,13 +1113,13 @@ def _archive_message(cohort_org: str, course_org: str, when: date) -> tuple[str,
         f"{_anchor(edit_at, SCHEDULE_PATH)} in the "
         f"<code>{CONFIG_REPO}</code> repo.</p>\n"
     )
-    return f"[{label}] {cohort_org} is archived on {when}", body
+    return f"[{label}] {semester_org} is archived on {when}", body
 
 
-def notify_cohort_archiving(
-    cohort_org: str, course_org: str, when: date, now: datetime
+def notify_semester_archiving(
+    semester_org: str, course_org: str, when: date, now: datetime
 ) -> bool:
-    """Mail this cohort's teaching team that the whole org freezes on `when`. True only
+    """Mail this semester's teaching team that the whole org freezes on `when`. True only
     when a message actually went out.
 
     Its own small sender rather than `_deliver`'s: this is not a fault, so it has no
@@ -1127,18 +1131,18 @@ def notify_cohort_archiving(
     the self-healing one: the issue is still filed, and a tick after somebody wires the
     transport up sends the mail rather than deciding it was already sent."""
     to = _addresses(
-        c.email for c in _teaching_contacts(cohort_org, now)
+        c.email for c in _teaching_contacts(semester_org, now)
     ) or _fallback_to(course_org, now)
     if not to:
         log(
-            f"  [skip] no notification address for {cohort_org} - the notice issue is "
+            f"  [skip] no notification address for {semester_org} - the notice issue is "
             f"the only channel"
         )
         return False
     if mailer.graph_config_from_env() is None:
         log("  [skip] mail not configured - the notice issue is the only channel")
         return False
-    subject, body = _archive_message(cohort_org, course_org, when)
+    subject, body = _archive_message(semester_org, course_org, when)
     sent = mailer.send_bulk([mailer.Message(to, subject, body)], html=True)
     if len(sent) < len(to):
         # Un-recorded rather than lost: the issue body is not stamped, so the next tick
@@ -1148,7 +1152,7 @@ def notify_cohort_archiving(
             f"next tick will offer it again"
         )
         return False
-    log_ok(f"mailed {len(sent)} recipient(s) that {cohort_org} archives on {when}")
+    log_ok(f"mailed {len(sent)} recipient(s) that {semester_org} archives on {when}")
     return True
 
 

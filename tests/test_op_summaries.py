@@ -40,7 +40,7 @@ from dsl_course.ops.registry import REGISTRY, command
 from dsl_course.schedule import Release, Schedule
 
 COURSE = "hertie-dsl-demo-course-e1234"
-COHORT = "hertie-dsl-demo-f2026"
+SEMESTER = "hertie-dsl-demo-f2026"
 NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 
@@ -114,7 +114,7 @@ def engine(monkeypatch):
         "get_team_members",
         lambda org, team: {"prof"} if team == "course-admin" else set(),
     )
-    monkeypatch.setattr(request_mod, "discover_cohorts", lambda org: [COHORT])
+    monkeypatch.setattr(request_mod, "discover_semesters", lambda org: [SEMESTER])
     hooked = []
     monkeypatch.setattr(status, "write_after_op", hooked.append)
     monkeypatch.setattr(outcome_mod, "put_file", lambda *a, **k: True)
@@ -127,19 +127,19 @@ def _run(
     op: str,
     preview: bool = False,
     args: dict | None = None,
-    cohort: str | None = COHORT,
+    semester: str | None = SEMESTER,
 ) -> dict:
     raw = {
         "schema": "dsl.request/1",
         "op": op,
         "actor": "prof",
         "course_org": COURSE,
-        "cohort_org": cohort,
+        "semester_org": semester,
         "args": args or {},
         "preview": preview,
     }
-    if cohort is None:
-        del raw["cohort_org"]
+    if semester is None:
+        del raw["semester_org"]
     monkeypatch.setattr(
         sys, "argv", ["dsl_course.console", "--request", json.dumps(raw)]
     )
@@ -184,7 +184,7 @@ def test_a_refused_derive_carries_its_reasons_and_file_list(
         "assignment.derive_starter",
         preview=True,
         args={"course_source_repo": "assignment-1-f2026"},
-        cohort=None,
+        semester=None,
     )
     assert body["conclusion"] == "failed"
     assert [r["code"] for r in body["reasons"]] == ["NO_SOLUTION_REGION"]
@@ -231,7 +231,7 @@ def test_the_status_hook_is_handed_the_request_as_a_dict(monkeypatch, capsys, en
     _run(monkeypatch, capsys, "access.check")
     (request,) = engine
     assert isinstance(request, dict)
-    assert (request["course_org"], request["cohort_org"]) == (COURSE, COHORT)
+    assert (request["course_org"], request["semester_org"]) == (COURSE, SEMESTER)
 
 
 def test_every_real_op_has_a_sentence_to_fall_back_on():
@@ -244,7 +244,7 @@ def test_every_real_op_has_a_sentence_to_fall_back_on():
     assert missing == []
 
 
-def test_cohort_check_writes_status_json():
+def test_semester_check_writes_status_json():
     assert (
         REGISTRY["cohort.check"].argv(
             request_mod.parse_request(
@@ -254,7 +254,7 @@ def test_cohort_check_writes_status_json():
                         "op": "cohort.check",
                         "actor": "prof",
                         "course_org": COURSE,
-                        "cohort_org": COHORT,
+                        "semester_org": SEMESTER,
                         "args": {},
                         "preview": False,
                     }
@@ -269,7 +269,7 @@ def test_cohort_check_writes_status_json():
 
 
 def test_status_refresh_counts_problems_and_this_week():
-    doc = {"cohort": {}, "problems": [{}, {}], "this_week": [{}]}
+    doc = {"semester": {}, "problems": [{}, {}], "this_week": [{}]}
     s = status.refreshed(doc)
     assert s.text == "Status refreshed: 2 problems, 1 item this week."
     assert s.counts == {"problems": 2, "this_week": 1}
@@ -281,14 +281,14 @@ def test_status_refresh_counts_problems_and_this_week():
 
 def test_status_write_returns_the_summary(monkeypatch):
     doc = {
-        "course": {"cohorts": [COHORT]},
-        "cohort": {"live": True},
+        "course": {"semesters": [SEMESTER]},
+        "semester": {"live": True},
         "problems": [{}],
         "this_week": [],
     }
-    monkeypatch.setattr(status, "_document", lambda course, cohort: doc)
+    monkeypatch.setattr(status, "_document", lambda course, semester: doc)
     monkeypatch.setattr(status, "put_file", lambda *a, **k: True)
-    out = status.write(COURSE, COHORT)
+    out = status.write(COURSE, SEMESTER)
     assert out == 0
     assert out.text == "Status refreshed: 1 problem, 0 items this week."
 
@@ -317,7 +317,7 @@ def test_the_automation_preview_says_what_would_go_out_and_why_not():
 
 def test_the_automation_preview_with_nothing_due():
     s = scheduler.preview_summary([], [])
-    assert s.text == "Automation has nothing due in this cohort right now."
+    assert s.text == "Automation has nothing due in this semester right now."
     assert s.reasons == []
 
 
@@ -347,7 +347,7 @@ def _site(monkeypatch, fake_git) -> Summary:
             config={}, collections={}, commit="site: sync", title="Student site"
         )
 
-    return site_repo.sync_site_repo(COHORT, build)
+    return site_repo.sync_site_repo(SEMESTER, build)
 
 
 def test_a_site_update_counts_the_pages_it_changed(monkeypatch):
@@ -371,7 +371,7 @@ def test_reconcile_tallies_the_membership_changes(monkeypatch):
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: {"bot"})
     monkeypatch.setattr(gh_teams, "acting_login", lambda: "bot")
     gh_teams.reset_membership_changes()
-    assert gh_teams.reconcile_team_members(COHORT, "t", {"new1", "new2", "bot"}) == 0
+    assert gh_teams.reconcile_team_members(SEMESTER, "t", {"new1", "new2", "bot"}) == 0
     assert gh_teams.membership_changes() == {"added": 2, "removed": 1}
     gh_teams.reset_membership_changes()
     assert gh_teams.membership_changes() == {"added": 0, "removed": 0}
@@ -433,8 +433,8 @@ def _deploy_main(monkeypatch, *extra) -> Summary:
             COURSE,
             "--course-source-repo",
             "course-materials-f2026",
-            "--cohort-org",
-            COHORT,
+            "--semester-org",
+            SEMESTER,
             "--course-source-path",
             "lectures/05,labs/05",
             *extra,
@@ -512,15 +512,15 @@ def test_the_keep_for_future_terms_sentence():
     )
 
 
-def test_archiving_an_archived_cohort_had_nothing_to_do(monkeypatch):
+def test_archiving_an_archived_semester_had_nothing_to_do(monkeypatch):
     monkeypatch.setattr(
         teardown,
         "list_org_repos",
         lambda org: [{"name": "classroom-config", "archived": True}],
     )
-    out = teardown.close_out(COURSE, COHORT, dry_run=False)
+    out = teardown.close_out(COURSE, SEMESTER, dry_run=False)
     assert out == 0 and out.conclusion == "nothing_to_do"
-    assert out.text == "This cohort is already archived."
+    assert out.text == "This semester is already archived."
 
 
 # ------------------------------------------------------------------ teams.open_window
@@ -534,7 +534,7 @@ def _open_window_request(preview: bool) -> request_mod.Request:
                 "op": "teams.open_window",
                 "actor": "prof",
                 "course_org": COURSE,
-                "cohort_org": COHORT,
+                "semester_org": SEMESTER,
                 "args": {"assignment": "assignment-3-project"},
                 "preview": preview,
             }
@@ -548,8 +548,8 @@ def test_open_window_spells_the_open_team_formation_flags():
     base = [
         "--course-org",
         COURSE,
-        "--cohort-org",
-        COHORT,
+        "--semester-org",
+        SEMESTER,
         "--assignment",
         "assignment-3-project",
     ]
@@ -566,7 +566,7 @@ def test_open_window_needs_the_assignment():
                     "op": "teams.open_window",
                     "actor": "prof",
                     "course_org": COURSE,
-                    "cohort_org": COHORT,
+                    "semester_org": SEMESTER,
                     "args": {},
                     "preview": True,
                 }
@@ -577,7 +577,7 @@ def test_open_window_needs_the_assignment():
 def test_a_press_with_no_open_window_had_nothing_to_do(monkeypatch):
     monkeypatch.setattr(team_formation.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(team_formation, "open_windows", lambda *a: [])
-    out = team_formation.run(COURSE, COHORT, NOW)
+    out = team_formation.run(COURSE, SEMESTER, NOW)
     assert out == 0 and out.conclusion == "nothing_to_do"
     assert out.text == "No team-formation window is open right now; nothing to send."
 
@@ -585,6 +585,6 @@ def test_a_press_with_no_open_window_had_nothing_to_do(monkeypatch):
 def test_a_window_nobody_is_waiting_on_has_nothing_to_send():
     window = SimpleNamespace(shut=False, waiting=())
     out = team_formation.notify_windows(
-        COURSE, COHORT, Schedule(), [window], NOW, dry_run=True
+        COURSE, SEMESTER, Schedule(), [window], NOW, dry_run=True
     )
     assert out == 0 and out.conclusion == "nothing_to_do"

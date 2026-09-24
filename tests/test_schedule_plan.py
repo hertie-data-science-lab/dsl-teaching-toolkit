@@ -47,8 +47,8 @@ def test_session_dates_maps_folder_ordinal_and_section_to_release_when():
     sw = _row_dates(s)
     assert sw[("2", "lecture")] == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
     assert sw[("2", "lab")] == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
-    # keyed off the cohort_dest_path ordinal; a bare dest folder takes its section from
-    # cohort_dest_repo
+    # keyed off the semester_dest_path ordinal; a bare dest folder takes its section from
+    # semester_dest_repo
     assert sw[("1", "lecture")] == datetime(2026, 9, 8, 14, 0, tzinfo=BERLIN)
 
 
@@ -437,7 +437,7 @@ def test_row_kind_splits_labs_from_lectures():
 
 # ------------------------------------------------- `type:`, the declared row override
 # Optional, and purely additive: an entry that declares none is placed by where its files
-# land, exactly as every live cohort's is.
+# land, exactly as every live semester's is.
 
 
 def test_a_declared_type_places_a_row_its_path_would_not():

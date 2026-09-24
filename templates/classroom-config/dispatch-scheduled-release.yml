@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Dispatch scheduled release
 
-# Seeded into a cohort's private classroom-config repo as
+# Seeded into a semester's private classroom-config repo as
 # .github/workflows/dispatch-scheduled-release.yml (sibling of dispatch-sync-site.yml,
 # which refreshes the website). Its only job: fire the course org's Scheduled release
 # whenever one of this repo's hand-edited files changes here, so an edited release,
@@ -20,10 +20,10 @@ name: Dispatch scheduled release
 # hours - so "a schedule edit takes effect within ~15 minutes" is only true if the edit
 # itself starts a run. Firing is always safe: Scheduled release is idempotent (one-shot
 # work is guarded by its own markers, cumulative work re-converges), so an extra run does
-# no more than the cron would. `driver: classroom-config` plus `cohort_org` scopes the run
-# to THIS cohort, and hands any website render to Sync site's queue by dispatch.
+# no more than the cron would. `driver: classroom-config` plus `semester_org` scopes the run
+# to THIS semester, and hands any website render to Sync site's queue by dispatch.
 #
-# Reads the course org from THIS cohort's own .github/dsl-course.yml `course:` pointer
+# Reads the course org from THIS semester's own .github/dsl-course.yml `course:` pointer
 # (single source of truth). Fires a repository_dispatch (not workflow_dispatch) so the
 # scheduler's ungated automatic path picks it up. Runs under secrets.DSL_BOT_TOKEN, which
 # classroom-config already carries (an infra repo).
@@ -50,15 +50,15 @@ jobs:
       - name: Trigger Scheduled release in the course org
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          COHORT_ORG: ${{ github.repository_owner }}
+          SEMESTER_ORG: ${{ github.repository_owner }}
         run: |
-          course_org=$(gh api "repos/$COHORT_ORG/.github/contents/dsl-course.yml" \
+          course_org=$(gh api "repos/$SEMESTER_ORG/.github/contents/dsl-course.yml" \
             --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
           if [ -z "$course_org" ]; then
-            echo "::error::no 'course:' line in $COHORT_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            echo "::error::no 'course:' line in $SEMESTER_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
             exit 1
           fi
           gh api "repos/$course_org/.github/dispatches" \
             -f event_type=scheduled-release \
-            -f "client_payload[cohort_org]=$COHORT_ORG" \
+            -f "client_payload[semester_org]=$SEMESTER_ORG" \
             -f "client_payload[driver]=classroom-config"

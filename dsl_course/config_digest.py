@@ -1,4 +1,4 @@
-"""dsl-course config digest -- one self-updating issue per hand-edited file per cohort,
+"""dsl-course config digest -- one self-updating issue per hand-edited file per semester,
 for everything in it a human has to fix.
 
 The problem this solves is notification volume, not detection. The parsers already find
@@ -34,7 +34,7 @@ Previous state rides along in the body as an HTML comment (invisible when render
 the digest needs no committed state file and no database: the issue IS the record. On a
 tick that has to re-OPEN the issue, the state of the newest CLOSED one with the same title
 is adopted, so an issue somebody closed by hand does not report every standing fault as
-new and mail the cohort about all of it again.
+new and mail the semester about all of it again.
 
 Who is @mentioned is decided by git, not by the team: `notify.route` names the planner of
 the line and the last committer of the repo, and the same people are the mail's To line.
@@ -42,7 +42,7 @@ That answer costs several API reads, so it is asked for only on a tick with some
 say, and the logins it gave ride in the body too - see `resolve_mention`. The team the
 digest names (`cc_team`) is the fallback.
 
-One of these issues is not a cohort's: `COURSE` lives in the COURSE org's own `.github`
+One of these issues is not a semester's: `COURSE` lives in the COURSE org's own `.github`
 and carries the two files that decide whether the course is synced at all. Everything
 above is the same for it - the repo and the team are the digest's own answers, not this
 module's.
@@ -75,7 +75,7 @@ from .issues import close_issues_titled, find_issues, issue_url, upsert_issue
 from .log import log_err, log_ok, log_step
 from .roster import ROSTER_PATH
 from .schedule import CONFIG_REPO, SourceFault, worst_severity
-from .sync_faculty import COHORT_PEOPLE_PATH
+from .sync_faculty import SEMESTER_PEOPLE_PATH
 from .teams import TEAMS_PATH
 
 
@@ -98,14 +98,14 @@ class Digest:
     cc_team: str = "instructors"
     # How the file is NAMED where a reader is sent to it, when `<repo>/<file>` is not
     # where it lives. An assignment's `grading_config.yml` is a file in the course org, on
-    # a template's `solution` branch, and the issue about it is the cohort's - so the
+    # a template's `solution` branch, and the issue about it is the semester's - so the
     # heading has to say which file without claiming it is in the repo the issue is in.
     cite: str = ""
     # Whether the maintainer is copied on EVERY mail this digest sends, rather than only
     # on the age reminders (`notify.notify_config_faults`). True for the course-level
-    # files: a cohort's broken roster is one cohort's term and the people who can fix it
+    # files: a semester's broken roster is one semester's term and the people who can fix it
     # are all in the To line, but a course whose identity file or registry cannot be read
-    # has stopped syncing every cohort under it - and the course admins the mail goes to
+    # has stopped syncing every semester under it - and the course admins the mail goes to
     # are the same small group who may have just broken it.
     cc_maintainer: bool = False
 
@@ -120,7 +120,7 @@ class Digest:
 # two do.
 PEOPLE = Digest(
     title="people.yml has entries the sync cannot use",
-    file=COHORT_PEOPLE_PATH,
+    file=SEMESTER_PEOPLE_PATH,
     doc="docs/05-manage-teaching-team.md",
 )
 ROSTER = Digest(
@@ -133,7 +133,7 @@ TEAMS = Digest(
     file=TEAMS_PATH,
     doc="docs/09-release-assignment-to-cohort.md",
 )
-# The FOLDER, not one sheet: a cohort marks half a dozen assignments at once and an issue
+# The FOLDER, not one sheet: a semester marks half a dozen assignments at once and an issue
 # per sheet would be six threads about one grader's afternoon. Each fault still carries
 # its own sheet's path, so every line in the body links the sheet it is in.
 GRADING_SHEETS = Digest(
@@ -141,8 +141,8 @@ GRADING_SHEETS = Digest(
     file=f"{SHEETS_DIR}/",
     doc="docs/10-grade-and-return-assignments.md",
 )
-# The COHORT's issue about a file in the COURSE org: the assignment is defined once and
-# graded per cohort, and the people who can act on it are the ones in this cohort's
+# The SEMESTER's issue about a file in the COURSE org: the assignment is defined once and
+# graded per semester, and the people who can act on it are the ones in this semester's
 # people.yml. Every fault in it carries its own template's address, so the line links the
 # template it is in - see `ConfigFault.in_org`.
 GRADING_CONFIG = Digest(
@@ -151,11 +151,11 @@ GRADING_CONFIG = Digest(
     doc="docs/03-add-assignment-to-course.md",
     cite=f"<assignment template>/{GRADING_FILE}",
 )
-# The one digest that is not a cohort's. It lives in the COURSE org's own public
+# The one digest that is not a semester's. It lives in the COURSE org's own public
 # `.github`, beside the two files it is about, and it is the exception to "one issue per
-# FILE": `dsl-course.yml` and the cohort registry are one issue because they are one
+# FILE": `dsl-course.yml` and the semester registry are one issue because they are one
 # failure - either of them unreadable and the sync walks past the whole course, admins
-# and cohorts alike, so the consequence sentence and the audience are identical. `file`
+# and semesters alike, so the consequence sentence and the audience are identical. `file`
 # names dsl-course.yml because that is what the subject line has to say; each fault still
 # cites the file it is actually in.
 COURSE = Digest(
@@ -167,11 +167,11 @@ COURSE = Digest(
     cc_maintainer=True,
 )
 
-# Every digest a COHORT has, in the order a reader meets the files. The pre-flight builds
+# Every digest a SEMESTER has, in the order a reader meets the files. The pre-flight builds
 # its own map (each of these needs a different loader), so this exists for the surfaces
-# that only want to know WHICH issues a cohort can have standing - `status`, and the docs
+# that only want to know WHICH issues a semester can have standing - `status`, and the docs
 # check. Listed once so a seventh digest cannot be added and then quietly go unreported.
-COHORT_DIGESTS: tuple[Digest, ...] = (
+SEMESTER_DIGESTS: tuple[Digest, ...] = (
     PEOPLE,
     ROSTER,
     TEAMS,
@@ -205,7 +205,7 @@ AGE_REMINDERS: tuple[tuple[timedelta, str], ...] = (
 # When a notification is held. A rung crossed at 02:00 is real and the issue's BODY says
 # so at 02:00; the comment and the email wait for the morning, because a notification
 # nobody can act on for five hours has woken somebody for nothing, and that is the fastest
-# way to have a channel muted. Local hours, in the cohort's own zone - 02:00 in a
+# way to have a channel muted. Local hours, in the semester's own zone - 02:00 in a
 # datacentre is nobody's night.
 QUIET_FROM = 23
 QUIET_UNTIL = 7
@@ -220,14 +220,14 @@ _ABSORBED = "absorbed"  # the title of an issue this one took over, once it is c
 # The middle word of every marker, shared by all seven digests and FROZEN. The marker name
 # is the key to what an OPEN issue has already reported: renaming it would read as
 # "nothing recorded" and re-announce - and re-mail - every standing fault in every live
-# cohort. `source` because that is what the one digest predating this engine already
+# semester. `source` because that is what the one digest predating this engine already
 # carries. A constant rather than a `Digest` field, so it cannot be set wrong.
 _MARKER_KEY = "source"
 _MARKER_RE = f"<!-- dsl-{_MARKER_KEY}-{{name}}: (.*?) -->"
 
 
 def in_quiet_hours(when) -> bool:
-    """Whether `when` - which must already be in the COHORT's zone - is inside the window
+    """Whether `when` - which must already be in the SEMESTER's zone - is inside the window
     where a notification is held. See QUIET_FROM."""
     return when.hour >= QUIET_FROM or when.hour < QUIET_UNTIL
 
@@ -265,25 +265,25 @@ class Context(NamedTuple):
     which."""
 
     course_org: str
-    cohort_org: str = ""
+    semester_org: str = ""
     central_ref: str = CENTRAL_REF
     mention: tuple[str, ...] = ()
 
 
-def _cite(digest: Digest, cohort_org: str, fault: SourceFault | None) -> str:
+def _cite(digest: Digest, semester_org: str, fault: SourceFault | None) -> str:
     """`ConfigFault.cite`, plus the one case a fault cannot answer for: a key whose fault
     is GONE, which is the CLEARED line - and there is no line to point at any more."""
-    return fault.cite(cohort_org) if fault else f"`{digest.file}`"
+    return fault.cite(semester_org) if fault else f"`{digest.file}`"
 
 
 def _mention(digest: Digest, ctx: Context) -> str:
-    """`cc @who`, falling back to the cohort's instructors team.
+    """`cc @who`, falling back to the semester's instructors team.
 
     A team mention reaches everybody and is therefore what nobody reads; the fallback is
     for a line git could not attribute to anyone in people.yml."""
     if ctx.mention:
         return "cc " + " ".join(f"@{login}" for login in ctx.mention)
-    return f"cc @{ctx.cohort_org}/{digest.cc_team}"
+    return f"cc @{ctx.semester_org}/{digest.cc_team}"
 
 
 class Transitions(NamedTuple):
@@ -510,7 +510,7 @@ def render_body(
     Every line names the FIELD to edit, not just the entry - "something is wrong with
     lecture-2" is not an instruction, `releases.lecture_02 -> course_source_path` is -
     carries the one sentence that would fix it (`SourceFault.fix`, shared with the mail so
-    the two cannot disagree), and links straight at the line in the cohort's schedule.yml
+    the two cannot disagree), and links straight at the line in the semester's schedule.yml
     when the parser found it.
 
     `state` is the map the caller decided to record; passing it makes "the marker matches
@@ -542,7 +542,7 @@ def render_body(
                 else _seen_line(seen.get(f.key), f)
             )
             out.append(
-                f"- **{f.label}** at {_cite(digest, ctx.cohort_org, f)}  \n  "
+                f"- **{f.label}** at {_cite(digest, ctx.semester_org, f)}  \n  "
                 f"{f.what}  |  fix: {f.fix(ctx.course_org, f.severity(now))}  \n  {when}"
             )
     out += [
@@ -689,7 +689,7 @@ def _comment(
     thing about it and disagrees with the mail, which counts the same clock correctly."""
 
     def cite(k: str) -> str:
-        return _cite(digest, ctx.cohort_org, faults.get(k))
+        return _cite(digest, ctx.semester_org, faults.get(k))
 
     parts = []
     if t.escalated:
@@ -733,7 +733,7 @@ def _comment(
 
 def hold(
     digest: Digest,
-    cohort_org: str,
+    semester_org: str,
     held: dict[str, str | None],
     clock: int | None = None,
 ) -> int:
@@ -757,7 +757,7 @@ def hold(
     the body is written, the mail is sent, and only a failure comes back here."""
     if not held and clock is None:
         return 0
-    repo = f"{cohort_org}/{digest.repo}"
+    repo = f"{semester_org}/{digest.repo}"
     try:
         found = find_issues(repo, digest.title)
     except RuntimeError as exc:
@@ -837,7 +837,7 @@ def _superseded(repo: str, digest: Digest, absorb: str | None, body: str):
     A listing that could not be read must not stop the surviving issue being written: the
     worst case is that the old one is closed a tick later.
 
-    Asked at most twice in the life of a cohort: the fold happens on the first tick, and
+    Asked at most twice in the life of a semester: the fold happens on the first tick, and
     the first tick that finds nothing left to fold records that in the body. Without that
     every tick, for the rest of the term, would spend a second issue listing looking for
     an issue that was closed in September."""
@@ -864,7 +864,7 @@ def _close_superseded(repo: str, digest: Digest, absorb: str | None) -> None:
 
 def sync(
     digest: Digest,
-    cohort_org: str,
+    semester_org: str,
     course_org: str,
     faults: list[SourceFault],
     now,
@@ -873,7 +873,7 @@ def sync(
     migrate: Callable[[dict, list], dict] | None = None,
     absorb: str | None = None,
 ) -> DigestResult:
-    """Bring this cohort's digest issue for one FILE in line with `faults`. Reports what
+    """Bring this semester's digest issue for one FILE in line with `faults`. Reports what
     it did - the error count, and what a notifier owes an email for on top of the
     @mention.
 
@@ -890,17 +890,17 @@ def sync(
     `absorb` is the title of an issue this one has TAKEN OVER: its recorded state is read
     into this tick's (this issue's own wins) and it is closed once, on the first tick that
     finds it. One-off, for schedule.yml - whose unreadable entries used to have an issue of
-    their own, opened by a block of shell in the cohort's validate-schedule workflow.
+    their own, opened by a block of shell in the semester's validate-schedule workflow.
 
     Never raises past the caller's isolation and never fails a run: a notification that
     could not be delivered must not take a release cron down with it."""
-    repo = f"{cohort_org}/{digest.repo}"
+    repo = f"{semester_org}/{digest.repo}"
     by_key = {f.key: f for f in faults}
     # ONE listing, open and closed together. The PREVIOUS state rides along in the body,
     # and where there is no open issue to read it from, the newest CLOSED one is where it
     # is: somebody who closes this issue by hand has not staged anything, so without
     # adopting what it left behind the next tick reports every standing fault as newly
-    # appeared and notifies the cohort about all of it again.
+    # appeared and notifies the semester about all of it again.
     try:
         found = find_issues(repo, digest.title)
     except RuntimeError as exc:
@@ -997,7 +997,7 @@ def sync(
         if speaking and resolve_mention
         else tuple(_read_marker(body, _MENTION, []))
     )
-    ctx = Context(course_org, cohort_org, ref, mention)
+    ctx = Context(course_org, semester_org, ref, mention)
     note = _comment(
         digest, changed, by_key, now, ctx, reminder, [f.key for f in immediate]
     )

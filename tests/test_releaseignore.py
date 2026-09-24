@@ -1,5 +1,5 @@
 """`.releaseignore` matching. If this is wrong, faculty are told a file is withheld and it
-is published anyway - to a private cohort repo, or to the open web.
+is published anyway - to a private semester repo, or to the open web.
 
 The spec is `.gitignore`'s, so most of this file is a DIFFERENTIAL test against real git
 rather than a restatement of what we think git does: each case's tree is built twice, once

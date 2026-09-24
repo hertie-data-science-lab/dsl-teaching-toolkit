@@ -5,7 +5,7 @@ the student - because that is what the snapshot pins and what `CONTRIBUTIONS.md`
 late arithmetic later read. Faking it through the Contents API with the bot token would
 test the harness rather than the pipeline.
 
-The token is a fine-grained PAT on the demo cohort org and it appears in the remote URL,
+The token is a fine-grained PAT on the demo semester org and it appears in the remote URL,
 so every failure message here goes through `_redact` first. Contents R/W is what the push
 needs; `set_visibility` also needs Administration: write, because one of the five shapes
 this harness drives is the one whose repo the STUDENT is admin of and may publish.
@@ -133,10 +133,10 @@ def set_visibility(org: str, repo: str, visibility: str) -> bool:
 
     The point of driving it with their token and not the maintainer's: what the assignment
     page tells them is that the repo is THEIRS to publish, and what the scheduler promises
-    the rest of the cohort is that publishing it before the grading cutoff does not last.
+    the rest of the semester is that publishing it before the grading cutoff does not last.
     A flip made with an org-owner token would prove the second and none of the first.
 
-    Needs Administration: write on the cohort org in the student's fine-grained PAT, on
+    Needs Administration: write on the semester org in the student's fine-grained PAT, on
     top of the Contents R/W the push needs - see this suite's module docstring."""
     with acting():
         return repos.set_visibility(org, repo, visibility, person=True)

@@ -1,10 +1,10 @@
-"""dsl-course deploy -- publish path(s) from a course-org source repo into a cohort-org
+"""dsl-course deploy -- publish path(s) from a course-org source repo into a semester-org
 repo, additively + idempotently:
 
     source/<repo>/<course_source_path>          (a folder - e.g. lectures/02_intro - or a file)
             |  copy that path
             v
-    cohort/<cohort_dest_repo>/<cohort_dest_path>       (private + students read; accumulates over time)
+    semester/<semester_dest_repo>/<semester_dest_path>       (private + students read; accumulates over time)
 
 The copy lands on the dest's `upstream` branch and is MERGED into the branch students
 read (see `UPSTREAM_BRANCH`).
@@ -17,14 +17,14 @@ clones it once, not 27 times. Both callers arrive here - the hourly scheduler
 manual "Release materials" workflow (via `main` below, whose five inputs are deliberately the
 same five fields as a `deploy:` entry).
 
-The workflow's `course_source_path`/`cohort_dest_path` are comma-separated PARALLEL lists
+The workflow's `course_source_path`/`semester_dest_path` are comma-separated PARALLEL lists
 paired by index (parse_path_pairs) - one Deploy per pair, one deploy_many call for the batch.
 
 Usage:
     python3 -m dsl_course.deploy \\
         --source-org COURSE --course-source-repo course-materials-f2026 \\
-        --cohort-org COHORT --cohort-dest-repo materials \\
-        --course-source-path "lectures/02_intro,labs/02_lab" [--cohort-dest-path "week02/lecture,week02/lab"]
+        --semester-org SEMESTER --semester-dest-repo materials \\
+        --course-source-path "lectures/02_intro,labs/02_lab" [--semester-dest-path "week02/lecture,week02/lab"]
 """
 
 from __future__ import annotations
@@ -178,7 +178,7 @@ def _copy_ignore(
     `extra_root_skips` is decided per release rather than by contract - currently a README
     still carrying the scaffold placeholder. Skipping the COPY rather than deleting the
     result afterwards is what keeps a withheld file from touching the destination: a
-    delete-after-copy stages a deletion of whatever the cohort repo already had there."""
+    delete-after-copy stages a deletion of whatever the semester repo already had there."""
 
     def ignore(dirpath: str, names: list[str]) -> set[str]:
         skip = {n for n in names if n in NEVER_COPIED or is_never_material(n)}
@@ -214,7 +214,7 @@ def _has_ref(dd: Path, ref: str) -> bool:
     return git("-C", str(dd), "rev-parse", "--verify", "--quiet", ref)[0] == 0
 
 
-def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
+def _checkout_upstream(semester_org: str, repo: str, dd: Path) -> Dest | None:
     """Put a dest clone on `UPSTREAM_BRANCH` and describe it (see `Dest`).
 
     None when the checkout itself failed, or when the dest's default branch IS
@@ -234,7 +234,7 @@ def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
     release creates. One probe answers both halves: `--abbrev-ref` prints the branch, and
     an unborn HEAD is what fails `--verify`.
 
-    A cohort released into before any of this existed gets an `upstream` holding exactly
+    A semester released into before any of this existed gets an `upstream` holding exactly
     what it was last released - cut here, and reported back as not yet on the remote (see
     `Dest`), because the merge phase is the only thing that can push it."""
     code, out = git(
@@ -244,7 +244,7 @@ def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
     base = (
         out.strip()
         if code == 0 and out.strip()
-        else default_branch(cohort_org, repo, fallback="main")
+        else default_branch(semester_org, repo, fallback="main")
     )
     if base == UPSTREAM_BRANCH:
         # `upstream` as the DEFAULT branch collapses the two ends of the merge into one,
@@ -254,7 +254,7 @@ def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
         # Refused out loud, because silently releasing nothing for ever is the one
         # outcome worse than a red run (maintainers.md names this branch toolkit-owned).
         log_err(
-            f"  {cohort_org}/{repo}: `{UPSTREAM_BRANCH}` is this repo's DEFAULT branch. "
+            f"  {semester_org}/{repo}: `{UPSTREAM_BRANCH}` is this repo's DEFAULT branch. "
             f"It is the toolkit's own branch - make something else the default, and "
             f"releases can be merged into it again."
         )
@@ -269,14 +269,14 @@ def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
         code, out = git("-C", str(dd), *GIT_ENV, "checkout", "-b", UPSTREAM_BRANCH)
     if code != 0:
         log_err(
-            f"  {cohort_org}/{repo}: could not check out `{UPSTREAM_BRANCH}` - "
+            f"  {semester_org}/{repo}: could not check out `{UPSTREAM_BRANCH}` - "
             f"{out[:200]}"
         )
         return None
     return Dest(dd, base, unborn, on_remote)
 
 
-def _prepare_dest(cohort_org: str, repo: str, root: Path) -> Dest | None:
+def _prepare_dest(semester_org: str, repo: str, root: Path) -> Dest | None:
     """Create, grant, clone and put ONE dest repo on `UPSTREAM_BRANCH`. None when it could
     not be prepared - the copies for that dest are impossible either way, and each failure
     has already said so once.
@@ -285,33 +285,33 @@ def _prepare_dest(cohort_org: str, repo: str, root: Path) -> Dest | None:
     one of them existed has to get it too, and the release is the only thing that visits a
     dest regularly."""
     create_repo(
-        cohort_org,
+        semester_org,
         repo,
         private=True,
         description="Released lectures, labs, readings, & other materials",
     )
-    grant_read_teams(cohort_org, repo)
+    grant_read_teams(semester_org, repo)
     # Write, because an edit made here is now DURABLE: the release lands on `upstream`
-    # and is merged in, so a correction typed into the cohort repo survives the next tick
+    # and is merged in, so a correction typed into the semester repo survives the next tick
     # instead of being copied over. It was read for exactly as long as it was not.
     #
     # The course org is still the source of truth - a fix made here reaches next term
     # only when somebody carries it back. The floor (`access.faculty_floor`) stays at
     # read: the sweep never demotes, and this grant runs on every release, so the two
     # agree.
-    grant_faculty(cohort_org, repo, COURSE_TEAM_ACCESS, missing_is_note=True)
+    grant_faculty(semester_org, repo, COURSE_TEAM_ACCESS, missing_is_note=True)
     # Students are told to fork the materials and work in their own copy, and a PRIVATE
     # repo is forkable only if BOTH its org and it say so. Converged on every release,
     # not only at creation: the dests that predate this need it too.
-    allow_forking(cohort_org, repo)
+    allow_forking(semester_org, repo)
     dd = root / "out" / repo
-    if not clone(cohort_org, repo, dd):
-        log_err(f"could not clone dest {cohort_org}/{repo}")
+    if not clone(semester_org, repo, dd):
+        log_err(f"could not clone dest {semester_org}/{repo}")
         return None
     # A dest that would not go onto `upstream` is as unusable as one that would not
     # clone: releasing onto the base branch instead is exactly what the merge exists to
     # stop.
-    return _checkout_upstream(cohort_org, repo, dd)
+    return _checkout_upstream(semester_org, repo, dd)
 
 
 def _push(dd: Path, *branches: str) -> int:
@@ -330,7 +330,7 @@ def _push(dd: Path, *branches: str) -> int:
 def _conflict_body(base: str) -> str:
     """The body of the pull request a release opens when its merge conflicts.
 
-    Branch names only. This repo is readable by the whole cohort, so nothing about WHO
+    Branch names only. This repo is readable by the whole semester, so nothing about WHO
     edited what belongs here - and no file list either: this pull request's own Files tab
     is that list, and GitHub keeps it current as later releases add to the branch.
 
@@ -343,7 +343,7 @@ def _conflict_body(base: str) -> str:
         f"repo have both changed the same lines.\n\n"
         f"`{UPSTREAM_BRANCH}` holds everything the course org has released so far, and "
         f"grows with every release.\n\n"
-        f"`{base}` is untouched, so the cohort still reads what it read before. Resolve "
+        f"`{base}` is untouched, so the semester still reads what it read before. Resolve "
         f"the conflict here and merge - keeping this repo's version, the released one, "
         f"or a mix of the two. Merging is what settles it: further releases add to "
         f"`{UPSTREAM_BRANCH}` and re-use this pull request, and closing it unresolved "
@@ -352,7 +352,7 @@ def _conflict_body(base: str) -> str:
 
 
 def _merge_conflicted(dd: Path, out: str) -> bool:
-    """Whether a failed `git merge` failed on CONTENT - the release and the cohort having
+    """Whether a failed `git merge` failed on CONTENT - the release and the semester having
     changed the same lines - rather than never having started.
 
     Two tests, because either can be the one that answers: git announces every content
@@ -369,7 +369,7 @@ def _merge_conflicted(dd: Path, out: str) -> bool:
 
 
 def _merge_and_push(
-    cohort_org: str,
+    semester_org: str,
     repo: str,
     dest: Dest,
     touched: set[str],
@@ -406,7 +406,7 @@ def _merge_and_push(
         if not dest.upstream_on_remote:
             # A branch this run cut still has to reach the remote. Every other path
             # pushes it as half of the pair below; this one returns before them, and on a
-            # cohort whose every due release had already landed - every real org on the
+            # semester whose every due release had already landed - every real org on the
             # day it upgrades - that left the remote with no `upstream` at all. The next
             # tick then re-cut it from whatever the base held BY THEN, copied the source
             # over it, committed and fast-forwarded the base onto that: an instructor's
@@ -415,7 +415,9 @@ def _merge_and_push(
             if _push(dd, UPSTREAM_BRANCH) != 0:
                 log_err(f"  {repo}: could not push `{UPSTREAM_BRANCH}`")
                 return 1, False
-            log_ok(f"  {repo}: `{UPSTREAM_BRANCH}` created - cohort edits are kept now")
+            log_ok(
+                f"  {repo}: `{UPSTREAM_BRANCH}` created - semester edits are kept now"
+            )
         if repo in touched:
             log_ok(f"  {repo}: nothing new to release")
         return 0, False
@@ -446,7 +448,7 @@ def _merge_and_push(
             )
             return 1, False
         if code != 0:
-            # The cohort has edited what this release also changed. Leave `base` exactly
+            # The semester has edited what this release also changed. Leave `base` exactly
             # as students last read it, ship the release to `upstream` anyway so nothing
             # is lost, and put the decision in front of the instructors as ONE standing
             # pull request.
@@ -457,12 +459,12 @@ def _merge_and_push(
                 log_err(f"  {repo}: push failed")
                 return 1, False
             opened = pulls.upsert_pr(
-                f"{cohort_org}/{repo}",
+                f"{semester_org}/{repo}",
                 head=UPSTREAM_BRANCH,
                 base=dest.base,
                 title=f"Release: merge `{UPSTREAM_BRANCH}` into `{dest.base}`",
                 body=_conflict_body(dest.base),
-                reviewer=f"{cohort_org}/{INSTRUCTORS_TEAM}",
+                reviewer=f"{semester_org}/{INSTRUCTORS_TEAM}",
             )
             if opened.url:
                 log(f"  {repo}: held for review - {opened.url}")
@@ -476,14 +478,14 @@ def _merge_and_push(
 
 def deploy_many(
     source_org: str,
-    cohort_org: str,
+    semester_org: str,
     deploys: list[Deploy],
     sync: bool = True,
 ) -> tuple[int, bool]:
     """Apply a batch of Deploy copies, cloning each unique source and dest repo ONCE.
 
     Every deploy's `course_source_path` is copied from its (course-org) `course_source_repo`
-    into its (cohort-org) `cohort_dest_repo` at `cohort_dest_path` (default: mirror
+    into its (semester-org) `semester_dest_repo` at `semester_dest_path` (default: mirror
     `course_source_path`). Each touched dest repo gets a single commit on `UPSTREAM_BRANCH`
     covering all its copies, which is then merged into the branch students read; a dest with
     no net change is left alone (idempotent). Returns `(errors, changed)` - `errors` counts
@@ -509,28 +511,28 @@ def deploy_many(
             else:
                 src_dirs[repo] = sd
 
-        # 2. clone (create if needed) each unique dest repo once (cohort org)
+        # 2. clone (create if needed) each unique dest repo once (semester org)
         dests: dict[str, Dest] = {}
         archived: set[str] = set()
-        for repo in sorted({d.cohort_dest_repo for d in deploys}):
-            if repo_is_archived(cohort_org, repo):
-                # A closed cohort. Everything below - the grants, the commit, the push -
+        for repo in sorted({d.semester_dest_repo for d in deploys}):
+            if repo_is_archived(semester_org, repo):
+                # A closed semester. Everything below - the grants, the commit, the push -
                 # 403s on an archived repo, so a schedule that still names one would red
                 # this cron for the rest of time. Being finished is a state somebody
                 # chose, so it is a line, not an error. (`repo_is_archived` fails open, so
                 # a flag that could not be read releases as usual and the write itself is
                 # the alarm.)
-                log(f"  [skip] {cohort_org}/{repo} is archived")
+                log(f"  [skip] {semester_org}/{repo} is archived")
                 archived.add(repo)
                 continue
-            dest = _prepare_dest(cohort_org, repo, root)
+            dest = _prepare_dest(semester_org, repo, root)
             if dest is not None:
                 dests[repo] = dest
 
         # A deploy into an ARCHIVED dest is not a failure and not a copy: it was skipped
         # on purpose, and counting it would red every run of a course that has closed one
-        # of its cohorts. Dropping it here leaves everything below counting failures.
-        deploys = [d for d in deploys if d.cohort_dest_repo not in archived]
+        # of its semesters. Dropping it here leaves everything below counting failures.
+        deploys = [d for d in deploys if d.semester_dest_repo not in archived]
 
         # A deploy whose source or dest could not be prepared - the clone, or the dest's
         # `upstream` checkout - is one impossible copy. Count it ONCE, per deploy, not
@@ -538,15 +540,18 @@ def deploy_many(
         errors += sum(
             1
             for d in deploys
-            if d.course_source_repo not in src_dirs or d.cohort_dest_repo not in dests
+            if d.course_source_repo not in src_dirs or d.semester_dest_repo not in dests
         )
 
         # 3. apply every copy against the already-cloned trees
         touched: set[str] = set()
         for d in deploys:
-            if d.course_source_repo not in src_dirs or d.cohort_dest_repo not in dests:
+            if (
+                d.course_source_repo not in src_dirs
+                or d.semester_dest_repo not in dests
+            ):
                 continue  # its source/dest failed to clone (already counted)
-            # A root cohort_dest_path means the dest repo's root, exactly as a root
+            # A root semester_dest_path means the dest repo's root, exactly as a root
             # course_source_path means the source repo's - no mirror-the-source fallback.
             # The rule is stated once (schedule_plan.deploy_dest) because the site reads
             # the same rule to work out which schedule row a release lands in; two copies
@@ -561,11 +566,11 @@ def deploy_many(
                 )
                 errors += 1
                 continue
-            destp = _resolve_within(dests[d.cohort_dest_repo].dir, dest_rel)
+            destp = _resolve_within(dests[d.semester_dest_repo].dir, dest_rel)
             if destp is None:
                 log_err(
-                    f"unsafe cohort_dest_path `{dest_rel}` for "
-                    f"{cohort_org}/{d.cohort_dest_repo} - skipped."
+                    f"unsafe semester_dest_path `{dest_rel}` for "
+                    f"{semester_org}/{d.semester_dest_repo} - skipped."
                 )
                 errors += 1
                 continue
@@ -589,7 +594,7 @@ def deploy_many(
                     # A WHOLE-REPO release carries the root README along, which is how the
                     # placeholder actually reached students. Checked on the SOURCE and
                     # skipped before the copy, never deleted after it: faculty who fixed a
-                    # leaked placeholder by editing the cohort repo's own README would
+                    # leaked placeholder by editing the semester repo's own README would
                     # otherwise have that fix staged as a deletion by the next release -
                     # while the log said everything else shipped.
                     #
@@ -640,8 +645,8 @@ def deploy_many(
                 )
                 errors += 1
                 continue
-            log_ok(f"+ {d.cohort_dest_repo}/{dest_rel or '(repo root)'}")
-            touched.add(d.cohort_dest_repo)
+            log_ok(f"+ {d.semester_dest_repo}/{dest_rel or '(repo root)'}")
+            touched.add(d.semester_dest_repo)
 
         # 4. one commit on `upstream` per dest, then merge it into the branch students
         # read. Every CLONED dest, not just the ones this run copied into: a run whose
@@ -678,17 +683,17 @@ def deploy_many(
                     continue
                 committed = True
             merge_errors, base_moved = _merge_and_push(
-                cohort_org, repo, dest, touched, committed=committed
+                semester_org, repo, dest, touched, committed=committed
             )
             errors += merge_errors
             changed = changed or base_moved
 
     if sync and changed:
-        # site.sync_site RAISES on a genuine tree/team read failure - one cohort's
+        # site.sync_site RAISES on a genuine tree/team read failure - one semester's
         # site-sync failure must be logged and counted (making the release non-zero), not
         # an unhandled traceback that aborts the batch.
         try:
-            if site.sync_site(source_org, cohort_org) != 0:
+            if site.sync_site(source_org, semester_org) != 0:
                 log_err("site sync incomplete after release")
                 errors += 1
         except Exception as exc:
@@ -709,7 +714,7 @@ def parse_path_pairs(
     """Pair the Release materials workflow's two comma-separated lists by index.
 
     A blank `dest_paths` mirrors every source path (`None` dest, exactly what an omitted
-    `cohort_dest_path:` means in schedule.yml). Otherwise the counts MUST match: unlike the
+    `semester_dest_path:` means in schedule.yml). Otherwise the counts MUST match: unlike the
     schedule (which drops what it can't pair, on an unattended cron), a workflow run has an
     operator watching it, so a mismatch is a loud ValueError naming both counts rather
     than a silently short release. Surrounding whitespace is stripped and empty items
@@ -722,9 +727,9 @@ def parse_path_pairs(
         return [(s, None) for s in sources]
     if len(dests) != len(sources):
         raise ValueError(
-            f"{len(sources)} course_source_paths but {len(dests)} cohort_dest_paths - give "
-            f"one cohort_dest_path per course_source_path (paired in order), or leave "
-            f"cohort_dest_path blank to mirror every course_source_path"
+            f"{len(sources)} course_source_paths but {len(dests)} semester_dest_paths - give "
+            f"one semester_dest_path per course_source_path (paired in order), or leave "
+            f"semester_dest_path blank to mirror every course_source_path"
         )
     return list(zip(sources, dests))
 
@@ -735,11 +740,14 @@ def main() -> int:
     parser.add_argument(
         "--course-source-repo", required=True, help="Source repo holding the path(s)"
     )
-    parser.add_argument("--cohort-org", required=True, help="Cohort org (target)")
     parser.add_argument(
+        "--semester-org", "--cohort-org", required=True, help="Semester org (target)"
+    )
+    parser.add_argument(
+        "--semester-dest-repo",
         "--cohort-dest-repo",
         default="materials",
-        help="Target repo in the cohort org, created if missing (default: materials)",
+        help="Target repo in the semester org, created if missing (default: materials)",
     )
     parser.add_argument(
         "--course-source-path",
@@ -747,6 +755,7 @@ def main() -> int:
         help="Source path(s) to release - a folder/file, or a comma-separated list",
     )
     parser.add_argument(
+        "--semester-dest-path",
         "--cohort-dest-path",
         default="",
         help="Destination path(s), paired with --course-source-path by index "
@@ -760,12 +769,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    dest_repo = args.cohort_dest_repo.strip() or "materials"
-    if (args.source_org, args.course_source_repo) == (args.cohort_org, dest_repo):
+    dest_repo = args.semester_dest_repo.strip() or "materials"
+    if (args.source_org, args.course_source_repo) == (args.semester_org, dest_repo):
         log_err("source and target must differ.")
         return 1
     try:
-        pairs = parse_path_pairs(args.course_source_path, args.cohort_dest_path)
+        pairs = parse_path_pairs(args.course_source_path, args.semester_dest_path)
     except ValueError as e:
         log_err(f"{e}.")
         return 1
@@ -773,7 +782,7 @@ def main() -> int:
     if args.dry_run:
         log_step(
             f"DRY-RUN release {len(pairs)} path(s) from "
-            f"{args.source_org}/{args.course_source_repo} -> {args.cohort_org}/{dest_repo}"
+            f"{args.source_org}/{args.course_source_repo} -> {args.semester_org}/{dest_repo}"
         )
         # The cheap structural checks need no clone, so catch them here: a source path that
         # strips to the repo root (drags the source's own .git/.github over the dest), or one
@@ -808,14 +817,14 @@ def main() -> int:
 
     log_step(
         f"Releasing {len(pairs)} path(s) from {args.source_org}/{args.course_source_repo} -> "
-        f"{args.cohort_org}/{dest_repo}"
+        f"{args.semester_org}/{dest_repo}"
     )
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
         errors, changed = deploy_many(
             args.source_org,
-            args.cohort_org,
+            args.semester_org,
             [
                 Deploy(args.course_source_repo, src, dest_repo, dest)
                 for src, dest in pairs

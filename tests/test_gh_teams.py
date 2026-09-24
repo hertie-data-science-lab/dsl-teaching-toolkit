@@ -317,7 +317,7 @@ _PATCH_PRIVACY = (
 
 def test_an_existing_team_has_its_privacy_corrected(monkeypatch):
     # create_team treated a duplicate as success and left the team as it was, so every
-    # cohort made before students/auditors became `secret` still published the class list
+    # semester made before students/auditors became `secret` still published the class list
     # to every student in it.
     calls = _duplicate_then(monkeypatch, "closed")
     assert gh_teams.create_team("Org", "students", privacy="secret") is True
@@ -340,8 +340,8 @@ def test_an_existing_team_keeps_its_privacy_when_none_is_asked_for(monkeypatch):
     assert len(calls) == 1  # the POST, and nothing after it
 
 
-def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
-    # It used to be cohort-only, so every member of a COURSE org - every TA, every
+def test_a_course_org_is_tightened_like_a_semester(monkeypatch):
+    # It used to be semester-only, so every member of a COURSE org - every TA, every
     # visiting instructor - could read the unreleased materials, the model solutions and
     # the assignment `solution` branches. Faculty access comes from the team grants.
     calls = _patched(monkeypatch)
@@ -351,15 +351,15 @@ def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
     assert "members_can_create_repositories=false" in fields
 
 
-def test_only_a_cohort_lets_its_private_repos_be_forked(monkeypatch):
+def test_only_a_semester_lets_its_private_repos_be_forked(monkeypatch):
     # The one setting here that loosens, so only the org kind that needs it asks for it.
-    # A cohort's materials repo is private and GitHub hides the Fork button on a private
-    # repo unless its org allows forks, so a cohort told to fork the labs simply had no
+    # A semester's materials repo is private and GitHub hides the Fork button on a private
+    # repo unless its org allows forks, so a semester told to fork the labs simply had no
     # button; there it grants nothing, because a fork carries the reader's own access. A
     # COURSE org holds the unreleased materials, the solutions and the hidden tests, and
     # a private fork of those into somebody's personal account gains nobody anything.
     calls = _patched(monkeypatch)
-    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 0
+    assert gh_teams.converge_org_settings("Semester-f2026", private_forks=True) == 0
     fields = [f for call in calls for f in call]
     assert "members_can_fork_private_repositories=true" in fields
 
@@ -395,7 +395,7 @@ def test_a_refused_forking_setting_never_takes_the_tightening_with_it(monkeypatc
     # setting) would drop `default_repository_permission=none` too and leave every member
     # reading every repo behind a log line about forking.
     calls = _fork_field_answers(monkeypatch, (1, "gh: HTTP 422"))
-    gh_teams.converge_org_settings("Cohort-f2026", private_forks=True)
+    gh_teams.converge_org_settings("Semester-f2026", private_forks=True)
     fields = [f for call in calls for f in call]
     assert "default_repository_permission=none" in fields
     assert "members_can_create_repositories=false" in fields
@@ -406,7 +406,7 @@ def test_a_forking_policy_github_refuses_is_named_not_red(monkeypatch, capsys):
     # the setting. No re-run can change either, so counting it left every nightly refresh
     # of that org red for ever - and the line has to say what students will find missing.
     _fork_field_answers(monkeypatch, (1, "gh: HTTP 403 forbidden by enterprise policy"))
-    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 0
+    assert gh_teams.converge_org_settings("Semester-f2026", private_forks=True) == 0
     assert "not forkable" in capsys.readouterr().out
 
 
@@ -414,14 +414,14 @@ def test_a_forking_patch_that_never_reached_github_is_still_a_failure(monkeypatc
     # Nothing was refused here - the request did not get there, so the org's real setting
     # is unknown and a re-run may well fix it. That is exactly what a red run is for.
     _fork_field_answers(monkeypatch, (1, "gh: dial tcp 140.82.121.6:443: i/o timeout"))
-    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 1
+    assert gh_teams.converge_org_settings("Semester-f2026", private_forks=True) == 1
 
 
 def test_a_failed_tighten_reds_the_run(monkeypatch):
     # An org left at GitHub's default (every member reads every repo) is a real
     # misconfiguration - it must red the caller, not just log and pass.
     _patched(monkeypatch, (1, "gh: HTTP 403"))
-    assert gh_teams.converge_org_settings("Cohort-f2026") == 1
+    assert gh_teams.converge_org_settings("Semester-f2026") == 1
 
 
 def test_2fa_that_cannot_be_enforced_is_named_and_counted_not_red(monkeypatch, capsys):

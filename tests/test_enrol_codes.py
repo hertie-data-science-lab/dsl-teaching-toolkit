@@ -237,7 +237,7 @@ def test_a_failed_graph_token_is_not_reported_as_nothing_to_send(monkeypatch):
 def test_fill_enrol_codes_preserves_unknown_columns_and_raw_role():
     # The old whole-file round-trip re-serialised only roster.FIELDS, dropping
     # every column the engine does not read - a faculty-added `notes`, and the retired
-    # `student_id`/`section` a deployed cohort's roster still carries - and normalising
+    # `student_id`/`section` a deployed semester's roster still carries - and normalising
     # `role`. A surgical cell edit must leave every other column and each cell's raw text
     # exactly as written.
     import csv
@@ -316,7 +316,7 @@ def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
     )
     assert (
         enrol_codes.write_column(
-            "COHORT", STALE, "stale", "enrol_code", _codes(), "roster: assign"
+            "SEMESTER", STALE, "stale", "enrol_code", _codes(), "roster: assign"
         )
         == written[-1]
     )
@@ -333,7 +333,7 @@ def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
     )
     assert (
         enrol_codes.write_column(
-            "COHORT", STALE, "stale", "enrol_code", _codes(), "roster: assign"
+            "SEMESTER", STALE, "stale", "enrol_code", _codes(), "roster: assign"
         )
         is None
     )
@@ -355,7 +355,7 @@ def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
     )
     assert enrol_codes.write_column(
-        "COHORT", STALE, "stale", "enrol_code", _codes(), "roster: assign"
+        "SEMESTER", STALE, "stale", "enrol_code", _codes(), "roster: assign"
     )
     assert "dsl-theirs" in written[-1] and "dsl-aaa111" not in written[-1]
 
@@ -382,7 +382,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
             expected_sha == "fresh"
         ),
     )
-    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
     _transport(monkeypatch, True)
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
@@ -392,7 +392,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
             sent.extend(messages) or [m[0] for m in messages]
         ),
     )
-    assert enrol_codes.run("COHORT") is enrol_codes.Outcome.SENT
+    assert enrol_codes.run("SEMESTER") is enrol_codes.Outcome.SENT
     ada = next(body for to, _subject, body in sent if to == "ada@uni.edu")
     assert "dsl-theirs" in ada  # not the code this run generated for her in memory
 
@@ -466,7 +466,7 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport
         return True
 
     monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
         "send_bulk",
@@ -475,7 +475,7 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport
             or [m[0] for m in messages][: len(messages) if sends is None else sends]
         ),
     )
-    outcome = enrol_codes.run("COHORT")
+    outcome = enrol_codes.run("SEMESTER")
     return outcome, sent, written
 
 
@@ -559,7 +559,7 @@ def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
 
 def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monkeypatch):
     # A credential Graph refuses raises out of `send_bulk`. Unreleased, the claim would
-    # leave a whole cohort marked as emailed by a run that sent nothing, with no later
+    # leave a whole semester marked as emailed by a run that sent nothing, with no later
     # push to the roster ever retrying them.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     _transport(monkeypatch, True)
@@ -576,14 +576,14 @@ def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monke
             written.append(content.decode()) or True
         ),
     )
-    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(
         enrol_codes.mailer,
         "send_bulk",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("token request failed")),
     )
     with pytest.raises(RuntimeError):
-        enrol_codes.run("COHORT")
+        enrol_codes.run("SEMESTER")
     rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
     assert rows[0]["code_sent_at"].strip() == ""
 
@@ -611,9 +611,9 @@ def test_a_claim_that_cannot_be_released_names_the_exact_stamp_to_clear(
         lambda org, repo, path: (written[-1] if written else text, "sha"),
     )
     monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "Test")
     monkeypatch.setattr(enrol_codes.mailer, "send_bulk", lambda *a, **k: [])
-    assert enrol_codes.run("COHORT") is enrol_codes.Outcome.FAILED
+    assert enrol_codes.run("SEMESTER") is enrol_codes.Outcome.FAILED
     err = capsys.readouterr().err
     stamped = next(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
     assert f"code_sent_at={stamped['code_sent_at']}" in err
@@ -638,7 +638,7 @@ def test_a_semicolon_roster_sends_nothing_and_leaves_the_run_green(monkeypatch, 
     # A German-locale Excel export. Every cell reads blank through DictReader, so the send
     # used to write a mangled roster back and exit 0 - then the header check made it a red
     # X instead, which files `Send enrolment codes is failing` in the course org and mails
-    # the maintainer about a CSV in a cohort org. It is faculty's file: nothing is written,
+    # the maintainer about a CSV in a semester org. It is faculty's file: nothing is written,
     # nothing is sent, the run is green, and the same push opens the students.csv digest.
     semicolons = ROSTER_HEADER.replace(",", ";") + "\nada@uni.edu;Ada;enrolled;;;;\n"
     outcome, sent, written = _run_with(monkeypatch, semicolons)
@@ -682,10 +682,10 @@ def test_an_absent_roster_and_a_missing_transport_still_red(monkeypatch):
 
 
 def test_a_roster_with_only_a_header_is_green(monkeypatch, capsys):
-    # A cohort is bootstrapped with the roster template and enrolled days later, and every
+    # A semester is bootstrapped with the roster template and enrolled days later, and every
     # push to the file fires this send. Nothing is outstanding, so there is nothing to be
     # red about - it used to file `Send enrolment codes is failing` and mail the maintainer
-    # about a brand-new cohort.
+    # about a brand-new semester.
     outcome, sent, written = _run_with(monkeypatch, HEADER)
     assert outcome is enrol_codes.Outcome.EMPTY_ROSTER
     assert not enrol_codes.reds_the_run(outcome)
@@ -695,7 +695,7 @@ def test_a_roster_with_only_a_header_is_green(monkeypatch, capsys):
 
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda org, repo, path: None)
-    outcome = enrol_codes.run("COHORT")
+    outcome = enrol_codes.run("SEMESTER")
     assert outcome is enrol_codes.Outcome.NO_ROSTER
     assert enrol_codes.reds_the_run(outcome)  # nothing is outstanding only if it sent
     assert "Could not find students.csv" in capsys.readouterr().err
@@ -704,96 +704,100 @@ def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
 # ------------------------- the dispatched path's trust boundary (--dispatched-by)
 
 
-def _dispatched(monkeypatch, cohort, registered, course="Course-Org"):
-    """main() as the roster-push dispatcher invokes it. Returns (rc, cohorts run for)."""
+def _dispatched(monkeypatch, semester, registered, course="Course-Org"):
+    """main() as the roster-push dispatcher invokes it. Returns (rc, semesters run for)."""
     ran: list[str] = []
-    monkeypatch.setattr(enrol_codes, "discover_cohorts", lambda org: registered)
+    monkeypatch.setattr(enrol_codes, "discover_semesters", lambda org: registered)
     monkeypatch.setattr(
         enrol_codes, "run", lambda org: ran.append(org) or enrol_codes.Outcome.SENT
     )
-    monkeypatch.setattr(enrol_codes.status, "refresh", lambda course, cohort=None: 0)
+    monkeypatch.setattr(enrol_codes.status, "refresh", lambda course, semester=None: 0)
     monkeypatch.setattr(
         "sys.argv",
-        ["enrol_codes", "--cohort-org", cohort, "--dispatched-by", course],
+        ["enrol_codes", "--semester-org", semester, "--dispatched-by", course],
     )
     return enrol_codes.main(), ran
 
 
-def test_a_dispatched_send_refreshes_the_cohorts_status(monkeypatch):
+def test_a_dispatched_send_refreshes_the_semesters_status(monkeypatch):
     # The codes just sent are the roster's `codes_sent` count in status.json.
     refreshed: list = []
-    _dispatched(monkeypatch, "Cohort-f2026", ["Cohort-f2026"])
+    _dispatched(monkeypatch, "Semester-f2026", ["Semester-f2026"])
     monkeypatch.setattr(
         enrol_codes.status, "refresh", lambda *a: refreshed.append(a) or 1
     )
     # A status that could not be written does not red the send.
     assert enrol_codes.main() == 0
-    assert refreshed == [("Course-Org", "Cohort-f2026")]
+    assert refreshed == [("Course-Org", "Semester-f2026")]
 
 
-def test_a_dispatched_send_refuses_a_cohort_this_course_org_does_not_own(
+def test_a_dispatched_send_refuses_a_semester_this_course_org_does_not_own(
     monkeypatch, capsys
 ):
-    # A client_payload is written by whoever holds a COHORT's bot token - a lower trust
-    # tier than the course org - so naming someone else's cohort would have this run
-    # generate codes into that cohort's roster and email its students. The registry is the
+    # A client_payload is written by whoever holds a SEMESTER's bot token - a lower trust
+    # tier than the course org - so naming someone else's semester would have this run
+    # generate codes into that semester's roster and email its students. The registry is the
     # authority, and a name absent from it is refused before anything is read.
-    rc, ran = _dispatched(monkeypatch, "Someone-Elses-f2026", ["Cohort-f2026"])
+    rc, ran = _dispatched(monkeypatch, "Someone-Elses-f2026", ["Semester-f2026"])
     assert (rc, ran) == (1, [])
     err = capsys.readouterr().err
     assert "Someone-Elses-f2026 is not registered under Course-Org" in err
-    assert "Cohort-f2026" in err  # what IS registered, so the fix is obvious
+    assert "Semester-f2026" in err  # what IS registered, so the fix is obvious
 
 
-def test_an_empty_registry_authorises_no_dispatched_cohort(monkeypatch, capsys):
+def test_an_empty_registry_authorises_no_dispatched_semester(monkeypatch, capsys):
     # The bug this exists to prevent: short-circuiting on an empty registry let a course
-    # org that had never registered a cohort accept any org name a dispatch cared to name.
-    rc, ran = _dispatched(monkeypatch, "Cohort-f2026", [])
+    # org that had never registered a semester accept any org name a dispatch cared to name.
+    rc, ran = _dispatched(monkeypatch, "Semester-f2026", [])
     assert (rc, ran) == (1, [])
     assert "lists nothing" in capsys.readouterr().err
 
 
-def test_a_dispatched_send_accepts_a_registered_cohort_whatever_its_casing(monkeypatch):
+def test_a_dispatched_send_accepts_a_registered_semester_whatever_its_casing(
+    monkeypatch,
+):
     # GitHub org names are case-insensitive, and the registry's spelling need not match
     # the dispatch's - refusing on case alone would break the automatic path for real.
-    assert _dispatched(monkeypatch, "cohort-F2026", ["Cohort-f2026"]) == (
+    assert _dispatched(monkeypatch, "semester-F2026", ["Semester-f2026"]) == (
         0,
-        ["cohort-F2026"],
+        ["semester-F2026"],
     )
 
 
 def test_a_hand_run_without_dispatched_by_never_consults_the_registry(monkeypatch):
-    # A maintainer naming a cohort on the command line has no untrusted input to check, so
+    # A maintainer naming a semester on the command line has no untrusted input to check, so
     # it pays for no registry read. Every production send passes --dispatched-by.
     def boom(org):
-        raise AssertionError("a hand run must not read the cohort registry")
+        raise AssertionError("a hand run must not read the semester registry")
 
     ran: list[str] = []
-    monkeypatch.setattr(enrol_codes, "discover_cohorts", boom)
+    monkeypatch.setattr(enrol_codes, "discover_semesters", boom)
     monkeypatch.setattr(
         enrol_codes, "run", lambda org: ran.append(org) or enrol_codes.Outcome.SENT
     )
-    monkeypatch.setattr("sys.argv", ["enrol_codes", "--cohort-org", "Cohort-f2026"])
-    assert (enrol_codes.main(), ran) == (0, ["Cohort-f2026"])
+    monkeypatch.setattr("sys.argv", ["enrol_codes", "--semester-org", "Semester-f2026"])
+    assert (enrol_codes.main(), ran) == (0, ["Semester-f2026"])
 
 
-def test_a_closed_out_cohort_is_sent_no_codes(monkeypatch):
+def test_a_closed_out_semester_is_sent_no_codes(monkeypatch):
     # Registered, so the trust-boundary check passes - but its classroom-config is
     # read-only, so the `code_sent_at` write-back could not land, and nobody is being
     # enrolled into a term that is over.
-    monkeypatch.setattr(enrol_codes, "cohort_is_live", lambda org: False)
+    monkeypatch.setattr(enrol_codes, "semester_is_live", lambda org: False)
 
     def boom(org):
-        raise AssertionError("a frozen cohort must not be sent enrolment codes")
+        raise AssertionError("a frozen semester must not be sent enrolment codes")
 
-    monkeypatch.setattr(enrol_codes, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(
+        enrol_codes, "discover_semesters", lambda org: ["Semester-f2026"]
+    )
     monkeypatch.setattr(enrol_codes, "run", boom)
     monkeypatch.setattr(
         "sys.argv",
         [
             "enrol_codes",
-            "--cohort-org",
-            "Cohort-f2026",
+            "--semester-org",
+            "Semester-f2026",
             "--dispatched-by",
             "Course-Org",
         ],

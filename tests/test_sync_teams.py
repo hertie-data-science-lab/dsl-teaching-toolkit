@@ -254,7 +254,7 @@ def test_sync_matches_roster_handles_case_insensitively(stub_team, monkeypatch):
 
 def test_a_student_cannot_materialise_a_faculty_team_from_teams_csv(capsys):
     # teams.csv is student-written; (assignment="course", team="admin") slugs to
-    # `course-admin`, the team holding admin on every cohort repo. Reconciling it would add
+    # `course-admin`, the team holding admin on every semester repo. Reconciling it would add
     # the student and prune the real admins.
     per = {
         "course": {"admin": ["mallory"]},

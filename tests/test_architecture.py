@@ -148,7 +148,7 @@ def _rebound_names(tree: ast.AST) -> set[str]:
 
 @pytest.mark.parametrize("name", MODULES)
 def test_every_sibling_module_attribute_exists(name):
-    """`status.py` read `sync_faculty.COHORT_CONFIG_REPO` for months after the constant
+    """`status.py` read `sync_faculty.SEMESTER_CONFIG_REPO` for months after the constant
     moved to `course`: a name that survives the move only in the *referencing* module
     stays invisible until someone runs the line. Nothing but the module itself knows
     what it exports, so ask it."""

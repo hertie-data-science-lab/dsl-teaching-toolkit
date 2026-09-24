@@ -107,14 +107,14 @@ def open_titles(repo: str) -> set[str]:
     """The exact title of every OPEN issue in `repo`, in one listing.
 
     For a caller asking about SEVERAL known titles at once - `status`, which wants to know
-    which of a cohort's digest issues are standing. One search per title is the right shape
+    which of a semester's digest issues are standing. One search per title is the right shape
     when a caller is about to write one of them (`find_issues` also needs the closed one's
     body); it is the wrong shape for a report that only wants a yes or no about seven, and
     seven listings is seven round trips for one table.
 
     Raises like `_titled` does, for the same reason: a listing that could not be read is
     not "no issues are open", and a status table that quietly said so would report a
-    cohort with a broken roster as healthy."""
+    semester with a broken roster as healthy."""
     try:
         rows = gh_json(
             "issue",

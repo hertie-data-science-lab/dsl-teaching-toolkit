@@ -8,14 +8,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        The teams that already exist, and how much room each has left, are listed on the assignment's page on the cohort site.
+        The teams that already exist, and how much room each has left, are listed on the assignment's page on the semester site.
 
         To **join** one, choose *Join an existing team* and type its name exactly as that page spells it. To **start** one, choose *Create a new team* and pick a name nobody is using yet.
 
         Already in a team? Joining or creating another moves you out of your current one while team formation is open.
-  # dsl:assignment-field:start - this cohort's open assignments are spliced in here as a
+  # dsl:assignment-field:start - this semester's open assignments are spliced in here as a
   # dropdown by dsl_course.welcome.join_team_form; edits between these markers are
-  # overwritten on the next refresh. The free-text field below is what a cohort with no
+  # overwritten on the next refresh. The free-text field below is what a semester with no
   # assignment open for team formation receives.
   - type: input
     id: assignment

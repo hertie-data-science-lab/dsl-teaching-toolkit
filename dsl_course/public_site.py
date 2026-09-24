@@ -4,7 +4,7 @@ The course org's `<course-org>.github.io` is PUBLIC and opt-in. The `course-mate
 repos it publishes are private, so linking into them would 404 for the public; instead
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
-events, no cohort repos. The first publish is a manual click that persists its settings
+events, no semester repos. The first publish is a manual click that persists its settings
 into the site repo (`PUBLISH_CONFIG`); the daily cron then re-syncs from those.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.
@@ -103,7 +103,7 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     URLs are relative to the public site root (`/PUBLIC_MATERIALS_DIR/...`), so they
     resolve for the public - never blob/raw URLs into the private source repo. Names are
     the path relative to the session folder (so two nested `notes.pdf` stay
-    distinguishable, as on the cohort site) and URL-encoded so spaces etc. survive.
+    distinguishable, as on the semester site) and URL-encoded so spaces etc. survive.
 
     Every file stays COPIED and served whatever this returns - a rendered deck's `libs/`
     and `<name>_files/` must remain reachable at their original relative paths or the
@@ -118,7 +118,7 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     section with no links is skipped entirely, get no page at all.
 
     `site_link_extensions` deliberately does NOT apply here, for the same reason: a file
-    the allowlist excluded would be served and unreachable. The cohort site takes the extra
+    the allowlist excluded would be served and unreachable. The semester site takes the extra
     narrowing because it CAN offer a folder link; this one keeps every file reachable."""
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
     # Denylisted paths are already absent from a folder THIS run copied
@@ -165,7 +165,7 @@ def _public_lecture_entry(
     repo's sections are - `lectures`, `faq`, ... - plus `readings` in actual-readings
     mode), plus the reading list in `reading_list:` when in reading-list mode. Public-facing
     body - no 'enrolled students only' gate. The week's `labs` section is a `lab` row of
-    its own (`kind`), exactly as on the cohort site.
+    its own (`kind`), exactly as on the semester site.
 
     The reading list goes in the front matter, not the body, so that BOTH sites feed the
     theme's Materials layout from one field rather than each carrying its own mechanism -
@@ -175,7 +175,7 @@ def _public_lecture_entry(
     `details:` of its own; the theme simply shows the ordinal.
 
     `section_links` is `(section, [Link, ...])` in publication order; each link is
-    named `<section-singular> - <file>`, as on the cohort site."""
+    named `<section-singular> - <file>`, as on the semester site."""
     links = links_block(section_links)
     title = f"{ROW_NOUN[kind]} {session}"
     return (
@@ -213,8 +213,8 @@ def sync_public_site(
 
     def build(site_wd: Path) -> SitePlan | None:
         meta = yaml_file(course_org, ".github", "dsl-course.yml")
-        # A course site spans years and has no per-cohort schedule.yml to read (that's
-        # cohort-scoped), so the date is a neutral fallback that only orders the session
+        # A course site spans years and has no per-semester schedule.yml to read (that's
+        # semester-scoped), so the date is a neutral fallback that only orders the session
         # entries.
         start = date(2025, 1, 1)
 
@@ -316,7 +316,7 @@ def sync_public_site(
             config["course_code"] = str(meta["course_code"])
         config["course_semester"] = "Open Courseware"  # neutral: the site is multi-year
         # The public open-courseware site belongs to the COURSE org (multi-year), so its
-        # footer links there - unlike a cohort site, which links its cohort org.
+        # footer links there - unlike a semester site, which links its semester org.
         config["github_org"] = course_org
 
         return SitePlan(
@@ -331,7 +331,7 @@ def sync_public_site(
             files={
                 # People from the course org's declared `people:` block (else the GitHub
                 # teams). Instructors only - the open-courseware site is multi-year, and
-                # TAs are declared per cohort (in each cohort's people.yml), never
+                # TAs are declared per semester (in each semester's people.yml), never
                 # course-level.
                 "_data/people.yml": people_yaml(
                     course_org,
@@ -339,10 +339,10 @@ def sync_public_site(
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
-                "README.md": site_readme(course_org, cohort=False),
-                # No cohort repos to index, so `/materials/` stays the readings page.
-                "_data/nav.yml": nav_yaml(cohort=False),
-                **theme_pages(cohort=False),
+                "README.md": site_readme(course_org, semester=False),
+                # No semester repos to index, so `/materials/` stays the readings page.
+                "_data/nav.yml": nav_yaml(semester=False),
+                **theme_pages(semester=False),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to
                 # how a session renders is tested against the generator that

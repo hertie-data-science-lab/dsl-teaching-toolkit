@@ -136,13 +136,13 @@ def test_publishes_every_discovered_section_not_just_lectures(published):
     # A nested file is still SERVED (asserted above) but not listed: a rendered deck's
     # assets have to stay reachable at their own paths, and linking each of them is what
     # put 1,641 links on a live site. Jekyll serves no directory index, so - unlike the
-    # cohort site - there is no folder link to offer here either.
+    # semester site - there is no folder link to offer here either.
     assert ("lab", "data/rows.csv") not in entry_links(lab1)
     assert ("faq", "faq.md") in entry_links(files["_lectures/session-02.md"])
 
 
 def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
-    # As on the cohort site: `type: lab` is what the theme's labs page selects on, and a
+    # As on the semester site: `type: lab` is what the theme's labs page selects on, and a
     # lab linked from the session row too would appear twice.
     files = published(readings_mode="none")
     assert "type: lab" in files["_lectures/lab-02.md"]
@@ -196,7 +196,7 @@ def test_people_are_written_even_when_the_clone_has_no_data_dir(published):
 
 
 def test_an_archived_site_repo_is_a_quiet_skip_not_a_daily_failure(monkeypatch, capsys):
-    # A past cohort's site repo is frozen read-only. The clone and the commit both succeed
+    # A past semester's site repo is frozen read-only. The clone and the commit both succeed
     # and only the push 403s, so the nightly Sync site run failed on it every single day.
     committed = _install_fakes(monkeypatch)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: True)
@@ -297,7 +297,7 @@ def test_the_public_site_honours_a_faculty_releaseignore(published):
 def test_junk_a_machine_left_behind_is_never_published_as_material(published):
     # Neither list above would refuse these: nothing leaks, and no faculty member would
     # think to write `.DS_Store` into a `.releaseignore`. A session folder is copied
-    # wholesale, so a cohort site listed a `.gitkeep` and a `.DS_Store` among its course
+    # wholesale, so a semester site listed a `.gitkeep` and a `.DS_Store` among its course
     # materials and counted them into its session totals.
     files = published(readings_mode="actual-readings")
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
@@ -328,7 +328,7 @@ def test_reading_list_mode_does_not_name_a_withheld_reading(published):
 
 
 def test_the_releaseignore_itself_is_never_published(published):
-    # The one entry on PUBLICATION_DENYLIST that a cohort release deliberately DOES carry.
+    # The one entry on PUBLICATION_DENYLIST that a semester release deliberately DOES carry.
     # Its contents name what was held back, and this destination is a world-readable page.
     files = published(readings_mode="actual-readings")
     assert not [p for p in files if Path(p).name == ".releaseignore"]

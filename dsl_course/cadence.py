@@ -20,9 +20,9 @@ Two alarms, in two places, because they have two audiences:
   cron is left. This is the dead-man's switch, and the dispatcher is the ONLY thing it is
   about - GitHub's own cron is listed for information and never alarms, because dropping
   most of its fires is its measured normal state.
-- LATE DELIVERY, in each cohort's private `classroom-config`, for that cohort's instructors:
+- LATE DELIVERY, in each semester's private `classroom-config`, for that semester's instructors:
   these named moments passed more than GAP_SLO before the tick that shipped them. This is
-  the SLO, and it is per cohort because the plan that was late is theirs.
+  the SLO, and it is per semester because the plan that was late is theirs.
 
 DISARMED until an external dispatch run appears in the window. Nothing opens and nothing
 closes before then - the whole point of the alarm is that a dispatch every 15 minutes is
@@ -34,7 +34,7 @@ driver-health issue is the second half of the evidence, and `report_course` keep
 whenever it finds one.
 
 Both issues CLOSE on hysteresis, never on a single good sign: the driver has to be back on
-cadence (a dispatch inside HEALTHY_GAP), and a cohort's delivery has to have held for
+cadence (a dispatch inside HEALTHY_GAP), and a semester's delivery has to have held for
 HEALTHY_GAPS consecutive ticks - counting the gap this very tick arrived on. Closing on a
 first good tick and reopening on the next late moment is the same cry-wolf failure from the
 other direction.
@@ -47,9 +47,9 @@ Two things neither alarm can see. Lateness is measured from the last run that EX
 success or failure, so a streak of red runs that finally ships a moment is not reported
 here; the `<workflow> is failing` issue covers that case from the first red run. And any
 `repository_dispatch` run counts as the dispatcher, because the runs listing does not carry
-`client_payload.driver` - except a run a cohort's classroom-config push SCOPED to that one
-cohort, which says so in its title (`SCOPED_RUN_TITLE`) and is read as no tick at all: it
-released into one cohort, so it can neither date the dispatcher nor close a gap for the rest.
+`client_payload.driver` - except a run a semester's classroom-config push SCOPED to that one
+semester, which says so in its title (`SCOPED_RUN_TITLE`) and is read as no tick at all: it
+released into one semester, so it can neither date the dispatcher nor close a gap for the rest.
 
 Every line either module publishes carries workflow names, timestamps, minutes, schedule
 labels and counts - never a handle, a student repo, or a `describe()` line (which names
@@ -77,7 +77,7 @@ from .schedule import (
     grading_datetime_at,
 )
 
-# How late one dated moment may ship before its cohort is told. A tick arrives every 15
+# How late one dated moment may ship before its semester is told. A tick arrives every 15
 # minutes and a release's `when` is usually a class time, so the first hour is ordinary
 # jitter; past it, faculty stood in front of a class whose materials were not up.
 GAP_SLO = timedelta(minutes=60)
@@ -99,7 +99,7 @@ HEALTHY_GAP = timedelta(minutes=20)
 # check reads a 404 - loudly (the read raises), but only in the logs.
 WORKFLOW_FILE = "scheduled-release.yml"
 # The API's largest page - up to ~25 hours of quarter-hourly ticks - in ONE request. It has
-# to be that large because the runs a classroom-config push SCOPED to one cohort are skipped
+# to be that large because the runs a classroom-config push SCOPED to one semester are skipped
 # (`SCOPED_RUN_TITLE`) but still take rows: at 20, one busy evening of pushes filled the
 # window and disarmed both alarms. EVERYTHING this module says is bounded by this window,
 # which is why the bodies say "in the last N runs" rather than implying knowledge of
@@ -396,7 +396,7 @@ def _driver_body(course_org: str, verdict: Verdict) -> str:
         [
             (
                 f"`Scheduled release` in `{course_org}` is not being driven. Every dated "
-                "action in every cohort rides on these ticks, so while this stands nothing "
+                "action in every semester rides on these ticks, so while this stands nothing "
                 "is released, handed out, frozen or graded anywhere."
             ),
             "",
@@ -412,7 +412,7 @@ def _driver_body(course_org: str, verdict: Verdict) -> str:
             "",
             (
                 "Any `repository_dispatch` counts as an external dispatch, a push to a "
-                "cohort's schedule included: the run listing does not say which sender "
+                "semester's schedule included: the run listing does not say which sender "
                 "asked for it."
             ),
             "",
@@ -455,7 +455,7 @@ def _item_line(item: LateItem, now: datetime) -> str:
 
 
 def _late_body(
-    course_org: str, cohort_org: str, verdict: Verdict, items: list[LateItem]
+    course_org: str, semester_org: str, verdict: Verdict, items: list[LateItem]
 ) -> str:
     """The late-delivery issue: the moments this gap swallowed, and how late each was.
 
@@ -489,18 +489,18 @@ def _late_body(
                 f"is failing` issue in `{course_org}/.github` rather than here."
             ),
             "",
-            f"cc @{cohort_org}/instructors",
+            f"cc @{semester_org}/instructors",
             "",
             _marker({"items": sorted(item.label for item in items)}),
         ]
     )
 
 
-def _late_comment(cohort_org: str, new: list[LateItem], now: datetime) -> str:
+def _late_comment(semester_org: str, new: list[LateItem], now: datetime) -> str:
     return (
         "**Shipped late**:\n"
         + "\n".join(_item_line(item, now) for item in new)
-        + f"\n\ncc @{cohort_org}/instructors"
+        + f"\n\ncc @{semester_org}/instructors"
     )
 
 
@@ -585,14 +585,14 @@ def report_course(course_org: str, verdict: Verdict, dry_run: bool = False) -> i
         return 1
 
 
-def report_cohort(
+def report_semester(
     course_org: str,
-    cohort_org: str,
+    semester_org: str,
     verdict: Verdict,
     items: list[LateItem],
     dry_run: bool = False,
 ) -> int:
-    """Keep this cohort's late-delivery issue in line with `items`. Returns the error count,
+    """Keep this semester's late-delivery issue in line with `items`. Returns the error count,
     and never raises - the same contract as `report_course`.
 
     Opening needs late items; CLOSING needs a proven cadence (`Verdict.healthy`, which
@@ -601,7 +601,7 @@ def report_cohort(
     next late moment, twice an hour."""
     if not verdict.armed:
         return 0
-    repo = f"{cohort_org}/{CONFIG_REPO}"
+    repo = f"{semester_org}/{CONFIG_REPO}"
     try:
         if not items:
             if not verdict.healthy:
@@ -627,15 +627,15 @@ def report_cohort(
             )
             return 0
         log_step(
-            f"{len(items)} moment(s) in {cohort_org}'s plan shipped more than "
+            f"{len(items)} moment(s) in {semester_org}'s plan shipped more than "
             f"{_minutes(GAP_SLO)} min late ({len(new)} new)"
         )
         return upsert_issue(
             repo,
             LATE_TITLE,
-            _late_body(course_org, cohort_org, verdict, items),
-            comment=_late_comment(cohort_org, new, verdict.now) if new else None,
+            _late_body(course_org, semester_org, verdict, items),
+            comment=_late_comment(semester_org, new, verdict.now) if new else None,
         ).errors
     except Exception as exc:
-        log_err(f"could not report {cohort_org}'s late deliveries: {exc}")
+        log_err(f"could not report {semester_org}'s late deliveries: {exc}")
         return 1

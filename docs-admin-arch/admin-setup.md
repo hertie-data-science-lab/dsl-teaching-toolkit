@@ -13,12 +13,12 @@ Every button runs under **one** credential, `DSL_BOT_TOKEN`. **Faculty & instruc
 or see it**: they trigger the Actions buttons, which run server-side under the org secret.
 
 The bot is the shared service account **`hertie-dsl-bot`**: one GitHub account with its own email
-+ 2FA, added as **Owner** of every course/cohort org; its classic PAT is `DSL_BOT_TOKEN`. Invite
++ 2FA, added as **Owner** of every course/semester org; its classic PAT is `DSL_BOT_TOKEN`. Invite
 this account as Owner of each new org. Org-wide 2FA enforcement is **not** turned on: GitHub
 refuses it while any member has 2FA off, so each refresh reports the count instead. Standing it up and rotating it:
 [CENTRAL ADMIN → Bot lifecycle](central-admin.md#bot-lifecycle---setup--rotation).
 
-**Required permissions.** The bot must be an **Owner** of every course and cohort org, and its
+**Required permissions.** The bot must be an **Owner** of every course and semester org, and its
 token must carry:
 
 | Classic PAT scope | Covers |
@@ -35,7 +35,7 @@ Two **separate** populations - keep them distinct:
   `faculty`/`instructors`/`admin` teams in `hertie-data-science-lab` →
   **[central-admin.md](central-admin.md)**.
 - **Who may run a specific course's buttons**: that course org's own `course-admin` team, or a
-  cohort's `instructors-<tag>` team → **[access-reference.md](../docs/reference/access-reference.md)**.
+  semester's `instructors-<tag>` team → **[access-reference.md](../docs/reference/access-reference.md)**.
 
 Both gate on repo permission, which is also why GitHub only shows "Run workflow" to write+ users.
 

@@ -1,7 +1,7 @@
-"""sync_faculty parses a `people:` block (course org's or a cohort's) and flattens it
+"""sync_faculty parses a `people:` block (course org's or a semester's) and flattens it
 into desired GitHub team membership per role. The gh wiring (the reconcile/grant
 calls) is not tested here - only the pure parsing, role->team flattening, and the
-cohort-scoping/tag-matching helpers, which decide what gets reconciled.
+semester-scoping/tag-matching helpers, which decide what gets reconciled.
 """
 
 from __future__ import annotations
@@ -65,54 +65,54 @@ def test_sync_course_admins_still_prunes_a_present_but_empty_people_block(monkey
     )
     errors = sync_faculty.sync_course_admins("Course", ["Course-f2026"])
     assert errors == 0
-    # reconciled the course org + the one cohort, each to an empty desired set
+    # reconciled the course org + the one semester, each to an empty desired set
     assert [c[0] for c in calls] == ["Course", "Course-f2026"]
     assert all(c[2] == set() for c in calls)
 
 
-def test_sync_cohort_instructors_refuses_to_prune_when_people_yml_is_absent(
+def test_sync_semester_instructors_refuses_to_prune_when_people_yml_is_absent(
     monkeypatch,
 ):
     # Nothing is reconciled - an absent people.yml with prune=True would strip the
-    # cohort's whole instructors team - and the run stays GREEN: a file faculty have to
+    # semester's whole instructors team - and the run stays GREEN: a file faculty have to
     # write reaches them on the people.yml digest issue, while this run's red X reaches
     # only a maintainer who cannot write another org's teaching team.
-    monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: None)
+    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: None)
     calls = []
     monkeypatch.setattr(
         sync_faculty,
         "reconcile_team_members",
         lambda *a, **k: calls.append(a) or 0,
     )
-    errors = sync_faculty.sync_cohort_instructors("Course", "Course-f2026", [], [])
+    errors = sync_faculty.sync_semester_instructors("Course", "Course-f2026", [], [])
     assert errors == 0
     assert calls == []
 
 
-def test_sync_cohort_instructors_counts_failed_grants(monkeypatch):
+def test_sync_semester_instructors_counts_failed_grants(monkeypatch):
     # create_team / grant_team_repo_access returns used to be discarded, so a failed grant
     # was invisible to the exit code. Now each failure is counted.
-    monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: {})
+    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: {})
     monkeypatch.setattr(sync_faculty, "reconcile_team_members", lambda *a, **k: 0)
-    monkeypatch.setattr(sync_faculty, "term_tag", lambda org: "f2026")
+    monkeypatch.setattr(sync_faculty, "semester_of", lambda org: "f2026")
     monkeypatch.setattr(
         sync_faculty, "create_team_outcome", lambda *a, **k: gh_teams.EXISTED
     )
     monkeypatch.setattr(
         sync_faculty, "grant_team_repo_access", lambda *a, **k: False
     )  # every grant fails
-    errors = sync_faculty.sync_cohort_instructors(
+    errors = sync_faculty.sync_semester_instructors(
         "Course", "Course-f2026", ["course-materials-f2026"], []
     )
     # _tag_repos always includes .github + the one matching content repo -> 2 failed grants
     assert errors == 2
 
 
-def test_sync_cohort_instructors_skips_wiring_when_team_creation_fails(monkeypatch):
+def test_sync_semester_instructors_skips_wiring_when_team_creation_fails(monkeypatch):
     # A failed create_team must not then grant access + reconcile against a nonexistent
     # team (which would triple-count the one failure and fire doomed API calls).
-    monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: {})
-    monkeypatch.setattr(sync_faculty, "term_tag", lambda org: "f2026")
+    monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: {})
+    monkeypatch.setattr(sync_faculty, "semester_of", lambda org: "f2026")
     monkeypatch.setattr(sync_faculty, "create_team_outcome", lambda *a, **k: None)
     grants = []
     monkeypatch.setattr(
@@ -124,14 +124,14 @@ def test_sync_cohort_instructors_skips_wiring_when_team_creation_fails(monkeypat
         "reconcile_team_members",
         lambda *a, **k: reconciles.append(a) or 0,
     )
-    errors = sync_faculty.sync_cohort_instructors(
+    errors = sync_faculty.sync_semester_instructors(
         "Course", "Course-f2026", ["course-materials-f2026"], []
     )
     assert errors == 1  # the single create_team failure, counted once
     assert grants == []  # no doomed grants against a team that does not exist
     assert (
         len(reconciles) == 1
-    )  # only the cohort's own instructors team, not the tag team
+    )  # only the semester's own instructors team, not the tag team
 
 
 def test_desired_team_members_coerces_a_nonstring_handle():
@@ -181,32 +181,32 @@ def test_desired_team_members_maps_roles_and_filters_by_date():
     }
 
 
-def test_cohort_roles_only_drops_course_admins():
+def test_semester_roles_only_drops_course_admins():
     faculty = {
         "instructors": [{"github_handle": "janedoe"}],
         "teaching_assistants": [{"github_handle": "anOther"}],
         "course_admins": [{"github_handle": "adminhandle"}],
     }
-    cohort_faculty = sync_faculty._cohort_roles_only(faculty)
-    assert "course_admins" not in cohort_faculty
-    assert cohort_faculty["instructors"] == faculty["instructors"]
-    assert cohort_faculty["teaching_assistants"] == faculty["teaching_assistants"]
+    semester_faculty = sync_faculty._semester_roles_only(faculty)
+    assert "course_admins" not in semester_faculty
+    assert semester_faculty["instructors"] == faculty["instructors"]
+    assert semester_faculty["teaching_assistants"] == faculty["teaching_assistants"]
 
 
-def test_cohort_roles_only_is_safe_without_course_admins():
+def test_semester_roles_only_is_safe_without_course_admins():
     faculty = {"instructors": [{"github_handle": "janedoe"}]}
-    assert sync_faculty._cohort_roles_only(faculty) == faculty
+    assert sync_faculty._semester_roles_only(faculty) == faculty
 
 
-def test_cohort_people_yml_declaring_course_admins_grants_nothing():
-    # a stray course_admins: entry in a cohort's people.yml must not grant admin -
+def test_semester_people_yml_declaring_course_admins_grants_nothing():
+    # a stray course_admins: entry in a semester's people.yml must not grant admin -
     # that role is exclusively course-level.
     raw = """
 people:
   course_admins:
     - github_handle: sneaky
 """
-    faculty = sync_faculty._cohort_roles_only(_parse(raw))
+    faculty = sync_faculty._semester_roles_only(_parse(raw))
     desired = sync_faculty.desired_team_members(faculty, today="2026-10-01")
     assert desired == {"instructors": set(), "course-admin": set()}
 
@@ -247,7 +247,7 @@ def test_desired_for_filters_to_one_team():
 # --------------------------------------------------------------- `email:`, the one field
 # an instructor/TA entry needs beyond the handle. It is what a notification is sent to, so
 # an entry missing it is reported - and never fixed by withholding access, which would
-# take the cohort's team away over a field nobody has filled in yet.
+# take the semester's team away over a field nobody has filled in yet.
 
 
 def test_valid_email_accepts_an_address_and_rejects_everything_else():
@@ -277,7 +277,7 @@ people:
     assert "instructors entry janedoe" in err
     assert "teaching_assistants entry anOther" in err
     assert "`email:`" in err
-    # course_admins is notified through the course org, not a cohort's people.yml
+    # course_admins is notified through the course org, not a semester's people.yml
     assert "adminhandle" not in err
     # the declared value is personal data: the report names the handle, never the address
     assert "not-an-address" not in err
@@ -445,7 +445,7 @@ def test_a_people_yml_that_is_absent_or_unreadable_is_itself_the_fault(monkeypat
             lambda *a, _f=raise_or_return, **k: _f(),
         )
         found = []
-        assert sync_faculty.read_cohort_people("Cohort-f2026", found) is None
+        assert sync_faculty.read_semester_people("Semester-f2026", found) is None
         (fault,) = found
         assert expected in fault.what
         assert fault.file == "people.yml" and fault.lineno is None
@@ -463,7 +463,7 @@ def test_a_read_that_failed_is_not_reported_as_a_broken_people_yml(monkeypatch):
     )
     found = []
     with pytest.raises(RuntimeError):
-        sync_faculty.read_cohort_people("Cohort-f2026", found)
+        sync_faculty.read_semester_people("Semester-f2026", found)
     assert found == []
 
 
@@ -477,7 +477,7 @@ def _raiser(exc):
 # ---------------------------------------------- the COURSE org's own identity file
 #
 # dsl-course.yml declares the course admins and the toolkit tier every workflow under
-# this course is rendered at. A fault in it is not one cohort's problem: the sync walks
+# this course is rendered at. A fault in it is not one semester's problem: the sync walks
 # past the whole course, so it earns a digest of its own in the course org.
 
 
@@ -514,7 +514,7 @@ def test_a_course_admin_handle_no_team_can_be_given_is_a_fault(monkeypatch):
         6,
     )
     # The COURSE org's own .github, so the citation and the deep link land on the file a
-    # course admin actually edits - not on some cohort's classroom-config.
+    # course admin actually edits - not on some semester's classroom-config.
     assert (fault.file, fault.in_repo) == ("dsl-course.yml", ".github")
     assert fault.link("Course-Org") == (
         "https://github.com/Course-Org/.github/blob/main/dsl-course.yml#L6"
@@ -581,26 +581,26 @@ def test_a_clean_course_config_has_no_faults(monkeypatch):
     assert found == []
 
 
-def test_the_faculty_sweep_leaves_a_closed_out_cohort_alone(monkeypatch):
-    # Every grant it makes is a write into a read-only org. The live cohort beside it is
+def test_the_faculty_sweep_leaves_a_closed_out_semester_alone(monkeypatch):
+    # Every grant it makes is a write into a read-only org. The live semester beside it is
     # still reconciled, so a course does not stop syncing because one term ended.
-    monkeypatch.setattr(sync_faculty, "live_cohorts", lambda org: ["Cohort-B"])
+    monkeypatch.setattr(sync_faculty, "live_semesters", lambda org: ["Semester-B"])
     monkeypatch.setattr(sync_faculty, "discover_content_repos", lambda org: [])
     monkeypatch.setattr(sync_faculty, "discover_assignments", lambda org: [])
     admins: list[list[str]] = []
     monkeypatch.setattr(
         sync_faculty,
         "sync_course_admins",
-        lambda course, cohorts, **k: admins.append(list(cohorts)) or 0,
+        lambda course, semesters, **k: admins.append(list(semesters)) or 0,
     )
     seen: list[str] = []
     monkeypatch.setattr(
         sync_faculty,
-        "sync_cohort_instructors",
-        lambda course, cohort, *a, **k: seen.append(cohort) or 0,
+        "sync_semester_instructors",
+        lambda course, semester, *a, **k: seen.append(semester) or 0,
     )
     assert sync_faculty.sync("Course") == 0
-    assert (seen, admins) == (["Cohort-B"], [["Cohort-B"]])
+    assert (seen, admins) == (["Semester-B"], [["Semester-B"]])
 
 
 @pytest.mark.parametrize(
@@ -615,7 +615,7 @@ def test_a_just_created_instructors_tag_team_is_not_read_back(
     # aborted. A team that was already there is still read.
     monkeypatch.setattr(
         sync_faculty,
-        "load_cohort_faculty",
+        "load_semester_faculty",
         lambda org: {"instructors": [{"github_handle": "prof-a"}]},
     )
     monkeypatch.setattr(sync_faculty, "create_team_outcome", lambda *a, **k: outcome)
@@ -632,11 +632,11 @@ def test_a_just_created_instructors_tag_team_is_not_read_back(
     )
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     monkeypatch.setattr(gh_teams, "acting_login", lambda: "the-bot")
-    errors = sync_faculty.sync_cohort_instructors(
-        "course-org", "cohort-f2026", [], [], dry_run=False
+    errors = sync_faculty.sync_semester_instructors(
+        "course-org", "semester-f2026", [], [], dry_run=False
     )
     assert errors == 0
-    assert read == ["cohort-f2026"] + (["course-org"] if reads_course_team else [])
+    assert read == ["semester-f2026"] + (["course-org"] if reads_course_team else [])
     assert ("course-org", "instructors-f2026", "prof-a") in added
 
 
@@ -681,6 +681,6 @@ def test_course_admin_emails_are_the_active_usable_ones_in_order():
     assert sync_faculty.course_admin_emails(faculty, "2026-09-23") == ["lonny@x.edu"]
 
 
-def test_a_course_admin_email_in_a_cohort_file_is_not_checked():
-    # A cohort's people.yml drops course_admins altogether; nothing to report there.
+def test_a_course_admin_email_in_a_semester_file_is_not_checked():
+    # A semester's people.yml drops course_admins altogether; nothing to report there.
     assert _faults(COURSE_PEOPLE) == []

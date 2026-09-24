@@ -143,7 +143,7 @@ def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
     # needs a commit to hang a tree off, and only the Contents API will create that first
     # one. This test used to assert the opposite (that omitting base_tree was enough), with
     # a stub that let the POST succeed - so the real 409 went unnoticed until the first
-    # cohort org bootstrapped after the classroom-config scaffolds were batched, whose
+    # semester org bootstrapped after the classroom-config scaffolds were batched, whose
     # roster, schedule and people.yml never landed at all.
     calls = []
 
@@ -226,7 +226,7 @@ def test_put_files_skips_a_deletion_of_a_file_that_is_already_gone(monkeypatch):
 
 def test_get_file_content_returns_none_only_for_a_genuine_404(monkeypatch):
     # None is what every caller reads as "not configured yet" (an unseeded roster, an
-    # empty cohort registry), so only a real 404 may produce it - a rate-limited or
+    # empty semester registry), so only a real 404 may produce it - a rate-limited or
     # forbidden read has to be loud, or a transient failure looks like an empty course.
     _stub_gh(monkeypatch, lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     assert (
@@ -263,7 +263,7 @@ def test_a_file_comes_back_byte_for_byte(monkeypatch, text):
     # `ghcli.gh` returns `(stdout + stderr).strip()`, so decoding through jq's `@base64d`
     # lost a file's trailing newline and a CRLF file's `\r`. Read that way and written
     # back, a file faculty hand-edited is a different blob - the e2e teardown's fidelity
-    # check called a cohort's schedule.yml drifted on every single run. Base64 is what
+    # check called a semester's schedule.yml drifted on every single run. Base64 is what
     # survives the strip, so the decode happens in Python.
     _stub_gh(monkeypatch, lambda *a, **k: (0, _b64(text)))
     assert gh_contents.get_file_content("Org", "repo", "schedule.yml") == text
@@ -510,7 +510,7 @@ def test_a_file_that_is_not_text_travels_as_a_blob(monkeypatch):
     # A tree entry's `content` field is TEXT. `get_blob` reads bytes, so Patch could pick
     # up a corrected image or dataset that this could not then write: the `.decode()` here
     # raised UnicodeDecodeError, which is not the RuntimeError `patch_one_repo` catches, so
-    # one binary under a patched folder abandoned the run mid-cohort. Binaries go up as a
+    # one binary under a patched folder abandoned the run mid-semester. Binaries go up as a
     # loose blob and into the tree by sha.
     png = b"\x89PNG\r\n\x1a\n\x00\xff\xfe"
     calls: list[tuple] = []

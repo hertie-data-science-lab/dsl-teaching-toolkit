@@ -27,7 +27,7 @@ from dsl_course.ops.request import RequestError, parse_request
 from dsl_course.schedule import Deploy, Release, Schedule
 
 COURSE = "hertie-dsl-demo-course-e1234"
-COHORT = "hertie-dsl-demo-f2026"
+SEMESTER = "hertie-dsl-demo-f2026"
 
 # contracts.md section 1, verbatim but for the actor placeholder.
 CONTRACT_REQUEST = {
@@ -35,7 +35,7 @@ CONTRACT_REQUEST = {
     "op": "release.now",
     "actor": "prof",
     "course_org": COURSE,
-    "cohort_org": COHORT,
+    "semester_org": SEMESTER,
     "args": {"entry": "s5"},
     "preview": True,
     "client": "console/0.1",
@@ -97,12 +97,12 @@ def _run_flags(rendered: str, module: str) -> set[str]:
     raise AssertionError(f"no step runs dsl_course.{module}")
 
 
-def _all_flags(name: str, args: dict, cohort: str | None = COHORT) -> set[str]:
+def _all_flags(name: str, args: dict, semester: str | None = SEMESTER) -> set[str]:
     """The flags the registry can spell for an op: every optional arg on, both gates."""
     op = REGISTRY[name]
     flags = set()
     for preview in (True, False):
-        req = Request(name, "prof", COURSE, cohort, args, preview)
+        req = Request(name, "prof", COURSE, semester, args, preview)
         flags |= {t for t in command(op, req) if t.startswith("--")}
     return flags
 
@@ -112,12 +112,14 @@ def _all_flags(name: str, args: dict, cohort: str | None = COHORT) -> set[str]:
     [
         (
             "cohort.archive",
-            workflows_render.render_archive_cohort([COHORT]),
+            workflows_render.render_archive_semester([SEMESTER]),
             {"force": True},
         ),
         (
             "assignment.update_copies",
-            workflows_render.render_patch_assignment([COHORT], ["assignment-1-f2026"]),
+            workflows_render.render_patch_assignment(
+                [SEMESTER], ["assignment-1-f2026"]
+            ),
             {
                 "course_source_repo": "assignment-1-f2026",
                 "path": "a.ipynb",
@@ -128,7 +130,7 @@ def _all_flags(name: str, args: dict, cohort: str | None = COHORT) -> set[str]:
         (
             "assignment.collect_now",
             workflows_render.render_collect_submissions(
-                [COHORT], ["assignment-1-f2026"]
+                [SEMESTER], ["assignment-1-f2026"]
             ),
             {"course_source_repo": "assignment-1-f2026", "slug": "a1"},
         ),
@@ -141,18 +143,18 @@ def test_argv_spells_the_flags_the_seeded_workflow_spells(name, rendered, args):
 
 def test_a_workflow_op_dispatches_inputs_its_workflow_declares():
     op = REGISTRY["assignment.collect_now"]
-    declared = workflow_inputs(workflows_render.render_collect_submissions([COHORT]))
+    declared = workflow_inputs(workflows_render.render_collect_submissions([SEMESTER]))
     assert set(op.inputs) <= set(declared)
     req = Request(
         op.name,
         "prof",
         COURSE,
-        COHORT,
+        SEMESTER,
         {"course_source_repo": "assignment-1-f2026"},
         True,
     )
     assert op_inputs(op, command(op, req)) == {
-        "cohort_org": COHORT,
+        "semester_org": SEMESTER,
         "course_source_repo": "assignment-1-f2026",
         "dry_run": "true",
     }
@@ -160,7 +162,7 @@ def test_a_workflow_op_dispatches_inputs_its_workflow_declares():
 
 def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
     op = REGISTRY["grades.return"]
-    real = command(op, Request(op.name, "prof", COURSE, COHORT, {}, False))
+    real = command(op, Request(op.name, "prof", COURSE, SEMESTER, {}, False))
     assert real[-1] == "--no-dry-run" and "--dry-run" not in real
 
 
@@ -169,9 +171,9 @@ def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
 
 def test_the_contract_example_parses():
     req = parse_request(json.dumps(CONTRACT_REQUEST))
-    assert (req.op, req.cohort_org, req.args, req.preview) == (
+    assert (req.op, req.semester_org, req.args, req.preview) == (
         "release.now",
-        COHORT,
+        SEMESTER,
         {"entry": "s5"},
         True,
     )
@@ -183,7 +185,7 @@ def test_the_contract_example_parses():
         (
             _request(
                 op="course.publish_website",
-                cohort_org=None,
+                semester_org=None,
                 args={"source_repo": "m", "readings_mode": "all"},
             ),
             "BAD_ARGS",
@@ -193,7 +195,7 @@ def test_the_contract_example_parses():
         (_request(op="release.later"), "UNKNOWN_OP"),
         (_request(args={"entry": "s5", "surprise": 1}), "BAD_ARGS"),
         (_request(args={"entry": "--no-dry-run"}), "BAD_ARGS"),
-        (_request(cohort_org=None), "BAD_REQUEST"),
+        (_request(semester_org=None), "BAD_REQUEST"),
     ],
 )
 def test_a_bad_request_is_refused_with_its_code(raw, code):
@@ -214,23 +216,23 @@ def _teams(members: dict[tuple[str, str], set[str]]):
 
 
 @pytest.fixture(autouse=True)
-def _cohort_is_registered(monkeypatch):
-    monkeypatch.setattr(request_mod, "discover_cohorts", lambda org: [COHORT])
+def _semester_is_registered(monkeypatch):
+    monkeypatch.setattr(request_mod, "discover_semesters", lambda org: [SEMESTER])
 
 
-def test_a_cohort_of_another_course_is_refused(monkeypatch):
+def test_a_semester_of_another_course_is_refused(monkeypatch):
     req = parse_request(json.dumps(_request()))
-    monkeypatch.setattr(request_mod, "discover_cohorts", lambda org: ["other-f2026"])
+    monkeypatch.setattr(request_mod, "discover_semesters", lambda org: ["other-f2026"])
     monkeypatch.setattr(
         request_mod, "get_team_members", _teams({(COURSE, "course-admin"): {"prof"}})
     )
-    assert "not a cohort of" in request_mod.check_access(req)
+    assert "not a semester of" in request_mod.check_access(req)
 
 
-def test_access_needs_the_cohort_instructors_team_or_course_admin(monkeypatch):
+def test_access_needs_the_semester_instructors_team_or_course_admin(monkeypatch):
     req = parse_request(json.dumps(_request()))
     monkeypatch.setattr(
-        request_mod, "get_team_members", _teams({(COHORT, "instructors"): {"Prof"}})
+        request_mod, "get_team_members", _teams({(SEMESTER, "instructors"): {"Prof"}})
     )
     assert request_mod.check_access(req) is None
     monkeypatch.setattr(request_mod, "get_team_members", _teams({}))
@@ -247,7 +249,7 @@ def test_a_course_op_accepts_any_term_instructors_team(monkeypatch):
         preview=False,
         args={"course_source_repo": "assignment-1-f2026"},
     )
-    del raw["cohort_org"]
+    del raw["semester_org"]
     req = parse_request(json.dumps(raw))
     monkeypatch.setattr(
         request_mod,
@@ -267,7 +269,7 @@ def test_bootstrap_needs_course_admin(monkeypatch):
         json.dumps(_request(op="cohort.bootstrap", preview=False, args={}))
     )
     monkeypatch.setattr(
-        request_mod, "get_team_members", _teams({(COHORT, "instructors"): {"prof"}})
+        request_mod, "get_team_members", _teams({(SEMESTER, "instructors"): {"prof"}})
     )
     assert "course-admin" in request_mod.check_access(req)
 
@@ -286,7 +288,7 @@ def test_the_annotation_names_nobody():
             {
                 "code": "SKIPPED",
                 "text": "assignment-3-octocat kept its own file",
-                "fix": {"repo": f"{COHORT}/assignment-3-octocat"},
+                "fix": {"repo": f"{SEMESTER}/assignment-3-octocat"},
             }
         ],
         people=[{"handle": "octocat", "text": "No repo: not joined yet."}],
@@ -415,8 +417,8 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
     assert rc == 0
     assert seen["argv"] == [
         "distribute",
-        "--cohort-org",
-        COHORT,
+        "--semester-org",
+        SEMESTER,
         "--no-notify",
         "--no-dry-run",
     ]
@@ -425,7 +427,7 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
     assert body["counts"] == {"gradebooks": 3, "emails": 3, "held": 0}
     (org, repo, path, content, _msg), _ = engine[0]
     assert (org, repo, path) == (
-        COHORT,
+        SEMESTER,
         "classroom-config",
         ".dsl/outcomes/grades.return.json",
     )
@@ -490,7 +492,7 @@ def test_a_named_entry_is_released_from_its_schedule_row(monkeypatch, capsys, en
                 deploy=[
                     Deploy("course-materials-f2026", "lectures/05"),
                     Deploy(
-                        "course-materials-f2026", "labs/05", cohort_dest_path="labs/5"
+                        "course-materials-f2026", "labs/05", semester_dest_path="labs/5"
                     ),
                 ],
             )
@@ -508,7 +510,7 @@ def test_a_named_entry_is_released_from_its_schedule_row(monkeypatch, capsys, en
     assert rc == 0 and body["conclusion"] == "previewed"
     argv = seen[0]
     assert argv[argv.index("--course-source-path") + 1] == "lectures/05,labs/05"
-    assert argv[argv.index("--cohort-dest-path") + 1] == "lectures/05,labs/5"
+    assert argv[argv.index("--semester-dest-path") + 1] == "lectures/05,labs/5"
     assert argv[-1] == "--dry-run"
 
 
@@ -561,14 +563,14 @@ def test_collect_now_starts_its_own_workflow(monkeypatch, capsys, engine):
         f"repos/{COURSE}/.github/actions/workflows/collect-submissions.yml/dispatches"
         in args
     )
-    assert f"inputs[cohort_org]={COHORT}" in args
+    assert f"inputs[semester_org]={SEMESTER}" in args
     assert not any("dry_run" in a for a in args)
 
 
-def test_a_refusal_for_another_courses_cohort_writes_nowhere(
+def test_a_refusal_for_another_courses_semester_writes_nowhere(
     monkeypatch, capsys, engine
 ):
-    monkeypatch.setattr(request_mod, "discover_cohorts", lambda org: ["other-f2026"])
+    monkeypatch.setattr(request_mod, "discover_semesters", lambda org: ["other-f2026"])
     rc, body, _ = _main(monkeypatch, capsys, _request(op="grades.return", args={}))
     assert rc == 0
     assert body["reasons"][0]["code"] == "NOT_ALLOWED"
@@ -618,7 +620,7 @@ def test_a_failed_refresh_after_a_new_template_is_a_reason_not_a_failure(
     raw = _request(
         op="assignment.create", args={"number": "2", "tag": "f2026"}, preview=False
     )
-    del raw["cohort_org"]
+    del raw["semester_org"]
     rc, body, _ = _main(monkeypatch, capsys, raw)
     assert rc == 0 and body["conclusion"] == "done"
     assert [r["code"] for r in body["reasons"]] == ["REFRESH_FAILED"]

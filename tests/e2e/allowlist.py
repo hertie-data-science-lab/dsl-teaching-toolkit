@@ -6,7 +6,7 @@ the same fact, stated as a literal rather than read from the environment, so tha
 mistyped env var cannot WIDEN the run: `DSL_E2E_ORGS` may only ever narrow.
 
 Both demo orgs are named here because the pipeline needs both - the assignment template is
-created in the course org and the submission repos land in the cohort org.
+created in the course org and the submission repos land in the semester org.
 """
 
 from __future__ import annotations

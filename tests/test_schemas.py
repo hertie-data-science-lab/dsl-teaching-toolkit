@@ -143,12 +143,12 @@ CONTRACT_STATUS = {
         "templates": [
             {"repo": "assignment-3-f2026", "slug": "assignment-3", "state": "problem"}
         ],
-        "cohorts": ["hertie-dsl-demo-f2026"],
+        "semesters": ["hertie-dsl-demo-f2026"],
     },
-    "cohort": {
+    "semester": {
         "org": "hertie-dsl-demo-f2026",
-        "term": "f2026",
-        "term_label": "Fall 2026",
+        "key": "f2026",
+        "label": "Fall 2026",
         "timezone": "Europe/Berlin",
         "week": 3,
         "weeks": 15,
@@ -167,7 +167,7 @@ CONTRACT_STATUS = {
     "problems": [
         {
             "id": "schedule:s5:SOURCE_MISSING",
-            "scope": "cohort",
+            "scope": "semester",
             "stage": "K4",
             "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
             "stops": "The release on Thu 8 Oct will be skipped.",

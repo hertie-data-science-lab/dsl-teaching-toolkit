@@ -1,4 +1,4 @@
-"""site.py schedule wiring: the cohort website's rows take their dates and their types
+"""site.py schedule wiring: the semester website's rows take their dates and their types
 from schedule.yml (not a synthesised weekly guess), joined to the released folders by
 ordinal AND section - a week's lecture and its lab are separate rows. A wrong mapping here
 silently mis-dates the whole schedule page, or hides a lab inside a lecture row."""
@@ -79,7 +79,7 @@ def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry(
-        "Cohort",
+        "Semester",
         "2",
         _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)),
         RELEASED,
@@ -93,7 +93,7 @@ def test_lecture_entry_falls_back_to_0900_for_a_bare_date(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry(
-        "Cohort", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
+        "Semester", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
     )
     assert "date: 2026-09-15T09:00:00" in md
 
@@ -102,13 +102,13 @@ def test_lecture_entry_renders_a_lab_row_as_its_own_type(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry(
-        "Cohort", "3", _row(date(2026, 9, 17)), RELEASED, "lab", hosted={}
+        "Semester", "3", _row(date(2026, 9, 17)), RELEASED, "lab", hosted={}
     )
     assert "type: lab" in md
     assert 'title: "Lab 3"' in md
     assert "Session 3" not in md
     lec = site._lecture_entry(
-        "Cohort", "3", _row(date(2026, 9, 15)), RELEASED, hosted={}
+        "Semester", "3", _row(date(2026, 9, 15)), RELEASED, hosted={}
     )
     assert "type: lecture" in lec and 'title: "Session 3"' in lec
 
@@ -119,10 +119,10 @@ def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert "unreleased: true" not in site._lecture_entry(
-        "Cohort", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
+        "Semester", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
     )
     assert "unreleased: true" in site._lecture_entry(
-        "Cohort", "2", _row(date(2026, 9, 15)), [], hosted={}
+        "Semester", "2", _row(date(2026, 9, 15)), [], hosted={}
     )
 
 
@@ -136,10 +136,10 @@ def test_a_provisional_session_date_is_marked_on_both_kinds_of_row(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     for kind, sources in (("lecture", RELEASED), ("lab", RELEASED), ("lecture", [])):
         marked = site._lecture_entry(
-            "Cohort", "2", _row(date(2026, 9, 15), tbc=True), sources, kind, hosted={}
+            "Semester", "2", _row(date(2026, 9, 15), tbc=True), sources, kind, hosted={}
         )
         plain = site._lecture_entry(
-            "Cohort", "2", _row(date(2026, 9, 15)), sources, kind, hosted={}
+            "Semester", "2", _row(date(2026, 9, 15)), sources, kind, hosted={}
         )
         assert "tbc: true" in marked
         assert "tbc" not in plain
@@ -225,23 +225,23 @@ def test_the_archive_row_is_a_special_event_that_says_what_freezes():
     said = "Everything here goes read-only. You keep read access."
     out = site._archive_entry(_archive_row(said), date(2026, 12, 20))
     assert "type: special_event" in out
-    assert 'title: "Cohort archived"' in out
+    assert 'title: "Semester archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
     assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
-    # What it SAYS is the cohort's own sentence, in the key every row says things in.
+    # What it SAYS is the semester's own sentence, in the key every row says things in.
     assert _said(out) == said
     # And nothing else: no body, so nothing renders twice.
     assert out.endswith("---\n")
 
 
-def test_the_cohorts_own_sentence_is_the_rows_details_and_not_its_title():
+def test_the_semesters_own_sentence_is_the_rows_details_and_not_its_title():
     # This is the sentence students read, and it goes where every other row's prose goes -
     # the Details column - rather than into the page body, which is what forced it onto one
     # line and made it the one `details:` that could not run to a paragraph.
     said = "We freeze on the 16th - your repos stay readable for ever."
     out = site._archive_entry(_archive_row(said), date(2027, 2, 1))
     assert _said(out) == said
-    assert 'title: "Cohort archived"' in out
+    assert 'title: "Semester archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
 
 
@@ -282,10 +282,10 @@ def test_a_multi_paragraph_sentence_stays_multi_paragraph():
 
 def test_without_a_sentence_the_row_carries_none():
     # There is no default: the toolkit does not know what a freeze means for a given
-    # cohort's students, and a wrong reassurance is worse than none. The row still
+    # semester's students, and a wrong reassurance is worse than none. The row still
     # renders - its title and its date - and the Updates box skips an empty bullet.
     out = site._archive_entry(_archive_row(), date(2027, 2, 1))
-    assert out.endswith('title: "Cohort archived"\n---\n')
+    assert out.endswith('title: "Semester archived"\n---\n')
     assert "read-only" not in out
 
 
@@ -327,14 +327,14 @@ def test_a_row_with_nothing_to_say_is_not_announced():
 
 
 def test_term_date_entry_hides_the_placeholder_time():
-    out = site._term_date_entry("Term starts", date(2026, 9, 7))
+    out = site._term_date_entry("Semester starts", date(2026, 9, 7))
     assert "type: term_date" in out
     assert "date: 2026-09-07T09:00:00" in out
     assert "hide_time: true" in out  # a term boundary is a whole day, not a 09:00 slot
     # The name is the row's TITLE. It used to be `name:`, which the theme prints in the
     # Event column, beside an always-empty Title cell - the one row that named itself in a
     # different column from every other.
-    assert 'title: "Term starts"' in out
+    assert 'title: "Semester starts"' in out
     assert "name:" not in out and "description:" not in out
 
 
@@ -344,7 +344,7 @@ def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -362,7 +362,7 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-2-f2026",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-2"}),
@@ -372,7 +372,7 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
 
 def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     # The template repo exists from the day faculty write the assignment; publishing its
-    # README on sight put the whole brief on the PUBLIC cohort site weeks before hand-out,
+    # README on sight put the whole brief on the PUBLIC semester site weeks before hand-out,
     # while the scheduler was still correctly holding the student repos back. So the
     # CONTENT is embargoed - the README is not read at all - but the entry still exists,
     # and with it the two schedule rows. Withholding those left an assignment students
@@ -383,7 +383,7 @@ def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     monkeypatch.setattr(site, "get_file_content", _no_reads)
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -404,7 +404,7 @@ def test_a_passed_handout_inlines_the_brief(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -416,7 +416,7 @@ def test_a_passed_handout_inlines_the_brief(monkeypatch):
 
 def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
     # The manual button's documented mode pins no handout_datetime at all, so the plan
-    # cannot say this went out - the frozen cohort template repo it creates is what says
+    # cannot say this went out - the frozen semester template repo it creates is what says
     # so. Gating on the plan alone published these briefs from the day the template
     # existed, which is the whole bug.
     monkeypatch.setattr(
@@ -424,7 +424,7 @@ def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-2-f2026",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-2"}),
@@ -434,37 +434,37 @@ def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
 
 
 def test_an_assignment_with_no_handout_on_record_withholds_its_brief(monkeypatch):
-    # Neither signal fires: no cohort template repo, no pin. Withholding the CONTENT is
+    # Neither signal fires: no semester template repo, no pin. Withholding the CONTENT is
     # the safe direction - the brief appears the moment either says it went out - but the
     # row is still the plan's, and the plan is already public.
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Assignment 2\nThe brief."
     )
     out = site._assignment_entry(
-        "Course", "Cohort-f2026", "assignment-2-f2026", date(2026, 11, 10)
+        "Course", "Semester-f2026", "assignment-2-f2026", date(2026, 11, 10)
     )
     assert "handout_pending: true" in out
     assert "The brief." not in out
     assert 'title: "Assignment 2"' in out
 
 
-def test_a_released_assignment_links_the_cohort_repo_not_the_course_org(monkeypatch):
+def test_a_released_assignment_links_the_semester_repo_not_the_course_org(monkeypatch):
     # The two halves of an assignment live in different orgs, and this took only the
-    # course one - so the page told students their repo was "in `<course-org>`'s cohort
+    # course one - so the page told students their repo was "in `<course-org>`'s semester
     # org": the org they cannot open, and not the one they can.
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Assignment 1\nThe brief."
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         date(2026, 10, 13),
         handed_out=frozenset({"assignment-1"}),
     )
     # both levels: the theme reaches the due row via `map: "due_event"`, which cannot
     # see the parent entry's fields
-    assert out.count("Cohort-f2026/repositories?q=assignment-1-") == 2
+    assert out.count("Semester-f2026/repositories?q=assignment-1-") == 2
     assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
     assert "Course" not in out.split("---")[1]  # the course org names no student repo
 
@@ -486,7 +486,7 @@ def test_the_plans_title_is_the_assignments_name_and_beats_the_readme(monkeypatc
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         date(2026, 10, 13),
         found=("assignment-1", sched.assignments["assignment-1"]),
@@ -542,7 +542,7 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-3-f2026",
         date(2026, 10, 13),
         found=("assignment-3", sched.assignments["assignment-3"]),
@@ -564,7 +564,7 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
     hands it out on 22 September and freezes it on 20 October - so `now` alone decides
     which side of the team-formation window the page is rendered on.
 
-    `teams_csv` is the cohort's private teams.csv, as text, so the table of teams the page
+    `teams_csv` is the semester's private teams.csv, as text, so the table of teams the page
     prints goes through the real parser the rest of the toolkit reads that file with - or a
     reader of its own, for the page rendered against a file that could not be read."""
     monkeypatch.setattr(
@@ -591,7 +591,7 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
     entry = sched.assignments["assignment-3"]
     return site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-3-f2026",
         entry.due_datetime,
         handout=entry.handout_datetime,
@@ -619,7 +619,7 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
     assert out.count("repo_url:") == 2
     assert out.count('repo_name: "assignment-3-<your-team>"') == 2
     assert (
-        'team_join_url: "https://github.com/Cohort-f2026/welcome/issues/new/choose"'
+        'team_join_url: "https://github.com/Semester-f2026/welcome/issues/new/choose"'
         in out
     )
     # The cap the Join-team form enforces, and the day it stops accepting - the same date
@@ -650,7 +650,7 @@ def test_the_teams_that_exist_are_listed_beside_the_invitation(monkeypatch):
 
 
 def test_no_handle_from_teams_csv_reaches_the_public_page(monkeypatch):
-    # The cohort site is PUBLIC. A team name is student-chosen and public by construction;
+    # The semester site is PUBLIC. A team name is student-chosen and public by construction;
     # who is in it is not, and neither is the `<slug>-<handle>` repo it would name.
     out = _team_entry(
         monkeypatch,
@@ -671,7 +671,7 @@ def test_a_window_with_no_teams_yet_prints_no_table(monkeypatch):
 
 def test_a_teams_csv_that_cannot_be_read_still_renders_the_page(monkeypatch, capsys):
     # teams.csv is student-written and lives behind an API. Neither a broken header nor a
-    # rate limit may take down the render of a cohort's whole website - the callout is the
+    # rate limit may take down the render of a semester's whole website - the callout is the
     # part that matters.
     def boom(org):
         raise RuntimeError("API rate limit exceeded")
@@ -686,7 +686,7 @@ def test_the_invitation_goes_when_the_window_does(monkeypatch):
     # frozen - so the page is exactly the page it always was.
     out = _team_entry(monkeypatch, SELF_SELECT_GROUP, now=SHUT)
     assert "team_join" not in out
-    assert out.count("Cohort-f2026/repositories?q=assignment-3-") == 2
+    assert out.count("Semester-f2026/repositories?q=assignment-3-") == 2
 
 
 def test_a_group_assignment_not_yet_handed_out_is_still_only_pending(monkeypatch):
@@ -707,22 +707,22 @@ def test_an_individual_assignment_is_never_asked_to_form_a_team(monkeypatch):
     # grading_config.yml - and an individual assignment has no teams to form.
     out = _team_entry(monkeypatch, "type: individual\n", now=FORMING)
     assert "team_join" not in out
-    assert out.count("Cohort-f2026/repositories?q=assignment-3-") == 2
+    assert out.count("Semester-f2026/repositories?q=assignment-3-") == 2
 
 
 def test_an_allocated_group_assignment_asks_nobody_to_form_a_team(monkeypatch):
     # `team_formation: assigned` means the teaching team writes teams.csv and the
-    # Join-team form refuses every request. Pointing a cohort at a form that will refuse
+    # Join-team form refuses every request. Pointing a semester at a form that will refuse
     # them is worse than the missing button this replaces.
     out = _team_entry(
         monkeypatch, "type: group\nteam_formation: assigned\n", now=FORMING
     )
     assert "team_join" not in out
-    assert out.count("Cohort-f2026/repositories?q=assignment-3-") == 2
+    assert out.count("Semester-f2026/repositories?q=assignment-3-") == 2
 
 
 def test_the_invitation_does_not_wait_for_the_first_team(monkeypatch):
-    # Whether a team exists is ONE answer for the whole cohort - `handed_out` carries this
+    # Whether a team exists is ONE answer for the whole semester - `handed_out` carries this
     # assignment's name only once the handout has actually provisioned, which for a group
     # assignment means a team formed. Keying the invitation on that would take it away
     # from every student still looking for a team the moment the first one was agreed.
@@ -748,7 +748,7 @@ def _entry_for(monkeypatch, config: str, **kw) -> str:
     )
     return site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         **kw,
@@ -807,7 +807,7 @@ def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
@@ -828,7 +828,7 @@ def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -850,7 +850,7 @@ def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
@@ -861,7 +861,7 @@ def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
 
 def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch):
     # The handout creates a PRIVATE repo; `student_choice` is a rule about who may change
-    # that afterwards. The placeholder line would otherwise promise a cohort their
+    # that afterwards. The placeholder line would otherwise promise a semester their
     # "student_choice repo".
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     monkeypatch.setattr(
@@ -871,7 +871,7 @@ def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -1035,7 +1035,7 @@ def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
@@ -1055,7 +1055,7 @@ def test_a_definition_that_cannot_be_read_leaves_the_github_wording(monkeypatch)
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-1"}),
@@ -1070,7 +1070,7 @@ def test_a_pending_assignment_links_no_repo(monkeypatch):
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -1090,7 +1090,7 @@ def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 10, 20, 14, 0, tzinfo=BERLIN),
@@ -1101,8 +1101,8 @@ def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
     assert "unreleased: true" not in out
 
 
-def test_handed_out_keys_on_the_cohort_dest_repo_not_the_slug(monkeypatch):
-    # assign.py freezes the cohort template under `cohort_dest_repo` when an entry renames
+def test_handed_out_keys_on_the_semester_dest_repo_not_the_slug(monkeypatch):
+    # assign.py freezes the semester template under `semester_dest_repo` when an entry renames
     # it, so the gate must look the assignment up under the same name it was created with.
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Assignment 1\nThe brief."
@@ -1112,11 +1112,11 @@ def test_handed_out_keys_on_the_cohort_dest_repo_not_the_slug(monkeypatch):
             "assignment-1": AssignmentEntry(
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-                cohort_dest_repo="homework-1",
+                semester_dest_repo="homework-1",
             )
         }
     )
-    args = ("Course", "Cohort-f2026", "assignment-1-f2026", date(2026, 10, 13))
+    args = ("Course", "Semester-f2026", "assignment-1-f2026", date(2026, 10, 13))
     found = ("assignment-1", sched.assignments["assignment-1"])
     assert "The brief." in site._assignment_entry(
         *args, found=found, handed_out=frozenset({"homework-1"})
@@ -1169,7 +1169,7 @@ def _plan(
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    # ONE cohort listing answers both of the build's questions of the org. Everything in
+    # ONE semester listing answers both of the build's questions of the org. Everything in
     # it carries the handed-out topic, so it names the templates and no content repos.
     monkeypatch.setattr(
         site,
@@ -1196,11 +1196,11 @@ def _plan(
     # authenticated dev box and fails in CI.
     monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", ())))
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
-    assert site.sync_site("Course-Org", "Cohort-f2026") == 0
+    assert site.sync_site("Course-Org", "Semester-f2026") == 0
     return captured["plan"]
 
 
-def test_the_build_lists_the_cohort_once_for_both_of_its_questions(
+def test_the_build_lists_the_semester_once_for_both_of_its_questions(
     monkeypatch, tmp_path
 ):
     # "Which repos hold released content" and "which assignments have gone out" are two
@@ -1235,17 +1235,17 @@ def test_the_build_lists_the_cohort_once_for_both_of_its_questions(
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
 
-    assert site.sync_site("Course-Org", "Cohort-f2026") == 0
-    assert listed == ["Cohort-f2026"], "the cohort was listed twice for one build"
+    assert site.sync_site("Course-Org", "Semester-f2026") == 0
+    assert listed == ["Semester-f2026"], "the semester was listed twice for one build"
     # The same listing, read two ways: the templated repo is a hand-out, not content.
     assert seen_content == [["materials"]]
 
 
-def test_cohort_site_links_back_to_the_cohort_org(monkeypatch, tmp_path):
-    # The footer's GitHub link (site.github_org) is the cohort site's only click-back; it
-    # must point at THIS cohort org, not the template default or the course org.
+def test_semester_site_links_back_to_the_semester_org(monkeypatch, tmp_path):
+    # The footer's GitHub link (site.github_org) is the semester site's only click-back; it
+    # must point at THIS semester org, not the template default or the course org.
     plan = _plan(monkeypatch, tmp_path, Schedule())
-    assert plan.config["github_org"] == "Cohort-f2026"
+    assert plan.config["github_org"] == "Semester-f2026"
 
 
 def test_a_mixed_week_becomes_a_lecture_row_and_a_lab_row(monkeypatch, tmp_path):
@@ -1284,7 +1284,7 @@ def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch, tmp_path
 ):
     # course_description is declared once in the course org's dsl-course.yml and pushed to
-    # every cohort site. Undeclared, it must not be written at all - the site repo keeps
+    # every semester site. Undeclared, it must not be written at all - the site repo keeps
     # whatever blurb it has.
     captured = {}
     monkeypatch.setattr(
@@ -1299,13 +1299,13 @@ def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
-    assert site.sync_site("Course-Org", "Cohort-f2026") == 0
+    assert site.sync_site("Course-Org", "Semester-f2026") == 0
     assert "course_description" not in captured["plan"].config
 
     monkeypatch.setattr(
         site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
     )
-    assert site.sync_site("Course-Org", "Cohort-f2026") == 0
+    assert site.sync_site("Course-Org", "Semester-f2026") == 0
     cfg = site_repo._replace_config_scalar(
         'course_name: "x"\ncourse_description: "old"\ncourse_code: "y"\n',
         "course_description",
@@ -1354,7 +1354,7 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
         site.schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
     )
 
-    assert site.sync_site("Course-Org", "Cohort-f2026") == 0
+    assert site.sync_site("Course-Org", "Semester-f2026") == 0
 
     plan = captured["plan"]
     assert plan.config["course_name"] == "Deep Learning"
@@ -1436,9 +1436,9 @@ def test_an_unreleased_row_names_where_its_materials_will_land(monkeypatch, tmp_
     body = plan.collections["_lectures"]["session-03.md"]
     assert "`lecture-materials/lectures/03_week-3`" in body
     assert "`lecture-materials/readings/03_week-3`" in body
-    # The row says what is coming and where, and stops there - naming the cohort org as
+    # The row says what is coming and where, and stops there - naming the semester org as
     # well made the schedule table's cell two clauses long for no reader's benefit.
-    assert "`Cohort-f2026`" not in body
+    assert "`Semester-f2026`" not in body
 
 
 def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_path):
@@ -1605,11 +1605,12 @@ def test_the_archive_row_ships_with_the_rest_of_the_schedule(monkeypatch, tmp_pa
         ),
     )
     assert (
-        'title: "Cohort archived"' in plan.collections["_events"]["cohort-archived.md"]
+        'title: "Semester archived"'
+        in plan.collections["_events"]["semester-archived.md"]
     )
 
 
-def test_a_cohort_can_keep_its_archive_date_off_the_site(monkeypatch, tmp_path):
+def test_a_semester_can_keep_its_archive_date_off_the_site(monkeypatch, tmp_path):
     plan = _plan(
         monkeypatch,
         tmp_path,
@@ -1618,12 +1619,12 @@ def test_a_cohort_can_keep_its_archive_date_off_the_site(monkeypatch, tmp_path):
             archive=ArchiveRow(when=date(2027, 2, 16), show_on_site=False),
         ),
     )
-    assert "cohort-archived.md" not in plan.collections["_events"]
+    assert "semester-archived.md" not in plan.collections["_events"]
 
 
-def test_a_cohort_with_no_archive_date_gets_no_row(monkeypatch, tmp_path):
+def test_a_semester_with_no_archive_date_gets_no_row(monkeypatch, tmp_path):
     plan = _plan(monkeypatch, tmp_path, Schedule(semester_start=date(2026, 9, 7)))
-    assert "cohort-archived.md" not in plan.collections["_events"]
+    assert "semester-archived.md" not in plan.collections["_events"]
 
 
 def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_path):
@@ -1633,9 +1634,9 @@ def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_
         Schedule(semester_start=date(2026, 9, 7), semester_end=date(2026, 12, 18)),
     )
     events = plan.collections["_events"]
-    assert 'title: "Term starts"' in events["term-start.md"]
+    assert 'title: "Semester starts"' in events["term-start.md"]
     assert "date: 2026-09-07T09:00:00" in events["term-start.md"]
-    assert 'title: "Term ends"' in events["term-end.md"]
+    assert 'title: "Semester ends"' in events["term-end.md"]
     assert "date: 2026-12-18T09:00:00" in events["term-end.md"]
 
     unbounded = _plan(monkeypatch, tmp_path, Schedule())
@@ -1646,8 +1647,8 @@ def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_
 # -------------------------------------------------------- dest_repo mismatch (fix 4)
 
 
-def test_assignment_entry_names_the_cohort_dest_repo_not_the_course_repo(monkeypatch):
-    # assign.py provisions `<cohort_dest_repo or slug>-<handle>`; the site must name the
+def test_assignment_entry_names_the_semester_dest_repo_not_the_course_repo(monkeypatch):
+    # assign.py provisions `<semester_dest_repo or slug>-<handle>`; the site must name the
     # same repo (and title the page from it), not the course repo minus its tag.
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     sched = Schedule(
@@ -1655,13 +1656,13 @@ def test_assignment_entry_names_the_cohort_dest_repo_not_the_course_repo(monkeyp
             "assignment-1": AssignmentEntry(
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-                cohort_dest_repo="homework-1",
+                semester_dest_repo="homework-1",
             )
         }
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         date(2026, 10, 13),
         found=("assignment-1", sched.assignments["assignment-1"]),
@@ -1671,11 +1672,11 @@ def test_assignment_entry_names_the_cohort_dest_repo_not_the_course_repo(monkeyp
     assert 'title: "Homework 1"' in out
 
 
-def test_the_site_build_gates_a_brief_on_what_the_cohort_actually_holds(
+def test_the_site_build_gates_a_brief_on_what_the_semester_actually_holds(
     monkeypatch, tmp_path
 ):
     # End-to-end through sync_site, not just the renderer: the gate is worthless if the
-    # build forgets to pass what the cohort org holds. (`_plan` blanks every file read, so
+    # build forgets to pass what the semester org holds. (`_plan` blanks every file read, so
     # the entry's presence - not the brief text - is what this can pin.)
     sched = Schedule(
         assignments={
@@ -1708,7 +1709,7 @@ def test_a_pending_assignment_does_not_shift_a_later_ones_ordinal(
         assignments=["assignment-1-f2026", "assignment-2-f2026"],
         handed_out=["assignment-2"],
     ).collections["_assignments"]
-    # named by the COHORT-side name, which is what students see
+    # named by the SEMESTER-side name, which is what students see
     assert list(out) == ["01-assignment-1.md", "02-assignment-2.md"]
     assert "handout_pending: true" in out["01-assignment-1.md"]
     assert "handout_pending: true" not in out["02-assignment-2.md"]
@@ -1718,7 +1719,7 @@ def test_an_assignment_in_the_plan_gets_rows_before_its_template_is_staged(
     monkeypatch, tmp_path
 ):
     # A term written in August names template repos nobody has created yet. Discovery finds
-    # none of them, and the site used to render one row for a cohort that had written four
+    # none of them, and the site used to render one row for a semester that had written four
     # - dates published in schedule.yml, nothing on the schedule that publishes them.
     # Dates derived from TODAY, not pinned to a literal. `_assignment_entry` treats a
     # handout_datetime that has already fired as handed out, so a hardcoded September 2026
@@ -1784,7 +1785,7 @@ def test_session_files_missing_tree_is_empty(monkeypatch):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
     assert (
-        site._session_files("Cohort-f2026", "materials", "lectures", "03_x", {}) == []
+        site._session_files("Semester-f2026", "materials", "lectures", "03_x", {}) == []
     )
 
 
@@ -1793,7 +1794,7 @@ def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monke
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
     with pytest.raises(RuntimeError):
-        site._session_files("Cohort-f2026", "materials", "lectures", "03_x", {})
+        site._session_files("Semester-f2026", "materials", "lectures", "03_x", {})
 
 
 def test_team_people_missing_team_is_empty(monkeypatch):
@@ -1865,19 +1866,19 @@ def _bad_indent_error() -> yaml.YAMLError:
 def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     monkeypatch,
 ):
-    # A cohort's people.yml with one bad indent used to parse to `{}` - "nothing declared" -
+    # A semester's people.yml with one bad indent used to parse to `{}` - "nothing declared" -
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
     monkeypatch.setattr(
         site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
     )
     with pytest.raises(yaml.YAMLError):
-        site_repo.yaml_file("Cohort-f2026", "classroom-config", "people.yml")
+        site_repo.yaml_file("Semester-f2026", "classroom-config", "people.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
     monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
-    assert site_repo.yaml_file("Cohort-f2026", "classroom-config", "people.yml") == {}
+    assert site_repo.yaml_file("Semester-f2026", "classroom-config", "people.yml") == {}
 
 
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
@@ -1887,91 +1888,93 @@ def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
     # is not a RuntimeError, so it used to walk straight through main()'s guard and out as
     # a traceback in the Actions log.
     err = _bad_indent_error()
-    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(site, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(site, "sync_site", lambda *a: (_ for _ in ()).throw(err))
     monkeypatch.setattr(
         "sys.argv",
-        ["site", "sync", "--course-org", "Course", "--cohort-org", "Cohort-f2026"],
+        ["site", "sync", "--course-org", "Course", "--semester-org", "Semester-f2026"],
     )
     assert site.main() == 1
     assert "Traceback" not in capsys.readouterr().err
 
 
-def test_main_refuses_a_cohort_this_course_org_never_registered(monkeypatch, capsys):
-    # --cohort-org reaches main straight from a repository_dispatch's client_payload,
-    # written by whoever holds a cohort's DSL_BOT_TOKEN - a lower trust tier than the
-    # course org. Naming SOMEONE ELSE'S cohort would rebuild that cohort's site from this
+def test_main_refuses_a_semester_this_course_org_never_registered(monkeypatch, capsys):
+    # --semester-org reaches main straight from a repository_dispatch's client_payload,
+    # written by whoever holds a semester's DSL_BOT_TOKEN - a lower trust tier than the
+    # course org. Naming SOMEONE ELSE'S semester would rebuild that semester's site from this
     # dispatch, so the registry gets the last word.
 
-    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(site, "discover_semesters", lambda org: ["Semester-f2026"])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
         "sys.argv",
-        ["site", "sync", "--course-org", "Course", "--cohort-org", "Other-f2026"],
+        ["site", "sync", "--course-org", "Course", "--semester-org", "Other-f2026"],
     )
     assert site.main() == 1
     assert synced == []
     assert "not registered under Course" in capsys.readouterr().err
 
 
-def test_main_refuses_every_cohort_when_the_registry_is_empty(monkeypatch, capsys):
+def test_main_refuses_every_semester_when_the_registry_is_empty(monkeypatch, capsys):
     # The check used to short-circuit on an empty registry, so a course org that had
     # registered nothing accepted any org a dispatch named. An empty registry authorises
     # nothing.
 
-    monkeypatch.setattr(site, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(site, "discover_semesters", lambda org: [])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
         "sys.argv",
-        ["site", "sync", "--course-org", "Course", "--cohort-org", "Other-f2026"],
+        ["site", "sync", "--course-org", "Course", "--semester-org", "Other-f2026"],
     )
     assert site.main() == 1
     assert synced == []
     assert "lists nothing" in capsys.readouterr().err
 
 
-def test_main_matches_a_registered_cohort_case_insensitively(monkeypatch):
+def test_main_matches_a_registered_semester_case_insensitively(monkeypatch):
     # GitHub org names are case-insensitive; a case difference must not read as a
-    # cross-cohort dispatch.
+    # cross-semester dispatch.
 
-    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-F2026"])
+    monkeypatch.setattr(site, "discover_semesters", lambda org: ["Semester-F2026"])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     refreshed: list = []
     monkeypatch.setattr(site.status, "refresh", lambda *a: refreshed.append(a) or 1)
     monkeypatch.setattr(
         "sys.argv",
-        ["site", "sync", "--course-org", "Course", "--cohort-org", "cohort-f2026"],
+        ["site", "sync", "--course-org", "Course", "--semester-org", "semester-f2026"],
     )
     assert site.main() == 0
-    assert synced == [("Course", "cohort-f2026")]
+    assert synced == [("Course", "semester-f2026")]
     # The site's last update is in status.json; a write that failed does not red the sync.
-    assert refreshed == [("Course", "cohort-f2026")]
+    assert refreshed == [("Course", "semester-f2026")]
 
 
-def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
+def test_all_semesters_loop_survives_one_semesters_raised_failure(monkeypatch, capsys):
     # The lesson PR #151/#146 applied to the nightly refresh: the single try used to wrap
-    # the whole loop, so one cohort's raise skipped every LATER cohort's site on the 06:00
-    # cron. The loop iterates the LIVE cohorts, which is what a test replaces here.
+    # the whole loop, so one semester's raise skipped every LATER semester's site on the 06:00
+    # cron. The loop iterates the LIVE semesters, which is what a test replaces here.
 
-    monkeypatch.setattr(site, "live_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
+    monkeypatch.setattr(
+        site, "live_semesters", lambda org: ["Semester-A", "Semester-B"]
+    )
     seen: list[str] = []
 
-    def fake_sync(course, cohort):
-        seen.append(cohort)
-        if cohort == "Cohort-A":
+    def fake_sync(course, semester):
+        seen.append(semester)
+        if semester == "Semester-A":
             raise _bad_indent_error()
         return 0
 
     monkeypatch.setattr(site, "sync_site", fake_sync)
     monkeypatch.setattr(
-        "sys.argv", ["site", "sync", "--course-org", "Course", "--all-cohorts"]
+        "sys.argv", ["site", "sync", "--course-org", "Course", "--all-semesters"]
     )
     assert site.main() == 1
-    assert seen == ["Cohort-A", "Cohort-B"]
-    assert "Cohort-A" in capsys.readouterr().err
+    assert seen == ["Semester-A", "Semester-B"]
+    assert "Semester-A" in capsys.readouterr().err
 
 
 # --------------------------------------------- front-matter escaping (fix 7)
@@ -1985,7 +1988,7 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         date(2026, 11, 10),
         handed_out=frozenset(
@@ -2016,7 +2019,7 @@ def test_assignment_readme_body_is_fenced_as_liquid_raw(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-1"}),  # the README is only inlined once out
@@ -2028,8 +2031,8 @@ def test_assignment_readme_body_is_fenced_as_liquid_raw(monkeypatch):
 
 
 def test_iso_when_prints_the_datetime_it_is_given_offset_free():
-    # The cohort-tz conversion happens ONCE, in schedule's parser (below), so every
-    # datetime reaching the renderers is already cohort wall-clock: printing it is just
+    # The semester-tz conversion happens ONCE, in schedule's parser (below), so every
+    # datetime reaching the renderers is already semester wall-clock: printing it is just
     # dropping the offset, with no zone for a renderer to forget to pass.
     assert site_repo.iso_when(datetime(2026, 9, 15, 12, 0, tzinfo=BERLIN)) == (
         "2026-09-15T12:00:00"
@@ -2039,8 +2042,8 @@ def test_iso_when_prints_the_datetime_it_is_given_offset_free():
     )
 
 
-def test_a_written_offset_reaches_the_site_as_the_cohort_wall_clock_time():
-    # End to end: 10:00 UTC in a Berlin cohort (CEST, +2 in September) is shown as 12:00 -
+def test_a_written_offset_reaches_the_site_as_the_semester_wall_clock_time():
+    # End to end: 10:00 UTC in a Berlin semester (CEST, +2 in September) is shown as 12:00 -
     # the time the class actually happens - not the written offset's 10:00.
     (event,) = site.schedule.parse(
         {
@@ -2078,7 +2081,7 @@ def test_a_row_carries_the_title_and_details_the_plan_declared(monkeypatch):
     )
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     out = site._lecture_entry(
-        "Cohort-f2026",
+        "Semester-f2026",
         "1",
         _row(
             datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
@@ -2103,7 +2106,7 @@ def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
     )
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     out = site._lecture_entry(
-        "Cohort-f2026",
+        "Semester-f2026",
         "1",
         _row(datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)),
         RELEASED,
@@ -2114,7 +2117,7 @@ def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
 
 def test_an_unreleased_row_still_says_what_the_session_is_about():
     out = site._lecture_entry(
-        "Cohort-f2026",
+        "Semester-f2026",
         "3",
         _row(
             datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
@@ -2139,12 +2142,12 @@ def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
     # "edits overwritten" issue. Also: the public sync writes no materials index.
     from dsl_course.site_repo import _site_pages
 
-    cohort_readme = site_repo.site_readme("org", cohort=True)
-    for pg in _site_pages(cohort=True):
-        assert f"`{pg.file}`" in cohort_readme, pg.file
-    assert "pages, `Gemfile`" not in cohort_readme
-    assert "`_data/materials.yml`" in cohort_readme
-    assert "`_data/materials.yml`" not in site_repo.site_readme("org", cohort=False)
+    semester_readme = site_repo.site_readme("org", semester=True)
+    for pg in _site_pages(semester=True):
+        assert f"`{pg.file}`" in semester_readme, pg.file
+    assert "pages, `Gemfile`" not in semester_readme
+    assert "`_data/materials.yml`" in semester_readme
+    assert "`_data/materials.yml`" not in site_repo.site_readme("org", semester=False)
 
 
 def test_readings_pending_reaches_the_rendered_row():
@@ -2168,7 +2171,7 @@ def test_readings_pending_reaches_the_rendered_row():
     row = schedule_plan.planned_sessions(s)[("2", "lecture")]
     # live_repos empty -> _dest_link renders plain code and makes no tree call
     page = site._lecture_entry(
-        "COHORT", "2", row, sources=[], live_repos=frozenset(), hosted={}
+        "SEMESTER", "2", row, sources=[], live_repos=frozenset(), hosted={}
     )
     assert "readings_pending: true" in page
     assert "materials/readings/02_x" in page
@@ -2200,7 +2203,7 @@ def test_stamping_a_page_with_no_front_matter_leaves_it_untouched():
 
 
 def test_the_site_readme_names_what_the_sync_rewrites_and_what_it_does_not():
-    r = site_repo.site_readme("hertie-x-f2026", cohort=True)
+    r = site_repo.site_readme("hertie-x-f2026", semester=True)
     assert r.startswith("<!-- SYSTEM-OWNED - do not edit.")
     assert "Do not edit this repository." in r
     for owned in ("_lectures/", "_assignments/", "_events/", "_data/people.yml"):
@@ -2226,45 +2229,45 @@ def test_a_config_without_the_template_header_line_is_left_alone():
     )
 
 
-def test_a_closed_out_cohorts_site_is_left_as_teardown_left_it(monkeypatch):
-    # The site repo is frozen with the rest of the cohort, and its last sync was the one
-    # teardown ran before freezing it. The live cohort beside it still rebuilds.
+def test_a_closed_out_semesters_site_is_left_as_teardown_left_it(monkeypatch):
+    # The site repo is frozen with the rest of the semester, and its last sync was the one
+    # teardown ran before freezing it. The live semester beside it still rebuilds.
     monkeypatch.setattr(
-        discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        discovery, "discover_semesters", lambda org: ["Semester-A", "Semester-B"]
     )
     monkeypatch.setattr(
-        discovery, "repo_is_archived", lambda org, name: org == "Cohort-A"
+        discovery, "repo_is_archived", lambda org, name: org == "Semester-A"
     )
     seen: list[str] = []
     monkeypatch.setattr(
-        site, "sync_site", lambda course, cohort: seen.append(cohort) or 0
+        site, "sync_site", lambda course, semester: seen.append(semester) or 0
     )
     monkeypatch.setattr(
-        "sys.argv", ["site", "sync", "--course-org", "Course", "--all-cohorts"]
+        "sys.argv", ["site", "sync", "--course-org", "Course", "--all-semesters"]
     )
     assert site.main() == 0
-    assert seen == ["Cohort-B"]
+    assert seen == ["Semester-B"]
 
 
-def test_a_dispatch_naming_a_closed_out_cohort_syncs_nothing(monkeypatch):
+def test_a_dispatch_naming_a_closed_out_semester_syncs_nothing(monkeypatch):
     # Still REGISTERED, so it is not the trust-boundary refusal above - just nothing left
     # to do, and a write that would 403.
-    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-A"])
-    monkeypatch.setattr(site, "cohort_is_live", lambda org: False)
+    monkeypatch.setattr(site, "discover_semesters", lambda org: ["Semester-A"])
+    monkeypatch.setattr(site, "semester_is_live", lambda org: False)
 
     def boom(*a, **k):
-        raise AssertionError("a frozen cohort's site must not be rebuilt")
+        raise AssertionError("a frozen semester's site must not be rebuilt")
 
     monkeypatch.setattr(site, "sync_site", boom)
     monkeypatch.setattr(
         "sys.argv",
-        ["site", "sync", "--course-org", "Course", "--cohort-org", "Cohort-A"],
+        ["site", "sync", "--course-org", "Course", "--semester-org", "Semester-A"],
     )
     assert site.main() == 0
 
 
 # ---------------------------------------------------- public copies of published files
-# What a cohort site hosts itself, so an HTML deck renders in a browser instead of showing
+# What a semester site hosts itself, so an HTML deck renders in a browser instead of showing
 # as source on GitHub. `_mirror_public` is the ONE decision: it says which paths it copied,
 # and every renderer links a hosted copy only for a path it names - so a page cannot offer
 # a rendered copy that a size cap, a denylist or a failed clone stopped being made.
@@ -2280,7 +2283,7 @@ def _fresh_publish_policy():
 
 @pytest.fixture
 def origins(tmp_path, monkeypatch) -> BareOrigins:
-    """Cohort repos as bare repos on disk, with `gh repo clone` reaching them."""
+    """Semester repos as bare repos on disk, with `gh repo clone` reaching them."""
     world = BareOrigins(tmp_path / "world")
     monkeypatch.setattr(ghcli, "gh", world.clone_only)
     return world
@@ -2291,9 +2294,9 @@ def _policy(*patterns: str) -> dict[str, tuple]:
 
 
 def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
-    """Mirror a faked cohort repo into a site checkout; return (hosted, what it serves).
+    """Mirror a faked semester repo into a site checkout; return (hosted, what it serves).
 
-    Called twice by the tests that are about a SECOND sync: the cohort repo is seeded on
+    Called twice by the tests that are about a SECOND sync: the semester repo is seeded on
     the first call only and the site checkout is reused, which is the state a re-sync
     actually runs against."""
     if tree and "main" not in origins.refs("materials"):
@@ -2302,7 +2305,7 @@ def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
         site, "_repo_tree", lambda org, repo: ("main", tuple(sorted(tree)))
     )
     site_wd = tmp_path / "site"
-    hosted = site._mirror_public(site_wd, "Cohort-f2026", policies)
+    hosted = site._mirror_public(site_wd, "Semester-f2026", policies)
     served = site_wd / site.SITE_FILES_DIR
     return hosted, sorted(
         p.relative_to(served).as_posix() for p in served.rglob("*") if p.is_file()
@@ -2318,17 +2321,17 @@ def test_a_published_file_is_linked_to_the_hosted_copy_and_to_its_source(monkeyp
         cache(lambda org, repo: ("main", ("lectures/01_a/slides.html",))),
     )
     link = site._session_files(
-        "Cohort-f2026",
+        "Semester-f2026",
         "materials",
         "lectures",
         "01_a",
         {"materials": frozenset({"lectures/01_a/slides.html"})},
     )[0]
     assert link.url == (
-        "https://github.com/Cohort-f2026/materials/blob/main/lectures/01_a/slides.html"
+        "https://github.com/Semester-f2026/materials/blob/main/lectures/01_a/slides.html"
     )
     assert link.view_url == (
-        "https://cohort-f2026.github.io/files/materials/lectures/01_a/slides.html"
+        "https://semester-f2026.github.io/files/materials/lectures/01_a/slides.html"
     )
 
 
@@ -2347,7 +2350,7 @@ def test_only_a_format_a_browser_renders_is_linked_to_its_copy(
 ):
     monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", (path,))))
     link = site._session_files(
-        "Cohort-f2026",
+        "Semester-f2026",
         "materials",
         "lectures",
         "01_a",
@@ -2364,12 +2367,12 @@ def test_a_file_that_was_not_copied_is_never_linked_to_a_copy(monkeypatch):
         "_repo_tree",
         cache(lambda org, repo: ("main", ("lectures/01_a/slides.html",))),
     )
-    link = site._session_files("Cohort-f2026", "materials", "lectures", "01_a", {})[0]
+    link = site._session_files("Semester-f2026", "materials", "lectures", "01_a", {})[0]
     assert link.view_url == ""
 
 
 def test_a_course_that_publishes_nothing_writes_the_front_matter_it_always_did():
-    # The golden: every cohort site alive today publishes nothing, and its rows must come
+    # The golden: every semester site alive today publishes nothing, and its rows must come
     # out byte for byte as they did before any of this existed.
     block = site_repo.links_block(
         [("lectures", [Link("slides.pdf", "https://github.com/o/r/blob/main/s.pdf")])]
@@ -2488,7 +2491,7 @@ def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
     monkeypatch, origins, tmp_path, capsys
 ):
     # One 200 MB recording in a materials repo would otherwise fail the site's own push
-    # and take the whole cohort site offline - for a file that is still on GitHub.
+    # and take the whole semester site offline - for a file that is still on GitHub.
     monkeypatch.setattr(site, "_MAX_PUBLIC_FILE_BYTES", 8)
     tree = {"lectures/01_a/recording.pdf": "x" * 64, "lectures/01_a/slides.html": "d"}
     hosted, served = _mirror(
@@ -2518,7 +2521,7 @@ def test_a_clone_that_failed_leaves_the_last_syncs_copies_standing(
 
 
 def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
-    # Course-level, in the repo faculty actually edit - keyed on the cohort DESTINATION,
+    # Course-level, in the repo faculty actually edit - keyed on the semester DESTINATION,
     # which is the repo whose files the site links and whose bytes get copied.
     asked: list[tuple[str, str, str]] = []
 
@@ -2530,7 +2533,7 @@ def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
     sched = _one_deploy()
     sched.releases[0].deploy.append(Deploy("course-code-f2026", "src", "code"))
     policies = site._publish_policies("Course-Org", sched, ["materials"])
-    # The `code` destination is not one of this cohort's content repos, so it is not asked
+    # The `code` destination is not one of this semester's content repos, so it is not asked
     # about at all.
     assert asked == [("Course-Org", "course-materials-f2026", "publish.yml")]
     assert policies["materials"][0].check_file("lectures/01_a/slides.html").include
@@ -2540,7 +2543,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
     monkeypatch,
 ):
     # The ONE shape whose `repo_name` is a real repo: there is a single drop box for the
-    # whole cohort, so the page can name it exactly - and `repo_url` is that repo rather
+    # whole semester, so the page can name it exactly - and `repo_url` is that repo rather
     # than the org's filtered list, because there is nothing to filter to.
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A3\nThe brief.")
     monkeypatch.setattr(
@@ -2550,7 +2553,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-3-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-3"}),
@@ -2559,7 +2562,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
     assert out.count('repo_name: "assignment-3-submissions"') == 2
     assert (
         out.count(
-            'repo_url: "https://github.com/Cohort-f2026/assignment-3-submissions"'
+            'repo_url: "https://github.com/Semester-f2026/assignment-3-submissions"'
         )
         == 2
     )
@@ -2578,13 +2581,13 @@ def test_a_shared_group_assignment_names_the_team_s_folder(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-3-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handed_out=frozenset({"assignment-3"}),
     )
     assert out.count('submit_path: "<your-team>/"') == 2
-    # One drop box either way: the repo is the cohort's, not the team's.
+    # One drop box either way: the repo is the semester's, not the team's.
     assert out.count('repo_name: "assignment-3-submissions"') == 2
 
 
@@ -2599,7 +2602,7 @@ def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypa
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-3-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         handout=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -2643,7 +2646,7 @@ def test_a_special_events_details_fill_its_row():
 
 def test_an_exam_with_nothing_to_say_says_nothing():
     # It used to carry "Details to be confirmed." in its body - written into every exam of
-    # every cohort whether or not anything was outstanding, and undeletable from
+    # every semester whether or not anything was outstanding, and undeletable from
     # schedule.yml.
     out = site._event_row("exam", "Final Exam", date(2026, 12, 15))
     assert "to be confirmed" not in out.lower()
@@ -2666,7 +2669,7 @@ def test_an_event_kept_off_the_site_gets_no_row(monkeypatch, tmp_path):
 
 
 def test_a_hidden_exam_still_answers_the_synthesised_exam_stubs(monkeypatch, tmp_path):
-    # A cohort that wrote its exams and then took them off the site HAS said what its
+    # A semester that wrote its exams and then took them off the site HAS said what its
     # exams are; answering that with two invented ones would put back what it removed.
     sched = Schedule(
         semester_end=END_OF_TERM,
@@ -2696,7 +2699,7 @@ def test_an_assignments_details_ride_both_of_its_rows(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         entry.due_datetime,
         found=("assignment-1", entry),
@@ -2717,7 +2720,7 @@ def test_a_multi_paragraph_details_block_survives_the_due_rows_nesting(monkeypat
     )
     out = site._assignment_entry(
         "Course",
-        "Cohort-f2026",
+        "Semester-f2026",
         "assignment-1-f2026",
         entry.due_datetime,
         found=("assignment-1", entry),
@@ -2738,7 +2741,7 @@ def test_a_tbc_assignment_marks_both_rows_and_moves_neither_date(monkeypatch):
         )
         out = site._assignment_entry(
             "Course",
-            "Cohort-f2026",
+            "Semester-f2026",
             "assignment-1-f2026",
             entry.due_datetime,
             datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -2850,9 +2853,9 @@ def test_the_archive_row_can_be_renamed_and_marked_provisional():
 def test_a_team_member_is_published_as_a_salted_digest_of_their_handle():
     # The page's script hashes its reader's saved handle the same way to recognise their
     # team, so this vector is the contract between the two sides: sha256 of
-    # `<cohort org>:<handle, lower-cased>`, hex.
+    # `<semester org>:<handle, lower-cased>`, hex.
     vector = "49565f39eed5ad0a289c5291fa1b3540c44ccd9205c0c78550ca21ab1d328dc8"
     assert site.member_digest("Cohort-f2026", "ada-l") == vector
     assert site.member_digest("Cohort-f2026", "Ada-L") == vector
-    # Salted with the org: the same student is a different digest in another cohort.
-    assert site.member_digest("Cohort-s2027", "ada-l") != vector
+    # Salted with the org: the same student is a different digest in another semester.
+    assert site.member_digest("Semester-s2027", "ada-l") != vector

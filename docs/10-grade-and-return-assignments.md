@@ -109,7 +109,7 @@ last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **an
 by one of that unit's own members**, so a classmate's edit is never marked as their work. A
 folder nobody in the unit ever pushed to has no submission. Two things differ from the
 shapes with a repo each: `suspect` never appears (GitHub's last-push record is the whole
-repo's, so it would accuse the entire cohort of one student's late push), and
+repo's, so it would accuse the entire semester of one student's late push), and
 `submitted_note` carries what the search through the folder found:
 
 | `info.submitted_note` | what it means |
@@ -123,7 +123,7 @@ repo's, so it would accuse the entire cohort of one student's late push), and
 1. **Handout.** The sheet appears with one row per student or team, every student has a
    private `grades-<handle>` gradebook, and a `submit_via: assignment_repo`, `visibility: private`
    submission repo gets a **Submission receipts** issue. An `external` assignment has no repos, a
-   `shared_dropbox_repo` one has a repo the whole cohort reads, and a `public` or `student_choice` repo
+   `shared_dropbox_repo` one has a repo the whole semester reads, and a `public` or `student_choice` repo
    is not private - none of the three gets an issue, so none of the three gets receipts.
    Nothing else turns on it: marks and feedback go to the gradebook for every shape alike.
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
@@ -139,7 +139,7 @@ repo's, so it would accuse the entire cohort of one student's late push), and
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
    grades preview* issue in `classroom-config`. Each dry run rewrites that issue; the real
    run closes it. There is no assignment to pick: every gradebook and the registrar's
-   export are rebuilt from every sheet in the cohort on every run, so a student's
+   export are rebuilt from every sheet in the semester on every run, so a student's
    gradebook always shows everything they have been marked on. A half-typed sheet is
    therefore a reason to wait.
 
@@ -281,37 +281,37 @@ can knit). The run log says which, in counts. None of that ever reds the cutoff 
 submission with no fences in it, or one repo that could not be read, is counted and the
 freeze carries on.
 
-## Closing the cohort out
+## Closing the semester out
 
 **Ask for it once and it happens on its own.** Write an `archive:` block in `schedule.yml`
-and the scheduler archives the whole cohort org on its date. You do not have to remember
+and the scheduler archives the whole semester org on its date. You do not have to remember
 it, and nobody has to be around for it.
 
 ```yaml
 archive:
   event_datetime: 2027-02-16   # optional - default: semester_end + 60 days
-  show_on_site: true     # optional - default: true. A "Cohort archived" row on the site
+  show_on_site: true     # optional - default: true. A "Semester archived" row on the site
 ```
 
 The block is the switch: `archive:` on its own is enough, and means sixty days after your
-`semester_end`. **Without the block, nothing is ever archived** - the cohort stays live and
+`semester_end`. **Without the block, nothing is ever archived** - the semester stays live and
 writable, and its digest issue says so, term after term.
 
-**A fortnight before**, the cohort gets one issue in `classroom-config` and one email to
+**A fortnight before**, the semester gets one issue in `classroom-config` and one email to
 the teaching team saying what is about to happen. That is the moment to move the date if
 you need longer - move it inside the fortnight and a notice for the new date opens and
 mails again. Students see it too, in the site's Updates box and on its schedule.
 
 **On the day**, in this order:
 
-1. the cohort's edits to released material are offered back to the course org as a pull
-   request (see [Carrying cohort edits back](08-release-materials-to-cohort.md#carrying-cohort-edits-back));
+1. the semester's edits to released material are offered back to the course org as a pull
+   request (see [Carrying semester edits back](08-release-materials-to-cohort.md#carrying-semester-edits-back));
 2. the toolkit's own open notices in `classroom-config` are closed;
 3. the website is synced one last time, so it ships the archived state;
 4. **every repository in the org is archived** - students' work, the released materials,
    `welcome` (so nobody can still Join a term that is over), the website, `.github`;
 5. `archive/teardown.md` is written into `classroom-config`, recording what was frozen;
-6. `classroom-config` is archived last, which is what tells every nightly sync this cohort
+6. `classroom-config` is archived last, which is what tells every nightly sync this semester
    is finished and to leave it alone.
 
 **Nobody is removed and nothing is deleted.** An archived repository is read-only for
@@ -323,13 +323,13 @@ project teams are untouched.
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive cohort** is the button for closing a cohort out early, or at all. `dry_run` is on
+**Archive semester** is the button for closing a semester out early, or at all. `dry_run` is on
 by default and prints the counts; the real run **refuses** until the archive date has
-arrived, and `force` overrides that - which is how a cohort with no `archive:` block, and
+arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
 so no date, is closed out. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.
 
-`classroom-config` is now the cohort's whole record of assessment - roster, teams, schedule,
+`classroom-config` is now the semester's whole record of assessment - roster, teams, schedule,
 grading sheets, autograde detail, what was sent to whom, and `cohort-gradebook.csv`. Delete
 the repository, and the archived student repos with it, when your institution's retention
 period for that record expires.

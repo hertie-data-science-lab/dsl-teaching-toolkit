@@ -41,7 +41,7 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
         return True
 
     monkeypatch.setattr(enrol_codes, "put_file", put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "ML")
+    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
     monkeypatch.setattr(enrol_codes, "welcome_issue_url", lambda org: "https://w")
 
     def send_bulk(messages, dry_run=False, sample=None):
@@ -50,7 +50,7 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
         return out if sends is None else out[:sends]
 
     monkeypatch.setattr(enrol_codes.mailer, "send_bulk", send_bulk)
-    outcome, _counts = enrol_codes.resend_unjoined("COHORT", dry_run=dry_run)
+    outcome, _counts = enrol_codes.resend_unjoined("SEMESTER", dry_run=dry_run)
     return outcome, sent, written
 
 
@@ -114,7 +114,7 @@ def test_without_a_transport_no_code_changes(monkeypatch):
 
 
 def test_the_cli_refuses_a_preview_of_the_ordinary_send(monkeypatch, capsys):
-    monkeypatch.setattr("sys.argv", ["enrol_codes", "--cohort-org", "C", "--dry-run"])
+    monkeypatch.setattr("sys.argv", ["enrol_codes", "--semester-org", "C", "--dry-run"])
     with pytest.raises(SystemExit) as refused:
         enrol_codes.main()
     assert refused.value.code == 2
@@ -138,12 +138,12 @@ def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):
         return expected_sha == "sha2"
 
     monkeypatch.setattr(enrol_codes, "put_file", put_file)
-    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "ML")
+    monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
     monkeypatch.setattr(enrol_codes, "welcome_issue_url", lambda org: "https://w")
     monkeypatch.setattr(
         enrol_codes.mailer, "send_bulk", lambda *a, **k: pytest.fail("mailed")
     )
-    outcome, counts = enrol_codes.resend_unjoined("COHORT", dry_run=False)
+    outcome, counts = enrol_codes.resend_unjoined("SEMESTER", dry_run=False)
     assert outcome is enrol_codes.Outcome.NOTHING_TO_SEND
     assert not enrol_codes.reds_the_run(outcome)
     assert counts["students"] == 0

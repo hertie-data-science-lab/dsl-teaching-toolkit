@@ -1,14 +1,14 @@
 # Schedule releases
 
-Write the term's plan into the cohort's `classroom-config/schedule.yml` once, and the scheduler runs the term for you - every materials release, every assignment hand-out, every autograde run. 
+Write the term's plan into the semester's `classroom-config/schedule.yml` once, and the scheduler runs the term for you - every materials release, every assignment hand-out, every autograde run. 
 
 The schedule file can be updated throughout the semester.
 
 ## Prerequisites
 
 - A bootstrapped [course org](01-new-course-org.md)
-- A bootstrapped [cohort org](04-new-cohort-org.md) 
-- Source material repos to be released (staged in course-org, released to cohort-org)
+- A bootstrapped [semester org](04-new-cohort-org.md) 
+- Source material repos to be released (staged in course-org, released to semester-org)
 
 ## Write your term's plan
 
@@ -18,11 +18,11 @@ The schedule file can be updated throughout the semester.
 
 Three blocks carry the whole term, and each is defined by what it **does**:
 
-- **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the cohort org, where students can access them.
+- **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the semester org, where students can access them.
 - **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
-- **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the cohort site.
+- **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the semester site.
 
-Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the term and render as rows of their own. An optional `archive:` block freezes the cohort read-only - writing it is what turns that on.
+Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the term and render as rows of their own. An optional `archive:` block freezes the semester read-only - writing it is what turns that on.
 
 ### One word per column
 
@@ -85,11 +85,11 @@ Nested under `deploy:` we have the following:
 |---|---|---|---|
 | `course_source_repo` | **yes** | - | the repo in the COURSE org to copy from |
 | `course_source_path` | **yes** | - | the folder or file to copy, relative to `course_source_repo` - or `/` for the whole repo |
-| `cohort_dest_repo` | no | `materials` | the cohort repo to copy into - created on first release |
-| `cohort_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `cohort_dest_repo` |
+| `semester_dest_repo` | no | `materials` | the semester repo to copy into - created on first release |
+| `semester_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `semester_dest_repo` |
 | `deploy_datetime` | no | the entry's `event_datetime` | ship this one copy earlier (or later) than the class it belongs to |
 
-NB: `cohort_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `cohort_dest_repo` and `cohort_dest_path` is created on release if non-exist.
+NB: `semester_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `semester_dest_repo` and `semester_dest_path` is created on release if non-exist.
 
 NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally.
 
@@ -124,18 +124,18 @@ releases:
     deploy:
       - course_source_repo: course-materials-f2026 # item 1
         course_source_path: lectures/02_intro
-        cohort_dest_repo: lecture_materials
+        semester_dest_repo: lecture_materials
         deploy_datetime: 2026-09-15T09:00   # is released 1h early
       - course_source_repo: course-materials-f2026 # item 2
         course_source_path: readings/02_intro
-        cohort_dest_repo: lecture_materials   
+        semester_dest_repo: lecture_materials   
 
   lab_02:
     event_datetime: 2026-09-17T14:00   # the lab session, which the undefined deploy_datetime will default to
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/02_intro
-        cohort_dest_repo: lab_materials
+        semester_dest_repo: lab_materials
 
 ```
 
@@ -153,7 +153,7 @@ second copy into the same session folder is how solutions reach students after t
         course_source_path: labs/02_intro          # the empty scripts, at lab time
       - course_source_repo: course-materials-f2026
         course_source_path: solutions/labs/02_intro   # staged OUTSIDE labs/02_intro
-        cohort_dest_path: labs/02_intro/solutions
+        semester_dest_path: labs/02_intro/solutions
         deploy_datetime: 2026-09-17T18:00          # after the lab
 ```
 
@@ -165,11 +165,11 @@ inside `labs/02_intro` ships with the 14:00 copy.
 
 For the full assignment lifecyle: hand-out, due date, grading
 
-Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names where it comes from and `cohort_dest_repo` what it is called in the cohort (default: the slug).
+Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names where it comes from and `semester_dest_repo` what it is called in the semester (default: the slug).
 
 Unlike a `releases:` label, **an assignment's slug is shown to students**: it names their repo (`assignment-1-<handle>`), and the site prints it as the row's heading - `assignment-3-project` reads "Assignment 3 Project". So keep it short, and put the assignment's name in `title:` beside it. 
 
-> `teams.csv` rows and the grading-sheet/snapshot files key on the cohort name too - `cohort_dest_repo` if set, else the slug.
+> `teams.csv` rows and the grading-sheet/snapshot files key on the semester name too - `semester_dest_repo` if set, else the slug.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
@@ -182,7 +182,7 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 | `grading_datetime` | no | `due_datetime` + the template's `late_window_days` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) - i.e. the END of the late window, not the deadline it is measured from |
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime`, and needs it set |
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
-| `cohort_dest_repo` | no | the slug | what the cohort-side repos are called: `<name>-<handle>` per student (or `<name>-<team>`), and the frozen cohort template `<name>` |
+| `semester_dest_repo` | no | the slug | what the semester-side repos are called: `<name>-<handle>` per student (or `<name>-<team>`), and the frozen semester template `<name>` |
 
 **This file is timing only.** `type:` and `max_team_size:` used to be accepted here and are not any more: what an assignment IS - its shape, its team cap, how it is handed in, its question maxima, its late policy, whether it is autograded - lives in that assignment's own `grading_config.yml`, on the course template's `solution` branch (see [Add an assignment](03-add-assignment-to-course.md)). Written here they are flagged by **Validate schedule**, which names the file they moved to, and ignored.
 
@@ -193,7 +193,7 @@ assignments:
   assignment-1:
     title: Linear regression            # optional: the assignment's name, beside the slug
     course_source_repo: assignment-1-f2026  # required: the course-org repo it hands out from
-    cohort_dest_repo: assignment-1-basics # optional: the cohort-side name. Default if undefined: the slug (i.e. assignment-1).
+    semester_dest_repo: assignment-1-basics # optional: the semester-side name. Default if undefined: the slug (i.e. assignment-1).
     handout_datetime: 2026-09-22T09:00  
     due_datetime: 2026-10-13            # what students see
     grading_datetime: 2026-10-15        # snapshot freezes + autograded (default when undefined: due_datetime plus the template's late_window_days)
@@ -206,7 +206,7 @@ assignments:
 
 A `course_source_repo:` naming a repo that does not exist is reported loudly and the assignment is skipped - it can only be a typo, and its one other symptom is an assignment that never hands out and never grades. An entry missing the field altogether is dropped, like one missing `due_datetime:`.
 
-**Two assignments off one template** - a resit off the same brief, or one template handed out to two halves of a cohort - are allowed, but only when **every** entry citing that template sets its own `cohort_dest_repo:`. That name is what the student repos, the teams.csv rows, the snapshot and the grading sheet all key on, so two explicit ones can never touch each other's work; one left to default makes the pair ambiguous and the second entry is dropped. Both **Release assignment** and **Collect submissions** start from the template, so neither can tell the two apart on its own. **Collect submissions** takes an optional `slug` (the schedule key) for saying which one you mean; **Release assignment** does not ask - it refuses such a template and tells you to hand it out from the schedule, which fires each entry on its own `handout_datetime`.
+**Two assignments off one template** - a resit off the same brief, or one template handed out to two halves of a semester - are allowed, but only when **every** entry citing that template sets its own `semester_dest_repo:`. That name is what the student repos, the teams.csv rows, the snapshot and the grading sheet all key on, so two explicit ones can never touch each other's work; one left to default makes the pair ambiguous and the second entry is dropped. Both **Release assignment** and **Collect submissions** start from the template, so neither can tell the two apart on its own. **Collect submissions** takes an optional `slug` (the schedule key) for saying which one you mean; **Release assignment** does not ask - it refuses such a template and tells you to hand it out from the schedule, which fires each entry on its own `handout_datetime`.
 
 ## `events:` 
 
@@ -241,16 +241,16 @@ events:
 
 ## `archive:`
 
-When this cohort is frozen read-only: every repository in the org archived, nothing deleted, nobody removed. See [Closing the cohort out](10-grade-and-return-assignments.md#closing-the-cohort-out).
+When this semester is frozen read-only: every repository in the org archived, nothing deleted, nobody removed. See [Closing the semester out](10-grade-and-return-assignments.md#closing-the-semester-out).
 
-**The block is the switch.** Write it and the cohort is archived automatically; leave it out and nothing ever is. Every field inside it is optional. A new cohort's seeded `schedule.yml` already carries the block, so filling in `semester_end` arms a freeze sixty days later; delete the block to opt out.
+**The block is the switch.** Write it and the semester is archived automatically; leave it out and nothing ever is. Every field inside it is optional. A new semester's seeded `schedule.yml` already carries the block, so filling in `semester_end` arms a freeze sixty days later; delete the block to opt out.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `event_datetime` | no | `semester_end` + `grace_days` | the day the whole cohort org is archived |
+| `event_datetime` | no | `semester_end` + `grace_days` | the day the whole semester org is archived |
 | `grace_days` | no | `60` | how many days after `semester_end` the default date falls |
-| `title` | no | `Cohort archived` | the row's Title column |
-| `show_on_site` | no | `true` | a "Cohort archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
+| `title` | no | `Semester archived` | the row's Title column |
+| `show_on_site` | no | `true` | a "Semester archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
 | `details` | no | *none* | the sentence that row and that notice say - all of it; `{date}` in it is filled in with the archive date |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**. **Display only** - the freeze still happens on the date above |
 
@@ -259,19 +259,19 @@ semester_end: 2026-12-18
 archive:
   event_datetime: 2027-02-16  # optional - without it, 60 days after semester_end
   details: >-                 # optional - what students are told, in your own words
-    This cohort is archived on 2027-02-16: every repository in it becomes read-only.
+    This semester is archived on 2027-02-16: every repository in it becomes read-only.
     You keep read access.
 ```
 
 `details:` is where the sentence comes from, and the only place: there is no wording
 of the toolkit's own behind it, because what a freeze means for your students is yours to
-say. Write none and the row still shows - "Cohort archived", with its date - and says
-nothing under it, and nothing goes in the Updates box. The skeleton in a new cohort's
+say. Write none and the row still shows - "Semester archived", with its date - and says
+nothing under it, and nothing goes in the Updates box. The skeleton in a new semester's
 `schedule.yml` carries a suggested sentence ready to uncomment.
 
 `archive:` on its own means "yes, on the default date". With no block, or a block with
 neither an `event_datetime` nor a `semester_end` to count from, nothing is archived automatically and
-the cohort's digest issue says so. Closing such a cohort out is the **Archive cohort**
+the semester's digest issue says so. Closing such a semester out is the **Archive semester**
 button with `force`.
 
 ---
@@ -288,12 +288,12 @@ Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 - GitHub's own cron at :07/:22/:37/:52, which GitHub delivers only some of the time - a backstop, not the clock;
 - a push to `classroom-config/schedule.yml`, which fires a tick straight away.
 
-The two drivers guard each other, so a time in the plan is honoured to within about 15 minutes: **pin a release ahead of the class that needs it**, not at its start time. The button is there too, for a run on demand. Releasing and grading are separate jobs, grading one per cohort, so a long autograding pass never holds up anyone's release.
+The two drivers guard each other, so a time in the plan is honoured to within about 15 minutes: **pin a release ahead of the class that needs it**, not at its start time. The button is there too, for a run on demand. Releasing and grading are separate jobs, grading one per semester, so a long autograding pass never holds up anyone's release.
 
 If a driver stops, or something due ships late, the scheduler files an issue and closes it again once things recover:
 
 - **Scheduled release: driver health**, in the course org's `.github` - the lab server has stopped dispatching, so only GitHub's unreliable cron is left; tell whoever runs the infrastructure. It ccs your `course-admin` team.
-- **Scheduled release: late delivery**, in the cohort's private `classroom-config` - something due shipped more than an hour late, naming the schedule entries and by how many minutes. It ccs the cohort's `instructors`.
+- **Scheduled release: late delivery**, in the semester's private `classroom-config` - something due shipped more than an hour late, naming the schedule entries and by how many minutes. It ccs the semester's `instructors`.
 
 A newly bootstrapped org raises neither until it has seen its first dispatched run. Thresholds and timing: [maintainers.md](reference/maintainers.md#the-schedulers-two-drivers).
 
@@ -303,7 +303,7 @@ Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub
 
 The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `snapshots/<slug>.csv`, `solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
 
-Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself. A release already shipped stays shipped, because unshipping it would mean rewriting the cohort repo's git history.
+Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself. A release already shipped stays shipped, because unshipping it would mean rewriting the semester repo's git history.
 
 ## Verifying your schedule
 
@@ -321,8 +321,8 @@ Parsed schedule.yml
 
 Three other ways to check, none of them required:
 
-1. **Read the counts.** **Check cohort setup** reports the release plan and term dates, and flags `N entry/ies DROPPED`.
-2. **Validate by hand.** `python3 -m dsl_course.schedule --cohort-org hertie-dsl-demo-f2026 --validate`, or `--file schedule.yml --validate` against a local copy. Without `--validate` it prints the schedule *as parsed*, as JSON.
+1. **Read the counts.** **Check semester setup** reports the release plan and term dates, and flags `N entry/ies DROPPED`.
+2. **Validate by hand.** `python3 -m dsl_course.schedule --semester-org hertie-dsl-demo-f2026 --validate`, or `--file schedule.yml --validate` against a local copy. Without `--validate` it prints the schedule *as parsed*, as JSON.
 3. **Dry-run it.** Run **Scheduled release** by hand; `dry_run` defaults to **`true`**, so it lists what *would* open and releases nothing.
 
 ## Sources that do not exist yet
@@ -339,9 +339,9 @@ So the sources are checked against the course org in two places: **Validate sche
 | 6 hours or less | **critical** | it comments again, one rung louder, and the email copies the toolkit maintainer |
 | the moment has passed | **missed** | the copy did not ship. A last comment and a last email, and the fault stays listed until the source is staged |
 
-**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the cohort's instructors. If git can name nobody in `people.yml` - the line was never edited by teaching staff, or the blame could not be read - the whole teaching team is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/people.yml`; the digest issue `cc`s the same people by handle. If nobody in `people.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
+**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the semester's instructors. If git can name nobody in `people.yml` - the line was never edited by teaching staff, or the blame could not be read - the whole teaching team is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/people.yml`; the digest issue `cc`s the same people by handle. If nobody in `people.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
 
-**Nothing is emailed between 23:00 and 07:00** in the cohort's own timezone. The issue still updates and comments immediately; the email is held and sent on the first tick after 07:00, as one message at the loudest rung it reached overnight.
+**Nothing is emailed between 23:00 and 07:00** in the semester's own timezone. The issue still updates and comments immediately; the email is held and sent on the first tick after 07:00, as one message at the loudest rung it reached overnight.
 
 **And a push gets an immediate reply.** Committing a `schedule.yml` that leaves a release inside 24 hours with nothing staged gets a comment on that commit, naming each line and its deadline. Distant faults get nothing - the digest issue holds those.
 
@@ -351,7 +351,7 @@ So the sources are checked against the course org in two places: **Validate sche
 
 ### The digest issue
 
-One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler. It carries everything wrong with this file - a source nobody has staged, an entry the parser had to drop, a file that does not parse at all, a group assignment whose teams have not all formed (which stays listed after the window shuts, until you fix it):
+One issue per semester, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler. It carries everything wrong with this file - a source nobody has staged, an entry the parser had to drop, a file that does not parse at all, a group assignment whose teams have not all formed (which stays listed after the window shuts, until you fix it):
 
 - its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`), the one sentence that would fix it, and a link at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
 - it **comments** only when something crosses a rung - a fault appears at warning, escalates, or clears - and `cc`s the same people the email is addressed to.
@@ -375,9 +375,9 @@ By hand: add `--check-sources <course-org>` to either `--validate` form above. E
 
 ## Dropped entries
 
-An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it cannot be run, so the rest of the term parses without it. This is the one fault a green run hides, so every drop is named in the run log, counted on **Check cohort setup**, and turned into a non-zero exit by `--validate`.
+An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it cannot be run, so the rest of the term parses without it. This is the one fault a green run hides, so every drop is named in the run log, counted on **Check semester setup**, and turned into a non-zero exit by `--validate`.
 
-| Fault | What the cohort loses |
+| Fault | What the semester loses |
 |---|---|
 | no valid `event_datetime` on a `releases:` or `events:` entry | nothing deploys, and no row appears on the site |
 | no valid `due_datetime` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
@@ -391,8 +391,8 @@ An empty `deploy:` - the key written with nothing under it - is flagged too. It 
 
 ## Timezones and bare dates
 
-- Everything naive is read in the cohort's `timezone:` (default `Europe/Berlin`).
-- An explicit offset (`2026-09-15T14:00+00:00`) names that exact instant; it fires then, and the site shows it on the cohort's own clock (`16:00` for a `Europe/Berlin` cohort in September).
+- Everything naive is read in the semester's `timezone:` (default `Europe/Berlin`).
+- An explicit offset (`2026-09-15T14:00+00:00`) names that exact instant; it fires then, and the site shows it on the semester's own clock (`16:00` for a `Europe/Berlin` semester in September).
 - A **bare date** with no time means **00:00** on a release's `event_datetime`/`deploy_datetime` (the day opens), **23:59:59** on an assignment `due_datetime` (the day closes), and a whole day on an `events:` entry's `event_datetime` (the site shows a 09:00 placeholder).
 
 ## Deadline snapshots and autograding

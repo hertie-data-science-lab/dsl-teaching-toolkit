@@ -5,7 +5,7 @@ Give an instructor, TA, faculty assistant or guest lecturer access to a course -
 ## Prerequisites
 
 - A bootstrapped [course org](01-new-course-org.md), 
-- A bootstrapped [cohort](04-new-cohort-org.md).
+- A bootstrapped [semester](04-new-cohort-org.md).
 - Instructors' **GitHub handles** and **email addresses**. Those are the two required fields; everything else is display.
 
 ---
@@ -20,10 +20,10 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 | Role | You want them to… | Declare them in | Level | They get |
 |--- |---|---|---|---|
-| Faculty, FAs | Administer the **whole course**, every cohort, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every cohort org |
-| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that cohort's `classroom-config/people.yml` → `instructors` / `teaching_assistants` | **cohort** - per year | cohort org `instructors` team + course org `instructors-<tag>`: push on `.github` and on every course-org repo named `*-<tag>` |
+| Faculty, FAs | Administer the **whole course**, every semester, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every semester org |
+| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that semester's `classroom-config/people.yml` → `instructors` / `teaching_assistants` | **semester** - per year | semester org `instructors` team + course org `instructors-<tag>`: push on `.github` and on every course-org repo named `*-<tag>` |
 
-**Prefer the cohort file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's staff cards.
+**Prefer the semester file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's staff cards.
 
 >Full model - every team and what it reaches: [`access-reference.md`](reference/access-reference.md).
 
@@ -31,7 +31,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 1. **Edit the file.**
 
-   **Cohort org**: → `classroom-config` → `people.yml` (this year's teaching team):
+   **Semester org**: → `classroom-config` → `people.yml` (this year's teaching team):
 
    ```yaml
    people:
@@ -47,7 +47,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
          email: "another@example.org"
    ```
 
-   `email` is required and private: it is where this cohort's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the cohort site's staff card. A `course_admins` entry's `email` is optional, and public, since `dsl-course.yml` is. Leave every entry without one and the cohort's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
+   `email` is required and private: it is where this semester's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the semester site's staff card. A `course_admins` entry's `email` is optional, and public, since `dsl-course.yml` is. Leave every entry without one and the semester's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
 
    Or **course org** → `.github` → `dsl-course.yml` (course-wide admin):
 
@@ -70,7 +70,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
 
 `photo` accepts either form:
 
-1. **A site-relative path** like `/_images/pp/jane.jpg` - commit the image into this cohort's site repo, `<cohort-org>.github.io`, under `_images/pp/`. The **safe default**.
+1. **A site-relative path** like `/_images/pp/jane.jpg` - commit the image into this semester's site repo, `<semester-org>.github.io`, under `_images/pp/`. The **safe default**.
 2. **An absolute URL** on a host that allows hotlinking. GitHub avatars (`https://github.com/<handle>.png`) always work.
 
 > Institutional profile sites often block off-site requests. E.g. `hertie-school.org` returns **403** to anything not loaded from its own pages.
@@ -100,11 +100,11 @@ Worked example: [`example-course/cohort-org/people.yml`](../example-course/cohor
 ## What the access actually reaches
 
 `instructors-<tag>` gets:
-1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check cohort setup…) visible and runnable for them
+1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check semester setup…) visible and runnable for them
 2. every course-org repo whose **name ends their associated `-<tag>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
-3. Cohort-side they also get write on `classroom-config`, `welcome` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the cohort: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
+3. Semester-side they also get write on `classroom-config`, `welcome` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the semester: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
 
-So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the cohort org ([08](08-release-materials-to-cohort.md)) themselves.
+So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the semester org ([08](08-release-materials-to-cohort.md)) themselves.
 
 >The suffix match is the whole rule: a course-org repo **without** the year tag in its name is not covered. Name per-year content repos `<thing>-<tag>`. 
 >
@@ -124,7 +124,7 @@ not a security boundary.
 
 ## Next
 
-- [Enrol students](06-enrol-students-to-cohort.md) - the other half of populating a cohort.
+- [Enrol students](06-enrol-students-to-cohort.md) - the other half of populating a semester.
 - [Add materials to the course](02-add-materials-to-course.md) - what a new TA usually does first.
 - Field-by-field schemas: [DEPLOYMENT-CHECKLIST](DEPLOYMENT-CHECKLIST.md#peopleyml).
 

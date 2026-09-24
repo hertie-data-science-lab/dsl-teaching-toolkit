@@ -2,30 +2,30 @@
 
 The Release / Provision actions live INSIDE course content (and assignment-template)
 repos, so faculty & instructors trigger them from the repo they're working in. The repo the workflow
-runs in is the default SOURCE; the action pushes into a chosen cohort org/repo.
+runs in is the default SOURCE; the action pushes into a chosen semester org/repo.
 
-The cohort org input is a GitHub `choice` dropdown. GitHub can't populate a dropdown
-live, so its options are rendered into the YAML from the cohort registry and
+The semester org input is a GitHub `choice` dropdown. GitHub can't populate a dropdown
+live, so its options are rendered into the YAML from the semester registry and
 refreshed on demand: `refresh` reads the course org's .github/cohort-courses-pages.yml
-`cohorts:` list (maintained by `bootstrap --cohort --course X`, or by hand) and re-pushes
+`semesters:` list (maintained by `bootstrap --semester --course X`, or by hand) and re-pushes
 the content actions to every course repo. No cron, no app.
 
 This module is the placement + CLI layer; the three jobs it used to also do live next to
 it, and every caller imports them from their owning module:
 
 - workflows_render - the workflow YAML templates and every render_* function;
-- discovery       - the cohort registry and all live org/repo/section/session discovery;
+- discovery       - the semester registry and all live org/repo/section/session discovery;
 - profile_readme  - the org landing page + `.github` repo README.
 
 CLI:
   refresh --course-org X   re-render the content actions into every course repo with
-                           fresh cohort/course-source-repo/assignment dropdowns, converge
+                           fresh semester/course-source-repo/assignment dropdowns, converge
                            each materials repo's SYSTEM-owned files (maintainer guide,
                            syllabus example) and its seeded stubs, rebuild
-                           the org profile README, and re-push each registered cohort's
+                           the org profile README, and re-push each registered semester's
                            welcome workflows + classroom-config SYSTEM-owned files (the
                            schema README, the dispatchers, the schedule validator) and
-                           `*.sample` worked examples. (Run by the Bootstrap-cohort
+                           `*.sample` worked examples. (Run by the Bootstrap-semester
                            workflow, and by Refresh actions - on demand and on its nightly
                            cron, which is how an org converges on its central ref
                            without anyone pressing anything.)
@@ -41,17 +41,18 @@ from datetime import datetime, timedelta, timezone
 from . import scaffold
 from .access import converge_faculty_access, converge_topics
 from .central import MissingCentralRef
-from .course import COHORT_TEAMS, CONFIG_REPO, FACULTY_TEAMS, term_tag
+from .course import CONFIG_REPO, FACULTY_TEAMS, SEMESTER_TEAMS, semester_of
 from .discovery import (
     central_ref_for,
     discover_assignment_repos,
     discover_assignments,
-    discover_cohorts,
     discover_content_repos,
+    discover_semesters,
     list_org_repos,
+    migrate_semester_registry,
     org_tier,
     student_repo_names,
-    unregister_cohort,
+    unregister_semester,
 )
 from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
@@ -64,7 +65,7 @@ from .status import refresh as refresh_status
 from .welcome import (
     refresh_classroom_samples,
     refresh_classroom_system_files,
-    refresh_cohort_pointer,
+    refresh_semester_pointer,
     refresh_welcome_workflows,
 )
 from .workflows_place import (
@@ -74,8 +75,8 @@ from .workflows_place import (
 )
 from .workflows_render import (
     for_placement,
-    render_archive_cohort,
-    render_bootstrap_cohort,
+    render_archive_semester,
+    render_bootstrap_semester,
     render_central_release,
     render_collect_submissions,
     render_console,
@@ -86,7 +87,7 @@ from .workflows_render import (
     render_new_materials,
     render_open_team_formation,
     render_patch_assignment,
-    render_propagate_cohort,
+    render_propagate_semester,
     render_provision,
     render_publish_site,
     render_refresh,
@@ -101,9 +102,9 @@ from .workflows_render import (
 # from. See _write_heartbeat.
 HEARTBEAT_PATH = ".github/.last-refresh"
 
-# The MISS LEDGER: `<cohort> <first missed at>` per line, beside the heartbeat in the
+# The MISS LEDGER: `<semester> <first missed at>` per line, beside the heartbeat in the
 # course org's `.github` repo - the only cross-run state this toolkit has. Unregistering a
-# cohort takes two misses at least MISS_GRACE_HOURS apart (see _live_cohorts), so the
+# semester takes two misses at least MISS_GRACE_HOURS apart (see _live_semesters), so the
 # first verdict has to survive to the next run, and the grace period has to be measured in
 # WALL time: two manual runs ten minutes apart are also two consecutive refreshes.
 MISSES_PATH = ".github/.missing-cohorts"
@@ -141,7 +142,7 @@ def _write_heartbeat(course_org: str) -> int:
 
 
 def _read_misses(course_org: str) -> dict[str, str]:
-    """`{cohort: when it was FIRST missed}` from the previous refreshes - see MISSES_PATH.
+    """`{semester: when it was FIRST missed}` from the previous refreshes - see MISSES_PATH.
 
     A line carrying no timestamp - a ledger written before they were recorded - maps to
     "", which reads as "too recent to act on" and costs one more grace period. That is the
@@ -149,9 +150,9 @@ def _read_misses(course_org: str) -> dict[str, str]:
     content = get_file_content(course_org, ".github", MISSES_PATH)
     out: dict[str, str] = {}
     for line in (content or "").splitlines():
-        cohort, _, first_seen = line.strip().partition(" ")
-        if cohort:
-            out[cohort.casefold()] = first_seen.strip()
+        semester, _, first_seen = line.strip().partition(" ")
+        if semester:
+            out[semester.casefold()] = first_seen.strip()
     return out
 
 
@@ -160,7 +161,7 @@ def _write_misses(
 ) -> None:
     """Record this run's misses, if they differ from the last run's.
 
-    Each line is `<cohort> <first missed at>`, and a cohort still missing keeps the
+    Each line is `<semester> <first missed at>`, and a semester still missing keeps the
     ORIGINAL timestamp - re-stamping it every night would restart the grace period every
     night and nothing would ever be unregistered.
 
@@ -173,71 +174,73 @@ def _write_misses(
         ".github",
         MISSES_PATH,
         ("".join(f"{c} {at}\n" for c, at in sorted(misses.items()))).encode(),
-        "chore: record cohort orgs this refresh could not see",
+        "chore: record semester orgs this refresh could not see",
     )
 
 
-def _live_cohorts(course_org: str) -> tuple[list[str], int]:
-    """The registry, converged: every registered cohort whose org still exists, with any
+def _live_semesters(course_org: str) -> tuple[list[str], int]:
+    """The registry, converged: every registered semester whose org still exists, with any
     that has been missing for two refreshes at least MISS_GRACE_HOURS apart dropped from
-    the registry on the way past. Returns `(live cohorts, how many were unregistered)`.
+    the registry on the way past. Returns `(live semesters, how many were unregistered)`.
 
-    The count goes into the refresh's failure total: nothing re-adds a cohort, and every
+    The count goes into the refresh's failure total: nothing re-adds a semester, and every
     nightly sync in every tool stops looking at that org, so a run that removed one is not
     an ordinary green night.
 
     TWO misses, on two different days, because GitHub answers 404 - not 403 - for an org
     the TOKEN cannot see: a bot dropped from one org, or a rotated token never re-invited,
     is indistinguishable from a deleted org, and one bad night would silently unregister a
-    live cohort. The first miss is loud, costs that cohort only that night's refresh, and
-    is carried to the next run in MISSES_PATH; a cohort that answers again clears it.
+    live semester. The first miss is loud, costs that semester only that night's refresh, and
+    is carried to the next run in MISSES_PATH; a semester that answers again clears it.
 
     Liveness is probed on the ORG itself, never one of its repos - a live org that has only
     lost its classroom-config must fail loud in refresh_classroom_samples, not be pruned
     away. `org_exists` raises rather than guessing, and "could not tell" reads as LIVE.
     """
-    registered = discover_cohorts(course_org)
+    registered = discover_semesters(course_org)
     previous = _read_misses(course_org)
     now = datetime.now(timezone.utc)
     live: list[str] = []
     missing: dict[str, str] = {}
     unregistered = 0
-    for cohort in registered:
+    for semester in registered:
         try:
-            gone = not org_exists(cohort)
+            gone = not org_exists(semester)
         except RuntimeError as exc:
-            log(f"  [warn] could not probe {cohort}, treating it as live: {exc}")
+            log(f"  [warn] could not probe {semester}, treating it as live: {exc}")
             gone = False
         if not gone:
-            live.append(cohort)
+            live.append(semester)
             continue
-        first_seen = previous.get(cohort.casefold(), "")
+        first_seen = previous.get(semester.casefold(), "")
         try:
             since = now - datetime.fromisoformat(first_seen)
         except ValueError:
             since = timedelta(0)  # never recorded, or unparseable - start the clock now
         if since < timedelta(hours=MISS_GRACE_HOURS):
-            missing[cohort.casefold()] = first_seen or now.isoformat(timespec="seconds")
+            missing[semester.casefold()] = first_seen or now.isoformat(
+                timespec="seconds"
+            )
             log_err(
-                f"{cohort} did not answer - it is either deleted or no longer visible to "
+                f"{semester} did not answer - it is either deleted or no longer visible to "
                 f"this token. Left registered and skipped for tonight; if it is still "
                 f"missing at a refresh more than {MISS_GRACE_HOURS}h from the first miss "
                 f"it will be unregistered from {course_org}."
             )
             continue
         log(
-            f"  [skip] {cohort} (missing since {first_seen} - unregistering it from "
+            f"  [skip] {semester} (missing since {first_seen} - unregistering it from "
             f"{course_org})"
         )
-        unregister_cohort(course_org, cohort)
+        unregister_semester(course_org, semester)
         unregistered += 1
-        # The cohort's own `instructors-<tag>` team lives in the COURSE org, so deleting
-        # the cohort org does not take it with it - and once unregistered, sync_faculty
+        # The semester's own `instructors-<tag>` team lives in the COURSE org, so deleting
+        # the semester org does not take it with it - and once unregistered, sync_faculty
         # never looks at it again. Say so here: before the prune this showed up as a
         # nightly sync_faculty failure, and silently trading that for an orphaned team
         # holding push on this org's repos would be a worse deal than the noise.
         log(
-            f"  [note] {course_org}/instructors-{term_tag(cohort) or cohort} may now be "
+            f"  [note] {course_org}/instructors-{semester_of(semester) or semester} may now be "
             f"an orphaned team with push access - delete it by hand if so"
         )
     _write_misses(course_org, missing, previous)
@@ -250,45 +253,45 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
     Split out from the write below so that "what this checkout renders for this org" can be
     asked without writing anything - the live e2e preflight compares these blob shas with
     what the org actually has, which is the only honest way to tell a refreshed org from a
-    stale one. Every input is discovered from the org itself (cohorts, content repos,
+    stale one. Every input is discovered from the org itself (semesters, content repos,
     assignment templates), so the answer is org-specific without the caller having to know
     any of it."""
-    cohorts = discover_cohorts(course_org)
+    semesters = discover_semesters(course_org)
     source_repos = discover_content_repos(course_org)
     assignments = discover_assignments(course_org)
     rendered = {
         ".github/workflows/release-materials.yml": render_central_release(
-            source_repos, cohorts
+            source_repos, semesters
         ),
         ".github/workflows/release-assignment.yml": render_provision(
-            cohorts, assignments
+            semesters, assignments
         ),
         ".github/workflows/collect-submissions.yml": render_collect_submissions(
-            cohorts, assignments
+            semesters, assignments
         ),
         ".github/workflows/patch-assignment.yml": render_patch_assignment(
-            cohorts, assignments
+            semesters, assignments
         ),
         ".github/workflows/new-materials.yml": render_new_materials(source_repos),
         ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
-            source_repos, cohorts
+            source_repos, semesters
         ),
         ".github/workflows/new-assignment.yml": render_new_assignment(assignments),
         ".github/workflows/derive-student-version.yml": render_derive_student_version(
             assignments
         ),
-        ".github/workflows/sync-site.yml": render_sync_site(cohorts),
+        ".github/workflows/sync-site.yml": render_sync_site(semesters),
         ".github/workflows/publish-site.yml": render_publish_site(source_repos),
-        ".github/workflows/sync-membership.yml": render_sync_membership(cohorts),
+        ".github/workflows/sync-membership.yml": render_sync_membership(semesters),
         ".github/workflows/send-codes.yml": render_send_codes(),
-        ".github/workflows/distribute-grades.yml": render_distribute_grades(cohorts),
+        ".github/workflows/distribute-grades.yml": render_distribute_grades(semesters),
         ".github/workflows/open-team-formation.yml": render_open_team_formation(
-            cohorts
+            semesters
         ),
-        ".github/workflows/propagate-cohort.yml": render_propagate_cohort(cohorts),
-        ".github/workflows/archive-cohort.yml": render_archive_cohort(cohorts),
-        ".github/workflows/bootstrap-cohort.yml": render_bootstrap_cohort(),
-        ".github/workflows/check-cohort-setup.yml": render_status(cohorts),
+        ".github/workflows/propagate-cohort.yml": render_propagate_semester(semesters),
+        ".github/workflows/archive-cohort.yml": render_archive_semester(semesters),
+        ".github/workflows/bootstrap-cohort.yml": render_bootstrap_semester(),
+        ".github/workflows/check-cohort-setup.yml": render_status(semesters),
         ".github/workflows/refresh-actions.yml": render_refresh(),
         ".github/workflows/scheduled-release.yml": render_scheduler(),
         ".github/workflows/console.yml": render_console(),
@@ -302,7 +305,7 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
 def seed_github_workflows(course_org: str, central_ref: str) -> int:
     """Seed/refresh the org-level workflows into the course org's .github repo: the
     CENTRAL Release materials (course-source-repo dropdown), Release assignment, plus Sync
-    membership / Bootstrap cohort / Refresh.
+    membership / Bootstrap semester / Refresh.
 
     All of them land as ONE commit (and the retired ones go in the same commit). They are
     rendered from one set of inputs by shared helpers, so in practice they change together:
@@ -416,7 +419,7 @@ def _converge_org(
     org: str,
     central_ref: str,
     listing: list[dict] | None = None,
-    is_cohort: bool = False,
+    is_semester: bool = False,
 ) -> int:
     """Sweep one org's repo listing and re-render its landing pages from that SAME
     snapshot. Failure count.
@@ -424,35 +427,39 @@ def _converge_org(
     One listing for both: the sweep corrects the descriptions the landing page's table is
     built from, so the page is right in this run rather than one run behind.
 
-    Run for the course org and for every live cohort. A cohort's own pages - the
+    Run for the course org and for every live semester. A semester's own pages - the
     student-facing profile/README.md and the orientation in its `.github` - were written
     once at Bootstrap and then frozen, so every wording fix since reached the course org
-    and no cohort. The `.github` README is SYSTEM-owned and rewritten outright; the
+    and no semester. The `.github` README is SYSTEM-owned and rewritten outright; the
     student-facing landing page is INSTRUCTOR-owned, so only its marked repo table is
     refreshed (see profile_readme.splice_repo_table) - which is what keeps that table
     honest as repos are added, without flattening an instructor's wording around it.
 
-    `listing` is that snapshot when the caller already holds one - a cohort's refresh reads
+    `listing` is that snapshot when the caller already holds one - a semester's refresh reads
     its archived flag off the same listing rather than probing classroom-config for it.
 
     The org's own settings are converged here too (gh_teams.converge_org_settings). They
     used to be written only at bootstrap, so every org tightened after its own bootstrap
     kept GitHub's default of `read` for every member on every repo.
 
-    `is_cohort` says this org is a cohort. It lets the org's private repos be forked
+    `is_semester` says this org is a semester. It lets the org's private repos be forked
     (converge_org_settings' `private_forks`) - students are told to fork the labs, while
     a private fork in a COURSE org would be an uncontrolled copy of the solutions in a
     personal account - and it additionally converges the four role teams'
-    PRIVACY (course.FACULTY_TEAMS + COHORT_TEAMS). Their privacy was asserted only by the
+    PRIVACY (course.FACULTY_TEAMS + SEMESTER_TEAMS). Their privacy was asserted only by the
     team-creating call at bootstrap, so `students` and `auditors` stayed `closed` - their
-    membership browsable by every student in the org - on every cohort created before they
+    membership browsable by every student in the org - on every semester created before they
     were made `secret`. One GET per role team per night; the read-before-PATCH inside
     create_team is what keeps that from being four writes."""
     if listing is None:
         listing = list_org_repos(org)
     return (
-        converge_org_settings(org, private_forks=is_cohort)
-        + (create_role_teams(org, (*FACULTY_TEAMS, *COHORT_TEAMS)) if is_cohort else 0)
+        converge_org_settings(org, private_forks=is_semester)
+        + (
+            create_role_teams(org, (*FACULTY_TEAMS, *SEMESTER_TEAMS))
+            if is_semester
+            else 0
+        )
         + _converge_org_metadata(org, listing)
         + update_profile_readme(org, central_ref=central_ref, repos=listing)
     )
@@ -464,9 +471,9 @@ def refresh(course_org: str) -> int:
     materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its
     seeded stubs; repopulate dropdowns; converge each org's repo descriptions, faculty-team
     access and machinery topics (_converge_org_metadata) and rebuild its profile README
-    off the same listing; re-push every registered cohort's welcome workflows, its
+    off the same listing; re-push every registered semester's welcome workflows, its
     classroom-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
-    validate-schedule.yml) and its `*.sample` worked examples (skipping cohorts whose
+    validate-schedule.yml) and its `*.sample` worked examples (skipping semesters whose
     repos are archived) - never its own config, which stays create-if-missing; (Free-plan
     workaround) propagate the token as a repo secret so those private repos can
     authenticate; and stamp the heartbeat that keeps this org's crons from being
@@ -475,18 +482,21 @@ def refresh(course_org: str) -> int:
     Non-zero if any file could not be written: this runs nightly on a cron, so a run that
     silently failed to converge an org would go unnoticed until someone ran a workflow
     that was never seeded."""
-    # Converge the registry FIRST, so `cohorts` is the live list for everything below.
+    # Converge the registry FIRST, so `semesters` is the live list for everything below.
     # Every org-level workflow dropdown, the run-from-repo workflows in every content
-    # repo and the profile README's cohort list are all rendered from it further down;
+    # repo and the profile README's semester list are all rendered from it further down;
     # pruning after them wrote the dead org into all of them one last time and self-healed
     # a night later, which is the same "converges eventually, if someone waits" the prune
     # exists to end.
     # ONE read of this org's tier, threaded into everything below: the course org's
-    # workflows, its content repos' workflows, and every cohort's classroom-config
-    # validator all have to be pinned to the same ref, and a cohort inherits its course
-    # org's (central_ref_for), so re-reading it per cohort could only ever disagree.
+    # workflows, its content repos' workflows, and every semester's classroom-config
+    # validator all have to be pinned to the same ref, and a semester inherits its course
+    # org's (central_ref_for), so re-reading it per semester could only ever disagree.
     central_ref = central_ref_for(course_org)
-    cohorts, unregistered = _live_cohorts(course_org)
+    # The registry's rename bridge: write semesters.yml from the old file before anything
+    # reads it. A write that fails is counted, and every reader still finds the old file.
+    registry_failed = 0 if migrate_semester_registry(course_org) else 1
+    semesters, unregistered = _live_semesters(course_org)
     targets = discover_content_repos(course_org)
     # Org-wide; discovered once, not per repo. Two lists off the one listing: every
     # template names itself in the dropdowns this refresh renders, and the LIVE ones are
@@ -496,11 +506,11 @@ def refresh(course_org: str) -> int:
     live_templates = [r["name"] for r in templates if not r.get("archived")]
     log_step(
         f"Refreshing {course_org} at central ref {central_ref}: {len(targets)} content "
-        f"repo(s), {len(assignments)} assignment template(s), cohorts "
-        f"{cohorts or 'none'}"
+        f"repo(s), {len(assignments)} assignment template(s), semesters "
+        f"{semesters or 'none'}"
     )
-    # An unregistration is never a silent success: see _live_cohorts.
-    failures = unregistered
+    # An unregistration is never a silent success: see _live_semesters.
+    failures = unregistered + registry_failed
     # status.json writes that did not land: warned about, never counted (see below).
     status_misses = 0
     # `central.pin_central_ref` refuses a ref the central repo does not have, and every
@@ -527,7 +537,12 @@ def refresh(course_org: str) -> int:
         is the same in both - written once so an added argument is added once."""
         return render(
             lambda: push_content_workflows(
-                course_org, repo, cohorts, assignments, central_ref, workflows=workflows
+                course_org,
+                repo,
+                semesters,
+                assignments,
+                central_ref,
+                workflows=workflows,
             )
         )
 
@@ -544,7 +559,7 @@ def refresh(course_org: str) -> int:
     # The LIVE templates only. An archived repo is read-only: the placement and the secret
     # both 403, and a template a faculty member archived on purpose would red this cron
     # every night from then on, for a repo nobody is going to release from again. Same
-    # reasoning as the archived-cohort skip further down - and the dropdowns above still
+    # reasoning as the archived-semester skip further down - and the dropdowns above still
     # offer every template, because copying an assignment forward from an archived one is
     # a read.
     for repo in live_templates:
@@ -553,50 +568,52 @@ def refresh(course_org: str) -> int:
     failures += render(lambda: seed_github_workflows(course_org, central_ref))
     failures += _write_heartbeat(course_org)
     failures += _converge_org(course_org, central_ref)
-    # A cohort's onboarding workflows, classroom-config dispatchers and config samples are
-    # seeded at Bootstrap cohort, and would otherwise stay frozen for the whole semester
+    # A semester's onboarding workflows, classroom-config dispatchers and config samples are
+    # seeded at Bootstrap semester, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
     log_step(
         f"Refreshing welcome workflows + classroom-config system files + samples "
-        f"in {len(cohorts)} cohort org(s)"
+        f"in {len(semesters)} semester org(s)"
     )
-    for cohort in cohorts:
-        # ONE listing of the cohort: the archived flag below, and the convergence sweep +
+    for semester in semesters:
+        # ONE listing of the semester: the archived flag below, and the convergence sweep +
         # profile rebuild at the end of the loop, are all read off this same snapshot. The
         # flag used to be its own GET of classroom-config, a night after night probe for a
         # field the listing already carries.
-        listing = list_org_repos(cohort)
+        listing = list_org_repos(semester)
         config_repo = next((r for r in listing if r["name"] == CONFIG_REPO), None)
-        # A finished semester's cohort is archived, and an archived repo is read-only:
+        # A finished semester's semester is archived, and an archived repo is read-only:
         # every write 403s, and the samples are new files so put_file's sha no-op can't
-        # absorb it. A past cohort is meant to stay frozen anyway, so skip it whole rather
+        # absorb it. A past semester is meant to stay frozen anyway, so skip it whole rather
         # than turn the nightly cron red in every org that has ever finished a semester.
-        # A cohort with no classroom-config at all is not archived, it is unfinished, and
+        # A semester with no classroom-config at all is not archived, it is unfinished, and
         # the writes below are what give it one.
         if config_repo is not None and config_repo.get("archived"):
-            log(f"  [skip] {cohort} (archived cohort - left frozen)")
+            log(f"  [skip] {semester} (archived semester - left frozen)")
             continue
-        failures += refresh_welcome_workflows(cohort)
-        # SYSTEM-owned files only (see welcome.CLASSROOM_SYSTEM_FILES): the cohort's own
+        failures += refresh_welcome_workflows(semester)
+        # SYSTEM-owned files only (see welcome.CLASSROOM_SYSTEM_FILES): the semester's own
         # students.csv/teams.csv/schedule.yml/people.yml are never touched here, or this
         # nightly cron would overwrite a live roster every night. Skipped whole when the
         # ref is missing: the set includes validate-schedule.yml, which is rendered at it.
         failures += render(
-            lambda cohort=cohort: refresh_classroom_system_files(cohort, central_ref)
+            lambda semester=semester: refresh_classroom_system_files(
+                semester, central_ref
+            )
         )
-        failures += refresh_classroom_samples(cohort)
+        failures += refresh_classroom_samples(semester)
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
-        # also only ever written by Bootstrap cohort until now - same bug class.
-        failures += refresh_cohort_pointer(cohort, course_org)
+        # also only ever written by Bootstrap semester until now - same bug class.
+        failures += refresh_semester_pointer(semester, course_org)
         # The Join-team form's mirror of every assignment's team rules. SYSTEM-owned like
         # the two above, but DERIVED rather than templated, so it cannot join
-        # welcome.CLASSROOM_SYSTEM_FILES: it is rendered per cohort from that cohort's
+        # welcome.CLASSROOM_SYSTEM_FILES: it is rendered per semester from that semester's
         # schedule and each template's grading_config.yml. Here is what seeds it - a
-        # Bootstrap cohort run ends in this refresh - and what converges it every night.
-        failures += 0 if sync_team_lock(course_org, cohort).ok else 1
-        failures += _converge_org(cohort, central_ref, listing, is_cohort=True)
-        # Last, so it describes the cohort this refresh has just converged.
-        status_misses += refresh_status(course_org, cohort)
+        # Bootstrap semester run ends in this refresh - and what converges it every night.
+        failures += 0 if sync_team_lock(course_org, semester).ok else 1
+        failures += _converge_org(semester, central_ref, listing, is_semester=True)
+        # Last, so it describes the semester this refresh has just converged.
+        status_misses += refresh_status(course_org, semester)
     status_misses += refresh_status(course_org)
     if status_misses:
         # A warning, not a failure: status.json is the console's view, and an org that

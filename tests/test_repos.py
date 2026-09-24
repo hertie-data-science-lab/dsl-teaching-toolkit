@@ -25,16 +25,16 @@ def test_an_internal_repo_is_not_a_private_one():
 
 
 def test_repo_is_archived_reads_the_flag_and_assumes_live_when_it_cannot(monkeypatch):
-    # This gates whether the nightly refresh skips a cohort, so the failure default is the
+    # This gates whether the nightly refresh skips a semester, so the failure default is the
     # whole point: an unreadable repo must read as LIVE. Guessing "archived" on a transient
-    # error would silently stop converging a running cohort with nothing in the log to say
+    # error would silently stop converging a running semester with nothing in the log to say
     # so; guessing "live" costs a loud 403 from the write itself, which is the right alarm.
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, '{"archived": true}'))
-    assert repos.repo_is_archived("Cohort-f2025", "classroom-config") is True
+    assert repos.repo_is_archived("Semester-f2025", "classroom-config") is True
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, '{"archived": false}'))
-    assert repos.repo_is_archived("Cohort-f2026", "classroom-config") is False
+    assert repos.repo_is_archived("Semester-f2026", "classroom-config") is False
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502 - bad gateway"))
-    assert repos.repo_is_archived("Cohort-f2026", "classroom-config") is False
+    assert repos.repo_is_archived("Semester-f2026", "classroom-config") is False
 
 
 def _forking(monkeypatch, answer: str | tuple[int, str]):
@@ -53,12 +53,12 @@ def _forking(monkeypatch, answer: str | tuple[int, str]):
 def test_allow_forking_patches_a_private_repo_that_is_not_forkable_yet(monkeypatch):
     # `create_repo`'s POST takes no forking field, so this is a PATCH of its own.
     calls = _forking(monkeypatch, '{"private": true, "allow_forking": false}')
-    assert repos.allow_forking("Cohort-f2026", "materials") is True
+    assert repos.allow_forking("Semester-f2026", "materials") is True
     assert calls[-1] == (
         "api",
         "--method",
         "PATCH",
-        "repos/Cohort-f2026/materials",
+        "repos/Semester-f2026/materials",
         "--field",
         "allow_forking=true",
     )
@@ -68,11 +68,11 @@ def test_allow_forking_writes_nothing_when_there_is_nothing_to_change(monkeypatc
     # The release runs every quarter of an hour, so an unconditional PATCH is 96 writes a
     # day per dest for a flag that changes once - and on a PUBLIC repo GitHub refuses the
     # field outright (422 "only be changed on org-owned private repositories"), which the
-    # demo cohort logged as a warning on every single tick. Both are already forkable.
+    # demo semester logged as a warning on every single tick. Both are already forkable.
     calls = _forking(monkeypatch, '{"private": false, "allow_forking": false}')
-    assert repos.allow_forking("Cohort-f2026", "public-materials") is True
+    assert repos.allow_forking("Semester-f2026", "public-materials") is True
     calls += _forking(monkeypatch, '{"private": true, "allow_forking": true}')
-    assert repos.allow_forking("Cohort-f2026", "already-forkable") is True
+    assert repos.allow_forking("Semester-f2026", "already-forkable") is True
     assert [c for c in calls if "--method" in c] == []
 
 
@@ -80,7 +80,7 @@ def test_allow_forking_still_patches_a_repo_it_could_not_read(monkeypatch):
     # Fail-open, like every other read here: a 502 on the GET must not silently stop the
     # setting from converging.
     calls = _forking(monkeypatch, (1, "gh: HTTP 502 - bad gateway"))
-    assert repos.allow_forking("Cohort-f2026", "materials") is True
+    assert repos.allow_forking("Semester-f2026", "materials") is True
     assert [c for c in calls if "--method" in c]
 
 
@@ -88,7 +88,7 @@ def test_a_refused_forking_patch_is_a_warning_not_an_error(monkeypatch, capsys):
     # Whether the setting exists at all depends on the org's plan, and reddening a
     # quarter-hourly release for a button is how a real failure stops being noticed.
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
-    assert repos.allow_forking("Cohort-f2026", "materials") is False
+    assert repos.allow_forking("Semester-f2026", "materials") is False
     out = capsys.readouterr().out
     assert "[warn]" in out and "forkable" in out
 
@@ -105,13 +105,13 @@ def test_set_visibility_patches_the_one_field_and_says_nothing_public_on_failure
         return 0, ""
 
     monkeypatch.setattr(repos, "gh", fake_gh)
-    assert repos.set_visibility("Cohort-f2026", "assignment-1-ada", "public") is True
+    assert repos.set_visibility("Semester-f2026", "assignment-1-ada", "public") is True
     assert calls == [
         (
             "api",
             "--method",
             "PATCH",
-            "repos/Cohort-f2026/assignment-1-ada",
+            "repos/Semester-f2026/assignment-1-ada",
             "--field",
             "visibility=public",
         )
@@ -119,7 +119,9 @@ def test_set_visibility_patches_the_one_field_and_says_nothing_public_on_failure
     # The repo is somebody's, so the failure line carries no name in a public log.
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
     assert (
-        repos.set_visibility("Cohort-f2026", "assignment-1-ada", "public", person=True)
+        repos.set_visibility(
+            "Semester-f2026", "assignment-1-ada", "public", person=True
+        )
         is False
     )
     out = capsys.readouterr()
@@ -209,15 +211,15 @@ def test_is_collaborator_asks_for_direct_grants_only(monkeypatch):
     monkeypatch.setattr(
         repos, "gh", lambda *a, **k: seen.append(a) or (0, "Ada-L\nhertie-dsl-bot\n")
     )
-    assert repos.is_collaborator("Cohort", "assignment-1-ada-l", "ada-l") is True
+    assert repos.is_collaborator("Semester", "assignment-1-ada-l", "ada-l") is True
     assert any("affiliation=direct" in a for a in seen[0])
-    assert repos.is_collaborator("Cohort", "assignment-1-ada-l", "zoe-z") is False
+    assert repos.is_collaborator("Semester", "assignment-1-ada-l", "zoe-z") is False
 
     # An unreadable answer is neither - the caller must not revoke on a rate limit.
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502 bad gateway"))
-    assert repos.is_collaborator("Cohort", "assignment-1-ada-l", "ada-l") is None
+    assert repos.is_collaborator("Semester", "assignment-1-ada-l", "ada-l") is None
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    assert repos.is_collaborator("Cohort", "gone", "ada-l") is False
+    assert repos.is_collaborator("Semester", "gone", "ada-l") is False
 
 
 def test_pending_invitations_picks_out_one_logins_ids(monkeypatch):
@@ -245,11 +247,11 @@ def test_a_repo_named_after_a_student_is_not_announced_in_a_public_log(
     # skip branch already was, the create branch was not.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, ""))
-    assert repos.create_repo("Cohort-f2026", "grades-ada-l", person=True) is True
+    assert repos.create_repo("Semester-f2026", "grades-ada-l", person=True) is True
     assert "ada-l" not in capsys.readouterr().out
 
     monkeypatch.setenv("DSL_VERBOSE", "1")
-    assert repos.create_repo("Cohort-f2026", "grades-ada-l", person=True) is True
+    assert repos.create_repo("Semester-f2026", "grades-ada-l", person=True) is True
     assert "ada-l" in capsys.readouterr().out
 
 
@@ -274,7 +276,7 @@ def test_an_existing_student_repo_is_not_named_either(monkeypatch, capsys):
         repos.generate_from_template(
             template_org="Course-Org",
             template_name="a1-template",
-            owner="Cohort-f2026",
+            owner="Semester-f2026",
             name="a1-ada-l",
             person=True,
         )
@@ -287,7 +289,7 @@ def test_a_failed_student_repo_create_still_names_it(monkeypatch, capsys):
     # The carve-out: an error a faculty member must act on is worse unactionable than named.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "HTTP 403: forbidden"))
-    assert repos.create_repo("Cohort-f2026", "grades-ada-l", person=True) is False
+    assert repos.create_repo("Semester-f2026", "grades-ada-l", person=True) is False
     assert "grades-ada-l" in capsys.readouterr().err
 
 
@@ -310,20 +312,20 @@ def test_the_drop_box_ruleset_forbids_force_push_and_deletion_on_the_default_bra
     monkeypatch,
 ):
     calls = _rulesets(monkeypatch, (0, ""))
-    assert repos.protect_shared_repo("Cohort", "assignment-3-submissions") is True
+    assert repos.protect_shared_repo("Semester", "assignment-3-submissions") is True
     (read, _), (write, body) = calls
     assert read[1] == "--paginate"
-    assert "repos/Cohort/assignment-3-submissions/rulesets" in read[2]
+    assert "repos/Semester/assignment-3-submissions/rulesets" in read[2]
     assert write[:4] == (
         "api",
         "--method",
         "POST",
-        "repos/Cohort/assignment-3-submissions/rulesets",
+        "repos/Semester/assignment-3-submissions/rulesets",
     )
     sent = json.loads(body)
     assert sent["name"] == repos.DROP_BOX_RULESET
     assert sent["target"] == "branch" and sent["enforcement"] == "active"
-    # No bypass: a listed actor is one more account that may rewrite the cohort's work.
+    # No bypass: a listed actor is one more account that may rewrite the semester's work.
     assert sent["bypass_actors"] == []
     # The branch is named by GitHub's own alias, not by "main" - the drop box inherits its
     # default branch from the course template, and a ruleset on the wrong branch is none.
@@ -335,15 +337,15 @@ def test_the_drop_box_ruleset_is_not_posted_twice(monkeypatch):
     # The handout re-fires on every tick, so a second POST would 422 on the name for the
     # rest of the term. One listing answers it.
     calls = _rulesets(monkeypatch, (0, f"some-other-rule\n{repos.DROP_BOX_RULESET}\n"))
-    assert repos.protect_shared_repo("Cohort", "assignment-3-submissions") is True
+    assert repos.protect_shared_repo("Semester", "assignment-3-submissions") is True
     assert len(calls) == 1
 
 
 def test_a_drop_box_that_could_not_be_protected_says_what_it_costs(monkeypatch, capsys):
     _rulesets(monkeypatch, (1, "gh: HTTP 502"), post=(1, "gh: HTTP 403 - forbidden"))
-    assert repos.protect_shared_repo("Cohort", "assignment-3-submissions") is False
+    assert repos.protect_shared_repo("Semester", "assignment-3-submissions") is False
     err = capsys.readouterr().err
-    assert "erase the whole cohort's work" in err
+    assert "erase the whole semester's work" in err
 
 
 def test_direct_collaborators_unions_collaborators_and_un_accepted_invitations(
@@ -359,7 +361,7 @@ def test_direct_collaborators_unions_collaborators_and_un_accepted_invitations(
 
     monkeypatch.setattr(repos, "gh", fake_gh)
     assert repos.direct_collaborators(
-        "Cohort", "assignment-3-submissions"
+        "Semester", "assignment-3-submissions"
     ) == frozenset({"anna", "bot", "late-joiner"})
     assert len(asked) == 2
 
@@ -370,8 +372,8 @@ def test_direct_collaborators_cannot_answer_when_either_listing_fails(
     # None, never the empty set: the caller grants everyone again on None, and would grant
     # nobody on an empty set it read as "nothing is there".
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
-    assert repos.direct_collaborators("Cohort", "assignment-3-submissions") is None
-    assert "could not read Cohort/assignment-3-submissions's collaborators" in (
+    assert repos.direct_collaborators("Semester", "assignment-3-submissions") is None
+    assert "could not read Semester/assignment-3-submissions's collaborators" in (
         capsys.readouterr().err
     )
 
@@ -494,7 +496,9 @@ def test_a_collaborator_grant_waits_out_a_locked_repo(monkeypatch, capsys):
     answers = iter([(1, SETTLING_ANSWERS[1]), (1, SETTLING_ANSWERS[1]), (0, "")])
     monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
     monkeypatch.setattr(repos.time, "sleep", lambda s: None)
-    assert repos.add_collaborator("Cohort-f2026", "a1-ada", "ada", person=True) is True
+    assert (
+        repos.add_collaborator("Semester-f2026", "a1-ada", "ada", person=True) is True
+    )
     assert capsys.readouterr().err == ""
 
 
@@ -502,4 +506,4 @@ def test_a_topics_put_waits_out_a_locked_repo(monkeypatch):
     answers = iter([(1, SETTLING_ANSWERS[2]), (0, "")])
     monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
     monkeypatch.setattr(repos.time, "sleep", lambda s: None)
-    assert repos.set_repo_topics("Cohort-f2026", "a1-ada", ["Assignment"]) is True
+    assert repos.set_repo_topics("Semester-f2026", "a1-ada", ["Assignment"]) is True

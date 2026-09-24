@@ -41,7 +41,9 @@ STATUS_SCHEMA = "dsl.status/1"
 
 DISPATCH = "dispatch"
 COURSE = "course"
-COHORT = "cohort"
+# The op scope and the `cohort.*` op ids are what the console matches on; they are renamed
+# together with the console (WP-A3), not here.
+SEMESTER = "cohort"
 BOOTSTRAP_OP = "cohort.bootstrap"
 INLINE = "inline"
 VIA_WORKFLOW = "workflow:"
@@ -52,7 +54,7 @@ ORG_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 REPO_PATTERN = r"^(?!-)[A-Za-z0-9._-]{1,100}$"
 PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"
-TAG_PATTERN = r"^[fs][0-9]{4}$"
+SEMESTER_PATTERN = r"^[fs][0-9]{4}$"
 HANDLE_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 FORMATS_PATTERN = (
     rf"^(?:none|(?:{'|'.join(STARTER_FORMATS)})(?:,(?:{'|'.join(STARTER_FORMATS)}))*)$"
@@ -67,7 +69,7 @@ class Request:
     op: str
     actor: str
     course_org: str
-    cohort_org: str | None
+    semester_org: str | None
     args: dict
     preview: bool
     client: str = ""
@@ -179,8 +181,8 @@ _SLUG = _string(
 _DEPLOY_FIELDS = {
     "course_source_repo": _string(REPO_PATTERN, "Course-org repo to release from"),
     "course_source_path": _string(PATH_PATTERN, "Path(s), comma-separated"),
-    "cohort_dest_repo": _string(REPO_PATTERN, "Cohort repo to release into"),
-    "cohort_dest_path": _string(PATH_PATTERN, "Destination path(s), comma-separated"),
+    "semester_dest_repo": _string(REPO_PATTERN, "Semester repo to release into"),
+    "semester_dest_path": _string(PATH_PATTERN, "Destination path(s), comma-separated"),
 }
 
 
@@ -191,16 +193,16 @@ def _a(request: Request, key: str, default=None):
     return request.args.get(key, default)
 
 
-def _course_cohort(request: Request) -> list[str]:
-    return ["--course-org", request.course_org, "--cohort-org", request.cohort_org]
+def _course_semester(request: Request) -> list[str]:
+    return ["--course-org", request.course_org, "--semester-org", request.semester_org]
 
 
 def _status_write(request: Request) -> list[str]:
-    return [*_course_cohort(request), "--write"]
+    return [*_course_semester(request), "--write"]
 
 
 def _scheduler(request: Request) -> list[str]:
-    return [*_course_cohort(request), "--skip-autograde", "--dry-run"]
+    return [*_course_semester(request), "--skip-autograde", "--dry-run"]
 
 
 def _deploy(request: Request) -> list[str]:
@@ -209,14 +211,14 @@ def _deploy(request: Request) -> list[str]:
         request.course_org,
         "--course-source-repo",
         _a(request, "course_source_repo"),
-        "--cohort-org",
-        request.cohort_org,
+        "--semester-org",
+        request.semester_org,
         "--course-source-path",
         _a(request, "course_source_path"),
-        "--cohort-dest-repo",
-        _a(request, "cohort_dest_repo", "materials"),
-        "--cohort-dest-path",
-        _a(request, "cohort_dest_path", ""),
+        "--semester-dest-repo",
+        _a(request, "semester_dest_repo", "materials"),
+        "--semester-dest-path",
+        _a(request, "semester_dest_path", ""),
     ]
 
 
@@ -226,8 +228,8 @@ def _assign_base(request: Request) -> list[str]:
         request.course_org,
         "--course-source-repo",
         _a(request, "course_source_repo"),
-        "--cohort-org",
-        request.cohort_org,
+        "--semester-org",
+        request.semester_org,
     ]
 
 
@@ -255,7 +257,7 @@ def _collect(request: Request) -> list[str]:
 
 
 def _grades(request: Request) -> list[str]:
-    argv = ["distribute", "--cohort-org", request.cohort_org]
+    argv = ["distribute", "--semester-org", request.semester_org]
     if not _a(request, "notify", True):
         argv.append("--no-notify")
     if _a(request, "receipt_note"):
@@ -267,8 +269,8 @@ def _grades(request: Request) -> list[str]:
 
 def _send_codes(request: Request) -> list[str]:
     return [
-        "--cohort-org",
-        request.cohort_org,
+        "--semester-org",
+        request.semester_org,
         "--dispatched-by",
         request.course_org,
         "--resend-unjoined",
@@ -276,11 +278,11 @@ def _send_codes(request: Request) -> list[str]:
 
 
 def _site_sync(request: Request) -> list[str]:
-    return ["sync", *_course_cohort(request)]
+    return ["sync", *_course_semester(request)]
 
 
 def _teardown(request: Request) -> list[str]:
-    argv = _course_cohort(request)
+    argv = _course_semester(request)
     if _a(request, "force"):
         argv.append("--force")
     return argv
@@ -312,7 +314,7 @@ def _derive(request: Request) -> list[str]:
 
 def _syllabus(request: Request) -> list[str]:
     return [
-        *_course_cohort(request),
+        *_course_semester(request),
         "--course-source-repo",
         _a(request, "course_source_repo"),
     ]
@@ -323,8 +325,8 @@ def _new_materials(request: Request) -> list[str]:
         "materials",
         "--org",
         request.course_org,
-        "--tag",
-        _a(request, "tag"),
+        "--semester",
+        _a(request, "semester"),
         "--public-dirs",
         _a(request, "public_dirs", NOTHING_PUBLIC),
         "--public-types",
@@ -342,8 +344,8 @@ def _new_assignment(request: Request) -> list[str]:
         request.course_org,
         "--number",
         str(_a(request, "number")),
-        "--tag",
-        _a(request, "tag"),
+        "--semester",
+        _a(request, "semester"),
         "--name",
         _a(request, "name", ""),
         "--format",
@@ -364,13 +366,13 @@ def _new_assignment(request: Request) -> list[str]:
     return argv
 
 
-def _bootstrap_cohort(request: Request) -> list[str]:
+def _bootstrap_semester(request: Request) -> list[str]:
     return [
         "--org",
-        request.cohort_org,
+        request.semester_org,
         "--org-name",
-        request.cohort_org,
-        "--cohort",
+        request.semester_org,
+        "--semester",
         "--course",
         request.course_org,
         "--propagate-secret",
@@ -378,7 +380,7 @@ def _bootstrap_cohort(request: Request) -> list[str]:
 
 
 def _open_window(request: Request) -> list[str]:
-    return [*_course_cohort(request), "--assignment", _a(request, "assignment")]
+    return [*_course_semester(request), "--assignment", _a(request, "assignment")]
 
 
 # ------------------------------------------------------------------ the registry
@@ -394,7 +396,7 @@ def _release(name: str, help_text: str, args_schema: dict) -> Operation:
     return Operation(
         name=name,
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=args_schema,
         help=help_text,
@@ -411,10 +413,10 @@ _OPS = (
     Operation(
         name="cohort.check",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Check the cohort's setup and refresh what the console shows.",
+        help="Check the semester's setup and refresh what the console shows.",
         done_text="Status refreshed.",
         doc="docs/reference/actions-reference.md",
         module="status",
@@ -423,10 +425,10 @@ _OPS = (
     Operation(
         name="cohort.preview_automation",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Preview what automation would release in this cohort now.",
+        help="Preview what automation would release in this semester now.",
         doc="docs/07-schedule-releases.md",
         module="scheduler",
         argv=_scheduler,
@@ -456,21 +458,21 @@ _OPS = (
     Operation(
         name="release.propagate_back",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Keep this cohort's edits for future terms: one pull request per source repo.",
-        done_text="Cohort edits checked for future terms.",
+        help="Keep this semester's edits for future terms: one pull request per source repo.",
+        done_text="Semester edits checked for future terms.",
         doc="docs/08-release-materials-to-cohort.md",
         module="propagate",
-        argv=_course_cohort,
+        argv=_course_semester,
         preview_flag="--dry-run",
         real_flag="--no-dry-run",
     ),
     Operation(
         name="assignment.handout_now",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
@@ -491,7 +493,7 @@ _OPS = (
     Operation(
         name="assignment.update_copies",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
@@ -513,7 +515,7 @@ _OPS = (
     Operation(
         name="assignment.collect_now",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {"course_source_repo": _TEMPLATE, "slug": _SLUG},
@@ -525,12 +527,12 @@ _OPS = (
         argv=_collect,
         preview_flag="--dry-run",
         via=f"{VIA_WORKFLOW}collect-submissions.yml",
-        inputs=("cohort_org", "course_source_repo", "slug", "dry_run"),
+        inputs=("semester_org", "course_source_repo", "slug", "dry_run"),
     ),
     Operation(
         name="grades.return",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
@@ -551,7 +553,7 @@ _OPS = (
     Operation(
         name="roster.send_codes",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Send new codes to every student who has not joined; old codes stop working.",
@@ -565,10 +567,10 @@ _OPS = (
     Operation(
         name="site.update",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
-        help="Update the cohort site now.",
+        help="Update the semester site now.",
         done_text="Student site updated.",
         doc="docs/11-configure-cohort-site.md",
         module="site",
@@ -577,7 +579,7 @@ _OPS = (
     Operation(
         name="teams.open_window",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {"assignment": _string(KEY_PATTERN, "The schedule.yml assignments key")},
@@ -596,26 +598,26 @@ _OPS = (
     Operation(
         name="access.check",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(),
         help="Check staff and student access against people.yml, the roster and teams.",
         done_text="Staff access checked.",
         doc="docs/05-manage-teaching-team.md",
         module="sync_membership",
-        argv=_course_cohort,
+        argv=_course_semester,
         preview_flag="--dry-run",
     ),
     Operation(
         name="cohort.archive",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
-            {"force": _boolean("Archive before the cohort's archive date")}
+            {"force": _boolean("Archive before the semester's archive date")}
         ),
-        help="Archive the cohort: every repo read-only, nothing deleted.",
-        done_text="Cohort archived.",
+        help="Archive the semester: every repo read-only, nothing deleted.",
+        done_text="Semester archived.",
         doc="docs/10-grade-and-return-assignments.md",
         module="teardown",
         argv=_teardown,
@@ -662,13 +664,13 @@ _OPS = (
     Operation(
         name="assignment.generate_syllabus",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {"course_source_repo": _string(REPO_PATTERN, "Repo holding the syllabus")},
             required=("course_source_repo",),
         ),
-        help="Write the syllabus's session list from the cohort's schedule.",
+        help="Write the syllabus's session list from the semester's schedule.",
         done_text="Syllabus session list written.",
         doc="docs/07-schedule-releases.md",
         module="syllabus",
@@ -684,14 +686,14 @@ _OPS = (
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
             {
-                "tag": _string(TAG_PATTERN, "Term tag, e.g. f2026"),
+                "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
                 "copy_from": _string(REPO_PATTERN, "Materials repo to copy forward"),
                 "public_dirs": _enum(PUBLIC_DIRS),
                 "public_types": _enum(PUBLIC_TYPES),
             },
-            required=("tag",),
+            required=("semester",),
         ),
-        help="Create a materials repo for a term.",
+        help="Create a materials repo for a semester.",
         done_text="Materials repo created.",
         doc="docs/02-add-materials-to-course.md",
         module="scaffold",
@@ -707,7 +709,7 @@ _OPS = (
             {
                 "name": _string(r"^(?!-)[^\x00-\x1f]{1,200}$", "The assignment's name"),
                 "number": _string(r"^[0-9]{1,3}$", "Assignment number"),
-                "tag": _string(TAG_PATTERN, "Term tag, e.g. f2026"),
+                "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
                 "copy_from": _string(REPO_PATTERN, "Template to copy forward"),
                 "format": _string(FORMATS_PATTERN, "Starter file(s), comma-separated"),
                 "type": _enum(ASSIGNMENT_TYPES),
@@ -716,7 +718,7 @@ _OPS = (
                 "visibility": _enum(VISIBILITIES),
                 "autograde": _boolean("Seed tests and run them at the cutoff"),
             },
-            required=("number", "tag"),
+            required=("number", "semester"),
         ),
         help="Create an assignment template.",
         done_text="Assignment template created.",
@@ -727,15 +729,15 @@ _OPS = (
     ),
     Operation(
         name=BOOTSTRAP_OP,
-        done_text="Cohort set up.",
+        done_text="Semester set up.",
         runs_as=DISPATCH,
-        scope=COHORT,
+        scope=SEMESTER,
         required_team=COURSE_ADMIN_TEAM,
         args_schema=_args(),
-        help="Set up an empty cohort org for a new term.",
+        help="Set up an empty semester org.",
         doc="docs/04-new-cohort-org.md",
         module="bootstrap_course",
-        argv=_bootstrap_cohort,
+        argv=_bootstrap_semester,
         refresh_after=True,
     ),
 )
@@ -744,7 +746,7 @@ REGISTRY: dict[str, Operation] = {op.name: op for op in _OPS}
 
 
 def refresh_command(request: Request) -> list[str]:
-    """The `seed refresh` that ends New materials, New assignment and Bootstrap cohort."""
+    """The `seed refresh` that ends New materials, New assignment and Bootstrap semester."""
     return ["refresh", "--course-org", request.course_org]
 
 

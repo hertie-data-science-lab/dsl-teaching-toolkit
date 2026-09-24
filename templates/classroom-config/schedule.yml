@@ -1,6 +1,6 @@
 # INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
 #
-# This cohort's schedule + auto-release plan. Instructors edit it directly.
+# This semester's schedule + auto-release plan. Instructors edit it directly.
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/docs/07-schedule-releases.md
 # - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
@@ -11,7 +11,7 @@
 # of the class that needs it (see `deploy_datetime` below) rather than at its start time.
 #
 # Each block encodes BEHAVIOUR:
-#   releases:     entries that DEPLOY materials (course org -> this cohort org)
+#   releases:     entries that DEPLOY materials (course org -> this semester org)
 #   assignments:  each assignment's handout / due / grading lifecycle
 #   events:       display-only calendar rows - nothing deploys
 #
@@ -35,7 +35,7 @@
 # a real release plan, a group project, exams - see `schedule.yml.sample`.
 
 # timezone: Europe/Berlin           # OPTIONAL - default: Europe/Berlin
-# semester_start:                   # OPTIONAL - default: inferred from the cohort tag (f2026 -> 1 Sep 2026)
+# semester_start:                   # OPTIONAL - default: inferred from the semester tag (f2026 -> 1 Sep 2026)
 # semester_end:                     # OPTIONAL - default: 15 weeks after the start
 
 # releases:                         
@@ -55,12 +55,12 @@
 #     deploy:                       # OPTIONAL - omit it for a display-only row (a session with nothing to ship yet)
 #       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
-#         cohort_dest_repo:         # OPTIONAL - default: materials
-#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
+#         semester_dest_repo:         # OPTIONAL - default: materials
+#         semester_dest_path:         # OPTIONAL - default: mirrors course_source_path
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime. But can set on its own clock - e.g. for lectures might want to release slides BEFORE/AFTER the lecture itself 
 #       - course_source_repo:       # a SECOND file, on its own clock (here the second item itself is optional, but once specified the course_source_path is REQUIRED)
 #         course_source_path:       
-#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
+#         semester_dest_path:         # OPTIONAL - default: mirrors course_source_path
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #
 #   lab-1:                          
@@ -70,13 +70,13 @@
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path: labs/01_session-1   # REQUIRED
-#         cohort_dest_repo:         # OPTIONAL - default: materials
-#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
+#         semester_dest_repo:         # OPTIONAL - default: materials
+#         semester_dest_path:         # OPTIONAL - default: mirrors course_source_path
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #       - course_source_repo:       # NB stage solutions OUTSIDE the folder released above, else the first copy ships them too
 #         course_source_path: labs/01_session-1/solutions
-#         cohort_dest_repo:
-#         cohort_dest_path:
+#         semester_dest_repo:
+#         semester_dest_path:
 #         deploy_datetime:          # could be set for AFTER the lab, so students work the empty notebooks/scripts first
 #
 #   readings-1:                     # each session's readings can optionally get their own entry, on their own clock (recommended)- they usually go out ahead of the session. (Could also be released as part of the lecture block above).
@@ -85,8 +85,8 @@
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path: readings/01_session-1   # NB including an optional READINGS.md alongside the files themselves serves as a clean citation list (published publicly, whereas the files themeselves remain behind enrolment gating)
-#         cohort_dest_repo:         # OPTIONAL - default: materials
-#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
+#         semester_dest_repo:         # OPTIONAL - default: materials
+#         semester_dest_path:         # OPTIONAL - default: mirrors course_source_path
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #                                   
 # assignments:                      
@@ -96,7 +96,7 @@
 #     show_on_site: true            # OPTIONAL - default: true. false = it hands out, grades and returns exactly as written, and the site says nothing about it at all
 #     tbc: false                    # OPTIONAL - default: false. true = site marks both rows "(TBC)". DISPLAY ONLY: the deadline, the late window and the grading snapshot still fire on the dates below
 #     course_source_repo:           # REQUIRED - the course-org repo it hands out from
-#     cohort_dest_repo:             # OPTIONAL - default: the slug above (here assignment-1)
+#     semester_dest_repo:             # OPTIONAL - default: the slug above (here assignment-1)
 #     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
 #     due_datetime:                 # REQUIRED - a bare date without time -> end of that day (23:59:59)
 #     grading_datetime:             # OPTIONAL - default: due_datetime plus the template's `late_window_days`, i.e. the end of the late window (with no window, the due date). Snapshot freezes + autograder fires. Not shown to students. Autograding is off unless the template's grading_config.yml says `autograde: true`
@@ -128,8 +128,8 @@
 # archive the org (freezes in place): removes all write permissions, retains all read permissions
 archive:
   event_datetime:             # optional (default: semester_end + 60 days)
-  title: Cohort archived      # optional - the row's Title column
-  show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, also sends a notice email 14 days out
+  title: Semester archived      # optional - the row's Title column
+  show_on_site: true          # a "Semester archived" row on the site's Schedule tab, also sends a notice email 14 days out
   tbc: false                  # optional - true marks the date "(TBC)". Display only: the freeze still happens on the date above
   details: >-                 # optional, `{{date}}` is filled in automatically
-    This cohort is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
+    This semester is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
