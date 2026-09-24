@@ -503,3 +503,31 @@ def test_a_topics_put_waits_out_a_locked_repo(monkeypatch):
     monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
     monkeypatch.setattr(repos.time, "sleep", lambda s: None)
     assert repos.set_repo_topics("Cohort-f2026", "a1-ada", ["Assignment"]) is True
+
+
+def test_a_rename_succeeds_only_when_github_names_the_repo_anew(monkeypatch):
+    # The old name keeps answering after a rename (GitHub redirects it), so the PATCH's own
+    # answer is the confirmation.
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        repos, "gh", lambda *a, **k: seen.append(a) or (0, "grades-b\n")
+    )
+    assert repos.rename_repo("Org", "grades-a", "grades-b", description="for @b")
+    assert "name=grades-b" in seen[0] and "description=for @b" in seen[0]
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, "grades-a\n"))
+    assert not repos.rename_repo("Org", "grades-a", "grades-b")
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 422"))
+    assert not repos.rename_repo("Org", "grades-a", "grades-b")
+
+
+def test_collaborator_permission_speaks_the_puts_vocabulary(monkeypatch):
+    # The listing says `write`/`read`; the PUT refuses both.
+    monkeypatch.setattr(
+        repos, "gh", lambda *a, **k: (0, "Ada\twrite\nBen\tread\nCy\tmaintain\n")
+    )
+    assert repos.collaborator_permission("Org", "r", "ada") == "push"
+    assert repos.collaborator_permission("Org", "r", "ben") == "pull"
+    assert repos.collaborator_permission("Org", "r", "cy") == "maintain"
+    assert repos.collaborator_permission("Org", "r", "zoe") == ""
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    assert repos.collaborator_permission("Org", "r", "ada") is None

@@ -200,6 +200,34 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     return False
 
 
+def rename_repo(
+    org: str,
+    name: str,
+    new_name: str,
+    *,
+    description: str | None = None,
+    person: bool = False,
+) -> bool:
+    """Rename `org/name` to `new_name`, optionally re-describing it in the same PATCH.
+
+    True only when GitHub's answer NAMES the repo `new_name`. Not `repo_missing` on the old
+    name: GitHub redirects a renamed repo's old name, so a read of it succeeds either way.
+    The per-process repo memo is dropped, because both names now answer differently."""
+    args = ["api", "--method", "PATCH", f"repos/{org}/{name}", "-f", f"name={new_name}"]
+    if description is not None:
+        args += ["-f", f"description={description}"]
+    code, out = gh_settled(*args, "--jq", ".name")
+    _repo.cache_clear()
+    if code == 0 and out.strip() == new_name:
+        return True
+    _failed_on(
+        person,
+        f"could not rename a repo in {org}",
+        f"could not rename {org}/{name} to {new_name}: {out[:160]}",
+    )
+    return False
+
+
 def set_visibility(
     org: str, name: str, visibility: str, *, person: bool = False
 ) -> bool:
@@ -876,6 +904,38 @@ def direct_collaborators(
             return None
         logins |= {login.casefold() for login in found}
     return frozenset(logins)
+
+
+# What the collaborators LISTING calls a permission, in the words the PUT takes. The two
+# vocabularies differ (#214), and a `write` sent back as a permission is refused.
+_ROLE_TO_PERMISSION = {"read": "pull", "write": "push"}
+
+
+def collaborator_permission(
+    org: str, repo: str, login: str, *, person: bool = False
+) -> str | None:
+    """The permission `login`'s DIRECT grant on `org/repo` carries, in the PUT's vocabulary
+    (`pull`/`triage`/`push`/`maintain`/`admin`); "" when they hold no direct grant; None
+    when the listing could not be read."""
+    rows, out = _direct_logins(
+        org,
+        repo,
+        "collaborators?affiliation=direct&per_page=100",
+        ".[] | [.login, .role_name] | @tsv",
+    )
+    if rows is None:
+        _failed_on(
+            person,
+            f"could not read a repo's collaborators in {org}",
+            f"could not read {org}/{repo}'s collaborators: {out[:160]}",
+        )
+        return None
+    for row in rows:
+        who, _, role = row.partition("\t")
+        if who.strip().casefold() == login.casefold():
+            role = role.strip()
+            return _ROLE_TO_PERMISSION.get(role, role)
+    return ""
 
 
 def remove_collaborator(

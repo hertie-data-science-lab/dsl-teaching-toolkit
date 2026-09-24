@@ -441,6 +441,20 @@ def acting_login() -> str | None:
     return out.strip() if code == 0 and out.strip() else None
 
 
+def id_of_login(login: str) -> str | None:
+    """The immutable GitHub id of the account `login` names now. None for a 404 and for
+    any read that failed alike: every caller acts only on a definite answer."""
+    code, out = gh("api", f"users/{login}", "--jq", ".id")
+    return out.strip() if code == 0 and out.strip().isdigit() else None
+
+
+def login_of_id(user_id: str) -> str | None:
+    """The login the account with this immutable id goes by now - None on a 404 or any
+    failed read, as `id_of_login`."""
+    code, out = gh("api", f"user/{user_id}", "--jq", ".login")
+    return out.strip() if code == 0 and out.strip() else None
+
+
 @cache
 def get_org_owners(org: str) -> frozenset[str] | None:
     """Active Owners of `org` - see reconcile_team_members for why these are never

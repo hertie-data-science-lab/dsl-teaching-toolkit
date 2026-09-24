@@ -651,3 +651,20 @@ def test_an_empty_repo_has_no_last_committer(monkeypatch):
 def test_a_newest_commit_from_an_unlinked_email_names_nobody(monkeypatch):
     monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: [{"author": None}])
     assert gh_contents.last_committer("Org", "course-materials-f2026") is None
+
+
+def test_path_commit_subjects_reads_the_whole_history_or_raises(monkeypatch):
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        gh_contents,
+        "gh",
+        lambda *a, **k: seen.append(a) or (0, "roster: link @a (id 1)\n\nEdit\n"),
+    )
+    assert gh_contents.path_commit_subjects("O", "c", "students.csv") == (
+        "roster: link @a (id 1)",
+        "Edit",
+    )
+    assert "--paginate" in seen[0] and "path=students.csv" in seen[0][2]
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    with pytest.raises(RuntimeError):
+        gh_contents.path_commit_subjects("O", "c", "students.csv")

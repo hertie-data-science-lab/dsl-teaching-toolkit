@@ -533,3 +533,14 @@ def test_a_just_created_team_is_reconciled_without_reading_it(monkeypatch):
     assert errors == 0
     assert added == ["alice", "bob"]
     assert removed == []  # the creator GitHub auto-added is never pruned
+
+
+def test_user_lookups_answer_only_when_github_does(monkeypatch):
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, "202\n"))
+    assert gh_teams.id_of_login("ada") == "202"
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, "ada-l\n"))
+    assert gh_teams.login_of_id("202") == "ada-l"
+    for failure in ("gh: Not Found (HTTP 404)", "gh: HTTP 502"):
+        monkeypatch.setattr(gh_teams, "gh", lambda *a, f=failure, **k: (1, f))
+        assert gh_teams.id_of_login("ada") is None
+        assert gh_teams.login_of_id("202") is None

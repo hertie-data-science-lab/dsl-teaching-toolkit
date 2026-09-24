@@ -893,6 +893,24 @@ def path_committers(org: str, repo: str, path: str, limit: int = 5) -> tuple[str
     return tuple(dict.fromkeys(login for login in logins if login))
 
 
+def path_commit_subjects(org: str, repo: str, path: str) -> tuple[str, ...]:
+    """The first line of every commit message that touched `path`, newest first - the
+    whole history, paginated. Raises on a read it could not make: a caller asking whether
+    some commit is there must not read "could not look" as "it is not"."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/commits?per_page=100&path={path}",
+        "--jq",
+        '.[].commit.message | split("\\n")[0]',
+    )
+    if code != 0:
+        raise RuntimeError(
+            f"could not read the history of {org}/{repo}/{path}: {out[:200]}"
+        )
+    return tuple(line for line in out.splitlines() if line.strip())
+
+
 def load_yaml_config(
     org: str, repo: str, path: str, lines: bool = False
 ) -> dict | None:
