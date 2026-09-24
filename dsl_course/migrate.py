@@ -15,6 +15,11 @@ first failed verification naming that step's rollback. Every step is idempotent:
 whose work is already done says "already migrated", so a second run changes nothing and a
 run that stopped part-way resumes where it stopped. An archived semester is never touched.
 
+The pause is GitHub's own switch: Actions are DISABLED on every repo of the org that runs
+workflows, for the window, and enabled again at the end. (An org variable cannot do this:
+on GitHub Free org variables do not reach private repos, and the workflows already live in
+an org carry no gate until they are re-rendered.)
+
 Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
 unpause, status. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
 template keys, materials files, re-render, unpause, status.
@@ -28,11 +33,13 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import yaml
 
-from . import records, seed, status
-from .central import PAUSE_VARIABLE
+from . import records, schedule, seed, status
+from .bootstrap_course import semester_scaffold
+from .central import CENTRAL
 from .course import (
     CONFIG_REPO,
     COURSE_CONFIG,
@@ -49,6 +56,7 @@ from .course import (
     SOLUTION_BRANCH,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
+    pages_repo,
 )
 from .discovery import (
     OLD_SEMESTERS_PATH,
@@ -56,14 +64,25 @@ from .discovery import (
     central_ref_for,
     list_org_repos,
 )
-from .faults import NOT_MIGRATED
-from .gh_contents import blob_sha, get_file_content, move_files, repo_blob_shas
+from .faults import NOT_MIGRATED, NotMigrated
+from .gh_contents import (
+    blob_sha,
+    get_file_content,
+    load_yaml_lines,
+    move_files,
+    repo_blob_shas,
+)
 from .ghcli import gh
-from .grades import GRADING_FILE, sync_team_lock
+from .grades import (
+    GRADING_FILE,
+    TEAM_LOCK_PATH,
+    parse_grading_spec,
+    sync_team_lock,
+    team_lock_content,
+)
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
-from .profile_readme import update_profile_readme
-from .repos import default_branch, set_repo_topics
-from .schedule import SCHEDULE_PATH
+from .profile_readme import profile_files, update_profile_readme
+from .repos import default_branch, repo_missing, set_repo_topics
 from .welcome import (
     config_system_files,
     join_files,
@@ -106,6 +125,7 @@ MATERIALS_MOVES = {
 OLD_POINTER_REPO = ".github"
 REPO_RENAMES = {OLD_CONFIG_REPO: CONFIG_REPO, OLD_JOIN_REPO: JOIN_REPO}
 SAMPLE_SUFFIX = ".sample"
+WORKFLOWS_DIR = ".github/workflows/"
 LAYOUT_COMMIT = "migrate: layout"
 KEYS_COMMIT = "migrate: keys"
 
@@ -129,6 +149,22 @@ def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
 _TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*):")
 
 
+def split_comment(text: str) -> tuple[str, str]:
+    """`(value, tail)`: `tail` is the trailing ` # comment` with the spaces before it,
+    verbatim, or "". A `#` inside quotes, or not preceded by a space, is part of the
+    value (YAML's own rule)."""
+    quote = ""
+    for i, char in enumerate(text):
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (i == 0 or text[i - 1] in " \t"):
+            value = text[:i].rstrip()
+            return value, text[len(value) :]
+    return text.rstrip(), ""
+
+
 def schedule_keys(text: str) -> str:
     """`schedule.yml`: `cohort_dest_*` -> `semester_dest_*` anywhere, and `type:` ->
     `kind:` on the entries of `releases:` and `events:` (an assignment's `type:` is its
@@ -147,13 +183,24 @@ def schedule_keys(text: str) -> str:
 
 
 def formats_line(line: str, indent: str = "") -> str:
-    """One `format: x` line (at `indent`) as `formats: [x]`; any other line unchanged."""
-    match = re.match(rf"^{indent}format:(\s*)([^#\n]*?)(\s*#.*)?$", line)
+    """One `format: x` line (at `indent`) as `formats: [x]`; any other line unchanged.
+    An empty `format:` becomes `formats: []`; a list value is kept as it is written."""
+    match = re.match(rf"^{indent}format:(.*)$", line)
     if not match:
         return line
-    value = match.group(2).strip()
-    listed = value if value.startswith("[") else f"[{value}]"
-    return f"{indent}formats: {listed}{match.group(3) or ''}"
+    value, tail = split_comment(match.group(1))
+    value = value.strip()
+    try:
+        parsed = yaml.safe_load(value) if value else None
+    except yaml.YAMLError:
+        return line  # left for the verify step to refuse
+    if parsed in (None, ""):
+        listed = "[]"
+    elif isinstance(parsed, list):
+        listed = value
+    else:
+        listed = f"[{value}]"
+    return f"{indent}formats: {listed}{tail}"
 
 
 def grading_config_keys(text: str) -> str:
@@ -186,38 +233,94 @@ def registry_keys(text: str) -> str:
 _ROLE_KEYS = {"instructors": "instructor", "teaching_assistants": "teaching_assistant"}
 
 
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _flow(entry: dict, role: str) -> str:
+    """A flow-style entry with `role:` after its first key, as one line."""
+    items = list(entry.items())
+    ordered = dict([*items[:1], ("role", role), *items[1:]])
+    dumped = yaml.safe_dump(
+        ordered, default_flow_style=True, sort_keys=False, width=10**6
+    )
+    return dumped.strip()
+
+
 def people_to_instructors(text: str) -> str | None:
     """`people.yml` (a `people:` mapping of role -> list) as `instructors.yml` (one
-    `instructors:` list, `role:` on every entry), line by line so comments survive. None
-    when the file is not in the shape the toolkit seeded - that one is converted by hand."""
+    `instructors:` list, `role:` on every entry), line by line so comments survive. Any
+    indent width, a comment after a role key, and flow-style entries are all read. None
+    when the file is not a shape this can convert faithfully - that one goes by hand."""
     lines = text.split("\n")
-    try:
-        start = next(i for i, line in enumerate(lines) if line.rstrip() == "people:")
-    except StopIteration:
+    head = next((i for i, x in enumerate(lines) if re.match(r"^people:", x)), None)
+    if head is None:
         return None
-    out, role = [*lines[:start], "instructors:"], None
-    for line in lines[start + 1 :]:
-        if _TOP_KEY.match(line):
-            return None  # a second top-level key: not the seeded shape
-        key = re.match(r"^  ([a-z_]+):\s*(\[\s*\])?\s*$", line)
-        if key:
+    value, tail = split_comment(lines[head][len("people:") :])
+    if value.strip() not in ("", "{}"):
+        return None
+    body = lines[head + 1 :]
+    keys = [x for x in body if x.strip() and not x.lstrip().startswith("#")]
+    width = _indent(keys[0]) if keys else 2
+    if keys and width == 0:
+        return None
+    out = [*lines[:head], f"instructors:{tail}" if keys else f"instructors: []{tail}"]
+    role, dash = None, None
+    for line in body:
+        stripped = line.strip()
+        if stripped and not line.startswith(" ") and not stripped.startswith("#"):
+            return None  # a second top-level key: not a people.yml this can read
+        key = re.match(r"^ *([a-z_]+):(.*)$", line)
+        if key and _indent(line) == width and not stripped.startswith("#"):
             if key.group(1) not in _ROLE_KEYS:
                 return None
-            role = _ROLE_KEYS[key.group(1)]
+            role, dash = _ROLE_KEYS[key.group(1)], None
+            value, tail = split_comment(key.group(2))
+            if tail:
+                out.append(f"  {tail.strip()}")
+            if value.strip() in ("", "[]"):
+                continue
+            try:
+                entries = yaml.safe_load(value)
+            except yaml.YAMLError:
+                return None
+            if not isinstance(entries, list) or not all(
+                isinstance(e, dict) for e in entries
+            ):
+                return None
+            out += [f"  - {_flow(entry, role)}" for entry in entries]
             continue
-        body = line.removeprefix("  ")
-        out.append(body)
-        if re.match(r"^  -(\s|$)", body):
+        moved = line[width:] if line[:width].strip() == "" else line.lstrip()
+        item = re.match(r"^( *)-(?: +(.*))?$", moved)
+        if item and not moved.lstrip().startswith("#"):
             if role is None:
                 return None
-            out.append(f"    role: {role}")
+            dash = _indent(moved) if dash is None else dash
+            if _indent(moved) == dash:
+                rest, tail = split_comment(item.group(2) or "")
+                if rest.startswith("{"):
+                    try:
+                        entry = yaml.safe_load(rest)
+                    except yaml.YAMLError:
+                        return None
+                    if not isinstance(entry, dict):
+                        return None
+                    out.append(f"{' ' * dash}- {_flow(entry, role)}{tail}")
+                    continue
+                out.append(moved)
+                out.append(f"{' ' * (dash + 2)}role: {role}")
+                continue
+        out.append(moved)
     return "\n".join(out)
 
 
 def same_people(old: str, new: str) -> bool:
     """Whether `new` (instructors.yml) names exactly the people of `old` (people.yml),
-    field for field, each with the role their old list gave them."""
+    field for field, each with the role their old list gave them. Raises yaml.YAMLError
+    when either does not parse."""
     before = (yaml.safe_load(old) or {}).get("people") or {}
+    if not isinstance(before, dict) or set(before) - set(_ROLE_KEYS):
+        return False
     want = [
         {**entry, "role": _ROLE_KEYS[key]}
         for key in _ROLE_KEYS
@@ -225,6 +328,29 @@ def same_people(old: str, new: str) -> bool:
     ]
     got = (yaml.safe_load(new) or {}).get("instructors") or []
     return sorted(want, key=repr) == sorted(got, key=repr)
+
+
+def _worked_example(ref: str, rel: str) -> str:
+    return f"https://github.com/{CENTRAL}/blob/{ref}/example-course/semester-org/{rel}"
+
+
+def fix_header(text: str, ref: str) -> str:
+    """Point the seeded header's links at the worked example, not at the deleted sample
+    or the old repo name."""
+    example = _worked_example(ref, INSTRUCTORS_FILE)
+    out = []
+    for line in text.split("\n"):
+        if line.lstrip().startswith("#"):
+            line = line.replace(
+                "`people.yml.sample`", f"the worked example ({example})"
+            )
+            line = re.sub(
+                rf"https://github\.com/[^/\s]+/{OLD_CONFIG_REPO}/blob/[^/\s]+/people\.yml",
+                example,
+                line,
+            )
+        out.append(line)
+    return "\n".join(out)
 
 
 # ------------------------------------------------------------------ GitHub, narrowly
@@ -239,58 +365,60 @@ def _topics(listing: dict[str, dict]) -> set[str]:
 
 
 def _files(org: str, repo: str, branch: str = "") -> dict[str, str]:
-    return repo_blob_shas(org, repo, branch or default_branch(org, repo))
+    """`{path: blob sha}` of `repo`, or `{}` when the repo is not there. An absent repo
+    (a 404) is "not migrated yet", never an error; any other failure raises."""
+    if repo not in _listing(org):
+        return {}
+    try:
+        branch = branch or default_branch(org, repo)
+    except RuntimeError:
+        if repo_missing(org, repo):
+            return {}
+        raise
+    return repo_blob_shas(org, repo, branch)
 
 
-def _pause_value(org: str) -> str | None:
-    code, out = gh(
-        "api", f"orgs/{org}/actions/variables/{PAUSE_VARIABLE}", "--jq", ".value"
-    )
-    return out.strip() if code == 0 else None
-
-
-def _pause(org: str) -> bool:
-    if _pause_value(org) is None:
-        code, out = gh(
-            "api", "--method", "POST", f"orgs/{org}/actions/variables",
-            "-f", f"name={PAUSE_VARIABLE}", "-f", "value=true", "-f", "visibility=all",
-        )  # fmt: skip
-    else:
-        code, out = gh(
-            "api", "--method", "PATCH", f"orgs/{org}/actions/variables/{PAUSE_VARIABLE}",
-            "-f", "value=true",
-        )  # fmt: skip
-    if code != 0:
-        log_err(f"could not pause {org}: {out[:200]}")
-    return code == 0
-
-
-def _unpause(org: str) -> bool:
-    if _pause_value(org) is None:
-        return True
-    code, out = gh(
-        "api", "--method", "DELETE", f"orgs/{org}/actions/variables/{PAUSE_VARIABLE}"
-    )
-    if code != 0:
-        log_err(f"could not unpause {org}: {out[:200]}")
-    return code == 0
-
-
-def _runs_alive(org: str) -> int:
-    """How many workflow runs are queued or running in `org`'s `.github` - the repo every
-    scheduled and dispatched job of a course runs from. -1 when that cannot be read."""
-    total = 0
-    for state in ("in_progress", "queued"):
-        code, out = gh(
-            "api",
-            f"repos/{org}/.github/actions/runs?status={state}",
-            "--jq",
-            ".total_count",
+def _actions_enabled(org: str, repo: str) -> bool:
+    """Whether Actions run in `org/repo`. A read that fails RAISES: "could not tell"
+    is never "paused" or "unpaused"."""
+    code, out = gh("api", f"repos/{org}/{repo}/actions/permissions", "--jq", ".enabled")
+    if code != 0 or out.strip() not in ("true", "false"):
+        raise RuntimeError(
+            f"could not read the Actions setting of {org}/{repo}: {out[:200]}"
         )
-        if code != 0 or not out.strip().isdigit():
-            return -1
-        total += int(out.strip())
-    return total
+    return out.strip() == "true"
+
+
+def _set_actions(org: str, repo: str, enabled: bool) -> bool:
+    code, out = gh(
+        "api",
+        "--method",
+        "PUT",
+        f"repos/{org}/{repo}/actions/permissions",
+        "-F",
+        f"enabled={str(enabled).lower()}",
+    )
+    if code != 0:
+        log_err(f"could not switch Actions in {org}/{repo}: {out[:200]}")
+    return code == 0
+
+
+def _run_count(org: str, repo: str, query: str) -> int:
+    code, out = gh(
+        "api", f"repos/{org}/{repo}/actions/runs?{query}", "--jq", ".total_count"
+    )
+    if code != 0 or not out.strip().isdigit():
+        raise RuntimeError(f"could not list the runs of {org}/{repo}: {out[:200]}")
+    return int(out.strip())
+
+
+def _alive(targets: list[tuple[str, str]]) -> list[str]:
+    """The target repos with a run queued or in progress."""
+    return [
+        f"{org}/{repo}"
+        for org, repo in targets
+        if any(_run_count(org, repo, f"status={s}") for s in ("in_progress", "queued"))
+    ]
 
 
 def _rename(org: str, old: str, new: str) -> bool:
@@ -307,6 +435,22 @@ def _yaml(text: str | None) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _with_workflows(org: str, candidates: list[str]) -> list[tuple[str, str]]:
+    """`(org, repo)` for each live candidate repo that carries a workflow."""
+    listing = _listing(org)
+    return [
+        (org, repo)
+        for repo in candidates
+        if repo in listing
+        and not listing[repo].get("archived")
+        and any(p.startswith(WORKFLOWS_DIR) for p in _files(org, repo))
+    ]
+
+
 # ------------------------------------------------------------------ steps
 
 
@@ -318,78 +462,139 @@ class Step:
     do: Callable[[], bool]
     verify: Callable[[], bool]
     rollback: str
-    # The pause and the unpause bracket the work: with no work left they are skipped too,
-    # so a run over a migrated org changes nothing at all.
-    bracket: bool = False
+    # "pause" / "unpause" bracket the work. With no work left the pause is skipped; the
+    # unpause always asks the repos, so a run that stopped paused is always released.
+    bracket: str = ""
 
 
-def run(org: str, steps: list[Step], preview: bool) -> int:
-    """Print the plan; then (not in preview) do, verify, stop at the first failure."""
-    work = [s for s in steps if not s.bracket]
-    idle = all(s.done() for s in work[:-1])  # the last is the status check, always run
+def _enable_hint(targets: list[tuple[str, str]]) -> str:
+    repos = ", ".join(f"{o}/{r}" for o, r in targets)
+    return (
+        f"Actions are still DISABLED in: {repos}. Re-run the migration with "
+        f"--no-preview to finish, or re-enable each by hand: gh api -X PUT "
+        f"repos/<org>/<repo>/actions/permissions -F enabled=true"
+    )
 
-    def done(step: Step) -> bool:
-        return idle if step.bracket else step.done()
 
-    log_step(f"Migration plan for {org}")
-    for step in steps:
-        if done(step):
-            log(f"  {step.name}: already migrated")
-            continue
-        log(f"  {step.name}:")
-        for line in step.plan():
-            log(f"    - {line}")
-    if preview:
-        log_ok("PREVIEW - nothing was written. Run again with --no-preview to migrate.")
-        return 0
-    for step in steps:
-        if done(step):
-            log(f"  [skip] {step.name}: already migrated")
-            continue
-        log_step(step.name)
-        if not step.do() or not step.verify():
-            log_err(
-                f"{step.name} did not verify - stopped here. Rollback: {step.rollback}"
-            )
-            return 1
-        log_ok(f"{step.name}: done and verified")
+def run(
+    org: str,
+    steps: list[Step],
+    preview: bool,
+    targets: Callable[[], list[tuple[str, str]]],
+) -> int:
+    """Print the plan; then (not in preview) do, verify, stop at the first failure. Any
+    failure while the org is paused says so, and how to release it."""
+    paused = False
+    step = steps[0]
+    try:
+        work = [s for s in steps if not s.bracket]
+        idle = all(s.done() for s in work[:-1])  # the last is the status check
+
+        def done(s: Step) -> bool:
+            return idle if s.bracket == "pause" else s.done()
+
+        log_step(f"Migration plan for {org}")
+        for step in steps:
+            if done(step):
+                log(f"  {step.name}: already migrated")
+                continue
+            log(f"  {step.name}:")
+            for line in step.plan():
+                log(f"    - {line}")
+        if preview:
+            log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
+            return 0
+        for step in steps:
+            if step.bracket == "pause" and not idle:
+                paused = True
+            if done(step):
+                log(f"  [skip] {step.name}: already migrated")
+                continue
+            log_step(step.name)
+            if not step.do() or not step.verify():
+                log_err(
+                    f"{step.name} did not verify - stopped here. "
+                    f"Rollback: {step.rollback}"
+                )
+                if paused:
+                    log_err(_enable_hint(targets()))
+                return 1
+            if step.bracket == "unpause":
+                paused = False
+            log_ok(f"{step.name}: done and verified")
+    except Exception as exc:
+        log_err(f"{step.name}: stopped by an error - {exc}")
+        if paused:
+            try:
+                log_err(_enable_hint(targets()))
+            except Exception:
+                log_err("Actions may still be DISABLED in this org's workflow repos.")
+        return 1
     log_ok(f"{org} is migrated")
     return 0
 
 
-def _pause_step(orgs: list[str]) -> Step:
-    both = " and ".join(orgs)
+def _pause_step(targets: Callable[[], list[tuple[str, str]]]) -> Step:
+    started: list[str] = []
+
+    def names() -> str:
+        return ", ".join(f"{o}/{r}" for o, r in targets())
+
+    def disabled() -> bool:
+        return not any(_actions_enabled(o, r) for o, r in targets())
 
     def quiet() -> bool:
-        alive = [o for o in orgs if _runs_alive(o) != 0]
+        alive = _alive(targets())
         if alive:
             log_err(
-                f"a workflow run is queued or running in {', '.join(alive)}/.github - "
-                f"let it finish, then run the migration again"
+                f"a workflow run is queued or running in {', '.join(alive)} - wait "
+                f"for it to finish, then re-run the migration"
             )
         return not alive
 
+    def do() -> bool:
+        started[:] = [_now()]
+        return all(_set_actions(o, r, False) for o, r in targets())
+
+    def verify() -> bool:
+        if not disabled():
+            log_err("Actions did not read back as disabled")
+            return False
+        since = f"created=%3E%3D{started[0]}" if started else ""
+        late = [f"{o}/{r}" for o, r in targets() if since and _run_count(o, r, since)]
+        if late:
+            log_err(
+                f"a run started after the pause in {', '.join(late)} - wait for it "
+                f"to finish, then re-run the migration"
+            )
+            return False
+        return quiet()
+
     return Step(
-        f"pause automation ({PAUSE_VARIABLE})",
-        done=lambda: all(_pause_value(o) == "true" for o in orgs),
-        plan=lambda: [f"set the org variable {PAUSE_VARIABLE}=true in {both}"],
-        do=lambda: all(_pause(o) for o in orgs),
-        verify=lambda: all(_pause_value(o) == "true" for o in orgs) and quiet(),
-        rollback=f"delete the org variable {PAUSE_VARIABLE} in {both}",
-        bracket=True,
+        "pause automation",
+        done=lambda: disabled() and quiet(),
+        plan=lambda: [f"disable Actions in {names()}"],
+        do=do,
+        verify=verify,
+        rollback="re-enable Actions in each repo named below",
+        bracket="pause",
     )
 
 
-def _unpause_step(orgs: list[str]) -> Step:
-    both = " and ".join(orgs)
+def _unpause_step(targets: Callable[[], list[tuple[str, str]]]) -> Step:
+    def enabled() -> bool:
+        return all(_actions_enabled(o, r) for o, r in targets())
+
     return Step(
         "unpause automation",
-        done=lambda: all(_pause_value(o) is None for o in orgs),
-        plan=lambda: [f"delete the org variable {PAUSE_VARIABLE} in {both}"],
-        do=lambda: all(_unpause(o) for o in orgs),
-        verify=lambda: all(_pause_value(o) is None for o in orgs),
-        rollback=f"set {PAUSE_VARIABLE}=true in {both} again",
-        bracket=True,
+        done=enabled,
+        plan=lambda: [
+            "enable Actions in " + ", ".join(f"{o}/{r}" for o, r in targets())
+        ],
+        do=lambda: all(_set_actions(o, r, True) for o, r in targets()),
+        verify=enabled,
+        rollback="re-enable Actions in each repo by hand (see the line below)",
+        bracket="unpause",
     )
 
 
@@ -397,27 +602,34 @@ def _status_step(course_org: str, semester_org: str | None) -> Step:
     repo = CONFIG_REPO if semester_org else ".github"
     org = semester_org or course_org
 
-    def not_migrated() -> int | None:
-        doc = get_file_content(org, repo, records.path("status"))
-        if doc is None:
-            return None
-        return sum(
-            NOT_MIGRATED in json.dumps(p) for p in json.loads(doc).get("problems") or []
+    def doc() -> dict:
+        text = get_file_content(org, repo, records.path("status"))
+        return json.loads(text) if text else {}
+
+    def not_migrated(data: dict) -> int:
+        return sum(NOT_MIGRATED in json.dumps(p) for p in data.get("problems") or [])
+
+    def done() -> bool:
+        # Written by THIS engine (the old one said `cohort`/`cohorts`) and clean. A
+        # status.json the old engine wrote knows nothing of NOT_MIGRATED, so it is
+        # never taken as done; one this engine wrote is left alone on a second run.
+        data = doc()
+        new = (
+            "semester" in data
+            if semester_org
+            else "semesters" in data.get("course", {})
         )
+        return bool(data) and new and not_migrated(data) == 0
 
     def clean() -> bool:
-        count = not_migrated()
+        count = not_migrated(doc())
         if count:
-            log_err(
-                f"status.json still reports {count} NOT_MIGRATED problem(s) in {org}"
-            )
+            log_err(f"status.json reports {count} NOT_MIGRATED problem(s) in {org}")
         return count == 0
 
-    # Never "already migrated": a status.json the OLD engine wrote (moved in by the layout
-    # step) knows nothing of NOT_MIGRATED, so the check always rewrites it with this one.
     return Step(
         "status",
-        done=lambda: False,
+        done=done,
         plan=lambda: [
             f"write {repo}/{records.path('status')} and expect zero NOT_MIGRATED"
         ],
@@ -427,16 +639,51 @@ def _status_step(course_org: str, semester_org: str | None) -> Step:
     )
 
 
+def _schedule_clean(text: str | None, *, quiet: bool = False) -> bool:
+    """`schedule.yml` read by this engine with no NOT_MIGRATED fault; each one found is
+    named (unless `quiet`), for a person to fix by hand."""
+    if text is None:
+        return True
+    sched = schedule.parse(load_yaml_lines(text) or {})
+    bad = [f for f in sched.faults if f.code == NOT_MIGRATED]
+    bad += [d for d in sched.dropped if NOT_MIGRATED in d]
+    for fault in [] if quiet else bad:
+        log_err(
+            f"{schedule.SCHEDULE_PATH}: {getattr(fault, 'what', fault)} - fix by hand"
+        )
+    return not bad
+
+
+def _grading_clean(text: str | None) -> bool:
+    """A `grading_config.yml` read by this engine with no NOT_MIGRATED fault."""
+    if text is None:
+        return True
+    try:
+        spec = parse_grading_spec(text)
+    except NotMigrated:
+        return False
+    return not any(NOT_MIGRATED in d for d in spec.dropped)
+
+
 # --------------------------------------------------------------- the semester org
 
 
 class Semester:
     def __init__(self, org: str, course_org: str) -> None:
         self.org, self.course = org, course_org
+        self.people = ""
 
     def config(self) -> str:
         """The config repo under whichever name it has right now."""
         return CONFIG_REPO if CONFIG_REPO in _listing(self.org) else OLD_CONFIG_REPO
+
+    def join(self) -> str:
+        return JOIN_REPO if JOIN_REPO in _listing(self.org) else OLD_JOIN_REPO
+
+    def targets(self) -> list[tuple[str, str]]:
+        """Every repo whose workflows act on this semester: its own, and the course's."""
+        own = [self.config(), self.join(), pages_repo(self.org), ".github"]
+        return _with_workflows(self.org, own) + Course(self.course).targets()
 
     # rename -------------------------------------------------------------------
     def renames_left(self) -> dict[str, str]:
@@ -454,12 +701,31 @@ class Semester:
         return True
 
     def renamed(self) -> bool:
-        names = set(_listing(self.org))
-        return all(
-            new in names and old not in names for old, new in REPO_RENAMES.items()
-        )
+        """No repo left under an old name. A repo that never existed (a semester with
+        no `welcome`) has nothing to rename."""
+        return not self.renames_left()
 
     # layout -------------------------------------------------------------------
+    def instructors_text(self, old: str) -> str | None:
+        """The `instructors.yml` for this semester's `people.yml`, or None when it
+        cannot be converted faithfully (then a person does it)."""
+        ref = central_ref_for(self.course)
+        try:
+            parsed = yaml.safe_load(old)
+        except yaml.YAMLError:
+            return None
+        if parsed is None:
+            # The seeded skeleton, all comments: the current skeleton replaces it.
+            return semester_scaffold(self.org, INSTRUCTORS_FILE, ref)
+        new = people_to_instructors(old)
+        if new is None:
+            return None
+        new = fix_header(new, ref)
+        try:
+            return new if same_people(old, new) else None
+        except yaml.YAMLError:
+            return None
+
     def layout_work(self) -> tuple[dict, dict, list, bool]:
         """(moves, files, deletes, old pointer present) for semester-config."""
         repo = self.config()
@@ -470,32 +736,36 @@ class Semester:
         if OLD_PEOPLE_FILE in live:
             deletes.append(OLD_PEOPLE_FILE)
             if INSTRUCTORS_FILE not in live:
-                text = get_file_content(self.org, repo, OLD_PEOPLE_FILE) or ""
-                files[INSTRUCTORS_FILE] = (people_to_instructors(text) or "").encode()
-        if records.path("pointer") not in live:
-            files[records.path("pointer")] = (
-                template("semester/dsl-course.yml")
-                .format(course=self.course, org=self.org)
-                .encode()
-            )
+                old = get_file_content(self.org, repo, OLD_PEOPLE_FILE) or ""
+                files[INSTRUCTORS_FILE] = (self.instructors_text(old) or "").encode()
+        if live and records.path("pointer") not in live:
+            files[records.path("pointer")] = self.pointer()
         old_pointer = COURSE_CONFIG in _files(self.org, OLD_POINTER_REPO)
         return moves, files, deletes, old_pointer
 
+    def pointer(self) -> bytes:
+        return (
+            template("semester/dsl-course.yml")
+            .format(course=self.course, org=self.org)
+            .encode()
+        )
+
     def layout_done(self) -> bool:
+        if not self.renamed():
+            return False
         moves, files, deletes, old_pointer = self.layout_work()
         return not (moves or files or deletes or old_pointer)
 
     def layout_plan(self) -> list[str]:
-        moves, files, deletes, old_pointer = self.layout_work()
+        moves, _, deletes, old_pointer = self.layout_work()
         out = [
             f"move {len(moves)} record file(s) under {records.SYSTEM_DIR}/ (one commit)"
         ]
-        if INSTRUCTORS_FILE in files:
+        if OLD_PEOPLE_FILE in deletes:
             out.append(
                 f"{OLD_PEOPLE_FILE} -> {INSTRUCTORS_FILE} (one list, a role each)"
             )
-        if records.path("pointer") in files:
-            out.append(f"write the course pointer to {records.path('pointer')}")
+        out.append(f"write the course pointer to {records.path('pointer')}")
         samples = [p for p in deletes if p.endswith(SAMPLE_SUFFIX)]
         if samples:
             out.append(f"delete {len(samples)} *{SAMPLE_SUFFIX} file(s)")
@@ -508,8 +778,9 @@ class Semester:
         moves, files, deletes, old_pointer = self.layout_work()
         if INSTRUCTORS_FILE in files and not files[INSTRUCTORS_FILE]:
             log_err(
-                f"{OLD_PEOPLE_FILE} in {self.org} is not in the seeded shape - write "
-                f"{INSTRUCTORS_FILE} by hand (docs/05), then run again"
+                f"{OLD_PEOPLE_FILE} in {self.org} cannot be converted faithfully - write "
+                f"{INSTRUCTORS_FILE} by hand (docs/05), delete {OLD_PEOPLE_FILE}, then "
+                f"run again. Nothing was written."
             )
             return False
         self.before = _files(self.org, repo)
@@ -528,32 +799,35 @@ class Semester:
         repo = self.config()
         live = _files(self.org, repo)
         before = getattr(self, "before", live)
-        moved = fold(set(before), SEMESTER_MOVES)
         # Every marker at its new path, byte for byte, and nowhere else.
-        for old, new in moved.items():
+        for old, new in fold(set(before), SEMESTER_MOVES).items():
             if old in live or live.get(new) != before[old]:
-                log_err(
-                    f"{repo}: a record did not arrive intact under {records.SYSTEM_DIR}/"
-                )
+                log_err(f"{repo}: a record did not arrive intact at {new}")
                 return False
-        old = getattr(self, "people", "")
-        if old and OLD_PEOPLE_FILE not in live:
+        if self.people and OLD_PEOPLE_FILE not in live:
             new = get_file_content(self.org, repo, INSTRUCTORS_FILE) or ""
-            if not same_people(old, new):
+            if yaml.safe_load(self.people) is not None and not same_people(
+                self.people, new
+            ):
                 log_err(
-                    f"{INSTRUCTORS_FILE} does not name the people {OLD_PEOPLE_FILE} did"
+                    f"{INSTRUCTORS_FILE} does not name the people of {OLD_PEOPLE_FILE}"
                 )
                 return False
         return self.layout_done()
 
     # keys -------------------------------------------------------------------
     def keys_text(self) -> tuple[str | None, str | None]:
-        text = get_file_content(self.org, self.config(), SCHEDULE_PATH)
+        text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
         return text, (schedule_keys(text) if text is not None else None)
 
     def keys_done(self) -> bool:
+        """Nothing left for the rewrite, and the new engine reads the file clean. A key
+        the line rewrite cannot reach (inside a flow mapping, say) keeps this undone: the
+        step then stops, naming the entry to fix by hand."""
+        if not self.renamed():
+            return False
         text, new = self.keys_text()
-        return text == new
+        return text == new and _schedule_clean(text, quiet=True)
 
     def keys(self) -> bool:
         text, new = self.keys_text()
@@ -564,12 +838,20 @@ class Semester:
             self.config(),
             {},
             KEYS_COMMIT,
-            files={SCHEDULE_PATH: new.encode()},
+            files={schedule.SCHEDULE_PATH: new.encode()},
         )
+
+    def keys_verified(self) -> bool:
+        text, new = self.keys_text()
+        return text == new and _schedule_clean(text)
 
     # topic -------------------------------------------------------------------
     def topics(self) -> set[str]:
         return _topics(_listing(self.org))
+
+    def topic_done(self) -> bool:
+        topics = self.topics()
+        return SEMESTER_TOPIC in topics and OLD_SEMESTER_TOPIC not in topics
 
     def retopic(self) -> bool:
         topics = (self.topics() - {OLD_SEMESTER_TOPIC}) | {SEMESTER_TOPIC}
@@ -577,12 +859,21 @@ class Semester:
 
     # re-render ---------------------------------------------------------------
     def drift(self) -> list[str]:
+        """Every SYSTEM-OWNED file of the semester that is not what this checkout
+        renders: the config repo's workflows and README, the pointer, the lock, the
+        join repo's forms and workflows and the org READMEs."""
         ref = central_ref_for(self.course)
+        wanted = {
+            CONFIG_REPO: {
+                **config_system_files(ref),
+                records.path("pointer"): self.pointer(),
+                TEAM_LOCK_PATH: team_lock_content(self.course, self.org),
+            },
+            JOIN_REPO: join_files(self.org),
+            ".github": profile_files(self.org, central_ref=ref),
+        }
         out = []
-        for repo, want in (
-            (CONFIG_REPO, config_system_files(ref)),
-            (JOIN_REPO, join_files(self.org)),
-        ):
+        for repo, want in wanted.items():
             live = _files(self.org, repo)
             out += [
                 f"{repo}/{p}"
@@ -590,6 +881,9 @@ class Semester:
                 if live.get(p) != blob_sha(body)
             ]
         return out
+
+    def rerender_done(self) -> bool:
+        return self.renamed() and self.layout_done() and not self.drift()
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
@@ -603,7 +897,7 @@ class Semester:
     def steps(self) -> list[Step]:
         repo = f"{self.org}/{CONFIG_REPO}"
         return [
-            _pause_step([self.org, self.course]),
+            _pause_step(self.targets),
             Step(
                 "rename repos",
                 done=self.renamed,
@@ -626,37 +920,34 @@ class Semester:
                 "keys",
                 done=self.keys_done,
                 plan=lambda: [
-                    f"{SCHEDULE_PATH}: cohort_dest_* -> semester_dest_*, type -> kind"
+                    (
+                        f"{schedule.SCHEDULE_PATH}: cohort_dest_* -> semester_dest_*, "
+                        f"type -> kind on releases and events"
+                    )
                 ],
                 do=self.keys,
-                verify=self.keys_done,
+                verify=self.keys_verified,
                 rollback=f"git revert the '{KEYS_COMMIT}' commit in {repo}",
             ),
             Step(
                 "topic",
-                done=lambda: (
-                    SEMESTER_TOPIC in self.topics()
-                    and OLD_SEMESTER_TOPIC not in self.topics()
-                ),
+                done=self.topic_done,
                 plan=lambda: [
                     f".github topic {OLD_SEMESTER_TOPIC} -> {SEMESTER_TOPIC}"
                 ],
                 do=self.retopic,
-                verify=lambda: (
-                    SEMESTER_TOPIC in self.topics()
-                    and OLD_SEMESTER_TOPIC not in self.topics()
-                ),
+                verify=self.topic_done,
                 rollback=f"set the .github topic back to {OLD_SEMESTER_TOPIC}",
             ),
             Step(
                 "re-render",
-                done=lambda: not self.drift(),
-                plan=lambda: [f"re-write {len(self.drift())} SYSTEM-OWNED file(s)"],
+                done=self.rerender_done,
+                plan=lambda: ["re-write every SYSTEM-OWNED file that differs"],
                 do=self.rerender,
                 verify=lambda: not self.drift(),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            _unpause_step([self.org, self.course]),
+            _unpause_step(self.targets),
             _status_step(self.course, self.org),
         ]
 
@@ -668,19 +959,25 @@ class Course:
     def __init__(self, org: str) -> None:
         self.org = org
 
+    def targets(self) -> list[tuple[str, str]]:
+        """`.github` and every content repo and template that carries a workflow."""
+        return _with_workflows(self.org, sorted(_listing(self.org)))
+
+    # registry ---------------------------------------------------------------
     def registry(self) -> tuple[str | None, str | None]:
         return (
             get_file_content(self.org, ".github", OLD_SEMESTERS_PATH),
             get_file_content(self.org, ".github", SEMESTERS_PATH),
         )
 
+    def registry_done(self) -> bool:
+        old, new = self.registry()
+        return old is None and "cohorts" not in _yaml(new)
+
     def migrate_registry(self) -> bool:
         old, new = self.registry()
-        files = (
-            {}
-            if new is not None
-            else {SEMESTERS_PATH: registry_keys(old or "").encode()}
-        )
+        source = new if new is not None else old or ""
+        files = {SEMESTERS_PATH: registry_keys(source).encode()}
         return move_files(
             self.org,
             ".github",
@@ -690,13 +987,11 @@ class Course:
             delete=[OLD_SEMESTERS_PATH],
         )
 
-    def registry_done(self) -> bool:
-        old, new = self.registry()
-        return old is None and (new is None or "cohorts" not in _yaml(new))
-
+    # .github -------------------------------------------------------------------
     def dotgithub_moves(self) -> dict[str, str]:
         return fold(set(_files(self.org, ".github")), COURSE_MOVES)
 
+    # dsl-course.yml ---------------------------------------------------------------
     def meta_text(self) -> tuple[str | None, str | None]:
         text = get_file_content(self.org, ".github", COURSE_CONFIG)
         return text, (course_config_keys(text) if text is not None else None)
@@ -704,6 +999,16 @@ class Course:
     def meta_done(self) -> bool:
         text, new = self.meta_text()
         return text == new
+
+    def meta_verified(self) -> bool:
+        text, _ = self.meta_text()
+        meta = _yaml(text)
+        defaults = meta.get("assignment_defaults") or {}
+        return (
+            self.meta_done()
+            and "cohort_defaults" not in meta
+            and "format" not in (defaults if isinstance(defaults, dict) else {})
+        )
 
     def rewrite_meta(self) -> bool:
         text, new = self.meta_text()
@@ -713,18 +1018,24 @@ class Course:
             self.org, ".github", {}, KEYS_COMMIT, files={COURSE_CONFIG: new.encode()}
         )
 
+    # templates ---------------------------------------------------------------
     def templates(self) -> list[str]:
         return sorted(
             name
             for name, row in _listing(self.org).items()
-            if row.get("isTemplate") and name.startswith("assignment-")
+            if row.get("isTemplate")
+            and not row.get("archived")
+            and name.startswith("assignment-")
         )
+
+    def grading_text(self, repo: str) -> str | None:
+        return get_file_content(self.org, repo, GRADING_FILE, ref=SOLUTION_BRANCH)
 
     def templates_left(self) -> dict[str, str]:
         """`{template: its rewritten grading_config.yml}` for each that needs it."""
         out = {}
         for repo in self.templates():
-            text = get_file_content(self.org, repo, GRADING_FILE, ref=SOLUTION_BRANCH)
+            text = self.grading_text(repo)
             if text is not None and grading_config_keys(text) != text:
                 out[repo] = grading_config_keys(text)
         return out
@@ -742,12 +1053,19 @@ class Course:
             for repo, text in self.templates_left().items()
         )
 
+    def templates_verified(self) -> bool:
+        bad = [r for r in self.templates() if not _grading_clean(self.grading_text(r))]
+        for repo in bad:
+            log_err(f"{repo}@{SOLUTION_BRANCH}/{GRADING_FILE} is still NOT_MIGRATED")
+        return not self.templates_left() and not bad
+
+    # materials ---------------------------------------------------------------
     def materials_moves(self) -> dict[str, dict[str, str]]:
         return {
             repo: moves
             for repo in sorted(_listing(self.org))
-            if repo.startswith(MATERIALS_REPO_PREFIX)
-            and (moves := fold(set(_files(self.org, repo)), MATERIALS_MOVES))
+            if (moves := fold(set(_files(self.org, repo)), MATERIALS_MOVES))
+            and repo.startswith(MATERIALS_REPO_PREFIX)
         }
 
     def move_materials(self) -> bool:
@@ -756,20 +1074,33 @@ class Course:
             for repo, moves in self.materials_moves().items()
         )
 
+    # re-render ---------------------------------------------------------------
     def drift(self) -> list[str]:
         want = seed.github_workflow_files(self.org, central_ref_for(self.org))
         live = _files(self.org, ".github")
         return [p for p, body in want.items() if live.get(p) != blob_sha(body)]
 
+    def rerender_done(self) -> bool:
+        return self.registry_done() and not self.drift()
+
+    def work_done(self) -> bool:
+        """Every step of the course's migration done - what a semester waits for."""
+        return all(
+            s.done() for s in self.steps() if not s.bracket and s.name != "status"
+        )
+
     def steps(self) -> list[Step]:
         dotgithub = f"{self.org}/.github"
         return [
-            _pause_step([self.org]),
+            _pause_step(self.targets),
             Step(
                 "registry",
                 done=self.registry_done,
                 plan=lambda: [
-                    f".github/{OLD_SEMESTERS_PATH} -> {SEMESTERS_PATH}, cohorts: -> semesters:"
+                    (
+                        f".github/{OLD_SEMESTERS_PATH} -> {SEMESTERS_PATH}, "
+                        f"cohorts: -> semesters:"
+                    )
                 ],
                 do=self.migrate_registry,
                 verify=self.registry_done,
@@ -779,7 +1110,10 @@ class Course:
                 f"{records.SYSTEM_DIR}/ in .github",
                 done=lambda: not self.dotgithub_moves(),
                 plan=lambda: [
-                    f"move {len(self.dotgithub_moves())} file(s) under {records.SYSTEM_DIR}/"
+                    (
+                        f"move {len(self.dotgithub_moves())} file(s) under "
+                        f"{records.SYSTEM_DIR}/"
+                    )
                 ],
                 do=lambda: move_files(
                     self.org, ".github", self.dotgithub_moves(), LAYOUT_COMMIT
@@ -791,10 +1125,13 @@ class Course:
                 f"{COURSE_CONFIG} keys",
                 done=self.meta_done,
                 plan=lambda: [
-                    "cohort_defaults: -> semester_defaults:, assignment_defaults format: -> formats:"
+                    (
+                        "cohort_defaults: -> semester_defaults:, "
+                        "assignment_defaults format: -> formats:"
+                    )
                 ],
                 do=self.rewrite_meta,
-                verify=self.meta_done,
+                verify=self.meta_verified,
                 rollback=f"git revert the '{KEYS_COMMIT}' commit in {dotgithub}",
             ),
             Step(
@@ -805,8 +1142,11 @@ class Course:
                     for r in self.templates_left()
                 ],
                 do=self.rewrite_templates,
-                verify=lambda: not self.templates_left(),
-                rollback=f"git revert the '{KEYS_COMMIT}' commit on each template's {SOLUTION_BRANCH} branch",
+                verify=self.templates_verified,
+                rollback=(
+                    f"git revert the '{KEYS_COMMIT}' commit on each template's "
+                    f"{SOLUTION_BRANCH} branch"
+                ),
             ),
             Step(
                 "materials files",
@@ -821,15 +1161,13 @@ class Course:
             ),
             Step(
                 "re-render",
-                done=lambda: not self.drift(),
-                plan=lambda: [
-                    f"Refresh actions from this checkout ({len(self.drift())} workflow(s) differ)"
-                ],
+                done=self.rerender_done,
+                plan=lambda: ["Refresh actions from this checkout"],
                 do=lambda: seed.refresh(self.org) == 0,
                 verify=lambda: not self.drift(),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            _unpause_step([self.org]),
+            _unpause_step(self.targets),
             _status_step(self.org, None),
         ]
 
@@ -843,10 +1181,8 @@ def _pointer_course(org: str, listing: dict[str, dict]) -> str:
         text = get_file_content(org, CONFIG_REPO, records.path("pointer"))
         if text is not None:
             return str(_yaml(text).get("course") or "")
-    return str(
-        _yaml(get_file_content(org, OLD_POINTER_REPO, COURSE_CONFIG)).get("course")
-        or ""
-    )
+    old = get_file_content(org, OLD_POINTER_REPO, COURSE_CONFIG)
+    return str(_yaml(old).get("course") or "")
 
 
 def preflight(org: str) -> Course | Semester | None:
@@ -861,40 +1197,56 @@ def preflight(org: str) -> Course | Semester | None:
         log_err(f"{org} has no .github repo - not a bootstrapped org")
         return None
     if COURSE_HUB_TOPIC in topics:
-        if _runs_alive(org) != 0:
+        if listing[".github"].get("archived"):
+            log_err(f"{org}/.github is archived - an archived course is never touched")
+            return None
+        target: Course | Semester = Course(org)
+    elif topics & {OLD_SEMESTER_TOPIC, SEMESTER_TOPIC}:
+        config = listing.get(CONFIG_REPO) or listing.get(OLD_CONFIG_REPO)
+        if (
+            config is None
+            or config.get("archived")
+            or all(r.get("archived") for r in listing.values())
+        ):
             log_err(
-                f"a workflow run is queued or running in {org}/.github - wait for it"
+                f"{org} is archived (or has no config repo) - archived semesters are "
+                f"never touched"
             )
             return None
-        return Course(org)
-    if not topics & {OLD_SEMESTER_TOPIC, SEMESTER_TOPIC}:
+        course = _pointer_course(org, listing)
+        if not course:
+            log_err(f"{org}'s course pointer names no course org")
+            return None
+        parent = Course(course)
+        target = Semester(org, course)
+        # The course is complete when every step of its own migration is done and its
+        # Actions are on - unless they are off because THIS semester's migration paused
+        # them and stopped (its own repos are off too): then this run resumes it.
+        own = _with_workflows(
+            org, [target.config(), target.join(), pages_repo(org), ".github"]
+        )
+        resuming = bool(own) and not any(_actions_enabled(o, r) for o, r in own)
+        course_on = all(_actions_enabled(o, r) for o, r in parent.targets())
+        if not parent.work_done() or not (course_on or resuming):
+            log_err(
+                f"{course} is not fully migrated, or another migration under it is "
+                f"in flight - finish that first (run the migration on {course}), then "
+                f"this semester"
+            )
+            return None
+    else:
         log_err(
             f"{org}'s .github carries neither {COURSE_HUB_TOPIC} nor a semester topic"
         )
         return None
-    config = listing.get(CONFIG_REPO) or listing.get(OLD_CONFIG_REPO)
-    if (
-        config is None
-        or config.get("archived")
-        or all(r.get("archived") for r in listing.values())
-    ):
+    alive = _alive(target.targets())
+    if alive:
         log_err(
-            f"{org} is archived (or has no config repo) - archived semesters are never touched"
+            f"a workflow run is queued or running in {', '.join(alive)} - wait for it "
+            f"to finish, then re-run the migration"
         )
         return None
-    course = _pointer_course(org, listing)
-    if not course:
-        log_err(f"{org}'s course pointer names no course org")
-        return None
-    if get_file_content(course, ".github", OLD_SEMESTERS_PATH) is not None:
-        log_err(f"{course} is not migrated yet - migrate the course org first")
-        return None
-    if _runs_alive(course) != 0:
-        log_err(
-            f"a workflow run is queued or running in {course}/.github - wait for it"
-        )
-        return None
-    return Semester(org, course)
+    return target
 
 
 def main() -> int:
@@ -902,13 +1254,16 @@ def main() -> int:
     parser.add_argument("org", help="The course org or semester org to migrate")
     add_preview_flag(parser, "Print the plan and write nothing (default).")
     args = parser.parse_args()
-    target = preflight(args.org)
+    try:
+        target = preflight(args.org)
+    except RuntimeError as exc:
+        log_err(f"preflight could not read {args.org}: {exc}")
+        return 1
     if target is None:
         return 1
-    log(
-        f"  central ref of the course: {central_ref_for(getattr(target, 'course', args.org))}"
-    )
-    return run(args.org, target.steps(), args.preview)
+    course = target.course if isinstance(target, Semester) else args.org
+    log(f"  central ref of the course: {central_ref_for(course)}")
+    return run(args.org, target.steps(), args.preview, target.targets)
 
 
 if __name__ == "__main__":
