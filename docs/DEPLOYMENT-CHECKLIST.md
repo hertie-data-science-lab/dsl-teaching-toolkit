@@ -17,6 +17,8 @@ Accompanies the e2e [worked example](../example-course/).
 
 > Enrolment-code + grade emails send as `datasciencelab@hertie-school.org` via a central Entra app, authenticated by certificate ([details](../docs-admin-arch/central-admin.md#email)). Live on every course org. Where it is not, enrolment codes still land in `students.csv` (to be emailed by hand) and grades still reach each student's repo; only the notification is skipped.
 
+<a id="cohort-setup-per-year"></a>
+
 ## Semester setup (per year)
 
 | | Step | Org Level | Where | Input | Output |
@@ -119,6 +121,8 @@ e.evans@students.hertie-school.org,Eve Evans,auditor,,,
 | `role` | you | blank/`enrolled` = full participant; `auditor` = reads released materials, gets no assignments/grades, refused from teams |
 
 Add any other column you want (a registrar id, a lecture section, notes) - the engine ignores it and preserves it.
+
+<a id="peopleyml"></a>
 
 ### `instructors.yml`
 

@@ -114,6 +114,8 @@ So a TA on f2026 can `git push` labs into the course org level `course-materials
 >
 >A repo scaffolded by **New materials repo** / **New assignment** is granted as it is created - there is nothing to run afterwards.
 
+<a id="only-staff-in-these-teams"></a>
+
 ## Only instructors in these teams
 
 `DSL_BOT_TOKEN` is mirrored as a repo secret onto every course-org content repo and assignment

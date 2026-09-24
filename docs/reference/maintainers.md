@@ -688,9 +688,11 @@ Decision 0012 gave each concept one name. The engine writes and reads ONLY the n
 spelling; an old one found in an instructor file, a key, a repo, a topic, a request or a
 dispatch is refused as `NOT_MIGRATED` (`faults.NOT_MIGRATED`: one code, one sentence naming
 the new spelling and "run the migration"). A migration tool rewrites a live org from this
-table, which is its input - keep it complete when a spelling changes. The one exception is
-the Submission receipts lookup chain in `course.py`, which recognises every label and mark
-an already-open issue carries.
+table, which is its input - keep it complete when a spelling changes. The exceptions are the
+append-only recognition chains for things already open in a live org - the Submission
+receipts labels and marks (`course.py`) and the archive notice prefixes (`teardown.py`) -
+and ds01's `all_cohorts` payload, read as a deprecated alias until ds01-infra switches at
+Promote.
 
 | Old | New | Where |
 |---|---|---|
@@ -700,7 +702,8 @@ an already-open issue carries.
 | `cohort_defaults:` | `semester_defaults:` | course org `dsl-course.yml` |
 | `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `classroom-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
 | `format:` (one word) | `formats:` (a list; the first is the runnable one) | `grading_config.yml` on a template's `solution` branch; `assignment_defaults:` in `dsl-course.yml` |
-| dispatch payload `cohort_org`, `all_cohorts` | `semester_org`, `all_semesters` | the semester dispatchers (re-rendered by Refresh actions), the ds01 timers |
+| dispatch payload `cohort_org` | `semester_org` | the semester dispatchers (re-rendered by Refresh actions) |
+| dispatch payload `all_cohorts` | `all_semesters` | **ds01-infra's membership timer must switch at Promote.** Until then Sync membership reads `all_cohorts` as a deprecated alias (a log line, no fault) - the one dispatch exception |
 | request field `cohort_org`; op args `cohort_dest_repo`, `cohort_dest_path`, `tag`, `format`, `include_solution` | `semester_org`; `semester_dest_repo`, `semester_dest_path`, `semester`, `formats`, `solution_datetime: now` | `dsl.request/1` (the console) |
 | CLI `--cohort-org`, `--all-cohorts`, `--list-cohorts`, `--cohort-dest-repo`, `--cohort-dest-path`, `--cohort`, `--tag`, `--format`, `--solution` | `--semester-org`, `--all-semesters`, `--list-semesters`, `--semester-dest-repo`, `--semester-dest-path`, `--semester`, `--semester`, `--formats`, `--solution-datetime now` | every CLI; rendered workflows use the new ones |
 | workflow inputs `cohort_org`, `cohort_dest_repo`, `cohort_dest_path`, `tag`, `semester_tag`, `format`, `include_solution` | `semester_org`, `semester_dest_repo`, `semester_dest_path`, `semester`, `semester`, `formats`, `solution_datetime` | rendered workflows (Refresh actions re-renders them) |
@@ -720,6 +723,12 @@ an already-open issue carries.
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
 | CLI entry `python3 -m dsl_course.teardown` | `python3 -m dsl_course.archive` (the documented entry point; `teardown` stays as the frozen module name) | the Archive semester workflow and the console op |
 | copy "teardown", "close out", "freeze" (a semester) | "archive" | logs, the archive record and notices, forms, docs |
+| archive notice title `Cohort archives on <date>` | `Semester archives on <date>` | semester `classroom-config` issues. The prefix is an append-only chain (`teardown.ARCHIVE_NOTICE_PREFIXES`): an open notice under the old prefix is still found and edited, never duplicated - nothing to migrate |
+| console schema `people.schema.json` | `instructors.schema.json` | `console/schemas/` (the console follows in WP-A3) |
+| workflow env `COHORT_ORG` | `SEMESTER_ORG` | rendered workflows |
+| semester template description `<slug> - cohort assignment template` | `<slug> - semester assignment template` | converged by `repos.SUPERSEDED_DESCRIPTION_ENDINGS` |
+| doc anchors `#closing-the-cohort-out`, `#peopleyml`, `#write-your-terms-plan`, `#carrying-cohort-edits-back`, `#cohort-setup-per-year`, `#only-staff-in-these-teams`, `#what-instructors-tag-reaches`, `#end-of-term` | `#archiving-the-semester`, `#instructorsyml`, `#write-your-semesters-plan`, `#carrying-semester-edits-back`, `#semester-setup-per-year`, `#only-instructors-in-these-teams`, `#what-instructors-semester-reaches`, `#end-of-semester` | docs; each old anchor is kept as an HTML alias above its heading, so a link already posted still lands |
+| paths KEPT, not renamed: `.github/.missing-cohorts`, `classroom-config/cohort-gradebook.csv`, `classroom-config/archive/teardown.md` | unchanged here (WP-A2 moves the records) | the tool must NOT rename them |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

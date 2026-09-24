@@ -67,6 +67,8 @@ has no actor to check.
 > **Publish course website:** `actual-readings` mode hosts the reading files publicly. Only
 > publish what you hold the rights to share - use `reading-list` for copyrighted readings.
 
+<a id="what-instructors-tag-reaches"></a>
+
 ## What `instructors-<semester>` reaches
 
 Push on:

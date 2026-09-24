@@ -10,6 +10,8 @@ The schedule file can be updated throughout the semester.
 - A bootstrapped [semester org](04-new-cohort-org.md) 
 - Source material repos to be released (staged in course-org, released to semester-org)
 
+<a id="write-your-terms-plan"></a>
+
 ## Write your semester's plan
 
 > For a fully worked example schedule.yml (a full semester) see [here](../example-course/cohort-org/schedule.yml).

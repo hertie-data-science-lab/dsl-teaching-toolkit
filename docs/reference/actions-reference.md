@@ -43,6 +43,8 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 | **Collect submissions** | Refresh one assignment's grading sheet now instead of waiting for the cron: re-read each submission, refill `info:`, post any receipt still owed. It never freezes anything - the cutoff does that. Before the due date there is nothing to derive yet, so a press then says so and refreshes nothing. |
 | **Distribute grades** | Send what the grading sheet holds to the three places it goes: each student's private `grades-<handle>` repo (`grades.yml` + `README.md`), `cohort-gradebook.csv`, and an email. Nothing is posted into a submission repo. Nothing is said twice, so a re-run after one correction reaches one student. A mark distributed before the due date is sent with a warning, since the submission facts behind it are not derived yet. **`preview` defaults to `true`**: it writes no grades, sends no mail, and posts who gets what as a *Distribute grades preview* issue in `classroom-config`, which the real run closes. `silent` sends without emailing. There is no assignment to pick - every run rebuilds every gradebook from every sheet. |
 
+<a id="end-of-term"></a>
+
 ## End of semester
 
 | Action | Effect |

@@ -83,6 +83,8 @@ the second release on, edits are kept.
 default branch is what students read, what the website reads, and what a release merges
 into.
 
+<a id="carrying-cohort-edits-back"></a>
+
 ## Carrying semester edits back
 
 A fix typed into the semester's copy is not in the course org, so it is not in next semester's.

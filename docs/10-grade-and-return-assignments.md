@@ -281,6 +281,8 @@ can knit). The run log says which, in counts. None of that ever reds the cutoff 
 submission with no fences in it, or one repo that could not be read, is counted and the
 freeze carries on.
 
+<a id="closing-the-cohort-out"></a>
+
 ## Archiving the semester
 
 **Ask for it once and it happens on its own.** Write an `archive:` block in `schedule.yml`
