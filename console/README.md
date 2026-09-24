@@ -137,7 +137,9 @@ who teaches somewhere, and in student mode otherwise.
 ## Schemas
 
 `schemas/` holds the JSON Schemas the engine exports with `python -m dsl_course.schemas`;
-a Python test fails when they drift. Never edit them by hand.
+a Python test fails when they drift. Never edit them by hand. `names.json` is every repo name
+and path the console must spell as the engine does (the config and join repos, `.system/` and
+each record in it); read it rather than writing a literal.
 
 ## Routes
 

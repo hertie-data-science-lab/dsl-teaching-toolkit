@@ -692,6 +692,10 @@ def coerce_date(value: object) -> date | None:
 # a required `role:`. `OLD_PEOPLE_FILE` - a `people:` mapping of role -> list - is never
 # read: a semester that still has it is refused as NOT_MIGRATED (`sync_faculty`).
 INSTRUCTORS_FILE = "instructors.yml"
+# The semester layer of the assignment settings (decision 0010: a `defaults:` block and an
+# `assignments:` map of per-slug deviations), at the root of semester-config beside the
+# schedule. Named now so the console has no literal; the engine reads it from B2.
+ASSIGNMENTS_FILE = "assignments.yml"
 OLD_PEOPLE_FILE = "people.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
 INSTRUCTOR_ROLES = {
