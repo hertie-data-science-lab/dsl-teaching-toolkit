@@ -40,6 +40,17 @@ describe('the tiered form', () => {
     expect(toConfig(effective(tiers, v)).autograde).toBeUndefined();
   });
 
+  it('lets visibility change for their own repo and saves it, with the note on existing copies', () => {
+    const v = { ...fromConfig({ submit_via: 'assignment_repo', visibility: 'private' }), visibility: 'public' };
+    expect(tiers.visibility.forced?.(v)).toBeNull();
+    expect(tiers.visibility.options?.map((o) => o.value)).toEqual(['private', 'public', 'student_choice']);
+    const out = render(<SchemaForm id="t" schema={null} tiers={tiers} values={v} onChange={() => {}} />);
+    expect(out).toContain('Applies to copies handed out after this change; existing copies keep theirs.');
+    expect(out).not.toContain('cannot be changed');
+    expect(toConfig(effective(tiers, v)).visibility).toBe('public');
+    expect(toConfig(effective(tiers, { ...v, submit_via: 'external', submit_url: 'https://x' })).visibility).toBe('private');
+  });
+
   it('validates inline: the bad value in the file, https only, both or neither', () => {
     expect(fieldErrors(null, tiers, fromConfig({ autograde: 'sometimes' })).autograde).toContain('“sometimes”');
     expect(fieldErrors(null, tiers, fromConfig({ submit_via: 'external', submit_url: 'http://x' })).submit_url).toContain('https://');
