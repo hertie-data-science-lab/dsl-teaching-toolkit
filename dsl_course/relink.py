@@ -19,7 +19,11 @@ old login from it and is idempotent on (old, new), so a run that stops anywhere 
 by the next one. Nothing is ever deleted: a new-name repo in the way is renamed aside and
 archived when nobody but the toolkit ever committed to it, and anything a person wrote on
 both sides holds the relink (a REFUSAL - logged, naming the handle, never a red run) until
-faculty settle it.
+faculty settle it. The classroom-config commit is a compare-and-set on the commit its
+files were read at, so an edit that lands mid-relink fails the commit (the next run
+retries) instead of being overwritten. Once the grants have moved, the old account leaves
+the org - only a plain member in no faculty team and on no other row; staff are never
+touched.
 
 Not moved: a shared drop box's `<handle>/` folder (a bot commit there would read as a late
 submission), `snapshots/` (frozen history) and the receipts issue's text.
@@ -36,7 +40,13 @@ from datetime import UTC, datetime
 
 from . import roster, teams
 from .collect import AUTOGRADE_DIR
-from .course import GRADEBOOK_PREFIX, submission_repo, submission_suffix
+from .course import (
+    COURSE_ADMIN_TEAM,
+    GRADEBOOK_PREFIX,
+    INSTRUCTORS_TEAM,
+    submission_repo,
+    submission_suffix,
+)
 from .discovery import classify_repos
 from .enrol_codes import write_column
 from .faults import Unusable
@@ -44,13 +54,20 @@ from .gh_contents import (
     dump_csv,
     get_blob,
     get_file_with_sha,
+    head_commit,
     path_commit_subjects,
     put_file,
     put_files,
     read_csv,
     repo_blob_shas,
 )
-from .gh_teams import id_of_login, login_of_id
+from .gh_teams import (
+    get_team_members,
+    id_of_login,
+    login_of_id,
+    org_member_role,
+    remove_org_membership,
+)
 from .ghcli import BOT_EMAIL, bot_login, gh
 from .grades import (
     CHANNEL_EMAIL,
@@ -64,12 +81,11 @@ from .grades import (
     parse_sheet,
 )
 from .issues import close_by_creator
-from .log import log, log_err, log_ok, log_person, log_step
+from .log import log_err, log_err_person, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
     archive_repo,
     collaborator_permission,
-    default_branch,
     direct_collaborators,
     rename_repo,
     repo_missing,
@@ -106,41 +122,56 @@ class Pending:
     new_id: str
     old: str
     old_id: str
+    old_on_roster: bool = False  # the old login is still another row's handle
 
     @property
     def line(self) -> int:
         return self.index + 2
 
 
-def _skip(index: int, why: str, act: bool = False) -> None:
+def _skip(index: int, why: str) -> None:
     """A row this pass leaves alone, by LINE only: the reason is what faculty act on."""
-    (log_err if act else log)(f"  students.csv line {index + 2}: {why} - not relinked")
+    log_err(f"  students.csv line {index + 2}: {why} - not relinked")
 
 
 def pending(org: str, students: list[roster.Student]) -> list[Pending]:
-    """The rows that qualify for a relink this pass (see the module docstring)."""
+    """The rows that qualify for a relink this pass (see the module docstring).
+
+    A lookup GitHub did not answer is COUNTED, not logged per row: an outage would
+    otherwise print a line per student. The count is one public line; which rows it was
+    goes through `log_person`."""
     handles = Counter(s.github_handle.casefold() for s in students if s.onboarded)
     found: list[Pending] = []
+    unanswered = 0
     subjects: tuple[str, ...] | None = None
     for i, s in enumerate(students):
         stored = s.github_id.strip()
         if not s.onboarded or not stored.isdigit():
             continue
         new_id = id_of_login(s.github_handle)
-        if new_id is None:
-            _skip(i, "GitHub could not confirm the account this handle names", act=True)
+        if not new_id:
+            unanswered += 1
+            log_person(f"    no definite answer for @{s.github_handle} (line {i + 2})")
             continue
         if new_id == stored:
             continue
         if handles[s.github_handle.casefold()] > 1:
-            _skip(i, "this handle is on another row too", act=True)
+            _skip(i, "this handle is on another row too")
             continue
         if any(o.github_id.strip() == new_id for o in students if o is not s):
-            _skip(i, "the account this handle names is linked on another row", act=True)
+            _skip(i, "the account this handle names is linked on another row")
             continue
         old = login_of_id(stored)
+        if old == "":
+            log_err_person(
+                f"  students.csv line {i + 2}: the GitHub account this row was first "
+                f"linked to has been deleted - not relinked",
+                f"    the row now names @{s.github_handle}; its stored id {stored} is gone",
+            )
+            continue
         if old is None or old.casefold() == s.github_handle.casefold():
-            _skip(i, "GitHub could not confirm the previously linked account", act=True)
+            unanswered += 1
+            log_person(f"    no definite answer for id {stored} (line {i + 2})")
             continue
         if subjects is None:
             try:
@@ -159,10 +190,19 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
                 i,
                 "the student renamed their account and someone else now holds the old "
                 "name - put their CURRENT login in the row",
-                act=True,
             )
             continue
-        found.append(Pending(i, s.hertie_email, s.github_handle, new_id, old, stored))
+        old_on_roster = handles[old.casefold()] > 0
+        found.append(
+            Pending(
+                i, s.hertie_email, s.github_handle, new_id, old, stored, old_on_roster
+            )
+        )
+    if unanswered:
+        log_err(
+            f"{unanswered} roster row(s) in {org} could not be checked for a switched "
+            f"GitHub account (GitHub gave no definite answer) - the next sync checks again"
+        )
     if len(found) > MAX_PER_PASS:
         log_err(
             f"{len(found)} roster rows point at a different GitHub account from the one "
@@ -462,11 +502,18 @@ def _rekey_distributed(text: str, old: str, new: str) -> str | None:
     return dump_distributed(records)
 
 
-def _config_changes(org: str, p: Pending) -> tuple[dict[str, bytes], list[str]]:
+def _config_changes(
+    org: str, p: Pending
+) -> tuple[dict[str, bytes], list[str], tuple[str, str] | None]:
     """Everything in classroom-config that names the old login, rewritten for the new one:
-    `(files to write, paths to remove)`. Raises `Refused` for a collision."""
+    `(files to write, paths to remove, the commit they were read at)`. Raises `Refused`
+    for a collision. The commit goes to `put_files` as its `base`, so a write that landed
+    after this read makes the commit fail rather than be overwritten."""
     config = roster.CONFIG_REPO
-    live = repo_blob_shas(org, config, default_branch(org, config))
+    base = head_commit(org, config)
+    if base is None:
+        return {}, [], None
+    live = repo_blob_shas(org, config, base[1])
 
     def read(path: str) -> bytes:
         content = get_blob(org, config, live[path])
@@ -508,10 +555,36 @@ def _config_changes(org: str, p: Pending) -> tuple[dict[str, bytes], list[str]]:
             raise Refused("both accounts have autograde results for one assignment")
         files[to] = read(path)
         delete.append(path)
-    return files, delete
+    return files, delete, base
 
 
 # --------------------------------------------------------------------------- one row
+
+
+def _remove_old_member(org: str, p: Pending) -> bool:
+    """Take the old account out of the org (or cancel its invitation) - only a plain
+    `member`, in no faculty team and named on no other roster row. The faculty-access
+    floor: staff are never demoted, so anything else is left and said privately. False
+    only when the removal itself failed."""
+    if p.old_on_roster:
+        log_person(f"  [skip] @{p.old} is still on the roster - left in {org}")
+        return True
+    role = org_member_role(org, p.old)
+    if role == "":
+        return True
+    if role != "member":
+        log_person(f"  [skip] @{p.old} is {role or 'unreadable'} in {org} - left")
+        return True
+    for team in (INSTRUCTORS_TEAM, COURSE_ADMIN_TEAM):
+        members = get_team_members(org, team)
+        if members is None or p.old.casefold() in {m.casefold() for m in members}:
+            log_person(f"  [skip] @{p.old} may be faculty ({team}) in {org} - left")
+            return True
+    if not remove_org_membership(org, p.old):
+        log_err("could not remove a relinked student's old account from the org")
+        return False
+    log_person(f"  [ok] removed @{p.old} from {org}")
+    return True
 
 
 def _record(org: str, p: Pending, repos: list[str]) -> bool:
@@ -570,7 +643,7 @@ def relink_row(
         return False
     if not _move_grants(org, p, existing, team_repos):
         return False
-    files, delete = _config_changes(org, p)
+    files, delete, base = _config_changes(org, p)
     if (files or delete) and not put_files(
         org,
         roster.CONFIG_REPO,
@@ -578,6 +651,7 @@ def relink_row(
         f"relink: move @{p.old}'s rows to @{p.new}",
         delete=delete,
         person=True,
+        base=base,
     ):
         return False
     closed, failed = close_by_creator(
@@ -586,6 +660,8 @@ def relink_row(
     if failed:
         return False
     log_person(f"  [ok] closed {closed} unresolved Join issue(s) from @{p.new}")
+    if not _remove_old_member(org, p):
+        return False
     if not _record(org, p, _repos_of(existing, p.new, team_repos)):
         return False
     return _write_id(org, p)

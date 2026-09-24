@@ -98,6 +98,11 @@ class World:
         self.archived: set[str] = set()
         self.fail: str | None = None
         self.fail_times = 1
+        self.gone: dict[str, str | None] = {}
+        self.head = 0
+        self.race = None
+        self.org: dict[str, str | None] = {OLD: "member", "bob": "member"}
+        self.faculty: dict[str, set[str] | None] = {"instructors": {"prof"}}
 
     def listing(self) -> dict[str, dict]:
         return {
@@ -123,11 +128,16 @@ class World:
 @pytest.fixture
 def world(monkeypatch) -> World:
     w = World()
-    monkeypatch.setattr(relink, "id_of_login", lambda login: w.users.get(login.lower()))
+    # "" is GitHub's definite 404; None (an entry set to None) is no answer at all.
+    monkeypatch.setattr(
+        relink, "id_of_login", lambda login: w.users.get(login.lower(), "")
+    )
     monkeypatch.setattr(
         relink,
         "login_of_id",
-        lambda uid: next((k for k, v in w.users.items() if v == uid), None),
+        lambda uid: w.gone.get(
+            uid, next((k for k, v in w.users.items() if v == uid), "")
+        ),
     )
 
     def subjects(org, repo, path):
@@ -159,16 +169,32 @@ def world(monkeypatch) -> World:
 
     monkeypatch.setattr(relink, "put_file", record)
 
-    def commit(org, repo, files, message, *, delete=(), person=False, **k):
-        if w.failing("config"):
-            return False
+    def commit(org, repo, files, message, *, delete=(), person=False, base=None):
+        if w.race:
+            w.race()  # somebody else commits between the relink's read and its write
+            w.race = None
+        if w.failing("config") or base != (f"c{w.head}", "tree"):
+            return False  # a non-forced ref update off a stale parent: 422
         w.config.update(files)
         for path in delete:
             w.config.pop(path, None)
+        w.head += 1
         return True
 
     monkeypatch.setattr(relink, "put_files", commit)
-    monkeypatch.setattr(relink, "default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(relink, "head_commit", lambda org, repo: (f"c{w.head}", "tree"))
+    monkeypatch.setattr(
+        relink, "org_member_role", lambda org, login: w.org.get(login.lower(), "")
+    )
+    monkeypatch.setattr(
+        relink, "get_team_members", lambda org, team: w.faculty.get(team, set())
+    )
+
+    def remove(org, login):
+        w.org.pop(login.lower(), None)
+        return True
+
+    monkeypatch.setattr(relink, "remove_org_membership", remove)
     monkeypatch.setattr(
         relink,
         "repo_blob_shas",
@@ -376,7 +402,9 @@ def test_the_same_id_is_a_rename_and_not_a_relink(world):
     "setup",
     [
         pytest.param(lambda w: w.users.pop(NEW), id="handle-404"),
-        pytest.param(lambda w: w.users.pop(OLD), id="stored-id-404"),
+        pytest.param(lambda w: w.users.update({NEW: None}), id="handle-unanswered"),
+        pytest.param(lambda w: w.gone.update({OLD_ID: ""}), id="stored-id-404"),
+        pytest.param(lambda w: w.gone.update({OLD_ID: None}), id="stored-unanswered"),
         pytest.param(
             lambda w: setattr(w, "roster", roster_text(stored="")), id="no-stored-id"
         ),
@@ -489,3 +517,99 @@ def test_the_squat_guard_matches_the_message_onboard_commits():
     onboard = (Path(__file__).parents[1] / "templates/welcome/onboard.yml").read_text()
     js = relink.LINK_MESSAGE.format(handle="${handle}", user_id="${userId}")
     assert f"message: `{js}`" in onboard
+
+
+# ------------------------------------------------------------ racing writes
+
+
+def test_a_config_edit_that_lands_mid_relink_is_never_overwritten(world):
+    # The classroom-config commit is built on the commit its files were READ at, so a
+    # write that landed in between makes it fail rather than be silently reverted.
+    def faculty_edit():
+        world.config[teams.TEAMS_PATH] += b"assignment-2,team-x,cy\n"
+        world.head += 1
+
+    world.race = faculty_edit
+    assert run(world)[0] == 1
+    assert world.stored_id() == OLD_ID
+    assert OLD in world.config[teams.TEAMS_PATH].decode()
+    assert run(world)[0] == 0
+    text = world.config[teams.TEAMS_PATH].decode()
+    assert "cy" in text and "newacct" in text and OLD not in text
+    assert world.stored_id() == NEW_ID
+
+
+def test_the_id_write_never_reverts_a_roster_edit_that_landed_meanwhile(
+    world, monkeypatch
+):
+    # `write_column` sends the sha it read at and re-applies only this row's cell on a
+    # refusal, so a row somebody added in between survives.
+    real = enrol_codes.put_file
+    added = "c@x.edu,Cy,,,,,"
+
+    def racing(*a, **k):
+        if added not in world.roster:
+            world.roster += added + "\n"
+        return real(*a, **k)
+
+    monkeypatch.setattr(enrol_codes, "put_file", racing)
+    assert run(world)[0] == 0
+    assert world.stored_id() == NEW_ID and added in world.roster
+
+
+# ------------------------------------------------------------ the old account
+
+
+def test_the_old_account_leaves_the_org(world):
+    run(world)
+    assert OLD not in world.org and "bob" in world.org
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        pytest.param(lambda w: w.org.update({OLD: "admin"}), id="owner"),
+        pytest.param(lambda w: w.faculty.update({"instructors": {OLD}}), id="faculty"),
+        pytest.param(
+            lambda w: w.faculty.update({"course-admin": None}), id="faculty-unreadable"
+        ),
+        pytest.param(lambda w: w.org.update({OLD: None}), id="role-unreadable"),
+        pytest.param(
+            lambda w: setattr(
+                w, "roster", roster_text(extra=[f"c@x.edu,Cy,,{OLD},,,"])
+            ),
+            id="still-on-the-roster",
+        ),
+    ],
+)
+def test_the_old_account_is_kept_when_it_may_be_staff(world, setup):
+    setup(world)
+    assert run(world)[0] == 0
+    assert OLD in world.org and world.stored_id() == NEW_ID
+
+
+def test_an_old_account_already_gone_is_done(world):
+    world.org.pop(OLD)
+    assert run(world)[0] == 0
+    assert world.stored_id() == NEW_ID
+
+
+# ------------------------------------------------------------ lookup noise
+
+
+def test_an_outage_is_one_public_line_not_one_per_student(world, capsys):
+    for n in range(5):
+        world.users[f"s{n}"] = None
+    extra = [f"s{n}@x.edu,S,,s{n},9{n},," for n in range(5)]
+    world.roster = roster_text(stored=NEW_ID, extra=extra)
+    run(world)
+    err = capsys.readouterr().err
+    assert err.count("could not be checked") == 1 and "5 roster row(s)" in err
+
+
+def test_a_deleted_old_account_is_one_line_for_faculty(world, capsys):
+    world.gone[OLD_ID] = ""
+    run(world)
+    err = capsys.readouterr().err
+    assert err.count("has been deleted") == 1 and "could not be checked" not in err
+    assert NEW not in err  # the handle itself is verbose-only
