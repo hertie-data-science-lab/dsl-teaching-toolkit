@@ -626,7 +626,7 @@ def render_course(
     stages = _stage_states(COURSE_STAGES, done, standing)
     block = {
         "org": facts.org,
-        "name": str(meta.get("course_name") or meta.get("org_name") or ""),
+        "name": str(meta.get("course_name") or ""),
         "code": str(meta.get("course_code") or ""),
         "app_installed": app_installed(),
         "stages": stages,

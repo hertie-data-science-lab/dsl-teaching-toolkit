@@ -18,8 +18,8 @@ from test_renderers import ALL_RENDERED
 
 from dsl_course import (
     assign,
-    bootstrap_course,
     collect,
+    course,
     deploy,
     discovery,
     grades,
@@ -234,12 +234,16 @@ def test_a_cli_takes_only_the_new_flag(monkeypatch, capsys, flag):
         assert seen == [("C", "Sem")]
 
 
-def test_bootstrap_refuses_the_old_cohort_defaults_block(monkeypatch):
+@pytest.mark.parametrize("key", course.RETIRED_COURSE_KEYS)
+def test_a_retired_course_key_is_not_migrated(monkeypatch, key):
     monkeypatch.setattr(
-        bootstrap_course, "org_meta", lambda org: {"cohort_defaults": {}}
+        sync_faculty,
+        "load_yaml_config",
+        lambda *a, **k: {key: "x", "people": {"course_admins": []}},
     )
-    with pytest.raises(NotMigrated):
-        bootstrap_course.course_semester_defaults("C")
+    faults: list = []
+    sync_faculty.read_course_config("C", faults)
+    assert [f.field for f in faults if f.code == NOT_MIGRATED] == [key]
 
 
 @pytest.mark.parametrize(

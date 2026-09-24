@@ -18,6 +18,11 @@ from . import records
 # The per-org identity/config file, at the root of every org's `.github` repo: a course
 # org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
 COURSE_CONFIG = "dsl-course.yml"
+# Its keys that went (decision 0009): the org is the repo owner, the name is `course_name`,
+# and a semester's timezone and archive grace are the semester's own facts with the
+# institution's defaults. Never read: a file still carrying one is NOT_MIGRATED, and
+# `migrate` strips them.
+RETIRED_COURSE_KEYS = ("org", "org_name", "cohort_defaults", "semester_defaults")
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
 # Every semester org has exactly one, under exactly this name.
 CONFIG_REPO = "semester-config"

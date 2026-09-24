@@ -201,7 +201,7 @@ def test_the_faculty_landing_page_links_the_docs_at_the_orgs_ref():
     # The runbooks describe the engine the org is actually running; an org on the trunk
     # sent to the release docs reads instructions for code it does not have.
     page = profile_readme.render_profile_readme(
-        "Course", "Course", "Deep Learning", [], False, [], central_ref="main"
+        "Course", "Deep Learning", [], False, [], central_ref="main"
     )
     assert f"https://github.com/{CENTRAL}/blob/main/docs/README.md" in page
     assert "/blob/release/" not in page

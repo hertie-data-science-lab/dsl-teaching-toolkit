@@ -6,8 +6,8 @@ on:
       org:
         description: "Course org to bootstrap (e.g. hertie-dsl-demo-course-e1234)"
         required: true
-      org_name:
-        description: "Display name for org profile (e.g. DSL Demo)"
+      course_name:
+        description: "Course name (e.g. Machine Learning) - dsl-course.yml `course_name`, shown on every site"
         required: true
       course_code:
         description: "Course code (e.g. GRAD-E1234)."
@@ -93,7 +93,7 @@ jobs:
           SET_SECRET: ${{ inputs.set_secret }}
           ADMIN: ${{ inputs.admin }}
           ORG: ${{ inputs.org }}
-          ORG_NAME: ${{ inputs.org_name }}
+          COURSE_NAME: ${{ inputs.course_name }}
           COURSE_CODE: ${{ inputs.course_code }}
           CENTRAL_REF: ${{ inputs.central_ref }}
           # A repository VARIABLE, not a secret: it is the toolkit maintainer's address,
@@ -111,7 +111,7 @@ jobs:
           # Recorded in the org's own dsl-course.yml, so the tier this run checked out is
           # the tier the org keeps running once the nightly refresh takes over.
           args=(--org "$ORG"
-                --org-name "$ORG_NAME"
+                --course-name "$COURSE_NAME"
                 --course-code "$COURSE_CODE"
                 --central-ref "$CENTRAL_REF")
           [ "$SET_SECRET" = "true" ] && args+=(--propagate-secret)

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from . import mailer
+from . import mailer, policy
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
@@ -791,7 +791,7 @@ def _copy_from_input(description: str, options: list[str]) -> str:
 # it. This box used to be required-and-blank on the theory that naming the destination was
 # worth forcing - but a mandatory free-text field IS the typo surface that theory feared, and
 # it made the button contradict the schedule for no gain. A cleared box is still safe:
-# deploy.main resolves `semester_dest_repo.strip() or "materials"`.
+# deploy.main resolves `semester_dest_repo.strip() or` the policy's `semester_dest_repo`.
 _COURSE_SOURCE_REPO_DESC = "1. repo to release from in the course org"
 
 _COURSE_SOURCE_PATH_INPUT = """\
@@ -799,10 +799,10 @@ _COURSE_SOURCE_PATH_INPUT = """\
         description: "2. within-repo folder/file path to copy from (or comma-separated list)"
         required: true"""
 
-_SEMESTER_DEST_INPUTS = """\
+_SEMESTER_DEST_INPUTS = f"""\
       semester_dest_repo:
         description: "4. repo to release to in the semester org; created if missing"
-        default: "materials"
+        default: "{policy.defaults()["semester_dest_repo"]}"
         required: true
       semester_dest_path:
         description: "5. within-repo destination path (blank mirrors box 2's path(s)); created if missing"
@@ -1459,7 +1459,7 @@ on:
           # to GRAPH_SENDER like everything else.
           DSL_MAINTAINER_EMAIL: ${{{{ secrets.DSL_MAINTAINER_EMAIL }}}}
         run: |
-          python3 -m dsl_course.bootstrap_course --org "$SEMESTER" --org-name "$SEMESTER" \\
+          python3 -m dsl_course.bootstrap_course --org "$SEMESTER" \\
             --semester --course "$COURSE" --propagate-secret
           python3 -m dsl_course.seed refresh --course-org "$COURSE"
 """

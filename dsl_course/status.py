@@ -212,7 +212,7 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
 
     data: dict[str, dict] = {}
 
-    course_name = course_meta.get("course_name") or course_meta.get("org_name") or ""
+    course_name = course_meta.get("course_name") or ""
     data["B1"] = _row(
         "B1",
         "Course identity",

@@ -3,6 +3,7 @@ that does not validate refused whole."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -129,3 +130,8 @@ def test_the_seeded_site_config_carries_the_policy_institution_block():
     assert seed["schoolurl"] == block["url"]
     assert seed["dsl_org_url"] == block["dsl_org_url"]
     assert seed["address"].strip() == block["address"].strip()
+
+
+def test_the_console_export_is_the_policy_the_engine_runs_on():
+    exported = json.loads((ROOT / "console/schemas/policy.json").read_text())
+    assert exported == policy.load()

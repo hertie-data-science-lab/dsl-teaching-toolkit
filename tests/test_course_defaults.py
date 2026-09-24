@@ -1,6 +1,6 @@
 """Course-level defaults in `dsl-course.yml`: `assignment_defaults:` answers the New
-assignment boxes left at the course-default choice, and `semester_defaults:` shapes the
-`schedule.yml` Bootstrap semester seeds."""
+assignment boxes left at the course-default choice; the `schedule.yml` Bootstrap semester
+seeds names the institution's defaults and copies none of them."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from datetime import date
 
 import yaml
 
-from dsl_course import bootstrap_course, course, scaffold, schedule, settings
-from dsl_course.central import pin_central_ref
+from dsl_course import bootstrap_course, course, policy, scaffold, schedule, settings
 from dsl_course.welcome import template
 
 SENTINEL = course.COURSE_DEFAULT_CHOICE
@@ -133,69 +132,25 @@ def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
     assert seen["formats"] == ["qmd"] and seen["visibility"] == "public"
 
 
-# ------------------------------------------------------------- semester_defaults
+# ------------------------------------------------ what a new semester is seeded with
 
 
-def test_semester_defaults_parse_a_zone_and_an_archive_switch():
-    got = schedule.parse_semester_defaults(
-        {"timezone": "America/New_York", "archive": {"auto": True, "grace_days": 30}}
-    )
-    assert got == {
-        "timezone": "America/New_York",
-        "archive": {"auto": True, "grace_days": 30},
-    }
-
-
-def test_unusable_semester_defaults_are_dropped_with_a_warning(capsys):
-    got = schedule.parse_semester_defaults(
-        {"timezone": "Mars/Olympus", "archive": {"auto": "maybe"}, "colour": "red"}
-    )
-    assert got == {}
-    err = capsys.readouterr().err
-    assert "Mars/Olympus" in err and "auto" in err and "colour" in err
-
-
-def _seeded(defaults: dict) -> str:
+def _seeded() -> str:
     """The schedule.yml Bootstrap semester writes, through the real render path."""
     return bootstrap_course._scaffold_text(
-        "schedule.yml", "semester-config/schedule.yml", "main", "f2026", 2026, defaults
+        "schedule.yml", "semester-config/schedule.yml", "main", "f2026", 2026
     ).decode()
 
 
-def _parsed(text: str, **extra) -> schedule.Schedule:
-    meta = yaml.safe_load(text) or {}
-    meta.update(extra)
-    return schedule.parse(meta)
-
-
-def test_no_semester_defaults_seed_todays_skeleton():
-    plain = pin_central_ref(template("semester-config/schedule.yml"), "main").format(
-        tag="f2026", year=2026, year_next=2027
-    )
-    assert _seeded({}) == plain
-    assert "\narchive:\n" in _seeded({})
-
-
-def test_a_course_timezone_is_seeded_live():
-    sched = _parsed(_seeded({"timezone": "America/New_York"}))
-    assert sched.timezone == "America/New_York" and sched.dropped == []
-
-
-def test_auto_archive_off_seeds_no_archive_block():
-    sched = _parsed(
-        _seeded({"archive": {"auto": False, "grace_days": None}}),
-        semester_end="2026-12-18",
-    )
-    assert sched.archive is None
-
-
-def test_auto_archive_on_counts_the_courses_grace_days():
-    sched = _parsed(
-        _seeded({"archive": {"auto": True, "grace_days": 30}}),
-        semester_end="2026-12-18",
-    )
-    assert sched.archive.when == date(2027, 1, 17)
-    assert sched.dropped == []
+def test_the_seeded_skeleton_names_the_institution_s_defaults_and_sets_none():
+    text = _seeded()
+    ours = policy.defaults()
+    assert f"# timezone: {ours['timezone']}" in text
+    assert f"semester_end + {ours['archive']['grace_days']} days" in text
+    sched = schedule.parse(yaml.safe_load(text) or {})
+    # Nothing copied into the semester: absent means the institution's default.
+    assert sched.timezone == schedule.DEFAULT_TZ == ours["timezone"]
+    assert "\narchive:\n" in text
 
 
 def test_an_unusable_grace_days_is_flagged_and_the_sixty_days_stand():
@@ -207,8 +162,12 @@ def test_an_unusable_grace_days_is_flagged_and_the_sixty_days_stand():
     assert drop.startswith("archive.grace_days")
 
 
-def test_the_course_template_documents_both_blocks():
+def test_the_course_template_offers_the_course_layer_and_nothing_retired():
     text = template("course/dsl-course.yml")
-    assert "semester_defaults" in text
-    for key in ("format", "submit_via", "team_formation", "visibility"):
+    for key in course.RETIRED_COURSE_KEYS:
+        assert f"\n{key}:" not in text and f"# {key}:" not in text
+    block = yaml.safe_load(text.format(course_name="C", course_code="E1"))
+    # Every line commented: the course layer is optional, absent = the institution's.
+    assert block[settings.ASSIGNMENT_DEFAULTS_KEY] is None
+    for key in ("formats", "submit_via", "team_formation", "visibility"):
         assert key in text

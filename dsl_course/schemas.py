@@ -1,7 +1,8 @@
 """Export the console's contracts as JSON Schema: `python -m dsl_course.schemas --out DIR`.
 
 Three wire shapes (`dsl.request/1`, `dsl.outcome/1`, `dsl.status/1`), the operations
-registry (`ops.json`), and one schema per instructor-owned file the console edits. Every
+registry (`ops.json`), the engine's names (`names.json`) and institution policy
+(`policy.json`), and one schema per instructor-owned file the console edits. Every
 enum and every key set is READ off the constant the engine itself parses with, so a value
 added to the engine reaches the console's forms with no second edit; the committed copies
 under `console/schemas/` are held to a fresh export by `tests/test_schemas.py`.
@@ -17,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import records
+from . import policy, records
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
@@ -36,7 +37,6 @@ from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
     HANDLE_PATTERN,
-    ORG_PATTERN,
     OUTCOME_SCHEMA,
     REGISTRY,
     STATUS_SCHEMA,
@@ -81,10 +81,8 @@ PEOPLE_ENTRY_KEYS = (
 PEOPLE_REQUIRED = ("github_handle", "role", "email")
 COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
 COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url")
-# dsl-course.yml keys beyond `people`, `assignment_defaults` and `semester_defaults`.
+# dsl-course.yml keys beyond `people` and `assignment_defaults`.
 COURSE_TOP_KEYS = (
-    "org",
-    "org_name",
     "course_name",
     "course_code",
     "central_ref",
@@ -486,14 +484,6 @@ def dsl_course_schema() -> dict:
         }
     )
     defaults = _obj(_keys((*COURSE_DEFAULT_KEYS, *ASKED_DEFAULT_KEYS), _SPEC_TYPES))
-    semester_defaults = _obj(
-        {
-            "timezone": _str(),
-            "archive": _obj(
-                {"auto": {"type": "boolean"}, "grace_days": {"type": "integer"}}
-            ),
-        }
-    )
     central_ref = {
         "type": "string",
         "pattern": f"^(?:{'|'.join(TIERS)}|[0-9a-f]{{40}})$",
@@ -501,7 +491,6 @@ def dsl_course_schema() -> dict:
     top = _keys(
         COURSE_TOP_KEYS,
         {
-            "org": {"type": "string", "pattern": ORG_PATTERN},
             "central_ref": central_ref,
             "site_link_extensions": {"type": "array", "items": _str()},
         },
@@ -509,9 +498,8 @@ def dsl_course_schema() -> dict:
     top |= {
         "people": people,
         ASSIGNMENT_DEFAULTS_KEY: defaults,
-        "semester_defaults": semester_defaults,
     }
-    return _doc(".github/dsl-course.yml", _obj(top, ("org",)))
+    return _doc(".github/dsl-course.yml", _obj(top))
 
 
 def names_json() -> dict:
@@ -537,6 +525,9 @@ def all_schemas() -> dict[str, dict]:
         "status.schema.json": status_schema(),
         "ops.json": ops_json(),
         "names.json": names_json(),
+        # The institution policy the engine runs on (`policy.load`): the defaults, kinds,
+        # site block, contact and licences, so the console holds no literal of its own.
+        "policy.json": policy.load(),
         "schedule.schema.json": schedule_schema(),
         "instructors.schema.json": instructors_schema(),
         "students.schema.json": students_schema(),

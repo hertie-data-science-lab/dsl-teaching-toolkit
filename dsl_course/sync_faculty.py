@@ -53,6 +53,7 @@ from .course import (
     INSTRUCTORS_FILE,
     INSTRUCTORS_TEAM,
     OLD_PEOPLE_FILE,
+    RETIRED_COURSE_KEYS,
     active_today,
     semester_of,
 )
@@ -61,7 +62,7 @@ from .discovery import (
     discover_content_repos,
     live_semesters,
 )
-from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
+from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import line_of, load_yaml_config, take_lines
 from .gh_teams import (
     CREATED,
@@ -641,6 +642,20 @@ def read_course_config(
     # for `central_ref:` - and so the loader's reserved key cannot survive into anything
     # that renders this mapping.
     lines = take_lines(meta)
+    for key in RETIRED_COURSE_KEYS:
+        if key in meta:
+            faults.append(
+                ConfigFault(
+                    COURSE_CONFIG,
+                    f"`{key}:` is no longer read (decision 0009)",
+                    field=key,
+                    file=COURSE_CONFIG,
+                    in_repo=".github",
+                    lineno=line_of(lines, key),
+                    fix_text="run the migration, which removes it",
+                    code=NOT_MIGRATED,
+                )
+            )
     faculty = parse_faculty_from_meta(meta, faults, file=COURSE_CONFIG, repo=".github")
     try:
         resolve_central_ref(

@@ -19,8 +19,9 @@ from dsl_course import roster, schedule, site, welcome
 
 
 def test_course_metadata_carries_faculty_block():
-    md = bc._course_metadata("My-Course-E1", "My Course", "Deep Learning", "E1")
-    assert "org: My-Course-E1" in md
+    md = bc._course_metadata("Deep Learning", "E1")
+    for key in ("org", "org_name", "semester_defaults"):
+        assert f"\n{key}:" not in md
     assert "course_name: Deep Learning" in md
     assert "course_code: E1" in md
     # the (commented) faculty block faculty fill in - schedule stays semester-side
@@ -37,9 +38,7 @@ def test_course_metadata_seeds_admins_live_when_given():
     # --admins at bootstrap must land in the SSOT itself (uncommented), not just get a
     # one-time direct team invite (add_course_admins) - otherwise the next sync_faculty
     # run sees them as undeclared and prunes them right back out.
-    md = bc._course_metadata(
-        "My-Course-E1", "My Course", "Deep Learning", "E1", admins=["alice", "bob"]
-    )
+    md = bc._course_metadata("Deep Learning", "E1", admins=["alice", "bob"])
     assert "# people:" not in md  # live, not commented out
     assert "people:" in md
     assert '- github_handle: "alice"' in md
@@ -99,7 +98,7 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
     # renderer never touched puts a stray brace pair on the Schedule tab and in the
     # Updates box of every semester that uncomments the sentence.
     seeded = welcome.template("semester-config/schedule.yml").format(
-        tag="f2026", year=2026, year_next=2027
+        tag="f2026", year=2026, year_next=2027, timezone="Europe/Berlin", grace_days=60
     )
     meta = yaml.safe_load(seeded)
     # The skeleton leaves `semester_end:` commented out, and the archive date defaults off
@@ -182,7 +181,7 @@ def _bootstrapped_topics(monkeypatch, **kwargs) -> list[list[str]]:
     monkeypatch.setattr(
         bc, "set_repo_topics", lambda org, repo, topics: stamped.append(topics) or True
     )
-    bc.create_profile_repo("Org", "Org Name", "Course Name", **kwargs)
+    bc.create_profile_repo("Org", "Course Name", **kwargs)
     return stamped
 
 
@@ -211,7 +210,7 @@ def test_a_repo_that_could_not_be_created_is_not_stamped(monkeypatch):
     monkeypatch.setattr(
         bc, "set_repo_topics", lambda org, repo, topics: stamped.append(topics) or True
     )
-    bc.create_profile_repo("Org", "Org Name", "Course Name")
+    bc.create_profile_repo("Org", "Course Name")
     assert stamped == []
 
 
