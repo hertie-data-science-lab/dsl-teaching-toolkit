@@ -210,7 +210,7 @@ function inline(s: string): string {
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 }
 
-/** Escaped HTML for a small markdown subset: paragraphs, `- ` lists, code, bold, italic, links. */
+/** Escaped HTML for a small markdown subset: paragraphs, hard breaks, `- ` lists, code, bold, italic, links. */
 export function md(src: string | null | undefined): string {
   if (!src || !String(src).trim()) return '';
   return esc(String(src).trim())
@@ -218,7 +218,9 @@ export function md(src: string | null | undefined): string {
     .map((b) => {
       const lines = b.split('\n');
       if (lines.every((l) => /^\s*- /.test(l))) return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*- /, ''))}</li>`).join('')}</ul>`;
-      return `<p>${inline(lines.join('<br>'))}</p>`;
+      // As markdown does: a single newline is a space; a line ending in two spaces breaks.
+      const text = lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join('');
+      return `<p>${inline(text)}</p>`;
     })
     .join('');
 }
