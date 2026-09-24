@@ -73,7 +73,8 @@ Things whose *literal spelling* is depended on from outside Python:
   `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
   `sync_teams`, `team_formation`, `teardown`, `archive` (the documented name of `teardown`),
   `console`, `schemas` (the last two:
-  [The Instructor Console](#the-instructor-console)).
+  [The Instructor Console](#the-instructor-console)), and `migrate` (a maintainer's
+  laptop only, never a workflow: [Migration](#migration)).
   A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
   parser rather than a subcommand, for the same reason: `--patch-path` switches it from
   handing an assignment out to patching one that is already out, and every org's Release
@@ -127,8 +128,17 @@ Things whose *literal spelling* is depended on from outside Python:
   that or not, and anything that archives a semester must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
 - **`.github/semesters.yml`** is the semester registry every dropdown reads, and
-  **`.github/.last-refresh`** is the heartbeat that keeps an org's crons from GitHub's 60-day
-  inactivity disable.
+  **`.github/.system/last-refresh`** is the heartbeat that keeps an org's crons from GitHub's
+  60-day inactivity disable.
+- **The repo names `semester-config` and `join`** (`course.CONFIG_REPO`, `course.JOIN_REPO`)
+  and **everything under `.system/`** (`records.path`, exported to
+  `console/schemas/names.json`). `join` is in every enrolment mail; the old names
+  (`course.RETIRED_REPO_NAMES`) are live redirects, and `repos.create_repo` refuses them -
+  a repo created at one ends the redirect. The shipped JavaScript reads the config repo
+  and the lock path substituted, never spelt.
+- **The pause variable `DSL_PAUSED`** (`central.PAUSE_VARIABLE`): every job of every seeded
+  workflow is gated on it (`central.pausable`, applied at the write site), and only
+  `migrate` sets it.
 - **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is a filename faculty type into their
   own content repos. A rename silently stops withholding whatever the old name held back -
   worse than an outage, because the release still goes green. Nothing re-spells it: the
@@ -315,7 +325,7 @@ never propagated:
 Seeded files carry their owner on the first line, and the write site enforces it:
 
 - **SYSTEM-OWNED** - written unconditionally on every bootstrap and refresh, so fixes reach
-  running courses. Workflows, generated docs, `*.sample`.
+  running courses. Workflows, generated docs, everything under `.system/`.
 - **INSTRUCTOR-OWNED** - `gh_contents.seed_if_absent` only. Rewriting one destroys live state (roster
   rows, enrol codes, the semester's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
@@ -349,10 +359,10 @@ repo path to a file under `templates/`. Adding a file like this is four places:
 4. a test that the nightly loop reaches every live semester, beside the pointer's
    (`tests/test_bootstrap_seeding.py`).
 
-It carries no `.sample` twin and is absent from `example-course/cohort-org/`: nobody edits
-it, so there is nothing in it for a person to copy.
+It is absent from `example-course/cohort-org/`: nobody edits it, so there is nothing in it
+for a person to copy.
 
-`.dsl/status.json` (`dsl.status/1`, built by `status_json`, written by `status.write`) is the
+`.system/status.json` (`dsl.status/1`, built by `status_json`, written by `status.write`) is the
 same kind of file, twice: in each semester's private `semester-config`, and in the course org's
 public `.github` (counts only, never a handle or an email). `seed.refresh` rewrites every live
 semester's and the course's; the single-semester run of each of the four semester-config dispatch
@@ -657,7 +667,7 @@ org's whole `.github/workflows` set with `seed.github_workflow_files` (the same 
 Refresh actions makes, at the tier the org declares) and compares each blob sha with the
 org's tree. Every input to that render is discovered from the org, so nothing is hardcoded
 and no file is excused. A named file means run **Refresh actions** and start again. The
-`.last-refresh` heartbeat is only checked for existence - its content is the date, so it
+`.system/last-refresh` heartbeat is only checked for existence - its content is the date, so it
 moves at most once a day and could never show a promotion made an hour ago.
 
 Everything a run creates is namespaced `assignment-90-<run id>`, each shape under a
@@ -728,14 +738,49 @@ Promote.
 | workflow env `COHORT_ORG` | `SEMESTER_ORG` | rendered workflows |
 | semester template description `<slug> - cohort assignment template` | `<slug> - semester assignment template` | converged by `repos.SUPERSEDED_DESCRIPTION_ENDINGS` |
 | doc anchors `#closing-the-cohort-out`, `#peopleyml`, `#write-your-terms-plan`, `#carrying-cohort-edits-back`, `#cohort-setup-per-year`, `#only-staff-in-these-teams`, `#what-instructors-tag-reaches`, `#end-of-term` | `#archiving-the-semester`, `#instructorsyml`, `#write-your-semesters-plan`, `#carrying-semester-edits-back`, `#semester-setup-per-year`, `#only-instructors-in-these-teams`, `#what-instructors-semester-reaches`, `#end-of-semester` | docs; each old anchor is kept as an HTML alias above its heading, so a link already posted still lands |
-| paths KEPT, not renamed: `.github/.missing-cohorts`, `semester-config/.system/semester-gradebook.csv`, `semester-config/.system/archive.md` | unchanged here (WP-A2 moves the records) | the tool must NOT rename them |
+| repo `classroom-config` | `semester-config` (`course.CONFIG_REPO`) | semester org; renamed by the tool, the old name redirects |
+| repo `welcome` | `join` (`course.JOIN_REPO`); `join/README.md` is now a pointer to the org profile (new semesters; live ones keep theirs) | semester org; renamed by the tool - every sent enrolment mail links the old URL, which redirects |
+| `.dsl/` | `.system/` | `semester-config` and the course `.github` |
+| `semester-config/assignments.lock.yml`, `snapshots/`, `autograde/` (with the `_graded.json` / `_skipped.json` markers), `solutions/`, `gradebook/` (with `distributed.csv`), `team-formation/` | the same under `semester-config/.system/` (`records.path`) | MOVED by the tool, by blob sha, in one commit: each fire-once marker exists exactly once |
+| `semester-config/cohort-gradebook.csv`, `semester-config/archive/teardown.md` | `semester-config/.system/semester-gradebook.csv`, `semester-config/.system/archive.md` | semester org (the archive record is only ever written into a live semester) |
+| semester `.github/dsl-course.yml` (the course pointer) | `semester-config/.system/dsl-course.yml` | semester org; the four dispatchers read it there |
+| `semester-config/*.sample`, `grading_sheets/*.yml.sample` | none - the scaffolds and docs link `example-course/cohort-org/` | deleted by the tool |
+| course `.github/.github/.last-refresh`, `.github/.github/.missing-cohorts` | `.github/.system/last-refresh`, `.github/.system/missing-semesters` | course org |
+| materials `MAINTAINING.md`, `SYLLABUS.md.sample`, `SYLLABUS.sessions.md` | `.system/MAINTAINING.md`, `.system/SYLLABUS.md.sample`, `.system/SYLLABUS.sessions.md`; a whole-repo release skips `.system/` | every `course-materials-*` repo |
+| semester topic `dsl-cohort` on an ARCHIVED semester | kept for ever: archived semesters are never migrated, and every sweep skips them (`discovery.semester_is_live`, `seed.refresh`) | - |
+| console op ids `cohort.check`, `cohort.preview_automation`, `cohort.archive`, `cohort.bootstrap`; op scope `cohort` | `semester.*`; scope `semester` | `console/schemas/ops.json` |
+| status `fix.screen: staff` | `instructors` | `dsl.status/1` |
+| status `inputs` key `assignments.lock.yml` | `.system/assignments.lock.yml` | `dsl.status/1` |
+| toolkit `templates/classroom-config/`, `templates/welcome/`, `templates/cohort/` | `templates/semester-config/`, `templates/join/`, `templates/semester/` | this repo only |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,
 `check-cohort-setup.yml`), the digest issue titles (so `people.yml has entries the sync
 cannot use` keeps its old word), the site's `_data/people.yml` the pinned theme reads, the
-`SCOPED_RUN_TITLE` run-name the cadence check reads back, and the console's op ids and op
-scope (`cohort.*`, renamed with the console source).
+`SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
+name (not a CLI), and the site's `files/materials/` dest.
+
+**The cut-off.** Real orgs stay on the OLD engine until the Promote to `release` that
+carries this change; the old engine must never see a migrated org, and the new one never an
+unmigrated one (a hard `NOT_MIGRATED` everywhere). So: migrate the demo course and its live
+semester on `main`, run the e2e there, then - on the user's go-ahead, outside teaching
+hours - migrate every live real org and Promote in the same window (with ds01's switch to
+`all_semesters`). `.project/build/migration-runbook.md` holds the order.
+
+**The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, nothing
+written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
+step: do, verify, stop on the first failure naming the rollback. A step already done says
+"already migrated"; with no work left, the pause is not even set. Semester steps: preflight
+(topic, not archived, course already migrated, no run queued or running), pause
+(`DSL_PAUSED` in the semester AND its course org), rename repos, layout (records into
+`.system/`, `people.yml` -> `instructors.yml`, the pointer moved in, samples deleted - one
+`migrate: layout` commit), keys (`schedule.yml`), topic, re-render, unpause, status (zero
+`NOT_MIGRATED`). Course steps: preflight, pause, registry, `.system/` in `.github`,
+`dsl-course.yml` keys, template keys (`grading_config.yml` `format:` -> `formats:` on each
+template's `solution` branch - course-owned, so here rather than per semester), materials
+files, re-render (Refresh actions from the checkout), unpause, status. `grading_datetime` is
+left for B2. Tested only against
+a stubbed GitHub (`tests/test_migrate.py`).
 
 ## Working conventions
 
