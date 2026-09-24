@@ -197,9 +197,9 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
           <div class="nav-h">Course</div>
           <ul>
             {!cohort ? item('#course', 'Overview', 'course') : null}
-            {item('#materials', 'Materials', 'materials')}
-            {item('#templates', 'Templates', 'templates')}
             {item('#details', 'Course details', 'details')}
+            {item('#materials', 'Materials', 'materials')}
+            {item('#templates', 'Assignment templates', 'templates')}
             {item('#website', 'Public website', 'website')}
           </ul>
         </>

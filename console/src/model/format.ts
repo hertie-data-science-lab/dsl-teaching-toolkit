@@ -117,7 +117,7 @@ export const COHORT_STAGES: [string, string][] = [
   ['K1', 'Org'], ['K2', 'Setup'], ['K3', 'Staff'], ['K4', 'Schedule'], ['K5', 'Students'], ['K6', 'Site'], ['K7', 'Archive'],
 ];
 export const COURSE_STAGES: [string, string][] = [
-  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Materials'], ['C5', 'Templates'], ['C6', 'Website'],
+  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
 ];
 
 /** Where a problem sits, as the problem card's bold first word. */

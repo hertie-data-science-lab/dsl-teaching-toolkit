@@ -191,7 +191,7 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
       <div class="field">
         <label for="e-tpl">Template</label>
         <select id="e-tpl" onChange={(e) => set({ template: (e.target as HTMLSelectElement).value })}>
-          {!d.template ? <option value="" selected>Choose a template</option> : null}
+          {!d.template ? <option value="" selected>Choose an assignment template</option> : null}
           {opts.map((o) => <option value={o.value} selected={o.value === d.template}>{o.label}</option>)}
         </select>
         {errors.template ? <Invalid>{errors.template}</Invalid>

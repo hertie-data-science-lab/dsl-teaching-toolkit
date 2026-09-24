@@ -25,7 +25,7 @@ export const ASSIGNMENT_DEFAULTS: Tiers = {
     tier: 'default', label: 'Late penalty per day', default: '10%', defaultLabel: 'default: 10%',
     check: (x, v) => (x !== undefined && !PENALTY.test(String(x)) ? 'Write a percentage (10%) or a fraction (0.1).' : x !== undefined && v.late_window_days === undefined ? 'Set both or neither.' : null),
   },
-  max_team_size: { tier: 'default', label: 'Largest team', widget: 'number', default: 5, defaultLabel: 'default: 5' },
+  max_team_size: { tier: 'default', label: 'Max team size', widget: 'number', default: 5, defaultLabel: 'default: 5' },
   format: { tier: 'default', label: 'Default format', widget: 'select', options: [opt('', 'Jupyter notebook (the toolkit’s default)'), ...FORMATS.map(([v, l]) => opt(v, l))] },
   submit_via: { tier: 'default', label: 'Default place to submit', widget: 'select', options: [opt('', 'Their own repo (the toolkit’s default)'), ...SUBMIT.map(([v, l]) => opt(v, l))] },
   team_formation: { tier: 'default', label: 'Default team formation', widget: 'select', options: [opt('', 'Students form their own (the toolkit’s default)'), opt('self_select', 'Students form their own'), opt('assigned', 'You assign them')] },

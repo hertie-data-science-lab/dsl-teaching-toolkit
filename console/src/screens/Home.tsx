@@ -71,7 +71,7 @@ export function HomeScreen({ courses, cohortStates, user }: HomeProps) {
     <>
       <Crumbs items={[{ t: 'All courses' }]} />
       <div class="page-head">
-        <div><h1>Your courses</h1><p class="lede">Ordered by what needs you. Greyed rows are courses you can see but not change.</p></div>
+        <div><h1>Your courses</h1><p class="lede">All courses past &amp; present; ordered by what needs your attention</p></div>
         <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
       </div>
       <Help title="What am I looking at?" doc="01-new-course-org.md">
@@ -171,7 +171,7 @@ export function ReadonlyScreen({ course, cohort }: { course: Course; cohort?: Co
         <b>Read only.</b>
         <span>You are not staff on this course, so this shows only what your GitHub account can see: the course’s public details and its student site. No roster, no marks, no buttons.</span>
       </div>
-      <p class="footnote" style="margin:-8px 0 18px">Who can change what: instructors and teaching assistants of a cohort can change that cohort and the course’s materials and templates; course admins can change everything in the course. This follows GitHub’s own access.</p>
+      <p class="footnote" style="margin:-8px 0 18px">Who can change what: instructors and teaching assistants of a cohort can change that cohort and the course’s materials and assignment templates; course admins can change everything in the course. This follows GitHub’s own access.</p>
       <section class="panel section">
         <h2>Course</h2>
         <dl class="kv">

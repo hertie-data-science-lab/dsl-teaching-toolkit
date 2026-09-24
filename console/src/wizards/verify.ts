@@ -113,19 +113,19 @@ export interface TemplateCheck {
 export async function checkTemplate(client: GitHubClient, org: string, repo: string): Promise<TemplateCheck> {
   try {
     const r = await client.getRepo(org, repo);
-    if (!r) return { checks: [{ text: `Template ${repo} created`, ok: false, hint: 'Not there yet; creating takes about a minute.' }], config: null };
+    if (!r) return { checks: [{ text: `Assignment template ${repo} created`, ok: false, hint: 'Not there yet; creating takes about a minute.' }], config: null };
     const [main, sol, cfg] = await Promise.all([client.getBranch(org, repo, 'main'), client.getBranch(org, repo, 'solution'), client.getContents(org, repo, 'grading_config.yml', 'solution')]);
     const parses = cfg ? !new YamlText(cfg.text).errors.length : false;
     return {
       checks: [
-        { text: `Template ${repo} created`, ok: true },
+        { text: `Assignment template ${repo} created`, ok: true },
         { text: 'Brief and solution branches present', ok: !!main && !!sol },
         { text: 'Settings check out (grading_config.yml parses)', ok: parses, hint: cfg && !parses ? 'grading_config.yml does not parse; fix it on the template’s settings.' : undefined },
       ],
       config: cfg ? { text: cfg.text, sha: cfg.sha } : null,
     };
   } catch (e) {
-    return { checks: [{ text: `Template ${repo} created`, ok: null, hint: `GitHub did not answer (${why(e)}).` }], config: null };
+    return { checks: [{ text: `Assignment template ${repo} created`, ok: null, hint: `GitHub did not answer (${why(e)}).` }], config: null };
   }
 }
 

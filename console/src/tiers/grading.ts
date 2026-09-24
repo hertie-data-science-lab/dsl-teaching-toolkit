@@ -69,25 +69,29 @@ export function toConfig(v: Values): Record<string, unknown> {
 
 const PENALTY = /^(\d+(\.\d+)?%|0?\.\d+|0|1(\.0+)?)$/;
 
-export function settingsTiers(d: CourseDefaults): Tiers {
+/** `teamsHref`: where "You assign them" links to, the newest cohort's Teams page when there is one. */
+export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
   return {
-    title: { tier: 'default', label: 'Title', defaultLabel: 'from the wizard', reason: 'Shown to students on the site and in their repo.' },
+    title: { tier: 'default', label: 'Title', reason: 'Shown to students on the site and in their repo.' },
     type: {
-      tier: 'ask', label: 'Alone or in teams', widget: 'radio', reason: 'The one choice that changes everything downstream.',
+      tier: 'ask', label: 'Alone or in teams', widget: 'radio', defaultLabel: 'default: alone', reason: 'This choice changes downstream options.',
       options: [opt('individual', 'Alone', 'One repo per student. The default.'), opt('group', 'In teams', 'One repo per team; teams form before hand out.')],
     },
     team_formation: {
       tier: 'conditional', under: 'type', when: (v) => v.type === 'group', label: 'How teams form', widget: 'radio', default: 'self_select', defaultLabel: 'default: students choose',
-      options: [opt('self_select', 'Students form their own', 'On the student site.'), opt('assigned', 'You assign them', 'On the Teams page.')],
+      options: [
+        opt('self_select', 'Students form their own', 'On the student site. The default.'),
+        { ...opt('assigned', 'You assign them', 'You assign them on the cohort’s Teams page once hand-out is scheduled.'), href: teamsHref },
+      ],
     },
     max_team_size: {
-      tier: 'conditional', under: 'type', when: (v) => v.type === 'group', label: 'Largest team', widget: 'number', defaultLabel: `course default: ${d.teamSize}`,
+      tier: 'conditional', under: 'type', when: (v) => v.type === 'group', label: 'Max team size', widget: 'number', defaultLabel: `course default: ${d.teamSize}`,
       placeholder: d.teamSize, reason: 'Students cannot join a team that is full.',
       check: (x) => (x !== undefined && (!Number.isInteger(x) || (x as number) < 1) ? 'A whole number, 1 or more.' : null),
     },
     submit_via: {
       tier: 'default', label: 'Where students submit', widget: 'radio', default: 'assignment_repo', defaultLabel: 'default: their own repo', reason: 'Decides what marking reads.',
-      options: SUBMIT.map(([v, l, s]) => opt(v, l, s)),
+      options: SUBMIT.map(([v, l, s]) => opt(v, l, v === 'assignment_repo' ? `${s} The default.` : s)),
     },
     submit_url: {
       tier: 'conditional', under: 'submit_via', when: (v) => v.submit_via === 'external', label: 'Link to where they submit', widget: 'url', placeholder: 'https://',
@@ -105,11 +109,11 @@ export function settingsTiers(d: CourseDefaults): Tiers {
     },
     format: {
       tier: 'default', label: 'What students hand in', widget: 'radio', default: 'ipynb', defaultLabel: 'default: Jupyter notebook', reason: 'Seeds the starter files and decides how markers see submissions.',
-      options: FORMATS.map(([v, l]) => opt(v, l)),
+      options: FORMATS.map(([v, l]) => opt(v, l, v === 'ipynb' ? 'The default.' : undefined)),
     },
     autograde: {
       tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off',
-      options: [opt('true', 'On', 'Tests suggest a mark.'), opt('false', 'Off', 'Marked by hand.')],
+      options: [opt('true', 'On', 'Tests suggest a mark. Marker has final discretion.'), opt('false', 'Off', 'Marked purely by hand. The default')],
       forced: (v) => (isDrop(v) ? { value: undefined, reason: 'A shared drop box holds every student’s work in one repo, so tests cannot run per student.' } : null),
       check: (x) => (x === undefined || x === 'true' || x === 'false' ? null : `The file says “${String(x)}”. Choose on or off.`),
     },
@@ -120,7 +124,7 @@ export function settingsTiers(d: CourseDefaults): Tiers {
     completion_check: {
       tier: 'advanced', label: 'Completion check', widget: 'radio', default: 'auto',
       defaultLabel: 'default: auto (on for a notebook, off otherwise)', reason: 'Flags submissions with unanswered questions in the mark sheet.',
-      options: [opt('auto', 'Auto'), opt('on', 'On'), opt('off', 'Off')],
+      options: [opt('auto', 'Auto', 'The default.'), opt('on', 'On'), opt('off', 'Off')],
       forced: (v) => (isDrop(v) ? { value: 'auto', reason: 'Off: not available for a shared drop box.' } : null),
     },
     grader_pdf: {
@@ -133,7 +137,7 @@ export function settingsTiers(d: CourseDefaults): Tiers {
       check: (x, v) => (x !== undefined && !v.late_penalty_per_day ? 'Set both or neither; one alone is ignored and the course default applies.' : null),
     },
     late_penalty_per_day: {
-      tier: 'advanced', label: 'Late penalty per day', placeholder: d.latePct, reason: 'Write 10% or 0.1.',
+      tier: 'advanced', label: 'Late penalty per day', placeholder: d.latePct, defaultLabel: `course default: ${d.latePct}`, reason: 'Write 10% or 0.1.',
       check: (x, v) =>
         x !== undefined && !PENALTY.test(String(x)) ? 'Write a percentage (10%) or a fraction (0.1).'
         : x !== undefined && v.late_window_days === undefined ? 'Set both or neither; one alone is ignored and the course default applies.' : null,

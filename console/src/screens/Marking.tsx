@@ -36,6 +36,7 @@ function Marks(p: ReadyProps & { a: Assignment }) {
   const { a } = p;
   const env = useEnv();
   const [edits, setEdits] = useState<Record<string, unknown>>({});
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
   const [save, runSave, setSave] = useSave(env);
   const path = `grading_sheets/${a.slug}.yml`;
   const file = p.files.file(p.cohort.org, 'classroom-config', path);
@@ -113,13 +114,17 @@ function Marks(p: ReadyProps & { a: Assignment }) {
         </tr>,
       ];
     }
+    const open = !folded[u.key];
     return [
       <tr class={`team-row${nosub ? ' nosub' : ''}`}>
-        <td><b>{u.key}</b><br /><span class="footnote">{u.people.length} member{u.people.length === 1 ? '' : 's'}</span></td>{sys}{scoreCells}
+        <td>
+          <button class="fold-toggle" type="button" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} the members of ${u.key}`} onClick={() => setFolded({ ...folded, [u.key]: open })}>{open ? '▾' : '▸'}</button>
+          <b>{u.key}</b><br /><span class="footnote">{u.people.length} member{u.people.length === 1 ? '' : 's'}</span>
+        </td>{sys}{scoreCells}
         <td>{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, false, true) : null}</td>
         <td /><td /><td class="pen">{penaltyText(rate, days)}</td><td class="calc">{round(finalGrade(total, rate, days, 0))}</td>
       </tr>,
-      ...u.people.map((pr) => (
+      ...(open ? u.people : []).map((pr) => (
         <tr class="member-row">
           <td style="padding-left:22px"><span class="slug">{pr.handle}</span></td>
           <td class="sys" colSpan={4} /><td colSpan={Math.max(1, qs.length)} />
@@ -153,7 +158,7 @@ function Marks(p: ReadyProps & { a: Assignment }) {
               <th class="sys grp-h" colSpan={4}>Submission<span class="grp">system <Lock /></span></th>
               <th class="grp-h" colSpan={Math.max(1, qs.length)}>{qs.length ? 'Points per question' : 'Score'}</th>
               <th rowSpan={2}>Feedback<span class="grp">students see</span></th>
-              <th rowSpan={2}>Adjust<span class="grp">±</span></th>
+              <th rowSpan={2}>Adjust ±<span class="grp">{sheet.group ? 'individual adjustment relative to team (optional)' : 'optional'}</span></th>
               <th rowSpan={2}>Private notes<span class="grp">never shared</span></th>
               <th rowSpan={2} class="sys">Penalty</th>
               <th rowSpan={2} class="sys">Total{max ? ` / ${max}` : ''}</th>
@@ -291,7 +296,7 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
           </section>
           <section class="panel section">
             <h2>Team size</h2>
-            <dl class="kv"><dt>Largest team</dt><dd>{maxSize} <span class="footnote">{cfg.max_team_size ? 'from the template' : 'the course default'}</span></dd><dt>How teams form</dt><dd>{formation}</dd></dl>
+            <dl class="kv"><dt>Max team size</dt><dd>{maxSize} <span class="footnote">{cfg.max_team_size ? 'from the template' : 'the course default'}</span></dd><dt>How teams form</dt><dd>{formation}</dd></dl>
             <a class="textlink" href={`?course=${p.course.org}#template-${a.slug}`}>Change on the template</a>
           </section>
         </div>

@@ -18,7 +18,7 @@ export interface FieldTier {
   /** How the default is written beside the label: "default: 10%". */
   defaultLabel?: string;
   widget?: Widget;
-  options?: { value: string; label: string; sub?: string; off?: string }[];
+  options?: { value: string; label: string; sub?: string; off?: string; href?: string }[];
   placeholder?: string;
   /** Conditional: the field it sits under. */
   under?: string;

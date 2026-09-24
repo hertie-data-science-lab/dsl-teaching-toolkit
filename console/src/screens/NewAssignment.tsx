@@ -222,7 +222,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <dt>Submit</dt><dd>{copying ? 'As copied' : submit}</dd><dd>{copying ? null : <a href="#new-assignment-2">Change</a>}</dd>
           <dt>Marking</dt><dd>{copying ? 'As copied' : `${fmts}; tests ${w.autograde === 'true' ? `on (${String(w.tests ?? 'tests')})` : 'off'}`}</dd><dd>{copying ? null : <a href="#new-assignment-3">Change</a>}</dd>
         </dl>
-        <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Template ${repo} created`]} />
+        <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Assignment template ${repo} created`]} />
         {extrasPending ? <p class="footnote">The marking settings the create step does not take are written to grading_config.yml next.</p> : null}
         <SaveLine state={save} />
         {ready ? (
@@ -249,10 +249,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const back = step > 1 ? <a class="btn quiet" href={`#new-assignment-${step === 4 && copying ? 1 : step - 1}`}>Back</a> : <a class="btn quiet" href="#templates">Cancel</a>;
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Templates', href: '#templates' }, { t: 'New assignment' }]} />
+      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: 'New assignment' }]} />
       <div class="page-head"><div><h1>New assignment</h1></div></div>
-      <Help title="What a template is" doc="03-add-assignment-to-course.md">
-        <p>One template per assignment. Students get a copy at hand out; marking reads its solution branch. Everything here has a default and can be changed later on the template’s settings.</p>
+      <Help title="What an assignment template is" doc="03-add-assignment-to-course.md">
+        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. Everything here has a default and can be changed later on the template’s settings.</p>
       </Help>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Three questions, then a check" base="new-assignment-" />

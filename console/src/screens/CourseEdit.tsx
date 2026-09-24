@@ -341,10 +341,10 @@ export function MaterialsScreen(p: CourseProps) {
           {m ? (m.state === 'ready' ? <div class="check-line ok"><Check /><span>Written.</span></div> : <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine>) : <p class="footnote">Not checked yet.</p>}
           <div class="actions"><EditFile org={course.org} repo={repo} path="SYLLABUS.md" /></div>
           {scope ? (
-            <div class="savebar">
-              <span class="footnote">Generate the session list from {scope.where}’s schedule into SYLLABUS.sessions.md.</span>
-              <OpButtons def={generateSyllabus(scope, repo)} small />
-            </div>
+            <>
+              <p class="footnote">Builds a paste-ready ‘Course sessions and readings’ block from the cohort schedule and the <code>readings/NN_*</code> folders. Write saves it as <code>SYLLABUS.sessions.md</code> in this repo; <code>SYLLABUS.md</code> is yours and is never touched.</p>
+              <div class="actions"><OpButtons def={generateSyllabus(scope, repo)} small previewLabel="Preview the session list" /></div>
+            </>
           ) : null}
         </section>
         <section class="panel section">
