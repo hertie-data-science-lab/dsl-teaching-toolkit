@@ -123,7 +123,7 @@ CONTRACT_STATUS = {
         "teams.csv": "d",
         "grading_sheets": "e",
         "course/dsl-course.yml": "f",
-        "assignments.lock.yml": "g",
+        ".system/assignments.lock.yml": "g",
     },
     "course": {
         "org": "hertie-dsl-demo-course-e1234",

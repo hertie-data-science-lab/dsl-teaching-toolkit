@@ -12,8 +12,8 @@ sheet, as information for whoever marks it. Faculty & instructors write the mark
   semester/<slug>-<handle>  (individual)   clone @ snapshot, overlay tests, run
   semester/<slug>-<team>    (group)              |
                 v
-  semester-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  semester-config/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
+  semester-config/.system/autograde/<slug>/<key>.json   (per-test detail, private archive)
+  semester-config/.system/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
                                                  completion check ran)
   semester-config/grading_sheets/<slug>.yml     (`info.autograde`, `info.completion` -
                                                  never a mark)
@@ -25,7 +25,7 @@ entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to befor
 deadline passes a `rev-list --before` pin. The hourly scheduler therefore freezes each
 assignment shortly after its grading deadline, writing one row per submission repo into
 
-    semester-config/snapshots/<slug>.csv
+    semester-config/.system/snapshots/<slug>.csv
         repo,sha,recorded_at,submitted_at,submitted_source
 
 and never rewriting it. `submitted_at` is WHEN that submission arrived and
@@ -54,8 +54,8 @@ delete the snapshot CSV and let the next tick rebuild it.
 
 FIRE-ONCE.  The hourly scheduler autogrades each assignment exactly once, just after its
 grading deadline. The marker is an explicit SENTINEL file this module writes as the very last
-action of a successful run - `autograde/<slug>/_graded.json` - NOT the mere existence of the
-`autograde/<slug>/` directory: an unchecked archive write used to create that directory
+action of a successful run - `.system/autograde/<slug>/_graded.json` - NOT the mere existence of the
+`.system/autograde/<slug>/` directory: an unchecked archive write used to create that directory
 first, so an aborted run left the marker present over unwritten scores and un-graded everyone.
 While no sentinel exists the assignment has never been machine-graded, and once one exists it
 is never graded again automatically. A DECISION not to grade (no `solution` branch,
@@ -64,7 +64,7 @@ instead, saying why - because a skip that leaves the directory empty is re-decid
 cost of a template clone, every hour for ever. `has_autograde_results` tests for either
 record, never bare directory existence, so a stray early write into the directory can no
 longer be mistaken for a completed grade. To re-grade deliberately, delete
-`autograde/<slug>/` and let the next tick regrade.
+`.system/autograde/<slug>/` and let the next tick regrade.
 
 grading_config.yml (on the template's solution branch):
     type: individual        # or group
@@ -115,7 +115,7 @@ from operator import itemgetter
 from pathlib import Path
 from typing import NamedTuple
 
-from . import course, grades, roster, schedule, sync_teams, teams
+from . import course, grades, records, roster, schedule, sync_teams, teams
 from .course import (
     CONFIG_REPO,
     SANDBOX_USER,
@@ -160,10 +160,10 @@ from .log import (
 )
 from .repos import default_branch, repo_missing
 
-AUTOGRADE_DIR = "autograde"  # semester-config/autograde/<slug>/<key>.json
+AUTOGRADE_DIR = records.path("autograde")  # <it>/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
 SKIP_RECORD = "_skipped.json"  # the same marker, for an assignment nothing grades
-SNAPSHOT_DIR = "snapshots"  # semester-config/snapshots/<slug>.csv
+SNAPSHOT_DIR = records.path("snapshots")  # <it>/<slug>.csv
 SNAPSHOT_FIELDS = (
     "repo",
     "sha",
@@ -323,7 +323,7 @@ def target_ref(repo: str) -> str:
     The log is PUBLIC (every workflow runs in the course org's public `.github`) and a
     submission repo is named `<slug>-<handle>`, so naming it beside a score or a
     non-submission publishes a student's result. The private per-target archive under
-    autograde/<slug>/ records the tag next to the repo, which is where a marker looks it up."""
+    .system/autograde/<slug>/ records the tag next to the repo, which is where a marker looks it up."""
     return "#" + hashlib.sha1((_REF_SALT + repo).encode()).hexdigest()[:7]
 
 
@@ -1071,12 +1071,12 @@ def _warn_if_late_commits_only(
 def has_autograde_results(semester_org: str, slug: str) -> bool:
     """Whether `slug` carries the autograder's FIRE-ONCE marker in semester-config: the
     `_graded.json` sentinel of a completed run, or the `_skipped.json` record of a decision
-    not to grade. NOT bare `autograde/<slug>/` existence - an aborted run can leave that
+    not to grade. NOT bare `.system/autograde/<slug>/` existence - an aborted run can leave that
     directory populated with archives but no sentinel, and it must then still regrade.
 
     The scheduler grades an assignment only while neither record is present, so a machine score
     is written once and never silently refreshed under a marker's hand-edits. A deliberate
-    re-grade means deleting `autograde/<slug>/` (the next tick then regrades) or running the
+    re-grade means deleting `.system/autograde/<slug>/` (the next tick then regrades) or running the
     autograder."""
     return any(
         file_exists(semester_org, CONFIG_REPO, f"{autograde_path(slug)}/{record}")
@@ -1123,10 +1123,10 @@ def _record_skip(semester_org: str, slug: str, reason: str, dry_run: bool) -> in
 
 
 def mark_graded(semester_org: str, slug: str) -> bool:
-    """Write the fire-once sentinel `autograde/<slug>/_graded.json` - the LAST action of a
+    """Write the fire-once sentinel `.system/autograde/<slug>/_graded.json` - the LAST action of a
     fully successful run, once every per-target archive is durably written.
 
-    Making the marker an EXPLICIT file (rather than the mere existence of `autograde/<slug>/`,
+    Making the marker an EXPLICIT file (rather than the mere existence of `.system/autograde/<slug>/`,
     which the first archive `put_file` created as a side effect) decouples "this assignment is
     graded" from any single archive write: a future early write into the directory can no
     longer be mistaken for a completed grade, and a run that fails part-way through the archives
@@ -2998,7 +2998,7 @@ def _grader_document_for(
             if verdict in (GRADER_PDF, GRADER_HTML)
             else source.suffix.lstrip(".")
         )
-        # `person=True`: the PATH is `autograde/<slug>/<handle>.pdf`, and this log is
+        # `person=True`: the PATH is `.system/autograde/<slug>/<handle>.pdf`, and this log is
         # world-readable even where semester-config is not.
         if not put_file(
             semester_org,
@@ -3399,7 +3399,7 @@ def collect(
                 # A runner fault with one fix, said in words by `_grader_dep_missing`
                 # rather than through a semester of `did-not-run`. Recorded like any other
                 # decision not to machine-mark, so the cron does not re-decide it hourly;
-                # deleting `autograde/<slug>/` re-runs it once the runner is fixed.
+                # deleting `.system/autograde/<slug>/` re-runs it once the runner is fixed.
                 no_completion = COMPLETION_DEP_SKIP
             else:
                 starters = _starter_notebook_shas(course_org, template)
@@ -3462,7 +3462,7 @@ def collect(
         # The per-target result archives are held here and written only AFTER the grading
         # sheet is durable (see below), with the `_graded.json` sentinel written last. Writing
         # archives mid-loop is what let an aborted run un-grade everyone back when bare
-        # `autograde/<slug>/` existence was the marker; the explicit sentinel now decouples the
+        # `.system/autograde/<slug>/` existence was the marker; the explicit sentinel now decouples the
         # marker from any archive write, but the ordering is kept as defence in depth.
         archives: list[tuple[str, bytes, str]] = []
         # `_grade_target` returns None for one reason only: the submission repo could not be
@@ -3578,7 +3578,7 @@ def collect(
             # Every target WAS examined and none of them yielded a grade. Not a failure: the
             # snapshot is frozen, so an hourly retry would see exactly what this run saw and
             # go red for ever. Record the skip and stay green - a deliberate re-grade is
-            # still a delete of autograde/<slug>/ away.
+            # still a delete of .system/autograde/<slug>/ away.
             log_ok(
                 f"{slug}: nothing gradable across {len(targets)} target(s) - recording "
                 f"the skip rather than retrying every hour."
@@ -3623,7 +3623,7 @@ def collect(
         # and the sentinel.
         archive_ok = True
         for apath, acontent, amsg in archives:
-            # `person=True`: the PATH is `autograde/<slug>/<handle>.json`, and this log is
+            # `person=True`: the PATH is `.system/autograde/<slug>/<handle>.json`, and this log is
             # world-readable even when semester-config is not.
             if not put_file(
                 semester_org, CONFIG_REPO, apath, acontent, amsg, person=True

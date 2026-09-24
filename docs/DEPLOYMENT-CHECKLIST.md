@@ -178,7 +178,7 @@ cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
 
 `semester-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
-1. Students self-select via the `join` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/assignments.lock.yml`,
+1. Students self-select via the `join` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/.system/assignments.lock.yml`,
 2. you edit it directly;
 either way a push materialises a GitHub team per group, and releasing a group assignment grants each team one shared repo.
 
@@ -484,10 +484,10 @@ Verify with `python3 -m dsl_course.schedule --semester-org <SEMESTER> --validate
 [Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).
 
 **What happens at the grading deadline.** The scheduler freezes each submission repo's
-commit into `semester-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
+commit into `semester-config/.system/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
 then examines it **once** - the hidden tests where the `<slug>-<semester>` template's
 `grading_config.yml` says `autograde: true`, the completion check where it asks for one (the
-`_graded.json` / `_skipped.json` record in `semester-config/autograde/<slug>/` is the fired
+`_graded.json` / `_skipped.json` record in `semester-config/.system/autograde/<slug>/` is the fired
 marker - delete it, or the whole folder, to re-grade). All of this happens whether or not the
 semester uses `releases`.
 

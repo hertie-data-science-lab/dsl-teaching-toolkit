@@ -64,7 +64,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
-from . import config_digest, grades, mailer, roster, schedule, teams
+from . import config_digest, grades, mailer, records, roster, schedule, teams
 from .course import CONFIG_REPO, course_phrase
 from .discovery import course_name_of, join_issue_url, semester_is_live
 from .faults import ConfigFault, Unusable
@@ -357,7 +357,7 @@ def _what(window: Window) -> str:
 # One row per thing SAID, in the PRIVATE semester-config, shaped like
 # `grades.DISTRIBUTED_PATH`: a re-run says nothing twice, and a message that could not be
 # sent is retried exactly once, because the row holding its claim is given back.
-MAILED_PATH = "team-formation/mailed.csv"
+MAILED_PATH = records.path("team_formation", "mailed.csv")
 MAILED_HEADER = (
     # The SCHEDULE key, not the semester-side name: it is what teams.csv and the Join-team
     # form are keyed on, and it survives an edit to `semester_dest_repo` - which, keyed on

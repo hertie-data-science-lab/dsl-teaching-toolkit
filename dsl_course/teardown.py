@@ -57,7 +57,7 @@ import sys
 from datetime import date, datetime, timezone
 from typing import NamedTuple
 
-from . import cadence, config_digest, propagate, schedule, site, source_digest
+from . import cadence, config_digest, propagate, records, schedule, site, source_digest
 from .course import CONFIG_REPO, JOIN_REPO, UPSTREAM_BRANCH, pages_repo
 from .discovery import (
     ASSIGNMENT_TEMPLATE_TOPIC,
@@ -84,7 +84,7 @@ from .repos import archive_repo
 # The record itself, in the private repo it describes. Its own directory rather than a root
 # file, so the sealed repo shows at a glance which files are the term's working state and
 # which one is the account of how it ended.
-RECORD_PATH = "archive/teardown.md"
+RECORD_PATH = records.path("archive")
 
 _RECORD_BANNER = (
     "<!-- SYSTEM-OWNED - do not edit. Written by `python3 -m dsl_course.archive` "
@@ -98,7 +98,7 @@ _RECORD_BANNER = (
 _RETENTION_NOTE = f"""This repository is the semester's private record and is now read-only.
 It holds the roster (`students.csv`), the project teams (`teams.csv`), the instructors
 (`instructors.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
-the autograde detail (`autograde/`), what was sent to whom (`gradebook/distributed.csv`)
+the autograde detail (`.system/autograde/`), what was sent to whom (`.system/gradebook/distributed.csv`)
 and the registrar export (`{SEMESTER_CSV_NAME}`). Together those are this semester's record of
 assessment: delete the repository when your institution's retention period for that record
 expires, and the archived student repos with it."""

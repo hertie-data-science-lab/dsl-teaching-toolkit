@@ -115,10 +115,11 @@ def test_a_changed_topic_and_a_deleted_repo_both_show_up():
 def test_a_snapshot_left_in_semester_config_shows_up():
     before = _fp({}, {"schedule.yml": "aaa"})
     after = _fp(
-        {}, {"schedule.yml": "aaa", "snapshots/assignment-90-e2eab12.csv": "bbb"}
+        {},
+        {"schedule.yml": "aaa", ".system/snapshots/assignment-90-e2eab12.csv": "bbb"},
     )
     assert estate.diff(before, after) == {
-        "semester-config/snapshots/assignment-90-e2eab12.csv": (None, "bbb")
+        "semester-config/.system/snapshots/assignment-90-e2eab12.csv": (None, "bbb")
     }
 
 
@@ -436,19 +437,19 @@ def test_another_runs_leavings_are_reported_not_deleted():
 @pytest.mark.parametrize(
     "path,mine",
     [
-        ("snapshots/assignment-90-e2eab12cd.csv", True),
-        ("autograde/assignment-90-e2eab12cd/_graded.json", True),
+        (".system/snapshots/assignment-90-e2eab12cd.csv", True),
+        (".system/autograde/assignment-90-e2eab12cd/_graded.json", True),
         ("grading_sheets/assignment-90-e2eab12cd.yml", True),
         # One assignment per shape, so every artefact this run writes is named after the
         # NAMESPACE plus a shape - `-` is as much a boundary here as `/` and `.`.
-        ("snapshots/assignment-90-e2eab12cd-shared.csv", True),
+        (".system/snapshots/assignment-90-e2eab12cd-shared.csv", True),
         ("grading_sheets/assignment-90-e2eab12cd-student-choice.yml", True),
-        ("autograde/assignment-90-e2eab12cd-private/_graded.json", True),
-        ("snapshots/assignment-1.csv", False),
+        (".system/autograde/assignment-90-e2eab12cd-private/_graded.json", True),
+        (".system/snapshots/assignment-1.csv", False),
         ("schedule.yml", False),
-        ("autograde/assignment-90-e2effffff/_graded.json", False),
+        (".system/autograde/assignment-90-e2effffff/_graded.json", False),
         # A longer run id, not a shape of ours.
-        ("snapshots/assignment-90-e2eab12cd2-private.csv", False),
+        (".system/snapshots/assignment-90-e2eab12cd2-private.csv", False),
     ],
 )
 def test_only_this_runs_artefacts_are_dropped(path, mine):
@@ -609,7 +610,7 @@ def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
 
 # ------------------------------------------------- putting the shared files back exactly
 
-# `csv.writer` writes CRLF, so this is the shape `cohort-gradebook.csv` really has on
+# `csv.writer` writes CRLF, so this is the shape `.system/semester-gradebook.csv` really has on
 # disk - trailing newline and all. Every byte of it has to survive the round trip.
 CRLF_CSV = b"hertie_email,name\r\nada@x,Ada\r\n"
 
@@ -635,25 +636,31 @@ def test_a_recorded_file_keeps_every_byte_it_had(monkeypatch):
     # a different blob, and the estate check at teardown - which compares blob shas -
     # called it drift on every single run.
     encoded = base64.b64encode(CRLF_CSV).decode()
-    _reads(monkeypatch, {"cohort-gradebook.csv": (0, encoded)})
-    assert cleanup.file_bytes(SEMESTER, "semester-config", "cohort-gradebook.csv") == (
-        CRLF_CSV
-    )
+    _reads(monkeypatch, {".system/semester-gradebook.csv": (0, encoded)})
+    assert cleanup.file_bytes(
+        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+    ) == (CRLF_CSV)
 
 
 def test_a_file_that_is_not_there_is_recorded_as_absent(monkeypatch):
     _reads(monkeypatch, {})
     assert (
-        cleanup.file_bytes(SEMESTER, "semester-config", "gradebook/nothing.csv") is None
+        cleanup.file_bytes(SEMESTER, "semester-config", ".system/gradebook/nothing.csv")
+        is None
     )
 
 
 def test_a_read_that_failed_is_not_read_as_absent(monkeypatch):
     # An absent file is DELETED by the restore. A rate limit read as absence would take a
     # real file out of a real org.
-    _reads(monkeypatch, {"cohort-gradebook.csv": (1, "gh: API rate limit exceeded")})
+    _reads(
+        monkeypatch,
+        {".system/semester-gradebook.csv": (1, "gh: API rate limit exceeded")},
+    )
     with pytest.raises(RuntimeError, match="could not read"):
-        cleanup.file_bytes(SEMESTER, "semester-config", "cohort-gradebook.csv")
+        cleanup.file_bytes(
+            SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+        )
 
 
 def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
@@ -669,14 +676,17 @@ def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
         cleanup.restore_files(
             SEMESTER,
             "semester-config",
-            {"cohort-gradebook.csv": CRLF_CSV, "gradebook/distributed.csv": None},
+            {
+                ".system/semester-gradebook.csv": CRLF_CSV,
+                ".system/gradebook/distributed.csv": None,
+            },
         )
         == 0
     )
     ((org, repo, files, delete),) = written
     assert (org, repo) == (SEMESTER, "semester-config")
-    assert files == {"cohort-gradebook.csv": CRLF_CSV}
-    assert delete == ("gradebook/distributed.csv",)
+    assert files == {".system/semester-gradebook.csv": CRLF_CSV}
+    assert delete == (".system/gradebook/distributed.csv",)
 
 
 def test_what_was_read_is_what_is_written_back(monkeypatch):
@@ -685,9 +695,11 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
     # file makes no commit at all.
     _reads(
         monkeypatch,
-        {"cohort-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
+        {".system/semester-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
     )
-    recorded = cleanup.file_bytes(SEMESTER, "semester-config", "cohort-gradebook.csv")
+    recorded = cleanup.file_bytes(
+        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+    )
     written: list[dict] = []
     monkeypatch.setattr(
         cleanup.gh_contents,
@@ -697,9 +709,9 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
         ),
     )
     cleanup.restore_files(
-        SEMESTER, "semester-config", {"cohort-gradebook.csv": recorded}
+        SEMESTER, "semester-config", {".system/semester-gradebook.csv": recorded}
     )
-    assert written == [{"cohort-gradebook.csv": CRLF_CSV}]
+    assert written == [{".system/semester-gradebook.csv": CRLF_CSV}]
 
 
 def _pipeline_module(monkeypatch):

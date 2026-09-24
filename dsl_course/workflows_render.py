@@ -1223,7 +1223,7 @@ def render_open_team_formation(semester_orgs: list[str]) -> str:
 # window opens - this is how you send it again on your own say-so, after announcing the
 # assignment in class or once a semester's mail secrets are finally set.
 # NOTHING IS SAID TWICE: every message is recorded in semester-config's
-# team-formation/mailed.csv, so a second press reaches only the students a first press did
+# .system/team-formation/mailed.csv, so a second press reaches only the students a first press did
 # not - a newcomer who has since joined GitHub, and nobody else.
 # Leave `assignment` empty for every window that is open. Filling it in narrows the run to
 # ONE schedule.yml assignment key and leaves the other windows alone; a key with no open
@@ -1491,7 +1491,7 @@ def render_scheduler() -> str:
 # Reads each semester's semester-config/schedule.yml and, on every tick: freezes the submission
 # snapshot for each assignment whose grading deadline has passed, fires every `releases:`
 # release whose `when` datetime has arrived, and autogrades each frozen assignment ONCE
-# (marker: semester-config/autograde/<slug>/ - delete it to re-grade). Releases are
+# (marker: semester-config/.system/autograde/<slug>/ - delete it to re-grade). Releases are
 # idempotent, so re-releasing on the next tick is a no-op; grading is not re-run. Unattended
 # it releases for real; manual runs default to dry-run.
 #

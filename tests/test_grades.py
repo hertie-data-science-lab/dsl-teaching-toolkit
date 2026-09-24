@@ -705,6 +705,7 @@ def _distribute(
         (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / grades.GRADEBOOK_DIR / name).write_text("student: someone\n")
     if exported is not None:
+        (cfg / grades.SEMESTER_CSV_NAME).parent.mkdir(parents=True, exist_ok=True)
         (cfg / grades.SEMESTER_CSV_NAME).write_text(exported)
     store = [] if preview_issues is None else preview_issues
     _fake_issues(monkeypatch, store)
@@ -1736,7 +1737,7 @@ def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
     tmp_path, monkeypatch
 ):
     # A semester that reached `distributed.csv` without ever having had a `notified.csv` was
-    # never on the migration path, so its `gradebook/*.yml` was left in place for the rest
+    # never on the migration path, so its `.system/gradebook/*.yml` was left in place for the rest
     # of the term - a stale copy of a grade beside the repo that holds the real one.
     out = _distribute(
         monkeypatch,
@@ -2440,7 +2441,7 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "COURSE", "SEMESTER", _sched(project="assignment-4-project-f2026")
     ).ok
     (put,) = puts
-    assert (put["org"], put["path"]) == ("SEMESTER", "assignments.lock.yml")
+    assert (put["org"], put["path"]) == ("SEMESTER", ".system/assignments.lock.yml")
     assert yaml.safe_load(put["content"])["assignments"]["project"] == {
         "team_formation": "self_select",
         "max_team_size": 5,

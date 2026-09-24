@@ -1087,7 +1087,7 @@ def test_the_freeze_timed_the_submission_by_githubs_own_push_record(pipeline):
 
 
 def test_the_autograde_marker_was_written(pipeline):
-    # `_graded.json`, not the bare `autograde/<slug>/` directory: that is the fire-once
+    # `_graded.json`, not the bare `.system/autograde/<slug>/` directory: that is the fire-once
     # sentinel the next tick reads to decide it has nothing to do. Only the shape that
     # asked New assignment for hidden tests has one.
     markers = pipeline.stages["artefacts"].detail["markers"]

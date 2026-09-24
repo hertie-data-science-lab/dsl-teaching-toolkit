@@ -12,7 +12,7 @@ name: Form team
 # Classroom-managed team does. Group-assignment provisioning grants that team its shared repo.
 #
 # WHETHER a team may form at all, and how big, is answered by
-# semester-config/assignments.lock.yml - written by the toolkit from each assignment's
+# semester-config/.system/assignments.lock.yml - written by the toolkit from each assignment's
 # grading_config.yml, because that file lives in the course org and this token cannot
 # reach it. An assignment the lock does not carry, or one it marks `assigned` or `none`,
 # is refused here.
@@ -112,7 +112,7 @@ jobs:
               const tMatch = (issue.body || '').match(/###\s*Team\s*[\r\n]+\s*([^\r\n]+)/i);
 
               // What this assignment allows, read from the machine-written mirror the
-              // toolkit keeps at semester-config/assignments.lock.yml - THIS FILE AND
+              // toolkit keeps at semester-config/.system/assignments.lock.yml - THIS FILE AND
               // NOTHING ELSE. The answer lives in the template's grading_config.yml, in
               // the course org, which this token deliberately cannot reach; the
               // schedule.yml scrape that stood here before let a slug with no `type:`
@@ -131,7 +131,7 @@ jobs:
               // `page` is the assignment's page on the semester site, which lists the teams
               // that exist - "" where the lock carries none, and the refusal then names
               // the page without linking it.
-              const LOCK = 'assignments.lock.yml';
+              const LOCK = '__LOCK__';
               const lockEntry = async (slug) => {
                 let text;
                 try {

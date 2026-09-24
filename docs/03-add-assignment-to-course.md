@@ -268,7 +268,7 @@ is GitHub's cap of ten inputs - every further setting lives in `grading_config.y
 > `team_formation` and `max_team_size` are also what the **Join team** form in each
 > semester's `join` repo answers on. The form runs in a public repo and cannot read this
 > file, so the toolkit mirrors those two values into each semester's
-> `semester-config/assignments.lock.yml` and the form reads that. Editing them here is
+> `semester-config/.system/assignments.lock.yml` and the form reads that. Editing them here is
 > enough: the mirror catches up on the next **Sync membership**, **Release assignment** or
 > nightly **Refresh actions**. Until this template exists, its schedule entry is locked to
 > "no teams", so nobody can form one for it.

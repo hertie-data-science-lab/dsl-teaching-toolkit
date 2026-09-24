@@ -60,7 +60,7 @@ from pathlib import Path
 
 import yaml
 
-from . import grades, roster, schedule, site, sync_teams, teams
+from . import grades, records, roster, schedule, site, sync_teams, teams
 from .access import (
     FACULTY_READ_ACCESS,
     grant_faculty,
@@ -144,7 +144,7 @@ from .workflows_place import NEVER_IN_STUDENT_REPOS
 # A marker rather than a time window (`solution_datetime <= now < +1h`): a missed tick -
 # an outage, a queued runner, a rate limit - would silently mean the solution never ships
 # at all, and nothing would ever notice. Deleting the file re-releases it.
-SOLUTION_RECORD_DIR = "solutions"
+SOLUTION_RECORD_DIR = records.path("solutions")
 
 
 def _wait_for_content(

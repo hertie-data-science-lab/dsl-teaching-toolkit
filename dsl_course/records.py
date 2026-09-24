@@ -28,7 +28,7 @@ RECORDS = {
     "gradebook": "gradebook",
     "distributed": "gradebook/distributed.csv",
     "team_formation": "team-formation",
-    "archive": "archive",
+    "archive": "archive.md",
     "semester_gradebook": "semester-gradebook.csv",
     # the course org's `.github`: the refresh's heartbeat and its miss ledger
     "heartbeat": "last-refresh",

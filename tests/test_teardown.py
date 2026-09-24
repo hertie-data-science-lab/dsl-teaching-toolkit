@@ -425,14 +425,14 @@ def test_the_record_names_what_was_frozen_and_why_it_is_being_kept():
         teardown.Closed(["assignment-1-ada-l"], ["grades-ada-l"], 0),
         sealed_on=date(2027, 2, 16),
         archive_date=date(2027, 2, 16),
-        registrar="cohort-gradebook.csv, 30 student row(s)",
+        registrar=".system/semester-gradebook.csv, 30 student row(s)",
         propagated=PR_URL,
     )
     assert text.startswith("<!-- SYSTEM-OWNED")
     assert "`assignment-1-ada-l`" in text and "`grades-ada-l`" in text
     assert "| Repositories archived | 2 (1 already were) |" in text
     assert PR_URL in text
-    assert "cohort-gradebook.csv, 30 student row(s)" in text
+    assert ".system/semester-gradebook.csv, 30 student row(s)" in text
     assert "2027-02-16" in text
     assert "Nobody was revoked." in text and "Nothing was deleted." in text
     assert "retention period" in text
@@ -444,7 +444,7 @@ def test_a_forced_record_says_no_archive_date_was_ever_declared():
         teardown.Closed([], [], 0),
         sealed_on=date(2027, 1, 5),
         archive_date=None,
-        registrar="cohort-gradebook.csv, 0 student row(s)",
+        registrar=".system/semester-gradebook.csv, 0 student row(s)",
         propagated="nothing had been edited",
     )
     assert "`--force`" in text
@@ -459,7 +459,7 @@ def test_the_registrar_export_is_summarised_by_its_row_count(monkeypatch):
         lambda o, r, p: "hertie_email,name,github_handle,a1\na@uni.edu,Ada,ada-l,80\n",
     )
     summary = teardown.registrar_summary(SEMESTER)
-    assert summary == "cohort-gradebook.csv, 1 student row(s)"
+    assert summary == ".system/semester-gradebook.csv, 1 student row(s)"
     assert "ada-l" not in summary
 
 

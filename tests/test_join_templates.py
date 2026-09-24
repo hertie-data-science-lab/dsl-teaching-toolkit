@@ -342,7 +342,7 @@ def test_the_form_reads_the_lock_file_and_nothing_else():
     # used to scrape them out of the semester's schedule.yml, which no longer carries them
     # at all: every request would be accepted, at a default cap, for any slug.
     script = script_of("team-formation.yml", "form-team")
-    assert "assignments.lock.yml" in script and "path: LOCK" in script
+    assert ".system/assignments.lock.yml" in script and "path: LOCK" in script
     # Nothing reads the semester's schedule any more, and nothing interprets a `type:`.
     assert "path: 'schedule.yml'" not in script
     assert "declaredType" not in script
@@ -584,9 +584,7 @@ def test_refresh_seeds_exactly_the_routing_labels_the_forms_declare(monkeypatch)
         lambda org, repo, name, **k: created.append((org, repo, name)) or True,
     )
     assert welcome.refresh_join_workflows("Org") == 0
-    assert created == [
-        ("Org", "join", name) for name, _, _ in welcome.JOIN_LABELS
-    ]
+    assert created == [("Org", "join", name) for name, _, _ in welcome.JOIN_LABELS]
 
 
 def test_refresh_reds_when_a_routing_label_cannot_be_created(monkeypatch, capsys):
@@ -682,7 +680,7 @@ def _run_form(
         re.sub(r"\bawait\s+", "", script_of("team-formation.yml", "form-team")),
     )
     files = {
-        "assignments.lock.yml": lock,
+        ".system/assignments.lock.yml": lock,
         "teams.csv": teams_csv,
         "students.csv": _roster_of(*(roster or ("ann", "bob", handle))),
     }

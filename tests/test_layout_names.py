@@ -166,3 +166,30 @@ def test_the_record_paths_all_sit_under_one_folder():
     assert records.path("autograde", "a1", "_graded.json") == (
         ".system/autograde/a1/_graded.json"
     )
+
+
+# ---------------------------------------------------- records under .system/ (item 4)
+
+
+def test_every_record_is_written_and_read_at_its_one_path():
+    from dsl_course import assign, collect, grades, team_formation
+
+    assert collect.snapshot_path("a1") == records.path("snapshots", "a1.csv")
+    assert collect.autograde_path("a1") == records.path("autograde", "a1")
+    assert f"{collect.autograde_path('a1')}/{collect.GRADED_RECORD}" == (
+        ".system/autograde/a1/_graded.json"
+    )
+    assert assign.solution_record_path("a1") == records.path("solutions", "a1.json")
+    assert grades.DISTRIBUTED_PATH == records.path("distributed")
+    assert grades.TEAM_LOCK_PATH == records.path("lock")
+    assert grades.SEMESTER_CSV_NAME == records.path("semester_gradebook")
+    assert team_formation.MAILED_PATH == records.path("team_formation", "mailed.csv")
+    assert teardown.RECORD_PATH == records.path("archive")
+
+
+def test_the_join_team_script_reads_the_lock_at_its_moved_path():
+    from dsl_course import grades
+
+    text = welcome.join_workflow("join/team-formation.yml")
+    assert f"const LOCK = '{grades.TEAM_LOCK_PATH}';" in text
+    assert "__LOCK__" not in text

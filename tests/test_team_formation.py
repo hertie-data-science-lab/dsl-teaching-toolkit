@@ -527,7 +527,7 @@ NEAR_CLOSE = SHUTS - timedelta(hours=10)
 
 
 class Record:
-    """The semester's `team-formation/mailed.csv`, as a file that remembers its sha.
+    """The semester's `.system/team-formation/mailed.csv`, as a file that remembers its sha.
 
     `refuse` is how many writes GitHub turns down, which is what another tick's commit
     looks like from here; `on_refuse` is that other tick's content landing. `refuse_from`

@@ -81,7 +81,11 @@ def join_workflow(rel: str) -> str:
             f"{pad}{shared}\n" if shared.strip() else "\n"
             for shared in template(SHARED_SCRIPT).rstrip("\n").split("\n")
         ]
-    return "".join(out).replace("__CONFIG_REPO__", CONFIG_REPO)
+    return (
+        "".join(out)
+        .replace("__CONFIG_REPO__", CONFIG_REPO)
+        .replace("__LOCK__", TEAM_LOCK_PATH)
+    )
 
 
 @cache
@@ -206,7 +210,7 @@ def join_team_form(opened: Mapping[str, str]) -> str:
     options = "\n".join(f"        - {slug}" for slug in opened)
     block = (
         f"{ASSIGNMENT_FIELD_START} - AUTO-GENERATED from this semester's\n"
-        "  # `semester-config/assignments.lock.yml`: the assignments open for team\n"
+        "  # `semester-config/.system/assignments.lock.yml`: the assignments open for team\n"
         "  # formation right now. Edits between these markers are overwritten.\n"
         "  - type: dropdown\n"
         "    id: assignment\n"

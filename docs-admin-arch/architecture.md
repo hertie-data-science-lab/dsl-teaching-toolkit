@@ -303,7 +303,7 @@ WHETHER a team may form at all, and how big, is the assignment's own declaration
 `grading_config.yml` on the course template's `solution` branch. The form cannot read it:
 it runs on an `issues: opened` event any stranger can trigger, in a PUBLIC repo, under a
 token deliberately scoped away from the course org's content repos. So the toolkit mirrors
-the two answers it needs into `semester-config/assignments.lock.yml` - SYSTEM-OWNED,
+the two answers it needs into `semester-config/.system/assignments.lock.yml` - SYSTEM-OWNED,
 `team_formation` (`self_select` | `assigned` | `none`) and `max_team_size`, one entry per
 assignment in `schedule.yml` - and the form reads that and nothing else. It is rewritten by
 **Sync membership** (whose dispatcher fires on a `schedule.yml` push), by every **Release
@@ -406,7 +406,7 @@ Each tick, per semester:
 
 1. **Freeze passed deadlines** - for every assignment whose grading deadline (`grading_datetime`,
    else `due_datetime`) has passed and has no snapshot yet, record the commit each submission
-   repo is at into `semester-config/snapshots/<name>.csv` (`repo,sha,recorded_at`).
+   repo is at into `semester-config/.system/snapshots/<name>.csv` (`repo,sha,recorded_at`).
 2. **Fire every action whose time has arrived** - each deploy at its `deploy_datetime` (else its
    entry's `event_datetime`), and assignment handouts at `handout_datetime` (synthesised into the
    release plan and re-sorted into time order). Deploys go out as one batch, then handouts, then
@@ -425,9 +425,9 @@ success only:
 
 | Phase | Marker | Meaning |
 | --- | --- | --- |
-| snapshot | `semester-config/snapshots/<name>.csv` | frozen; `snapshot_assignment` refuses to overwrite |
-| autograde | `autograde/<name>/_graded.json` | graded - never again |
-| autograde | `autograde/<name>/_skipped.json` | deliberately not machine-graded, with the reason |
+| snapshot | `semester-config/.system/snapshots/<name>.csv` | frozen; `snapshot_assignment` refuses to overwrite |
+| autograde | `.system/autograde/<name>/_graded.json` | graded - never again |
+| autograde | `.system/autograde/<name>/_skipped.json` | deliberately not machine-graded, with the reason |
 
 A `_skipped.json` stops a hand-marked assignment being re-cloned and re-decided every tick; both
 sentinels are **withheld** when any target was unreachable or an archive write failed, so a
@@ -462,7 +462,7 @@ out what a grader typed there: a comment on each submission repo's Feedback issu
 private `grades-<handle>` gradebook (provisioned by `ensure_gradebooks` on the way in), the
 registrar export, and an email saying there is something new to read. Everything the toolkit owns
 sits under `info:`; everything else is the grader's and is never rewritten. Nothing is said twice -
-every send is recorded in `gradebook/distributed.csv`, so a re-run after one correction reaches one
+every send is recorded in `.system/gradebook/distributed.csv`, so a re-run after one correction reaches one
 student.
 
 ## Convergence - the daily self-refresh

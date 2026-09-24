@@ -6,13 +6,13 @@ A grader fills ONE file per assignment, `semester-config/grading_sheets/<slug>.y
     grading_sheets/<slug>.yml   (the grader types here; the toolkit owns only `info:`)
           |
           +--> semester/grades-<handle>   (private; student = read) grades.yml + README.md
-          +--> semester-config/cohort-gradebook.csv   (the registrar export, never logged)
+          +--> semester-config/.system/semester-gradebook.csv   (the registrar export, never logged)
           +--> an email saying there is something new to read (no marks in it)
 
 ONE place a mark is written, and it is the student's gradebook. Nothing is posted into a
 submission repo; that repo's issue carries the submission receipts and nothing else.
 
-Nothing is said twice: every send is recorded in `gradebook/distributed.csv`, so a re-run
+Nothing is said twice: every send is recorded in `.system/gradebook/distributed.csv`, so a re-run
 after one correction reaches one student.
 
 Usage:
@@ -39,7 +39,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from . import gh_teams, mailer, roster, schedule
+from . import gh_teams, mailer, records, roster, schedule
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import (
     ASSIGNMENT_TYPES,
@@ -123,14 +123,16 @@ from .repos import (
     set_repo_topics,
 )
 
-GRADEBOOK_DIR = (
-    "gradebook"  # what has been sent (distributed.csv), beside the retired files
-)
+GRADEBOOK_DIR = records.path(
+    "gradebook"
+)  # what has been sent, beside the retired files
 # RETIRED. The old per-student notification marker, named here for one reason only: the
 # migration in `_read_distributed` reads it once and deletes it in the same commit that
 # writes `distributed.csv`, which records every channel rather than just the email.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
-SEMESTER_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
+SEMESTER_CSV_NAME = records.path(
+    "semester_gradebook"
+)  # the wide faculty-only glance view
 
 # What a gradebook says before its student has been marked in anything. The legend names
 # the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
@@ -2036,7 +2038,7 @@ def _undeclared_faults(
 
 # --------------------------------------------------- the team-formation lock file
 
-# `semester-config/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
+# `semester-config/.system/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
 # the Join-team form in the semester's public `join` repo. It exists because of who can
 # read what: the form runs on an `issues: opened` event any stranger can trigger, in a
 # public repo, under a token deliberately scoped away from the course org's assignment
@@ -2045,7 +2047,7 @@ def _undeclared_faults(
 # instead, which is why a slug with neither let any student mint a real GitHub team.
 #
 # Flat scalars per schedule key, and no vocabulary the form has to interpret twice.
-TEAM_LOCK_PATH = "assignments.lock.yml"
+TEAM_LOCK_PATH = records.path("lock")
 _TEAM_LOCK_HEADER = f"""\
 # SYSTEM-OWNED - do not edit, edits here are overwritten. Written by the DSL teaching
 # toolkit from each assignment's `{GRADING_FILE}`, one entry per assignment in
@@ -2272,7 +2274,7 @@ def sync_team_lock(
     now: datetime | None = None,
     dry_run: bool = False,
 ) -> LockWrite:
-    """Mirror every assignment's team rules into `semester-config/assignments.lock.yml`,
+    """Mirror every assignment's team rules into `semester-config/.system/assignments.lock.yml`,
     and say whether that changed anything.
 
     Written from everything that could have moved one of its inputs: the membership
@@ -3722,7 +3724,7 @@ def ensure_gradebooks(
 # once. It replaces `gradebook/notified.csv`, which recorded only the email and only per
 # student - so a corrected grade re-emailed the whole semester, and a write that failed was
 # never retried because nothing recorded that it had not.
-DISTRIBUTED_PATH = f"{GRADEBOOK_DIR}/distributed.csv"
+DISTRIBUTED_PATH = records.path("distributed")
 DISTRIBUTED_HEADER = (
     "target",  # a handle; a TEAM name on the rows the retired issue channel left behind
     "assignment",  # the semester-side slug; "" for the whole-book email

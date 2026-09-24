@@ -188,7 +188,7 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 
 **This file is timing only.** `type:` and `max_team_size:` used to be accepted here and are not any more: what an assignment IS - its shape, its team cap, how it is handed in, its question maxima, its late policy, whether it is autograded - lives in that assignment's own `grading_config.yml`, on the course template's `solution` branch (see [Add an assignment](03-add-assignment-to-course.md)). Written here they are flagged by **Validate schedule**, which names the file they moved to, and ignored.
 
-Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `semester-config/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be, and re-renders the form's Assignment drop-down from it. So a new group assignment is joinable - and selectable on the form - within a minute or so of the push, provided its template already declares `team_formation: self_select` and its team-formation window is open - it runs from `handout_datetime` to the grading pin ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
+Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `semester-config/.system/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be, and re-renders the form's Assignment drop-down from it. So a new group assignment is joinable - and selectable on the form - within a minute or so of the push, provided its template already declares `team_formation: self_select` and its team-formation window is open - it runs from `handout_datetime` to the grading pin ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
 
 ```yaml
 assignments:
@@ -303,7 +303,7 @@ A newly bootstrapped org raises neither until it has seen its first dispatched r
 
 Just commit the edit to `semester-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The push fires the scheduler itself, so the change takes effect within minutes; there is nothing to re-arm or re-deploy. 
 
-The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `snapshots/<slug>.csv`, `solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
+The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `.system/snapshots/<slug>.csv`, `.system/solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `.system/autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
 
 Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself. A release already shipped stays shipped, because unshipping it would mean rewriting the semester repo's git history.
 
@@ -405,7 +405,7 @@ Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-re
 
 Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_datetime` plus the template's `late_window_days`. From the **due date** the cron refreshes the grading sheet (and posts submission receipts) every quarter of an hour; at the cutoff it does three things, once each:
 
-1. **Freezes** each submission repo's HEAD into `semester-config/snapshots/<slug>.csv`, using the **server's** clock, and records against it when GitHub saw the push that delivered that commit.
+1. **Freezes** each submission repo's HEAD into `semester-config/.system/snapshots/<slug>.csv`, using the **server's** clock, and records against it when GitHub saw the push that delivered that commit.
 2. **Freezes** the grading sheet - its `info:` never moves again.
 3. **Autogrades** it (optional).
 

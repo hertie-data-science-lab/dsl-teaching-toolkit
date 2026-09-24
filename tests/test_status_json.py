@@ -75,7 +75,7 @@ CONTRACT_EXAMPLE = {
         "teams.csv": "...",
         "grading_sheets": "<sha of the directory tree>",
         "course/dsl-course.yml": "...",
-        "assignments.lock.yml": "...",
+        ".system/assignments.lock.yml": "...",
     },
     "course": {
         "org": "hertie-dsl-demo-course-e1234",
@@ -249,7 +249,7 @@ def _semester(**over) -> status_json.SemesterFacts:
             "students.csv": "57ude",
             "teams.csv": "7ea45",
             "grading_sheets": "5hee7",
-            "assignments.lock.yml": "10c4",
+            ".system/assignments.lock.yml": "10c4",
         },
         sched=_sched(),
         people=_people(),
@@ -563,7 +563,7 @@ def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
         "teams.csv": "7ea45",
         "grading_sheets": "5hee7",
         "course/dsl-course.yml": "c0ffee",
-        "assignments.lock.yml": "10c4",
+        ".system/assignments.lock.yml": "10c4",
     }
     stamp = re.compile(
         r"generated|written|timestamp|updated_at|rendered|as_of", re.IGNORECASE

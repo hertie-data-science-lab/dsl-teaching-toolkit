@@ -47,11 +47,11 @@ Every tick also drives each assignment's grading deadline (`grading_datetime`, e
 
 1. FREEZE (release phase). For every assignment whose grading deadline has gone by and that
    has no snapshot yet, record the commit each submission repo is graded at into
-   `semester-config/snapshots/<slug>.csv` (see `dsl_course.collect`). That timestamp is the
+   `semester-config/.system/snapshots/<slug>.csv` (see `dsl_course.collect`). That timestamp is the
    server's, not the student's, which is the only reason the pin can be trusted.
 2. AUTOGRADE, ONCE (autograde phase). Run the autograder for every frozen assignment -
    template `<slug>-<tag>` in the course org. The fire-once marker is the
-   `autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record): present means
+   `.system/autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record): present means
    already graded, so never again.
 
 Sources are always read from the course org and destinations always written to the semester
@@ -540,11 +540,11 @@ def _autograde_passed_deadlines(
     """Autograde every passed-deadline assignment exactly once - zero config. Returns the
     error count.
 
-    Fire-once: the `autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record) in
+    Fire-once: the `.system/autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record) in
     semester-config is the marker. Absent means never machine-graded, so grade now; present
     means graded already, so never again - which is what stops an hourly re-run from recomputing
-    scores a marker has since hand-edited. A deliberate re-grade = delete `autograde/<slug>/`
-    (delete `autograde/<slug>/` to let a later tick regrade).
+    scores a marker has since hand-edited. A deliberate re-grade = delete `.system/autograde/<slug>/`
+    (delete `.system/autograde/<slug>/` to let a later tick regrade).
 
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual

@@ -81,7 +81,7 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/join/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
-- **`grades.team_lock_text`'s LAYOUT.** `semester-config/assignments.lock.yml` is parsed by
+- **`grades.team_lock_text`'s LAYOUT.** `semester-config/.system/assignments.lock.yml` is parsed by
   line scanners - one in `templates/join/team-formation.yml` (github-script has no YAML
   library), one in `grades.parse_team_lock` - which match a two-space assignment key
   and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
@@ -188,7 +188,7 @@ and left alone.
 - **The completion check** executes the pinned notebook with `nbconvert --execute
   --allow-errors` and records `ran-clean` / `errors:N` / `not-attempted` / `no-notebook` /
   `timed-out` / `did-not-run` into `info.completion`, archiving the executed copy at
-  `autograde/<slug>/<key>.ipynb` under a 5 MiB cap. It needs **`ipykernel`** as well as
+  `.system/autograde/<slug>/<key>.ipynb` under a 5 MiB cap. It needs **`ipykernel`** as well as
   `nbconvert` (nbconvert converts without a kernel and cannot execute without one) - both
   pinned in `requirements-autograde.txt`, which every grading job installs; a runner without them
   records the decision once and stays green rather than reporting a semester of failures.
@@ -332,7 +332,7 @@ The full rule is the ownership note at the top of `bootstrap_course.py`.
 
 ### The one SYSTEM-OWNED file that is not a template
 
-`semester-config/assignments.lock.yml` is SYSTEM-OWNED like the dispatchers, but it is
+`semester-config/.system/assignments.lock.yml` is SYSTEM-OWNED like the dispatchers, but it is
 DERIVED - rendered per semester from that semester's `schedule.yml` and each named template's
 `grading_config.yml` - so it cannot join `welcome.CONFIG_SYSTEM_FILES`, which maps a
 repo path to a file under `templates/`. Adding a file like this is four places:
@@ -728,7 +728,7 @@ Promote.
 | workflow env `COHORT_ORG` | `SEMESTER_ORG` | rendered workflows |
 | semester template description `<slug> - cohort assignment template` | `<slug> - semester assignment template` | converged by `repos.SUPERSEDED_DESCRIPTION_ENDINGS` |
 | doc anchors `#closing-the-cohort-out`, `#peopleyml`, `#write-your-terms-plan`, `#carrying-cohort-edits-back`, `#cohort-setup-per-year`, `#only-staff-in-these-teams`, `#what-instructors-tag-reaches`, `#end-of-term` | `#archiving-the-semester`, `#instructorsyml`, `#write-your-semesters-plan`, `#carrying-semester-edits-back`, `#semester-setup-per-year`, `#only-instructors-in-these-teams`, `#what-instructors-semester-reaches`, `#end-of-semester` | docs; each old anchor is kept as an HTML alias above its heading, so a link already posted still lands |
-| paths KEPT, not renamed: `.github/.missing-cohorts`, `semester-config/cohort-gradebook.csv`, `semester-config/archive/teardown.md` | unchanged here (WP-A2 moves the records) | the tool must NOT rename them |
+| paths KEPT, not renamed: `.github/.missing-cohorts`, `semester-config/.system/semester-gradebook.csv`, `semester-config/.system/archive.md` | unchanged here (WP-A2 moves the records) | the tool must NOT rename them |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,
