@@ -1,0 +1,58 @@
+# The institution policy the toolkit ships: what happens when nobody said otherwise.
+#
+# Read by `dsl_course.policy`. An institution changes it with a `policy.yml` at the root of
+# the toolkit repo (read at the org's `central_ref`, like the engine): `defaults` and
+# `institution` merge key by key over this file; `kinds`, `contact` and `licences` replace
+# it whole. These are the Hertie School's values.
+
+# The institution layer of the defaults cascade (institution -> course -> semester ->
+# assignment; nearest wins). A course overrides the assignment keys in its
+# `dsl-course.yml` `assignment_defaults:`; a semester and an assignment in
+# `semester-config/assignments.yml`.
+defaults:
+  late_window_days: 10          # 0 = nothing after the due date is accepted
+  late_penalty_per_day: 10%     # of the earned grade, per day started
+  max_team_size: 5
+  visibility: private           # private | public | student_choice
+  team_formation: self_select   # self_select | assigned
+  formats: [ipynb]              # the starters New assignment seeds; the first is runnable
+  timezone: Europe/Berlin       # a semester's schedule.yml `timezone:` when it names none
+  archive:
+    grace_days: 60              # archive date = semester_end + this, unless given
+  semester_dest_repo: materials # where a release lands when its deploy entry names no repo
+
+# Schedule row kinds, in display order. `colour` is the row's label, `background` its row
+# (both clear 4.5:1). `system: true` = the engine creates the row (the kind may be relabelled
+# or recoloured, never removed); `other` is where an unknown kind lands.
+kinds:
+  - {key: lecture, label: Lecture, colour: "#a94442", background: "#f2dede", system: false}
+  - {key: lab, label: Lab, colour: "#3c763d", background: "#dff0d8", system: false}
+  - {key: readings, label: Readings, colour: "#2b6a60", background: "#dcefec", system: false}
+  - {key: exam, label: Exam, colour: "#5a5f66", background: "#f0f1f2", system: false}
+  - {key: assignment, label: Assignment, colour: "#31708f", background: "#d9edf7", system: true}
+  - {key: term, label: Semester, colour: "#59468f", background: "#e5dcf0", system: true}
+  - {key: archive, label: Archive, colour: "#7d6230", background: "#fbf2d5", system: true}
+  - {key: drop-in, label: Drop-in, colour: "#8f4a1c", background: "#fbe3d6", system: false}
+  - {key: other, label: Event, colour: "#7d6230", background: "#fbf2d5", system: false}
+
+# The institution block every semester site and the open site carry.
+institution:
+  name: Hertie School
+  url: https://hertie-school.org/en/datasciencelab
+  dsl_org_url: https://github.com/hertie-data-science-lab
+  address: |
+    Data Science Lab
+    Hertie School
+    Friedrichstraße 180
+    10117 Berlin, Germany
+
+# Where a fault goes when no course admin declares an address: the toolkit maintainers'
+# shared mailbox.
+contact: datasciencelab@hertie-school.org
+
+# The licences an open site may carry; the first is the default.
+licences:
+  - {name: CC BY-NC-SA 4.0, url: "https://creativecommons.org/licenses/by-nc-sa/4.0/"}
+  - {name: CC BY 4.0, url: "https://creativecommons.org/licenses/by/4.0/"}
+  - {name: CC BY-SA 4.0, url: "https://creativecommons.org/licenses/by-sa/4.0/"}
+  - {name: All rights reserved, url: ""}
