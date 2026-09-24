@@ -100,6 +100,31 @@ describe('relay', () => {
 
   it('says it is not configured when the client id or secret is missing', async () => {
     github(TOKENS);
-    expect((await relay.fetch(post('/exchange', { code: 'c' }), env({ GH_APP_CLIENT_SECRET: '' }))).status).toBe(500);
+    const res = await relay.fetch(post('/exchange', { code: 'c' }), env({ GH_APP_CLIENT_SECRET: '' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'not_configured' });
+  });
+
+  it('turns GitHub’s incorrect_client_credentials into 503 not_configured', async () => {
+    github({ error: 'incorrect_client_credentials', error_description: 'The client_id and/or client_secret passed are incorrect.' });
+    const res = await relay.fetch(post('/refresh', { refresh_token: 'ghr_r' }), env());
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'not_configured' });
+  });
+
+  it('answers 502 for a 200 that is not JSON', async () => {
+    vi.stubGlobal('fetch', async () => new Response('<html>oops</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }));
+    const res = await relay.fetch(post('/exchange', { code: 'c' }), env());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'github_error' });
+  });
+
+  it('forwards a redirect_uri on the console origin, and refuses one elsewhere', async () => {
+    const sent = github(TOKENS);
+    expect((await relay.fetch(post('/exchange', { code: 'c', redirect_uri: `${ORIGIN}/app/` }), env())).status).toBe(200);
+    expect(sent[0].get('redirect_uri')).toBe(`${ORIGIN}/app/`);
+    expect((await relay.fetch(post('/exchange', { code: 'c', redirect_uri: 'https://evil.example/' }), env())).status).toBe(400);
+    expect((await relay.fetch(post('/exchange', { code: 'c', redirect_uri: 'not a url' }), env())).status).toBe(400);
+    expect(sent).toHaveLength(1);
   });
 });

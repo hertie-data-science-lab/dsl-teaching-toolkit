@@ -27,6 +27,14 @@ function reply(status: number, body: object, headers: Record<string, string>): R
   });
 }
 
+function sameOrigin(url: string, origin: string): boolean {
+  try {
+    return new URL(url).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
 async function handle(req: Request, env: Env): Promise<Response> {
   const origin = req.headers.get('Origin') ?? '';
   const allowed = env.CONSOLE_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
@@ -40,7 +48,7 @@ async function handle(req: Request, env: Env): Promise<Response> {
   }
   const route = new URL(req.url).pathname;
   if (req.method !== 'POST' || (route !== '/exchange' && route !== '/refresh')) return reply(404, { error: 'not_found' }, cors);
-  if (!env.GH_APP_CLIENT_ID || !env.GH_APP_CLIENT_SECRET) return reply(500, { error: 'not_configured' }, cors);
+  if (!env.GH_APP_CLIENT_ID || !env.GH_APP_CLIENT_SECRET) return reply(503, { error: 'not_configured' }, cors);
 
   const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
   if (!(await env.LIMITER.limit({ key: ip })).success) return reply(429, { error: 'rate_limited' }, cors);
@@ -60,6 +68,11 @@ async function handle(req: Request, env: Env): Promise<Response> {
       if (!valid(body.code_verifier)) return reply(400, { error: 'bad_request' }, cors);
       params.set('code_verifier', body.code_verifier);
     }
+    // Where GitHub sent the browser back; it must be on the console's own origin.
+    if (body.redirect_uri !== undefined) {
+      if (typeof body.redirect_uri !== 'string' || !sameOrigin(body.redirect_uri, origin)) return reply(400, { error: 'bad_request' }, cors);
+      params.set('redirect_uri', body.redirect_uri);
+    }
   } else {
     if (!valid(body.refresh_token)) return reply(400, { error: 'bad_request' }, cors);
     params.set('grant_type', 'refresh_token');
@@ -77,7 +90,9 @@ async function handle(req: Request, env: Env): Promise<Response> {
     return reply(502, { error: 'github_unreachable' }, cors);
   }
   const out = (res.ok ? await res.json().catch(() => ({})) : {}) as Record<string, unknown>;
-  // GitHub answers a bad code or refresh token with 200 and an `error` field.
+  // GitHub answers a bad code or refresh token with 200 and an `error` field. A wrong client
+  // id or secret is this deployment's fault, not the person's: say sign-in is not set up.
+  if (out.error === 'incorrect_client_credentials') return reply(503, { error: 'not_configured' }, cors);
   if (typeof out.error === 'string') return reply(400, { error: out.error, error_description: String(out.error_description ?? '') }, cors);
   if (typeof out.access_token !== 'string') return reply(502, { error: 'github_error' }, cors);
   return reply(200, { access_token: out.access_token, refresh_token: out.refresh_token, expires_in: out.expires_in, refresh_token_expires_in: out.refresh_token_expires_in }, cors);
