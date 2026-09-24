@@ -274,16 +274,19 @@ export function WebsiteScreen(p: CourseProps) {
 // --------------------------------------------------------------------------- materials repo settings
 
 function FileList({ files, patterns, cls, tag }: { files: string[]; patterns: string[]; cls: string; tag: string }) {
-  const shown = files.slice(0, 400);
   const rules = compileAll(patterns);
+  const hits = files.filter((f) => matchRules(rules, f));
+  const shown = hits.slice(0, 400);
   return (
-    <ul class="file-list">
-      {shown.map((f) => {
-        const hit = matchRules(rules, f);
-        return <li class={hit ? 'hit' : ''}><span>{f}</span>{hit ? <span class={`tag ${cls}`}>{tag}</span> : null}</li>;
-      })}
-      {files.length > shown.length ? <li>… and {files.length - shown.length} more</li> : null}
-    </ul>
+    <>
+      <p class="hint">{hits.length} of {files.length} files</p>
+      {hits.length ? (
+        <ul class="file-list">
+          {shown.map((f) => <li class="hit"><span>{f}</span><span class={`tag ${cls}`}>{tag}</span></li>)}
+          {hits.length > shown.length ? <li>… and {hits.length - shown.length} more</li> : null}
+        </ul>
+      ) : <p class="footnote">No file matches yet</p>}
+    </>
   );
 }
 
@@ -338,10 +341,10 @@ export function MaterialsScreen(p: CourseProps) {
           {m ? (m.state === 'ready' ? <div class="check-line ok"><Check /><span>Written.</span></div> : <CheckLine cls="bad">Still the template text. Students would see the placeholder at the first release.</CheckLine>) : <p class="footnote">Not checked yet.</p>}
           <div class="actions"><EditFile org={course.org} repo={repo} path="SYLLABUS.md" /></div>
           {scope ? (
-            <div class="savebar">
-              <span class="footnote">Generate the session list from {scope.where}’s schedule into SYLLABUS.sessions.md.</span>
-              <OpButtons def={generateSyllabus(scope, repo)} small />
-            </div>
+            <>
+              <p class="footnote">Builds a paste-ready ‘Course sessions and readings’ block from the cohort schedule and the <code>readings/NN_*</code> folders. Write saves it as <code>SYLLABUS.sessions.md</code> in this repo; <code>SYLLABUS.md</code> is yours and is never touched.</p>
+              <div class="actions"><OpButtons def={generateSyllabus(scope, repo)} small previewLabel="Preview the session list" /></div>
+            </>
           ) : null}
         </section>
         <section class="panel section">

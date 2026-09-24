@@ -117,7 +117,7 @@ export const COHORT_STAGES: [string, string][] = [
   ['K1', 'Org'], ['K2', 'Setup'], ['K3', 'Staff'], ['K4', 'Schedule'], ['K5', 'Students'], ['K6', 'Site'], ['K7', 'Archive'],
 ];
 export const COURSE_STAGES: [string, string][] = [
-  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Materials'], ['C5', 'Templates'], ['C6', 'Website'],
+  ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
 ];
 
 /** Where a problem sits, as the problem card's bold first word. */
@@ -189,11 +189,11 @@ export function releaseIdent(r: Release, all: Release[]): string {
 
 export const TYPE_CLASS: Record<string, string> = {
   lecture: 'lec', lab: 'lab', readings: 'lec', handout: 'asg', due: 'asg', exam: 'exam',
-  special_event: 'evt', event: 'evt', term: 'term', archive: 'term',
+  special_event: 'evt', event: 'evt', term: 'term', archive: 'term', release: 'term',
 };
 export const TYPE_LABEL: Record<string, string> = {
   lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', due: 'due', exam: 'exam',
-  special_event: 'event', event: 'event', term: 'term', archive: 'archive',
+  special_event: 'event', event: 'event', term: 'term', archive: 'archive', release: 'release',
 };
 
 // ------------------------------------------------------------------ markdown (as the site renders `details`)
@@ -210,15 +210,28 @@ function inline(s: string): string {
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 }
 
-/** Escaped HTML for a small markdown subset: paragraphs, `- ` lists, code, bold, italic, links. */
+/** Escaped HTML for a small markdown subset: paragraphs, hard breaks, `- ` lists, code, bold, italic, links. */
 export function md(src: string | null | undefined): string {
   if (!src || !String(src).trim()) return '';
   return esc(String(src).trim())
     .split(/\n{2,}/)
     .map((b) => {
       const lines = b.split('\n');
-      if (lines.every((l) => /^\s*- /.test(l))) return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*- /, ''))}</li>`).join('')}</ul>`;
-      return `<p>${inline(lines.join('<br>'))}</p>`;
+      // A paragraph may run straight into a list ("Intro:\n- a\n- b"): split at the first item.
+      const first = lines.findIndex((l) => ITEM.test(l));
+      if (first > 0 && lines.slice(first).every((l) => ITEM.test(l))) return para(lines.slice(0, first)) + list(lines.slice(first));
+      return first === 0 && lines.every((l) => ITEM.test(l)) ? list(lines) : para(lines);
     })
     .join('');
+}
+
+const ITEM = /^\s*- /;
+
+function list(lines: string[]): string {
+  return `<ul>${lines.map((l) => `<li>${inline(l.replace(ITEM, ''))}</li>`).join('')}</ul>`;
+}
+
+/** As markdown does: a single newline is a space; a line ending in two spaces breaks. */
+function para(lines: string[]): string {
+  return `<p>${inline(lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join(''))}</p>`;
 }

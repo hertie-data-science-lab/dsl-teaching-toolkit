@@ -40,9 +40,9 @@ export function assignmentWhat(terms: string[], next: number, templates: string[
       tier: 'default', label: 'Number', widget: 'number', defaultLabel: `next free: ${next}`, reason: 'Must be free this term.',
       check: (x) => (x === undefined ? 'Needed.' : Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 999 ? null : 'A whole number from 1 to 999.'),
     },
-    term: { tier: 'default', label: 'Term', widget: 'select', defaultLabel: 'default: newest cohort', reason: 'The term that first uses this template.', options: terms.map((t) => opt(t, termLabel(t))) },
+    term: { tier: 'default', label: 'Term', widget: 'select', defaultLabel: 'default: newest cohort', reason: 'The term that first uses this assignment template.', options: terms.map((t) => opt(t, termLabel(t))) },
     copy_from: {
-      tier: 'advanced', label: 'Copy an existing template', widget: 'select', default: '', defaultLabel: 'default: start fresh',
+      tier: 'advanced', label: 'Copy an existing assignment template', widget: 'select', default: '', defaultLabel: 'default: start fresh',
       reason: 'Copying takes its settings too, so the next two questions are skipped.',
       options: [opt('', 'No, start fresh'), ...templates.map((r) => opt(r, r))],
     },

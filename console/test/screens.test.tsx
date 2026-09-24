@@ -1,7 +1,8 @@
 // One render per screen, with the contracts example as the status fixture.
 
+import { options } from 'preact';
 import { render } from 'preact-render-to-string';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
@@ -15,6 +16,9 @@ import { StaffScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
 import { OperationsScreen, SiteScreen } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
+import { generateSyllabus } from '../src/ops/defs';
+import { OutcomeView } from '../src/ops/Panel';
+import { ScreenBoundary } from '../src/ui/boundary';
 import { Footer, Sidenav, Topbar } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
@@ -157,7 +161,7 @@ describe('S16 and S10 assignments', () => {
     expect(out).toContain('Late work until');
     expect(out).toContain('Update every copy');
     expect(out).toContain('Collect now');
-    expect(out).toContain('Template ready.');
+    expect(out).toContain('Assignment template ready.');
   });
   it('says when an assignment is not in the status', () => {
     expect(text(<AssignmentScreen {...props({ entry: 'assignment-9' })} />)).toContain('No assignment called assignment-9');
@@ -194,6 +198,71 @@ describe('S6 schedule and S11 release', () => {
     expect(t).toContain(`${COHORT_ORG}/materials/lectures/05_trees`);
     expect(t).toContain('Fix the folder');
   });
+  const unstaged: Loaded = {
+    kind: 'ready', sha: 's', stale: [],
+    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', type: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
+  };
+  it('renders a release with no deploy block as nothing to release, with no Release early', () => {
+    const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
+    expect(out).toContain('<b>Session 12</b>: Review');
+    expect(out).toMatch(/<li class="trow term" data-entry="lecture-12"><span class="k">release<\/span>/);
+    expect(out).toContain('Nothing to release yet: this entry has no deploy block');
+    expect(out).toContain('href="#schedule-lecture-12"');
+    expect(out).not.toContain('Release early');
+  });
+  it('shows the nothing-to-release page for a release with no source', () => {
+    const t = text(<ReleaseScreen {...props({ loaded: unstaged, entry: 'lecture-12' })} />);
+    expect(t).toContain('Nothing to release yet: this entry has no deploy block.');
+    expect(t).toContain('Edit entry');
+    expect(t).not.toContain('Release early');
+  });
+});
+
+describe('operation outcome', () => {
+  it('shows what the op produced in the details fold, preformatted', () => {
+    const def = generateSyllabus({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, 'course-materials-f2026');
+    const outcome = { schema: 'dsl.outcome/1' as const, op: def.op, run_id: 7, actor: 'a', preview: true, conclusion: 'previewed' as const, summary: 'Preview: the session list.', reasons: [{ code: 'NO_SOLUTION_REGION', text: 'solution.py\nhas no region' }], details: ['main/solution.py', 'main/README.md'], block: '## Course sessions and readings\n- Session 1: Intro' };
+    const out = html(<OutcomeView result={{ outcome, people: [], leaked: [] }} def={def} />);
+    expect(out).toContain('<summary>Details</summary>');
+    expect(out).toContain('<ul class="outcome-list"><li>main/solution.py</li><li>main/README.md</li></ul>');
+    expect(out).toContain('<pre class="outcome-details">## Course sessions and readings\n- Session 1: Intro</pre>');
+    expect(out).toContain('>Copy</button>');
+    expect(out.indexOf('outcome-list')).toBeLessThan(out.indexOf('outcome-details'));
+    expect(out).toContain('<td class="pre">solution.py\nhas no region');
+  });
+});
+
+describe('screen error boundary', () => {
+  const Boom = (): preact.VNode => {
+    throw new Error('kaboom');
+  };
+  // The string renderer honours boundaries only when asked; the browser always does.
+  const withBoundaries = (fn: () => void) => {
+    const o = options as { errorBoundaries?: boolean };
+    const was = o.errorBoundaries;
+    o.errorBoundaries = true;
+    try {
+      fn();
+    } finally {
+      o.errorBoundaries = was;
+    }
+  };
+  it('shows the error instead of the screen that threw', () => withBoundaries(() => {
+    const t = text(<ScreenBoundary><Boom /></ScreenBoundary>);
+    expect(t).toContain('This screen hit an error');
+    expect(t).toContain('kaboom');
+    expect(html(<ScreenBoundary><Boom /></ScreenBoundary>)).toContain('href="#cohort"');
+  }));
+  it('links Home when This week itself threw, so the route key changes', () => withBoundaries(() => {
+    vi.stubGlobal('location', { hash: '#cohort' });
+    try {
+      const out = html(<ScreenBoundary><Boom /></ScreenBoundary>);
+      expect(out).toContain('href="#">Back to Home');
+      expect(out).not.toContain('href="#cohort"');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }));
 });
 
 describe('S8 students', () => {

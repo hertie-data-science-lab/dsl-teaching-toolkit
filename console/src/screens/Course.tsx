@@ -80,7 +80,7 @@ export function CourseScreen(p: CourseProps) {
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <Help title="What lives in a course" doc="02-add-materials-to-course.md">
         <p>Materials live here privately until a scheduled release copies them to a cohort. Some folders can be withheld, or published openly on the public website.</p>
-        <p>One template per assignment. Students get a copy at hand out; marking reads its solution branch.</p>
+        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch.</p>
       </Help>
       <div class="stack">
         {showSetup && v.course ? (
@@ -94,7 +94,7 @@ export function CourseScreen(p: CourseProps) {
         ) : null}
         <div class="grid-2">
           <section class="panel section" id="sec-templates">
-            <div class="section-head"><h2>Templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
+            <div class="section-head"><h2>Assignment templates</h2><a class="btn small outline" href={`?course=${course.org}#new-assignment-1`}>New assignment</a></div>
             {v.course?.templates?.length ? (
               <ul class="rows">
                 {v.course.templates.map((t) => {
@@ -108,7 +108,7 @@ export function CourseScreen(p: CourseProps) {
                   );
                 })}
               </ul>
-            ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Templates appear once the course has been checked.'}</p>}
+            ) : <p class="footnote">{v.computed ? 'No assignment templates yet.' : 'Assignment templates appear once the course has been checked.'}</p>}
           </section>
           <section class="panel section" id="sec-materials">
             <div class="section-head"><h2>Materials</h2><a class="btn small outline" href={`?course=${course.org}#new-materials`}>New materials</a></div>
@@ -222,7 +222,8 @@ export function TemplateScreen(p: CourseProps) {
     else cfg = (y.toJS() ?? {}) as Record<string, unknown>;
   }
   const defaults = courseDefaults(course.meta);
-  const tiers = settingsTiers(defaults);
+  const newest = course.cohorts[0];
+  const tiers = settingsTiers(defaults, newest ? `?cohort=${newest.org}#teams-${slug}` : undefined);
   const base = fromConfig(cfg);
   const cur = values ?? base;
   const baseQ: [string, string][] = cfg.questions && typeof cfg.questions === 'object' ? Object.entries(cfg.questions as Record<string, unknown>).map(([q, n]) => [q, String(n ?? '')]) : [];
@@ -249,13 +250,13 @@ export function TemplateScreen(p: CourseProps) {
   };
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Templates', href: '#templates' }, { t: assignmentIdent(slug) }]} />
+      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: assignmentIdent(slug) }]} />
       <div class="page-head">
-        <div><h1>{assignmentIdent(slug)}{title ? `: ${title}` : ''}</h1><p class="lede">Template settings. <span class="slug">{repo}</span></p></div>
+        <div><h1>{assignmentIdent(slug)}{title ? `: ${title}` : ''}</h1><p class="lede">Assignment template settings. <span class="slug">{repo}</span></p></div>
         <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span></div>
       </div>
       <Help title="What these settings do" doc="03-add-assignment-to-course.md">
-        <p>One template per assignment. Students get a copy at hand out; marking reads its solution branch. These settings apply to every cohort that uses the template; after hand out they reach students only through Update every copy.</p>
+        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. These settings apply to every cohort that uses the template; after hand out they reach students only through Update every copy.</p>
       </Help>
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
@@ -278,8 +279,7 @@ export function TemplateScreen(p: CourseProps) {
               <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['format', 'autograde', 'tests'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} advancedOpen={!!errors.late_window_days || !!errors.late_penalty_per_day} />
-              <Lives org={course.org} repo={repo} path="grading_config.yml" branch="solution" />
-              <p class="footnote">On the solution branch.</p>
+              <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>
             </div>
             <div class="form-section">
               <h3>Student version</h3>

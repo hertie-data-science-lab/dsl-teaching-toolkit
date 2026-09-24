@@ -16,6 +16,7 @@ import { CheckLine, Crumbs, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Check, Ext, Lock } from '../ui/icons';
 import { NotFound } from './Assignments';
+import { readSchedule } from './Cohort';
 import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
@@ -35,6 +36,7 @@ function Marks(p: ReadyProps & { a: Assignment }) {
   const { a } = p;
   const env = useEnv();
   const [edits, setEdits] = useState<Record<string, unknown>>({});
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
   const [save, runSave, setSave] = useSave(env);
   const path = `grading_sheets/${a.slug}.yml`;
   const file = p.files.file(p.cohort.org, 'classroom-config', path);
@@ -112,13 +114,17 @@ function Marks(p: ReadyProps & { a: Assignment }) {
         </tr>,
       ];
     }
+    const open = !folded[u.key];
     return [
       <tr class={`team-row${nosub ? ' nosub' : ''}`}>
-        <td><b>{u.key}</b><br /><span class="footnote">{u.people.length} member{u.people.length === 1 ? '' : 's'}</span></td>{sys}{scoreCells}
+        <td>
+          <button class="fold-toggle" type="button" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} the members of ${u.key}`} onClick={() => setFolded({ ...folded, [u.key]: open })}>{open ? '▾' : '▸'}</button>
+          <b>{u.key}</b><br /><span class="footnote">{u.people.length} member{u.people.length === 1 ? '' : 's'}</span>
+        </td>{sys}{scoreCells}
         <td>{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, false, true) : null}</td>
         <td /><td /><td class="pen">{penaltyText(rate, days)}</td><td class="calc">{round(finalGrade(total, rate, days, 0))}</td>
       </tr>,
-      ...u.people.map((pr) => (
+      ...(open ? u.people : []).map((pr) => (
         <tr class="member-row">
           <td style="padding-left:22px"><span class="slug">{pr.handle}</span></td>
           <td class="sys" colSpan={4} /><td colSpan={Math.max(1, qs.length)} />
@@ -152,7 +158,7 @@ function Marks(p: ReadyProps & { a: Assignment }) {
               <th class="sys grp-h" colSpan={4}>Submission<span class="grp">system <Lock /></span></th>
               <th class="grp-h" colSpan={Math.max(1, qs.length)}>{qs.length ? 'Points per question' : 'Score'}</th>
               <th rowSpan={2}>Feedback<span class="grp">students see</span></th>
-              <th rowSpan={2}>Adjust<span class="grp">±</span></th>
+              <th rowSpan={2}>Adjust ±<span class="grp">{sheet.group ? 'individual adjustment relative to team (optional)' : 'optional'}</span></th>
               <th rowSpan={2}>Private notes<span class="grp">never shared</span></th>
               <th rowSpan={2} class="sys">Penalty</th>
               <th rowSpan={2} class="sys">Total{max ? ` / ${max}` : ''}</th>
@@ -248,8 +254,10 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
     const ok = await runSave({ owner: p.cohort.org, repo: 'classroom-config', path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, 'classroom-config'] });
     if (ok) setDraft(null);
   };
+  // As the engine's formation window: hand out to the grading pin (grading_datetime, else due).
+  const pin = readSchedule(p)?.assignments[a.slug]?.grading ?? a.due;
   const opens = a.handout ? a.handout.slice(0, 10) : null;
-  const closes = a.late_until ? a.late_until.slice(0, 10) : null;
+  const closes = pin ? pin.slice(0, 10) : null;
   const window = !opens ? 'never' : today < opens ? 'pending' : closes && today > closes ? 'closed' : 'open';
   const empty = cur.teams.filter((t) => !t.members.length);
   return (
@@ -260,7 +268,7 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
           <h1>Teams: {assignmentTitle(a)}</h1>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
-        <div class="actions"><a class="btn outline" href={`https://${p.cohort.org}.github.io/teams/`} target="_blank" rel="noopener">Team list on the student site <Ext /></a></div>
+        <div class="actions"><a class="btn outline" href={`https://${p.cohort.org}.github.io/assignments/`} target="_blank" rel="noopener">Assignments on the student site <Ext /></a></div>
       </div>
       {p.groups.length > 1 ? (
         <div class="filters" role="group" aria-label="Assignment" style="margin-bottom:12px">
@@ -269,7 +277,7 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
         </div>
       ) : null}
       <Help title="How teams form" doc="09-release-assignment-to-cohort.md">
-        <p>Students form their own teams on the student site until the window closes; you can assign the rest here. Teams are fixed at hand out. Team-less students get their own repo then.</p>
+        <p>Students form their own teams on the student site until the window closes; you can assign the rest here. Students without a team get no repo at hand out. Assign them here or they are left out.</p>
       </Help>
       <div class="stack">
         <div class="grid-2">
@@ -282,14 +290,14 @@ function Teams(p: ReadyProps & { a: Assignment; groups: Assignment[] }) {
                 : window === 'closed' ? 'Only you can change teams now.'
                 : 'This assignment is handed out by hand, so students cannot form teams on the site; assign them here.'}
             </p>
-            <p class="footnote">The window runs from hand out to the end of late work, both set in the schedule.</p>
+            <p class="footnote">The window runs from hand out until marking starts: the due date, unless the schedule sets a later grading date.</p>
             {window === 'open' && free.length ? <div class="actions"><OpButtons def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} small label={`Email ${free.length} without a team`} /></div> : null}
             <a class="textlink" href={`#schedule-${a.slug}`}>Change the dates in the schedule</a>
           </section>
           <section class="panel section">
             <h2>Team size</h2>
-            <dl class="kv"><dt>Largest team</dt><dd>{maxSize} <span class="footnote">{cfg.max_team_size ? 'from the template' : 'the course default'}</span></dd><dt>How teams form</dt><dd>{formation}</dd></dl>
-            <a class="textlink" href={`?course=${p.course.org}#template-${a.slug}`}>Change on the template</a>
+            <dl class="kv"><dt>Max team size</dt><dd>{maxSize} <span class="footnote">{cfg.max_team_size ? 'from the assignment template' : 'the course default'}</span></dd><dt>How teams form</dt><dd>{formation}</dd></dl>
+            <a class="textlink" href={`?course=${p.course.org}#template-${a.slug}`}>Change on the assignment template</a>
           </section>
         </div>
         <section class="panel section">

@@ -156,7 +156,7 @@ export function Field({ id, k, t, value, values, error, set, readOnly }: FieldPr
             <label class={`choice${o.off ? ' off' : ''}`} title={o.off}>
               <input type="radio" name={id} value={o.value} checked={str(value) === o.value} disabled={readOnly || !!o.off} onChange={() => set(k, o.value)} />
               <b>{o.label}</b>
-              {o.sub || o.off ? <span>{o.off ?? o.sub}</span> : null}
+              {o.sub || o.off ? <span>{o.off ?? o.sub}{o.href && !o.off ? <> <a class="textlink" href={o.href}>Open Teams</a></> : null}</span> : null}
             </label>
           ))}
         </div>

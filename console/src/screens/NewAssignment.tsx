@@ -162,7 +162,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   };
 
   let heading = '', body, foot;
-  const createdNote = created && step < 4 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo.replace(/-[fs]\d{4}$/, '')}`}>template’s settings</a>.</p> : null;
+  const createdNote = created && step < 4 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo.replace(/-[fs]\d{4}$/, '')}`}>assignment template’s settings</a>.</p> : null;
   if (step === 1) {
     heading = 'What is the assignment?';
     const errs = errsOf(tiers1);
@@ -192,7 +192,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const tiers = step === 2 ? tiers2 : tiers3;
     const errs = { ...errsOf(tiers), ...(step === 3 && formatError(vv) ? { formats: formatError(vv)! } : {}) };
     body = copying ? (
-      <p class="note">Copied from {String(v.copy_from)}: its settings come with it, so this question is skipped. Change them on the template’s settings after creation.</p>
+      <p class="note">Copied from {String(v.copy_from)}: its settings come with it, so this question is skipped. Change them on the assignment template’s settings after creation.</p>
     ) : (
       <>
         {createdNote}
@@ -222,7 +222,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
           <dt>Submit</dt><dd>{copying ? 'As copied' : submit}</dd><dd>{copying ? null : <a href="#new-assignment-2">Change</a>}</dd>
           <dt>Marking</dt><dd>{copying ? 'As copied' : `${fmts}; tests ${w.autograde === 'true' ? `on (${String(w.tests ?? 'tests')})` : 'off'}`}</dd><dd>{copying ? null : <a href="#new-assignment-3">Change</a>}</dd>
         </dl>
-        <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Template ${repo} created`]} />
+        <Checks list={tplNow?.checks ?? null} busy={tpl.busy} pending={[`Assignment template ${repo} created`]} />
         {extrasPending ? <p class="footnote">The marking settings the create step does not take are written to grading_config.yml next.</p> : null}
         <SaveLine state={save} />
         {ready ? (
@@ -234,8 +234,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             </div>
             <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>
           </>
-        ) : created ? null : <p class="footnote">Creating makes a template with a main branch for the brief and a solution branch for marking.</p>}
-        {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The template is not complete yet. Check again in a minute; if it stays like this, open the run from All operations.</WizError> : null}
+        ) : created ? null : <p class="footnote">Creating makes an assignment template with a main branch for the brief and a solution branch for marking.</p>}
+        {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. Check again in a minute; if it stays like this, open the run from All operations.</WizError> : null}
       </>
     );
     foot = !created ? (
@@ -249,10 +249,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const back = step > 1 ? <a class="btn quiet" href={`#new-assignment-${step === 4 && copying ? 1 : step - 1}`}>Back</a> : <a class="btn quiet" href="#templates">Cancel</a>;
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Templates', href: '#templates' }, { t: 'New assignment' }]} />
+      <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Assignment templates', href: '#templates' }, { t: 'New assignment' }]} />
       <div class="page-head"><div><h1>New assignment</h1></div></div>
-      <Help title="What a template is" doc="03-add-assignment-to-course.md">
-        <p>One template per assignment. Students get a copy at hand out; marking reads its solution branch. Everything here has a default and can be changed later on the template’s settings.</p>
+      <Help title="What an assignment template is" doc="03-add-assignment-to-course.md">
+        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. Everything here has a default and can be changed later on the template’s settings.</p>
       </Help>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Three questions, then a check" base="new-assignment-" />

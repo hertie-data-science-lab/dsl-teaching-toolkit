@@ -30,6 +30,7 @@ import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading } from './ui/bits';
+import { ScreenBoundary } from './ui/boundary';
 import { Footer, Sidenav, Topbar } from './ui/shell';
 
 export interface AppDeps {
@@ -171,7 +172,7 @@ export function App({ state: s }: { state: AppState }) {
         </aside>
         <main id="view" tabindex={-1}>
           {sel.wizard && ctx.course && !wiz ? <p class="note" style="margin-bottom:18px"><a href={`?course=${ctx.course.org}#${sel.wizard}`}>Back to the {sel.wizard.startsWith('new-cohort') ? 'New cohort' : 'wizard'}</a> when you are done here.</p> : null}
-          {body}
+          <ScreenBoundary key={s.search.value + s.hash.value}>{body}</ScreenBoundary>
         </main>
       </div>
       <Footer course={ctx.course} cohort={ctx.cohort} />

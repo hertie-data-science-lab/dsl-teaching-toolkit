@@ -22,7 +22,7 @@ import { TIMEZONES } from '../tiers/course';
 import { Crumbs, EditFile, Help, Lives, Md, ProblemCards, ghUrl } from '../ui/bits';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { Check } from '../ui/icons';
-import { releaseRef } from './Cohort';
+import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -189,17 +189,17 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
   return (
     <>
       <div class="field">
-        <label for="e-tpl">Template</label>
+        <label for="e-tpl">Assignment template</label>
         <select id="e-tpl" onChange={(e) => set({ template: (e.target as HTMLSelectElement).value })}>
-          {!d.template ? <option value="" selected>Choose a template</option> : null}
+          {!d.template ? <option value="" selected>Choose an assignment template</option> : null}
           {opts.map((o) => <option value={o.value} selected={o.value === d.template}>{o.label}</option>)}
         </select>
         {errors.template ? <Invalid>{errors.template}</Invalid>
-          : tpl && tpl.state !== 'ready' ? <Invalid>This template has a problem. <a href={`#template-${tpl.slug}`}>Fix it on the template</a></Invalid>
-          : d.template ? <span class="valid-msg"><Check />Template ready</span> : null}
+          : tpl && tpl.state !== 'ready' ? <Invalid>This assignment template has a problem. <a href={`#template-${tpl.slug}`}>Fix it on the assignment template</a></Invalid>
+          : d.template ? <span class="valid-msg"><Check />Assignment template ready</span> : null}
         <p class="why">Must exist and be ready.</p>
       </div>
-      <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the template', reason: 'The name after the assignment’s number. Also feeds repo names.' }} />
+      <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the assignment template', reason: 'The name after the assignment’s number. Also feeds repo names.' }} />
       <div class="field">
         <span class="label">Hand out</span>
         <div class="choices">
@@ -224,7 +224,7 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
       {vis !== 'private' ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">Not available: student repos are not private, so the solution cannot be pushed automatically.</div></div>
       ) : d.manual ? (
-        <div class="field"><span class="label">Solution shown</span><div class="readonly">Needs a hand-out time; the solution must follow it.</div></div>
+        <div class="field"><span class="label">Solution shown</span><div class="readonly">Needs a hand out time; the solution must follow it.</div></div>
       ) : (
         <>
           <F id="e-solon" k="solutionOn" d={d} set={set} t={{ tier: 'default', label: 'Show the solution', widget: 'checkbox', defaultLabel: 'default: off' }} />
@@ -292,7 +292,7 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
           <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the term ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
           <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after term end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the term ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
           <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Cohort archived' }} />
-          <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{{date}} is filled in with the archive date.')} />
+          <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{date} is filled in with the archive date.')} />
           <Common d={d} set={set} />
         </div>
       ) : null}
@@ -400,10 +400,12 @@ function View(p: ReadyProps) {
     if (!filters[r.block]) continue;
     const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
     const gone = !!removed[r.entry];
+    const ref = rel ? releaseRef(rel, status.releases ?? [], tz, year) : null;
     const st = gone ? (
       <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
     ) : r.fault && r.block === 'releases' ? <><span class="st-chip skip">will be skipped</span><span class="st-note">Fix the folder first</span></>
-      : rel && rel.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, releaseRef(rel, status.releases ?? [], tz, year))} cls="btn small" label="Release early" /></>
+      : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
+      : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${r.fault && r.block === 'releases' ? ' fault' : ''}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}`} data-entry={r.entry}>
@@ -426,7 +428,7 @@ function View(p: ReadyProps) {
           <div class="entry-head"><div><div class="eyebrow">New entry</div><h2 id="entry-title">What kind of entry?</h2></div>{close}</div>
           <div class="entry-body">
             <div class="type-pick">{NEW_TYPES.map(([t, label, cls]) => <button type="button" class={`trow ${cls}`} style="display:block;min-height:44px" onClick={() => setDraft('new', blankDraft(t, { repo: repos[0] ?? '' }))}>{label}</button>)}</div>
-            <p class="footnote">A hand out is an assignment entry: template, hand out, due and late work together.</p>
+            <p class="footnote">A hand out is an assignment entry: assignment template, hand out, due and late work together.</p>
           </div>
         </div>
       );
@@ -434,6 +436,7 @@ function View(p: ReadyProps) {
       const errors = key in drafts ? errorsOf(d) : {};
       const set = <T,>(patch: Partial<T>) => setDraft(key, { ...(d as object), ...patch } as unknown as Draft);
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
+      const ref = rel ? releaseRef(rel, status.releases ?? [], tz, year) : null;
       const ident = identOf(d, current, doc);
       const title = d.kind === 'term' ? <>Term dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Cohort archived'}</> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
       const eyebrow = d.kind === 'term' ? 'Term' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
@@ -468,7 +471,8 @@ function View(p: ReadyProps) {
           </div>
           <div class="entry-foot">
             {rel ? (
-              rel.state === 'planned' ? <div class="savebar"><span class="footnote">Goes out at its time without you.</span><OpOpen def={releaseEarly(scope, releaseRef(rel, status.releases ?? [], tz, year))} cls="btn small outline" label="Release early…" /></div>
+              !ref ? <div class="savebar"><span class="st-note">{NOTHING_TO_RELEASE}. Add a deploy above.</span></div>
+              : rel.state === 'planned' ? <div class="savebar"><span class="footnote">Goes out at its time without you.</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small outline" label="Release early…" /></div>
               : rel.state === 'will_be_skipped' ? <div class="savebar"><span class="st-note">Fix the folder first; it cannot be released until it exists.</span></div>
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
               : null
@@ -562,9 +566,23 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const st = rel.state;
   const scope = cohortScope(p);
   const ref = releaseRef(rel, all, tz, year);
+  if (!ref) {
+    return (
+      <>
+        <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />
+        <div class="page-head">
+          <div>
+            <h1><b>{ident}</b>: {rel.title}</h1>
+            <p class="lede">{NOTHING_TO_RELEASE}.</p>
+          </div>
+          <div class="actions"><a class="btn" href={`#schedule-${rel.id}`}>Edit entry</a></div>
+        </div>
+      </>
+    );
+  }
   const problems = (status.problems ?? []).filter((x) => x.fix?.entry === rel.id);
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
-  const dest = rel.dest.repo || 'materials', destPath = rel.dest.path || rel.source.path;
+  const dest = rel.dest?.repo || 'materials', destPath = rel.dest?.path || ref.source.path;
   return (
     <>
       <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />
@@ -588,7 +606,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <section class="panel section">
           <h2>From and to</h2>
           <dl class="kv">
-            <dt>From</dt><dd><a href={ghUrl(p.course.org, rel.source.repo, rel.source.path, 'main').replace('/blob/', '/tree/')} target="_blank" rel="noopener">{p.course.org}/{rel.source.repo}/{rel.source.path}</a></dd>
+            <dt>From</dt><dd><a href={ghUrl(p.course.org, ref.source.repo, ref.source.path, 'main').replace('/blob/', '/tree/')} target="_blank" rel="noopener">{p.course.org}/{ref.source.repo}/{ref.source.path}</a></dd>
             <dt>To</dt><dd><a href={ghUrl(p.cohort.org, dest, destPath, 'main').replace('/blob/', '/tree/')} target="_blank" rel="noopener">{p.cohort.org}/{dest}/{destPath}</a></dd>
             <dt>On the student site</dt><dd>{rel.show_on_site ? 'Shown' : 'Hidden'}{rel.tbc ? ', TBC' : ''}</dd>
           </dl>

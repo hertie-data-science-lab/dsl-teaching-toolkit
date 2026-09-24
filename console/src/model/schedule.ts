@@ -13,6 +13,7 @@ export interface SchedEntry {
   show: boolean;
   when: string | null;
   type: string;
+  grading: string | null; // an assignment's explicit grading_datetime
 }
 
 export interface Schedule {
@@ -40,6 +41,7 @@ function entry(raw: unknown, dflt: Partial<SchedEntry> = {}): SchedEntry {
     show: e.show_on_site !== false,
     when: when && when.toLowerCase() !== 'tbc' ? when : null,
     type: s(e.type) || dflt.type || '',
+    grading: s(e.grading_datetime) || null,
   };
 }
 
@@ -99,7 +101,7 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
   for (const r of releases) {
     const e = sched?.releases[r.id];
     rows.push({
-      entry: r.id, block: 'releases', type: r.type, when: r.when, ident: releaseIdent(r, releases), name: r.title,
+      entry: r.id, block: 'releases', type: r.type ?? 'release', when: r.when, ident: releaseIdent(r, releases), name: r.title,
       state: RELEASE_WORD[r.state] ?? r.state, details: e?.details ?? '', tbc: r.tbc, show: r.show_on_site, fault: r.state === 'will_be_skipped',
     });
   }

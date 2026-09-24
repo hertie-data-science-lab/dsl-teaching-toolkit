@@ -294,7 +294,16 @@ describe('editing screens', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<li class="hit"><span>lectures\/01\/slides.html<\/span><span class="tag pub">public<\/span>/);
     expect(out).toMatch(/<li class="hit"><span>labs\/01\/solutions\/a.py<\/span><span class="tag wh">withheld<\/span>/);
+    expect(out).not.toContain('<span>SYLLABUS.md</span>');
+    expect(out.match(/1 of 3 files/g)).toHaveLength(2);
     expect(out).toContain('Write the session list');
+  });
+  it('materials settings says when no file matches', () => {
+    const none = new StaticFiles({ [`${COURSE_ORG}/course-materials-f2026/publish.yml`]: 'public: []\n' }, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
+    const out = html(<MaterialsScreen {...cp} files={none} entry="course-materials-f2026" />);
+    expect(out).toContain('0 of 2 files');
+    expect(out).toContain('No file matches yet');
+    expect(out).not.toContain('<span>SYLLABUS.md</span>');
   });
   it('the public website asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);

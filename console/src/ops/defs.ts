@@ -108,7 +108,7 @@ export function handout(s: Scope, a: AsgRef): OpDef {
 export function updateCopies(s: Scope, a: AsgRef, files: string[]): OpDef {
   return {
     ...base(s, 'assignment.update_copies', a.slug), name: 'Update every copy', title: a.title, where: `${a.units} student repos`,
-    intro: 'Pushes a template file to every student copy and posts a note on each receipts thread.',
+    intro: 'Pushes an assignment template file to every student copy and posts a note on each receipts thread.',
     verb: `Update ${a.units} copies`, running: 'Updating every copy', cancel: 'Stop; copies already updated stay updated',
     args: { course_source_repo: a.template, slug: a.slug }, options: copiesTiers(files),
   };

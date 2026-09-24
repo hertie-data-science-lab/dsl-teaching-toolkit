@@ -2,7 +2,7 @@
 // that open it. Preview is the filled button; a gated op's verb unlocks only after this
 // session previewed it. The outcome sentence is the engine's summary, verbatim.
 
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import type { Outcome } from '../model/types';
@@ -16,6 +16,25 @@ const TONE: Record<string, string> = { done: 'ok', previewed: 'dry', failed: 'fa
 
 function Mark({ tone }: { tone: string }) {
   return <span class={`outcome-mark ${tone}`}>{tone === 'ok' ? <Check /> : tone === 'dry' ? <Eye /> : tone === 'fail' ? <Fail /> : <Skip />}</span>;
+}
+
+/** A generated block, preformatted, with a Copy button. */
+function Block({ text }: { text: string }) {
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const copy = () => {
+    const done = (ok: boolean) => setCopied(ok);
+    try {
+      void navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+    } catch {
+      done(false);
+    }
+  };
+  return (
+    <div class="outcome-block">
+      <div class="savebar"><button class="btn small quiet" type="button" onClick={copy}>Copy</button>{copied === true ? <span class="footnote">Copied.</span> : copied === false ? <span class="footnote">Could not copy; select the text instead.</span> : null}</div>
+      <pre class="outcome-details">{text}</pre>
+    </div>
+  );
 }
 
 function runLink(def: OpDef, runId: number | null | undefined, url?: string) {
@@ -36,6 +55,7 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
     );
   const tone = TONE[o.conclusion] ?? 'skip';
   const counts = Object.entries(o.counts ?? {});
+  const reasons = o.reasons ?? [], details = o.details ?? [], block = o.block ?? '';
   return (
     <div class="outcome">
       <Mark tone={tone} />
@@ -44,15 +64,17 @@ export function OutcomeView({ result, def, url }: { result: Result; def: OpDef; 
       {result.leaked.length ? (
         <p class="check-line bad"><span>The public record of this run names {result.leaked.length === 1 ? 'a person' : `${result.leaked.length} people`}. Tell the lab: the console reports it so it can be fixed.</span></p>
       ) : null}
-      {(o.reasons ?? []).length || result.people.length ? (
+      {reasons.length || details.length || block || result.people.length ? (
         <details class="fold reasons">
           <summary>Details</summary>
           <div class="fold-body">
-            {(o.reasons ?? []).length ? (
-              <table><tbody>{(o.reasons ?? []).map((r) => (
-                <tr><td><code>{r.code}</code></td><td>{r.text}{r.fix?.screen ? <> <a href={`#${r.fix.screen}${r.fix.entry ? `-${r.fix.entry}` : ''}`}>Fix</a></> : null}</td></tr>
+            {reasons.length ? (
+              <table><tbody>{reasons.map((r) => (
+                <tr><td><code>{r.code}</code></td><td class="pre">{r.text}{r.fix?.screen ? <> <a href={`#${r.fix.screen}${r.fix.entry ? `-${r.fix.entry}` : ''}`}>Fix</a></> : null}</td></tr>
               ))}</tbody></table>
             ) : null}
+            {details.length ? <ul class="outcome-list">{details.map((d) => <li>{d}</li>)}</ul> : null}
+            {block ? <Block text={block} /> : null}
             {result.people.length ? (
               <>
                 <p class="footnote">Per person (private; not in the public run log):</p>

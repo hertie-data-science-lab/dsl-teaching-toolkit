@@ -26,7 +26,7 @@ export const HANDOUT: Tiers = {
 
 export function updateCopies(files: string[]): Tiers {
   return {
-    path: { tier: 'ask', label: 'File to push', widget: 'select', reason: 'Picked from the template.', options: [opt('', files.length ? 'Choose a file' : 'Reading the template…'), ...files.map((f) => opt(f, f))] },
+    path: { tier: 'ask', label: 'File to push', widget: 'select', reason: 'Picked from the assignment template.', options: [opt('', files.length ? 'Choose a file' : 'Reading the assignment template…'), ...files.map((f) => opt(f, f))] },
     overwrite: { tier: 'default', label: 'Overwrite students’ own edits to this file', widget: 'checkbox', default: false, defaultLabel: 'default: off, so their work is kept' },
   };
 }
