@@ -11,6 +11,9 @@ describe('md', () => {
   it('starts a new paragraph at a blank line', () => {
     expect(md('One.\n\nTwo *more*.')).toBe('<p>One.</p><p>Two <i>more</i>.</p>');
   });
+  it('splits a paragraph that runs into a list', () => {
+    expect(md('Intro:\n- a\n- b')).toBe('<p>Intro:</p><ul><li>a</li><li>b</li></ul>');
+  });
   it('keeps lists and escapes HTML', () => {
     expect(md('- a\n- <b>')).toBe('<ul><li>a</li><li>&lt;b&gt;</li></ul>');
   });

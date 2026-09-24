@@ -217,10 +217,21 @@ export function md(src: string | null | undefined): string {
     .split(/\n{2,}/)
     .map((b) => {
       const lines = b.split('\n');
-      if (lines.every((l) => /^\s*- /.test(l))) return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*- /, ''))}</li>`).join('')}</ul>`;
-      // As markdown does: a single newline is a space; a line ending in two spaces breaks.
-      const text = lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join('');
-      return `<p>${inline(text)}</p>`;
+      // A paragraph may run straight into a list ("Intro:\n- a\n- b"): split at the first item.
+      const first = lines.findIndex((l) => ITEM.test(l));
+      if (first > 0 && lines.slice(first).every((l) => ITEM.test(l))) return para(lines.slice(0, first)) + list(lines.slice(first));
+      return first === 0 && lines.every((l) => ITEM.test(l)) ? list(lines) : para(lines);
     })
     .join('');
+}
+
+const ITEM = /^\s*- /;
+
+function list(lines: string[]): string {
+  return `<ul>${lines.map((l) => `<li>${inline(l.replace(ITEM, ''))}</li>`).join('')}</ul>`;
+}
+
+/** As markdown does: a single newline is a space; a line ending in two spaces breaks. */
+function para(lines: string[]): string {
+  return `<p>${inline(lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join(''))}</p>`;
 }
