@@ -2266,6 +2266,23 @@ class LockWrite(NamedTuple):
     changed: bool
 
 
+def team_lock_content(
+    course_org: str,
+    semester_org: str,
+    sched: schedule.Schedule | None = None,
+    *,
+    now: datetime | None = None,
+) -> bytes:
+    """The lock exactly as `sync_team_lock` writes it, without writing - for a caller that
+    asks "is this semester's lock current?" (the migration's drift check)."""
+    sched = sched if sched is not None else schedule.load(semester_org)
+    return team_lock_text(
+        team_lock_entries(
+            course_org, sched, now, _formation_pages(course_org, semester_org, sched)
+        )
+    ).encode()
+
+
 def sync_team_lock(
     course_org: str,
     semester_org: str,
@@ -2301,11 +2318,7 @@ def sync_team_lock(
         # `grading_config.yml`, and a preview that never writes has nothing to do with them.
         log(f"    PREVIEW  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
         return LockWrite(True, False)
-    content = team_lock_text(
-        team_lock_entries(
-            course_org, sched, now, _formation_pages(course_org, semester_org, sched)
-        )
-    ).encode()
+    content = team_lock_content(course_org, semester_org, sched, now=now)
     try:
         existing = get_file_with_sha(semester_org, CONFIG_REPO, TEAM_LOCK_PATH)
     except RuntimeError:

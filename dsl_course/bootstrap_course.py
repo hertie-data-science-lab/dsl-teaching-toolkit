@@ -102,7 +102,7 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 #   seed.seed_github_workflows.
 #
 # Every user-editable semester-config file is a minimal commented scaffold (USER-owned,
-# seeded once). Filled examples are not seeded: the scaffolds link example-course/cohort-org/.
+# seeded once). Filled examples are not seeded: the scaffolds link example-course/semester-org/.
 # ---------------------------------------------------------------------------------------
 
 
@@ -533,6 +533,15 @@ def _scaffold_text(
     if path == schedule.SCHEDULE_PATH:
         text = seed_schedule(text, semester_defaults or {})
     return text.encode()
+
+
+def semester_scaffold(org: str, path: str, central_ref: str) -> str:
+    """One semester-config scaffold exactly as Bootstrap semester seeds it for `org` (the
+    migration replaces an untouched old skeleton with the current one)."""
+    tag, year = _tag_and_year(org)
+    return _scaffold_text(
+        path, CONFIG_SCAFFOLDS[path], central_ref, tag, year, None
+    ).decode()
 
 
 def seed_schedule(text: str, defaults: dict) -> str:

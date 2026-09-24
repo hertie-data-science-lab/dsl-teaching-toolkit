@@ -351,6 +351,20 @@ def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     return {path: sha for path, sha in entries}
 
 
+def repo_blob_entries(org: str, repo: str, branch: str) -> dict[str, tuple[str, str]]:
+    """`{path: (blob sha, file mode)}` for every file in `branch` - ONE recursive fetch.
+    `repo_blob_shas` with the mode kept, for a caller that re-points a file (`move_files`)
+    and must not turn an executable `run.sh` into a plain file on the way."""
+    lines = _tree(
+        org,
+        repo,
+        branch,
+        r'"\(.truncated)", (.tree[] | select(.type=="blob") | [.path, .sha, .mode] | @tsv)',
+    )
+    entries = (line.split("\t") for line in lines if line.count("\t") == 2)
+    return {path: (sha, mode) for path, sha, mode in entries}
+
+
 def repo_path_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     """`{path: sha}` for every entry in `org/repo`'s `branch`, directories included - ONE
     recursive fetch.
@@ -530,7 +544,7 @@ def move_files(
     is no commit. Returns False on a failed read or any failed leg of the commit."""
     try:
         branch = branch or default_branch(org, repo)
-        live = repo_blob_shas(org, repo, branch)
+        live = repo_blob_entries(org, repo, branch)
     except RuntimeError as exc:
         log_err(f"could not read {org}/{repo} before writing to it: {exc}")
         return False
@@ -540,18 +554,17 @@ def move_files(
         if old not in live:
             continue
         if new not in live:
-            tree.append(
-                {"path": new, "mode": "100644", "type": "blob", "sha": live[old]}
-            )
+            sha, mode = live[old]
+            tree.append({"path": new, "mode": mode, "type": "blob", "sha": sha})
         gone[old] = None
     for path, content in (files or {}).items():
-        if live.get(path) == blob_sha(content):
+        if path in live and live[path][0] == blob_sha(content):
             continue
         entry = _tree_entry(org, repo, path, content)
         if entry is None:
             return False
         tree.append(entry)
-    tree += [{"path": p, "mode": "100644", "type": "blob", "sha": None} for p in gone]
+    tree += [{"path": p, "mode": live[p][1], "type": "blob", "sha": None} for p in gone]
     if not tree:
         return True
     return _commit_tree(org, repo, branch, tree, message)

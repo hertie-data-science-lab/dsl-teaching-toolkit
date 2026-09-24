@@ -460,26 +460,17 @@ Maintained by the [Hertie Data Science Lab](https://github.com/hertie-data-scien
 """
 
 
-def update_profile_readme(
+def profile_files(
     org: str,
     org_name: str | None = None,
     course_name: str | None = None,
     *,
     central_ref: str,
     repos: list[dict] | None = None,
-) -> int:
-    """(Re)generate the org's profile/README.md from its metadata + live repo list.
-
-    A semester org (one with a `join` repo) gets a student-facing page; a course org
-    gets the faculty-facing one.
-
-    `repos` is the caller's listing when it already holds one (seed.refresh does, and has
-    just swept it), so an org's nightly run pays for `list_org_repos` once rather than
-    once per consumer. Fetched here when it is not given.
-
-    Returns the number of failed writes (0 or 1), so the nightly refresh can count it:
-    the commit's return used to be discarded under an unconditional "refreshed" line, and
-    a whole org whose landing pages never converged reported success every night."""
+) -> dict[str, bytes]:
+    """The org's `.github` READMEs exactly as `update_profile_readme` writes them, without
+    writing: `README.md` always, `profile/README.md` unless an instructor's page is left
+    as it is (see `_semester_profile_body`)."""
     if org_name is None or course_name is None:
         # Guarded load: absent (None) is normal - a semester org has no dsl-course.yml of its
         # own, so fall back to the org name. A MALFORMED config raises here (with a clear,
@@ -519,6 +510,33 @@ def update_profile_readme(
     }
     if body is not None:
         files["profile/README.md"] = body.encode()
+    return files
+
+
+def update_profile_readme(
+    org: str,
+    org_name: str | None = None,
+    course_name: str | None = None,
+    *,
+    central_ref: str,
+    repos: list[dict] | None = None,
+) -> int:
+    """(Re)generate the org's profile/README.md from its metadata + live repo list
+    (`profile_files`).
+
+    A semester org (one with a `join` repo) gets a student-facing page; a course org
+    gets the faculty-facing one.
+
+    `repos` is the caller's listing when it already holds one (seed.refresh does, and has
+    just swept it), so an org's nightly run pays for `list_org_repos` once rather than
+    once per consumer. Fetched here when it is not given.
+
+    Returns the number of failed writes (0 or 1), so the nightly refresh can count it:
+    the commit's return used to be discarded under an unconditional "refreshed" line, and
+    a whole org whose landing pages never converged reported success every night."""
+    files = profile_files(
+        org, org_name, course_name, central_ref=central_ref, repos=repos
+    )
     # Both are rendered from the same org snapshot and move together, so they belong in one
     # commit - kept separate from the workflow refresh's commit, because `docs:` vs `ci:` is
     # the one distinction in this history worth reading.
