@@ -4,6 +4,7 @@ import type { Files } from '../model/files';
 import type { Heartbeat } from '../model/heartbeat';
 import type { Loaded } from '../model/status';
 import type { Status } from '../model/types';
+import type { AssignmentTab } from '../router';
 
 /** What every cohort screen renders from. */
 export interface CohortProps {
@@ -13,6 +14,8 @@ export interface CohortProps {
   files: Files;
   now: number;
   entry?: string;
+  /** The assignment hub's tab, when the route names one. */
+  tab?: AssignmentTab;
   heartbeat?: Heartbeat | null;
   /** A template for the schedule editor's new entry (`?template=`, from New assignment). */
   prefill?: string;

@@ -86,7 +86,7 @@ export function Md({ src, class: cls }: { src: string | null | undefined; class?
   return <div class={cls} dangerouslySetInnerHTML={{ __html: md(src) }} />;
 }
 
-export function CheckLine({ cls, children }: { cls: 'ok' | 'bad' | 'busy'; children: ComponentChildren }) {
+export function CheckLine({ cls, children }: { cls: 'ok' | 'bad' | 'busy' | 'warn'; children: ComponentChildren }) {
   return (
     <div class={`check-line ${cls}`}>
       {cls === 'busy' ? <span class="spin" /> : cls === 'ok' ? <Check /> : <Alert />}

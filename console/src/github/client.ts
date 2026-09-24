@@ -307,6 +307,12 @@ export class GitHubClient {
     return { path: r.path, sha: r.sha, text };
   }
 
+  /** When `path` last changed on the default branch (its newest commit's date), or null for a path with no history. */
+  async lastCommitDate(owner: string, repo: string, path: string): Promise<string | null> {
+    const r = await this.getOrNull<{ commit?: { committer?: { date?: string } } }[]>(`/repos/${owner}/${repo}/commits?path=${encodeURIComponent(path)}&per_page=1`);
+    return r?.[0]?.commit?.committer?.date ?? null;
+  }
+
   /** A directory listing, or null when the directory is absent. */
   async listDir(owner: string, repo: string, path: string, ref?: string): Promise<DirEntry[] | null> {
     const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';

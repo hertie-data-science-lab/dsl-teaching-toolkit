@@ -69,6 +69,7 @@ export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu }: {
               <span class="who-name">{user.name || user.login}</span>
             </div>
           ) : null}
+          {user ? <a class="pill-ghost help-btn" href="#help" aria-label="Help: how the console is organised" title="Help">?</a> : null}
           <button class="pill-ghost" type="button" aria-label="Switch colour theme" onClick={toggle}>{dark ? 'Light' : 'Dark'}</button>
           {user && onSignOut ? <button class="pill-ghost" type="button" onClick={onSignOut}>Sign out</button> : null}
         </div>
@@ -216,10 +217,12 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
             {item('#cohort', 'This week', 'week', problems ? <span class="n-count" aria-label={`${problems} problems`}>{problems}</span> : null)}
             {item('#schedule', 'Schedule', 'schedule')}
             {item('#assignments', 'Assignments', 'assignments')}
+            {item('#marks', 'Marks', 'marks')}
             {item('#students', 'Students', 'students')}
-            {item('#teams', 'Teams', 'teams')}
             {item('#staff', 'Staff', 'staff')}
             {item('#site', 'Site', 'site')}
+            {item('#archive', 'Archive', 'archive')}
+            {item('#operations', 'Operations', 'operations')}
           </ul>
           <hr />
         </>
@@ -235,12 +238,6 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
             {item('#website', 'Public website', 'website')}
           </ul>
           <CohortsNav course={course} cohortStates={cohortStates} />
-        </>
-      ) : null}
-      {course && cohort && course.write ? (
-        <>
-          <hr />
-          <ul>{item('#operations', 'All operations', 'operations')}{item('#archive', 'Archive', 'archive')}</ul>
         </>
       ) : null}
       {course && !course.write ? <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p> : null}

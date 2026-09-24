@@ -15,8 +15,7 @@ import { OpPanel } from './ops/Panel';
 import { OpsSession } from './ops/session';
 import { ArchiveScreen } from './screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
-import { MarksScreen, TeamsScreen } from './screens/Marking';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, parseHash, parseSearch, resolveContext, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, landing, movedHash, parseHash, replaceHash, parseSearch, resolveContext, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseScreen, TemplateScreen } from './screens/Course';
@@ -25,6 +24,8 @@ import { HomeScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { StaffScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
+import { HelpScreen } from './screens/Help';
+import { MarksOverviewScreen } from './screens/Marking';
 import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
@@ -75,6 +76,14 @@ export function App({ state: s }: { state: AppState }) {
   }, []);
 
   const route = parseHash(s.hash.value);
+  // An old `#teams-<slug>` / `#marks-<slug>` link: show the tab, and write its new hash.
+  const moved = movedHash(s.hash.value);
+  useEffect(() => {
+    if (moved) {
+      replaceHash(moved);
+      s.hash.value = moved;
+    }
+  }, [moved]);
   useEffect(() => {
     document.body.classList.remove('nav-open');
     s.navOpen.value = false;
@@ -124,6 +133,8 @@ export function App({ state: s }: { state: AppState }) {
   let body;
   if (wiz?.name === 'new-course') {
     body = <NewCourseScreen files={s.files} step={wiz.step} />;
+  } else if (screen === 'help') {
+    body = <HelpScreen />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {
@@ -144,7 +155,7 @@ export function App({ state: s }: { state: AppState }) {
       : <CourseScreen {...cp} />;
   } else {
     const cp: CohortProps = {
-      course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry,
+      course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab,
       heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
@@ -158,8 +169,7 @@ export function App({ state: s }: { state: AppState }) {
       staff: () => <StaffScreen {...cp} />,
       site: () => <SiteScreen {...cp} />,
       operations: () => <OperationsScreen {...cp} />,
-      teams: () => <TeamsScreen {...cp} />,
-      marks: () => <MarksScreen {...cp} />,
+      marks: () => <MarksOverviewScreen {...cp} />,
       archive: () => <ArchiveScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.cohort)();

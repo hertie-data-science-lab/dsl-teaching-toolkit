@@ -1,5 +1,7 @@
 // Hash routes are the mockup's tokens (`#cohort`, `#schedule-s5`, `#template-assignment-3`);
-// a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. Which course or cohort
+// a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. An assignment's tabs
+// ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
+// `#marks-<slug>` screens parse to those tabs, so old links still land. Which course or cohort
 // the page is about rides in the query string (`?cohort=<org>` or `?course=<org>`), so a link
 // from a fault mail can name both.
 
@@ -8,15 +10,52 @@ import type { Course, CohortRef } from './model/discovery';
 export interface Route {
   screen: string;
   entry?: string;
+  /** The assignment hub's tab, when the hash names one. */
+  tab?: AssignmentTab;
 }
+
+export type AssignmentTab = 'overview' | 'teams' | 'marks';
+const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 
 const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
 
 export function parseHash(hash: string): Route {
   const r = decodeURIComponent(hash.replace(/^#/, ''));
   if (!r) return { screen: '' };
-  for (const s of ENTRY_SCREENS) if (r.startsWith(`${s}-`)) return { screen: s, entry: r.slice(s.length + 1) };
+  if (r === 'teams') return { screen: 'assignments' };
+  for (const s of ENTRY_SCREENS) {
+    if (!r.startsWith(`${s}-`)) continue;
+    const entry = r.slice(s.length + 1);
+    if (s === 'teams' || s === 'marks') return { screen: 'assignment', entry, tab: s };
+    if (s === 'assignment') {
+      const [slug, tab] = entry.split('/');
+      return TABS.includes(tab as AssignmentTab) ? { screen: s, entry: slug, tab: tab as AssignmentTab } : { screen: s, entry: slug };
+    }
+    return { screen: s, entry };
+  }
   return { screen: r };
+}
+
+/** The hash a route is canonically written as (the old Teams and Marks hashes rewrite to the tab). */
+export function hashOf(r: Route): string {
+  return `#${r.screen}${r.entry ? `-${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}`;
+}
+
+/** The hash to write instead of `hash` (an old Teams or Marks link), or null when it is already canonical. */
+export function movedHash(hash: string): string | null {
+  if (!hash || hash === '#') return null;
+  const canonical = hashOf(parseHash(hash));
+  return decodeURIComponent(hash) === canonical ? null : canonical;
+}
+
+/** Rewrite the address bar's hash in place (no history entry), keeping the query string. */
+export function replaceHash(hash: string): void {
+  history.replaceState(null, '', `${location.search}${hash}`);
+}
+
+/** The link to one tab of an assignment. */
+export function tabHref(slug: string, tab: AssignmentTab): string {
+  return `#assignment-${slug}/${tab}`;
 }
 
 export interface Selection {
@@ -42,7 +81,7 @@ export function parseSearch(search: string): Selection {
 /** Screens that need a cohort, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
   cohort: 'week', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
-  students: 'students', roster: 'students', teams: 'teams', marks: 'assignments', staff: 'staff', site: 'site', operations: 'operations', archive: 'archive',
+  students: 'students', roster: 'students', marks: 'marks', staff: 'staff', site: 'site', operations: 'operations', archive: 'archive',
 };
 /** Screens about the course. */
 export const COURSE_SCREENS: Record<string, string> = {
