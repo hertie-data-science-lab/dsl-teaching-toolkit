@@ -599,6 +599,27 @@ def _course_fault(what: str, field: str = "", lineno: int | None = None) -> Conf
     )
 
 
+def retired_course_faults(
+    meta: dict, lines: dict[str, int] | None = None
+) -> list[ConfigFault]:
+    """A NOT_MIGRATED fault for each key `dsl-course.yml` no longer has (decision 0009):
+    `course.RETIRED_COURSE_KEYS`. Pure, so the migration verifies with the same rule."""
+    return [
+        ConfigFault(
+            COURSE_CONFIG,
+            f"`{key}:` is no longer read (decision 0009)",
+            field=key,
+            file=COURSE_CONFIG,
+            in_repo=".github",
+            lineno=line_of(lines or {}, key),
+            fix_text="run the migration, which removes it",
+            code=NOT_MIGRATED,
+        )
+        for key in RETIRED_COURSE_KEYS
+        if key in meta
+    ]
+
+
 def read_course_config(
     course_org: str, faults: list[ConfigFault]
 ) -> dict[str, list[dict]] | None:
@@ -642,20 +663,7 @@ def read_course_config(
     # for `central_ref:` - and so the loader's reserved key cannot survive into anything
     # that renders this mapping.
     lines = take_lines(meta)
-    for key in RETIRED_COURSE_KEYS:
-        if key in meta:
-            faults.append(
-                ConfigFault(
-                    COURSE_CONFIG,
-                    f"`{key}:` is no longer read (decision 0009)",
-                    field=key,
-                    file=COURSE_CONFIG,
-                    in_repo=".github",
-                    lineno=line_of(lines, key),
-                    fix_text="run the migration, which removes it",
-                    code=NOT_MIGRATED,
-                )
-            )
+    faults += retired_course_faults(meta, lines)
     faculty = parse_faculty_from_meta(meta, faults, file=COURSE_CONFIG, repo=".github")
     try:
         resolve_central_ref(
