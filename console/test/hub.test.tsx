@@ -11,6 +11,7 @@ import { AssignmentScreen, defaultTab } from '../src/screens/Assignments';
 import { MarksOverviewScreen } from '../src/screens/Marking';
 import { gradebookWrites, readSheet, returnedOn } from '../src/model/marks';
 import type { CohortProps } from '../src/screens/types';
+import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
 const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
@@ -104,5 +105,16 @@ describe('the Marks overview', () => {
     const out = render(<MarksOverviewScreen {...props()} />);
     expect(out).toContain('No mark sheets yet');
     expect(out).not.toContain('<table');
+  });
+});
+
+describe('the cohort nav', () => {
+  it('lists the cohort pages in order, with Marks and without Teams', () => {
+    const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="marks" problems={0} />);
+    const first = nav.slice(nav.indexOf('href="#cohort"') - 9, nav.indexOf('</ul>', nav.indexOf('href="#cohort"')));
+    const names = [...first.matchAll(/<a href="#[a-z]+"[^>]*>([A-Za-z ]+)/g)].map((m) => m[1]);
+    expect(names).toEqual(['This week', 'Schedule', 'Assignments', 'Marks', 'Students', 'Staff', 'Site', 'Archive', 'Operations']);
+    expect(nav).toContain('href="#marks" aria-current="page"');
+    expect(nav).not.toContain('href="#teams"');
   });
 });
