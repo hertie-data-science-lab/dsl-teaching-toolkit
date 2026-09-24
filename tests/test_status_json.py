@@ -238,8 +238,7 @@ def _course(**over) -> status_json.CourseFacts:
 def _semester(**over) -> status_json.SemesterFacts:
     site = f"{SEMESTER}.github.io"
     listing = {
-        name: repo_row(name)
-        for name in ("semester-config", "welcome", site, "materials")
+        name: repo_row(name) for name in ("semester-config", "join", site, "materials")
     }
     facts = status_json.SemesterFacts(
         org=SEMESTER,
@@ -740,7 +739,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
             repo_row(n)
             for n in (
                 "semester-config",
-                "welcome",
+                "join",
                 f"{SEMESTER}.github.io",
                 "materials",
             )
@@ -1048,9 +1047,9 @@ def test_a_problem_or_a_prerequisite_is_the_why():
     doc = _render(*_contract_scenario())
     assert doc["semester"]["stage_why"]["K4"] == "1 problem needs fixing."
     half = _semester(people=None)
-    del half.listing["welcome"]
+    del half.listing["join"]
     doc = _render(semester=half)
-    assert doc["semester"]["stage_why"]["K2"] == "The semester has no welcome repo yet."
+    assert doc["semester"]["stage_why"]["K2"] == "The semester has no join repo yet."
     assert doc["semester"]["stages"]["K3"] == "blocked"
     assert (
         doc["semester"]["stage_why"]["K3"] == "Waiting for the semester to be set up."

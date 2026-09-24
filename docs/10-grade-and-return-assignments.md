@@ -311,7 +311,7 @@ mails again. Students see it too, in the site's Updates box and on its schedule.
 2. the toolkit's own open notices in `semester-config` are closed;
 3. the website is synced one last time, so it ships the archived state;
 4. **every repository in the org is archived** - students' work, the released materials,
-   `welcome` (so nobody can still Join a semester that is over), the website, `.github`;
+   `join` (so nobody can still Join a semester that is over), the website, `.github`;
 5. `archive/teardown.md` (the archive record) is written into `semester-config`, recording what was archived;
 6. `semester-config` is archived last, which is what tells every nightly sync this semester
    is finished and to leave it alone.

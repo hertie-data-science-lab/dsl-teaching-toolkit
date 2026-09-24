@@ -83,9 +83,7 @@ def _fp(repos: dict, config: dict) -> dict:
 
 
 def test_an_untouched_estate_diffs_to_nothing():
-    fp = _fp(
-        {"welcome": {"private": False, "topics": [], "archived": False}}, {"a": "1"}
-    )
+    fp = _fp({"join": {"private": False, "topics": [], "archived": False}}, {"a": "1"})
     assert estate.diff(fp, fp) == {}
 
 
@@ -103,14 +101,14 @@ def test_a_repo_left_behind_shows_up():
 def test_a_changed_topic_and_a_deleted_repo_both_show_up():
     before = _fp(
         {
-            "welcome": {"private": False, "topics": ["dsl-welcome"], "archived": False},
+            "join": {"private": False, "topics": ["dsl-welcome"], "archived": False},
             "gone": {"private": True, "topics": [], "archived": False},
         },
         {},
     )
-    after = _fp({"welcome": {"private": False, "topics": [], "archived": False}}, {})
+    after = _fp({"join": {"private": False, "topics": [], "archived": False}}, {})
     changed = estate.diff(before, after)
-    assert set(changed) == {"repos/welcome", "repos/gone"}
+    assert set(changed) == {"repos/join", "repos/gone"}
     assert changed["repos/gone"][1] is None
 
 
@@ -130,7 +128,7 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
         "list_org_repos",
         lambda org: [
             {
-                "name": "welcome",
+                "name": "join",
                 "visibility": "public",
                 "topics": ["x"],
                 "archived": False,
@@ -143,7 +141,7 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
         estate.gh_contents, "repo_blob_shas", lambda *a: {"schedule.yml": "s"}
     )
     fp = estate.fingerprint(SEMESTER)
-    assert fp["repos"]["welcome"] == {
+    assert fp["repos"]["join"] == {
         "private": False,
         "topics": ["x"],
         "archived": False,
@@ -193,7 +191,7 @@ def test_the_fingerprint_photographs_the_org_level_workflows(monkeypatch):
 
 
 def test_a_semester_org_is_not_asked_for_org_level_workflows(monkeypatch):
-    # It holds none - its own workflows live in `welcome` and `semester-config` - and a
+    # It holds none - its own workflows live in `join` and `semester-config` - and a
     # tree fetch of a directory that is not there raises rather than coming back empty.
     monkeypatch.setattr(
         estate.discovery,
@@ -569,7 +567,7 @@ def test_a_semester_org_has_no_buttons_to_re_render(monkeypatch):
     monkeypatch.setattr(
         cleanup.discovery,
         "list_org_repos",
-        lambda org: [{"name": "welcome", "visibility": "public"}],
+        lambda org: [{"name": "join", "visibility": "public"}],
     )
     assert cleanup.cleanup(RUN) == 0
     assert written == []

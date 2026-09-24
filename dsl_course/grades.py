@@ -2037,7 +2037,7 @@ def _undeclared_faults(
 # --------------------------------------------------- the team-formation lock file
 
 # `semester-config/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
-# the Join-team form in the semester's public `welcome` repo. It exists because of who can
+# the Join-team form in the semester's public `join` repo. It exists because of who can
 # read what: the form runs on an `issues: opened` event any stranger can trigger, in a
 # public repo, under a token deliberately scoped away from the course org's assignment
 # templates - so it cannot open `grading_config.yml` and ask what the assignment is. It
@@ -2052,7 +2052,7 @@ _TEAM_LOCK_HEADER = f"""\
 # `schedule.yml`. Faculty change an assignment by editing its own `{GRADING_FILE}` on
 # the course template's `{SOLUTION_BRANCH}` branch; this file catches up next sync.
 #
-# The Join-team form in this semester's `welcome` repo reads THIS FILE and nothing else.
+# The Join-team form in this semester's `join` repo reads THIS FILE and nothing else.
 #
 #   team_formation: self_select   students form their own teams with the Join-team form
 #                   assigned      the teaching team writes teams.csv; the form refuses

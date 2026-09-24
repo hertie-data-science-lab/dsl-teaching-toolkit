@@ -21,7 +21,7 @@ from dsl_course import (
     teardown,
     welcome,
 )
-from dsl_course.course import CONFIG_REPO, OLD_CONFIG_REPO
+from dsl_course.course import CONFIG_REPO, JOIN_REPO, OLD_CONFIG_REPO, OLD_JOIN_REPO
 
 ROOT = Path(__file__).resolve().parents[1]
 # The two files allowed to spell a retired name: the declaration and the migration.
@@ -38,12 +38,20 @@ def _shipped_files():
                 )
 
 
-@pytest.mark.parametrize("old", [OLD_CONFIG_REPO])
-def test_no_shipped_file_spells_a_retired_repo_name(old):
+# `welcome` is also the name of a module, so only its spellings AS A REPO count: quoted,
+# back-ticked, or a path segment.
+RETIRED_SPELLINGS = [
+    rf"\b{OLD_CONFIG_REPO}\b",
+    rf"[\"'`/>]{OLD_JOIN_REPO}[\"'`/<]",
+]
+
+
+@pytest.mark.parametrize("pattern", RETIRED_SPELLINGS)
+def test_no_shipped_file_spells_a_retired_repo_name(pattern):
     found = [
         rel
         for rel, text in _shipped_files()
-        if rel not in SPELLS_OLD_NAMES and re.search(rf"\b{re.escape(old)}\b", text)
+        if rel not in SPELLS_OLD_NAMES and re.search(pattern, text)
     ]
     assert found == []
 
@@ -51,17 +59,21 @@ def test_no_shipped_file_spells_a_retired_repo_name(old):
 def test_the_listing_sites_match_the_config_repo_by_its_constant():
     # Every name match on an org listing: an org listing returns ONLY the new name after a
     # rename, so a literal left behind here would silently stop matching.
-    assert CONFIG_REPO in discovery.INFRA_REPOS
-    assert CONFIG_REPO in discovery.SEMESTER_ONLY_REPOS
-    assert CONFIG_REPO in access.SEMESTER_WRITE_REPOS
-    assert CONFIG_REPO in profile_readme._SEMESTER_ROWS
+    for name in (CONFIG_REPO, JOIN_REPO):
+        assert name in discovery.INFRA_REPOS
+        assert name in discovery.SEMESTER_ONLY_REPOS
+        assert name in access.SEMESTER_WRITE_REPOS
+        assert name in profile_readme._SEMESTER_ROWS
+    assert discovery.join_issue_url("sem") == (
+        f"https://github.com/sem/{JOIN_REPO}/issues/new/choose"
+    )
     rows = [{"name": n, "topics": []} for n in (CONFIG_REPO, ".github", "x-repo")]
     assert CONFIG_REPO not in [r["name"] for r in teardown.freeze_order("o", rows)]
 
 
 def test_the_shipped_scripts_carry_the_config_repo_substituted():
-    for rel in ("welcome/onboard.yml", "welcome/team-formation.yml"):
-        text = welcome.welcome_workflow(rel)
+    for rel in ("join/onboard.yml", "join/team-formation.yml"):
+        text = welcome.join_workflow(rel)
         assert f"const CONFIG = '{CONFIG_REPO}'" in text
         assert "__CONFIG_REPO__" not in text
     files = welcome.config_system_files("main")

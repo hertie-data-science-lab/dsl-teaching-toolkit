@@ -28,11 +28,12 @@ import re
 from collections.abc import Callable
 
 from .central import CENTRAL
-from .course import CONFIG_REPO, COURSE_CONFIG
+from .course import CONFIG_REPO, COURSE_CONFIG, JOIN_REPO
 from .discovery import (
     carries_old_semester_topic,
     course_name_of,
     discover_semesters,
+    join_issue_url,
     list_org_repos,
     org_meta,
     org_tier,
@@ -71,14 +72,14 @@ def _rows(repos: list[dict], middle: Callable[[dict], str]) -> str:
 
 
 def _repo_table(repos: list[dict]) -> str:
-    """The COURSE org's repo table: GitHub visibility, `welcome` first then alphabetical.
+    """The COURSE org's repo table: GitHub visibility, `join` first then alphabetical.
 
     Faculty read this one, and they are the people for whom "private" is the whole answer
     - they can see every repo in the org, and what they want to know is which of them
     students could reach if a release went out."""
     visible = sorted(
         _visible_repos(repos),
-        key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()),
+        key=lambda r: (r["name"].lower() != JOIN_REPO, r["name"].lower()),
     )
     return _rows(visible, lambda r: r["visibility"].lower())
 
@@ -90,7 +91,7 @@ def _repo_table(repos: list[dict]) -> str:
 # students-first: the way in, then the content, then what instructors configure, then the
 # generated site.
 _SEMESTER_ROWS = {
-    "welcome": (0, "public (students join here)"),
+    JOIN_REPO: (0, "public (students join here)"),
     "materials": (1, "enrolled students & auditors only"),
     CONFIG_REPO: (3, "instructor-only"),
 }
@@ -275,7 +276,7 @@ this organisation once enrolled.
 ## Getting started
 
 1. Open a **Join course** issue in
-   [`welcome`](https://github.com/{org}/welcome/issues/new/choose) to enrol - your
+   [`{JOIN_REPO}`]({join_issue_url(org)}) to enrol - your
    GitHub handle is captured automatically.
 2. Once you're enrolled, course materials open up here session by session, and your own
    assignment repositories appear in this org. Everything is automatically deployed to
@@ -347,7 +348,7 @@ _(automatically bootstrapped from the central
 | Action | What it does | Managed |
 | --- | --- | --- |
 | [**Bootstrap semester**](https://github.com/{org}/.github/actions/workflows/bootstrap-cohort.yml) | Configures a freshly-created semester org (sets up scaffold repos, registers it with the course org, seeds workflow functionality). | Run by instructor |
-| [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their Hertie email address). Students paste the code into the welcome Join course issue. This keeps personal data out of the public repo. There is no button: a push to a semester's `students.csv` is what fires it, and it sends for real - so a re-send means clearing that row's `code_sent_at` and pushing again. | Automatic |
+| [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their Hertie email address). Students paste the code into the Join course issue. This keeps personal data out of the public repo. There is no button: a push to a semester's `students.csv` is what fires it, and it sends for real - so a re-send means clearing that row's `code_sent_at` and pushing again. | Automatic |
 | [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
 | [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-N-<year>` template repo from ten answers: brief + starter(s) on `main`; the `solution` branch carries the model solution and `grading_config.yml`, which defines the assignment from there on (hidden tests only when you asked for autograding). | Run by instructor |
 | [**Derive student version**](https://github.com/{org}/.github/actions/workflows/derive-student-version.yml) | Writes an assignment's student starter onto `main` from the ONE notebook you keep on its `solution` branch, with the fenced answers (`### BEGIN SOLUTION`, a `solution` cell tag, an Rmd `solution=TRUE` chunk) replaced by placeholders. So you maintain one file, not two. It never writes to `solution`, and it refuses to write a file that had nothing fenced in it. Preview first. | Run by instructor |
@@ -361,7 +362,7 @@ _(automatically bootstrapped from the central
 | [**Open team formation**](https://github.com/{org}/.github/actions/workflows/open-team-formation.yml) | Email every student still without a team for an assignment whose team-formation window is open - the cap, the closing day and a link to the semester's **Join team** form. The scheduler already sends this by itself when a window opens; press this to send it again on your own say-so. Nothing is said twice, so a second press reaches only whoever the first one could not. Leave `assignment` empty for every open window. Preview first. | Run by instructor |
 | [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | Send what the grading sheet holds: each student's private `grades-<handle>` repo, the registrar export, and an email (needs the `GRAPH_*` secrets). Preview first. | Run by instructor |
 | [**Propagate semester edits**](https://github.com/{org}/.github/actions/workflows/propagate-cohort.yml) | Carry a semester's edits to released material back here, as a pull request. For every path already released to that semester, what the semester has now is copied over this org's own copy on a branch `from-<semester-org>`, one commit per path, and one pull request per source repo - merge it, cherry-pick from it, or close it. Deletions are not propagated; a file the semester dropped is named in the pull request and left where it is. Preview first. | Run by instructor |
-| [**Archive semester**](https://github.com/{org}/.github/actions/workflows/archive-cohort.yml) | Archive a finished semester early, or at all - the scheduler does it by itself only for a semester that writes an `archive:` block in `schedule.yml` (its `event_datetime:` defaults to `semester_end` + 60 days), after a fortnight's notice. It carries the semester's edits back first, then archives **every repository in the semester org** - students' work, the materials, `welcome`, the website, `.github` - records what was frozen in `semester-config/archive/teardown.md`, and archives `semester-config` last. **Nobody is removed and nothing is deleted**: an archived repo is read-only for everyone, so students keep read access to their own work. Preview first; it refuses until the archive date has arrived, and `force` overrides that - which is how a semester with no block is closed out. | Run by instructor |
+| [**Archive semester**](https://github.com/{org}/.github/actions/workflows/archive-cohort.yml) | Archive a finished semester early, or at all - the scheduler does it by itself only for a semester that writes an `archive:` block in `schedule.yml` (its `event_datetime:` defaults to `semester_end` + 60 days), after a fortnight's notice. It carries the semester's edits back first, then archives **every repository in the semester org** - students' work, the materials, `join`, the website, `.github` - records what was frozen in `semester-config/archive/teardown.md`, and archives `semester-config` last. **Nobody is removed and nothing is deleted**: an archived repo is read-only for everyone, so students keep read access to their own work. Preview first; it refuses until the archive date has arrived, and `force` overrides that - which is how a semester with no block is closed out. | Run by instructor |
 
 NB: alternatively each materials repo *also* carries its own **Release** workflows (run from inside the repo).
 
@@ -391,7 +392,7 @@ The following are runnable by explicit ad hoc manual dispatch; course instructor
                                     solution  -> solution/   (pushed to students on demand)
 
 <Course>-f<year>/                 <- one SEMESTER org per year (Bootstrap semester sets it up)
-|-- welcome/                      Join issue -> onboard (enrol)
+|-- join/                         Join issue -> onboard (enrol)
 |-- semester-config/             students.csv  (private roster)
 |-- materials/                    released lectures/readings  (students-team read)
 |-- <org>.github.io/              auto-deployed website (synced from this structure)
@@ -469,7 +470,7 @@ def update_profile_readme(
 ) -> int:
     """(Re)generate the org's profile/README.md from its metadata + live repo list.
 
-    A semester org (one with a `welcome` repo) gets a student-facing page; a course org
+    A semester org (one with a `join` repo) gets a student-facing page; a course org
     gets the faculty-facing one.
 
     `repos` is the caller's listing when it already holds one (seed.refresh does, and has
@@ -502,7 +503,7 @@ def update_profile_readme(
     if repos is None:
         repos = list_org_repos(org)
     # `tier` is None for an org the listing cannot place (a legacy semester with no topics
-    # and no `welcome`); the page renders it as a course org, as before.
+    # and no `join`); the page renders it as a course org, as before.
     is_semester = org_tier(repos) == "semester" or carries_old_semester_topic(repos)
     semesters = None if is_semester else discover_semesters(org)
     body = render_profile_readme(

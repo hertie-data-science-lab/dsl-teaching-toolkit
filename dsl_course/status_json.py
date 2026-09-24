@@ -49,6 +49,7 @@ from .course import (
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
     INSTRUCTORS_TEAM,
+    JOIN_REPO,
     MATERIALS_REPO_PREFIX,
     PUBLISH_FILE,
     SOLUTION_BRANCH,
@@ -1051,7 +1052,7 @@ def semester_checks(
     if not facts.listing:
         out["K1"] = "The semester org could not be read, or holds no repos yet."
     missing = [
-        r for r in (schedule.CONFIG_REPO, "welcome", site) if r not in facts.listing
+        r for r in (schedule.CONFIG_REPO, JOIN_REPO, site) if r not in facts.listing
     ]
     if missing:
         out["K2"] = f"The semester has no {' or '.join(missing)} repo yet."
@@ -1136,7 +1137,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
 
     Stage predicates (lifecycle, semester stages):
     - K1 the org resolves (`app_installed` is a stub until decision 0002);
-    - K2 semester-config, welcome and the site repo exist, and the course registry lists it;
+    - K2 semester-config, join and the site repo exist, and the course registry lists it;
     - K3 instructors.yml is read, grants at least one instructor, and every entry has an email;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
     - K5 the roster has rows and every row has been sent a code;

@@ -114,7 +114,7 @@ request - which is how they report a typo in a lab, and how both of the courses 
 grew out of have always worked. A pull request lands on the branch students read like any
 other, so a merged one is live immediately and survives the next release.
 
-The invitation is in the semester's home page and in `welcome`. It reaches only semesters
+The invitation is in the semester's home page and in `join`. It reaches only semesters
 bootstrapped after it shipped: both files are instructor-owned and seeded once, so an
 existing semester needs the paragraph pasted in by hand.
 

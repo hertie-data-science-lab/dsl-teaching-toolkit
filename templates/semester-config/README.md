@@ -24,8 +24,8 @@ One row per student. Leave `github_handle`, `github_id` & `enrol_code` blank - t
 | `name` | instructor | display name |
 | `role` | instructor | `enrolled` (blank means enrolled) or `auditor` - auditors are read-only: released materials only, no assignment repos, no gradebook, no project teams |
 | `enrol_code` | **Send enrolment codes** workflow | random non-PII token, automatically emailed to the student; they paste it into the "Join course" issue. Leave blank - the workflow owns this. *NB it fills blanks only and never rewrites an issued code, so it is idempotent: just push the new rows when students are added later* |
-| `github_handle` | onboarding | blank until the student enrols via the `welcome` repo's "Join" issue - system-owned, do not hand-edit |
-| `github_id` | onboarding | blank until the student enrols via the `welcome` repo's "Join" issue - the immutable numeric id, which survives a handle rename. System-owned, do not hand-edit |
+| `github_handle` | onboarding | blank until the student enrols via the `join` repo's "Join" issue - system-owned, do not hand-edit |
+| `github_id` | onboarding | blank until the student enrols via the `join` repo's "Join" issue - the immutable numeric id, which survives a handle rename. System-owned, do not hand-edit |
 | `code_sent_at` | **Send enrolment codes** workflow | when that row's code email went out - written just BEFORE the send, so a roster that cannot be written means nothing is mailed rather than mailed twice. Blank means not yet emailed, and that is what the workflow selects on - so a later push mails only the students who still need a code. System-owned, do not hand-edit; clear a cell to deliberately re-send |
 
 Any OTHER column you add (a registrar id, a lecture section, notes) is yours: the engine never reads it, and never drops it when it writes back.
@@ -67,12 +67,12 @@ it is what stops a re-run repeating itself and what lets a failed notification b
 ## `teams.csv` - group membership (optional, for group assignments)
 
 2 possible ways this is populated:
-1. Students self-select via the welcome "Join team" issue, which appends rows to this file - but only for an assignment whose `grading_config.yml` says `team_formation: self_select`, only up to its `max_team_size`, and only between its hand-out and its late cutoff,
+1. Students self-select via the "Join team" issue, which appends rows to this file - but only for an assignment whose `grading_config.yml` says `team_formation: self_select`, only up to its `max_team_size`, and only between its hand-out and its late cutoff,
 2. Instructors edit directly - a push here also triggers **Sync membership**. This is the route for `team_formation: assigned`, where the form refuses every request.
 
 ## `assignments.lock.yml` - what the Join-team form is allowed to do (generated)
 
-SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `welcome` repo, under a token that cannot reach an assignment template, so it cannot read an assignment's `grading_config.yml`. This file mirrors the answers it needs - `team_formation`, `max_team_size`, and whether team formation is open for that assignment right now (`team_formation_window`, with the day it shuts in `team_formation_closes`, and the assignment's page on the semester site in `team_formation_page`) - one entry per assignment in `schedule.yml`.
+SYSTEM-OWNED, and the one file here nobody edits. The "Join team" workflow runs in the PUBLIC `join` repo, under a token that cannot reach an assignment template, so it cannot read an assignment's `grading_config.yml`. This file mirrors the answers it needs - `team_formation`, `max_team_size`, and whether team formation is open for that assignment right now (`team_formation_window`, with the day it shuts in `team_formation_closes`, and the assignment's page on the semester site in `team_formation_page`) - one entry per assignment in `schedule.yml`.
 
 It is rewritten by the quarter-hourly **Scheduled release** tick - which is what opens and shuts the window on its own clock - and again by **Sync membership** (which a push to `schedule.yml` triggers), by every **Release assignment**, and by the nightly **Refresh actions**. Change an assignment by editing its own `grading_config.yml` on the template's `solution` branch; this file catches up on the next sync. An assignment whose template does not exist yet is locked to `none`, so no team can be formed for it until the template says what it is.
 

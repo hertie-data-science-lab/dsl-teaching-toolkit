@@ -60,7 +60,7 @@ profile (auto)
     cgh["`**.github**
 
 semester config pointer + auto-generated student-facing org page`"]
-    welcome["`**welcome**
+    join["`**join**
 
 Join issue → onboard.yml (+ student README)`"]
     cfg["`**semester-config**
@@ -94,7 +94,7 @@ open-courseware site - hosts shared lectures + readings`"]
 
   classDef public fill:#e6f4ea,stroke:#2e7d32,color:#1b5e20;
   classDef private fill:#f3f3f3,stroke:#8a8a8a,color:#3c3c3c;
-  class gh,cgh,welcome,site,pub,keypub public;
+  class gh,cgh,join,site,pub,keypub public;
   class mat,tmpl,cfg,cmat,repos,team,keypriv private;
 ```
 

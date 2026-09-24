@@ -1083,7 +1083,7 @@ def test_the_message_carries_what_a_student_needs_in_order_to_act(semester, post
     assert "the Deep Learning course" in body
     assert "up to 4 people" in body, "the cap the Join-team form enforces"
     assert "closes on 4th Oct" in body, "the day, in the semester's own zone"
-    assert f"https://github.com/{SEMESTER}/welcome/issues/new/choose" in body
+    assert f"https://github.com/{SEMESTER}/join/issues/new/choose" in body
     assert (
         "https://semester-f2026.github.io/assignments/02-assignment-2.html" in body
     ), "the assignment's page, which lists the teams"
@@ -1185,7 +1185,7 @@ def test_the_sample_is_placeholders_and_the_same_template_as_the_send(semester, 
     assert "<n>" in body and "<date>" in body and "<assignment page>" in body
     # The NAME is a placeholder too: the preview is printed in a public run log.
     assert body.startswith("Dear <first name>,")
-    assert f"https://github.com/{SEMESTER}/welcome/issues/new/choose" in body
+    assert f"https://github.com/{SEMESTER}/join/issues/new/choose" in body
 
 
 def test_the_dry_run_prints_the_sample_claims_nothing_and_sends_nothing(

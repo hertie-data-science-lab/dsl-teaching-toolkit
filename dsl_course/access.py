@@ -12,6 +12,7 @@ from .course import (
     COURSE_ADMIN_TEAM,
     GRADEBOOK_PREFIX,
     INSTRUCTORS_TEAM,
+    JOIN_REPO,
     STUDENTS_TEAM,
 )
 from .discovery import classify_repos
@@ -86,7 +87,7 @@ FACULTY_READ_ACCESS = {INSTRUCTORS_TEAM: "pull", COURSE_ADMIN_TEAM: "admin"}
 # FACULTY_READ_ACCESS. `.github` is here because GitHub requires write on a repo to trigger
 # a workflow_dispatch at all. A release DEST also ends up at push, granted by every release
 # rather than by this floor: the two agree because the sweep only ever raises.
-SEMESTER_WRITE_REPOS = frozenset({".github", "welcome", CONFIG_REPO})
+SEMESTER_WRITE_REPOS = frozenset({".github", JOIN_REPO, CONFIG_REPO})
 
 # GitHub's repo permissions, weakest first, in the vocabulary a PUT takes (`permission=`).
 # A team-repos LISTING answers in a different one (`role_name`: read/write/...) - which is

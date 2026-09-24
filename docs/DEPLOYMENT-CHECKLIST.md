@@ -24,11 +24,11 @@ Accompanies the e2e [worked example](../example-course/).
 | | Step | Org Level | Where | Input | Output |
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the semester org | semester | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-f/sYYYY`; invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
-| `[required]` | 2. Bootstrap | course → semester | course `.github` → **Bootstrap semester** | `semester_org` | `welcome` (Join course / Join team issues) + `semester-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
+| `[required]` | 2. Bootstrap | course → semester | course `.github` → **Bootstrap semester** | `semester_org` | `join` (Join course / Join team issues) + `semester-config` (all the files below), `students`/`auditors` teams, the semester site, semester registered with the scheduler |
 | `[do this first]` | 3. The semester plan | semester | edit [`semester-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole semester; site dates; grading deadlines |
 | `[required]` | 4. Roster | semester | edit [`semester-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
 | *(optional)* | 5. Instructors | semester | edit [`semester-config/instructors.yml`](#instructorsyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this semester's instructors/TAs + site cards; time-boxed if dated |
-| `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
+| `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `join` **Join course** issue |
 | *(optional)* | 7. Ad-hoc release | course workflow, per semester | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
 | *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
 | *(optional)* | 9. Check semester setup | course workflow, per semester | course `.github` → **Check semester setup** | `semester_org` | what's configured, what's missing, an edit link per gap |
@@ -178,7 +178,7 @@ cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
 
 `semester-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
-1. Students self-select via the `welcome` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/assignments.lock.yml`,
+1. Students self-select via the `join` **Join team** issue - only where the assignment declares `team_formation: self_select`, only up to its `max_team_size` (default 5), and only between its `handout_datetime` and its grading pin; all three are read from the generated `semester-config/assignments.lock.yml`,
 2. you edit it directly;
 either way a push materialises a GitHub team per group, and releasing a group assignment grants each team one shared repo.
 

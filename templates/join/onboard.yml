@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Onboard student
 
-# Seed this into a semester's public `welcome` repo as
+# Seed this into a semester's public `join` repo as
 # .github/workflows/onboard.yml. Students open a "Join course" issue here; the issue AUTHOR is
 # the authenticated GitHub handle (unspoofable). We match the typed ENROLMENT CODE (a
 # random, non-PII token the bot emailed to each student) against the PRIVATE
@@ -24,7 +24,7 @@ name: Onboard student
 # guard), so a classmate can't bind your row to their account.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
-# semester-config, Members R/W (org invite + team), Issues R/W on welcome.
+# semester-config, Members R/W (org invite + team), Issues R/W on join.
 
 on:
   issues:

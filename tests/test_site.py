@@ -619,7 +619,7 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
     assert out.count("repo_url:") == 2
     assert out.count('repo_name: "assignment-3-<your-team>"') == 2
     assert (
-        'team_join_url: "https://github.com/Semester-f2026/welcome/issues/new/choose"'
+        'team_join_url: "https://github.com/Semester-f2026/join/issues/new/choose"'
         in out
     )
     # The cap the Join-team form enforces, and the day it stops accepting - the same date

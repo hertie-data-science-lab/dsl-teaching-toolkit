@@ -1464,7 +1464,7 @@ def _team_formation_phase(
     The FORM moves with the lock, and on the same tick: the Join-team form's Assignment
     field is a `required` dropdown rendered from the lock, so a window that opened this
     quarter of an hour is one a student cannot file an issue for until the form offers its
-    slug. `refresh_welcome_workflows` would do it, but only at bootstrap and on the nightly
+    slug. `refresh_join_workflows` would do it, but only at bootstrap and on the nightly
     cron - up to a day during which the site shows the callout and the mail links a chooser
     that refuses them. `refresh_join_team_form` pushes that one file, and only when the lock
     actually moved.

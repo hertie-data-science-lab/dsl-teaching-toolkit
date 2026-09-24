@@ -11,7 +11,7 @@ Sets up org-level infrastructure that persists across semesters:
 - Central faculty & instructors workflows seeded into .github (Release materials/assignment +
   Sync membership/Bootstrap-semester/Refresh); the run-from-repo copies are equipped by Refresh
 
-With --semester, instead seeds the student-facing welcome (onboard)
+With --semester, instead seeds the student-facing join (onboard)
 and semester-config (roster) repos.
 
 Usage:
@@ -33,6 +33,7 @@ from .course import (
     COURSE_ADMIN_TEAM,
     COURSE_HUB_TOPIC,
     FACULTY_TEAMS,
+    JOIN_REPO,
     OLD_SEMESTER_TOPIC,
     SEMESTER_TEAMS,
     SEMESTER_TOPIC,
@@ -50,7 +51,7 @@ from .welcome import (
     CONFIG_SCAFFOLDS,
     refresh_config_samples,
     refresh_config_system_files,
-    refresh_welcome_workflows,
+    refresh_join_workflows,
     template,
 )
 
@@ -80,14 +81,14 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 #
 #   USER-owned - content faculty edit, or that the running system writes live state into.
 #   In a semester: semester-config/{students.csv, teams.csv, schedule.yml, instructors.yml} and
-#   welcome/README.md (the student landing page). On a course org: .github/dsl-course.yml
+#   join/README.md (the student landing page). On a course org: .github/dsl-course.yml
 #   (the faculty/course_admins SSOT). Seed these ONLY
 #   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
 #   state (roster rows, enrol codes, onboarded handles) and the faculty's schedule.
 #
 #   SYSTEM-owned - machinery and documentation this repo generates and must be able to fix
-#   in place: everything under `.github/` in the seeded repos (welcome/onboard.yml,
-#   welcome/team-formation.yml, the ISSUE_TEMPLATE join forms those workflows parse - they
+#   in place: everything under `.github/` in the seeded repos (join/onboard.yml,
+#   join/team-formation.yml, the ISSUE_TEMPLATE join forms those workflows parse - they
 #   must stay in lockstep with them - and semester-config's dispatch-sync*.yml), a
 #   semester's `.github/dsl-course.yml` (a wholly generated course pointer with no
 #   faculty-authored content), semester-config's README.md (the schema contract - it went
@@ -120,7 +121,7 @@ def _tag_and_year(org: str) -> tuple[str, int]:
 def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
     """Create or update an org secret, scoped to the infra repos that need it.
 
-    The token must reach the **public** `.github` (faculty & instructors workflows), `welcome`
+    The token must reach the **public** `.github` (faculty & instructors workflows), `join`
     (onboarding), and `semester-config` (its dispatch-sync workflow cross-repo
     triggers Sync membership in `.github`). gh defaults org-secret visibility to
     `private`, which excludes public repos - so the seeded workflows there run with
@@ -132,7 +133,7 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
 
     The value goes over stdin - `gh secret set` reads it from there whenever `--body` is
     omitted - never argv, so it is not visible in `ps` to anyone on the runner."""
-    infra = [r for r in (".github", "welcome", CONFIG_REPO) if repo_exists(org, r)] or [
+    infra = [r for r in (".github", JOIN_REPO, CONFIG_REPO) if repo_exists(org, r)] or [
         ".github"
     ]
     code, out = gh(
@@ -285,7 +286,7 @@ def grant_button_access(org: str) -> int:
 # Every org is tightened to default_repository_permission=none, so without these grants
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `semester-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
-# instructors.yml, grading_sheets/), and `welcome` is where they triage `needs-review`
+# instructors.yml, grading_sheets/), and `join` is where they triage `needs-review`
 # onboarding issues. Course orgs have neither repo, so this is semester-only. Single-sourced
 # with the nightly sweep's floor (access.SEMESTER_WRITE_REPOS), so the two cannot disagree.
 SEMESTER_FACULTY_REPOS = sorted(SEMESTER_WRITE_REPOS - {".github"})
@@ -299,7 +300,7 @@ def grant_semester_faculty_access(org: str) -> None:
     Idempotent, and deliberately outside the `if create_repo(...)` seeding blocks in
     setup_semester_extras, so re-running "Bootstrap semester" on an org bootstrapped before
     this existed repairs the missing grants."""
-    log_step("Granting semester faculty access (welcome, semester-config)")
+    log_step("Granting semester faculty access (join, semester-config)")
     for repo in SEMESTER_FACULTY_REPOS:
         for team, perm in COURSE_TEAM_ACCESS.items():
             if grant_team_repo_access(org, team, repo, perm):
@@ -598,7 +599,7 @@ def setup_semester_extras(
 
     Layered on top of the common bootstrap when --semester is passed (the safe-by-default
     org permissions both org kinds get are in gh_teams.converge_org_settings):
-    - public `welcome` repo with the Join issue form + onboard workflow;
+    - public `join` repo with the Join issue form + onboard workflow;
     - private `semester-config` repo with a starter students.csv;
     - the faculty teams' standing grant on both of those repos.
     The `materials` repo is created on the first release, so it's not made here.
@@ -611,7 +612,7 @@ def setup_semester_extras(
     left half-seeded (onboarding workflow or config samples never landed) reds the
     bootstrap rather than reporting success.
     """
-    log_step("Semester setup: seed welcome/semester-config")
+    log_step("Semester setup: seed join/semester-config")
 
     failures = create_semester_teams(org)
 
@@ -624,20 +625,20 @@ def setup_semester_extras(
     # seeding rather than the create's False being silently dropped by a bare `if`.
     if not create_repo(
         org,
-        "welcome",
+        JOIN_REPO,
         private=False,
         description="Course front door - open a Join issue to enrol",
     ):
         failures += 1
         log_err(
-            f"could not create the welcome repo in {org} - students have no front door"
+            f"could not create the join repo in {org} - students have no front door"
         )
     else:
-        welcome_failures = refresh_welcome_workflows(org)
-        if welcome_failures:
-            failures += welcome_failures
+        join_failures = refresh_join_workflows(org)
+        if join_failures:
+            failures += join_failures
             log_err(
-                f"the welcome repo in {org} is not fully seeded - re-run Bootstrap "
+                f"the join repo in {org} is not fully seeded - re-run Bootstrap "
                 f"semester (or wait for the nightly Refresh) once the cause is cleared"
             )
         # The landing page a student sees on this public repo: what to do, and how. Its
@@ -646,10 +647,10 @@ def setup_semester_extras(
         # create-only - a repair re-run must not clobber their edits.
         if not seed_if_absent(
             org,
-            "welcome",
+            JOIN_REPO,
             "README.md",
-            template("welcome/README.md").format(org=org).encode(),
-            "docs: seed welcome README (how to join)",
+            template("join/README.md").format(org=org).encode(),
+            "docs: seed join README (how to join)",
         ):
             failures += 1
 
@@ -828,7 +829,7 @@ def main() -> int:
         "--semester",
         action="store_true",
         help="Also do semester student-facing setup: seed the "
-        "welcome (onboard) + semester-config (roster) repos.",
+        "join (onboard) + semester-config (roster) repos.",
     )
     parser.add_argument(
         "--course",
@@ -976,7 +977,7 @@ def _run(args: argparse.Namespace) -> int:
     # 3b. Course vs semester wiring.
     workflow_failures = 0
     if args.semester:
-        # Semester: student-facing welcome + roster + tightened perms.
+        # Semester: student-facing join + roster + tightened perms.
         workflow_failures = setup_semester_extras(
             args.org, central_ref, course_semester_defaults(args.course)
         )
@@ -1178,19 +1179,19 @@ NEXT STEPS (manual):
    "Bootstrap semester" action here with its name (configures + registers + refreshes).
 
 NB: semester orgs are made the same way - create the empty org, add the bot as owner,
-then run bootstrap with --semester (seeds welcome + roster).
+then run bootstrap with --semester (seeds join + roster).
 ============================================================
 """)
 
     if args.semester:
         log(
             "SEMESTER extras done:\n"
-            f"- welcome repo (public): Join issue form + onboard workflow\n"
+            f"- join repo (public): Join issue form + onboard workflow\n"
             f"- semester-config repo (private): starter students.csv "
             f"(edit https://github.com/{args.org}/semester-config/blob/HEAD/students.csv with registrar data), "
             f"plus schedule.yml and instructors.yml (this semester's calendar/due-dates and "
             f"instructors/TAs - both seeded mostly-commented, uncomment what you want)\n"
-            f"- faculty access: instructors (write) + course-admin (admin) on welcome and "
+            f"- faculty access: instructors (write) + course-admin (admin) on join and "
             f"semester-config, so non-owner faculty can edit the roster/schedule and "
             f"triage onboarding issues\n"
         )

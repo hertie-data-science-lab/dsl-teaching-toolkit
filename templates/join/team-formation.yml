@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Form team
 
-# Seed this into a semester's public `welcome` repo as
+# Seed this into a semester's public `join` repo as
 # .github/workflows/team-formation.yml. Students open a "Join team" issue here; the issue
 # AUTHOR is the authenticated GitHub handle (unspoofable). We verify they are an onboarded
 # ENROLLED student - auditors are read-only (released materials, no assignment repos) so they
@@ -22,7 +22,7 @@ name: Form team
 # carries that page's URL (`team_formation_page:`) for the refusals below to link.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
-# semester-config, Issues R/W on welcome.
+# semester-config, Issues R/W on join.
 
 on:
   issues:

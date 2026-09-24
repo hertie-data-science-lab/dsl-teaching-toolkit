@@ -2,7 +2,7 @@
 scaffolded course repo - so a non-owner instructor can push content to a repo they just
 scaffolded (previously only `.github` was granted, leaving content repos unwritable).
 
-The same policy covers a semester org's infra repos (welcome, semester-config): the semester
+The same policy covers a semester org's infra repos (join, semester-config): the semester
 is `default_repository_permission=none`, so before this only org owners could edit the
 roster/schedule or triage onboarding issues."""
 
@@ -111,7 +111,7 @@ def test_semester_infra_repos_get_the_faculty_grant():
     # grading sheets)
     # or triage welcome's needs-review onboarding issues without these.
     assert set(bootstrap_course.SEMESTER_FACULTY_REPOS) == {
-        "welcome",
+        "join",
         "semester-config",
     }
     # ...and single-sourced with the nightly sweep's write floor, so a repo cannot be
@@ -131,8 +131,8 @@ def test_semester_faculty_grant_uses_the_shared_policy(monkeypatch):
     monkeypatch.setattr(bootstrap_course, "grant_team_repo_access", fake_grant)
     bootstrap_course.grant_semester_faculty_access("Course-f2026")
     assert set(granted) == {
-        ("Course-f2026", "instructors", "welcome", "push"),
-        ("Course-f2026", "course-admin", "welcome", "admin"),
+        ("Course-f2026", "instructors", "join", "push"),
+        ("Course-f2026", "course-admin", "join", "admin"),
         ("Course-f2026", "instructors", "semester-config", "push"),
         ("Course-f2026", "course-admin", "semester-config", "admin"),
     }
@@ -314,14 +314,14 @@ def test_the_sweep_grants_the_per_repo_floor_where_a_team_holds_nothing(monkeypa
     # Nothing granted anywhere: a semester's write repos converge at push, the rest at pull,
     # course-admin at admin throughout. A course org converges at push everywhere.
     listings = {"instructors": _listing(), "course-admin": _listing()}
-    repos = [{"name": n} for n in ("welcome", "assignment-1-ada", "grades-ada")]
+    repos = [{"name": n} for n in ("join", "assignment-1-ada", "grades-ada")]
     changed, granted = _sweep(monkeypatch, listings, repos, "semester")
     assert changed == 6
     assert set(granted) == {
-        ("instructors", "welcome", "push"),
+        ("instructors", "join", "push"),
         ("instructors", "assignment-1-ada", "pull"),
         ("instructors", "grades-ada", "pull"),
-        ("course-admin", "welcome", "admin"),
+        ("course-admin", "join", "admin"),
         ("course-admin", "assignment-1-ada", "admin"),
         ("course-admin", "grades-ada", "admin"),
     }
@@ -434,8 +434,8 @@ def test_an_absent_team_is_none_and_an_unreadable_one_raises(monkeypatch):
 
 def test_an_absent_team_stops_the_sweep_for_that_team_only(monkeypatch):
     listings = {"course-admin": _listing()}  # instructors -> 404 from the fake
-    _, granted = _sweep(monkeypatch, listings, [{"name": "welcome"}], "semester")
-    assert granted == [("course-admin", "welcome", "admin")]
+    _, granted = _sweep(monkeypatch, listings, [{"name": "join"}], "semester")
+    assert granted == [("course-admin", "join", "admin")]
 
 
 def test_the_listing_is_paginated_in_pages_of_100(monkeypatch):
@@ -582,7 +582,7 @@ def _topic_repos():
         {"name": "assignment-1-bob", "topics": ["assignment-1", "submission"]},
         {"name": "grades-ada", "topics": []},
         {"name": "grades-bob", "topics": ["gradebook"]},
-        {"name": "welcome", "topics": []},
+        {"name": "join", "topics": []},
     ]
 
 

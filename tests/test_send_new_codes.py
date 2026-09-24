@@ -42,7 +42,7 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
 
     monkeypatch.setattr(enrol_codes, "put_file", put_file)
     monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
-    monkeypatch.setattr(enrol_codes, "welcome_issue_url", lambda org: "https://w")
+    monkeypatch.setattr(enrol_codes, "join_issue_url", lambda org: "https://w")
 
     def send_bulk(messages, dry_run=False, sample=None):
         sent.extend(messages)
@@ -143,7 +143,7 @@ def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):
 
     monkeypatch.setattr(enrol_codes, "put_file", put_file)
     monkeypatch.setattr(enrol_codes, "course_name_for_semester", lambda org: "ML")
-    monkeypatch.setattr(enrol_codes, "welcome_issue_url", lambda org: "https://w")
+    monkeypatch.setattr(enrol_codes, "join_issue_url", lambda org: "https://w")
     monkeypatch.setattr(
         enrol_codes.mailer, "send_bulk", lambda *a, **k: pytest.fail("mailed")
     )

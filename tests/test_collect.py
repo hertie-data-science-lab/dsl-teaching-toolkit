@@ -1635,7 +1635,7 @@ def test_collect_looks_teams_up_by_the_schedule_key_not_the_semester_name(monkey
 
 def test_the_log_tag_cannot_be_recomputed_from_outside_the_run(monkeypatch):
     # The salt is what stops anyone recomputing the tag: both halves of a submission repo
-    # name are public (the slug on the semester site, the handle in the welcome repo's Join
+    # name are public (the slug on the semester site, the handle in the join repo's Join
     # issue titles), so an unsalted sha1 would read the student straight back off the log.
     repo = "assignment-1-ada-l"
     unsalted = hashlib.sha1(repo.encode()).hexdigest()[:7]

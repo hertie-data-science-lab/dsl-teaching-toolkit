@@ -8,10 +8,10 @@ the semester org's `semester-config` repo. Columns:
 These are the columns the engine READS; a roster may carry any others faculty want
 (a registrar id, a lecture section, a notes column) and they are carried through
 untouched - every write path here addresses cells by column NAME, never by position
-(`enrol_codes.fill_enrol_codes_in_csv` and the welcome repo's Join handler both), so an
+(`enrol_codes.fill_enrol_codes_in_csv` and the join repo's Join handler both), so an
 extra column is neither read nor lost.
 
-`github_handle` / `github_id` are blank until the student onboards (the `welcome` Join
+`github_handle` / `github_id` are blank until the student onboards (the `join` Join
 issue fills them); a row with a blank handle is enrolled-but-not-yet-onboarded and is
 skipped by provisioning.
 

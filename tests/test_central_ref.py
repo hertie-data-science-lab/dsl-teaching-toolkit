@@ -290,7 +290,7 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     monkeypatch.setattr(seed, "seed_github_workflows", renders("org-workflows"))
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: 0)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
-    monkeypatch.setattr(seed, "refresh_welcome_workflows", lambda org: 0)
+    monkeypatch.setattr(seed, "refresh_join_workflows", lambda org: 0)
     monkeypatch.setattr(
         seed, "refresh_config_system_files", renders("config-system-files")
     )

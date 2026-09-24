@@ -79,10 +79,10 @@ Things whose *literal spelling* is depended on from outside Python:
   handing an assignment out to patching one that is already out, and every org's Release
   assignment workflow spells the bare form.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
-  shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
+  shipped JavaScript (`templates/join/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
 - **`grades.team_lock_text`'s LAYOUT.** `semester-config/assignments.lock.yml` is parsed by
-  line scanners - one in `templates/welcome/team-formation.yml` (github-script has no YAML
+  line scanners - one in `templates/join/team-formation.yml` (github-script has no YAML
   library), one in `grades.parse_team_lock` - which match a two-space assignment key
   and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
   `team_formation_closes:` / `team_formation_page:` under it. Re-indenting the writer, or
@@ -92,7 +92,7 @@ Things whose *literal spelling* is depended on from outside Python:
   shape the scanners see is constant, and a line that comes and goes is a second shape. A
   MISSING `team_formation_window:` reads as open, never as closed, so a semester whose lock
   predates the window keeps forming teams.
-  `tests/test_welcome_templates.py` runs the SHIPPED scanner over the writer's real output;
+  `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, ordinal
   from `schedule.assignment_pages`) names the site's `_assignments/` file AND every link to
@@ -378,11 +378,11 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `schedule_plan` (the session rows a plan declares), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `welcome`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `schedule_plan` (the session rows a plan declares), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 
 Two placements are not where they read: `access` sits above `discovery`, because the
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
-`welcome`, whose seeding it reuses.
+`join`, whose seeding it reuses.
 
 A write that can follow a create or a visibility flip goes through `repos.gh_settled`,
 which retries for ~60 s while GitHub answers that the repo is still busy or locked, and

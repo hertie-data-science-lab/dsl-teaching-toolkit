@@ -49,7 +49,7 @@ lectures/ + readings/`"]
 is_template: main + solution branch`"]
   end
   subgraph semester["SEMESTER org - per year"]
-    wel["`welcome
+    wel["`join
 Join course issue → onboard`"]
     ros["`semester-config
 roster, teams, grading sheets, snapshots, schedule, people`"]
@@ -68,7 +68,7 @@ auto-deployed website`"]
 ```
 
 Every button and cron lives in the **course** org's `.github`; semester orgs hold no org-level
-buttons of their own, only the `welcome` onboarding workflows and `semester-config`'s
+buttons of their own, only the `join` onboarding workflows and `semester-config`'s
 dispatchers/validator. Sources are always read course-ward, state is always written
 semester-ward, and the orgs come from the invocation - never from `schedule.yml`, which names
 repos only.
@@ -94,14 +94,14 @@ DSL_BOT_TOKEN = bot PAT
   src -->|"`Bootstrap Course Org
 --propagate-secret`"| orgsec["`each org's DSL_BOT_TOKEN
 ORG secret
-visibility = selected → .github (+ welcome, semester-config)`"]
+visibility = selected → .github (+ join, semester-config)`"]
   src -->|"Bootstrap, same run"| infrasec["`REPO secret on each
 PRIVATE infra repo
 semester-config`"]
   src -->|"Refresh actions"| reposec["`REPO secret on every
 content repo
 materials-* (not assignment-*)`"]
-  orgsec --> pub["`public .github / welcome
+  orgsec --> pub["`public .github / join
 workflows authenticate`"]
   infrasec --> disp["`semester-config's
 dispatch + validate workflows authenticate`"]
@@ -124,8 +124,8 @@ Why three paths, and why `selected` visibility:
   (`bootstrap_course.set_org_secret`) - that is the only path the token reaches
   `semester-config`.
 - An org secret with the gh-default `private` visibility doesn't reach **public** repos either,
-  and `.github` / `welcome` are public. So the **org** secret is scoped
-  **`visibility=selected → .github`** (plus `welcome` + `semester-config` on semester orgs, each
+  and `.github` / `join` are public. So the **org** secret is scoped
+  **`visibility=selected → .github`** (plus `join` + `semester-config` on semester orgs, each
   scoped only if it exists), which reaches the public infra repos while keeping the org-admin
   token **out of** student repos. `visibility=all` would expose it to every workflow in the org.
 - The value always goes over **stdin**, never argv, so it never appears in `ps`. Both writers
@@ -214,7 +214,7 @@ so an admin added via the Teams UI or a one-off `gh api` call must also be decla
 
 A **semester** is bootstrapped from the course org's own **Bootstrap semester** button (not the
 central action), given the empty semester org's name. It runs the same `bootstrap_course` with
-`--semester`: seeds `welcome` + `semester-config` (roster, teams, `schedule.yml`,
+`--semester`: seeds `join` + `semester-config` (roster, teams, `schedule.yml`,
 `instructors.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
 website, applies the course's current `course_admins`, registers the semester in the course's
 `cohort-courses-pages.yml`, and writes a small `.github/dsl-course.yml` **pointer** (`course:`,
@@ -271,7 +271,7 @@ demos, one-offs, and recovery.
 ```mermaid
 sequenceDiagram
   actor St as Student
-  participant W as welcome, Join course issue
+  participant W as join, Join course issue
   participant O as onboard.yml
   participant R as semester-config roster
   St->>W: open Join course issue, paste the emailed enrol_code
@@ -491,7 +491,7 @@ maintainer guide + syllabus example
 + seeded stubs`"]
   sr --> pr["profile READMEs + dropdowns"]
   sr --> coh["`each registered semester:
-welcome workflows + semester-config
+join workflows + semester-config
 system files + config samples`"]
   sr --> hb[".github/.last-refresh heartbeat"]
 ```
@@ -606,7 +606,7 @@ READMEs.
 One predicate, `discovery._is_infra_repo`, keeps infrastructure out of **both** orgs' dropdowns
 and scans - so a repo type added on one side can't leak into the other. It excludes:
 
-- names in `INFRA_REPOS` = `welcome`, `semester-config`, `.github`;
+- names in `INFRA_REPOS` = `join`, `semester-config`, `.github`;
 - anything ending `.github.io` (the generated site repos - critical, since content repos are
   handed the org-admin token as a repo secret and would publish it to a public repo);
 - any repo carrying a topic in `INFRA_TOPICS` = `submission`, `assignment-template`, `gradebook`
@@ -724,12 +724,12 @@ Self-contained - workflows and their Python implementation both live in this rep
     `default_repository_permission=none` (a course org holds the unreleased materials and the
     assignment `solution` branches, so members must not read it by default either); create
     teams; grant button access on `.github` and, semester-side, on the infra repos faculty
-    actually work in (`grant_semester_faculty_access` / `SEMESTER_FACULTY_REPOS` = `welcome`,
+    actually work in (`grant_semester_faculty_access` / `SEMESTER_FACULTY_REPOS` = `join`,
     `semester-config`, so non-owner instructors get write and course-admin gets admin);
     propagate the secret.
   - `seed` - place the workflows (central + run-from-repo) and the `refresh` CLI, whose nightly
     run also loops every registered semester (orgs missing two runs running pruned with a hint, archived ones left
-    frozen) re-converging its welcome workflows, semester-config system files and samples; it
+    frozen) re-converging its join workflows, semester-config system files and samples; it
     delegates to four modules and re-exports a few of their names (see `__all__`; new code
     imports from the owner):
     - `workflows_render` - the workflow YAML templates + every `render_*` function, plus the
@@ -737,7 +737,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     - `discovery` - the semester registry and all live org/repo/section/session discovery,
       including the shared infra-repo predicate;
     - `profile_readme` - the org landing page + the `.github` repo's own README;
-    - `welcome` - the SYSTEM-owned semester seeding (onboarding workflows, issue forms,
+    - `join` - the SYSTEM-owned semester seeding (onboarding workflows, issue forms,
       `semester-config` scaffolds, samples and system files), split out so `seed.refresh` can
       re-push it without importing `bootstrap_course` back.
   - `scheduler` - each tick: freeze passed deadlines, then fire due releases; autograde runs in a
@@ -774,7 +774,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     `upsert_issue`, `close_issues_titled`), shared by `source_digest` and `cadence`.
 - `templates/` - the files bootstrap seeds into a fresh org, verbatim from disk
   (`welcome.template`), one subdirectory per destination:
-  - `welcome/` - the semester onboarding + team-formation workflows and their issue forms.
+  - `join/` - the semester onboarding + team-formation workflows and their issue forms.
   - `semester-config/` - that repo's README contract, its dispatch + schedule-validation
     workflows, and the **scaffold** half of every user-editable file: header-only
     `students.csv` / `teams.csv`, tag-rendered `schedule.yml` / `instructors.yml` skeletons.

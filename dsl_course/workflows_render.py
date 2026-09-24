@@ -1317,7 +1317,7 @@ def render_archive_semester(semester_orgs: list[str]) -> str:
 # opt-in, so this button closes a semester out early - and is the only way to close out one
 # that wrote no block. It offers the semester's edits back to this org as a pull request
 # first, closes the toolkit's open notices, syncs the website one last time, then ARCHIVES
-# every repo in the semester org - students' work, `welcome` so a finished term cannot still
+# every repo in the semester org - students' work, `join` so a finished term cannot still
 # be joined, the released materials, the website, `.github` - writes the teardown record
 # into the private semester-config and archives that last, which is what tells every
 # nightly sweep the semester is finished.
@@ -1394,7 +1394,7 @@ def render_send_codes() -> str:
 
 # Generates a random enrolment code per student (into semester-config/students.csv) and
 # emails each not-yet-onboarded student their code to their Hertie email address. Students
-# paste the code into the welcome Join course issue - no personal data in the public repo.
+# paste the code into the Join course issue - no personal data in the public repo.
 # Needs the GRAPH_* secrets.
 #
 # There is no button: a push to a semester's students.csv is what fires this (its
@@ -1431,7 +1431,7 @@ on:
 
 
 def render_bootstrap_semester() -> str:
-    """Configure a (pre-created, empty) semester org from the course org: welcome +
+    """Configure a (pre-created, empty) semester org from the course org: join +
     semester-config + tightened perms, register it, and refresh the dropdowns."""
     return f"""name: Bootstrap semester
 

@@ -260,8 +260,8 @@ def test_a_repo_named_after_nobody_is_still_announced(monkeypatch, capsys):
     # these lines to know what they just built.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, ""))
-    assert repos.create_repo("Course-Org", "welcome") is True
-    assert "repo created: Course-Org/welcome" in capsys.readouterr().out
+    assert repos.create_repo("Course-Org", "join") is True
+    assert "repo created: Course-Org/join" in capsys.readouterr().out
 
 
 def test_an_existing_student_repo_is_not_named_either(monkeypatch, capsys):

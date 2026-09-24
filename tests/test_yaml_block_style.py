@@ -44,10 +44,10 @@ FLOW_ITEM = re.compile(r"^\s*(?:#\s*)?-\s*\{")
 
 # Machine infrastructure - audited by hand, deliberately left in GitHub's idiom.
 EXCLUDED = {
-    "templates/welcome/onboard.yml",
-    "templates/welcome/team-formation.yml",
-    "templates/welcome/ISSUE_TEMPLATE/01-join-course.yml",
-    "templates/welcome/ISSUE_TEMPLATE/02-join-team.yml",
+    "templates/join/onboard.yml",
+    "templates/join/team-formation.yml",
+    "templates/join/ISSUE_TEMPLATE/01-join-course.yml",
+    "templates/join/ISSUE_TEMPLATE/02-join-team.yml",
     "templates/semester-config/dispatch-sync.yml",
     "templates/semester-config/dispatch-sync-site.yml",
     "templates/semester-config/dispatch-scheduled-release.yml",

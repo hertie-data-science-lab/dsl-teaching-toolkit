@@ -1551,7 +1551,7 @@ def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
     # what explains an empty one.
     assert page["repo_url"] and page["due_event"]["repo_url"]
     assert page["team_join_url"] == (
-        "https://github.com/hertie-dsl-fixture-f2026/welcome/issues/new/choose"
+        "https://github.com/hertie-dsl-fixture-f2026/join/issues/new/choose"
     )
     assert page["team_join_cap"] == "4"
     # Already spoken (`grades.spoken_day`), so it is printed as it stands - the same

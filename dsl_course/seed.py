@@ -23,7 +23,7 @@ CLI:
                            each materials repo's SYSTEM-owned files (maintainer guide,
                            syllabus example) and its seeded stubs, rebuild
                            the org profile README, and re-push each registered semester's
-                           welcome workflows + semester-config SYSTEM-owned files (the
+                           join workflows + semester-config SYSTEM-owned files (the
                            schema README, the dispatchers, the schedule validator) and
                            `*.sample` worked examples. (Run by the Bootstrap-semester
                            workflow, and by Refresh actions - on demand and on its nightly
@@ -72,8 +72,8 @@ from .status import refresh as refresh_status
 from .welcome import (
     refresh_config_samples,
     refresh_config_system_files,
+    refresh_join_workflows,
     refresh_semester_pointer,
-    refresh_welcome_workflows,
 )
 from .workflows_place import (
     RELEASE_WORKFLOWS,
@@ -478,7 +478,7 @@ def refresh(course_org: str) -> int:
     materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its
     seeded stubs; repopulate dropdowns; converge each org's repo descriptions, faculty-team
     access and machinery topics (_converge_org_metadata) and rebuild its profile README
-    off the same listing; re-push every registered semester's welcome workflows, its
+    off the same listing; re-push every registered semester's join workflows, its
     semester-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
     validate-schedule.yml) and its `*.sample` worked examples (skipping semesters whose
     repos are archived) - never its own config, which stays create-if-missing; (Free-plan
@@ -576,7 +576,7 @@ def refresh(course_org: str) -> int:
     # seeded at Bootstrap semester, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
     log_step(
-        f"Refreshing welcome workflows + semester-config system files + samples "
+        f"Refreshing join workflows + semester-config system files + samples "
         f"in {len(semesters)} semester org(s)"
     )
     not_migrated: list[str] = []
@@ -596,7 +596,7 @@ def refresh(course_org: str) -> int:
         if config_repo is not None and config_repo.get("archived"):
             log(f"  [skip] {semester} (archived semester - left frozen)")
             continue
-        failures += refresh_welcome_workflows(semester)
+        failures += refresh_join_workflows(semester)
         # SYSTEM-owned files only (see welcome.CONFIG_SYSTEM_FILES): the semester's own
         # students.csv/teams.csv/schedule.yml/instructors.yml are never touched here, or this
         # nightly cron would overwrite a live roster every night. Skipped whole when the

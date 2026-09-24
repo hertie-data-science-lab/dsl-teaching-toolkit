@@ -43,7 +43,7 @@ admin on .github → every workflow, all semesters`"]
 (every semester org)`"]
   py["`SEMESTER org · semester-config/instructors.yml
 instructors + teaching_assistants`"] -->|Sync membership| ci["`instructors team (semester org)
-semester-config + welcome`"]
+semester-config + join`"]
   py -->|synced upward| itag["`instructors-<semester> team (course org)
 push on that semester's repos + .github → the workflows`"]
   ui["GitHub Teams UI (hand-add)"] -.->|reverted on next sync| ca
@@ -86,7 +86,7 @@ covered; name per-year content repos `<thing>-<semester>`, or grant that repo by
 by **New materials repo** / **New assignment** is granted **as it is created**, not on some later
 sync.
 
-Semester-side, the same people get write on `semester-config` and `welcome`.
+Semester-side, the same people get write on `semester-config` and `join`.
 
 ## What faculty hold on each repo
 
@@ -95,7 +95,7 @@ Two teams carry every faculty grant: `instructors` (this org's instructors) and 
 | Repo | `instructors` | `course-admin` |
 |---|---|---|
 | course org - **every** repo, `.github` included | push | admin |
-| semester `.github`, `welcome`, `semester-config` | push | admin |
+| semester `.github`, `join`, `semester-config` | push | admin |
 | semester released materials | push | admin |
 | semester submission repos (incl. `<slug>-submissions`), `grades-<handle>` | **read** | admin |
 

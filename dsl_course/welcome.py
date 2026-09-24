@@ -18,6 +18,7 @@ from functools import cache
 from pathlib import Path
 
 from .central import CENTRAL, pin_central_ref
+from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
 from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
@@ -78,11 +79,11 @@ def template(rel: str) -> str:
 # is spliced in at this marker, which is a JS comment so an un-spliced template is still
 # valid YAML and still valid JavaScript.
 SHARED_SCRIPT_MARK = "// {shared_script}"
-SHARED_SCRIPT = "welcome/_shared-script.js"
+SHARED_SCRIPT = "join/_shared-script.js"
 
 
-def welcome_workflow(rel: str) -> str:
-    """A welcome-repo workflow template, with the shared github-script helpers spliced in.
+def join_workflow(rel: str) -> str:
+    """A join-repo workflow template, with the shared github-script helpers spliced in.
 
     THE reader for these two files: seeding, refreshing and the tests all go through here,
     so nothing can ship (or assert about) a workflow whose script is only half written.
@@ -128,9 +129,9 @@ def example_course_file(rel: str) -> str:
 # the matching workflow gates on it (`if: contains(github.event.issue.labels.*.name, ...)`).
 # GitHub silently DROPS a form-declared label the repo doesn't have, and nothing else ever
 # created these - so every Join issue skipped both workflows: no redaction, no comment, no
-# needs-review, a green "skipped" run. Seeded by refresh_welcome_workflows below; the
-# names are pinned to the forms and the workflow guards by tests/test_welcome_templates.py.
-WELCOME_LABELS = (
+# needs-review, a green "skipped" run. Seeded by refresh_join_workflows below; the
+# names are pinned to the forms and the workflow guards by tests/test_join_templates.py.
+JOIN_LABELS = (
     ("onboarding", "0e8a16", "Join course issue - routes the Onboard student workflow"),
     ("team-formation", "1d76db", "Join team issue - routes the Form team workflow"),
     # Not a routing label: what the Form team workflow closes a Join team issue with when
@@ -151,7 +152,7 @@ WELCOME_LABELS = (
 # form as reviewed; everything between them is regenerated per semester, the same idiom (and
 # the same "an instructor who deleted the markers meant it" rule) as
 # `profile_readme.splice_repo_table`.
-JOIN_TEAM_FORM = "welcome/ISSUE_TEMPLATE/02-join-team.yml"
+JOIN_TEAM_FORM = "join/ISSUE_TEMPLATE/02-join-team.yml"
 ASSIGNMENT_FIELD_START = "# dsl:assignment-field:start"
 ASSIGNMENT_FIELD_END = "# dsl:assignment-field:end"
 
@@ -280,7 +281,7 @@ def refresh_join_team_form(org: str) -> int:
     offers the slug. Left to the nightly refresh, that is up to 24 hours during which the
     site shows a callout and the mail links a chooser that refuses them.
 
-    ONE file, deliberately, where `refresh_welcome_workflows` pushes six and ensures three
+    ONE file, deliberately, where `refresh_join_workflows` pushes six and ensures three
     labels: nothing else here moves with the calendar, and this runs on a semester's clock
     rather than on a deploy. `put_file` compares blob shas, so a window whose options have
     not actually changed is written nothing and commits nothing.
@@ -289,7 +290,7 @@ def refresh_join_team_form(org: str) -> int:
     whole set, this one keeps the dropdown honest between them."""
     if put_file(
         org,
-        "welcome",
+        JOIN_REPO,
         JOIN_TEAM_FORM_PATH,
         join_team_form(_open_formations(org)).encode(),
         "ci: refresh the Join-team form's open assignments",
@@ -303,8 +304,8 @@ def refresh_join_team_form(org: str) -> int:
     return 1
 
 
-def refresh_welcome_workflows(org: str) -> int:
-    """Re-push a semester's welcome-repo machinery (onboarding workflows + the issue forms
+def refresh_join_workflows(org: str) -> int:
+    """Re-push a semester's join-repo machinery (onboarding workflows + the issue forms
     they parse) from the current templates, as ONE commit - and ensure the routing labels
     those forms declare exist in the repo. Called both at bootstrap and on every refresh,
     so a fix reaches running semesters; put_files skips whatever is already identical and
@@ -328,20 +329,18 @@ def refresh_welcome_workflows(org: str) -> int:
     # these refresh on every run.
     if not put_files(
         org,
-        "welcome",
+        JOIN_REPO,
         {
-            ".github/workflows/onboard.yml": welcome_workflow(
-                "welcome/onboard.yml"
-            ).encode(),
+            ".github/workflows/onboard.yml": join_workflow("join/onboard.yml").encode(),
             ".github/ISSUE_TEMPLATE/01-join-course.yml": template(
-                "welcome/ISSUE_TEMPLATE/01-join-course.yml"
+                "join/ISSUE_TEMPLATE/01-join-course.yml"
             ).encode(),
-            ".github/workflows/team-formation.yml": welcome_workflow(
-                "welcome/team-formation.yml"
+            ".github/workflows/team-formation.yml": join_workflow(
+                "join/team-formation.yml"
             ).encode(),
             JOIN_TEAM_FORM_PATH: join_team_form(_open_formations(org)).encode(),
             ".github/ISSUE_TEMPLATE/config.yml": template(
-                "welcome/ISSUE_TEMPLATE/config.yml"
+                "join/ISSUE_TEMPLATE/config.yml"
             ).encode(),
         },
         "ci: refresh onboarding workflows + Join forms",
@@ -352,19 +351,19 @@ def refresh_welcome_workflows(org: str) -> int:
             ".github/ISSUE_TEMPLATE/join-team.yml",
         ),
     ):
-        log_err(f"welcome-repo files not written in {org}")
+        log_err(f"join-repo files not written in {org}")
         failures = 1
     else:
         failures = 0
     # The labels are as load-bearing as the files: without them both workflows are
     # `skipped` on every Join issue. ensure_label is create-only and idempotent, so a
     # semester that has them is written nothing.
-    for name, color, description in WELCOME_LABELS:
-        if not ensure_label(org, "welcome", name, color=color, description=description):
+    for name, color, description in JOIN_LABELS:
+        if not ensure_label(org, JOIN_REPO, name, color=color, description=description):
             failures += 1
     if failures:
         return failures
-    log_ok("welcome repo workflows + Join forms + routing labels up to date")
+    log_ok("join repo workflows + Join forms + routing labels up to date")
     return 0
 
 

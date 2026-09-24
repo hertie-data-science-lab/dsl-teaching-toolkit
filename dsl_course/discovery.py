@@ -28,6 +28,7 @@ from .course import (
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
+    JOIN_REPO,
     OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
     session_dirs,
@@ -44,7 +45,7 @@ SEMESTERS_PATH = "semesters.yml"
 # and not the new one, or the old `cohorts:` key, is refused as NOT_MIGRATED.
 OLD_SEMESTERS_PATH = "cohort-courses-pages.yml"
 
-INFRA_REPOS = {"welcome", CONFIG_REPO, ".github"}
+INFRA_REPOS = {JOIN_REPO, CONFIG_REPO, ".github"}
 # The topic assign.py stamps on the frozen semester-side template it creates before
 # provisioning a single student repo (ensure_semester_template). Named here, and imported by
 # the one writer and the one reader, so the string cannot drift between them.
@@ -55,17 +56,17 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 # The repos only a semester org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
-SEMESTER_ONLY_REPOS = {"welcome", CONFIG_REPO}
+SEMESTER_ONLY_REPOS = {JOIN_REPO, CONFIG_REPO}
 
 
-def welcome_issue_url(semester_org: str) -> str:
+def join_issue_url(semester_org: str) -> str:
     """Where a student opens a Join course or a Join team issue.
 
     ONE spelling, because four surfaces point at it - the org profile, the semester site's
     callout, the enrolment-code mail and the team-formation mail - and a semester whose
-    welcome repo moved with one of them left behind is a semester told to go somewhere that
+    join repo moved with one of them left behind is a semester told to go somewhere that
     is not there."""
-    return f"https://github.com/{semester_org}/welcome/issues/new/choose"
+    return f"https://github.com/{semester_org}/{JOIN_REPO}/issues/new/choose"
 
 
 def carries_old_semester_topic(repos: list[dict]) -> bool:
@@ -81,7 +82,7 @@ def org_tier(repos: list[dict]) -> str | None:
 
     The `.github` repo's topic is authoritative; the semester-only infra repos are the
     fallback. None is a real answer, not "course": a legacy semester (`hertie-dl-f2025`:
-    `.github` + student repos, no `welcome`, no topics) looks exactly like a course org by
+    `.github` + student repos, no `join`, no topics) looks exactly like a course org by
     elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
     dotgithub = next((r for r in repos if r["name"] == ".github"), None)
     topics = set((dotgithub or {}).get("topics") or [])

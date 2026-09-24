@@ -8,7 +8,7 @@ truth for who is in which team for which assignment:
     assignment-4-project,team-x,ben-baker
     assignment-4-project,team-y,carla-cohen
 
-Students self-select by opening a "Join team" issue in `welcome` (the workflow appends a
+Students self-select by opening a "Join team" issue in `join` (the workflow appends a
 row - authenticated author, size-capped); faculty & instructors override by editing the CSV directly. This
 CSV is the only writer surface for membership. `sync_teams` then materialises a GitHub Team
 `<assignment>-<team>` from it (one-way, idempotent), and group-assignment provisioning grants
@@ -176,7 +176,7 @@ def _teams_text(semester_org: str) -> str | None:
     """teams.csv's text, read ONCE per semester per process.
 
     A single run asks for it repeatedly - the handout, the collection and the off-boarding
-    revoke each want the same file - and only the welcome workflow writes it, in a process
+    revoke each want the same file - and only the Join-team workflow writes it, in a process
     of its own. The TEXT is memoised rather than `load`'s map, so each caller still parses
     its own copy and cannot mutate another's. Cleared between tests (tests/conftest.py)."""
     return get_file_content(semester_org, CONFIG_REPO, TEAMS_PATH)

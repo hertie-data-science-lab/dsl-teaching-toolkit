@@ -574,7 +574,7 @@ def reconcile_team_members(
             if handle.casefold() in protected:
                 # Same person, new login: the config still names the old one. Leave them
                 # in; the roster's handle cell is re-linked when they next open a Join
-                # issue (templates/welcome/onboard.yml matches on the id too).
+                # issue (templates/join/onboard.yml matches on the id too).
                 log_person(
                     f"  [keep] {handle} in {org}/{team} - renamed, same GitHub id"
                 )

@@ -40,7 +40,7 @@ def fingerprint(org: str) -> dict[str, dict]:
     so a teardown that deleted the template without re-rendering them left the org in a
     state no refresh produces - and nothing in the repo listing or in semester-config
     says so. Course orgs only; a semester org holds no org-level workflows (its own live in
-    `welcome` and `semester-config`), and asking for a directory that is not there
+    `join` and `semester-config`), and asking for a directory that is not there
     raises."""
     listing = discovery.list_org_repos(org)
     fp: dict[str, dict] = {

@@ -6,7 +6,7 @@ team its `role` column names - `students` for enrolled rows, `auditors` for audi
 Both teams carry semester-private read on released materials; only `students` rows get
 assignment repos and gradebooks (see dsl_course.assign / dsl_course.grades).
 
-Students normally grant themselves on Join (templates/welcome/onboard.yml); this is the
+Students normally grant themselves on Join (templates/join/onboard.yml); this is the
 faculty & instructors true-up - edit students.csv, then re-run to reconcile the whole team to the roster.
 
 With --prune, handles no longer wanted in a team are removed from it (off-boarding, and

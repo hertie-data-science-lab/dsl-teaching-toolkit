@@ -29,7 +29,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
     - From the **course** org's `.github` Actions tab: `Bootstrap semester`.
     - `semester_org` = select the newly created `hertie-<course-slug>-<termtag>`. 
     - This seeds: 
-      - **`welcome`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
+      - **`join`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
       - its **`README.md`**, telling them how to join - public like the rest of the repo, yours to reword, and never overwritten
       - **`semester-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `instructors.yml`
       - **`students` + `auditors` teams** (empty) - do not edit directly these, these will be populated by the workflow, 

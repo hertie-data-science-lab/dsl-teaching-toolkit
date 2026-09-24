@@ -1782,7 +1782,7 @@ def main() -> int:
         dest="team_formation",
         choices=[*TEAM_FORMATIONS, COURSE_DEFAULT_CHOICE],
         default=COURSE_DEFAULT_CHOICE,
-        help="Group assignments only: self_select = students use the welcome repo's "
+        help="Group assignments only: self_select = students use the join repo's "
         "'Join team' form; assigned = you write semester-config/teams.csv",
     )
     pa.add_argument(

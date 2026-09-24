@@ -29,7 +29,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         starters, and nothing else. Two that would land on one graded filename are
         refused (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
-      - `team_formation` (group only: `self_select` = students use the welcome repo's
+      - `team_formation` (group only: `self_select` = students use the join repo's
         **Join team** form; `assigned` = you write `semester-config/teams.csv`)
       - `submit_via` = where students hand in. `assignment_repo` = they push to their
         repo, and the cutoff, the receipts and the late window apply; `external` = handed
@@ -266,7 +266,7 @@ is GitHub's cap of ten inputs - every further setting lives in `grading_config.y
 >```
 >
 > `team_formation` and `max_team_size` are also what the **Join team** form in each
-> semester's `welcome` repo answers on. The form runs in a public repo and cannot read this
+> semester's `join` repo answers on. The form runs in a public repo and cannot read this
 > file, so the toolkit mirrors those two values into each semester's
 > `semester-config/assignments.lock.yml` and the form reads that. Editing them here is
 > enough: the mirror catches up on the next **Sync membership**, **Release assignment** or

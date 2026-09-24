@@ -1036,7 +1036,7 @@ def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
 def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     tmp_path, capsys, monkeypatch
 ):
-    # teams.csv is student-writable (the welcome "Join team" issue appends rows). A handle
+    # teams.csv is student-writable (the "Join team" issue appends rows). A handle
     # not on the roster - a typo, or a stranger's login - must be excluded, never invited
     # into the private org with maintain on a repo. An auditor's handle is excluded too.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only

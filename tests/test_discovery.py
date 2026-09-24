@@ -16,7 +16,7 @@ from dsl_course import course, discovery, gh_contents
 
 INFRA_AND_CONTENT = [
     {"name": ".github", "topics": []},
-    {"name": "welcome", "topics": []},
+    {"name": "join", "topics": []},
     {"name": "semester-config", "topics": []},
     {"name": "my-course-f2026.github.io", "topics": []},  # the generated site repo
     {"name": "grades-alice", "topics": ["gradebook"]},  # private student gradebook
@@ -133,7 +133,7 @@ def test_list_org_repos_paginates_instead_of_capping(monkeypatch):
 def test_list_org_repos_raises_instead_of_reporting_an_empty_org(monkeypatch):
     # [] means the org really is empty. A failed listing used to look identical, so a
     # transient API error made Refresh converge "0 content repo(s)" and go green, and
-    # made profile_readme file a semester org (no `welcome` found) as a course org.
+    # made profile_readme file a semester org (no `join` found) as a course org.
     monkeypatch.setattr(discovery, "gh", lambda *args: (1, "gh: HTTP 502"))
     with pytest.raises(RuntimeError, match="could not list repos in Org"):
         discovery.list_org_repos("Org")
@@ -399,13 +399,13 @@ def test_register_semester_is_idempotent_when_already_registered(monkeypatch):
 
 
 def test_org_tier_reads_the_dotgithub_topic_then_the_semester_only_repos_then_gives_up():
-    # None is a real answer: a legacy semester (`.github` + student repos, no `welcome`, no
+    # None is a real answer: a legacy semester (`.github` + student repos, no `join`, no
     # topics) is indistinguishable from a course org by elimination, and the faculty
     # sweep reads "course" as "push everywhere".
     gh = lambda *topics: {"name": ".github", "topics": list(topics)}
     assert discovery.org_tier([gh("dsl-semester"), {"name": "a1-ada"}]) == "semester"
     assert discovery.org_tier([gh("dsl-course-hub"), {"name": "cm-f2026"}]) == "course"
-    assert discovery.org_tier([gh(), {"name": "welcome"}]) == "semester"
+    assert discovery.org_tier([gh(), {"name": "join"}]) == "semester"
     assert discovery.org_tier([gh(), {"name": "semester-config"}]) == "semester"
     assert discovery.org_tier([gh(), {"name": "assignment-1-ada"}]) is None
     assert discovery.org_tier([{"name": "materials"}]) is None  # no .github at all
@@ -437,7 +437,7 @@ def test_student_repo_names_by_topic_or_by_name():
         {"name": "assignment-1-wizards", "topics": ["assignment-1", "submission"]},
         {"name": "grades-ada-l", "topics": []},
         {"name": "materials", "topics": []},
-        {"name": "welcome", "topics": []},
+        {"name": "join", "topics": []},
     ]
     # The template itself is not a student repo unless its own topic says so.
     assert discovery.student_repo_names(repos) == {

@@ -131,7 +131,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(bc, "put_file", f.put_file)
     monkeypatch.setattr(bc, "put_files", f.put_files)
-    # The welcome repo's SYSTEM-owned files are written by dsl_course.welcome (so that
+    # The join repo's SYSTEM-owned files are written by dsl_course.welcome (so that
     # seed.refresh can re-push them without importing bootstrap_course), in one commit per
     # set - so its put_files has to be faked too.
     monkeypatch.setattr(welcome, "put_files", f.put_files)
@@ -168,7 +168,7 @@ def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
 def test_fresh_semester_seeds_every_file(fake):
     bc.setup_semester_extras("Semester-f2026", "release")
     assert USER_OWNED | SYSTEM_OWNED == fake.written("semester-config")
-    assert fake.written("welcome") == WELCOME_SYSTEM_OWNED | {"README.md"}
+    assert fake.written("join") == WELCOME_SYSTEM_OWNED | {"README.md"}
     assert fake.skips == []
 
 
@@ -176,10 +176,8 @@ def test_welcome_readme_links_to_this_orgs_issue_chooser(fake):
     # The "open a Join issue" link is org-specific, so `{org}` must be substituted - an
     # unrendered placeholder would send every semester's students to a dead link.
     bc.setup_semester_extras("Semester-f2026", "release")
-    readme = fake.files[("welcome", "README.md")]
-    assert "https://github.com/Semester-f2026/welcome/issues/new/choose" in readme, (
-        readme
-    )
+    readme = fake.files[("join", "README.md")]
+    assert "https://github.com/Semester-f2026/join/issues/new/choose" in readme, readme
     assert "{org}" not in readme
 
 
@@ -187,13 +185,13 @@ def test_rerun_preserves_a_faculty_edited_welcome_readme(fake):
     # A repo-root README is content faculty may reword for their course; a repair re-run
     # must leave it alone while the .github/ machinery underneath it still refreshes.
     edited = "# Welcome to Deep Learning\n\nOur own wording.\n"
-    fake.files[("welcome", "README.md")] = edited
+    fake.files[("join", "README.md")] = edited
 
     bc.setup_semester_extras("Semester-f2026", "release")
 
-    assert fake.files[("welcome", "README.md")] == edited
-    assert fake.written("welcome") == WELCOME_SYSTEM_OWNED
-    assert "welcome/README.md" in fake.skips
+    assert fake.files[("join", "README.md")] == edited
+    assert fake.written("join") == WELCOME_SYSTEM_OWNED
+    assert "join/README.md" in fake.skips
 
 
 def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
@@ -209,7 +207,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
     }
     fake.files.update({("semester-config", p): c for p, c in live.items()})
-    fake.files[("welcome", ".github/workflows/onboard.yml")] = "name: stale onboard\n"
+    fake.files[("join", ".github/workflows/onboard.yml")] = "name: stale onboard\n"
 
     bc.setup_semester_extras("Semester-f2026", "release")
 
@@ -229,10 +227,10 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
     assert fake.files[("semester-config", "teams.csv.sample")] == (
         welcome.example_semester_file("teams.csv")
     )
-    assert fake.files[("welcome", ".github/workflows/onboard.yml")] == (
-        welcome.welcome_workflow("welcome/onboard.yml")
+    assert fake.files[("join", ".github/workflows/onboard.yml")] == (
+        welcome.join_workflow("join/onboard.yml")
     )
-    assert fake.written("welcome") == WELCOME_SYSTEM_OWNED | {"README.md"}
+    assert fake.written("join") == WELCOME_SYSTEM_OWNED | {"README.md"}
 
 
 def test_rerun_logs_one_skip_per_preserved_file(fake):
@@ -752,10 +750,10 @@ def test_course_dsl_course_yml_is_never_rewritten(fake, monkeypatch):
 def test_rerun_retires_the_pre_rename_issue_forms(fake):
     # The forms moved to 01-/02- prefixed names (chooser ordering); a live semester still
     # carrying the old files would show both generations in the issue chooser.
-    fake.files[("welcome", ".github/ISSUE_TEMPLATE/join.yml")] = "name: old\n"
+    fake.files[("join", ".github/ISSUE_TEMPLATE/join.yml")] = "name: old\n"
     bc.setup_semester_extras("Semester-f2026", "release")
-    assert ("welcome", ".github/ISSUE_TEMPLATE/join.yml") in fake.deletes
-    assert ("welcome", ".github/ISSUE_TEMPLATE/join.yml") not in fake.files
+    assert ("join", ".github/ISSUE_TEMPLATE/join.yml") in fake.deletes
+    assert ("join", ".github/ISSUE_TEMPLATE/join.yml") not in fake.files
 
 
 # --------------------------- setup_semester_extras closes the partial-provisioning holes
@@ -908,7 +906,7 @@ def test_bootstrap_reports_an_unreachable_api_instead_of_a_traceback(
 
 def _stub_refresh(
     monkeypatch,
-    welcome_failures=lambda org: 0,
+    join_failures=lambda org: 0,
     sample_failures=lambda org: 0,
     system_failures=lambda org, ref: 0,
     pointer_failures=lambda org, course: 0,
@@ -939,7 +937,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "seed_github_workflows", lambda org, ref: seed_failures)
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
-    monkeypatch.setattr(seed, "refresh_welcome_workflows", welcome_failures)
+    monkeypatch.setattr(seed, "refresh_join_workflows", join_failures)
     monkeypatch.setattr(seed, "refresh_config_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_config_system_files", system_failures)
     monkeypatch.setattr(seed, "refresh_semester_pointer", pointer_failures)
@@ -1038,8 +1036,8 @@ def test_refresh_leaves_an_archived_assignment_template_alone(monkeypatch):
 
 @pytest.mark.parametrize(
     "per_semester_job",
-    ["welcome_failures", "sample_failures", "system_failures"],
-    ids=["welcome-workflows", "config-samples", "config-system-files"],
+    ["join_failures", "sample_failures", "system_failures"],
+    ids=["join-workflows", "config-samples", "config-system-files"],
 )
 def test_refresh_reaches_every_registered_semester(monkeypatch, per_semester_job):
     # Every per-semester job is seeded at Bootstrap semester, and then left behind by an
@@ -1216,7 +1214,7 @@ def test_refresh_leaves_an_archived_semester_frozen(monkeypatch, capsys):
 
     _stub_refresh(
         monkeypatch,
-        welcome_failures=refresh_one,
+        join_failures=refresh_one,
         sample_failures=refresh_one,
         system_failures=refresh_one,
     )
@@ -1274,7 +1272,7 @@ def _missing_semester_run(monkeypatch, prior_misses=()):
     refreshed: list[str] = []
     store = _stub_refresh(
         monkeypatch,
-        welcome_failures=lambda org, *a: refreshed.append(org) or 0,
+        join_failures=lambda org, *a: refreshed.append(org) or 0,
         sample_failures=lambda org, *a: refreshed.append(org) or 0,
         system_failures=lambda org, *a: refreshed.append(org) or 0,
         prior_misses=prior_misses,
@@ -1371,7 +1369,7 @@ def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
     refreshed: list[str] = []
     _stub_refresh(
         monkeypatch,
-        welcome_failures=lambda org, *a: refreshed.append(org) or 0,
+        join_failures=lambda org, *a: refreshed.append(org) or 0,
         sample_failures=lambda org, *a: refreshed.append(org) or 0,
         system_failures=lambda org, *a: refreshed.append(org) or 0,
     )
@@ -1522,12 +1520,12 @@ def test_set_org_secret_sends_the_value_over_stdin(monkeypatch):
     # expose the bot token to anything else on the box. Both the org secret and the
     # private-infra-repo mirror go over stdin.
     calls: list = []
-    monkeypatch.setattr(bc, "repo_exists", lambda org, r: r in (".github", "welcome"))
-    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "welcome")
+    monkeypatch.setattr(bc, "repo_exists", lambda org, r: r in (".github", "join"))
+    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "join")
     monkeypatch.setattr(bc, "gh", lambda *a, **k: calls.append((a, k)) or (0, ""))
 
     assert bc.set_org_secret("Course-Org", "DSL_BOT_TOKEN", "s3cret") is True
-    assert len(calls) == 2  # org secret + the private `welcome` mirror
+    assert len(calls) == 2  # org secret + the private `join` mirror
     for a, k in calls:
         assert not any(x.startswith("--body") for x in a)
         assert "s3cret" not in a
@@ -1637,13 +1635,13 @@ def test_semester_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, cap
     ("failing_job", "count"),
     [
         ("seed_failures", 2),
-        ("welcome_failures", 1),
+        ("join_failures", 1),
         ("sample_failures", 1),
         ("system_failures", 1),
     ],
     ids=[
         "org-workflows",
-        "welcome-workflows",
+        "join-workflows",
         "config-samples",
         "config-system-files",
     ],
@@ -1680,7 +1678,7 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
 @pytest.mark.parametrize(
     ("job", "extra_args", "message"),
     [
-        ("refresh_welcome_workflows", (), "welcome-repo files not written"),
+        ("refresh_join_workflows", (), "join-repo files not written"),
         ("refresh_config_samples", (), "semester-config samples not written"),
         (
             "refresh_config_system_files",
@@ -1688,7 +1686,7 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
             "semester-config system files not written",
         ),
     ],
-    ids=["welcome-workflows", "config-samples", "config-system-files"],
+    ids=["join-workflows", "config-samples", "config-system-files"],
 )
 def test_a_per_semester_refresh_reds_on_a_failed_write_and_claims_nothing(
     monkeypatch, capsys, job, extra_args, message
@@ -1860,7 +1858,7 @@ def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
     # Deleting the call, or passing semester=False for a semester, would otherwise be
     # invisible: every other test stubs the sweep to a no-op. This pins what the one call
     # site passes.
-    semester = [_r(".github", topics=["dsl-semester"]), _r("welcome"), _r("grades-ada")]
+    semester = [_r(".github", topics=["dsl-semester"]), _r("join"), _r("grades-ada")]
     assert _spy_sweep(monkeypatch, semester) == {
         "tier": "semester",
         "protected": {"grades-ada"},
@@ -1871,7 +1869,7 @@ def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
 
 
 def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
-    # A legacy semester: `.github` without topics, student repos, no `welcome`. The landing
+    # A legacy semester: `.github` without topics, student repos, no `join`. The landing
     # page renders it as a course org, but the sweep must NOT hand instructors push on
     # every submission repo - so it is told the tier is UNKNOWN, which faculty_floor reads
     # as the read floor, and the student repos are protected by name as well.

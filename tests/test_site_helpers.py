@@ -1091,7 +1091,7 @@ def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):
     # - green forever while the published site rotted.
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
     monkeypatch.setattr(
-        site_repo, "list_org_repos", lambda org: _repos("welcome", "OLD-NAME.github.io")
+        site_repo, "list_org_repos", lambda org: _repos("join", "OLD-NAME.github.io")
     )
     built: list[object] = []
     assert site_repo.sync_site_repo("new-name", lambda wd: built.append(wd)) == 1
@@ -1101,7 +1101,7 @@ def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):
 def test_an_org_that_never_had_a_site_is_still_a_quiet_noop(monkeypatch):
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
     monkeypatch.setattr(
-        site_repo, "list_org_repos", lambda org: _repos("welcome", ".github")
+        site_repo, "list_org_repos", lambda org: _repos("join", ".github")
     )
     assert site_repo.sync_site_repo("new-name", lambda wd: None) == 0
 

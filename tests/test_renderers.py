@@ -490,18 +490,20 @@ def test_sync_membership_is_a_consolidated_reconcile():
     }
 
 
-def test_the_two_student_landing_pages_invite_a_pull_request():
+def test_the_student_landing_page_invites_a_pull_request():
     # Students cannot push to the materials; forking and opening a pull request is how
-    # they fix a typo, and it has to be said where they actually land. Both files are
-    # instructor-owned and seeded ONCE, so this text only ever reaches a semester
-    # bootstrapped after it shipped - docs/08 says to paste it into the older ones.
+    # they fix a typo, and it has to be said where they actually land: the org profile.
+    # The join repo's README is only a pointer to it (decision 0010), so the landing text
+    # is written once. Both files are seeded ONCE: live semesters keep what they have.
     invitation = "open a pull request"
     page = profile_readme.render_profile_readme(
         "My-Course-f2026", "My-Course-f2026", "My Course", [], True, central_ref="main"
     )
     assert invitation in page
     assert "fork" in page.lower()
-    assert invitation in welcome.template("welcome/README.md")
+    pointer = welcome.template("join/README.md")
+    assert invitation not in pointer
+    assert "(https://github.com/{org})" in pointer
 
 
 def test_dotgithub_readme_orients_faculty():
@@ -1159,7 +1161,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
         P,
         "list_org_repos",
         lambda org: [
-            {"name": "welcome", "url": "u", "visibility": "private", "description": ""}
+            {"name": "join", "url": "u", "visibility": "private", "description": ""}
         ],
     )
     monkeypatch.setattr(P, "discover_semesters", lambda org: [])
@@ -1180,7 +1182,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
 # its repo table. These pin the three ways a refresh can meet an existing page.
 
 _REPOS = [
-    {"name": "welcome", "url": "u", "visibility": "PUBLIC", "description": "front door"}
+    {"name": "join", "url": "u", "visibility": "PUBLIC", "description": "front door"}
 ]
 
 
@@ -1192,7 +1194,7 @@ def test_repo_table_drops_submission_and_gradebook_repos():
     rows = _repo_table(
         [
             {
-                "name": "welcome",
+                "name": "join",
                 "url": "u",
                 "visibility": "PUBLIC",
                 "description": "d",
@@ -1236,7 +1238,7 @@ def test_repo_table_drops_submission_and_gradebook_repos():
             },
         ]
     )
-    assert "welcome" in rows and "materials" in rows and "org.github.io" in rows
+    assert "join" in rows and "materials" in rows and "org.github.io" in rows
     assert "assignment-1-ada" not in rows
     assert "grades-ada" not in rows
     assert "| [assignment-1]" not in rows
@@ -1251,7 +1253,7 @@ def _semester_org_repos():
             (f"{org}.github.io", "PUBLIC"),
             ("labs", "PRIVATE"),
             ("materials", "PRIVATE"),
-            ("welcome", "PUBLIC"),
+            ("join", "PUBLIC"),
         )
     ]
 
@@ -1282,7 +1284,7 @@ def test_semester_table_runs_students_first_then_config_then_the_site():
         for row in _semester_repo_table(_semester_org_repos()).splitlines()
     ]
     assert names == [
-        "welcome",
+        "join",
         "materials",
         "labs",
         "semester-config",
@@ -2242,7 +2244,7 @@ def test_a_renamed_orgs_profile_page_stops_naming_the_dead_org():
         "Welcome! This is the course organisation for **hertie-nlp-e1282-f2026**.\n\n"
         "**[hertie-nlp-e1282-f2026 - course website]"
         "(https://hertie-nlp-e1282-f2026.github.io/)** - schedule,\n"
-        "[`welcome`](https://github.com/hertie-nlp-e1282-f2026/welcome/issues/new/choose)"
+        "[`join`](https://github.com/hertie-nlp-e1282-f2026/join/issues/new/choose)"
         " to enrol\n"
     )
     out, was = profile_readme.retitle_renamed_org(page, "hertie-nlp-f2026")

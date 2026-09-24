@@ -31,7 +31,7 @@ PR_URL = "https://github.com/hertie-dsl-demo-course-e1234/cm/pull/7"
 # already frozen, the released materials, the website, and the infra.
 LISTING = [
     repo_row("semester-config"),
-    repo_row("welcome"),
+    repo_row("join"),
     repo_row(".github", topics=["dsl-semester"]),
     repo_row(f"{SEMESTER}.github.io", visibility="public"),
     repo_row("materials"),
@@ -185,7 +185,7 @@ def test_the_gate_can_be_decided_against_the_callers_date(org, monkeypatch):
 
 
 def test_a_semester_with_no_semester_config_is_refused(org, monkeypatch):
-    monkeypatch.setattr(teardown, "list_org_repos", lambda o: [repo_row("welcome")])
+    monkeypatch.setattr(teardown, "list_org_repos", lambda o: [repo_row("join")])
     assert teardown.close_out(COURSE, SEMESTER, dry_run=False) == 1
     assert org == []
 
@@ -233,7 +233,7 @@ def test_every_repo_in_the_org_is_frozen_in_order_and_the_marker_goes_last(org):
         "assignment-2-project-team-x",
         "grades-ada-l",
         # then the way IN, so a finished term cannot still be joined
-        "welcome",
+        "join",
         # then the released content, the website, and the semester's own dispatchers
         "materials",
         f"{SEMESTER}.github.io",

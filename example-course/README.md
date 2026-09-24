@@ -16,7 +16,7 @@ i.e. what these files were used to create
 | Tier | Org | Role | URL|
 |------|-----|------|----|
 | Course | **`hertie-dsl-demo-course-e1234`** | persistent control panel - materials, assignment templates, the workflows | [Course org](https://github.com/hertie-dsl-demo-course-e1234) | 
-| Semester | **`hertie-dsl-demo-f2026`** | student-facing target - welcome, roster, released materials, the site | [Semester org](https://github.com/hertie-dsl-demo-f2026) & [Deployed site](https://hertie-dsl-demo-f2026.github.io)|
+| Semester | **`hertie-dsl-demo-f2026`** | student-facing target - join, roster, released materials, the site | [Semester org](https://github.com/hertie-dsl-demo-f2026) & [Deployed site](https://hertie-dsl-demo-f2026.github.io)|
 
 ## What's in this dataset
 
@@ -50,7 +50,7 @@ example-course/
 > NB: **`cohort-org/` is shipped, not just documented.** Every file in it is seeded into each
 > semester's private `semester-config` repo as the `.sample` twin of the scaffold faculty fill
 > in - `students.csv` → `students.csv.sample`, and so on for every other file here. The set is
-> derived by walking this directory (`welcome.CLASSROOM_SAMPLES`), so adding a file here ships
+> derived by walking this directory (`welcome.CONFIG_SAMPLES`), so adding a file here ships
 > it; bootstrap and the nightly Refresh both converge them, so editing one updates every
 > semester's worked example. Keep the contents fictional and self-contained: no real accounts,
 > and links written as full URLs (a repo-relative `docs/...` link resolves to nothing once the

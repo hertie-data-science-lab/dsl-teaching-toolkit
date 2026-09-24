@@ -66,7 +66,7 @@ from typing import NamedTuple
 
 from . import config_digest, grades, mailer, roster, schedule, teams
 from .course import CONFIG_REPO, course_phrase
-from .discovery import course_name_of, semester_is_live, welcome_issue_url
+from .discovery import course_name_of, join_issue_url, semester_is_live
 from .faults import ConfigFault, Unusable
 from .gh_contents import dump_csv, get_file_with_sha, put_file, read_csv
 from .grades import self_select_keys
@@ -393,7 +393,7 @@ def spoken_date(when: datetime, tz_name: str) -> str:
     """`4th Oct`, in the semester's own zone - what the Join-team form calls the same day.
 
     The spelling is `grades.spoken_day`'s, which is also the semester site's and the form's
-    (`spokenDate`, in templates/welcome/team-formation.yml): written out rather than left
+    (`spokenDate`, in templates/join/team-formation.yml): written out rather than left
     to `strftime`, which answers in the runner's locale, and shared so the
     mail, the site and the refusal a late student gets all name one day one way.
 
@@ -464,7 +464,7 @@ def _render(
     nowhere the toolkit can read, and a mail that guessed would be overruling them in the
     students' inbox."""
     course = course_phrase(course_name)
-    welcome = welcome_issue_url(semester_org)
+    join_url = join_issue_url(semester_org)
     if phase == PHASE_REMINDER:
         subject = f"Team formation for {title} closes on {day}"
         opening = (
@@ -487,7 +487,7 @@ def _render(
         f"{opening}\n\n"
         f"{cap_line}\n\n"
         f"To start a team, or to join one, open a 'Join team' issue here:\n"
-        f"  {welcome}"
+        f"  {join_url}"
         f"{listed}\n"
     )
     return (f"{subject} - {course_name}" if course_name else subject), body

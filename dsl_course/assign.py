@@ -1652,7 +1652,7 @@ def provision_all(
     #   `slug`: the semester-side NAME - `semester_dest_repo`, else the schedule key, else (for
     #     a handout of an unscheduled template) the template name minus its tag. Every repo
     #     made here, and every snapshot/autograde/grades artefact, is named after it.
-    #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the welcome Join-team form
+    #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the Join-team form
     #     validates the assignment against `assignments:` in schedule.yml and writes that
     #     key - and `sync_teams.desired_teams` derives its GitHub team slugs from it.
     # They differ exactly when `semester_dest_repo` is set. Keying the lookup or the team slug
@@ -1702,7 +1702,7 @@ def provision_all(
             # WHO fills teams.csv is the assignment's own declaration, and the two answers
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
-            # refuses every request (see templates/welcome/team-formation.yml).
+            # refuses every request (see templates/join/team-formation.yml).
             # The RAW declaration, not `team_formation_resolved`: a template that
             # declares nothing self-selects.
             self_select = gspec.team_formation != ASSIGNED
@@ -1739,7 +1739,7 @@ def provision_all(
                 )
                 return 0, False
             how = (
-                "students self-select via the welcome 'Join team' issue, or seed the CSV"
+                "students self-select via the 'Join team' issue, or seed the CSV"
                 if self_select
                 else "this assignment allocates teams (`team_formation: assigned`), so "
                 "the instructors fill the CSV - the Join-team form refuses it"
@@ -1748,7 +1748,7 @@ def provision_all(
                 f"no teams for `{key}` in {semester_org}/semester-config/teams.csv - {how}."
             )
             return 1, False
-        # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
+        # teams.csv is student-writable (the "Join team" issue appends rows), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
         # into the private semester org (and granted `maintain` on a repo) by ensure_team.

@@ -34,13 +34,13 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
    > **If the emailing integration isn't live** the run still writes every code into `students.csv` and then goes red for want of a transport → copy each student's code out of the roster into an email of your own and send it by hand. Emailing is live once the course org has the `GRAPH_*` secrets, set centrally by the DSL team; **Send enrolment codes** and **Distribute grades** are what use them.
 
 3. **Students self-onboard.**
-   - Each student opens a **Join course** issue in the semester's `welcome` repo and pastes their code.
+   - Each student opens a **Join course** issue in the semester's `join` repo and pastes their code.
    - The match is on the **`enrol_code`**; the issue author is the authenticated GitHub handle, so the code binds that handle (and its GitHub id) to the roster row. Single-use once bound.
    - Success: label `onboarded`, issue closed, student added to the org and to `students` | `auditors`. They must accept the org invite before they see anything.
    - Failure: one neutral "could not be matched" message, whether the code is unknown or already claimed. **Triage `needs-review` issues, then delete them** - the code stays readable in the body's edit history until the issue is deleted (or rotate the code: blank the row's `enrol_code` and its `code_sent_at`, then push).
-   - Students must never paste a code in a **comment** (public, never redacted). Blank issues are disabled in `welcome`.
+   - Students must never paste a code in a **comment** (public, never redacted). Blank issues are disabled in `join`.
 
-   > The semester org's `welcome` repo is automatically seeded when the semester org is [bootstrapped by the course org](04-new-cohort-org.md#steps).
+   > The semester org's `join` repo is automatically seeded when the semester org is [bootstrapped by the course org](04-new-cohort-org.md#steps).
 
 
 ### Auditors (optional)
@@ -56,7 +56,7 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 >This workflow is carried out *during* course delivery. Students form their teams **while the assignment is out**: self-selection opens at the hand-out and runs to the assignment's grading pin, and the release provisions each team's shared repo as it forms.
 
 - There are 2 methods to form groups:
-   1. Students open a **Join team** issue in `welcome`, 
+   1. Students open a **Join team** issue in `join`, 
    2. instructors edit `semester-config/teams.csv`(`assignment, team, github_handle`)
 - The issue flow only accepts an assignment **declared under `assignments:` in
   `semester-config/schedule.yml`**, **whose template says `team_formation: self_select`**,
@@ -95,4 +95,4 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 
 ---
 **Demo:** [Send enrolment codes](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/send-codes.yml)
-in the demo course org · Join course issue in [`hertie-dsl-demo-f2026/welcome`](https://github.com/hertie-dsl-demo-f2026).
+in the demo course org · Join course issue in [`hertie-dsl-demo-f2026/join`](https://github.com/hertie-dsl-demo-f2026).

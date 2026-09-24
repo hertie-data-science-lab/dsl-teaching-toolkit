@@ -18,7 +18,7 @@ the order is the whole design:
    write;
 2. one last website sync, so the deployed site shows the archived state rather than the
    state of the term's last release;
-3. ARCHIVE every repo in the org - students' work first, then `welcome` (the way IN, so a
+3. ARCHIVE every repo in the org - students' work first, then `join` (the way IN, so a
    finished term cannot still be joined), then the released content, the website and the
    semester's own `.github`;
 4. write the teardown record into the semester's private `semester-config`;
@@ -58,7 +58,7 @@ from datetime import date, datetime, timezone
 from typing import NamedTuple
 
 from . import cadence, config_digest, propagate, schedule, site, source_digest
-from .course import CONFIG_REPO, UPSTREAM_BRANCH, pages_repo
+from .course import CONFIG_REPO, JOIN_REPO, UPSTREAM_BRANCH, pages_repo
 from .discovery import (
     ASSIGNMENT_TEMPLATE_TOPIC,
     classify_repos,
@@ -85,10 +85,6 @@ from .repos import archive_repo
 # file, so the sealed repo shows at a glance which files are the term's working state and
 # which one is the account of how it ended.
 RECORD_PATH = "archive/teardown.md"
-
-# The way IN to a semester: the repo holding the Join course and Join team issues. Frozen
-# with the rest, so a finished semester cannot still be joined.
-WELCOME_REPO = "welcome"
 
 _RECORD_BANNER = (
     "<!-- SYSTEM-OWNED - do not edit. Written by `python3 -m dsl_course.archive` "
@@ -200,7 +196,7 @@ def freeze_order(semester_org: str, repos: list[dict]) -> list[dict]:
     """Every repo in the org except `semester-config`, in the order they are frozen.
 
     Students' work first, because it is the semester's record and the reason any of this is
-    reversible rather than a delete. `welcome` next: its Join issues are how a student
+    reversible rather than a delete. `join` next: its Join issues are how a student
     enrols themselves, and an open one on a finished semester writes into a
     `semester-config` that is about to be sealed - a red run instead of a place. Then the
     released content, then the website (after step 2's final sync), and the semester's own
@@ -216,7 +212,7 @@ def freeze_order(semester_org: str, repos: list[dict]) -> list[dict]:
         name = repo["name"]
         if is_student_repo(repo, derived) or _is_template(repo):
             return 0
-        if name == WELCOME_REPO:
+        if name == JOIN_REPO:
             return 1
         if name == site_repo:
             return 3

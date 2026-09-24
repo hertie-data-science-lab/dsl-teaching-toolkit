@@ -24,7 +24,13 @@ CONFIG_REPO = "semester-config"
 # name is a live redirect (every clone, API read and sent link resolves through it) for as
 # long as nothing else takes the name.
 OLD_CONFIG_REPO = "classroom-config"
-RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO})
+# The semester's public front door: the Join course and Join team issue forms and the two
+# workflows that act on them. Its URL is in every enrolment mail (`discovery.join_issue_url`
+# builds it); the ones sent before decision 0010 name `welcome`, which GitHub redirects here
+# for as long as no repo takes that name again.
+JOIN_REPO = "join"
+OLD_JOIN_REPO = "welcome"
+RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO, OLD_JOIN_REPO})
 # The per-student gradebook repo: grades-<handle> (grades.py creates them, discovery reads
 # them back). Named here so the reader and the writer cannot drift.
 GRADEBOOK_PREFIX = "grades-"
@@ -138,7 +144,7 @@ ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
 # outright, and it is not a value an instructor ever writes.
-SELF_SELECT = "self_select"  # students use the Join-team form in `welcome`
+SELF_SELECT = "self_select"  # students use the Join-team form in `join`
 ASSIGNED = "assigned"  # the teaching team writes teams.csv; the form refuses
 TEAM_FORMATIONS = (SELF_SELECT, ASSIGNED)
 NO_TEAMS = "none"

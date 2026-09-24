@@ -63,11 +63,11 @@ from .discovery import (
     discover_release_sources,
     discover_semesters,
     handed_out_assignments,
+    join_issue_url,
     list_org_repos,
     live_semesters,
     semester_content_repos,
     semester_is_live,
-    welcome_issue_url,
 )
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
@@ -1263,13 +1263,13 @@ def _assignment_entry(
     note = shape_note(spec.submit_shape) if out else ""
     note_fm = f'shape_note: "{q(note)}"\n' if note else ""
     # The one thing a student can act on while this assignment waits for its teams: the
-    # `welcome` repo's issue chooser, the cap on a team and the day the door shuts. Three
+    # `join` repo's issue chooser, the cap on a team and the day the door shuts. Three
     # keys and no fourth flag - their PRESENCE is the state, so a theme that has never
     # heard of team formation renders nothing rather than an empty callout, and the layout
     # and the schedule row read the same two facts rather than each wording its own.
     #
-    # The first thing on either site to link `welcome` at all, so it is built from the
-    # SEMESTER org: the course org has no welcome repo, and the one this semester's students
+    # The first thing on either site to link `join` at all, so it is built from the
+    # SEMESTER org: the course org has no join repo, and the one this semester's students
     # are members of is the only one that would answer them.
     #
     # The day, not the moment, and SPOKEN here (`grades.spoken_day`, in the semester's zone):
@@ -1291,7 +1291,7 @@ def _assignment_entry(
     # team, so its URL is the drop box's; an external assignment has no repo to link.
     team_fm = ""
     if forming and shuts is not None:
-        welcome = welcome_issue_url(semester_org)
+        join_url = join_issue_url(semester_org)
         cap = team_cap(course_org, spec)
 
         def team_entry(name: str, handles: list[str]) -> str:
@@ -1314,7 +1314,7 @@ def _assignment_entry(
         )
         closes = spoken_day(schedule.in_semester_zone(sched, shuts))
         team_fm = (
-            f'team_join_url: "{welcome}"\n'
+            f'team_join_url: "{join_url}"\n'
             f'team_join_cap: "{cap}"\n'
             f'team_join_closes: "{closes}"\n'
             f'team_salt: "{q(semester_org)}"\n'

@@ -48,7 +48,7 @@ def test_the_semester_topic_places_an_org_and_the_old_one_places_nothing():
     # The old topic is never read as a tier: the org's tier cannot be told, so the
     # faculty-access sweep gives it the read floor, and its caller reports NOT_MIGRATED.
     assert discovery.org_tier([_gh("dsl-semester")]) == "semester"
-    assert discovery.org_tier([_gh("dsl-cohort"), {"name": "welcome"}]) is None
+    assert discovery.org_tier([_gh("dsl-cohort"), {"name": "join"}]) is None
     assert discovery.carries_old_semester_topic([_gh("dsl-cohort")])
     assert not discovery.carries_old_semester_topic([_gh("dsl-semester")])
 

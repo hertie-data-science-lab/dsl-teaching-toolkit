@@ -311,7 +311,7 @@ def score_from_junit(xml_text: str) -> dict:
 
 
 # Salted per RUN. Without the salt the tag is sha1("<slug>-<handle>") and both halves are
-# public (the slug on the semester site, the handle in the welcome repo's Join issue titles),
+# public (the slug on the semester site, the handle in the join repo's Join issue titles),
 # so anyone could recompute the tag and read the student back off the log.
 _REF_SALT = secrets.token_hex(8)
 
@@ -595,7 +595,7 @@ def submission_targets(
         if not groups:
             log_err(f"no teams for `{key}` in {semester_org}/{CONFIG_REPO}/teams.csv.")
             return []
-        # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
+        # teams.csv is student-writable (the "Join team" issue appends rows), so its
         # handles pass the SAME roster allowlist `assign.provision_all` vets them through
         # before they are handed out - `sync_teams.vet_groups` is that one allowlist.
         # Unvetted, a typo'd or invented handle earned a block of its OWN in the grading
