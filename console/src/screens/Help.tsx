@@ -3,7 +3,7 @@
 // theme's tokens so both themes read.
 
 const COURSE_ITEMS = ['Course details', 'Materials', 'Assignment templates', 'Public website'];
-const COHORT_ITEMS = ['Schedule', 'Staff', 'Roster', 'Assignments: teams, marks', 'Student site'];
+const COHORT_ITEMS = ['Schedule', 'Instructors', 'Roster', 'Assignments: teams, marks', 'Student site'];
 
 const WHERE = [
   'Course details, materials and assignment templates live in the course and carry over to every semester.',

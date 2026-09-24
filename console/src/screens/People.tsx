@@ -281,12 +281,12 @@ function Instructors(p: ReadyProps) {
           <p class="lede">{ins} instructor{ins === 1 ? '' : 's'} and {tas} teaching assistant{tas === 1 ? '' : 's'}.{st && !st.synced ? ' GitHub access does not match this list yet.' : ''}</p>
         </div>
         <div class="actions">
-          <OpOpen def={checkAccess(scope)} cls="btn outline" label="Check staff access" />
+          <OpOpen def={checkAccess(scope)} cls="btn outline" label="Check instructor access" />
           <button class="btn" type="button" disabled={!y} onClick={() => { setEditing({ idx: 'new', values: { role: 'instructor' } }); setSave({ kind: 'idle' }); }}>Add a person</button>
         </div>
       </div>
       <Help title="Who is an instructor" doc="05-manage-teaching-team.md">
-        <p>Handles here get the instructor buttons for this semester; emails here get the problem emails. Check staff access makes GitHub match this list; it never removes access.</p>
+        <p>Handles here get the instructor buttons for this semester; emails here get the problem emails. Check instructor access makes GitHub match this list; it never removes access.</p>
         {admins.length ? <p>Course admins ({admins.join(', ')}) have access to every semester of the course; they are set on Course details.</p> : null}
       </Help>
       <div class="stack">
@@ -320,7 +320,7 @@ function Instructors(p: ReadyProps) {
             </table>
           </div>
         ) : null}
-        <p class="footnote">Access states: <b>Has access</b>, <b>Not a member</b> (Check staff access invites them). An invitation that is pending shows as not a member until it is accepted.</p>
+        <p class="footnote">Access states: <b>Has access</b>, <b>Not a member</b> (Check instructor access invites them). An invitation that is pending shows as not a member until it is accepted.</p>
         {removed.length && !editing ? (
           <div class="panel"><SaveBar state={save} onSave={() => void saveRemovals()} label={`Save ${removed.length} removal${removed.length > 1 ? 's' : ''}`} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: INSTRUCTORS_FILE }} /></div>
         ) : null}

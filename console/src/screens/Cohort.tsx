@@ -271,7 +271,7 @@ function Overview(p: ReadyProps) {
           <section class="panel section">
             <div class="section-head">
               <h2>Automation</h2>
-              <span class="actions"><OpOpen def={checkAccess(cohortScope(p))} cls="btn small quiet" label="Check staff access" /><a class="btn small quiet" href="#operations">All operations</a></span>
+              <span class="actions"><OpOpen def={checkAccess(cohortScope(p))} cls="btn small quiet" label="Check instructor access" /><a class="btn small quiet" href="#operations">All operations</a></span>
             </div>
             <AutomationHead heartbeat={p.heartbeat} now={now} />
             <OpsList list={ops.slice(0, 3)} now={now} runRepo={`${p.course.org}/.github`} />

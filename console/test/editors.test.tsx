@@ -255,10 +255,10 @@ describe('editing screens', () => {
     expect(out).toContain('Send new codes to students who have not joined');
     expect(out).not.toContain('SECRET');
   });
-  it('staff has Add a person and Check staff access', () => {
+  it('staff has Add a person and Check instructor access', () => {
     const out = html(<InstructorsScreen {...props()} />);
     expect(out).toContain('Add a person');
-    expect(out).toContain('Check staff access');
+    expect(out).toContain('Check instructor access');
     expect(out).toContain('>Edit<');
   });
   it('teams shows the window, the team size from the template and who has no team', () => {

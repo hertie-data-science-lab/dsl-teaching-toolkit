@@ -114,7 +114,7 @@ export function ago(iso: string | null | undefined, now: number): string {
 export const STAGE_WORD: Record<StageState, string> = { done: 'Done', todo: 'To do', blocked: 'Blocked', problem: 'Has a problem' };
 
 export const COHORT_STAGES: [string, string][] = [
-  ['K1', 'Org'], ['K2', 'Setup'], ['K3', 'Staff'], ['K4', 'Schedule'], ['K5', 'Students'], ['K6', 'Site'], ['K7', 'Archive'],
+  ['K1', 'Org'], ['K2', 'Setup'], ['K3', 'Instructors'], ['K4', 'Schedule'], ['K5', 'Students'], ['K6', 'Site'], ['K7', 'Archive'],
 ];
 export const COURSE_STAGES: [string, string][] = [
   ['C1', 'Org'], ['C2', 'Setup'], ['C3', 'Details'], ['C4', 'Materials'], ['C5', 'Assignment templates'], ['C6', 'Website'],
@@ -150,7 +150,7 @@ export const OP_LABEL: Record<string, string> = {
   'grades.return': 'Return marks',
   'roster.send_codes': 'Send new codes',
   'site.update': 'Update site',
-  'access.check': 'Check staff access',
+  'access.check': 'Check instructor access',
   'cohort.archive': 'Archive',
   'course.publish_website': 'Publish website',
   'assignment.derive_starter': 'Derive student version',

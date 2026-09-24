@@ -153,9 +153,9 @@ export function updateSite(s: Scope): OpDef {
 
 export function checkAccess(s: Scope): OpDef {
   return {
-    ...base(s, 'access.check', 'access'), name: 'Check staff access', title: 'Staff access', where: s.where,
+    ...base(s, 'access.check', 'access'), name: 'Check instructor access', title: 'Instructor access', where: s.where,
     intro: 'Makes GitHub match the instructors list. It never removes access.',
-    verb: 'Check staff access', running: 'Checking staff access', cancel: 'Stop', args: {},
+    verb: 'Check instructor access', running: 'Checking instructor access', cancel: 'Stop', args: {},
   };
 }
 

@@ -31,7 +31,7 @@ function Archive(p: ReadyProps) {
           <h2>What happens</h2>
           <ul class="checks">
             <li><span class="ck ok"><Check /></span><span>Every repo in {p.cohort.org} becomes read-only: student repos, marks repos, the student site, the join form, the settings repo.</span></li>
-            <li><span class="ck ok"><Check /></span><span>Students and staff keep read access.</span></li>
+            <li><span class="ck ok"><Check /></span><span>Students and instructors keep read access.</span></li>
             <li><span class="ck ok"><Check /></span><span>Nothing is deleted. The student site stays online.</span></li>
           </ul>
         </section>
