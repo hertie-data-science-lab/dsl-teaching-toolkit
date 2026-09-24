@@ -14,7 +14,7 @@ import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments'
 import { CohortScreen } from '../src/screens/Cohort';
 import { CourseScreen, TemplateScreen } from '../src/screens/Course';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
-import { StaffScreen, StudentsScreen } from '../src/screens/People';
+import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
 import { OperationsScreen, SiteScreen } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
@@ -54,7 +54,7 @@ assignments:
     due_datetime: 2026-09-27T23:59
 events:
   midterm:
-    type: exam
+    kind: exam
     title: Midterm
     details: Room 2.61, closed book.
     event_datetime: 2026-10-22T10:00
@@ -63,18 +63,18 @@ events:
     event_datetime: 2026-10-26
 `;
 const STUDENTS = '﻿hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@students.example.org,Anna Adams,enrolled,anna-a,101,SECRETCODE1,2026-09-02T09:30:00Z\nben@example,Ben Baker,enrolled,,,,\ncarla@students.example.org,Carla Cohen,auditor,,,SECRETCODE3,2026-09-02T09:30:00Z\n';
-const PEOPLE = 'people:\n  instructors:\n    - github_handle: a-example\n      email: a@staff.example.org\n      name: Dr A. Example\n      photo: images/a.jpg\n  teaching_assistants:\n    - github_handle: b-sample\n      email: b@staff.example.org\n      name: B. Sample\n      start: "2026-09-01"\n      end: "2026-12-31"\n';
-const GRADING = 'title: Group project\ntype: group\nteam_formation: self_select\nmax_team_size: 4\nsubmit_via: assignment_repo\nvisibility: private\nformat: ipynb\nautograde: sometimes\ncompletion_check: true\ngrader_pdf: false\nquestions:\n  proposal: 20\n  analysis: 30\n';
+const PEOPLE = 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n    photo: images/a.jpg\n  - github_handle: b-sample\n    role: teaching_assistant\n    email: b@staff.example.org\n    name: B. Sample\n    start: "2026-09-01"\n    end: "2026-12-31"\n';
+const GRADING = 'title: Group project\ntype: group\nteam_formation: self_select\nmax_team_size: 4\nsubmit_via: assignment_repo\nvisibility: private\nformats: [ipynb]\nautograde: sometimes\ncompletion_check: true\ngrader_pdf: false\nquestions:\n  proposal: 20\n  analysis: 30\n';
 const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.now', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
 
 const TREE = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/05_trees_and_ensembles/slides.html', 'lectures/05_trees_and_ensembles/notes.pdf', 'lectures/03_regularisation/slides.html'] };
 
 const files = new StaticFiles(
   {
-    [`${COHORT_ORG}/classroom-config/schedule.yml`]: SCHEDULE,
-    [`${COHORT_ORG}/classroom-config/students.csv`]: STUDENTS,
-    [`${COHORT_ORG}/classroom-config/people.yml`]: PEOPLE,
-    [`${COHORT_ORG}/classroom-config/.dsl/outcomes/release.now.json`]: OUTCOME,
+    [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE,
+    [`${COHORT_ORG}/semester-config/students.csv`]: STUDENTS,
+    [`${COHORT_ORG}/semester-config/instructors.yml`]: PEOPLE,
+    [`${COHORT_ORG}/semester-config/.system/outcomes/release.now.json`]: OUTCOME,
     [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **Machine Learning**.\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING,
   },
@@ -149,12 +149,12 @@ describe('S4 cohort overview', () => {
   it('has Check now and More in the header, with the More items live', () => {
     expect(out).toMatch(/<button class="btn" type="button">Check now<\/button>/);
     expect(t).toContain('Preview the next automatic run');
-    expect(t).toContain('Keep cohort edits for future terms');
+    expect(t).toContain('Keep for future semesters');
     expect(out).not.toMatch(/role="menuitem" disabled/);
     expect(t).toContain('What happens here');
   });
   it('flags a stale status', () => {
-    expect(text(<CohortScreen {...props({ loaded: { ...ready, stale: ['schedule.yml'] } as Loaded })} />)).toContain('schedule.yml changed since this cohort was last checked');
+    expect(text(<CohortScreen {...props({ loaded: { ...ready, stale: ['schedule.yml'] } as Loaded })} />)).toContain('schedule.yml changed since this semester was last checked');
   });
   it('shows Status not computed yet when the file is absent', () => {
     const a = html(<CohortScreen {...props({ loaded: { kind: 'absent' } })} />);
@@ -216,7 +216,7 @@ describe('S6 schedule and S11 release', () => {
   });
   const unstaged: Loaded = {
     kind: 'ready', sha: 's', stale: [],
-    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', type: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
+    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
   };
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
@@ -267,14 +267,14 @@ describe('screen error boundary', () => {
     const t = text(<ScreenBoundary><Boom /></ScreenBoundary>);
     expect(t).toContain('This screen hit an error');
     expect(t).toContain('kaboom');
-    expect(html(<ScreenBoundary><Boom /></ScreenBoundary>)).toContain('href="#cohort"');
+    expect(html(<ScreenBoundary><Boom /></ScreenBoundary>)).toContain('href="#semester"');
   }));
   it('links Home when This week itself threw, so the route key changes', () => withBoundaries(() => {
-    vi.stubGlobal('location', { hash: '#cohort' });
+    vi.stubGlobal('location', { hash: '#semester' });
     try {
       const out = html(<ScreenBoundary><Boom /></ScreenBoundary>);
       expect(out).toContain('href="#">Back to Home');
-      expect(out).not.toContain('href="#cohort"');
+      expect(out).not.toContain('href="#semester"');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -296,7 +296,7 @@ describe('S8 students', () => {
 
 describe('S7 staff', () => {
   it('lists instructors and teaching assistants with access and dates', () => {
-    const t = text(<StaffScreen {...props()} />);
+    const t = text(<InstructorsScreen {...props()} />);
     expect(t).toContain('Dr A. Example');
     expect(t).toContain('Teaching assistant');
     expect(t).toContain('Has access');
@@ -325,7 +325,7 @@ describe('S2 course and S17 template', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('shows problems, templates, materials, details and cohorts', () => {
     const t = text(<CourseScreen {...cp} />);
-    expect(t).toContain('Not ready for a new cohort');
+    expect(t).toContain('Not ready for a new semester');
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
     expect(t).toContain('course-materials-f2026');
@@ -354,14 +354,14 @@ describe('read only and the shell', () => {
   it('puts the switcher, nav with the problem count and header links in the frame', () => {
     const nav = html(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="week" problems={2} />);
     expect(nav).toContain('Machine Learning, Fall 2026');
-    expect(nav).toContain('New cohort of Machine Learning');
+    expect(nav).toContain('New semester of Machine Learning');
     expect(nav).toContain('class="n-count"');
     expect(nav).toContain('aria-current="page"');
     expect(nav).toContain('2 problems');
     const top = html(<Topbar user={{ login: 'a', id: 1, name: 'A', email: null, avatar_url: '' }} course={{ ...course, write: false }} cohort={cohort} navOpen={false} onMenu={() => {}} />);
     expect(top).toContain('read only');
     expect(top).toContain(`https://${COHORT_ORG}.github.io`);
-    expect(top).toContain('Cohort on GitHub');
+    expect(top).toContain('Semester on GitHub');
     expect(top).toContain('Course on GitHub');
     const foot = text(<Footer course={course} cohort={cohort} />);
     expect(foot).toContain('Friedrichstraße 180');

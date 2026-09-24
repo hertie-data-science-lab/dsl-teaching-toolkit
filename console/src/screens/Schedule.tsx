@@ -11,7 +11,7 @@ import { RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, release
 import { parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
   ARCHIVE_GRACE_DAYS, blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
-  type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type TermDraft,
+  type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
 import { validator } from '../model/validate';
@@ -26,13 +26,14 @@ import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
+import { CONFIG_REPO } from '../model/names';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 const validSchedule = validator(scheduleSchema);
 
 /** What the student site shows in the Details cell. */
 function Details({ r }: { r: Row }) {
-  if (r.entry === 'term') return <span class="det" />;
+  if (r.entry === 'semester') return <span class="det" />;
   if (!r.show) return <span class="det"><span class="gen">Hidden from the student site; still {r.block === 'releases' ? 'released' : 'runs'}.</span></span>;
   return (
     <span class="det">
@@ -53,7 +54,7 @@ interface SchedFile {
 }
 
 function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
-  const f = p.files.file(p.cohort.org, 'classroom-config', 'schedule.yml');
+  const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
   const text = f.kind === 'ready' ? f.text : null;
   const parsed = useMemo(() => {
     if (text === null) return null;
@@ -238,10 +239,10 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
       )}
       <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
-      <details class="fold" open={!!errors.cohortRepo || !!d.cohortRepo}>
-        <summary>Advanced <span class={`cnt${d.cohortRepo ? ' changed' : ''}`}>({d.cohortRepo ? '1 changed' : 'none changed'})</span></summary>
+      <details class="fold" open={!!errors.semesterRepo || !!d.semesterRepo}>
+        <summary>Advanced <span class={`cnt${d.semesterRepo ? ' changed' : ''}`}>({d.semesterRepo ? '1 changed' : 'none changed'})</span></summary>
         <div class="fold-body">
-          <F id="e-crepo" k="cohortRepo" d={d} set={set} error={errors.cohortRepo} t={{ tier: 'advanced', label: 'Repo name in the cohort', defaultLabel: 'derived', placeholder: slugOfTemplate(d.template), reason: 'Needed only when two entries hand out the same template; each must differ.' }} />
+          <F id="e-crepo" k="semesterRepo" d={d} set={set} error={errors.semesterRepo} t={{ tier: 'advanced', label: 'Repo name in the semester', defaultLabel: 'derived', placeholder: slugOfTemplate(d.template), reason: 'Needed only when two entries hand out the same template; each must differ.' }} />
         </div>
       </details>
       {d.id ? <a class="textlink" href={`#assignment-${d.id}`}>Open the assignment</a> : null}
@@ -257,7 +258,7 @@ function EventForm({ d, set, errors }: { d: EventDraft; set: Setter<EventDraft>;
         <F id="e-title" k="title" d={d} set={set} error={errors.title} t={{ tier: 'ask', label: 'Title', reason: 'Plain text; the student site shows only this, in bold.' }} />
       </div>
       <div class="row-2">
-        <F id="e-date" k="date" d={d} set={set} t={{ tier: 'ask', label: 'When', widget: 'date', reason: 'Leave the date empty and the student site shows TBC at the end of term.' }} />
+        <F id="e-date" k="date" d={d} set={set} t={{ tier: 'ask', label: 'When', widget: 'date', reason: 'Leave the date empty and the student site shows TBC at the end of the semester.' }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time', defaultLabel: 'optional' }} />
       </div>
       <F id="e-det" k="details" d={d} set={set} t={MD('Details')} />
@@ -266,12 +267,12 @@ function EventForm({ d, set, errors }: { d: EventDraft; set: Setter<EventDraft>;
   );
 }
 
-function TermForm({ d, set, errors }: { d: TermDraft; set: Setter<TermDraft>; errors: Record<string, string> }) {
+function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Setter<SemesterDraft>; errors: Record<string, string> }) {
   return (
     <>
       <div class="row-2">
-        <F id="e-ts" k="start" d={d} set={set} t={{ tier: 'default', label: 'Term starts', widget: 'date', defaultLabel: 'inferred from the term', reason: 'Everything on the site’s calendar hangs off these.' }} />
-        <F id="e-te" k="end" d={d} set={set} error={errors.end} t={{ tier: 'default', label: 'Term ends', widget: 'date', defaultLabel: 'default: +15 weeks' }} />
+        <F id="e-ts" k="start" d={d} set={set} t={{ tier: 'default', label: 'Semester starts', widget: 'date', defaultLabel: 'inferred from the semester', reason: 'Everything on the site’s calendar hangs off these.' }} />
+        <F id="e-te" k="end" d={d} set={set} error={errors.end} t={{ tier: 'default', label: 'Semester ends', widget: 'date', defaultLabel: 'default: +15 weeks' }} />
       </div>
       <details class="fold" open={!!d.tz && d.tz !== 'Europe/Berlin'}>
         <summary>Advanced <span class={`cnt${d.tz && d.tz !== 'Europe/Berlin' ? ' changed' : ''}`}>({d.tz && d.tz !== 'Europe/Berlin' ? '1 changed' : 'none changed'})</span></summary>
@@ -289,9 +290,9 @@ function ArchiveForm({ d, set, errors }: { d: ArchiveDraft; set: Setter<ArchiveD
       <F id="e-aon" k="on" d={d} set={set} t={{ tier: 'default', label: 'Archive automatically', widget: 'checkbox', defaultLabel: 'off means never' }} />
       {d.on ? (
         <div class="cond">
-          <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the term ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
-          <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after term end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the term ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
-          <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Cohort archived' }} />
+          <F id="e-ad" k="date" d={d} set={set} t={{ tier: 'default', label: 'Archive on', widget: 'date', defaultLabel: `default: ${d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends`, reason: 'Every repo becomes read-only then. Students keep access; nothing is deleted.' }} />
+          <F id="e-agrace" k="graceDays" d={d} set={set} error={errors.graceDays} t={{ tier: 'default', label: 'Days after semester end', widget: 'number', defaultLabel: `default: ${ARCHIVE_GRACE_DAYS}`, reason: `Archiving happens this many days after the semester ends; ${ARCHIVE_GRACE_DAYS} by default.` }} />
+          <F id="e-at" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'default: Semester archived' }} />
           <F id="e-det" k="details" d={d} set={set} t={MD('Details', '{date} is filled in with the archive date.')} />
           <Common d={d} set={set} />
         </div>
@@ -332,7 +333,7 @@ function View(p: ReadyProps) {
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
   const key = p.entry;
-  const current = key && key !== 'new' && key !== 'term' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
+  const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
   const repos = (status.course?.materials ?? []).map((m) => m.repo);
   const templates = status.course?.templates ?? [];
   const lateDays = String(((p.course.meta?.assignment_defaults ?? {}) as Record<string, unknown>).late_window_days ?? 10);
@@ -377,7 +378,7 @@ function View(p: ReadyProps) {
       return;
     }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
-    const ok = await runSave({ owner: p.cohort.org, repo: 'classroom-config', path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, 'classroom-config'] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) {
       setDrafts({});
       setRemoved({});
@@ -387,7 +388,7 @@ function View(p: ReadyProps) {
 
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
   const seen = new Set<string>();
-  for (const r of rows) if (r.entry !== 'term' && r.entry !== 'archive' && !seen.has(`${r.block}:${r.entry}`)) { seen.add(`${r.block}:${r.entry}`); counts[r.block]++; }
+  for (const r of rows) if (r.entry !== 'semester' && r.entry !== 'archive' && !seen.has(`${r.block}:${r.entry}`)) { seen.add(`${r.block}:${r.entry}`); counts[r.block]++; }
   const skipped = (status.releases ?? []).filter((r) => r.state === 'will_be_skipped').length;
   const nowKey = sortKey(new Date(now).toISOString(), tz);
   let todayDone = false;
@@ -438,11 +439,11 @@ function View(p: ReadyProps) {
       const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
       const ref = rel ? releaseRef(rel, status.releases ?? [], tz, year) : null;
       const ident = identOf(d, current, doc);
-      const title = d.kind === 'term' ? <>Term dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Cohort archived'}</> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
-      const eyebrow = d.kind === 'term' ? 'Term' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
+      const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'}</> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
+      const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
       const two = d.kind === 'releases' || d.kind === 'assignments';
-      const siteTitle = d.kind === 'term' ? '' : d.title || current?.name || '';
+      const siteTitle = d.kind === 'semester' ? '' : d.title || current?.name || '';
       sheet = (
         <div class="entry" role="dialog" aria-labelledby="entry-title">
           <div class="entry-head">
@@ -454,18 +455,18 @@ function View(p: ReadyProps) {
             {close}
           </div>
           <div class="entry-body">
-            {d.kind !== 'term' ? (
+            {d.kind !== 'semester' ? (
               <div class="site-note">
-                On the student site this row shows {two ? <><b>{ident}</b> on one line and “{siteTitle}” below it, without the colon.</> : <>only the bold title, <b>{siteTitle || (d.kind === 'archive' ? 'Cohort archived' : '')}</b>.</>}
+                On the student site this row shows {two ? <><b>{ident}</b> on one line and “{siteTitle}” below it, without the colon.</> : <>only the bold title, <b>{siteTitle || (d.kind === 'archive' ? 'Semester archived' : '')}</b>.</>}
               </div>
             ) : null}
             {probs.length ? <ProblemCards list={probs} /> : null}
             <div class="form">
-              {d.kind !== 'term' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
+              {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
               {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} />
                 : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} lateDays={lateDays} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
-                : d.kind === 'term' ? <TermForm d={d} set={set} errors={errors} />
+                : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
                 : <ArchiveForm d={d} set={set} errors={errors} />}
             </div>
           </div>
@@ -480,8 +481,8 @@ function View(p: ReadyProps) {
             <SaveLine state={save} />
             <div class="savebar">
               <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
-              <EditFile org={p.cohort.org} repo="classroom-config" path="schedule.yml" line={key !== 'new' && key !== 'term' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
-              {key !== 'new' && key !== 'term' && key !== 'archive' && blockOf(doc, key) && !removed[key] ? (
+              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
+              {key !== 'new' && key !== 'semester' && key !== 'archive' && blockOf(doc, key) && !removed[key] ? (
                 <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: blockOf(doc, key)! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
               ) : null}
             </div>
@@ -504,16 +505,16 @@ function View(p: ReadyProps) {
         <div class="actions"><CheckNow p={p} label="Check" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
       <Help title="How the schedule works" doc="07-schedule-releases.md">
-        <p>The schedule drives everything automatic: releases, hand outs, collection, the student site’s calendar. Dates are in the cohort’s timezone. The Details column shows exactly what students see.</p>
+        <p>The schedule drives everything automatic: releases, hand outs, collection, the student site’s calendar. Dates are in the semester’s timezone. The Details column shows exactly what students see.</p>
       </Help>
       <p class="site-note" style="margin-bottom:12px">
         Every row here reads <b>Identifier</b>: Name. The student site shows the same two parts on two lines, the bold identifier then the name, with no colon; exams and events show only the bold title. Whether the site should switch to one line is a theme decision.
       </p>
       <div class="term-meta">
-        {sched?.start && sched?.end ? <span>Term <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
+        {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
         <span>Timezone <b>{sched?.timezone ?? tz}</b></span>
-        <span>Archive <b>{status.cohort?.archive_date ? fmtDay(status.cohort.archive_date, tz, year) : 'never'}</b></span>
-        <a class="textlink" href="#schedule-term">Edit term dates</a>
+        <span>Archive <b>{status.semester?.archive_date ? fmtDay(status.semester.archive_date, tz, year) : 'never'}</b></span>
+        <a class="textlink" href="#schedule-semester">Edit semester dates</a>
         <a class="textlink" href="#schedule-archive">Archive settings</a>
       </div>
       {file === 'loading' ? <p class="footnote" style="margin-bottom:12px">Reading schedule.yml…</p> : null}
@@ -542,12 +543,12 @@ function View(p: ReadyProps) {
               <div class="savebar"><span class="footnote">See what automation’s next scheduled release run would do.</span><OpOpen def={scheduledPreview(scope)} cls="btn small outline" label="Preview scheduled releases" /></div>
             </div>
           </details>
-          <div style="margin-top:14px"><Lives org={p.cohort.org} repo="classroom-config" path="schedule.yml" /></div>
+          <div style="margin-top:14px"><Lives org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" /></div>
         </div>
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: 'classroom-config', path: 'schedule.yml' }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
     </>
   );
 }
@@ -596,7 +597,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       <Help title="Releases" doc="08-release-materials-to-cohort.md">
         <p>
           {st === 'released'
-            ? 'Edits students should see: push to the cohort copy, or release again after fixing the course copy. Edits future terms should keep: keep cohort edits for future terms.'
+            ? 'Edits students should see: push to the semester copy, or release again after fixing the course copy. Edits future semesters should keep: keep for future semesters.'
             : st === 'will_be_skipped' ? 'Automation will skip this until the folder exists.'
             : st === 'late' ? 'Reason codes tell you whether the source, the schedule or the scheduler was at fault.'
             : 'Nothing to do; it goes out at the scheduled time. You can release it early.'}
@@ -620,7 +621,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <h2>Actions</h2>
         <div class="actions">
           {st === 'planned' ? <OpButtons def={releaseEarly(scope, ref)} label="Release early" />
-            : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep cohort edits for future terms" /></>
+            : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
             : st === 'late' ? <OpButtons def={releaseNow(scope, ref)} label="Release now" />
             : <a class="btn" href={`#schedule-${rel.id}`}>Fix the folder</a>}
         </div>

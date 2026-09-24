@@ -6,7 +6,7 @@ import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
 import type { Values } from '../tiers/types';
 
-/** The lab's bot: an owner of every course and cohort org until the console app replaces it. */
+/** The lab's bot: an owner of every course and semester org until the console app replaces it. */
 export const BOT = 'hertie-dsl-bot';
 
 /** `hertie-<course-slug>-<code>`: lower case, no year; the code is folded to lower case. */
@@ -35,26 +35,26 @@ export function termLabel(term: string): string {
   return termOf(`x-${term}`).label;
 }
 
-/** The term after `term`: f2026 -> s2027 -> f2027. */
+/** The semester after `term`: f2026 -> s2027 -> f2027. */
 export function nextTerm(term: string): string {
   const m = /^([fs])(\d{4})$/.exec(term);
   if (!m) return term;
   return m[1] === 'f' ? `s${Number(m[2]) + 1}` : `f${m[2]}`;
 }
 
-/** The term a course starts next, from the date: Fall from January to July, else next Spring. */
+/** The semester a course starts next, from the date: Fall from January to July, else next Spring. */
 export function upcomingTerm(now: number): string {
   const d = new Date(now);
   return d.getUTCMonth() <= 6 ? `f${d.getUTCFullYear()}` : `s${d.getUTCFullYear() + 1}`;
 }
 
-/** Terms a new cohort can be for: the two after the newest one (or after today), none taken. */
+/** Terms a new semester can be for: the two after the newest one (or after today), none taken. */
 export function cohortTerms(existing: string[], now: number): string[] {
   const first = existing.length ? nextTerm(existing[0]) : upcomingTerm(now);
   return [first, nextTerm(first)].filter((t) => !existing.includes(t));
 }
 
-/** Terms a template or materials repo can be for: every cohort's, newest first, then the next. */
+/** Terms a template or materials repo can be for: every semester's, newest first, then the next. */
 export function contentTerms(existing: string[], now: number): string[] {
   const next = existing.length ? nextTerm(existing[0]) : upcomingTerm(now);
   return [...existing, next].filter((t, i, a) => a.indexOf(t) === i);
@@ -138,7 +138,7 @@ export function toggleFormat(formats: string[], f: string): string[] {
 
 /** The `assignment.create` args (schemas/ops.json) for the wizard's values. */
 export function assignmentArgs(v: Values): Record<string, unknown> {
-  const base = { name: v.name, number: v.number === undefined ? undefined : String(v.number), tag: v.term };
+  const base = { name: v.name, number: v.number === undefined ? undefined : String(v.number), semester: v.term };
   if (v.copy_from) return { ...base, copy_from: v.copy_from };
   const group = v.type === 'group';
   const submit = v.submit_via ?? 'assignment_repo';
@@ -148,14 +148,14 @@ export function assignmentArgs(v: Values): Record<string, unknown> {
     team_formation: group ? v.team_formation ?? 'self_select' : undefined,
     submit_via: submit,
     visibility: submit === 'assignment_repo' ? v.visibility ?? 'private' : 'private',
-    format: ((v.formats as string[] | undefined) ?? ['ipynb']).join(','),
+    formats: ((v.formats as string[] | undefined) ?? ['ipynb']).join(','),
     autograde: !autogradeBlock(v) && v.autograde === 'true',
   };
 }
 
 /** The `materials.create` args for the New materials form. */
 export function materialsArgs(v: Values): Record<string, unknown> {
-  if (v.copy_from) return { tag: v.term, copy_from: v.copy_from };
+  if (v.copy_from) return { semester: v.term, copy_from: v.copy_from };
   const open = v.open === true;
-  return { tag: v.term, public_dirs: open ? v.public_dirs ?? 'lectures' : '(nothing public)', public_types: open ? v.public_types ?? 'html + pdf' : undefined };
+  return { semester: v.term, public_dirs: open ? v.public_dirs ?? 'lectures' : '(nothing public)', public_types: open ? v.public_types ?? 'html + pdf' : undefined };
 }

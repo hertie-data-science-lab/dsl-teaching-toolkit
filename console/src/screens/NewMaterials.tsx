@@ -44,9 +44,9 @@ export function NewMaterialsScreen(p: CourseProps) {
   return (
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials', href: '#materials' }, { t: 'New materials' }]} />
-      <div class="page-head"><div><h1>New materials</h1><p class="lede">One repo of lectures, labs and readings, kept private until releases copy it to a cohort.</p></div></div>
+      <div class="page-head"><div><h1>New materials</h1><p class="lede">One repo of lectures, labs and readings, kept private until releases copy it to a semester.</p></div></div>
       <Help title="Materials repos" doc="02-add-materials-to-course.md">
-        <p>Materials are usually per term. Each term’s repo is named after its term, so the cohort that uses it is clear.</p>
+        <p>Materials are usually per semester. Each semester’s repo is named after its semester, so the semester that uses it is clear.</p>
       </Help>
       <div class="panel">
         <div class="form" style="max-width:640px">
@@ -58,7 +58,7 @@ export function NewMaterialsScreen(p: CourseProps) {
           {d.submitted === repo ? <Checks list={live.value?.repo === repo ? [live.value.c] : null} busy={live.busy} pending={[`${repo} created`]} /> : null}
           {made ? (
             <>
-              <Verified>Created. Write its syllabus, then add its folders to a cohort’s schedule.</Verified>
+              <Verified>Created. Write its syllabus, then add its folders to a semester’s schedule.</Verified>
               <div class="actions">
                 <EditFile org={course.org} repo={repo} path="SYLLABUS.md" />
                 <a class="btn outline" href={`#materials-${repo}`}>Materials settings</a>

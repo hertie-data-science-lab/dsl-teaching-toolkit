@@ -14,14 +14,15 @@ import type { GitHubClient, Job } from '../github/client';
 import type { Outcome } from '../model/types';
 import { validator } from '../model/validate';
 import { opSpec } from './registry';
+import { CONFIG_REPO, COURSE_REPO, OUTCOMES_DIR } from '../model/names';
 
 export const CONSOLE_WORKFLOW = 'console.yml';
 export const CONSOLE_REF = 'main';
-export const CONSOLE_REPO = '.github';
+export const CONSOLE_REPO = COURSE_REPO;
 export const CLIENT = 'console/0.1';
 export const OUTCOME_TITLE = 'dsl-outcome';
-export const OUTCOMES_DIR = '.dsl/outcomes';
-/** A private outcome file's path inside `classroom-config`. */
+export { OUTCOMES_DIR };
+/** A private outcome file's path inside the semester's config repo. */
 export const outcomePath = (op: string): string => `${OUTCOMES_DIR}/${op}.json`;
 
 export interface RequestInput {
@@ -37,7 +38,7 @@ export interface Request {
   op: string;
   actor: string;
   course_org: string;
-  cohort_org?: string;
+  semester_org?: string;
   args: Record<string, unknown>;
   preview: boolean;
   client: string;
@@ -115,13 +116,13 @@ export function buildRequest(actor: string, input: RequestInput): Request {
     op: input.op,
     actor,
     course_org: input.courseOrg,
-    ...(spec.scope === 'cohort' && input.cohortOrg ? { cohort_org: input.cohortOrg } : {}),
+    ...(spec.scope === 'cohort' && input.cohortOrg ? { semester_org: input.cohortOrg } : {}),
     args,
     preview: input.preview,
     client: CLIENT,
   };
   const errors = [...(requestValidator(req) ? [] : messages(requestValidator)), ...validateArgs(input.op, args)];
-  if (spec.scope === 'cohort' && !input.cohortOrg) errors.push('a cohort operation needs a cohort');
+  if (spec.scope === 'cohort' && !input.cohortOrg) errors.push('a semester operation needs a semester');
   if (input.preview && !spec.preview) errors.push(`${input.op} has no preview`);
   if (errors.length) throw new RequestInvalid(errors);
   return req;
@@ -183,7 +184,7 @@ export class DispatchAdapter implements Adapter {
       inputs: { request: JSON.stringify(req) },
     });
     if (!r?.workflow_run_id) throw new Error('GitHub started the Console workflow but did not say which run it is.');
-    return { op: input.op, runId: r.workflow_run_id, htmlUrl: r.html_url, preview: input.preview, courseOrg: input.courseOrg, cohortOrg: req.cohort_org };
+    return { op: input.op, runId: r.workflow_run_id, htmlUrl: r.html_url, preview: input.preview, courseOrg: input.courseOrg, cohortOrg: req.semester_org };
   }
 
   async watch(h: Handle): Promise<Progress> {
@@ -203,7 +204,7 @@ export class DispatchAdapter implements Adapter {
         if (pub) break;
       }
     }
-    const [owner, repo] = h.cohortOrg ? [h.cohortOrg, 'classroom-config'] : [h.courseOrg, CONSOLE_REPO];
+    const [owner, repo] = h.cohortOrg ? [h.cohortOrg, CONFIG_REPO] : [h.courseOrg, CONSOLE_REPO];
     let priv: Outcome | null = null;
     try {
       const f = await this.client.getContents(owner, repo, outcomePath(h.op));

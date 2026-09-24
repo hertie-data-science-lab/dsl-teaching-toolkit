@@ -30,7 +30,7 @@ export interface Zoned {
 export function zoned(iso: string, tz = 'Europe/Berlin'): Zoned {
   const naive = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(:\d{2})?$/.exec(iso);
   if (naive) {
-    // A schedule.yml time with no offset is already wall-clock time in the cohort's timezone.
+    // A schedule.yml time with no offset is already wall-clock time in the semester's timezone.
     const [y, m, d] = [Number(naive[1]), Number(naive[2]), Number(naive[3])];
     return { y, m, d, dow: new Date(Date.UTC(y, m - 1, d)).getUTCDay(), hh: naive[4], mm: naive[5], hasTime: true };
   }
@@ -122,7 +122,7 @@ export const COURSE_STAGES: [string, string][] = [
 
 /** Where a problem sits, as the problem card's bold first word. */
 export const PROBLEM_AREA: Record<string, string> = {
-  K1: 'Org', K2: 'Setup', K3: 'Staff', K4: 'Schedule', K5: 'Roster', K6: 'Site', K7: 'Archive',
+  K1: 'Org', K2: 'Setup', K3: 'Instructors', K4: 'Schedule', K5: 'Roster', K6: 'Site', K7: 'Archive',
   C1: 'Course org', C2: 'Course setup', C3: 'Course details', C4: 'Materials', C5: 'Template', C6: 'Public website',
 };
 
@@ -143,7 +143,7 @@ export const OP_LABEL: Record<string, string> = {
   'release.early': 'Release early',
   'release.rerun': 'Release again',
   'release.adhoc': 'Release',
-  'release.propagate_back': 'Keep for future terms',
+  'release.propagate_back': 'Keep for future semesters',
   'assignment.handout_now': 'Hand out',
   'assignment.update_copies': 'Update every copy',
   'assignment.collect_now': 'Collect submissions',
@@ -157,7 +157,7 @@ export const OP_LABEL: Record<string, string> = {
   'assignment.generate_syllabus': 'Generate syllabus',
   'materials.create': 'New materials',
   'assignment.create': 'New assignment',
-  'cohort.bootstrap': 'New cohort',
+  'cohort.bootstrap': 'New semester',
   'teams.open_window': 'Email students without a team',
 };
 
@@ -178,11 +178,11 @@ export function assignmentTitle(a: Pick<Assignment, 'slug' | 'title'>): string {
 
 /** The identifier the site derives for a release: "Session 3", "Lab 2", "Readings". */
 export function releaseIdent(r: Release, all: Release[]): string {
-  if (r.type === 'readings') return 'Readings';
-  const word = r.type === 'lab' ? 'Lab' : 'Session';
+  if (r.kind === 'readings') return 'Readings';
+  const word = r.kind === 'lab' ? 'Lab' : 'Session';
   const num = /(\d+)$/.exec(r.id); // `lecture-5`, `lab-3`: the label says its own ordinal
   if (num) return `${word} ${Number(num[1])}`;
-  const same = all.filter((x) => x.type === r.type).sort((a, b) => a.when.localeCompare(b.when));
+  const same = all.filter((x) => x.kind === r.kind).sort((a, b) => a.when.localeCompare(b.when));
   const n = same.findIndex((x) => x.id === r.id) + 1;
   return `${word} ${n || same.length + 1}`;
 }
@@ -193,7 +193,7 @@ export const TYPE_CLASS: Record<string, string> = {
 };
 export const TYPE_LABEL: Record<string, string> = {
   lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', due: 'due', exam: 'exam',
-  special_event: 'event', event: 'event', term: 'term', archive: 'archive', release: 'release',
+  special_event: 'event', event: 'event', term: 'semester', archive: 'archive', release: 'release',
 };
 
 // ------------------------------------------------------------------ markdown (as the site renders `details`)

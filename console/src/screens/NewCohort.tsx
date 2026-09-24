@@ -1,11 +1,11 @@
-// New cohort (`#new-cohort-1..3`): create the term's org on GitHub, set it up (the
-// `cohort.bootstrap` operation, through the course's Console), then Staff, Schedule and
+// New semester (`#new-semester-1..3`): create the semester's org on GitHub, set it up (the
+// `cohort.bootstrap` operation, through the course's Console), then Instructors, Schedule and
 // Students as three cards that open their editors and come back. Revision brief v2 section 7.
 
 import { useEnv } from '../env';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
-import { parsePeople, parseRoster } from '../model/people';
+import { parseInstructors, parseRoster } from '../model/people';
 import { parseSchedule } from '../model/schedule';
 import { bootstrapCohort } from '../ops/defs';
 import type { Values } from '../tiers/types';
@@ -16,11 +16,12 @@ import { cohortOrgName, cohortTerms, openAt, TERM_RE, termLabel } from '../wizar
 import { allOk, checkCohortSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
 import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified } from '../wizards/Wizard';
 import type { CourseProps } from './types';
+import { CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
 
 const STEPS = [
   { t: 'Org', s: 'Create it on GitHub' },
   { t: 'Setup', s: 'Site, join form, settings' },
-  { t: 'Staff, schedule, students', s: 'Three editors' },
+  { t: 'Instructors, schedule, students', s: 'Three editors' },
 ];
 
 export interface NkDraft {
@@ -35,15 +36,15 @@ export function nkDone(d: NkDraft, org: string, orgChecks: Check[] | null, setUp
   return [orgOk, orgOk && (setUp ? allOk(setUp) : d.setUp === org), false];
 }
 
-/** Which of the three cards are done, from the cohort's own files. */
+/** Which of the three cards are done, from the semester's own files. */
 export function cardsDone(files: Files, org: string): { staff: boolean; schedule: boolean; students: boolean } {
   const f = (path: string) => {
-    const s = files.file(org, 'classroom-config', path);
+    const s = files.file(org, CONFIG_REPO, path);
     return s.kind === 'ready' ? s.text : '';
   };
   const sched = parseSchedule(f('schedule.yml'));
   return {
-    staff: parsePeople(f('people.yml')).length > 0,
+    staff: parseInstructors(f(INSTRUCTORS_FILE)).length > 0,
     schedule: !!sched && Object.keys(sched.releases).length + Object.keys(sched.assignments).length > 0,
     students: parseRoster(f('students.csv')).rows.length > 0,
   };
@@ -52,7 +53,7 @@ export function cardsDone(files: Files, org: string): { staff: boolean; schedule
 export function NewCohortScreen({ course, files, now, step: asked }: Pick<CourseProps, 'course' | 'files' | 'now'> & { step?: number }) {
   const env = useEnv();
   const terms = cohortTerms(course.cohorts.map((c) => c.term), now);
-  const [d, set] = useDraft<NkDraft>(`new-cohort:${course.org}`, () => ({}));
+  const [d, set] = useDraft<NkDraft>(`new-semester:${course.org}`, () => ({}));
   const term = d.term && TERM_RE.test(d.term) ? d.term : terms[0];
   const org = d.org ?? cohortOrgName(course.org, course.code, term);
   const label = termLabel(term);
@@ -64,7 +65,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
   const done = nkDone(d, org, orgChecks, setUp);
   const step = openAt(done, asked);
   const go = (k: number) => {
-    if (typeof location !== 'undefined') location.hash = `#new-cohort-${k}`;
+    if (typeof location !== 'undefined') location.hash = `#new-semester-${k}`;
   };
   const q = `?course=${course.org}`;
 
@@ -94,8 +95,8 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
     body = (
       <>
         <p class="footnote">For {course.name}, {label}, in <code>{org}</code>.</p>
-        <p>This makes the student site, the join form and the cohort’s settings. It takes about a minute.</p>
-        <Checks list={setUp} busy={setupLive.busy} pending={['The cohort’s settings repo is in place (classroom-config)', 'The join form is in place (welcome)', 'The course lists the cohort']} />
+        <p>This makes the student site, the join form and the semester’s settings. It takes about a minute.</p>
+        <Checks list={setUp} busy={setupLive.busy} pending={[`The semester’s settings repo is in place (${CONFIG_REPO})`, `The join form is in place (${JOIN_REPO})`, 'The course lists the semester']} />
         {ok ? <Verified>Set up: student site, join form and settings are in place.</Verified> : null}
       </>
     );
@@ -108,10 +109,10 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
       </>
     );
   } else {
-    title = 'Staff, schedule and students';
+    title = 'Instructors, schedule and students';
     const c = cardsDone(files, org);
     const n = [c.staff, c.schedule, c.students].filter(Boolean).length;
-    const back = encodeURIComponent('new-cohort-3');
+    const back = encodeURIComponent('new-semester-3');
     const card = (name: string, screen: string, isDone: boolean, text: string, doneText: string) => (
       <div class={`scard${isDone ? ' done' : ''}`}>
         <h3>{name}{isDone ? <span class="chip ok">Done</span> : <span class="chip">To do</span>}</h3>
@@ -123,25 +124,25 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
       <>
         <p>Do these in any order. Each opens its editor and brings you back here.</p>
         <div class="setup-cards">
-          {card('Staff', 'staff', c.staff, 'Who gets the instructor buttons and the problem emails.', 'At least one person listed.')}
-          {card('Schedule', 'schedule-term', c.schedule, 'Term dates, releases, assignments, events.', 'Releases or assignments scheduled.')}
+          {card('Instructors', 'instructors', c.staff, 'Who gets the instructor buttons and the problem emails.', 'At least one person listed.')}
+          {card('Schedule', 'schedule-semester', c.schedule, 'Semester dates, releases, assignments, events.', 'Releases or assignments scheduled.')}
           {card('Students', 'students', c.students, 'The roster; adding a row sends a code.', 'Roster started.')}
         </div>
-        {n === 3 ? <Verified>{label} is live. Automation takes it from here.</Verified> : <p class="footnote">{n} of 3 done. The cohort goes live when all three are done.</p>}
+        {n === 3 ? <Verified>{label} is live. Automation takes it from here.</Verified> : <p class="footnote">{n} of 3 done. The semester goes live when all three are done.</p>}
       </>
     );
-    foot = <a class="btn outline" href={`?cohort=${org}#cohort`}>Open {label}</a>;
+    foot = <a class="btn outline" href={`?cohort=${org}#semester`}>Open {label}</a>;
   }
-  const backBtn = step > 1 ? <a class="btn quiet" href={`${q}#new-cohort-${step - 1}`}>Back</a> : <a class="btn quiet" href={`${q}#course`}>Cancel</a>;
+  const backBtn = step > 1 ? <a class="btn quiet" href={`${q}#new-semester-${step - 1}`}>Back</a> : <a class="btn quiet" href={`${q}#course`}>Cancel</a>;
   return (
     <>
-      <Crumbs items={[{ t: course.name, href: `${q}#course` }, { t: 'New cohort' }]} />
-      <div class="page-head"><div><h1>New cohort: {label}</h1></div></div>
-      <Help title="What a cohort is" doc="04-new-cohort-org.md">
-        <p>One org per term. Students join this org, never the course. It gets its own student site, join form and schedule.</p>
+      <Crumbs items={[{ t: course.name, href: `${q}#course` }, { t: 'New semester' }]} />
+      <div class="page-head"><div><h1>New semester: {label}</h1></div></div>
+      <Help title="What a semester is" doc="04-new-semester-org.md">
+        <p>One org per semester. Students join this org, never the course. It gets its own student site, join form and schedule.</p>
       </Help>
       <div class="wizard">
-        <Rail steps={STEPS} cur={step} done={done} heading="Two steps, then three editors" base="new-cohort-" query={q} />
+        <Rail steps={STEPS} cur={step} done={done} heading="Two steps, then three editors" base="new-semester-" query={q} />
         <StepCard ctx={`For ${course.name}`} of={`Step ${step} of 3`} title={title} back={backBtn} foot={foot}>{body}</StepCard>
       </div>
     </>

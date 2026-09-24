@@ -7,8 +7,8 @@ import { opt, type Tiers } from './types';
 /** An unscheduled release's destination: Advanced, defaulting to materials and the source path. */
 function releaseDest(sourcePath: string): Tiers {
   return {
-    cohort_dest_repo: { tier: 'advanced', label: 'To repo', default: 'materials', defaultLabel: 'default: materials', reason: 'In the cohort. Blank means materials.', placeholder: 'materials' },
-    cohort_dest_path: { tier: 'advanced', label: 'To path', defaultLabel: 'default: same as the folder', placeholder: sourcePath },
+    semester_dest_repo: { tier: 'advanced', label: 'To repo', default: 'materials', defaultLabel: 'default: materials', reason: 'In the semester. Blank means materials.', placeholder: 'materials' },
+    semester_dest_path: { tier: 'advanced', label: 'To path', defaultLabel: 'default: same as the folder', placeholder: sourcePath },
   };
 }
 
@@ -21,7 +21,11 @@ export function releaseAdhoc(repos: string[]): Tiers {
 }
 
 export const HANDOUT: Tiers = {
-  include_solution: { tier: 'advanced', label: 'Include the solution branch', widget: 'checkbox', default: false, defaultLabel: 'default: off' },
+  solution_datetime: {
+    tier: 'advanced', label: 'Solution shown', widget: 'select', default: '', defaultLabel: 'default: not now',
+    options: [opt('', 'Not now'), opt('now', 'Now, with the hand out')],
+    reason: 'Pushes the model answer and rubric into every student’s repo. This is not returning marks, and it cannot be undone for reuse.',
+  },
 };
 
 export function updateCopies(files: string[]): Tiers {
@@ -33,7 +37,7 @@ export function updateCopies(files: string[]): Tiers {
 
 export const RETURN_MARKS: Tiers = {
   notify: { tier: 'default', label: 'Email students whose marks changed', widget: 'checkbox', default: true, defaultLabel: 'the email links to their marks repo; default on' },
-  receipt_note: { tier: 'default', label: 'Post a note on the receipts thread', widget: 'checkbox', default: false, defaultLabel: 'default: off' },
+  receipt_note: { tier: 'default', label: 'Post a note on each Submission receipts issue', widget: 'checkbox', default: false, defaultLabel: 'default: off' },
   include_feedback: { tier: 'default', label: 'Include the feedback text in the email', widget: 'checkbox', default: false, defaultLabel: 'default: off', when: (v) => v.notify !== false },
 };
 

@@ -25,7 +25,7 @@ const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const old = { org: OLD_ORG, term: 'f2025', termLabel: 'Fall 2025' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort, old], meta: null };
 const ready: Loaded = { kind: 'ready', status: STATUS, sha: 's', stale: [] };
-const archived: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], cohort: { ...STATUS.cohort!, org: OLD_ORG, live: false } }, sha: 's', stale: [] };
+const archived: Loaded = { kind: 'ready', status: { ...STATUS, problems: [], semester: { ...STATUS.semester!, org: OLD_ORG, live: false } }, sha: 's', stale: [] };
 const withTemplate: Loaded = { kind: 'ready', status: { ...STATUS, assignments: [{ ...STATUS.assignments![0], template: 'assignment-3-f2026' }] }, sha: 's', stale: [] };
 
 const MAT = 'course-materials-f2026';
@@ -33,7 +33,7 @@ const files = new StaticFiles(
   {
     [`${COURSE_ORG}/${MAT}/publish.yml`]: 'public:\n  - lectures/**/slides.html\n  - nothing-here/\n',
     [`${COURSE_ORG}/${MAT}/.releaseignore`]: '# comment\nsolutions/\n*.key\n',
-    [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'title: Group project\ntype: group\nformat: py\n',
+    [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'title: Group project\ntype: group\nformats: [py]\n',
   },
   {},
   { [`${COURSE_ORG}/${MAT}`]: ['SYLLABUS.md', 'lectures/05_trees/slides.html', 'lectures/05_trees/notes.pdf', 'solutions/05.ipynb'] },
@@ -108,7 +108,7 @@ describe('index screens', () => {
     expect(t).toContain('Last change');
     expect(t).toContain('New materials');
     expect(t).toContain('lecture-code-f2026');
-    expect(t).toContain('Can be released to a cohort from the schedule.');
+    expect(t).toContain('Can be released to a semester from the schedule.');
     expect(t).not.toContain('assignment-9-draft');
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
@@ -175,8 +175,8 @@ describe('course nav and overview', () => {
   it('lists each cohort by term with its problems count, archived ones greyed', () => {
     const nav = render(<Sidenav courses={[course]} course={course} cohortStates={{ [COHORT_ORG]: ready, [OLD_ORG]: archived }} current="course" problems={0} />);
     const t = nav.replace(/<[^>]+>/g, ' ');
-    expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Cohorts'));
-    expect(nav).toContain(`href="?cohort=${COHORT_ORG}#cohort"`);
+    expect(t.indexOf('Public website')).toBeLessThan(t.indexOf('Semesters'));
+    expect(nav).toContain(`href="?cohort=${COHORT_ORG}#semester"`);
     expect(nav).toMatch(/aria-label="2 problems">2</);
     expect(nav).toContain('class="archived"');
     expect(t).toContain('Assignment templates');

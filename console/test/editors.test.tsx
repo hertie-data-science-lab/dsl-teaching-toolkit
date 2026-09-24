@@ -22,7 +22,7 @@ import { OpsSession } from '../src/ops/session';
 import { ArchiveScreen } from '../src/screens/Archive';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
-import { StaffScreen, StudentsScreen } from '../src/screens/People';
+import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody, json } from './fake';
@@ -44,31 +44,31 @@ const withProblem = (problems: object[]) => ({ ...(example as object), problems 
 const s5Problem = (example as unknown as Status).problems!.find((p) => p.fix?.entry === 's5')!;
 
 describe('saving a file', () => {
-  const T = { owner: COHORT_ORG, repo: 'classroom-config', path: 'schedule.yml' };
+  const T = { owner: COHORT_ORG, repo: 'semester-config', path: 'schedule.yml' };
 
   it('writes over the sha it read, as the user, then reports the checks and a cleared problem', async () => {
     let checks = 0, statusReads = 0;
     const gh = new FakeGitHub()
-      .on('PUT', `/repos/${COHORT_ORG}/classroom-config/contents/schedule.yml`, { content: { sha: 'new' }, commit: { sha: 'c9' } })
-      .on('GET', `/repos/${COHORT_ORG}/classroom-config/commits/c9/check-runs`, () => {
+      .on('PUT', `/repos/${COHORT_ORG}/semester-config/contents/schedule.yml`, { content: { sha: 'new' }, commit: { sha: 'c9' } })
+      .on('GET', `/repos/${COHORT_ORG}/semester-config/commits/c9/check-runs`, () => {
         checks++;
         return json({ check_runs: [{ id: 5, name: 'Validate schedule', status: checks > 1 ? 'completed' : 'in_progress', conclusion: checks > 1 ? 'success' : null, html_url: '', output: { title: null, summary: null, annotations_count: 0 } }] });
       })
-      .on('GET', `/repos/${COHORT_ORG}/classroom-config/contents/.dsl/status.json`, () => {
+      .on('GET', `/repos/${COHORT_ORG}/semester-config/contents/.system/status.json`, () => {
         statusReads++;
-        return json(fileBody('.dsl/status.json', JSON.stringify(withProblem(statusReads > 1 ? [] : [s5Problem]))));
+        return json(fileBody('.system/status.json', JSON.stringify(withProblem(statusReads > 1 ? [] : [s5Problem]))));
       })
       .on('GET', /git\/trees\/HEAD/, { sha: 't', tree: [], truncated: false });
     const env = saveEnv(gh);
-    await env.statuses.reload(COHORT_ORG, 'classroom-config');
+    await env.statuses.reload(COHORT_ORG, 'semester-config');
     const seen: SaveState[] = [];
-    const ok = await saveText(env, T, 'releases: {}\n', 'old-sha', { message: 'schedule: edit s5, from the Instructor Console', statusRepo: [COHORT_ORG, 'classroom-config'] }, (s) => seen.push(s));
+    const ok = await saveText(env, T, 'releases: {}\n', 'old-sha', { message: 'schedule: edit s5, from the Instructor Console', statusRepo: [COHORT_ORG, 'semester-config'] }, (s) => seen.push(s));
     expect(ok).toBe(true);
     const put = gh.seen.find((x) => x.method === 'PUT')!.body as Record<string, unknown>;
     expect(put.sha).toBe('old-sha');
     expect(put.author).toEqual({ name: 'A. Example', email: '1+a-example@users.noreply.github.com' });
     expect(seen.map((s) => s.kind === 'idle' ? '' : s.text)).toEqual(['Saving…', 'Checking…', 'Valid. Problem cleared.']);
-    expect((env.files.file(COHORT_ORG, 'classroom-config', 'schedule.yml') as { text: string }).text).toBe('releases: {}\n');
+    expect((env.files.file(COHORT_ORG, 'semester-config', 'schedule.yml') as { text: string }).text).toBe('releases: {}\n');
   });
 
   it('says so when the file moved on, and writes nothing', async () => {
@@ -102,7 +102,7 @@ describe('the schedule entry sheet model', () => {
     expect(id).toBe('lecture-1');
     writeDraft(y, { ...d, id }, doc);
     const out = parse(y.text);
-    expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', type: 'lecture', title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
+    expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', kind: 'lecture', title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
     expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
   });
 
@@ -138,7 +138,7 @@ describe('the schedule entry sheet model', () => {
     const e = draftErrors(a as never, { templateUsers: () => 2 });
     expect(e.due).toBe('Due must come after the hand out.');
     expect(e.solution).toBe('Must be after the hand out.');
-    expect(e.cohortRepo).toContain('give each its own repo name');
+    expect(e.semesterRepo).toContain('give each its own repo name');
   });
 
   it('edits the archive grace days, writing the key only once it differs from 60', () => {
@@ -209,7 +209,7 @@ describe('the operation panel', () => {
     const out = render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>);
     expect(out).toContain('Update each student’s marks repo<span class="always">always</span>');
     expect(out).toContain('Email students whose marks changed');
-    expect(out).toContain('Post a note on the receipts thread');
+    expect(out).toContain('Post a note on each Submission receipts issue');
     expect(out).toContain('Include the feedback text in the email');
   });
 });
@@ -225,15 +225,15 @@ const course: Course = {
 };
 const groupStatus: Status = {
   ...STATUS,
-  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', late_until: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true }],
+  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true }],
 };
 const ready: Loaded = { kind: 'ready', status: groupStatus, sha: 's', stale: [] };
 const files = new StaticFiles(
   {
-    [`${COHORT_ORG}/classroom-config/students.csv`]: 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n',
-    [`${COHORT_ORG}/classroom-config/people.yml`]: 'people:\n  instructors:\n    - github_handle: a-example\n      email: a@staff.example.org\n      name: Dr A. Example\n',
-    [`${COHORT_ORG}/classroom-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\nassignment-3,team-alpha,ben-b\n',
-    [`${COHORT_ORG}/classroom-config/grading_sheets/assignment-2.yml`]: '# GRADING SHEET\n# Status: OPEN\nsubmissions:\n  anna-a:\n    info:\n      submitted: 2026-09-27T20:00\n      days_late: 2\n    score_individual:\n      Q1: 14\n      Q2: 20\n    adjustment_individual: 1\n    feedback_individual: |\n      Good.\n    notes_not_shared_with_students:\n',
+    [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n',
+    [`${COHORT_ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n',
+    [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\nassignment-3,team-alpha,ben-b\n',
+    [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`]: '# GRADING SHEET\n# Status: OPEN\nsubmissions:\n  anna-a:\n    info:\n      submitted: 2026-09-27T20:00\n      days_late: 2\n    score_individual:\n      Q1: 14\n      Q2: 20\n    adjustment_individual: 1\n    feedback_individual: |\n      Good.\n    notes_not_shared_with_students:\n',
     [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'questions:\n  Q1: 15\n  Q2: 25\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\nmax_team_size: 3\n',
     [`${COURSE_ORG}/.github/dsl-course.yml`]: '# INSTRUCTOR-OWNED\norg: hertie-dsl-demo-course-e1234\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\nassignment_defaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n',
@@ -256,7 +256,7 @@ describe('editing screens', () => {
     expect(out).not.toContain('SECRET');
   });
   it('staff has Add a person and Check staff access', () => {
-    const out = html(<StaffScreen {...props()} />);
+    const out = html(<InstructorsScreen {...props()} />);
     expect(out).toContain('Add a person');
     expect(out).toContain('Check staff access');
     expect(out).toContain('>Edit<');
@@ -288,7 +288,7 @@ describe('editing screens', () => {
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
     expect(out).toContain('Assignment defaults');
-    expect(out).toContain('Cohort defaults');
+    expect(out).toContain('Semester defaults');
   });
   it('materials settings previews what is public and what is withheld', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);

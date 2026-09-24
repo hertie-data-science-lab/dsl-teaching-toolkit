@@ -12,9 +12,9 @@ function estate() {
     .on('GET', '/repos/hertie-ml-e1234/.github', { name: '.github', topics: ['dsl-course-hub'], permissions: { push: true } })
     .on('GET', '/repos/hertie-ids-c11/.github', { name: '.github', topics: ['dsl-course-hub'], permissions: { push: false, pull: true } })
     .on('GET', '/repos/some-other-org/.github', { name: '.github', topics: ['profile'], permissions: { push: true } })
-    .on('GET', '/repos/hertie-ml-e1234/.github/contents/cohort-courses-pages.yml', fileBody('cohort-courses-pages.yml', 'cohorts:\n  - hertie-ml-s2026\n  - hertie-ml-f2026\n'))
+    .on('GET', '/repos/hertie-ml-e1234/.github/contents/semesters.yml', fileBody('semesters.yml', 'semesters:\n  - hertie-ml-s2026\n  - hertie-ml-f2026\n'))
     .on('GET', '/repos/hertie-ml-e1234/.github/contents/dsl-course.yml', fileBody('dsl-course.yml', 'course_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n'))
-    .on('GET', '/repos/hertie-ids-c11/.github/contents/cohort-courses-pages.yml', fileBody('x', '- hertie-ids-f2026\n'))
+    .on('GET', '/repos/hertie-ids-c11/.github/contents/semesters.yml', fileBody('x', '- hertie-ids-f2026\n'))
     .on('GET', '/repos/hertie-ids-c11/.github/contents/dsl-course.yml', fileBody('x', 'course_name: Intro to Data Science\ncourse_code: C11\n'));
 }
 
@@ -44,7 +44,7 @@ describe('discovery', () => {
   });
 
   it('parses both registry shapes and nothing else', () => {
-    expect(parseRegistry('cohorts: [a, b]')).toEqual(['a', 'b']);
+    expect(parseRegistry('semesters: [a, b]')).toEqual(['a', 'b']);
     expect(parseRegistry('- a\n- b\n')).toEqual(['a', 'b']);
     expect(parseRegistry('just a string')).toEqual([]);
     expect(parseRegistry(': : :')).toEqual([]);
@@ -71,13 +71,13 @@ function orgs(gh: FakeGitHub, push: string[] = [], archived: string[] = []) {
   const dot = (org: string, topics: string[]) => ({ name: '.github', topics, archived: archived.includes(org), permissions: { push: push.includes(org), pull: true } });
   return gh
     .on('GET', `/repos/${COURSE}/.github`, dot(COURSE, ['course-e1234', 'dsl-course-hub']))
-    .on('GET', `/repos/${COURSE}/.github/contents/cohort-courses-pages.yml`, fileBody('x', `cohorts:\n  - ${OLD}\n  - ${SEM}\n`))
+    .on('GET', `/repos/${COURSE}/.github/contents/semesters.yml`, fileBody('x', `semesters:\n  - ${OLD}\n  - ${SEM}\n`))
     .on('GET', `/repos/${COURSE}/.github/contents/dsl-course.yml`, fileBody('x', 'course_name: Machine Learning\ncourse_code: E1234\n'))
-    .on('GET', `/repos/${SEM}/.github`, dot(SEM, ['dsl-cohort']))
+    .on('GET', `/repos/${SEM}/.github`, dot(SEM, ['dsl-semester']))
     .on('GET', `/repos/${SEM}/.github/contents/dsl-course.yml`, meta(COURSE))
     .on('GET', `/repos/${OLD}/.github`, dot(OLD, ['dsl-semester']))
     .on('GET', `/repos/${OLD}/.github/contents/dsl-course.yml`, meta(COURSE))
-    .on('GET', `/repos/${OTHER_SEM}/.github`, dot(OTHER_SEM, ['dsl-cohort']))
+    .on('GET', `/repos/${OTHER_SEM}/.github`, dot(OTHER_SEM, ['dsl-semester']))
     .on('GET', `/repos/${OTHER_SEM}/.github/contents/dsl-course.yml`, meta('hertie-nlp-e1282'))
     .on('GET', '/repos/hertie-nlp-e1282/.github/contents/dsl-course.yml', fileBody('x', 'course_name: Natural Language Processing\n'));
 }
@@ -192,7 +192,7 @@ describe('roles', () => {
 
   it('keys roles case-insensitively', async () => {
     // The first matching route answers, so this registry (the semester in capitals) wins.
-    const gh = orgs(new FakeGitHub().on('GET', `/repos/${COURSE}/.github/contents/cohort-courses-pages.yml`, fileBody('x', `cohorts:\n  - ${SEM.toUpperCase()}\n`)), [COURSE])
+    const gh = orgs(new FakeGitHub().on('GET', `/repos/${COURSE}/.github/contents/semesters.yml`, fileBody('x', `semesters:\n  - ${SEM.toUpperCase()}\n`)), [COURSE])
       .on('GET', MEMBERSHIPS, member([COURSE, SEM]));
     const e = await discover(gh);
     expect(e.courses[0].cohorts.map((k) => k.org)).toEqual([SEM.toUpperCase()]);

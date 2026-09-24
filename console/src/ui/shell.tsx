@@ -43,7 +43,7 @@ export function HeaderLinks({ course, cohort }: { course?: Course; cohort?: Coho
     <>
       {!course.write ? <span class="ro-chip">read only</span> : null}
       {cohort ? <a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Student site <Ext /></a> : null}
-      {cohort ? <a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Cohort on GitHub <Ext /></a> : null}
+      {cohort ? <a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a> : null}
       <a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </>
   );
@@ -133,7 +133,7 @@ function Switcher({ courses, course, cohort, cohortStates, semesters = [], semes
   const sw = (l: Loaded | undefined, c: Course): string => {
     if (!c.write) return 'read only';
     if (!l || l.kind !== 'ready') return l?.kind === 'absent' ? 'not computed yet' : '';
-    if (l.status.cohort?.live === false) return 'archived';
+    if (l.status.semester?.live === false) return 'archived';
     const n = (l.status.problems ?? []).length;
     return n ? `${n} problem${n > 1 ? 's' : ''}` : 'no problems';
   };
@@ -146,11 +146,11 @@ function Switcher({ courses, course, cohort, cohortStates, semesters = [], semes
         <a href="#home" role="menuitem">{courses.length ? 'All courses' : 'Your semesters'}</a>
         {!courses.length ? null : <a href="#new-course-1" role="menuitem">New course</a>}
         {!courses.length ? null : !course ? (
-          <span class="disabled" role="menuitem" aria-disabled="true">New cohort<small>Select a course first</small></span>
+          <span class="disabled" role="menuitem" aria-disabled="true">New semester<small>Select a course first</small></span>
         ) : !course.write ? (
-          <span class="disabled" role="menuitem" aria-disabled="true">New cohort of {course.name}<small>You have no write access</small></span>
+          <span class="disabled" role="menuitem" aria-disabled="true">New semester of {course.name}<small>You have no write access</small></span>
         ) : (
-          <a href={`?course=${course.org}#new-cohort-1`} role="menuitem">New cohort of {course.name}</a>
+          <a href={`?course=${course.org}#new-semester-1`} role="menuitem">New semester of {course.name}</a>
         )}
         <hr />
         {courses.map((c) => (
@@ -161,7 +161,7 @@ function Switcher({ courses, course, cohort, cohortStates, semesters = [], semes
             <div class="submenu" hidden={sub !== c.org}>
               <a href={`?course=${c.org}#course`} class={`${c.write ? '' : 'ro'}${course?.org === c.org && !cohort ? ' cur' : ''}`}>Course overview</a>
               {c.cohorts.map((k) => (
-                <a href={`?cohort=${k.org}#cohort`} class={`${c.write ? '' : 'ro'}${cohort?.org === k.org ? ' cur' : ''}`}>
+                <a href={`?cohort=${k.org}#semester`} class={`${c.write ? '' : 'ro'}${cohort?.org === k.org ? ' cur' : ''}`}>
                   {k.termLabel}<span class="pm-sub">{sw(cohortStates[k.org], c)}</span>
                 </a>
               ))}
@@ -184,27 +184,27 @@ function Switcher({ courses, course, cohort, cohortStates, semesters = [], semes
   );
 }
 
-/** A cohort's problem count and whether it is archived, from its loaded status. */
+/** A semester's problem count and whether it is archived, from its loaded status. */
 export function cohortFlags(l: Loaded | undefined): { problems: number | null; archived: boolean } {
   if (!l || l.kind !== 'ready') return { problems: null, archived: false };
-  return { problems: (l.status.problems ?? []).length, archived: l.status.cohort?.live === false };
+  return { problems: (l.status.problems ?? []).length, archived: l.status.semester?.live === false };
 }
 
 /**
- * The course nav's Cohorts group: each cohort by term with its problems count. No entry
- * carries aria-current: in a cohort, This week above already marks the page.
+ * The course nav's Semesters group: each semester by name with its problems count. No entry
+ * carries aria-current: in a semester, This week above already marks the page.
  */
 function CohortsNav({ course, cohortStates }: { course: Course; cohortStates: Record<string, Loaded> }) {
   if (!course.cohorts.length) return null;
   return (
     <>
-      <div class="nav-h">Cohorts</div>
+      <div class="nav-h">Semesters</div>
       <ul>
         {course.cohorts.map((k) => {
           const f = cohortFlags(cohortStates[k.org]);
           return (
             <li>
-              <a href={`?cohort=${k.org}#cohort`} class={f.archived ? 'archived' : undefined}>
+              <a href={`?cohort=${k.org}#semester`} class={f.archived ? 'archived' : undefined}>
                 <span>{k.termLabel}{f.archived ? <span class="n-soon"> archived</span> : null}</span>
                 {f.problems ? <span class="n-count" aria-label={`${f.problems} problems`}>{f.problems}</span> : null}
               </a>
@@ -234,12 +234,12 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
       {course && cohort && course.write ? (
         <>
           <ul>
-            {item('#cohort', 'This week', 'week', problems ? <span class="n-count" aria-label={`${problems} problems`}>{problems}</span> : null)}
+            {item('#semester', 'This week', 'week', problems ? <span class="n-count" aria-label={`${problems} problems`}>{problems}</span> : null)}
             {item('#schedule', 'Schedule', 'schedule')}
             {item('#assignments', 'Assignments', 'assignments')}
             {item('#marks', 'Marks', 'marks')}
             {item('#students', 'Students', 'students')}
-            {item('#staff', 'Staff', 'staff')}
+            {item('#instructors', 'Instructors', 'instructors')}
             {item('#site', 'Site', 'site')}
             {item('#archive', 'Archive', 'archive')}
             {item('#operations', 'Operations', 'operations')}
@@ -261,14 +261,14 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
         </>
       ) : null}
       {course && !course.write ? <p class="footnote" style="padding:8px 10px">Read only: other pages need write access.</p> : null}
-      {!course ? <p class="footnote" style="padding:4px 10px">{courses.length ? 'Choose a course and term to see its pages.' : 'Choose a semester to see its pages.'}</p> : null}
+      {!course ? <p class="footnote" style="padding:4px 10px">{courses.length ? 'Choose a course and semester to see its pages.' : 'Choose a semester to see its pages.'}</p> : null}
       {course ? (
         <div class="nav-links">
           <hr />
           <ul>
             {cohort && course.write ? <li><a href={studentHref(cohort.org)}>Student view</a></li> : null}
             {cohort ? <li><a href={`https://${cohort.org}.github.io`} target="_blank" rel="noopener">Student site <Ext /></a></li> : null}
-            {cohort ? <li><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Cohort on GitHub <Ext /></a></li> : null}
+            {cohort ? <li><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">Semester on GitHub <Ext /></a></li> : null}
             <li><a href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a></li>
           </ul>
         </div>

@@ -5,11 +5,12 @@ import type { GhRepo } from '../github/client';
 import { termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, assignmentIdent, fmtDay } from '../model/format';
-import { FORMATS } from '../tiers/grading';
+import { FORMATS, formatsList } from '../tiers/grading';
 import { Crumbs, Help, Loading, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { CourseHeaderActions, StateChip, courseView } from './Course';
 import type { CourseProps } from './types';
+import { COURSE_REPO } from '../model/names';
 
 /** "Fall 2026" from a repo named `...-f2026`, else null. */
 function termLabel(repo: string): string | null {
@@ -29,7 +30,7 @@ export function publicPatterns(text: string): string[] {
  * `course-materials-*`, not `assignment-*` and not a repo the course status already lists.
  */
 export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRepo[] {
-  const skip = new Set(['.github', `${org}.github.io`.toLowerCase(), ...known.map((k) => k.toLowerCase())]);
+  const skip = new Set([COURSE_REPO, `${org}.github.io`.toLowerCase(), ...known.map((k) => k.toLowerCase())]);
   return repos
     .filter((r) => !r.archived && !skip.has(r.name.toLowerCase()) && !/^course-materials-/i.test(r.name) && !/^assignment-/i.test(r.name))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -65,11 +66,11 @@ export function MaterialsIndexScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Materials' }]} />
       <div class="page-head">
-        <div><h1>Materials</h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a cohort.</p></div>
+        <div><h1>Materials</h1><p class="lede">The course’s materials repos. A scheduled release copies their folders to a semester.</p></div>
         <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
       </div>
       <Help title="What lives in a materials repo" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a cohort. Some files can be withheld from students, or published openly on the public website.</p>
+        <p>Materials live here privately until a scheduled release copies them to a semester. Some files can be withheld from students, or published openly on the public website.</p>
       </Help>
       <div class="stack">
         <section class="panel section">
@@ -98,13 +99,13 @@ export function MaterialsIndexScreen(p: CourseProps) {
         </section>
         <section class="panel section">
           <h2>Other repos</h2>
-          <p class="footnote">Repos in the course that are neither materials nor assignment templates. Can be released to a cohort from the schedule.</p>
+          <p class="footnote">Repos in the course that are neither materials nor assignment templates. Can be released to a semester from the schedule.</p>
           {repos.kind === 'loading' ? <Loading what="Listing the course’s repos" /> : others.length ? (
             <ul class="rows">
               {others.map((r) => (
                 <li>
                   <span class="r-title">{r.name}</span>
-                  <span class="r-sub">Can be released to a cohort from the schedule.</span>
+                  <span class="r-sub">Can be released to a semester from the schedule.</span>
                   <span class="r-side"><a class="btn small quiet" href={r.html_url || ghUrl(course.org, r.name)} target="_blank" rel="noopener">Open on GitHub <Ext /></a></span>
                 </li>
               ))}
@@ -146,7 +147,7 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const y = f.kind === 'ready' ? new YamlText(f.text) : null;
               const cfg = y && !y.errors.length ? obj(y.toJS()) : {};
               const title = cfg.title ? String(cfg.title) : '';
-              const how = y && !y.errors.length ? [cfg.type === 'group' ? 'In teams' : 'Alone', FORMAT_WORD[String(cfg.format ?? 'ipynb')] ?? String(cfg.format)] : [];
+              const how = y && !y.errors.length ? [cfg.type === 'group' ? 'In teams' : 'Alone', FORMAT_WORD[formatsList(cfg.formats)[0] ?? 'ipynb'] ?? formatsList(cfg.formats)[0]] : [];
               const term = termLabel(t.repo);
               const cohorts = scheduledIn(t.repo);
               return (

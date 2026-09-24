@@ -9,7 +9,7 @@ export const FORMATS: [string, string][] = [
   ['ipynb', 'Jupyter notebook'], ['py', 'Python files'], ['rmd', 'R Markdown'], ['qmd', 'Quarto'], ['latex', 'LaTeX'], ['none', 'No starter file'],
 ];
 export const SUBMIT: [string, string, string][] = [
-  ['assignment_repo', 'Their own repo', 'Private to the student and staff.'],
+  ['assignment_repo', 'Their own repo', 'Private to the student and instructors.'],
   ['shared_dropbox_repo', 'A shared drop box', 'One repo for the class; each student has a folder.'],
   ['external', 'Elsewhere', 'Moodle, Kaggle or in class. The repo carries the brief only.'],
 ];
@@ -19,6 +19,12 @@ export interface CourseDefaults {
   lateDays: string;
   latePct: string;
   teamSize: string;
+}
+
+/** A `formats:` value as a list: the file may spell a list or one comma-separated string. */
+export function formatsList(v: unknown): string[] {
+  const all = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(',') : [];
+  return all.map((x) => x.trim()).filter(Boolean);
 }
 
 const bool = (v: unknown) => (v === true ? 'true' : v === false ? 'false' : v == null ? undefined : String(v));
@@ -35,7 +41,9 @@ export function fromConfig(cfg: Record<string, unknown>): Values {
     submit_via: s('submit_via') === 'github' ? 'assignment_repo' : (s('submit_via') ?? 'assignment_repo'),
     submit_url: s('submit_url'),
     visibility: s('visibility') ?? 'private',
-    format: s('format'),
+    // The form asks for the runnable one, the first; the rest ride along untouched.
+    formats: formatsList(cfg.formats)[0],
+    formats_more: formatsList(cfg.formats).slice(1),
     autograde: bool(cfg.autograde),
     tests: s('tests'),
     completion_check: cfg.completion_check === true ? 'on' : cfg.completion_check === false ? 'off' : 'auto',
@@ -57,7 +65,7 @@ export function toConfig(v: Values): Record<string, unknown> {
     submit_via: v.submit_via,
     submit_url: v.submit_via === 'external' ? v.submit_url || undefined : undefined,
     visibility: v.visibility,
-    format: v.format || undefined,
+    formats: v.formats ? [String(v.formats), ...((v.formats_more as string[] | undefined) ?? []).filter((f) => f !== v.formats)] : undefined,
     autograde: isDrop(v) ? undefined : auto,
     tests: auto === true && v.tests && v.tests !== 'tests' ? v.tests : undefined,
     completion_check: isDrop(v) ? undefined : v.completion_check === 'on' ? true : v.completion_check === 'off' ? false : undefined,
@@ -69,7 +77,7 @@ export function toConfig(v: Values): Record<string, unknown> {
 
 const PENALTY = /^(\d+(\.\d+)?%|0?\.\d+|0|1(\.0+)?)$/;
 
-/** `teamsHref`: where "You assign them" links to, the newest cohort's Teams page when there is one. */
+/** `teamsHref`: where "You assign them" links to, the newest semester's Teams page when there is one. */
 export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
   return {
     title: { tier: 'default', label: 'Title', reason: 'Shown to students on the site and in their repo.' },
@@ -81,7 +89,7 @@ export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
       tier: 'conditional', under: 'type', when: (v) => v.type === 'group', label: 'How teams form', widget: 'radio', default: 'self_select', defaultLabel: 'default: students choose',
       options: [
         opt('self_select', 'Students form their own', 'On the student site. The default.'),
-        { ...opt('assigned', 'You assign them', 'You assign them on the cohort’s Teams page once hand out is scheduled.'), href: teamsHref },
+        { ...opt('assigned', 'You assign them', 'You assign them on the semester’s Teams page once hand out is scheduled.'), href: teamsHref },
       ],
     },
     max_team_size: {
@@ -107,7 +115,7 @@ export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
         : v.submit_via === 'external' ? { value: 'private', reason: 'Private: the repo holds the brief only.' }
         : null,
     },
-    format: {
+    formats: {
       tier: 'default', label: 'What students hand in', widget: 'radio', default: 'ipynb', defaultLabel: 'default: Jupyter notebook', reason: 'Seeds the starter files and decides how markers see submissions.',
       options: FORMATS.map(([v, l]) => opt(v, l, v === 'ipynb' ? 'The default.' : undefined)),
     },

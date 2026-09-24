@@ -1,4 +1,4 @@
-// students.csv and people.yml, read for the Students and Staff screens (private surfaces:
+// students.csv and instructors.yml, read for the Students and Instructors screens (private surfaces:
 // the user's token gates them). The enrol code column is never kept.
 
 import { parse } from 'yaml';
@@ -67,22 +67,24 @@ export interface Person {
   url: string;
   start: string;
   end: string;
-  role: 'instructor' | 'ta';
+  /** instructor | teaching_assistant; anything else is kept as written, and the engine skips the entry. */
+  role: string;
 }
 
-export function parsePeople(text: string): Person[] {
+export const ROLE_WORD: Record<string, string> = { instructor: 'Instructor', teaching_assistant: 'Teaching assistant' };
+
+/** instructors.yml's one `instructors:` list, in file order. */
+export function parseInstructors(text: string): Person[] {
   let d: unknown;
   try {
     d = parse(text);
   } catch {
     return [];
   }
-  const people = ((d as { people?: unknown })?.people ?? {}) as Record<string, unknown>;
+  const list = (d as { instructors?: unknown })?.instructors;
   const s = (v: unknown) => (v == null ? '' : String(v));
-  const read = (list: unknown, role: Person['role']): Person[] =>
-    (Array.isArray(list) ? list : []).map((e: Record<string, unknown>) => ({
-      handle: s(e.github_handle), email: s(e.email), name: s(e.name), title: s(e.title), photo: s(e.photo), url: s(e.url),
-      start: s(e.start), end: s(e.end), role,
-    }));
-  return [...read(people.instructors, 'instructor'), ...read(people.teaching_assistants, 'ta')];
+  return (Array.isArray(list) ? list : []).map((e: Record<string, unknown>) => ({
+    handle: s(e?.github_handle), email: s(e?.email), name: s(e?.name), title: s(e?.title), photo: s(e?.photo), url: s(e?.url),
+    start: s(e?.start), end: s(e?.end), role: s(e?.role),
+  }));
 }

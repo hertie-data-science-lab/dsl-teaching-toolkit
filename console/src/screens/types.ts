@@ -6,7 +6,7 @@ import type { Loaded } from '../model/status';
 import type { Status } from '../model/types';
 import type { AssignmentTab } from '../router';
 
-/** What every cohort screen renders from. */
+/** What every semester screen renders from. */
 export interface CohortProps {
   course: Course;
   cohort: CohortRef;
@@ -21,7 +21,7 @@ export interface CohortProps {
   prefill?: string;
 }
 
-/** A cohort screen whose status is ready. */
+/** A semester screen whose status is ready. */
 export interface ReadyProps extends CohortProps {
   status: Status;
 }

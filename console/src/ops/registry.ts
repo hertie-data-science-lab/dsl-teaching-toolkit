@@ -43,7 +43,7 @@ export const PREVIEW_ONLY = new Set(['cohort.preview_automation']);
 export type OpMode = 'gated' | 'preview' | 'direct' | 'previewOnly';
 
 /**
- * How the panel offers an op. A gated op whose engine has no dry run cannot be previewed
+ * How the panel offers an op. A gated op whose engine has no preview cannot be previewed
  * (the engine refuses `preview: true` with NO_PREVIEW), so it runs direct and asks for an
  * explicit confirmation instead.
  */

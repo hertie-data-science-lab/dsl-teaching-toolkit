@@ -11,7 +11,7 @@ import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { createAssignment } from '../ops/defs';
-import { FORMATS, VISIBILITY, toConfig } from '../tiers/grading';
+import { FORMATS, VISIBILITY, formatsList, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
 import { Crumbs, Help, editUrl } from '../ui/bits';
@@ -26,6 +26,7 @@ import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
 import { courseDefaults, courseView } from './Course';
 import { courseScope } from './CourseEdit';
 import type { CourseProps } from './types';
+import { COURSE_REPO } from '../model/names';
 
 const STEPS = [
   { t: 'What is it', s: 'Name and number' },
@@ -52,7 +53,7 @@ export function initialValues(meta: Record<string, unknown> | null, term: string
   const s = (k: string, d: string) => (typeof ad[k] === 'string' && ad[k] ? String(ad[k]) : d);
   return {
     term, type: 'individual', team_formation: s('team_formation', 'self_select'), submit_via: s('submit_via', 'assignment_repo'), visibility: s('visibility', 'private'),
-    formats: [s('format', 'ipynb')], autograde: 'false', completion_check: 'auto', grader_pdf: false,
+    formats: [formatsList(ad.formats)[0] ?? 'ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false,
   };
 }
 
@@ -157,7 +158,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     if (text === null) return set({ extrasSaved: repo });
     const y = new YamlText(text);
     if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
-    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, text, tplNow.config.sha, { message: 'template: settings from the New assignment wizard, from the Instructor Console', statusRepo: [course.org, '.github'] }))
+    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, text, tplNow.config.sha, { message: 'template: settings from the New assignment wizard, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] }))
       set({ extrasSaved: repo });
   };
 
@@ -230,7 +231,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             <Verified>Created. Nothing reaches students until you add it to a schedule.</Verified>
             <div class="actions">
               <a class="btn" href={editUrl(course.org, repo, 'README.md')} target="_blank" rel="noopener">Write the brief <Ext /></a>
-              {cohort ? <a class="btn outline" href={`?cohort=${cohort.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to {cohort.termLabel} schedule</a> : <a class="btn outline" href={`?course=${course.org}#new-cohort-1`}>Add to {termLabel(term)} schedule: set up the cohort first</a>}
+              {cohort ? <a class="btn outline" href={`?cohort=${cohort.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to {cohort.termLabel} schedule</a> : <a class="btn outline" href={`?course=${course.org}#new-semester-1`}>Add to {termLabel(term)} schedule: set up the semester first</a>}
             </div>
             <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>
           </>

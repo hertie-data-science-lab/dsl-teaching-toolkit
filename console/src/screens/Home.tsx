@@ -1,4 +1,4 @@
-// S1 Home (Your courses: every course and cohort, ordered by what needs you; Your
+// S1 Home (Your courses: every course and semester, ordered by what needs you; Your
 // semesters: the semesters the person is a student of), S0 Sign in, and the read-only view.
 
 import { useState } from 'preact/hooks';
@@ -31,20 +31,20 @@ interface Card {
 
 function cardOf(course: Course, c: CohortRef, l: Loaded | undefined, user: GhUser): Card {
   const name = cohortName({ course, cohort: c });
-  const base = { key: c.org, name, href: `?cohort=${c.org}#cohort` };
-  const who = course.admins.includes(user.login) ? 'you are a course admin' : 'you are staff';
+  const base = { key: c.org, name, href: `?cohort=${c.org}#semester` };
+  const who = course.admins.includes(user.login) ? 'you are a course admin' : 'you are an instructor';
   const sub = `${course.code ? `${course.code}; ` : ''}${course.write ? who : 'read only'}`;
   if (!course.write)
     return { ...base, sub, week: '', status: <span class="chip">read only</span>, next: [['', 'Problems and dates need write access']], ro: true, past: false, urgency: -1 };
   if (!l || l.kind === 'loading') return { ...base, sub, week: '…', status: <span class="chip">Reading</span>, next: [], ro: false, past: false, urgency: 0 };
   if (l.kind !== 'ready')
     return { ...base, sub, week: '', status: <span class="chip">{l.kind === 'absent' ? 'Not computed yet' : 'Unreadable'}</span>, next: [['', l.kind === 'absent' ? 'Open it and press Check now.' : 'The status file could not be read.']], ro: false, past: false, urgency: 0 };
-  const s = l.status, tz = s.cohort?.timezone, n = (s.problems ?? []).length;
-  const past = s.cohort?.live === false;
+  const s = l.status, tz = s.semester?.timezone, n = (s.problems ?? []).length;
+  const past = s.semester?.live === false;
   return {
     ...base,
-    sub: past && s.cohort?.archive_date ? `Archived ${fmtWhen(s.cohort.archive_date, tz)}` : sub,
-    week: past ? 'Finished' : s.cohort ? `Week ${s.cohort.week} of ${s.cohort.weeks}` : '',
+    sub: past && s.semester?.archive_date ? `Archived ${fmtWhen(s.semester.archive_date, tz)}` : sub,
+    week: past ? 'Finished' : s.semester ? `Week ${s.semester.week} of ${s.semester.weeks}` : '',
     status: past ? <span class="probs none">Archived</span> : <Probs n={n} />,
     next: past ? [['', 'Students keep access. Nothing was deleted.']] : (s.this_week ?? []).slice(0, 2).map((w) => [fmtWhen(w.when, tz), w.title] as [string, string]),
     ro: false,
@@ -175,25 +175,25 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
         <div class="actions"><a class="btn" href="#new-course-1">New course</a></div>
       </div>
       <Help title="What am I looking at?" doc="01-new-course-org.md">
-        <p>A course holds your materials and assignment templates for every term. Each term runs as its own cohort, which students join. What you can change follows GitHub: the console only offers what your account can do.</p>
+        <p>A course holds your materials and assignment templates for every semester. Each semester runs in its own org, which students join. What you can change follows GitHub: the console only offers what your account can do.</p>
       </Help>
       {!courses.length ? (
         <NothingFound kind={kind} />
       ) : (
         <div class="stack">
           <section class="section" aria-labelledby="h-live">
-            <h2 id="h-live">This term</h2>
-            {live.length ? <ul class="cohort-list">{live.map((c) => <CardRow c={c} />)}</ul> : <p class="footnote">No cohort is running.</p>}
+            <h2 id="h-live">This semester</h2>
+            {live.length ? <ul class="cohort-list">{live.map((c) => <CardRow c={c} />)}</ul> : <p class="footnote">No semester is running.</p>}
           </section>
           {past.length ? (
             <section class="section" aria-labelledby="h-past">
-              <h2 id="h-past">Past terms</h2>
+              <h2 id="h-past">Past semesters</h2>
               <ul class="cohort-list">{past.map((c) => <CardRow c={c} />)}</ul>
             </section>
           ) : null}
           {courseOnly.length ? (
             <section class="section">
-              <h2>Courses with no cohort yet</h2>
+              <h2>Courses with no semester yet</h2>
               <ul class="cohort-list">
                 {courseOnly.map((c) => (
                   <li><a class={`cohort-card${c.write ? '' : ' ro'}`} href={`?course=${c.org}#course`}><span class="cc-name">{c.name}<span>{c.code}</span></span><span class="cc-week" /><span /><span class="cc-next">Open the course</span></a></li>
@@ -306,16 +306,16 @@ export function ReadonlyScreen({ course, cohort }: { course: Course; cohort?: Co
       </div>
       <div class="ro-banner">
         <b>Read only.</b>
-        <span>You are not staff on this course, so this shows only what your GitHub account can see: the course’s public details and its student site. No roster, no marks, no buttons.</span>
+        <span>You are not an instructor on this course, so this shows only what your GitHub account can see: the course’s public details and its student site. No roster, no marks, no buttons.</span>
       </div>
-      <p class="footnote" style="margin:-8px 0 18px">Who can change what: instructors and teaching assistants of a cohort can change that cohort and the course’s materials and assignment templates; course admins can change everything in the course. This follows GitHub’s own access.</p>
+      <p class="footnote" style="margin:-8px 0 18px">Who can change what: instructors and teaching assistants of a semester can change that semester and the course’s materials and assignment templates; course admins can change everything in the course. This follows GitHub’s own access.</p>
       <section class="panel section">
         <h2>Course</h2>
         <dl class="kv">
           <dt>Code</dt><dd>{course.code || 'not set'}</dd>
           {course.description ? <><dt>About</dt><dd>{course.description}</dd></> : null}
           <dt>Course on GitHub</dt><dd><a href={ghUrl(course.org)} target="_blank" rel="noopener">{course.org}</a></dd>
-          {cohort ? <><dt>Cohort on GitHub</dt><dd><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">{cohort.org}</a></dd></> : null}
+          {cohort ? <><dt>Semester on GitHub</dt><dd><a href={ghUrl(cohort.org)} target="_blank" rel="noopener">{cohort.org}</a></dd></> : null}
         </dl>
       </section>
     </>

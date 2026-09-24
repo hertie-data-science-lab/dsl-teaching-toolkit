@@ -1,4 +1,4 @@
-// Instructor-owned files the read screens show directly (the roster grid, the staff table,
+// Instructor-owned files the read screens show directly (the roster grid, the instructors table,
 // the schedule's Details, a template's settings), read with the user's token and held in
 // signals so a screen re-renders when its file arrives.
 

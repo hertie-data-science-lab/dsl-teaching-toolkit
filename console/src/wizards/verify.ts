@@ -8,6 +8,7 @@ import { YamlText } from '../edit/yamlText';
 import { GitHubError, type GitHubClient } from '../github/client';
 import { COURSE_HUB_TOPIC, REGISTRY_PATH, parseRegistry } from '../model/discovery';
 import { BOT } from './model';
+import { CONFIG_REPO, COURSE_REPO, JOIN_REPO } from '../model/names';
 
 export interface Check {
   text: string;
@@ -53,11 +54,11 @@ export async function checkOrg(client: GitHubClient, org: string): Promise<Check
 /** Bootstrap Course Org left a course hub with its Console workflow. */
 export async function checkCourseSetUp(client: GitHubClient, org: string): Promise<Check[]> {
   try {
-    const repo = await client.getRepo(org, '.github');
-    const topics = repo ? repo.topics ?? (await client.getRepoTopics(org, '.github')) : [];
+    const repo = await client.getRepo(org, COURSE_REPO);
+    const topics = repo ? repo.topics ?? (await client.getRepoTopics(org, COURSE_REPO)) : [];
     const hub = !!repo && topics.includes(COURSE_HUB_TOPIC);
     const [meta, consoleWf] = hub
-      ? await Promise.all([client.getContents(org, '.github', 'dsl-course.yml'), client.getContents(org, '.github', '.github/workflows/console.yml')])
+      ? await Promise.all([client.getContents(org, COURSE_REPO, 'dsl-course.yml'), client.getContents(org, COURSE_REPO, '.github/workflows/console.yml')])
       : [null, null];
     return [
       { text: 'Course settings are in place (dsl-course.yml)', ok: hub && !!meta, hint: hub ? undefined : 'Set up the course; it takes a few minutes.' },
@@ -68,21 +69,21 @@ export async function checkCourseSetUp(client: GitHubClient, org: string): Promi
   }
 }
 
-/** Bootstrap cohort left classroom-config and registered the cohort with its course. */
+/** Bootstrap semester left the config repo and registered the semester with its course. */
 export async function checkCohortSetUp(client: GitHubClient, courseOrg: string, cohortOrg: string): Promise<Check[]> {
   try {
-    const [cfg, welcome, reg] = await Promise.all([
-      client.getRepo(cohortOrg, 'classroom-config'),
-      client.getRepo(cohortOrg, 'welcome'),
-      client.getContents(courseOrg, '.github', REGISTRY_PATH),
+    const [cfg, join, reg] = await Promise.all([
+      client.getRepo(cohortOrg, CONFIG_REPO),
+      client.getRepo(cohortOrg, JOIN_REPO),
+      client.getContents(courseOrg, COURSE_REPO, REGISTRY_PATH),
     ]);
     return [
-      { text: 'The cohort’s settings repo is in place (classroom-config)', ok: !!cfg },
-      { text: 'The join form is in place (welcome)', ok: !!welcome },
-      { text: 'The course lists the cohort', ok: parseRegistry(reg?.text).includes(cohortOrg) },
+      { text: `The semester’s settings repo is in place (${CONFIG_REPO})`, ok: !!cfg },
+      { text: `The join form is in place (${JOIN_REPO})`, ok: !!join },
+      { text: 'The course lists the semester', ok: parseRegistry(reg?.text).includes(cohortOrg) },
     ];
   } catch (e) {
-    return [{ text: 'The cohort is set up', ok: null, hint: `GitHub did not answer (${why(e)}); check again.` }];
+    return [{ text: 'The semester is set up', ok: null, hint: `GitHub did not answer (${why(e)}); check again.` }];
   }
 }
 
@@ -90,7 +91,7 @@ export async function checkCohortSetUp(client: GitHubClient, courseOrg: string, 
 export async function checkFree(client: GitHubClient, org: string, repo: string, what: string): Promise<Check> {
   try {
     const r = await client.getRepo(org, repo);
-    return r ? { text: `${what} is free in the course`, ok: false, hint: `${org}/${repo} already exists. Choose another number or term.` } : { text: `${what} is free in the course`, ok: true };
+    return r ? { text: `${what} is free in the course`, ok: false, hint: `${org}/${repo} already exists. Choose another number or semester.` } : { text: `${what} is free in the course`, ok: true };
   } catch (e) {
     return { text: `${what} is free in the course`, ok: null, hint: `GitHub did not answer (${why(e)}).` };
   }

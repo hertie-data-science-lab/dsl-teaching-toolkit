@@ -31,14 +31,14 @@ describe('YamlText on the seeded schedule.yml', () => {
       title: 'Intro',
       deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01' }],
     });
-    y.set(['releases', 'lab-1'], { event_datetime: '2026-09-11', type: 'lab' });
+    y.set(['releases', 'lab-1'], { event_datetime: '2026-09-11', kind: 'lab' });
     expect(comments(y.text)).toEqual(comments(SEEDED));
     expect(y.text.startsWith(SEEDED)).toBe(true);
     const d = parse(y.text);
     expect(Object.keys(d)).toEqual(['archive', 'releases']);
     expect(Object.keys(d.releases)).toEqual(['lecture-1', 'lab-1']);
     expect(d.releases['lecture-1'].deploy[0].course_source_path).toBe('lectures/01');
-    expect(d.archive.details).toContain('This cohort is archived on {{date}}');
+    expect(d.archive.details).toContain('This semester is archived on {{date}}');
   });
 
   it('edits, removes and re-adds entries without touching the neighbours', () => {
@@ -59,7 +59,7 @@ describe('YamlText on the seeded schedule.yml', () => {
     expect(y.text).toContain('  details: Archived on {{date}}. # optional, `{{date}}` is filled in automatically\n');
     y.assign(['archive', 'details'], 'One\nTwo');
     expect(parse(y.text).archive.details).toBe('One\nTwo');
-    expect(parse(y.text).archive.title).toBe('Cohort archived');
+    expect(parse(y.text).archive.title).toBe('Semester archived');
   });
 
   it('quotes strings PyYAML would read as booleans', () => {

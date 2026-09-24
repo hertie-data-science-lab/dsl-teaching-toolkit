@@ -27,7 +27,7 @@ const solo = STATUS.assignments![0];
 const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', units: 0, submissions: 0, teams: 1 };
 const status: Status = { ...STATUS, assignments: [solo, team] };
 const ready: Loaded = { kind: 'ready', status, sha: 's', stale: [] };
-const files = new StaticFiles({ [`${COHORT_ORG}/classroom-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\n' });
+const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\n' });
 const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files, now: NOW, ...over });
 const current = (out: string) => /<a href="[^"]*" aria-current="page">([^<]+)<\/a>/.exec(out)?.[1];
 
@@ -99,10 +99,10 @@ describe('the Marks overview', () => {
   const SHEET = 'submissions:\n  anna-a:\n    score_individual: 9\n  ben-b:\n    score_individual: 7\n';
   const LEDGER = 'target,assignment,channel,content_hash,distributed_at,issue\nanna-a,,gradebook,abc,2026-09-10T08:00:00+00:00,\nben-b,,gradebook,def,2026-09-11T09:00:00+00:00,\nben-b,,email,def,2026-09-12T09:00:00+00:00,\n';
   const withSheets = new StaticFiles(
-    { [`${COHORT_ORG}/classroom-config/grading_sheets/assignment-1.yml`]: SHEET, [`${COHORT_ORG}/classroom-config/gradebook/distributed.csv`]: LEDGER },
-    { [`${COHORT_ORG}/classroom-config/grading_sheets`]: ['assignment-1.yml'] },
+    { [`${COHORT_ORG}/semester-config/grading_sheets/assignment-1.yml`]: SHEET, [`${COHORT_ORG}/semester-config/.system/gradebook/distributed.csv`]: LEDGER },
+    { [`${COHORT_ORG}/semester-config/grading_sheets`]: ['assignment-1.yml'] },
     {}, {},
-    { [`${COHORT_ORG}/classroom-config/grading_sheets/assignment-1.yml`]: '2026-09-09T14:30:00Z' },
+    { [`${COHORT_ORG}/semester-config/grading_sheets/assignment-1.yml`]: '2026-09-09T14:30:00Z' },
   );
   const st: Loaded = { kind: 'ready', status: { ...status, assignments: [back, solo] }, sha: 's', stale: [] };
 
@@ -132,9 +132,9 @@ describe('the Marks overview', () => {
   });
 
   it('says the listing failed, rather than that there are no sheets', () => {
-    const broken = new StaticFiles({}, { [`${COHORT_ORG}/classroom-config/grading_sheets`]: new Error('Bad credentials') });
+    const broken = new StaticFiles({}, { [`${COHORT_ORG}/semester-config/grading_sheets`]: new Error('Bad credentials') });
     const out = render(<MarksOverviewScreen {...props({ files: broken })} />);
-    expect(out).toContain('Could not list the mark sheets in classroom-config/grading_sheets: Bad credentials');
+    expect(out).toContain('Could not list the mark sheets in semester-config/grading_sheets: Bad credentials');
     expect(out).not.toContain('No mark sheets yet');
   });
 });
@@ -142,9 +142,9 @@ describe('the Marks overview', () => {
 describe('the cohort nav', () => {
   it('lists the cohort pages in order, with Marks and without Teams', () => {
     const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="marks" problems={0} />);
-    const first = nav.slice(nav.indexOf('href="#cohort"') - 9, nav.indexOf('</ul>', nav.indexOf('href="#cohort"')));
+    const first = nav.slice(nav.indexOf('href="#semester"') - 9, nav.indexOf('</ul>', nav.indexOf('href="#semester"')));
     const names = [...first.matchAll(/<a href="#[a-z]+"[^>]*>([A-Za-z ]+)/g)].map((m) => m[1]);
-    expect(names).toEqual(['This week', 'Schedule', 'Assignments', 'Marks', 'Students', 'Staff', 'Site', 'Archive', 'Operations']);
+    expect(names).toEqual(['This week', 'Schedule', 'Assignments', 'Marks', 'Students', 'Instructors', 'Site', 'Archive', 'Operations']);
     expect(nav).toContain('href="#marks" aria-current="page"');
     expect(nav).not.toContain('href="#teams"');
   });
@@ -154,8 +154,8 @@ describe('the Assignments index', () => {
   it('shows teams formed and students without a team, marked of total and returned', () => {
     const roster = 'hertie_email,name,role,github_handle\na@x.org,A,enrolled,anna-a\nb@x.org,B,enrolled,ben-b\nc@x.org,C,enrolled,\n';
     const f = new StaticFiles({
-      [`${COHORT_ORG}/classroom-config/students.csv`]: roster,
-      [`${COHORT_ORG}/classroom-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,Anna-A\nassignment-2,x,ben-b\n',
+      [`${COHORT_ORG}/semester-config/students.csv`]: roster,
+      [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,Anna-A\nassignment-2,x,ben-b\n',
     });
     const back = { ...solo, marks: { filled: 40, total: 48 }, returned: true };
     const out = render(<AssignmentsScreen {...props({ files: f, loaded: { kind: 'ready', status: { ...status, assignments: [back, team] }, sha: 's', stale: [] } })} />);
@@ -174,7 +174,7 @@ describe('entry releases', () => {
       expect(def.args).toEqual({ entry: 's5' });
       expect(Object.keys(def.options ?? {})).toEqual([]);
     }
-    expect(Object.keys(releaseAdhoc(scope, ['course-materials-f2026']).options ?? {})).toContain('cohort_dest_repo');
+    expect(Object.keys(releaseAdhoc(scope, ['course-materials-f2026']).options ?? {})).toContain('semester_dest_repo');
   });
 });
 
@@ -184,14 +184,14 @@ describe('last change', () => {
     const client = { lastCommitDate: vi.fn(async () => dates.shift() ?? null) } as unknown as GitHubClient;
     const live = new LiveFiles(client);
     const path = 'grading_sheets/assignment-2.yml';
-    expect(live.lastChange(COHORT_ORG, 'classroom-config', path)).toBeUndefined();
+    expect(live.lastChange(COHORT_ORG, 'semester-config', path)).toBeUndefined();
     await Promise.resolve();
     await Promise.resolve();
-    expect(live.lastChange(COHORT_ORG, 'classroom-config', path)).toBe('2026-09-01T10:00:00Z');
-    live.put(COHORT_ORG, 'classroom-config', path, undefined, 'submissions: {}\n', 'new');
+    expect(live.lastChange(COHORT_ORG, 'semester-config', path)).toBe('2026-09-01T10:00:00Z');
+    live.put(COHORT_ORG, 'semester-config', path, undefined, 'submissions: {}\n', 'new');
     await Promise.resolve();
     await Promise.resolve();
-    expect(live.lastChange(COHORT_ORG, 'classroom-config', path)).toBe('2026-09-24T12:00:00Z');
+    expect(live.lastChange(COHORT_ORG, 'semester-config', path)).toBe('2026-09-24T12:00:00Z');
     expect(client.lastCommitDate).toHaveBeenCalledTimes(2);
   });
 });
