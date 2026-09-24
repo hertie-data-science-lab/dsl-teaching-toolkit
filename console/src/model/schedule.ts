@@ -13,6 +13,7 @@ export interface SchedEntry {
   show: boolean;
   when: string | null;
   type: string;
+  grading: string | null; // an assignment's explicit grading_datetime
 }
 
 export interface Schedule {
@@ -40,6 +41,7 @@ function entry(raw: unknown, dflt: Partial<SchedEntry> = {}): SchedEntry {
     show: e.show_on_site !== false,
     when: when && when.toLowerCase() !== 'tbc' ? when : null,
     type: s(e.type) || dflt.type || '',
+    grading: s(e.grading_datetime) || null,
   };
 }
 
