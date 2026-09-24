@@ -1256,7 +1256,8 @@ def _stale_archive_notices(semester_org: str, keep: str, dry_run: bool) -> int:
         stale = sorted(
             title
             for title in issues.open_titles(repo)
-            if teardown.is_archive_notice(title) and title != keep
+            if teardown.is_archive_notice(title)
+            and (not keep or teardown.notice_date(title) != teardown.notice_date(keep))
         )
     except RuntimeError as exc:
         # A listing that could not be read is not "no notice is open".
@@ -1287,7 +1288,14 @@ def _archive_notice(
         log(f"    PREVIEW  open `{title}` in {repo} and mail the instructors")
         return 0
     try:
-        found = issues.find_issue(repo, title)
+        # The written title first, then every older prefix: a notice opened before the
+        # rename is still THE notice, edited in place rather than duplicated.
+        found = None
+        for candidate in teardown.archive_notice_titles(when):
+            found = issues.find_issue(repo, candidate)
+            if found is not None:
+                title = candidate
+                break
     except RuntimeError as exc:
         log_err(str(exc))
         return 1

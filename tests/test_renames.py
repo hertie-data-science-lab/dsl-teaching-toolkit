@@ -592,3 +592,66 @@ def test_archive_is_the_documented_entry_point_and_runs_teardown(monkeypatch):
     assert archive.main() == 7
     assert REGISTRY["cohort.archive"].module == "archive"
     assert "python3 -m dsl_course.archive" in ALL_RENDERED["archive_semester"]
+
+
+def test_an_open_notice_under_the_old_prefix_is_edited_not_duplicated(monkeypatch):
+    from datetime import UTC, date, datetime
+
+    from dsl_course import issues as issues_mod
+    from dsl_course import scheduler, teardown
+
+    when = date(2027, 2, 16)
+    old = f"Cohort archives on {when}"
+    assert teardown.is_archive_notice(old) and teardown.notice_date(old) == when
+    open_issue = issues_mod.Issue(7, "body", False)
+    looked: list[str] = []
+    monkeypatch.setattr(
+        scheduler.issues,
+        "find_issue",
+        lambda repo, title: (
+            looked.append(title) or (open_issue if title == old else None)
+        ),
+    )
+    written: list[str] = []
+    monkeypatch.setattr(
+        scheduler.issues,
+        "upsert_issue",
+        lambda repo, title, body, **k: written.append(title) or issues_mod.Upserted(0),
+    )
+    monkeypatch.setattr(scheduler.notify, "notify_semester_archiving", lambda *a: True)
+    monkeypatch.setattr(scheduler.discovery, "central_ref_for", lambda org: "main")
+    scheduler._archive_notice("C", "S", when, datetime(2027, 2, 5, tzinfo=UTC), False)
+    assert looked == [f"Semester archives on {when}", old]
+    assert written == [old]  # the old notice, edited in place
+    closed: list[str] = []
+    monkeypatch.setattr(scheduler.issues, "open_titles", lambda repo: {old})
+    monkeypatch.setattr(
+        scheduler.issues,
+        "close_issues_titled",
+        lambda repo, title, comment=None: closed.append(title) or 0,
+    )
+    scheduler._stale_archive_notices("S", teardown.archive_notice_title(when), False)
+    assert closed == []  # the same date under the old prefix is not stale
+
+
+def test_ds01s_all_cohorts_is_a_deprecated_alias_and_cohort_org_is_still_refused():
+    import os
+    import subprocess
+
+    step = next(
+        s
+        for s in yaml.safe_load(ALL_RENDERED["sync_membership"])["jobs"]["sync-auto"][
+            "steps"
+        ]
+        if "DISPATCH_ALL" in (s.get("env") or {})
+    )
+    assert "all_cohorts" in step["env"]["DISPATCH_ALL"]
+    assert "all_cohorts" not in step["env"]["OLD_PAYLOAD"]
+    run = step["run"]
+    check = run[: run.index("# First, and never fatal")]
+    env = {"PATH": os.environ["PATH"], "OLD_PAYLOAD": "", "DEPRECATED_ALL": "true"}
+    out = subprocess.run(["bash", "-c", check], env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and "deprecated" in out.stdout
+    env |= {"OLD_PAYLOAD": "Sem-f2026", "DEPRECATED_ALL": "false"}
+    out = subprocess.run(["bash", "-c", check], env=env, capture_output=True, text=True)
+    assert out.returncode == 1 and "NOT_MIGRATED" in out.stdout

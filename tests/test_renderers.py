@@ -2209,7 +2209,7 @@ def test_the_ds01_membership_dispatch_can_ask_for_every_semester(
     )
     # The JSON boolean and nothing else: a string "true" or a 1 is absent.
     assert step["env"]["DISPATCH_ALL"] == (
-        "${{ toJSON(github.event.client_payload.all_semesters) == 'true' }}"
+        "${{ (toJSON(github.event.client_payload.all_semesters) == 'true' || toJSON(github.event.client_payload.all_cohorts) == 'true') }}"
     )
     script = "args=()\n" + _block(step["run"], 'case "$EVENT" in', "esac")
     env = {

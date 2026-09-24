@@ -131,17 +131,32 @@ _AUTOGRADE_CONCURRENCY = """    concurrency:
 
 
 # Which semester a repository_dispatch names, and whether it asks for all of them. The old
-# payload names (decision 0012) are never read as either: a dispatch that still sends
-# `cohort_org` / `all_cohorts` fails its step as NOT_MIGRATED, from the check below.
+# `cohort_org` (decision 0012) is never read: a dispatch that still sends it fails its step
+# as NOT_MIGRATED, from the check below.
+#
+# ONE narrow exception: `all_cohorts`, which the ds01 membership timer - an EXTERNAL system,
+# changed in lockstep at Promote - still sends. Read as a deprecated alias of
+# `all_semesters`, with a line in the log and no fault, so the hourly sync does not go red
+# in the gap. It goes once ds01-infra sends `all_semesters` (maintainers.md, Migration).
 _PAYLOAD_SEMESTER = "github.event.client_payload.semester_org"
-_PAYLOAD_ALL_SEMESTERS = "toJSON(github.event.client_payload.all_semesters) == 'true'"
+_PAYLOAD_ALL_SEMESTERS = (
+    "(toJSON(github.event.client_payload.all_semesters) == 'true' "
+    "|| toJSON(github.event.client_payload.all_cohorts) == 'true')"
+)
 _OLD_PAYLOAD_ENV = (
-    "          OLD_PAYLOAD: ${{ github.event.client_payload.cohort_org "
-    "|| github.event.client_payload.all_cohorts }}\n"
+    "          OLD_PAYLOAD: ${{ github.event.client_payload.cohort_org }}\n"
 )
 _OLD_PAYLOAD_CHECK = """          if [ -n "$OLD_PAYLOAD" ]; then
-            echo "::error::NOT_MIGRATED: this dispatch sends cohort_org or all_cohorts, the old names of semester_org and all_semesters - run the migration"
+            echo "::error::NOT_MIGRATED: this dispatch sends cohort_org, the old name of semester_org - run the migration"
             exit 1
+          fi
+"""
+_DEPRECATED_ALL_ENV = (
+    "          DEPRECATED_ALL: "
+    "${{ toJSON(github.event.client_payload.all_cohorts) == 'true' }}\n"
+)
+_DEPRECATED_ALL_NOTE = """          if [ "$DEPRECATED_ALL" = "true" ]; then
+            echo "deprecated: this dispatch sends all_cohorts - read as all_semesters; switch the sender to all_semesters"
           fi
 """
 
@@ -1087,14 +1102,14 @@ on:
           DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
           # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
           DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
-{_OLD_PAYLOAD_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
+{_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
 # dsl_course.notify.route_course), so the automatic job carries the transport and the
 # address list alongside the token. The manual button does not: somebody is standing at
 # that run and reads its log.
 {_MAIL_ENV}
 {_COURSE_ADMIN_ENV}
         run: |
-{_OLD_PAYLOAD_CHECK}          # First, and never fatal: a push to either of the course's own config files is
+{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
           # what this job is here for, and the reconcile below is what SKIPS the course
           # when one of them cannot be read. Its own digest issue and mail are the report.
           python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config --no-preview

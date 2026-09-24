@@ -121,6 +121,11 @@ _CLOSING_COMMENT = (
 # makes the two ends able to spell one title identically; the prefix is what makes the
 # ones for OTHER dates findable when this closes the semester out.
 ARCHIVE_NOTICE_PREFIX = "Semester archives on "
+# Every prefix a notice has ever been opened under, the written one first. A CHAIN, like
+# the receipts labels: an open notice titled under an older prefix must still be FOUND, or
+# the next tick opens a second one beside it and the seal leaves the first standing. Add a
+# prefix, never drop one.
+ARCHIVE_NOTICE_PREFIXES = (ARCHIVE_NOTICE_PREFIX, "Cohort archives on ")
 
 
 def archive_notice_title(when: date) -> str:
@@ -131,6 +136,22 @@ def archive_notice_title(when: date) -> str:
     that can never be skipped. The date is in the title so that moving the archive date opens
     a notice about the new one rather than silently editing the old one's body."""
     return f"{ARCHIVE_NOTICE_PREFIX}{when}"
+
+
+def archive_notice_titles(when: date) -> tuple[str, ...]:
+    """Every title a notice for `when` may carry, the written one first."""
+    return tuple(f"{prefix}{when}" for prefix in ARCHIVE_NOTICE_PREFIXES)
+
+
+def notice_date(title: str) -> date | None:
+    """The date an archive notice's title names, or None when it is not one."""
+    for prefix in ARCHIVE_NOTICE_PREFIXES:
+        if title.startswith(prefix):
+            try:
+                return date.fromisoformat(title[len(prefix) :])
+            except ValueError:
+                return None
+    return None
 
 
 def is_archive_notice(title: str) -> bool:
@@ -145,13 +166,7 @@ def is_archive_notice(title: str) -> bool:
     exact title precisely so that an issue a human filed quoting one is never adopted, and
     a prefix match on its own would close "Semester archives on the last day of what?"
     written by an instructor. Nothing this toolkit opens spells the date any other way."""
-    if not title.startswith(ARCHIVE_NOTICE_PREFIX):
-        return False
-    try:
-        date.fromisoformat(title[len(ARCHIVE_NOTICE_PREFIX) :])
-    except ValueError:
-        return False
-    return True
+    return notice_date(title) is not None
 
 
 class Closed(NamedTuple):
