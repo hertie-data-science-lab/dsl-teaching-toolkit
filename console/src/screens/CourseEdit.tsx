@@ -4,7 +4,7 @@
 import { useState } from 'preact/hooks';
 import courseSchema from '../../schemas/dsl_course.schema.json';
 import { useEnv, type Env } from '../env';
-import { compileAll, matchRules } from '../edit/glob';
+import { badgeFiles } from '../edit/badges';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
@@ -16,6 +16,7 @@ import { publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
 import { CheckLine, Crumbs, EditFile, Help, Lives, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
+import { FileTree } from '../ui/FileTree';
 import { Check, Ext } from '../ui/icons';
 import { courseView, CourseHeaderActions } from './Course';
 import type { CourseProps } from './types';
@@ -273,21 +274,12 @@ export function WebsiteScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- materials repo settings
 
-function FileList({ files, patterns, cls, tag }: { files: string[]; patterns: string[]; cls: string; tag: string }) {
-  const rules = compileAll(patterns);
-  const hits = files.filter((f) => matchRules(rules, f));
-  const shown = hits.slice(0, 400);
-  return (
-    <>
-      <p class="hint">{hits.length} of {files.length} files</p>
-      {hits.length ? (
-        <ul class="file-list">
-          {shown.map((f) => <li class="hit"><span>{f}</span><span class={`tag ${cls}`}>{tag}</span></li>)}
-          {hits.length > shown.length ? <li>… and {hits.length - shown.length} more</li> : null}
-        </ul>
-      ) : <p class="footnote">No file matches yet</p>}
-    </>
-  );
+/** Beside a rule list: the rules that match no file, or that every rule matches one. */
+function Unmatched({ rules, loading }: { rules: string[]; loading: boolean }) {
+  if (loading) return <Loading />;
+  return rules.length ? (
+    <ul class="unmatched">{rules.map((r) => <li><code>{r}</code> matches no file</li>)}</ul>
+  ) : <p class="footnote">Every rule matches at least one file.</p>;
 }
 
 const PUBLISH_STUB = '# INSTRUCTOR-OWNED - yours. What the cohort site hosts PUBLICLY; same syntax as .gitignore.\npublic:\n';
@@ -313,6 +305,9 @@ export function MaterialsScreen(p: CourseProps) {
   const pubLines = (pub ?? pubText).split('\n').map((l) => l.trim()).filter(Boolean);
   const ignLines = (ign ?? ignText).split('\n');
   const scope = newestScope(p);
+  const badged = badgeFiles(files, pubLines, ignLines);
+  const repos = p.files.repos(course.org);
+  const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined) ?? 'main';
   const savePub = async () => {
     if (pub === null) return;
     const y = new YamlText(pubFile.kind === 'ready' ? pubFile.text : PUBLISH_STUB);
@@ -356,7 +351,7 @@ export function MaterialsScreen(p: CourseProps) {
               <p class="hint">One pattern per line. Empty means nothing is public.</p>
               {pubY?.errors.length ? <CheckLine cls="bad">publish.yml does not parse ({pubY.errors[0]}); fix it with Edit the file.</CheckLine> : null}
             </div>
-            <div class="field"><span class="label">Matching files</span>{tree.kind === 'loading' ? <Loading /> : <FileList files={files} patterns={pubLines} cls="pub" tag="public" />}</div>
+            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.public} loading={tree.kind === 'loading'} /></div>
           </div>
           <SaveBar state={pubSave} onSave={() => void savePub()} small disabled={pub === null || pub === pubText || !!pubY?.errors.length} file={{ org: course.org, repo, path: 'publish.yml' }} />
           <Lives org={course.org} repo={repo} path="publish.yml" />
@@ -369,10 +364,15 @@ export function MaterialsScreen(p: CourseProps) {
               <textarea class="code" id="ign-pat" onInput={(e) => setIgn((e.target as HTMLTextAreaElement).value)}>{ign ?? ignText}</textarea>
               <p class="hint">A release that needs a withheld file is reported as a problem. This preview reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
             </div>
-            <div class="field"><span class="label">Matching files</span>{tree.kind === 'loading' ? <Loading /> : <FileList files={files} patterns={ignLines} cls="wh" tag="withheld" />}</div>
+            <div class="field"><span class="label">Rules</span><Unmatched rules={badged.unmatched.withheld} loading={tree.kind === 'loading'} /></div>
           </div>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ign === null || ign === ignText} file={{ org: course.org, repo, path: '.releaseignore' }} />
           <Lives org={course.org} repo={repo} path=".releaseignore" />
+        </section>
+        <section class="panel section">
+          <h2>Files</h2>
+          <p class="footnote">What happens to each file at a release, from the rules above as you type them. Withheld wins over published openly.</p>
+          {tree.kind === 'loading' ? <Loading what="Reading the repo" /> : tree.kind === 'absent' ? <p class="footnote">Could not read the repo’s files.</p> : <FileTree files={files} badges={badged.badges} org={course.org} repo={repo} branch={branch} />}
         </section>
       </div>
     </>
