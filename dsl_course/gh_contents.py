@@ -509,6 +509,54 @@ def put_files(
     return _commit_tree(org, repo, branch, tree, message, person)
 
 
+def move_files(
+    org: str,
+    repo: str,
+    moves: dict[str, str],
+    message: str,
+    *,
+    files: dict[str, bytes] | None = None,
+    delete: Iterable[str] = (),
+    branch: str = "",
+) -> bool:
+    """Move `moves` (old path -> new path), write `files` and remove `delete`, as ONE
+    commit on `branch` (the default branch when "").
+
+    A move carries the blob's sha, not its bytes: the content never leaves GitHub, so a
+    binary moves as safely as text and the file at the new path is the old one exactly -
+    which is what a fire-once marker needs, since a copy that differed would be a second
+    marker. A move whose source is absent is skipped (already moved); one whose target
+    already exists removes the source only. Same no-op rule as `put_files`: nothing to do
+    is no commit. Returns False on a failed read or any failed leg of the commit."""
+    try:
+        branch = branch or default_branch(org, repo)
+        live = repo_blob_shas(org, repo, branch)
+    except RuntimeError as exc:
+        log_err(f"could not read {org}/{repo} before writing to it: {exc}")
+        return False
+    tree: list[dict[str, Any]] = []
+    gone = {path: None for path in delete if path in live}
+    for old, new in moves.items():
+        if old not in live:
+            continue
+        if new not in live:
+            tree.append(
+                {"path": new, "mode": "100644", "type": "blob", "sha": live[old]}
+            )
+        gone[old] = None
+    for path, content in (files or {}).items():
+        if live.get(path) == blob_sha(content):
+            continue
+        entry = _tree_entry(org, repo, path, content)
+        if entry is None:
+            return False
+        tree.append(entry)
+    tree += [{"path": p, "mode": "100644", "type": "blob", "sha": None} for p in gone]
+    if not tree:
+        return True
+    return _commit_tree(org, repo, branch, tree, message)
+
+
 def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
     """`(head sha, its tree sha)` for `branch`, or None if the repo has NO commits yet.
 

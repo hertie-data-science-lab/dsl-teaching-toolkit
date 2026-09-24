@@ -280,6 +280,25 @@ def refresh_join_team_form(org: str) -> int:
     return 1
 
 
+def join_files(org: str) -> dict[str, bytes]:
+    """The join repo's SYSTEM-owned files for one semester, exactly as
+    `refresh_join_workflows` writes them - so "is this semester current?" can be asked
+    without writing (the migration's drift check)."""
+    return {
+        ".github/workflows/onboard.yml": join_workflow("join/onboard.yml").encode(),
+        ".github/ISSUE_TEMPLATE/01-join-course.yml": template(
+            "join/ISSUE_TEMPLATE/01-join-course.yml"
+        ).encode(),
+        ".github/workflows/team-formation.yml": join_workflow(
+            "join/team-formation.yml"
+        ).encode(),
+        JOIN_TEAM_FORM_PATH: join_team_form(_open_formations(org)).encode(),
+        ".github/ISSUE_TEMPLATE/config.yml": template(
+            "join/ISSUE_TEMPLATE/config.yml"
+        ).encode(),
+    }
+
+
 def refresh_join_workflows(org: str) -> int:
     """Re-push a semester's join-repo machinery (onboarding workflows + the issue forms
     they parse) from the current templates, as ONE commit - and ensure the routing labels
@@ -306,19 +325,7 @@ def refresh_join_workflows(org: str) -> int:
     if not put_files(
         org,
         JOIN_REPO,
-        {
-            ".github/workflows/onboard.yml": join_workflow("join/onboard.yml").encode(),
-            ".github/ISSUE_TEMPLATE/01-join-course.yml": template(
-                "join/ISSUE_TEMPLATE/01-join-course.yml"
-            ).encode(),
-            ".github/workflows/team-formation.yml": join_workflow(
-                "join/team-formation.yml"
-            ).encode(),
-            JOIN_TEAM_FORM_PATH: join_team_form(_open_formations(org)).encode(),
-            ".github/ISSUE_TEMPLATE/config.yml": template(
-                "join/ISSUE_TEMPLATE/config.yml"
-            ).encode(),
-        },
+        join_files(org),
         "ci: refresh onboarding workflows + Join forms",
         # The forms were renamed to control the issue-chooser ordering (01-/02- prefix);
         # retire the old filenames on live semesters or the chooser shows both generations.
