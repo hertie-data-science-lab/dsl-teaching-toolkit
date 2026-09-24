@@ -117,6 +117,9 @@ GRADEBOOK_DIR = (
 # migration in `_read_distributed` reads it once and deletes it in the same commit that
 # writes `distributed.csv`, which records every channel rather than just the email.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
+GRADEBOOK_PERMISSION = (
+    "pull"  # a student READS their gradebook; the sheet is the source
+)
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
 # What a gradebook says before its student has been marked in anything. The legend names
@@ -3427,7 +3430,9 @@ def provision_one(
             missing_is_note=True,
             person=True,
         )
-    if add_collaborator(cohort_org, repo, handle, permission="pull", person=True):
+    if add_collaborator(
+        cohort_org, repo, handle, permission=GRADEBOOK_PERMISSION, person=True
+    ):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status

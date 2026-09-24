@@ -41,7 +41,7 @@ import sys
 
 import yaml
 
-from . import sync_faculty, sync_roster, sync_teams
+from . import relink, sync_faculty, sync_roster, sync_teams
 from .discovery import (
     COHORTS_PATH,
     cohort_is_live,
@@ -168,6 +168,10 @@ def sync(
             # the gradebooks need. None is "we could not look", and each of them answers
             # it for itself.
             existing = listing_by_name(org)
+            # Before the roster reconcile: a student who switched GitHub account is moved
+            # to it here, and the reconcile, the prune and the gradebooks below then read
+            # the renamed repos off `existing` and the new id off the roster.
+            errors += relink.sync(org, existing, dry_run=dry_run)
             errors += sync_roster.sync(
                 org, prune=True, dry_run=dry_run, existing=existing
             )

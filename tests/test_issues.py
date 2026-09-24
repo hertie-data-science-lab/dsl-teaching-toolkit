@@ -294,3 +294,20 @@ def test_a_listing_that_could_not_be_read_is_not_an_empty_one(gh):
     gh([], list_code=1)
     with pytest.raises(RuntimeError):
         issues.open_titles(REPO)
+
+
+def test_close_by_creator_closes_that_authors_labelled_issues(gh, capsys):
+    fake = gh([{"number": 11}, {"number": 12}])
+    assert issues.close_by_creator(REPO, "ada", "needs-review", "linked") == (2, 0)
+    (listing,) = fake.did("issue", "list")
+    assert listing[listing.index("--author") + 1] == "ada"
+    assert listing[listing.index("--label") + 1] == "needs-review"
+    assert [c[2] for c in fake.did("issue", "close")] == ["11", "12"]
+
+
+def test_close_by_creator_never_names_the_author_when_it_fails(gh, capsys):
+    gh([], list_code=1)
+    assert issues.close_by_creator(REPO, "ada", "needs-review", "linked") == (0, 1)
+    gh([{"number": 11}], write_code=1)
+    assert issues.close_by_creator(REPO, "ada", "needs-review", "linked") == (0, 1)
+    assert "ada" not in capsys.readouterr().err

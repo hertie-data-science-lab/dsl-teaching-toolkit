@@ -200,6 +200,34 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     return False
 
 
+def rename_repo(
+    org: str,
+    name: str,
+    new_name: str,
+    *,
+    description: str | None = None,
+    person: bool = False,
+) -> bool:
+    """Rename `org/name` to `new_name`, optionally re-describing it in the same PATCH.
+
+    True only when GitHub's answer NAMES the repo `new_name`. Not `repo_missing` on the old
+    name: GitHub redirects a renamed repo's old name, so a read of it succeeds either way.
+    The per-process repo memo is dropped, because both names now answer differently."""
+    args = ["api", "--method", "PATCH", f"repos/{org}/{name}", "-f", f"name={new_name}"]
+    if description is not None:
+        args += ["-f", f"description={description}"]
+    code, out = gh_settled(*args, "--jq", ".name")
+    _repo.cache_clear()
+    if code == 0 and out.strip() == new_name:
+        return True
+    _failed_on(
+        person,
+        f"could not rename a repo in {org}",
+        f"could not rename {org}/{name} to {new_name}: {out[:160]}",
+    )
+    return False
+
+
 def set_visibility(
     org: str, name: str, visibility: str, *, person: bool = False
 ) -> bool:

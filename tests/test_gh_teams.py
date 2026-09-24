@@ -533,3 +533,31 @@ def test_a_just_created_team_is_reconciled_without_reading_it(monkeypatch):
     assert errors == 0
     assert added == ["alice", "bob"]
     assert removed == []  # the creator GitHub auto-added is never pruned
+
+
+def test_user_lookups_answer_only_when_github_does(monkeypatch):
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, "202\n"))
+    assert gh_teams.id_of_login("ada") == "202"
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, "ada-l\n"))
+    assert gh_teams.login_of_id("202") == "ada-l"
+    # A 404 is a definite "no such account"; anything else is no answer at all.
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert gh_teams.id_of_login("ada") == "" and gh_teams.login_of_id("202") == ""
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    assert gh_teams.id_of_login("ada") is None and gh_teams.login_of_id("202") is None
+
+
+def test_org_member_role_tells_absent_from_unreadable(monkeypatch):
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, "admin\n"))
+    assert gh_teams.org_member_role("Org", "ada") == "admin"
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert gh_teams.org_member_role("Org", "ada") == ""
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    assert gh_teams.org_member_role("Org", "ada") is None
+
+
+def test_removing_an_org_member_who_is_already_gone_is_done(monkeypatch):
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert gh_teams.remove_org_membership("Org", "ada") is True
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
+    assert gh_teams.remove_org_membership("Org", "ada") is False

@@ -1274,3 +1274,114 @@ def test_a_form_that_could_not_be_written_is_reported(monkeypatch, capsys):
     monkeypatch.setattr(welcome, "put_file", lambda *a, **k: False)
     assert welcome.refresh_join_team_form("Org") == 1
     assert "Join-team form" in capsys.readouterr().err
+
+
+# --- The onboard refusal record, run as shipped ---------------------------------------
+
+_CODE = "dsl-abc234"
+
+
+def _bound_roster(handle: str, user_id: str) -> str:
+    """students.csv whose one row carries `_CODE`, bound to `handle` / `user_id`."""
+    cells = {"github_handle": handle, "github_id": user_id, "enrol_code": _CODE}
+    return _ROSTER + ",".join(cells.get(f, "") for f in roster.FIELDS) + "\n"
+
+
+def _run_onboard(rosters: list[str], record_fails: bool = False) -> dict:
+    """Run the SHIPPED onboard script for a Join from `newacct` (id 202). `rosters` is
+    what successive reads of students.csv return; a write of it is refused with a 409, so a
+    second entry is what the retry re-reads. Returns `comments`, `records` (path -> the
+    parsed record) and `warnings`."""
+    code = re.sub(
+        r"\basync\s+",
+        "",
+        re.sub(r"\bawait\s+", "", script_of("onboard.yml", "onboard")),
+    )
+    issue = {
+        "number": 9,
+        "user": {"login": "newacct", "id": 202},
+        "body": f"### Enrolment code\n\n{_CODE}\n",
+    }
+    harness = (
+        f"const ROSTERS = {json.dumps(rosters)};\n"
+        f"const ISSUE = {json.dumps(issue)};\n"
+        f"const RECORD_FAILS = {json.dumps(record_fails)};\n"
+        "const OUT = { comments: [], records: {}, warnings: [] };\n"
+        "const Buffer = { from: (s, e) => ({ toString: () => s }) };\n"
+        "const process = { env: { HAS_BOT: 'true' } };\n"
+        "const setTimeout = (fn, ms) => fn();\n"
+        "const core = { setFailed: (m) => {}, warning: (m) => OUT.warnings.push(m) };\n"
+        "const context = { repo: { owner: 'cohort', repo: 'welcome' },"
+        " payload: { issue: ISSUE } };\n"
+        "let reads = 0;\n"
+        "const github = {\n"
+        "  paginate: (fn, args) => [],\n"
+        "  rest: {\n"
+        "  repos: {\n"
+        "    getContent: (a) => ({ data: { content:"
+        " ROSTERS[Math.min(reads++, ROSTERS.length - 1)], sha: 's' + reads } }),\n"
+        "    createOrUpdateFileContents: (a) => {\n"
+        "      if (a.path === 'students.csv') {"
+        " const e = new Error('stale'); e.status = 409; throw e; }\n"
+        "      if (RECORD_FAILS) { const e = new Error('no'); e.status = 403; throw e; }\n"
+        "      OUT.records[a.path] = JSON.parse(a.content); return {}; },\n"
+        "  },\n"
+        "  issues: {\n"
+        "    update: (a) => ({}),\n"
+        "    createComment: (a) => { OUT.comments.push(a.body); return {}; },\n"
+        "    addLabels: (a) => ({}),\n"
+        "  },\n"
+        "} };\n"
+        "(function () {\n" + code + "\n})();\n"
+        "JSON.stringify(OUT);\n"
+    )
+    run = subprocess.run(
+        [_JSC, "-l", "JavaScript", "-e", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+_NO_MATCH = "could not be matched to an unclaimed enrolment placement"
+
+
+@needs_js
+@pytest.mark.parametrize(
+    "rosters",
+    [
+        pytest.param([_bound_roster("oldacct", "101")], id="bound-when-read"),
+        pytest.param(
+            [_bound_roster("", ""), _bound_roster("oldacct", "101")],
+            id="bound-while-writing",
+        ),
+    ],
+)
+def test_a_code_bound_elsewhere_is_recorded_privately_and_answered_as_before(rosters):
+    out = _run_onboard(rosters)
+    (comment,) = out["comments"]
+    assert _NO_MATCH in comment and "oldacct" not in comment
+    record = out["records"]["enrolment/refusals/9.json"]
+    assert record["issue"] == 9
+    assert record["claimant"] == {"login": "newacct", "id": 202}
+    assert record["bound"] == {"handle": "oldacct", "id": "101"}
+    assert _CODE not in json.dumps(record)
+
+
+@needs_js
+def test_a_record_that_cannot_be_written_still_answers_the_student():
+    out = _run_onboard([_bound_roster("oldacct", "101")], record_fails=True)
+    assert out["records"] == {}
+    assert _NO_MATCH in out["comments"][0]
+    assert out["warnings"] == ["could not record why this Join was refused (403)"]
+
+
+def test_the_refusal_record_is_written_at_both_bound_elsewhere_sites():
+    code = code_of(script_of("onboard.yml", "onboard"))
+    assert code.count("await recordRefusal(") == 2
+    assert "await recordRefusal(matched)" in retry_loop(code)
+    record = code[code.index("const recordRefusal") : code.index("const row = rows")]
+    assert "try {" in record and "catch (e)" in record
+    assert "code" not in re.sub(r"\bcore\b|\bcontent\b", "", record)

@@ -236,6 +236,45 @@ def upsert_issue(
     return Upserted(0, url)
 
 
+def close_by_creator(
+    repo: str, creator: str, label: str, comment: str
+) -> tuple[int, int]:
+    """Close every open issue in `repo` that `creator` opened and that carries `label`,
+    each with `comment`. Returns `(closed, errors)`.
+
+    The failure lines never name `creator`: the repos this is asked about are public."""
+    try:
+        rows = gh_json(
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "open",
+            "--author",
+            creator,
+            "--label",
+            label,
+            "--limit",
+            _LIST_LIMIT,
+            "--json",
+            "number",
+        )
+    except (RuntimeError, json.JSONDecodeError):
+        log_err(f"could not list the open `{label}` issues in {repo}")
+        return 0, 1
+    closed = errors = 0
+    for row in rows:
+        number = str(row["number"])
+        code, _ = gh("issue", "close", number, "--repo", repo, "--comment", comment)
+        if code == 0:
+            closed += 1
+        else:
+            log_err(f"could not close one issue in {repo}")
+            errors += 1
+    return closed, errors
+
+
 def close_issues_titled(repo: str, title: str, comment: str | None = None) -> int:
     """Close every open issue in `repo` with this exact title, optionally with a closing
     comment. Returns the error count; closing nothing is a success.

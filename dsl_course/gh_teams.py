@@ -441,6 +441,41 @@ def acting_login() -> str | None:
     return out.strip() if code == 0 and out.strip() else None
 
 
+def _definite(code: int, out: str, valid) -> str | None:
+    """A lookup's answer: the value, "" for a definite 404, None when GitHub did not say."""
+    if code == 0 and valid(out.strip()):
+        return out.strip()
+    return "" if code != 0 and is_missing_resource(out) else None
+
+
+def id_of_login(login: str) -> str | None:
+    """The immutable GitHub id of the account `login` names now; "" when no account has
+    that login (a 404); None when the read failed. Callers act only on a definite answer."""
+    code, out = gh("api", f"users/{login}", "--jq", ".id")
+    return _definite(code, out, str.isdigit)
+
+
+def login_of_id(user_id: str) -> str | None:
+    """The login the account with this immutable id goes by now; "" when the account is
+    gone (a 404); None when the read failed."""
+    code, out = gh("api", f"user/{user_id}", "--jq", ".login")
+    return _definite(code, out, bool)
+
+
+def org_member_role(org: str, login: str) -> str | None:
+    """`admin` or `member` for an active member OR a pending invitee; "" when `login` is
+    neither (a 404); None when the read failed."""
+    code, out = gh("api", f"orgs/{org}/memberships/{login}", "--jq", ".role")
+    return _definite(code, out, bool)
+
+
+def remove_org_membership(org: str, login: str) -> bool:
+    """Remove `login` from `org`, or cancel their pending invitation - GitHub's one DELETE
+    does whichever applies. Already gone is success."""
+    code, out = gh("api", "--method", "DELETE", f"orgs/{org}/memberships/{login}")
+    return code == 0 or is_missing_resource(out)
+
+
 @cache
 def get_org_owners(org: str) -> frozenset[str] | None:
     """Active Owners of `org` - see reconcile_team_members for why these are never

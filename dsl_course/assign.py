@@ -84,7 +84,7 @@ from .course import (
     shared_repo,
     submission_repo,
     submit_shape,
-    visibility_is_students,
+    unit_permission,
 )
 from .discovery import (
     ASSIGNMENT_TEMPLATE_TOPIC,
@@ -861,7 +861,7 @@ def provision_one(
     # ONE answer for both arms below, off the vocabulary's own predicate rather than the
     # word: a group repo whose team could not publish it would leave a student_choice
     # assignment half-owned, and that is exactly the kind of drift two spellings buy.
-    permission = "admin" if visibility_is_students(visibility) else "maintain"
+    permission = unit_permission(visibility)
     if team is not None and not handles:
         # Every member was rejected by the roster allowlist upstream (typo'd handles, a
         # stranger's login), so this team can be granted nothing. Checked BEFORE anything is

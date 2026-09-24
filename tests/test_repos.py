@@ -503,3 +503,18 @@ def test_a_topics_put_waits_out_a_locked_repo(monkeypatch):
     monkeypatch.setattr(repos, "gh", lambda *a, **k: next(answers))
     monkeypatch.setattr(repos.time, "sleep", lambda s: None)
     assert repos.set_repo_topics("Cohort-f2026", "a1-ada", ["Assignment"]) is True
+
+
+def test_a_rename_succeeds_only_when_github_names_the_repo_anew(monkeypatch):
+    # The old name keeps answering after a rename (GitHub redirects it), so the PATCH's own
+    # answer is the confirmation.
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        repos, "gh", lambda *a, **k: seen.append(a) or (0, "grades-b\n")
+    )
+    assert repos.rename_repo("Org", "grades-a", "grades-b", description="for @b")
+    assert "name=grades-b" in seen[0] and "description=for @b" in seen[0]
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, "grades-a\n"))
+    assert not repos.rename_repo("Org", "grades-a", "grades-b")
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 422"))
+    assert not repos.rename_repo("Org", "grades-a", "grades-b")
