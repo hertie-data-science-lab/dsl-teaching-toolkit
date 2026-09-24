@@ -195,7 +195,7 @@ jobs:
               // team`, from a form a browser cached - is the student's to redo, not a crash.
               if (action !== null && action !== 'join' && action !== 'create') return refuse(
                 `Thanks @${handle} - I don't recognise that Action. [Open a new Join team issue](${newIssue(team)}) ` +
-                `and choose *Join an existing team* or *Create a new team* - either moves you out of a team ` +
+                `and choose *Join or switch to an existing team* or *Create a new team* - either moves you out of a team ` +
                 `you are already in.`);
               // The GitHub team this row becomes is `<assignment>-<team>` (sync_teams.team_slug).
               // `course` + `admin` is `course-admin` - the faculty team with admin on every repo
@@ -383,7 +383,7 @@ jobs:
                   const taken = size > 0 ? team : near;
                   return refuse(
                     `Thanks @${handle} - **${taken}** already exists for \`${assignment}\` (${sizeOf(taken)}/${cap}). ` +
-                    `To join it, [open a new Join team issue](${newIssue(taken)}) and choose *Join an existing team*. ` +
+                    `To join it, [open a new Join team issue](${newIssue(taken)}) and choose *Join or switch to an existing team*. ` +
                     `Or pick a clearly different name.`);
                 }
                 if (action === 'join' && size === 0) return refuse(missing());
@@ -432,7 +432,7 @@ jobs:
                 : [`Done @${handle} - you're in team **${team}** for \`${assignment}\` (${outcome.count}/${cap}).`];
               lines.push(``, `Next: open your team's submission repo - step 2 on ${page}. It appears within a few minutes.`);
               if (action === 'create') {
-                lines.push(``, `Tell your teammates to choose *Join an existing team* and type **${team}** exactly.`);
+                lines.push(``, `Tell your teammates to choose *Join or switch to an existing team* and type **${team}** exactly.`);
               }
               await github.rest.issues.createComment({
                 owner: org, repo: context.repo.repo, issue_number: issue.number, body: lines.join('\n') });
