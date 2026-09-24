@@ -304,6 +304,55 @@ def test_the_annotation_names_nobody():
     )
 
 
+def _body(line: str) -> dict:
+    message = line.split("::", 2)[2]
+    for code, char in (("%0A", "\n"), ("%0D", "\r"), ("%25", "%")):
+        message = message.replace(code, char)
+    return json.loads(message)
+
+
+def test_a_huge_block_is_cut_to_fit_the_annotation_and_still_parses():
+    out = Outcome(
+        op="assignment.generate_syllabus",
+        actor="prof",
+        preview=True,
+        conclusion="previewed",
+        summary="Built the session list: 12 sessions; nothing was written.",
+        details=["solution/a.py -> a.py"],
+        block="### Session 1: 100% theory\n" * 8000,  # ~200 KB, % and newlines escape
+    )
+    line = annotation(out)
+    message = line.split("::", 2)[2]
+    assert len(message.encode()) <= outcome_mod.ANNOTATION_CAP
+    body = _body(line)
+    assert body["block"].endswith(outcome_mod.TRUNCATED)
+    assert body["block"].startswith("### Session 1: 100% theory")
+    assert body["details"] == ["solution/a.py -> a.py"]
+    assert body["summary"] == out.summary
+
+
+def test_details_go_once_the_block_is_empty():
+    out = Outcome(
+        op="assignment.derive_starter",
+        actor="prof",
+        preview=True,
+        conclusion="previewed",
+        summary="x",
+        details=[f"solution/{n:05}.py -> {n:05}.py" for n in range(5000)],
+    )
+    line = annotation(out)
+    assert len(line.split("::", 2)[2].encode()) <= outcome_mod.ANNOTATION_CAP
+    body = _body(line)
+    assert body["block"] == outcome_mod.TRUNCATED
+    assert 0 < len(body["details"]) < 5000
+    assert body["details"][0] == "solution/00000.py -> 00000.py"
+
+
+def test_a_small_outcome_is_not_touched():
+    out = Outcome(op="x", actor="p", preview=False, conclusion="done", summary="y")
+    assert _body(annotation(out))["block"] == ""
+
+
 def test_redaction_keeps_templates_and_the_shared_drop_box():
     text = "assignment-3-f2026 and assignment-3-submissions"
     assert outcome_mod.redact(text) == text
