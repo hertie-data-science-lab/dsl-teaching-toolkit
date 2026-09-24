@@ -1,0 +1,50 @@
+name: relay-deploy
+
+# Deploy the console's sign-in relay (relay/) to Cloudflare Workers. Skips until the
+# GH_APP_CLIENT_ID repository variable is set. Secrets and variables: relay/README.md.
+on:
+  push:
+    branches: [main]
+    paths: [relay/**, .github/workflows/relay-deploy.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.GH_APP_CLIENT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - uses: cloudflare/wrangler-action@25853364521e0d392ece9b0c1e97a4b37b638087  # v4.1.2
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: relay
+          wranglerVersion: 4.138.0
+          command: deploy
+          vars: |
+            GH_APP_CLIENT_ID
+            CONSOLE_ORIGIN
+          secrets: |
+            GH_APP_CLIENT_SECRET
+        env:
+          GH_APP_CLIENT_ID: ${{ vars.GH_APP_CLIENT_ID }}
+          CONSOLE_ORIGIN: ${{ vars.CONSOLE_ORIGIN }}
+          GH_APP_CLIENT_SECRET: ${{ secrets.GH_APP_CLIENT_SECRET }}
