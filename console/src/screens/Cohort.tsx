@@ -126,7 +126,7 @@ function WeekItems({ status, p }: { status: Status; p: CohortProps }) {
         if (it.type === 'release') {
           const ref = rel ? releaseRef(rel, releases, tz, zoned(it.when, tz).y) : null;
           chip = 'Release';
-          cls = TYPE_CLASS[rel?.type ?? 'lecture'];
+          cls = TYPE_CLASS[rel ? rel.type ?? 'release' : 'lecture'];
           const ident = rel ? releaseIdent(rel, releases) : it.title.split(':')[0];
           detail = rel && !rel.source ? `${NOTHING_STAGED}.` : rel?.state === 'will_be_skipped' ? 'Will be skipped: its folder was not found.' : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
           buttons = (
