@@ -68,6 +68,14 @@ def welcome_issue_url(semester_org: str) -> str:
     return f"https://github.com/{semester_org}/welcome/issues/new/choose"
 
 
+def carries_old_semester_topic(repos: list[dict]) -> bool:
+    """Whether the org's `.github` still carries the OLD semester topic and not the new
+    one (decision 0012): a semester that has not been migrated."""
+    dotgithub = next((r for r in repos if r["name"] == ".github"), None)
+    topics = set((dotgithub or {}).get("topics") or [])
+    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
+
+
 def org_tier(repos: list[dict]) -> str | None:
     """`"semester"`, `"course"`, or None when the listing cannot say.
 
@@ -77,8 +85,11 @@ def org_tier(repos: list[dict]) -> str | None:
     elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
     dotgithub = next((r for r in repos if r["name"] == ".github"), None)
     topics = set((dotgithub or {}).get("topics") or [])
-    if OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics:
-        raise NotMigrated(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC, "the org's .github topic")
+    # The old topic alone is NOT a tier (never read as one): the org's tier cannot be told,
+    # so the faculty-access sweep gives it the read floor. Its caller reports the org as
+    # NOT_MIGRATED (`carries_old_semester_topic`) and carries on with the rest.
+    if carries_old_semester_topic(repos):
+        return None
     if SEMESTER_TOPIC in topics:
         return "semester"
     if COURSE_HUB_TOPIC in topics:

@@ -44,10 +44,36 @@ def _gh(topic: str) -> dict:
     return {"name": ".github", "topics": [topic]}
 
 
-def test_the_semester_topic_places_an_org_and_the_old_one_is_refused():
+def test_the_semester_topic_places_an_org_and_the_old_one_places_nothing():
+    # The old topic is never read as a tier: the org's tier cannot be told, so the
+    # faculty-access sweep gives it the read floor, and its caller reports NOT_MIGRATED.
     assert discovery.org_tier([_gh("dsl-semester")]) == "semester"
-    with pytest.raises(NotMigrated, match=NOT_MIGRATED):
-        discovery.org_tier([_gh("dsl-cohort")])
+    assert discovery.org_tier([_gh("dsl-cohort"), {"name": "welcome"}]) is None
+    assert discovery.carries_old_semester_topic([_gh("dsl-cohort")])
+    assert not discovery.carries_old_semester_topic([_gh("dsl-semester")])
+
+
+def test_one_unmigrated_semester_does_not_stop_the_course_refresh(monkeypatch, capsys):
+    from test_bootstrap_seeding import _stub_refresh
+
+    from dsl_course import seed
+
+    _stub_refresh(monkeypatch)
+    old = [_gh("dsl-cohort")]
+    monkeypatch.setattr(
+        seed, "list_org_repos", lambda org: old if org == "Semester-f2026" else []
+    )
+    converged: list[str] = []
+    monkeypatch.setattr(
+        seed,
+        "_converge_org",
+        lambda org, ref, listing=None, is_semester=False: converged.append(org) or 0,
+    )
+    assert seed.refresh("Course-Org") == 0
+    assert converged[-2:] == ["Semester-f2026", "Semester-s2027"]
+    out = capsys.readouterr()
+    assert f"::error::Semester-f2026: {NOT_MIGRATED}" in out.out
+    assert NOT_MIGRATED in out.err
 
 
 def test_the_inventory_names_an_org_on_the_old_topic_and_goes_partial(

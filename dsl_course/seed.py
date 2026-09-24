@@ -41,8 +41,16 @@ from datetime import datetime, timedelta, timezone
 from . import scaffold
 from .access import converge_faculty_access, converge_topics
 from .central import MissingCentralRef
-from .course import CONFIG_REPO, FACULTY_TEAMS, SEMESTER_TEAMS, semester_of
+from .course import (
+    CONFIG_REPO,
+    FACULTY_TEAMS,
+    OLD_SEMESTER_TOPIC,
+    SEMESTER_TEAMS,
+    SEMESTER_TOPIC,
+    semester_of,
+)
 from .discovery import (
+    carries_old_semester_topic,
     central_ref_for,
     discover_assignment_repos,
     discover_assignments,
@@ -53,6 +61,7 @@ from .discovery import (
     student_repo_names,
     unregister_semester,
 )
+from .faults import NOT_MIGRATED, not_migrated_text
 from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
@@ -571,6 +580,7 @@ def refresh(course_org: str) -> int:
         f"Refreshing welcome workflows + classroom-config system files + samples "
         f"in {len(semesters)} semester org(s)"
     )
+    not_migrated: list[str] = []
     for semester in semesters:
         # ONE listing of the semester: the archived flag below, and the convergence sweep +
         # profile rebuild at the end of the loop, are all read off this same snapshot. The
@@ -607,10 +617,24 @@ def refresh(course_org: str) -> int:
         # schedule and each template's grading_config.yml. Here is what seeds it - a
         # Bootstrap semester run ends in this refresh - and what converges it every night.
         failures += 0 if sync_team_lock(course_org, semester).ok else 1
+        if carries_old_semester_topic(listing):
+            # Reported and carried on past, never a red refresh: the tier cannot be told
+            # from the old topic, so the access sweep below gives this org the read floor.
+            not_migrated.append(semester)
+            print(
+                f"::error::{semester}: "
+                f"{not_migrated_text(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC)}",
+                flush=True,
+            )
         failures += _converge_org(semester, central_ref, listing, is_semester=True)
         # Last, so it describes the semester this refresh has just converged.
         status_misses += refresh_status(course_org, semester)
     status_misses += refresh_status(course_org)
+    if not_migrated:
+        log_err(
+            f"{NOT_MIGRATED}: {len(not_migrated)} semester org(s) still carry "
+            f"`{OLD_SEMESTER_TOPIC}` - run the migration: {', '.join(not_migrated)}"
+        )
     if status_misses:
         # A warning, not a failure: status.json is the console's view, and an org that
         # never opens the console must not have its nightly refresh go red over it. The

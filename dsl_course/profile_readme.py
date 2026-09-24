@@ -30,6 +30,7 @@ from collections.abc import Callable
 from .central import CENTRAL
 from .course import COURSE_CONFIG
 from .discovery import (
+    carries_old_semester_topic,
     course_name_of,
     discover_semesters,
     list_org_repos,
@@ -502,7 +503,7 @@ def update_profile_readme(
         repos = list_org_repos(org)
     # `tier` is None for an org the listing cannot place (a legacy semester with no topics
     # and no `welcome`); the page renders it as a course org, as before.
-    is_semester = org_tier(repos) == "semester"
+    is_semester = org_tier(repos) == "semester" or carries_old_semester_topic(repos)
     semesters = None if is_semester else discover_semesters(org)
     body = render_profile_readme(
         org,
