@@ -1,6 +1,7 @@
-"""Decision 0012's renames, in flight: every new spelling is the one written, and every
-old one is still READ for one release (with a note naming the new one where a file carries
-it). One section per rename, in the order of `maintainers.md`'s "Renames in flight"."""
+"""Decision 0012's renames: every new spelling is the one written and the only one read,
+and every old one is REFUSED as NOT_MIGRATED - naming the new spelling - wherever it turns
+up: an instructor file, a key, a topic, a request, a dispatch. One section per rename, in
+the order of `maintainers.md`'s "Migration" table."""
 
 from __future__ import annotations
 
@@ -21,10 +22,13 @@ from dsl_course import (
     schemas,
     site,
     status,
+    status_json,
     sync_faculty,
     welcome,
+    workflows_render,
 )
 from dsl_course.course import INSTRUCTOR_ROLES, people_by_role
+from dsl_course.faults import NOT_MIGRATED, NotMigrated
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import RequestError, parse_request
 
@@ -35,23 +39,24 @@ def _gh(topic: str) -> dict:
     return {"name": ".github", "topics": [topic]}
 
 
-@pytest.mark.parametrize("topic", ["dsl-semester", "dsl-cohort"])
-def test_both_semester_topics_place_an_org_as_a_semester(topic):
-    assert discovery.org_tier([_gh(topic)]) == "semester"
+def test_the_semester_topic_places_an_org_and_the_old_one_is_refused():
+    assert discovery.org_tier([_gh("dsl-semester")]) == "semester"
+    with pytest.raises(NotMigrated, match=NOT_MIGRATED):
+        discovery.org_tier([_gh("dsl-cohort")])
 
 
-def test_the_semester_inventory_searches_the_old_topic_too(monkeypatch):
-    searched: list[str] = []
+def test_the_inventory_names_an_org_on_the_old_topic_and_goes_partial(
+    monkeypatch, capsys
+):
     monkeypatch.setattr(
         list_orgs,
         "_tagged_orgs",
-        lambda topic: (
-            searched.append(topic) or {"dsl-cohort": ["Old-Sem"]}.get(topic, [])
-        ),
+        lambda topic: {"dsl-cohort": ["Old-Sem"], "dsl-semester": ["New-Sem"]}[topic],
     )
     monkeypatch.setattr(list_orgs, "_metadata_or_none", lambda org: {"course": "C"})
-    assert [s["org"] for s in list_orgs.discover_semester_orgs()] == ["Old-Sem"]
-    assert searched == ["dsl-semester", "dsl-cohort"]
+    found = {s["org"]: s["readable"] for s in list_orgs.discover_semester_orgs()}
+    assert found == {"Old-Sem": False, "New-Sem": True}
+    assert NOT_MIGRATED in capsys.readouterr().err
 
 
 def _registry(monkeypatch, files: dict[str, str]) -> list[tuple[str, bytes]]:
@@ -67,61 +72,53 @@ def _registry(monkeypatch, files: dict[str, str]) -> list[tuple[str, bytes]]:
     return written
 
 
-def test_the_old_registry_file_and_key_are_read_while_the_new_file_is_absent(
-    monkeypatch,
-):
-    _registry(monkeypatch, {"cohort-courses-pages.yml": "cohorts:\n- Sem-f2026\n"})
-    assert discovery.discover_semesters("Course") == ["Sem-f2026"]
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"cohort-courses-pages.yml": "cohorts:\n- Sem-f2026\n"},
+        {"semesters.yml": "cohorts:\n- Sem-f2026\n"},
+    ],
+)
+def test_the_old_registry_file_or_key_is_refused(monkeypatch, files):
+    _registry(monkeypatch, files)
+    with pytest.raises(NotMigrated):
+        discovery.discover_semesters("Course")
+    found: list = []
+    assert discovery.read_semester_registry("Course", found) == []
+    assert [f.code for f in found] == [NOT_MIGRATED]
 
 
-def test_the_new_registry_file_wins_over_the_old_one(monkeypatch):
-    _registry(
-        monkeypatch,
-        {
-            "semesters.yml": "semesters:\n- New-f2026\n",
-            "cohort-courses-pages.yml": "cohorts:\n- Old-f2025\n",
-        },
-    )
-    assert discovery.discover_semesters("Course") == ["New-f2026"]
-
-
-def test_registering_writes_the_new_registry_file_only(monkeypatch):
-    written = _registry(monkeypatch, {"cohort-courses-pages.yml": "cohorts: [A]\n"})
+def test_registering_writes_the_new_registry_file(monkeypatch):
+    written = _registry(monkeypatch, {"semesters.yml": "semesters: [A]\n"})
     assert discovery.register_semester("Course", "B")
     assert [(p, b.decode()) for p, b in written] == [
         ("semesters.yml", "semesters:\n- A\n- B\n")
     ]
 
 
-def test_the_refresh_bridge_copies_the_old_registry_once(monkeypatch):
-    written = _registry(monkeypatch, {"cohort-courses-pages.yml": "cohorts: [A]\n"})
-    assert discovery.migrate_semester_registry("Course")
-    assert [p for p, _ in written] == ["semesters.yml"]
-    written = _registry(monkeypatch, {"semesters.yml": "semesters: [A]\n"})
-    assert discovery.migrate_semester_registry("Course")
-    assert written == []
-
-
-@pytest.mark.parametrize("key", ["semester_dest_repo", "cohort_dest_repo"])
-def test_an_assignment_dest_repo_is_read_under_either_name(key):
+def test_an_assignment_naming_the_old_dest_key_is_dropped_as_not_migrated():
     sched = schedule.parse(
         {
             "assignments": {
                 "hw": {
                     "course_source_repo": "a-f2026",
                     "due_datetime": "2026-10-13",
-                    key: "homework-1",
-                }
+                    "cohort_dest_repo": "homework-1",
+                },
+                "ok": {
+                    "course_source_repo": "b-f2026",
+                    "due_datetime": "2026-10-13",
+                    "semester_dest_repo": "homework-2",
+                },
             }
         }
     )
-    assert sched.assignments["hw"].semester_dest_repo == "homework-1"
-    moved = [d for d in sched.dropped if "cohort_dest_repo" in d]
-    assert bool(moved) == (key == "cohort_dest_repo")
-    assert all("renamed to `semester_dest_repo:`" in d for d in moved)
+    assert list(sched.assignments) == ["ok"]
+    assert sched.assignments["ok"].semester_dest_repo == "homework-2"
+    assert [f.code for f in sched.faults if f.code] == [NOT_MIGRATED]
 
 
-def test_a_deploy_dest_is_read_under_its_old_names_with_a_note():
+def test_a_deploy_naming_the_old_dest_keys_ships_nothing():
     sched = schedule.parse(
         {
             "releases": {
@@ -132,36 +129,14 @@ def test_a_deploy_dest_is_read_under_its_old_names_with_a_note():
                             "course_source_repo": "course-materials-f2026",
                             "course_source_path": "lectures/01",
                             "cohort_dest_repo": "slides",
-                            "cohort_dest_path": "week-1",
                         }
                     ],
                 }
             }
         }
     )
-    (deploy,) = sched.releases[0].deploy
-    assert (deploy.semester_dest_repo, deploy.semester_dest_path) == (
-        "slides",
-        "week-1",
-    )
-    assert sum("renamed to `semester_dest_" in d for d in sched.dropped) == 2
-
-
-def test_an_entry_setting_both_dest_names_keeps_the_new_one():
-    sched = schedule.parse(
-        {
-            "assignments": {
-                "hw": {
-                    "course_source_repo": "a-f2026",
-                    "due_datetime": "2026-10-13",
-                    "semester_dest_repo": "new",
-                    "cohort_dest_repo": "old",
-                }
-            }
-        }
-    )
-    assert sched.assignments["hw"].semester_dest_repo == "new"
-    assert any("which is also set - ignored" in d for d in sched.dropped)
+    assert [d for r in sched.releases for d in r.deploy] == []
+    assert any(NOT_MIGRATED in line for line in sched.dropped)
 
 
 def _request(**over) -> str:
@@ -177,45 +152,68 @@ def _request(**over) -> str:
     return json.dumps(raw)
 
 
-def test_a_console_request_naming_the_old_cohort_org_is_read():
-    assert parse_request(_request(cohort_org="Sem-f2026")).semester_org == "Sem-f2026"
-    assert parse_request(_request(semester_org="Sem-f2026")).semester_org == "Sem-f2026"
+def test_a_request_takes_semester_org_and_refuses_cohort_org():
+    assert parse_request(_request(semester_org="Sem")).semester_org == "Sem"
+    with pytest.raises(RequestError) as refused:
+        parse_request(_request(cohort_org="Sem"))
+    assert refused.value.code == NOT_MIGRATED
 
 
-def test_a_request_naming_both_semester_spellings_is_refused():
-    with pytest.raises(RequestError):
-        parse_request(_request(cohort_org="A", semester_org="B"))
-
-
-def test_old_request_arg_names_reach_the_op_under_the_new_ones():
-    req = parse_request(
-        _request(semester_org="Sem", args={"entry": "s5", "cohort_dest_repo": "slides"})
-    )
-    assert req.args == {"entry": "s5", "semester_dest_repo": "slides"}
-    req = parse_request(
-        _request(op="materials.create", args={"tag": "f2026"}, preview=False)
-    )
-    assert req.args == {"semester": "f2026"}
+@pytest.mark.parametrize(
+    "op, args",
+    [
+        ("release.now", {"entry": "s5", "cohort_dest_repo": "slides"}),
+        ("materials.create", {"tag": "f2026"}),
+        ("assignment.create", {"number": "1", "semester": "f2026", "format": "py"}),
+        (
+            "assignment.handout_now",
+            {"course_source_repo": "a1", "include_solution": True},
+        ),
+    ],
+)
+def test_an_old_request_arg_is_refused_as_not_migrated(op, args):
+    with pytest.raises(RequestError) as refused:
+        parse_request(_request(op=op, semester_org="Sem", args=args))
+    assert refused.value.code == NOT_MIGRATED
 
 
 @pytest.mark.parametrize("flag", ["--semester-org", "--cohort-org"])
-def test_a_cli_takes_the_semester_org_under_either_flag(monkeypatch, flag):
+def test_a_cli_takes_only_the_new_flag(monkeypatch, flag):
     seen: list[tuple] = []
     monkeypatch.setattr(status, "refresh", lambda *a: seen.append(a) or 0)
     monkeypatch.setattr(
         sys, "argv", ["status", "--course-org", "C", flag, "Sem", "--write"]
     )
-    assert status.main() == 0
-    assert seen == [("C", "Sem")]
+    if flag == "--cohort-org":
+        with pytest.raises(SystemExit):
+            status.main()
+    else:
+        assert status.main() == 0
+        assert seen == [("C", "Sem")]
 
 
-def test_bootstrap_reads_the_old_cohort_defaults_block(monkeypatch):
+def test_bootstrap_refuses_the_old_cohort_defaults_block(monkeypatch):
     monkeypatch.setattr(
-        bootstrap_course,
-        "org_meta",
-        lambda org: {"cohort_defaults": {"timezone": "Europe/London"}},
+        bootstrap_course, "org_meta", lambda org: {"cohort_defaults": {}}
     )
-    assert bootstrap_course.course_semester_defaults("C")["timezone"] == "Europe/London"
+    with pytest.raises(NotMigrated):
+        bootstrap_course.course_semester_defaults("C")
+
+
+@pytest.mark.parametrize(
+    "render", ["render_sync_membership", "render_send_codes", "render_scheduler"]
+)
+def test_a_dispatch_sending_the_old_payload_names_fails_its_step(render):
+    fn = getattr(workflows_render, render)
+    rendered = fn(["A"]) if render == "render_sync_membership" else fn()
+    assert "client_payload.cohort_org" in rendered  # read only to be refused
+    assert "::error::NOT_MIGRATED" in rendered
+
+
+def test_status_json_says_semester_and_never_cohort():
+    semester = schemas.status_schema()["properties"]["semester"]["properties"]
+    assert {"key", "label"} <= set(semester)
+    assert "cohort" not in schemas.status_schema()["properties"]
 
 
 # --------------------------------------------------------- instructors.yml (people.yml)
@@ -227,12 +225,7 @@ NEW_INSTRUCTORS = {
         {"github_handle": "nobody", "email": "n@x.org"},
     ]
 }
-OLD_PEOPLE = {
-    "people": {
-        "instructors": [{"github_handle": "old-prof", "email": "o@x.org"}],
-        "teaching_assistants": [],
-    }
-}
+OLD_PEOPLE = {"people": {"instructors": [{"github_handle": "old", "email": "o@x.org"}]}}
 
 
 def test_the_instructors_list_is_grouped_by_role_and_a_missing_role_is_a_fault():
@@ -251,33 +244,33 @@ def _semester_files(monkeypatch, files: dict[str, dict]) -> None:
     )
 
 
-def test_the_old_people_file_is_read_with_a_fault_naming_the_new_one(monkeypatch):
-    _semester_files(monkeypatch, {"people.yml": OLD_PEOPLE})
+@pytest.mark.parametrize(
+    "files, cited",
+    [
+        ({"people.yml": OLD_PEOPLE}, "people.yml"),
+        ({"instructors.yml": OLD_PEOPLE}, "instructors.yml"),
+    ],
+)
+def test_the_old_file_or_shape_is_refused_and_nobody_is_pruned(
+    monkeypatch, files, cited
+):
+    _semester_files(monkeypatch, files)
     found: list = []
-    faculty = sync_faculty.read_semester_people("Sem", found)
-    assert [p["github_handle"] for p in faculty["instructors"]] == ["old-prof"]
-    assert [f.file for f in found] == ["people.yml"]
-    assert "renamed to instructors.yml" in found[0].what
-    assert sync_faculty.load_semester_faculty("Sem")["instructors"][0][
-        "github_handle"
-    ] == ("old-prof")
+    assert sync_faculty.read_semester_people("Sem", found) is None
+    assert [(f.code, f.file) for f in found] == [(NOT_MIGRATED, cited)]
+    with pytest.raises(NotMigrated):
+        sync_faculty.load_semester_faculty("Sem")
 
 
-def test_the_new_instructors_file_wins_over_the_old_one(monkeypatch):
-    _semester_files(
-        monkeypatch, {"instructors.yml": NEW_INSTRUCTORS, "people.yml": OLD_PEOPLE}
-    )
-    found: list = []
-    faculty = sync_faculty.read_semester_people("Sem", found)
+def test_the_new_instructors_file_is_read(monkeypatch):
+    _semester_files(monkeypatch, {"instructors.yml": NEW_INSTRUCTORS})
+    faculty = sync_faculty.read_semester_people("Sem", [])
     assert [p["github_handle"] for p in faculty["instructors"]] == ["prof"]
-    assert all(f.file == "instructors.yml" for f in found)
 
 
-def test_the_site_cards_read_either_file(monkeypatch):
-    files = {"people.yml": OLD_PEOPLE}
+def test_the_site_cards_read_instructors_yml_only(monkeypatch):
+    files = {"people.yml": OLD_PEOPLE, "instructors.yml": NEW_INSTRUCTORS}
     monkeypatch.setattr(site, "yaml_file", lambda org, repo, path: files.get(path, {}))
-    assert site._instructors_meta("Sem") == (OLD_PEOPLE, "people.yml")
-    files["instructors.yml"] = NEW_INSTRUCTORS
     meta, path = site._instructors_meta("Sem")
     assert path == "instructors.yml"
     grouped = people_by_role(meta)
@@ -296,6 +289,18 @@ def test_the_exported_instructors_schema_requires_a_role():
     entry = schemas.instructors_schema()["properties"]["instructors"]["items"]
     assert "role" in entry["required"]
     assert entry["properties"]["role"]["enum"] == list(INSTRUCTOR_ROLES)
+
+
+def test_a_not_migrated_fault_carries_its_own_problem_code():
+    from datetime import UTC, datetime
+
+    from dsl_course.faults import not_migrated_fault
+
+    fault = not_migrated_fault(
+        "people.yml", "instructors.yml", where="x", file="people.yml"
+    )
+    problem = status_json.problem_from_fault(fault, "Sem", datetime.now(UTC))
+    assert NOT_MIGRATED in problem["id"]
 
 
 # ------------------------------------------- grading_cutoff_datetime (late_until, pins)
@@ -351,12 +356,7 @@ def _hand_out(monkeypatch, *flags: str) -> list[bool]:
 
 
 @pytest.mark.parametrize(
-    "flags, pushed",
-    [
-        ((), False),
-        (("--solution-datetime", "now"), True),
-        (("--solution",), True),
-    ],
+    "flags, pushed", [((), False), (("--solution-datetime", "now"), True)]
 )
 def test_the_manual_hand_out_includes_the_solution_only_when_asked(
     monkeypatch, flags, pushed
@@ -364,20 +364,22 @@ def test_the_manual_hand_out_includes_the_solution_only_when_asked(
     assert _hand_out(monkeypatch, *flags) == [pushed]
 
 
-def test_a_later_solution_moment_is_refused_on_a_manual_hand_out(monkeypatch):
+@pytest.mark.parametrize(
+    "flags", [("--solution-datetime", "2026-12-01"), ("--solution",)]
+)
+def test_a_later_moment_or_the_old_switch_is_refused(monkeypatch, flags):
     with pytest.raises(SystemExit):
-        _hand_out(monkeypatch, "--solution-datetime", "2026-12-01")
+        _hand_out(monkeypatch, *flags)
 
 
-def test_an_old_include_solution_request_becomes_solution_datetime_now():
+def test_the_hand_out_op_passes_solution_datetime_now():
     req = parse_request(
         _request(
             op="assignment.handout_now",
             semester_org="S",
-            args={"course_source_repo": "a1", "include_solution": True},
+            args={"course_source_repo": "a1", "solution_datetime": "now"},
         )
     )
-    assert req.args == {"course_source_repo": "a1", "solution_datetime": "now"}
     assert REGISTRY["assignment.handout_now"].argv(req)[-2:] == [
         "--solution-datetime",
         "now",
@@ -392,24 +394,12 @@ def test_formats_is_a_list_and_its_first_entry_is_the_runnable_one():
     assert (spec.formats, spec.format, spec.dropped) == (("py", "ipynb"), "py", ())
 
 
-def test_the_old_format_key_is_read_with_a_line_naming_formats():
+def test_the_old_format_key_is_refused_and_not_read():
     spec = grades.parse_grading_spec("format: ipynb\n")
-    assert spec.formats == ("ipynb",)
-    assert [d.field for d in spec.dropped] == ["format"]
-    assert "is now `formats:`" in spec.dropped[0]
+    assert spec.formats == ()
+    assert [(d.field, d.code) for d in spec.dropped] == [("format", NOT_MIGRATED)]
 
 
-def test_a_course_default_format_is_read_under_its_old_name():
-    assert grades.parse_assignment_defaults({"format": "py"}) == {"formats": "py"}
-
-
-def test_an_old_format_request_arg_reaches_new_assignment_as_formats():
-    req = parse_request(
-        _request(
-            op="assignment.create",
-            args={"number": "1", "semester": "f2026", "format": "py"},
-            preview=False,
-        )
-    )
-    argv = REGISTRY["assignment.create"].argv(req)
-    assert argv[argv.index("--formats") + 1] == "py"
+def test_a_course_default_under_the_old_format_key_is_not_read():
+    assert grades.parse_assignment_defaults({"format": "py"}) == {}
+    assert grades.parse_assignment_defaults({"formats": "py"}) == {"formats": "py"}

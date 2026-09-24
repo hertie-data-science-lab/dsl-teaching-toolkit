@@ -49,7 +49,6 @@ from .discovery import (
     discover_content_repos,
     discover_semesters,
     list_org_repos,
-    migrate_semester_registry,
     org_tier,
     student_repo_names,
     unregister_semester,
@@ -493,9 +492,6 @@ def refresh(course_org: str) -> int:
     # validator all have to be pinned to the same ref, and a semester inherits its course
     # org's (central_ref_for), so re-reading it per semester could only ever disagree.
     central_ref = central_ref_for(course_org)
-    # The registry's rename bridge: write semesters.yml from the old file before anything
-    # reads it. A write that fails is counted, and every reader still finds the old file.
-    registry_failed = 0 if migrate_semester_registry(course_org) else 1
     semesters, unregistered = _live_semesters(course_org)
     targets = discover_content_repos(course_org)
     # Org-wide; discovered once, not per repo. Two lists off the one listing: every
@@ -510,7 +506,7 @@ def refresh(course_org: str) -> int:
         f"{semesters or 'none'}"
     )
     # An unregistration is never a silent success: see _live_semesters.
-    failures = unregistered + registry_failed
+    failures = unregistered
     # status.json writes that did not land: warned about, never counted (see below).
     status_misses = 0
     # `central.pin_central_ref` refuses a ref the central repo does not have, and every

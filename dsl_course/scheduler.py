@@ -1837,13 +1837,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--semester-org",
-        "--cohort-org",
         default=None,
         help="One semester; omit and use --all-semesters",
     )
     parser.add_argument(
         "--all-semesters",
-        "--all-cohorts",
         action="store_true",
         help="Run every semester registered with the course org (the release job).",
     )
@@ -1859,7 +1857,6 @@ def main() -> int:
     )
     parser.add_argument(
         "--list-semesters",
-        "--list-cohorts",
         action="store_true",
         help="Print the course org's registered semesters as a JSON list, and exit.",
     )

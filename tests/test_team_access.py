@@ -576,7 +576,7 @@ def test_the_verbose_sweep_still_says_which_repo_it_was(monkeypatch, capsys):
 
 def _topic_repos():
     return [
-        {"name": ".github", "topics": ["dsl-cohort"]},
+        {"name": ".github", "topics": ["dsl-semester"]},
         {"name": "assignment-1", "topics": ["assignment-template"], "isTemplate": True},
         {"name": "assignment-1-ada", "topics": []},  # stamp never landed
         {"name": "assignment-1-bob", "topics": ["assignment-1", "submission"]},

@@ -233,10 +233,9 @@ def sync(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
-    parser.add_argument("--semester-org", "--cohort-org", default=None)
+    parser.add_argument("--semester-org", default=None)
     parser.add_argument(
         "--all-semesters",
-        "--all-cohorts",
         action="store_true",
         help="Also reconcile roster/teams for every registered semester (not just --semester-org).",
     )

@@ -403,7 +403,7 @@ def test_org_tier_reads_the_dotgithub_topic_then_the_semester_only_repos_then_gi
     # topics) is indistinguishable from a course org by elimination, and the faculty
     # sweep reads "course" as "push everywhere".
     gh = lambda *topics: {"name": ".github", "topics": list(topics)}
-    assert discovery.org_tier([gh("dsl-cohort"), {"name": "a1-ada"}]) == "semester"
+    assert discovery.org_tier([gh("dsl-semester"), {"name": "a1-ada"}]) == "semester"
     assert discovery.org_tier([gh("dsl-course-hub"), {"name": "cm-f2026"}]) == "course"
     assert discovery.org_tier([gh(), {"name": "welcome"}]) == "semester"
     assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "semester"

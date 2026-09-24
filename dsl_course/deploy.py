@@ -740,12 +740,9 @@ def main() -> int:
     parser.add_argument(
         "--course-source-repo", required=True, help="Source repo holding the path(s)"
     )
-    parser.add_argument(
-        "--semester-org", "--cohort-org", required=True, help="Semester org (target)"
-    )
+    parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
         "--semester-dest-repo",
-        "--cohort-dest-repo",
         default="materials",
         help="Target repo in the semester org, created if missing (default: materials)",
     )
@@ -756,7 +753,6 @@ def main() -> int:
     )
     parser.add_argument(
         "--semester-dest-path",
-        "--cohort-dest-path",
         default="",
         help="Destination path(s), paired with --course-source-path by index "
         "(default: mirror each --course-source-path)",

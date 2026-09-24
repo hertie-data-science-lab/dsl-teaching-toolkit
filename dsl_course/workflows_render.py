@@ -130,14 +130,20 @@ _AUTOGRADE_CONCURRENCY = """    concurrency:
 """
 
 
-# Which semester a repository_dispatch names. The semester's dispatchers send
-# `semester_org`; for one release the old `cohort_org` (a dispatcher not yet refreshed, or
-# an external timer) is read too, and so is `all_cohorts` beside `all_semesters`.
-_PAYLOAD_SEMESTER = "(github.event.client_payload.semester_org || github.event.client_payload.cohort_org)"
-_PAYLOAD_ALL_SEMESTERS = (
-    "(toJSON(github.event.client_payload.all_semesters) == 'true' "
-    "|| toJSON(github.event.client_payload.all_cohorts) == 'true')"
+# Which semester a repository_dispatch names, and whether it asks for all of them. The old
+# payload names (decision 0012) are never read as either: a dispatch that still sends
+# `cohort_org` / `all_cohorts` fails its step as NOT_MIGRATED, from the check below.
+_PAYLOAD_SEMESTER = "github.event.client_payload.semester_org"
+_PAYLOAD_ALL_SEMESTERS = "toJSON(github.event.client_payload.all_semesters) == 'true'"
+_OLD_PAYLOAD_ENV = (
+    "          OLD_PAYLOAD: ${{ github.event.client_payload.cohort_org "
+    "|| github.event.client_payload.all_cohorts }}\n"
 )
+_OLD_PAYLOAD_CHECK = """          if [ -n "$OLD_PAYLOAD" ]; then
+            echo "::error::NOT_MIGRATED: this dispatch sends cohort_org or all_cohorts, the old names of semester_org and all_semesters - run the migration"
+            exit 1
+          fi
+"""
 
 
 def _concurrency(name: str) -> str:
@@ -1046,10 +1052,8 @@ on:
       - dsl-course.yml
       # The registry is the other half of the course's own config, and its digest issue is
       # the same one - so an edit to either is checked and mailed within the minute rather
-      # than waiting for the scheduler's next tick. The old name is watched for one
-      # release, while a course that has not refreshed still edits it.
+      # than waiting for the scheduler's next tick.
       - semesters.yml
-      - cohort-courses-pages.yml
   repository_dispatch:
     types: [sync-membership]
   schedule:
@@ -1081,14 +1085,14 @@ on:
           DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
           # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
           DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
-# A fault in the course org's own config is emailed to its admins from this step (see
+{_OLD_PAYLOAD_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
 # dsl_course.notify.route_course), so the automatic job carries the transport and the
 # address list alongside the token. The manual button does not: somebody is standing at
 # that run and reads its log.
 {_MAIL_ENV}
 {_COURSE_ADMIN_ENV}
         run: |
-          # First, and never fatal: a push to either of the course's own config files is
+{_OLD_PAYLOAD_CHECK}          # First, and never fatal: a push to either of the course's own config files is
           # what this job is here for, and the reconcile below is what SKIPS the course
           # when one of them cannot be read. Its own digest issue and mail are the report.
           python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config
@@ -1392,9 +1396,9 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
-{_MAIL_ENV}
+{_OLD_PAYLOAD_ENV}{_MAIL_ENV}
         run: |
-          # A payload with no semester names nothing to send for. Fail loudly rather than
+{_OLD_PAYLOAD_CHECK}          # A payload with no semester names nothing to send for. Fail loudly rather than
           # let an empty --semester-org reach the CLI and be refused for the wrong reason.
           if [ -z "$DISPATCH_SEMESTER" ]; then
             echo "::error::the send-codes dispatch carried no client_payload.semester_org - nothing to send."
@@ -1540,7 +1544,7 @@ on:
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           EVENT: ${{{{ github.event_name }}}}
           DRIVER: ${{{{ github.event.client_payload.driver }}}}
-# A source the plan cites and the org has not got is emailed to the people git names for
+{_OLD_PAYLOAD_ENV}# A source the plan cites and the org has not got is emailed to the people git names for
 # it, from this step (see dsl_course.notify) - so the release pass carries the transport
 # alongside the token. Without it the digest issue's @mention is the only channel, which
 # reaches whoever happens to read GitHub notifications that week. This pass also pre-flights
@@ -1549,7 +1553,7 @@ on:
 {_MAIL_ENV}
 {_COURSE_ADMIN_ENV}
         run: |
-          gh auth setup-git
+{_OLD_PAYLOAD_CHECK}          gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,
           # and it is what says whether both drivers are alive (a dispatch names its
           # sender in client_payload.driver; the cron has nobody to name).
@@ -2082,8 +2086,8 @@ on:
           COURSE: ${{{{ github.repository_owner }}}}
           EVENT: ${{{{ github.event_name }}}}
           DISPATCH_SEMESTER: ${{{{ {_PAYLOAD_SEMESTER} }}}}
-        run: |
-          gh auth setup-git
+{_OLD_PAYLOAD_ENV}        run: |
+{_OLD_PAYLOAD_CHECK}          gh auth setup-git
           args=(--course-org "$COURSE")
           case "$EVENT" in
             push|schedule) args+=(--all-semesters) ;;

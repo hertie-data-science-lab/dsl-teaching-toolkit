@@ -926,7 +926,6 @@ def _stub_refresh(
     across runs without stubbing the rule itself. Each entry is a `<semester> <first missed
     at>` line; `_missed_at` builds one at a chosen age."""
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(seed, "migrate_semester_registry", lambda org: True)
     monkeypatch.setattr(
         seed, "discover_semesters", lambda org: ["Semester-f2026", "Semester-s2027"]
     )
@@ -1671,7 +1670,6 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
         raise RuntimeError("could not list repos in Course-Org: gh: HTTP 502")
 
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(seed, "migrate_semester_registry", lambda org: True)
     monkeypatch.setattr(seed, "discover_semesters", boom)
     monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
 
@@ -1862,7 +1860,7 @@ def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
     # Deleting the call, or passing semester=False for a semester, would otherwise be
     # invisible: every other test stubs the sweep to a no-op. This pins what the one call
     # site passes.
-    semester = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
+    semester = [_r(".github", topics=["dsl-semester"]), _r("welcome"), _r("grades-ada")]
     assert _spy_sweep(monkeypatch, semester) == {
         "tier": "semester",
         "protected": {"grades-ada"},

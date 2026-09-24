@@ -28,7 +28,6 @@ on:
       - students.csv
       - teams.csv
       - instructors.yml
-      - people.yml  # the old name, watched for one release
       - schedule.yml
 
 # Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and

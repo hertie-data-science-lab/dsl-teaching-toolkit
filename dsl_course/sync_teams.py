@@ -247,7 +247,7 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--semester-org", "--cohort-org", required=True)
+    parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--prune",
         action="store_true",

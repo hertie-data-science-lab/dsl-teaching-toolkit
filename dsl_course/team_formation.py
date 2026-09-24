@@ -1116,7 +1116,7 @@ def run(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--course-org", required=True)
-    parser.add_argument("--semester-org", "--cohort-org", required=True)
+    parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--assignment",
         default="",

@@ -848,7 +848,6 @@ def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
         "instructors.yml",
-        "people.yml",
         "schedule.yml",
         "students.csv",
         "teams.csv",
@@ -869,7 +868,6 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_chan
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
         "instructors.yml",
-        "people.yml",
         "schedule.yml",
         "teams.csv",
     ]
@@ -891,7 +889,6 @@ def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     assert trigger["push"]["paths"] == [
         "schedule.yml",
         "instructors.yml",
-        "people.yml",
         "students.csv",
         "teams.csv",
     ]
@@ -924,7 +921,7 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
         if s.get("name", "").startswith("Send enrolment codes")
     )
     assert step["env"]["DISPATCH_SEMESTER"] == (
-        "${{ (github.event.client_payload.semester_org || github.event.client_payload.cohort_org) }}"
+        "${{ github.event.client_payload.semester_org }}"
     )
     assert "dry-run" not in rendered and "dry_run" not in rendered
     # The trust boundary: a client_payload is written by whoever holds a SEMESTER's bot
@@ -934,7 +931,7 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
     # Per semester, off the payload alone: two semesters pushing rosters at once must not
     # drop each other's queued send.
     assert (
-        "send-codes-${{ (github.event.client_payload.semester_org || github.event.client_payload.cohort_org) }}"
+        "send-codes-${{ github.event.client_payload.semester_org }}"
         in doc["concurrency"]["group"]
     )
 
@@ -1902,7 +1899,7 @@ SERIALISED_WRITERS = {
     # SEMESTER, because that raced state is one semester's students.csv: a roster push in one
     # semester must not drop a queued send in another (a group holds one pending run, and a
     # third arrival cancels the second).
-    "send_codes": "send-codes-${{ (github.event.client_payload.semester_org || github.event.client_payload.cohort_org) }}",
+    "send_codes": "send-codes-${{ github.event.client_payload.semester_org }}",
     "sync_membership": "sync-membership",
     "propagate_semester": "propagate-semester",
     "archive_semester": "archive-semester",
@@ -2109,8 +2106,7 @@ def test_the_core_requirements_carry_no_autograder():
 _SCOPED = (
     "(github.event_name == 'repository_dispatch' "
     "&& github.event.client_payload.driver == 'classroom-config' "
-    "&& (github.event.client_payload.semester_org "
-    "|| github.event.client_payload.cohort_org) || '')"
+    "&& github.event.client_payload.semester_org || '')"
 )
 
 
@@ -2166,7 +2162,7 @@ def test_a_config_push_run_releases_into_its_own_semester_only():
     # same one whichever arrival it is.
     assert yaml.safe_load(ALL_RENDERED["scheduler"])["run-name"] == (
         "${{ " + _SCOPED + " && format('" + course.SCOPED_RUN_TITLE
-        + " {0}', (github.event.client_payload.semester_org || github.event.client_payload.cohort_org)) || 'Scheduled release' }}"
+        + " {0}', github.event.client_payload.semester_org) || 'Scheduled release' }}"
     )  # fmt: skip
     assert release["concurrency"]["group"] == (
         "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}"
@@ -2211,7 +2207,7 @@ def test_the_ds01_membership_dispatch_can_ask_for_every_semester(
     )
     # The JSON boolean and nothing else: a string "true" or a 1 is absent.
     assert step["env"]["DISPATCH_ALL"] == (
-        "${{ (toJSON(github.event.client_payload.all_semesters) == 'true' || toJSON(github.event.client_payload.all_cohorts) == 'true') }}"
+        "${{ toJSON(github.event.client_payload.all_semesters) == 'true' }}"
     )
     script = "args=()\n" + _block(step["run"], 'case "$EVENT" in', "esac")
     env = {
@@ -2410,7 +2406,7 @@ def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
     rendered = ALL_RENDERED["sync_membership"]
     doc = yaml.safe_load(rendered)
     paths = doc.get("on", doc.get(True))["push"]["paths"]
-    assert paths == ["dsl-course.yml", "semesters.yml", "cohort-courses-pages.yml"]
+    assert paths == ["dsl-course.yml", "semesters.yml"]
     auto = workflow_jobs(rendered)["sync-auto"]["steps"]
     step = next(
         s for s in auto if "dsl_course.sync_membership" in str(s.get("run", ""))

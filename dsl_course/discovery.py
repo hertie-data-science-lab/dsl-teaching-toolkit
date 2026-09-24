@@ -28,10 +28,11 @@ from .course import (
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
-    SEMESTER_TOPICS,
+    OLD_SEMESTER_TOPIC,
+    SEMESTER_TOPIC,
     session_dirs,
 )
-from .faults import ConfigFault, Unusable
+from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log, log_err, log_ok
@@ -39,11 +40,9 @@ from .repos import default_branch, repo_exists, repo_is_archived
 
 # The standalone semester registry in the course org's .github repo.
 SEMESTERS_PATH = "semesters.yml"
-# Its old name, READ for one release when the new file is absent (under its old
-# `cohorts:` key too) and never written: the next registry write, or the nightly refresh
-# (`migrate_semester_registry`), writes SEMESTERS_PATH beside it.
+# Its old name and key (decision 0012). Never read: a course that still has the old file
+# and not the new one, or the old `cohorts:` key, is refused as NOT_MIGRATED.
 OLD_SEMESTERS_PATH = "cohort-courses-pages.yml"
-_REGISTRY_KEYS = ("semesters", "cohorts")
 
 INFRA_REPOS = {"welcome", "classroom-config", ".github"}
 # The topic assign.py stamps on the frozen semester-side template it creates before
@@ -78,7 +77,9 @@ def org_tier(repos: list[dict]) -> str | None:
     elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
     dotgithub = next((r for r in repos if r["name"] == ".github"), None)
     topics = set((dotgithub or {}).get("topics") or [])
-    if topics & set(SEMESTER_TOPICS):
+    if OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics:
+        raise NotMigrated(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC, "the org's .github topic")
+    if SEMESTER_TOPIC in topics:
         return "semester"
     if COURSE_HUB_TOPIC in topics:
         return "course"
@@ -303,8 +304,7 @@ def _registry_fault(what: str) -> ConfigFault:
 def _read_semesters(
     course_org: str, faults: list[ConfigFault] | None = None
 ) -> list[str]:
-    """Read the course org's standalone .github/semesters.yml registry (or, for one
-    release, the old cohort-courses-pages.yml when the new file is absent).
+    """Read the course org's standalone .github/semesters.yml registry.
 
     A genuinely absent or empty registry is [] (a valid brand-new course org). The
     machine-written form is a `{semesters: [...]}` mapping, but the file is human-editable
@@ -320,13 +320,8 @@ def _read_semesters(
     `faults.Unusable`, which says this is a file faculty must fix rather than a read that
     failed, so an unattended run can skip it and stay green."""
     content = get_file_content(course_org, ".github", SEMESTERS_PATH)
-    if content is None:
-        content = get_file_content(course_org, ".github", OLD_SEMESTERS_PATH)
-        if content:
-            log(
-                f"  [moved] {course_org}/.github/{OLD_SEMESTERS_PATH} is now "
-                f"{SEMESTERS_PATH}; read the old file (the next refresh writes the new one)"
-            )
+    if content is None and get_file_content(course_org, ".github", OLD_SEMESTERS_PATH):
+        return _not_migrated(course_org, OLD_SEMESTERS_PATH, SEMESTERS_PATH, faults)
     if not content:
         return []
     try:
@@ -345,11 +340,9 @@ def _read_semesters(
             )
         )
         return []
-    if isinstance(data, dict):
-        key = next((k for k in _REGISTRY_KEYS if k in data), _REGISTRY_KEYS[0])
-        semesters = data.get(key, [])
-    else:
-        semesters = data
+    if isinstance(data, dict) and "cohorts" in data and "semesters" not in data:
+        return _not_migrated(course_org, "cohorts", "semesters", faults)
+    semesters = data.get("semesters", []) if isinstance(data, dict) else data
     if not isinstance(semesters, list) or not all(
         isinstance(c, str) for c in semesters
     ):
@@ -368,6 +361,21 @@ def _read_semesters(
         )
         return []
     return [c for c in semesters if c]
+
+
+def _not_migrated(
+    course_org: str, old: str, new: str, faults: list[ConfigFault] | None
+) -> list[str]:
+    """An old spelling in the registry: raised, or - for a caller collecting faults -
+    filed, and read as no semesters at all."""
+    if faults is None:
+        raise NotMigrated(old, new, f"{course_org}/.github/{SEMESTERS_PATH}")
+    faults.append(
+        not_migrated_fault(
+            old, new, where=SEMESTERS_PATH, file=SEMESTERS_PATH, in_repo=".github"
+        )
+    )
+    return []
 
 
 def read_semester_registry(course_org: str, faults: list[ConfigFault]) -> list[str]:
@@ -521,25 +529,6 @@ def _write_semesters(
         return False
     log_ok(success)
     return True
-
-
-def migrate_semester_registry(course_org: str) -> bool:
-    """Write SEMESTERS_PATH from the old registry file when only the old one exists.
-
-    The rename's one-release bridge, run by the nightly refresh: afterwards every reader
-    finds the new file, and the old one is left where it was (nothing reads it once the new
-    one exists). True when there was nothing to do or the write landed."""
-    if get_file_content(course_org, ".github", SEMESTERS_PATH) is not None:
-        return True
-    if get_file_content(course_org, ".github", OLD_SEMESTERS_PATH) is None:
-        return True
-    return _write_semesters(
-        course_org,
-        set(_read_semesters(course_org)),
-        f"registry: {OLD_SEMESTERS_PATH} is now {SEMESTERS_PATH}",
-        failure=f"could not write {course_org}/.github/{SEMESTERS_PATH}",
-        success=f"wrote {course_org}/.github/{SEMESTERS_PATH} from {OLD_SEMESTERS_PATH}",
-    )
 
 
 def unregister_semester(course_org: str, semester_org: str) -> bool:

@@ -244,9 +244,8 @@ STOPS = {
     schedule.SCHEDULE_PATH: (
         "That entry is not scheduled: nothing is released, handed out or marked from it."
     ),
-    **dict.fromkeys(
-        sync_faculty.SEMESTER_PEOPLE_PATHS,
-        "This person has no access and is not told about problems.",
+    sync_faculty.SEMESTER_PEOPLE_PATH: (
+        "This person has no access and is not told about problems."
     ),
     roster.ROSTER_PATH: (
         "The whole roster is skipped: nobody new can join or is sent a code."
@@ -285,8 +284,9 @@ _FILES = {
     schedule.SCHEDULE_PATH: _Where(
         "schedule", "semester", "K4", "schedule", "SCHEDULE"
     ),
+    # The old file's name too, so a NOT_MIGRATED fault about it files under K3.
     **dict.fromkeys(
-        sync_faculty.SEMESTER_PEOPLE_PATHS,
+        (sync_faculty.SEMESTER_PEOPLE_PATH, sync_faculty.OLD_PEOPLE_FILE),
         _Where("people", "semester", "K3", "staff", "PEOPLE"),
     ),
     roster.ROSTER_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
@@ -471,7 +471,7 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         text, stops = _source_sentences(fault, now)
         entry = _entry_of(fault.where)
     else:
-        code = filed.code
+        code = fault.code or filed.code
         if filed.kind == "template":
             entry = assignment_slug(fault.in_repo)
         elif filed is _SHEET:
@@ -1098,8 +1098,7 @@ def semester_inputs(facts: SemesterFacts, course: CourseFacts) -> dict[str, str 
     paths = facts.config_paths
     return {
         schedule.SCHEDULE_PATH: paths.get(schedule.SCHEDULE_PATH),
-        sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH)
-        or paths.get(sync_faculty.OLD_PEOPLE_FILE),
+        sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH),
         roster.ROSTER_PATH: paths.get(roster.ROSTER_PATH),
         teams.TEAMS_PATH: paths.get(teams.TEAMS_PATH),
         grades.SHEETS_DIR: paths.get(grades.SHEETS_DIR),
@@ -1374,7 +1373,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         facts.site_last_update = _last_commit_at(semester_org, site)
     moments = [
         _last_commit_at(semester_org, schedule.CONFIG_REPO, p)
-        for p in (schedule.SCHEDULE_PATH, *sync_faculty.SEMESTER_PEOPLE_PATHS)
+        for p in (schedule.SCHEDULE_PATH, sync_faculty.SEMESTER_PEOPLE_PATH)
     ]
     facts.config_last_update = max((m for m in moments if m), default=None)
     members = get_team_members(semester_org, INSTRUCTORS_TEAM)

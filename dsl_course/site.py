@@ -43,7 +43,6 @@ from . import schedule, status, teams
 from .course import (
     CUTOFF_SENTENCE,
     INSTRUCTORS_FILE,
-    OLD_PEOPLE_FILE,
     PUBLISH_FILE,
     SELF_SELECT,
     assignment_slug,
@@ -120,14 +119,11 @@ def _semester_start(semester_org: str) -> date:
 
 
 def _instructors_meta(semester_org: str) -> tuple[dict, str]:
-    """A semester's instructors file and the path it came from: `instructors.yml`, else -
-    for one release - the old `people.yml`. `({}, instructors.yml)` when neither says
-    anything."""
-    for path in (INSTRUCTORS_FILE, OLD_PEOPLE_FILE):
-        meta = yaml_file(semester_org, "classroom-config", path)
-        if meta:
-            return meta, path
-    return {}, INSTRUCTORS_FILE
+    """A semester's `instructors.yml` and its path. The old `people.yml` is never read
+    (decision 0012): a semester that has not migrated gets the instructors-team cards."""
+    return yaml_file(
+        semester_org, "classroom-config", INSTRUCTORS_FILE
+    ), INSTRUCTORS_FILE
 
 
 def _semester_label(semester_org: str) -> str:
@@ -1842,13 +1838,11 @@ def main() -> int:
     ps.add_argument("--course-org", required=True)
     ps.add_argument(
         "--semester-org",
-        "--cohort-org",
         default=None,
         help="One semester; omit with --all-semesters",
     )
     ps.add_argument(
         "--all-semesters",
-        "--all-cohorts",
         action="store_true",
         help="Sync every registered semester (a course-level change, e.g. dsl-course.yml)",
     )

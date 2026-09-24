@@ -66,7 +66,7 @@ def test_parse_grading_spec_defaults_and_overrides():
     # A retired key (`max_auto`) in a template written before it went is flagged like any
     # other unknown key, never carried into the spec.
     spec = collect.parse_grading_spec(
-        "type: group\nformat: ipynb\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
+        "type: group\nformats: [ipynb]\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
     )
     assert spec == grades.GradingSpec(
         type="group",
@@ -76,8 +76,6 @@ def test_parse_grading_spec_defaults_and_overrides():
         dropped=spec.dropped,
     )
     assert [d for d in spec.dropped if "max_auto" in d]
-    # `format:` is the old name of `formats:`, still read, with a line naming the move.
-    assert [d for d in spec.dropped if "`format:` is now `formats:`" in d]
 
 
 def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
@@ -228,12 +226,14 @@ def test_a_shared_notebook_assignment_runs_no_completion_check_either(capsys):
     # is exactly the one that would have executed the whole semester's notebooks under every
     # student's key - and there is no line in the file to report as dropped.
     spec = collect.parse_grading_spec(
-        "submit_via: shared_dropbox_repo\nformat: ipynb\n"
+        "submit_via: shared_dropbox_repo\nformats: [ipynb]\n"
     )
     assert spec.runs_completion_check is False
     assert "completion_check" not in capsys.readouterr().err
     # ...and the same file without the drop box still runs it, so the default is intact.
-    assert collect.parse_grading_spec("format: ipynb\n").runs_completion_check is True
+    assert (
+        collect.parse_grading_spec("formats: [ipynb]\n").runs_completion_check is True
+    )
 
 
 def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(capsys):
@@ -1916,7 +1916,7 @@ def test_the_shape_is_read_off_the_solution_branch_grading_config(monkeypatch):
 
     def fake_get(org, repo, path, ref=""):
         seen.update(org=org, repo=repo, path=path, ref=ref)
-        return "type: group\nformat: py\n"
+        return "type: group\nformats: [py]\n"
 
     monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
     assert collect.load_grading_spec(
@@ -2715,11 +2715,11 @@ def _fake_execute(monkeypatch, writes: bytes | None, *, completes: bool = True):
 @pytest.mark.parametrize(
     "config, on",
     [
-        ("format: ipynb\n", True),
-        ("format: py\n", False),
+        ("formats: [ipynb]\n", True),
+        ("formats: [py]\n", False),
         ("", False),
-        ("format: ipynb\ncompletion_check: false\n", False),
-        ("format: py\ncompletion_check: true\n", True),
+        ("formats: [ipynb]\ncompletion_check: false\n", False),
+        ("formats: [py]\ncompletion_check: true\n", True),
         ("completion_check: true\n", True),
     ],
 )
@@ -3100,7 +3100,7 @@ def test_a_hand_marked_notebook_assignment_is_still_completion_checked(monkeypat
     # The common case, and the whole point: "restart the kernel and run all" is stated by
     # courses that mark BY HAND. Before this, `autograde: false` exited before any
     # submission was cloned and the rule stayed uncheckable.
-    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    _stub_collect(monkeypatch, None, grading="formats: [ipynb]\nautograde: false\n")
     monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
     monkeypatch.setattr(
         collect,
@@ -3124,7 +3124,7 @@ def test_a_hand_marked_notebook_assignment_is_still_completion_checked(monkeypat
 
 def test_the_executed_notebook_is_archived_beside_the_result(monkeypatch):
     # `errors:3` is a number; the grader has to be able to see WHICH three.
-    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    _stub_collect(monkeypatch, None, grading="formats: [ipynb]\nautograde: false\n")
     monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
     monkeypatch.setattr(
         collect,
@@ -3146,7 +3146,7 @@ def test_an_oversized_executed_notebook_is_recorded_but_not_archived(
 ):
     # A notebook of plots is base64 all the way down, and classroom-config is a repo
     # somebody has to clone. The STATE is the record; the copy is a convenience.
-    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    _stub_collect(monkeypatch, None, grading="formats: [ipynb]\nautograde: false\n")
     monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
     monkeypatch.setattr(collect, "ARCHIVE_MAX_BYTES", 16)
     monkeypatch.setattr(
@@ -3172,7 +3172,7 @@ def test_a_runner_without_the_kernel_records_a_skip_rather_than_a_red_cron(
     # nbconvert can CONVERT without ipykernel and cannot EXECUTE without it, so a runner
     # that installed only nbconvert would report a whole semester of `did-not-run`. It is a
     # runner fault with one fix: say so in words, record the decision once, stay green.
-    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    _stub_collect(monkeypatch, None, grading="formats: [ipynb]\nautograde: false\n")
     monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: None)
     _clear_dep_caches()
     written = _captured_writes(monkeypatch)
@@ -3194,7 +3194,7 @@ def test_the_hidden_tests_still_run_when_the_kernel_is_missing(monkeypatch):
     # The two are independent in BOTH directions: a runner that cannot execute notebooks
     # can still run pytest, and holding the whole assignment back would be a semester of
     # ungraded work over a check that is information only.
-    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: true\n")
+    _stub_collect(monkeypatch, None, grading="formats: [ipynb]\nautograde: true\n")
 
     def only_ipykernel_missing(name):
         return None if name == "ipykernel" else object()

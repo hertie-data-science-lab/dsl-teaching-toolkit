@@ -32,7 +32,7 @@ PR_URL = "https://github.com/hertie-dsl-demo-course-e1234/cm/pull/7"
 LISTING = [
     repo_row("classroom-config"),
     repo_row("welcome"),
-    repo_row(".github", topics=["dsl-cohort"]),
+    repo_row(".github", topics=["dsl-semester"]),
     repo_row(f"{SEMESTER}.github.io", visibility="public"),
     repo_row("materials"),
     repo_row("assignment-1", isTemplate=True, topics=["assignment-template"]),

@@ -541,7 +541,7 @@ def main() -> int:
         help="Course org - where this semester's edits are offered back before it is "
         "frozen, and where its website is synced from. Omit and both are skipped.",
     )
-    parser.add_argument("--semester-org", "--cohort-org", required=True)
+    parser.add_argument("--semester-org", required=True)
     # Default ON, like every other write button: the rendered workflow passes --dry-run /
     # --no-dry-run explicitly, so a bare local invocation cannot freeze a semester by accident.
     parser.add_argument(

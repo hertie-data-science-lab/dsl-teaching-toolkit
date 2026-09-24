@@ -112,7 +112,7 @@ def build(course_org: str, semester_org: str, source_repo: str) -> tuple[str, in
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--course-org", required=True)
-    ap.add_argument("--semester-org", "--cohort-org", required=True)
+    ap.add_argument("--semester-org", required=True)
     ap.add_argument("--course-source-repo", required=True)
     ap.add_argument(
         "--write",

@@ -686,7 +686,7 @@ def refuse_unregistered(semester_org: str, course_org: str) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--semester-org", "--cohort-org", required=True)
+    parser.add_argument("--semester-org", required=True)
     parser.add_argument(
         "--dispatched-by",
         default=None,

@@ -142,7 +142,6 @@ CONSEQUENCE = {
         "that entry is not scheduled: nothing releases, hands out or grades from it"
     ),
     "instructors.yml": "this person has no access and is not notified",
-    "people.yml": "this person has no access and is not notified",
     "students.csv": (
         "the whole roster is skipped: nobody new is enrolled or sent a code"
     ),
@@ -177,7 +176,6 @@ FIX = {
         "expected"
     ),
     "instructors.yml": "fix the handle/email on the line above",
-    "people.yml": "fix the handle/email on the line above",
     "students.csv": CSV_HEADER_FIX,
     "teams.csv": CSV_HEADER_FIX,
     "dsl-course.yml": "correct the line above",
@@ -268,6 +266,9 @@ class ConfigFault:
     # fix may still be in the course's template, but only this semester pays for it, so
     # `status_json` files it under the semester and keeps it off the course's own stages.
     per_semester: bool = False
+    # The problem code `status.json` files this under, where the file's own does not say
+    # what went wrong: NOT_MIGRATED, for an old spelling. "" = the file's.
+    code: str = ""
 
     @property
     def is_source(self) -> bool:
@@ -435,6 +436,42 @@ class ConfigFault:
         return f"{self.label}{at} - {self.what} - {when}"
 
 
+# An old spelling (decision 0012) found where only the new one is read: an instructor file,
+# a key, a repo, a topic, a workflow input. ONE code for all of them, and one instruction,
+# because the cure is one tool: the migration rewrites every old spelling to its new one.
+# Nothing reads an old spelling any more, so a file that still carries one is refused
+# rather than half-read.
+NOT_MIGRATED = "NOT_MIGRATED"
+
+
+def not_migrated_text(old: str, new: str) -> str:
+    """The one sentence an old spelling earns, wherever it is found."""
+    return f"{NOT_MIGRATED}: `{old}` is the old name of `{new}` - run the migration"
+
+
+def not_migrated_fault(
+    old: str,
+    new: str,
+    *,
+    where: str,
+    file: str,
+    field: str = "",
+    in_repo: str = CONFIG_REPO,
+    lineno: int | None = None,
+) -> ConfigFault:
+    """The ConfigFault for an old spelling in a hand-edited file."""
+    return ConfigFault(
+        where,
+        not_migrated_text(old, new),
+        field=field or old,
+        file=file,
+        in_repo=in_repo,
+        lineno=lineno,
+        fix_text="run the migration, which rewrites it to the new name",
+        code=NOT_MIGRATED,
+    )
+
+
 class Unusable(RuntimeError):
     """A hand-edited file the toolkit cannot read AT ALL - the header of a `;`-delimited
     CSV export, and nothing else so far.
@@ -445,6 +482,17 @@ class Unusable(RuntimeError):
     message text is not something to match on. The two are opposite jobs - a file faculty
     have to fix is a CONTENT fault, so the run skips it, stays green and lets the digest
     carry it, while a read that failed is the toolkit's own problem and earns the red X."""
+
+
+class NotMigrated(Unusable):
+    """An old spelling where only the new one is read (see NOT_MIGRATED). `Unusable`, so
+    every consumer stops for it exactly as for a file it cannot read, and an unattended
+    run skips the file and stays green while the fault carries it."""
+
+    def __init__(self, old: str, new: str, where: str = "") -> None:
+        text = not_migrated_text(old, new)
+        super().__init__(f"{where}: {text}" if where else text)
+        self.old, self.new, self.code = old, new, NOT_MIGRATED
 
 
 def header_fault(file: str, missing: list[str]) -> ConfigFault:

@@ -62,7 +62,7 @@ from .discovery import (
     discover_content_repos,
     live_semesters,
 )
-from .faults import ConfigFault, Unusable
+from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import line_of, load_yaml_config, take_lines
 from .gh_teams import (
     CREATED,
@@ -78,9 +78,6 @@ ROLE_TEAM = {
     "course_admins": COURSE_ADMIN_TEAM,
 }
 SEMESTER_PEOPLE_PATH = INSTRUCTORS_FILE
-# Both files a semester's instructors can be declared in: the new one first, and the old
-# `people.yml`, read for one release when the new one is absent.
-SEMESTER_PEOPLE_PATHS = (INSTRUCTORS_FILE, OLD_PEOPLE_FILE)
 # The roles a semester declares: its teaching team, the people a notification is addressed
 # to and therefore the entries `email:` is required on. course_admins is course-level and
 # notified through the course org, not a semester's instructors.yml.
@@ -131,9 +128,9 @@ def _declared(
     """`{role key: [(where, entry)]}` from either shape of a people block, or None.
 
     `instructors.yml`'s one `instructors:` list, grouped by each entry's REQUIRED `role:`
-    (an entry without a valid one is skipped and, with `faults`, reported); or the old
-    `people:` mapping of role -> list, still read for one release. `where` is the entry's
-    place in the file as written - its identity in the digest's state."""
+    (an entry without a valid one is skipped and, with `faults`, reported); or a course
+    file's `people:` mapping of role -> list. `where` is the entry's place in the file as
+    written - its identity in the digest's state."""
     listed = meta.get("instructors")
     if isinstance(listed, list):
         out: dict[str, list[tuple[str, object]]] = {}
@@ -255,7 +252,7 @@ def parse_faculty_from_meta(
                 # declares people who are notified through their entry alone.
                 if (
                     role in TEACHING_ROLES
-                    and file in SEMESTER_PEOPLE_PATHS
+                    and file == SEMESTER_PEOPLE_PATH
                     and valid_email(p.get("email")) is None
                 ):
                     log_err(
@@ -472,18 +469,23 @@ def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
 def _load_semester_file(
     semester_org: str, *, lines: bool = False
 ) -> tuple[dict | None, str]:
-    """`(meta, the path it was read from)`: `instructors.yml`, else - for one release -
-    the old `people.yml`. `(None, instructors.yml)` when neither exists. Raises exactly
-    what `load_yaml_config` raises, for whichever file it read."""
-    for path in SEMESTER_PEOPLE_PATHS:
-        meta = (
-            load_yaml_config(semester_org, CONFIG_REPO, path, lines=True)
-            if lines
-            else load_yaml_config(semester_org, CONFIG_REPO, path)
+    """`(meta, path)` for this semester's `instructors.yml`; `(None, path)` when it is
+    absent. A semester that has only the old `people.yml` is refused as NOT_MIGRATED:
+    read as absent, it would keep nobody's access and tell nobody why. Raises exactly what
+    `load_yaml_config` raises otherwise."""
+    meta = (
+        load_yaml_config(semester_org, CONFIG_REPO, SEMESTER_PEOPLE_PATH, lines=True)
+        if lines
+        else load_yaml_config(semester_org, CONFIG_REPO, SEMESTER_PEOPLE_PATH)
+    )
+    if meta is None and load_yaml_config(semester_org, CONFIG_REPO, OLD_PEOPLE_FILE):
+        raise NotMigrated(
+            OLD_PEOPLE_FILE, INSTRUCTORS_FILE, f"{semester_org}/{CONFIG_REPO}"
         )
-        if meta is not None:
-            return meta, path
-    return None, SEMESTER_PEOPLE_PATH
+    # The old file's shape under the new name: refused too, never read as "nobody".
+    if isinstance(meta, dict) and "people" in meta and "instructors" not in meta:
+        raise NotMigrated("people:", "instructors:", SEMESTER_PEOPLE_PATH)
+    return meta, SEMESTER_PEOPLE_PATH
 
 
 def read_semester_people(
@@ -502,6 +504,11 @@ def read_semester_people(
     look" must never be reported to faculty as "your file is broken"."""
     try:
         meta, path = _load_semester_file(semester_org, lines=True)
+    except NotMigrated as exc:
+        # The old file, or its old shape in the new one: filed against whichever holds it.
+        file = OLD_PEOPLE_FILE if exc.old == OLD_PEOPLE_FILE else SEMESTER_PEOPLE_PATH
+        faults.append(not_migrated_fault(exc.old, exc.new, where=file, file=file))
+        return None
     except yaml.YAMLError:
         faults.append(_file_fault("this file is not valid YAML, so none of it is read"))
         return None
@@ -523,21 +530,6 @@ def read_semester_people(
             )
         )
         return None
-    if path == OLD_PEOPLE_FILE:
-        faults.append(
-            ConfigFault(
-                OLD_PEOPLE_FILE,
-                f"renamed to {INSTRUCTORS_FILE}: one `instructors:` list, each entry "
-                f"with `role: instructor` or `role: teaching_assistant` - read under "
-                f"its old name and shape for one release only",
-                file=OLD_PEOPLE_FILE,
-                field="people",
-                fix_text=(
-                    f"move the entries into {INSTRUCTORS_FILE} (see its template), "
-                    f"then delete {OLD_PEOPLE_FILE}"
-                ),
-            )
-        )
     return _semester_roles_only(parse_faculty_from_meta(meta, faults, file=path))
 
 

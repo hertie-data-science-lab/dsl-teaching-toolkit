@@ -1723,9 +1723,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     pm = sub.add_parser("materials")
     pm.add_argument("--org", required=True)
-    pm.add_argument(
-        "--semester", "--tag", required=True, help="Semester, e.g. f2026 or s2026"
-    )
+    pm.add_argument("--semester", required=True, help="Semester, e.g. f2026 or s2026")
     pm.add_argument(
         "--copy-from",
         dest="copy_from",
@@ -1755,9 +1753,7 @@ def main() -> int:
     pa = sub.add_parser("assignment")
     pa.add_argument("--org", required=True)
     pa.add_argument("--number", required=True)
-    pa.add_argument(
-        "--semester", "--tag", required=True, help="Semester, e.g. f2026 or s2026"
-    )
+    pa.add_argument("--semester", required=True, help="Semester, e.g. f2026 or s2026")
     pa.add_argument(
         "--name",
         default="",
@@ -1768,7 +1764,6 @@ def main() -> int:
     # answers them, else the toolkit does (`resolve_answers`).
     pa.add_argument(
         "--formats",
-        "--format",
         dest="formats",
         default=COURSE_DEFAULT_CHOICE,
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "

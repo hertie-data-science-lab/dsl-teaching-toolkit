@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 import re
 
-from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM, SOLUTION_NOW
+from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM
 from ..discovery import discover_semesters
+from ..faults import NOT_MIGRATED, not_migrated_text
 from ..gh_teams import get_team_members, list_teams
 from .registry import (
     BOOTSTRAP_OP,
@@ -35,8 +36,6 @@ REQUEST_JSON_SCHEMA = {
         "actor": {"type": "string", "pattern": ORG_PATTERN},
         "course_org": {"type": "string", "pattern": ORG_PATTERN},
         "semester_org": {"type": "string", "pattern": ORG_PATTERN},
-        # The old spelling, read for one release (see RENAMED_REQUEST_FIELDS).
-        "cohort_org": {"type": "string", "pattern": ORG_PATTERN},
         "args": {"type": "object"},
         "preview": {"type": "boolean"},
         "client": {"type": "string", "pattern": r"^[A-Za-z0-9._/+-]{0,64}$"},
@@ -45,28 +44,25 @@ REQUEST_JSON_SCHEMA = {
     "additionalProperties": False,
 }
 
-# Old request spellings, read for one release and then refused: old -> new. A request
-# naming both is refused, since the two could disagree.
+# Old request spellings (decision 0012), old -> new. Nothing reads them: a request that
+# carries one is refused as NOT_MIGRATED before anything else is checked, naming the new
+# spelling, so a console that has not caught up says so instead of failing as a typo.
 RENAMED_REQUEST_FIELDS = {"cohort_org": "semester_org"}
 RENAMED_REQUEST_ARGS = {
     "cohort_dest_repo": "semester_dest_repo",
     "cohort_dest_path": "semester_dest_path",
     "tag": "semester",
     "format": "formats",
+    "include_solution": "solution_datetime",
 }
 
 
-def _renamed(fields: dict, renames: dict[str, str], where: str) -> dict:
-    """`fields` with every old spelling moved to its new one."""
-    out = dict(fields)
+def _refuse_old_spellings(fields: object, renames: dict[str, str], where: str) -> None:
     for old, new in renames.items():
-        if old in out:
-            if new in out:
-                raise RequestError(
-                    "BAD_REQUEST", f"{where}.{old} is the old name of {new}; send one."
-                )
-            out[new] = out.pop(old)
-    return out
+        if isinstance(fields, dict) and old in fields:
+            raise RequestError(
+                NOT_MIGRATED, f"{where}.{old}: {not_migrated_text(old, new)}."
+            )
 
 
 _TYPES = {
@@ -151,6 +147,12 @@ def parse_request(text: str) -> Request:
         raw = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         raise RequestError("BAD_REQUEST", "The request is not valid JSON.") from None
+    _refuse_old_spellings(raw, RENAMED_REQUEST_FIELDS, "$")
+    _refuse_old_spellings(
+        raw.get("args") if isinstance(raw, dict) else None,
+        RENAMED_REQUEST_ARGS,
+        "$.args",
+    )
     problems = validate(raw, REQUEST_JSON_SCHEMA)
     if problems:
         code = (
@@ -159,13 +161,6 @@ def parse_request(text: str) -> Request:
             else "BAD_REQUEST"
         )
         raise RequestError(code, f"The request is malformed: {'; '.join(problems)}.")
-    raw = _renamed(raw, RENAMED_REQUEST_FIELDS, "$")
-    raw["args"] = _renamed(raw["args"], RENAMED_REQUEST_ARGS, "$.args")
-    # `include_solution: true` is the old spelling of `solution_datetime: now`.
-    if isinstance(raw["args"], dict) and "include_solution" in raw["args"]:
-        raw["args"] = dict(raw["args"])
-        if raw["args"].pop("include_solution") is True:
-            raw["args"].setdefault("solution_datetime", SOLUTION_NOW)
     op = REGISTRY[raw["op"]]
     problems = validate(raw["args"], op.args_schema, "$.args")
     if problems:

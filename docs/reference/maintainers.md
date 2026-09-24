@@ -114,8 +114,7 @@ Things whose *literal spelling* is depended on from outside Python:
   one, or every issue opened under the old one becomes invisible. The hidden
   `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what makes the quarter-hourly
   refresh post once rather than four times an hour.
-- **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester` (and, for one release, the
-  old `dsl-cohort` - see [Renames in flight](#renames-in-flight)), `submission`, `gradebook`,
+- **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
 - **An ARCHIVED `classroom-config`** is a semester's "finished" marker. `teardown` archives it
   last, after everything else it freezes; `discovery.semester_is_live` is what every
@@ -124,8 +123,7 @@ Things whose *literal spelling* is depended on from outside Python:
   same flag for themselves off listings they already hold. So archiving one closes a semester whether the person doing it meant
   that or not, and anything that freezes a semester must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
-- **`.github/semesters.yml`** (read as `cohort-courses-pages.yml` for one release) is the
-  semester registry every dropdown reads, and
+- **`.github/semesters.yml`** is the semester registry every dropdown reads, and
   **`.github/.last-refresh`** is the heartbeat that keeps an org's crons from GitHub's 60-day
   inactivity disable.
 - **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is a filename faculty type into their
@@ -681,37 +679,37 @@ the run created in a student's namespace is drift the teardown cannot take back,
 handout provisions them now (gradebooks exist from onboarding, so the brief can point at
 one from day one).
 
-## Renames in flight
+## Migration
 
-Decision 0012 renamed one concept per row below. Each new spelling is the only one the engine
-writes; each old one is still READ for one release - with a fault or log line naming the new
-one where a file carries it - and is cut off in the release after (the one that follows the
-hand migration of the live orgs' files). Nothing may write an old spelling again.
+Decision 0012 gave each concept one name. The engine writes and reads ONLY the new
+spelling; an old one found in an instructor file, a key, a repo, a topic, a request or a
+dispatch is refused as `NOT_MIGRATED` (`faults.NOT_MIGRATED`: one code, one sentence naming
+the new spelling and "run the migration"). A migration tool rewrites a live org from this
+table, which is its input - keep it complete when a spelling changes. The one exception is
+the Submission receipts lookup chain in `course.py`, which recognises every label and mark
+an already-open issue carries.
 
-| Old | New | Where | Cut off |
-|---|---|---|---|
-| `cohort`, `term`, `tag` (identifiers, copy) | `semester` | engine, docs, logs, mails | now (no reader) |
-| topic `dsl-cohort` | `dsl-semester` | `.github` of a semester org; re-run Bootstrap semester to restamp | next release |
-| `.github/cohort-courses-pages.yml` (`cohorts:`) | `.github/semesters.yml` (`semesters:`) | course org; the nightly refresh writes the new file | next release |
-| `--cohort-org`, `--all-cohorts`, `--list-cohorts`, `--cohort-dest-repo`, `--cohort-dest-path`, `--cohort`, `--tag` | `--semester-org`, `--all-semesters`, `--list-semesters`, `--semester-dest-repo`, `--semester-dest-path`, `--semester`, `--semester` | every CLI (argparse aliases) | next release |
-| workflow inputs `cohort_org`, `cohort_dest_repo`, `cohort_dest_path`, `tag`, `semester_tag` | `semester_org`, `semester_dest_repo`, `semester_dest_path`, `semester` | rendered workflows (re-rendered by Refresh actions) | now |
-| dispatch payload `cohort_org`, `all_cohorts` | `semester_org`, `all_semesters` | semester dispatchers, ds01 timers | next release |
-| request field `cohort_org`; op args `cohort_dest_repo`, `cohort_dest_path`, `tag` | `semester_org`, `semester_dest_repo`, `semester_dest_path`, `semester` | `dsl.request/1` | next release |
-| `schedule.yml` `cohort_dest_repo`, `cohort_dest_path` | `semester_dest_repo`, `semester_dest_path` | assignment and `deploy:` entries | next release |
-| `dsl-course.yml` `cohort_defaults:` | `semester_defaults:` | course org | next release |
-| `status.json` `cohort`, `cohorts`, `cohort.term`, `cohort.term_label` | `semester`, `semesters`, `semester.key`, `semester.label` | `dsl.status/1` (the console follows in WP-A3) | now |
-| `classroom-config/people.yml` (`people:` -> `instructors:`/`teaching_assistants:` lists) | `classroom-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` required) | every reader (`sync_faculty`, the site); a fault names the move; the dispatchers watch both | next release |
-| copy "staff", "teaching team" | "instructors" | logs, mails, forms, docs | now |
-| `status.json` `late_until`; `schedule.grading_datetime_at` + `grades.cutoff_at` | `grading_cutoff_datetime`; one resolver, `schedule.grading_cutoff_datetime` | `dsl.status/1` (the console follows in WP-A3); engine | now |
-| copy "grading cutoff", "grading deadline", "the cutoff" | "late cutoff" | logs, mails, receipts, forms | now |
-| Release assignment input `include_solution`; `assign --solution`; op arg `include_solution` | `solution_datetime` (`now` = include; a later moment goes in `schedule.yml`); `--solution-datetime now`; op arg `solution_datetime` | rendered workflow (now); CLI alias and request arg (next release) | next release |
-| `grading_config.yml` / `assignment_defaults` `format:` (one word) | `formats:` (a list; the first is the runnable one) | template `solution` branch, `dsl-course.yml`; a dropped line names the move | next release |
-| New assignment input `format`; `scaffold --format`; op arg `format` | `formats`; `--formats`; `formats` | rendered workflow (now); CLI alias and request arg (next release) | next release |
+| Old | New | Where |
+|---|---|---|
+| topic `dsl-cohort` | `dsl-semester` | a semester org's `.github` |
+| `.github/cohort-courses-pages.yml`, key `cohorts:` | `.github/semesters.yml`, key `semesters:` | course org |
+| `cohort_dest_repo:`, `cohort_dest_path:` | `semester_dest_repo:`, `semester_dest_path:` | `schedule.yml` assignment and `deploy:` entries |
+| `cohort_defaults:` | `semester_defaults:` | course org `dsl-course.yml` |
+| `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `classroom-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
+| `format:` (one word) | `formats:` (a list; the first is the runnable one) | `grading_config.yml` on a template's `solution` branch; `assignment_defaults:` in `dsl-course.yml` |
+| dispatch payload `cohort_org`, `all_cohorts` | `semester_org`, `all_semesters` | the semester dispatchers (re-rendered by Refresh actions), the ds01 timers |
+| request field `cohort_org`; op args `cohort_dest_repo`, `cohort_dest_path`, `tag`, `format`, `include_solution` | `semester_org`; `semester_dest_repo`, `semester_dest_path`, `semester`, `formats`, `solution_datetime: now` | `dsl.request/1` (the console) |
+| CLI `--cohort-org`, `--all-cohorts`, `--list-cohorts`, `--cohort-dest-repo`, `--cohort-dest-path`, `--cohort`, `--tag`, `--format`, `--solution` | `--semester-org`, `--all-semesters`, `--list-semesters`, `--semester-dest-repo`, `--semester-dest-path`, `--semester`, `--semester`, `--formats`, `--solution-datetime now` | every CLI; rendered workflows use the new ones |
+| workflow inputs `cohort_org`, `cohort_dest_repo`, `cohort_dest_path`, `tag`, `semester_tag`, `format`, `include_solution` | `semester_org`, `semester_dest_repo`, `semester_dest_path`, `semester`, `semester`, `formats`, `solution_datetime` | rendered workflows (Refresh actions re-renders them) |
+| workflow names Archive cohort, Bootstrap cohort, Check cohort setup, Propagate cohort edits | Archive semester, Bootstrap semester, Check semester setup, Propagate semester edits | display names only; the workflow FILE paths are unchanged |
+| `status.json` `cohort`, `cohorts`, `cohort.term`, `cohort.term_label`, assignment `late_until` | `semester`, `semesters`, `semester.key`, `semester.label`, `grading_cutoff_datetime` | `dsl.status/1` (rewritten by the engine; the console follows) |
+| config repo description "...configure for this cohort ... term schedule..." | "...configure for this semester ... schedule..." | converged by the existing `SUPERSEDED_SEMESTER_DESCRIPTIONS` chain |
+| copy "cohort", "term", "tag"; "staff", "teaching team"; "grading cutoff", "the cutoff" | "semester"; "instructors"; "late cutoff" | logs, mails, forms, docs |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,
-`check-cohort-setup.yml` - only their display names changed), the digest issue titles (so `people.yml has entries the sync cannot use` keeps its old
-word), the site's `_data/people.yml` the pinned theme reads, the
+`check-cohort-setup.yml`), the digest issue titles (so `people.yml has entries the sync
+cannot use` keeps its old word), the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, and the console's op ids and op
 scope (`cohort.*`, renamed with the console source).
 

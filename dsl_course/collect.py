@@ -3654,7 +3654,6 @@ def main() -> int:
     )
     parser.add_argument(
         "--semester-org",
-        "--cohort-org",
         required=True,
         help="Semester org (submissions)",
     )

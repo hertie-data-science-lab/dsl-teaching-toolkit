@@ -275,7 +275,6 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
         "gh",
         lambda *a, **k: (0, "") if ref_exists else (1, "gh: Not Found (HTTP 404)"),
     )
-    monkeypatch.setattr(seed, "migrate_semester_registry", lambda org: True)
     monkeypatch.setattr(seed, "_live_semesters", lambda org: (["Semester-f2026"], 0))
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
     monkeypatch.setattr(seed, "discover_assignment_repos", lambda org: [])

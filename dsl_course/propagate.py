@@ -498,7 +498,6 @@ def main() -> int:
     parser.add_argument("--course-org", required=True, help="Course org (the target)")
     parser.add_argument(
         "--semester-org",
-        "--cohort-org",
         required=True,
         help="Semester org (the source)",
     )

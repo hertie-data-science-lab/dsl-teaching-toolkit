@@ -37,6 +37,7 @@ from .course import (
     semester_of,
 )
 from .discovery import SEMESTERS_PATH, central_ref_for, org_meta, register_semester
+from .faults import NotMigrated
 from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
@@ -577,14 +578,15 @@ def course_semester_defaults(course_org: str) -> dict:
     except Exception as exc:
         log_err(f"  ! could not read {course_org}'s semester_defaults ({exc})")
         return {}
-    raw = meta.get("semester_defaults")
-    if raw is None and "cohort_defaults" in meta:
-        # The block's old name, read for one release (decision 0012).
-        log(
-            f"  [moved] {course_org}'s cohort_defaults: is now semester_defaults: - rename it"
+    if "cohort_defaults" in meta:
+        # The block's old name (decision 0012): refused, so a semester is never bootstrapped
+        # with defaults nobody reads any more.
+        raise NotMigrated(
+            "cohort_defaults",
+            "semester_defaults",
+            f"{course_org}/.github/dsl-course.yml",
         )
-        raw = meta.get("cohort_defaults")
-    return schedule.parse_semester_defaults(raw)
+    return schedule.parse_semester_defaults(meta.get("semester_defaults"))
 
 
 def setup_semester_extras(
@@ -807,7 +809,6 @@ def main() -> int:
     )
     parser.add_argument(
         "--semester",
-        "--cohort",
         action="store_true",
         help="Also do semester student-facing setup: seed the "
         "welcome (onboard) + classroom-config (roster) repos.",

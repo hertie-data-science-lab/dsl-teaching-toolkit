@@ -99,7 +99,7 @@ def _run_new_assignment(monkeypatch, argv: list[str], defaults: dict) -> dict:
             "Org",
             "--number",
             "1",
-            "--tag",
+            "--semester",
             "f2026",
             *argv,
         ],
@@ -127,7 +127,7 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
 def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
     seen = _run_new_assignment(
         monkeypatch,
-        ["--format", "qmd", "--visibility", "public"],
+        ["--formats", "qmd", "--visibility", "public"],
         {"formats": "py", "visibility": "private"},
     )
     assert seen["formats"] == ["qmd"] and seen["visibility"] == "public"

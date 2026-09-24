@@ -103,6 +103,7 @@ from .course import (
 )
 from .discovery import discover_assignments
 from .faults import (
+    NOT_MIGRATED,
     NOTIFY_FROM,
     SOURCE_CRITICAL_WINDOW,
     SOURCE_URGENT_WINDOW,
@@ -111,6 +112,7 @@ from .faults import (
     FaultKind,
     Severity,
     hours,
+    not_migrated_text,
 )
 from .gh_contents import (
     LINES,
@@ -539,6 +541,7 @@ class Drops:
         field_name: str,
         what: str,
         lines: dict[str, int] | None,
+        code: str = "",
     ) -> None:
         self.report.append(report)
         self.faults.append(
@@ -548,6 +551,7 @@ class Drops:
                 file=SCHEDULE_PATH,
                 field=field_name,
                 lineno=line_of(lines if lines is not None else self.top, field_name),
+                code=code,
             )
         )
 
@@ -557,11 +561,12 @@ class Drops:
         field_name: str,
         what: str,
         lines: dict[str, int] | None = None,
+        code: str = "",
     ) -> None:
         """A fault with its own wording - a key that MOVED to another file, a timezone
         that is not a zone. The two below are the shapes every other fault takes."""
         loc = f"{where}.{field_name}" if where else field_name
-        self._add(f"{loc}: {what}", where, field_name, what, lines)
+        self._add(f"{loc}: {what}", where, field_name, what, lines, code)
 
 
 def _drop(
@@ -682,43 +687,27 @@ MOVED_ASSIGNMENT_KEYS = {
         "the 'Join team' flow uses the cap declared there, or the course default"
     ),
 }
-# Keys RENAMED in place (decision 0012), old -> new. For one release the old spelling is
-# still read - moved onto the new key, with a fault naming it - and nothing writes it; the
-# release after, it is an unknown key like any other.
+# Keys RENAMED (decision 0012), old -> new. Never read: an entry that still spells one is
+# DROPPED as NOT_MIGRATED rather than half-read - a destination silently defaulted to the
+# slug would hand out into a repo nobody named.
 RENAMED_DEST_KEYS = {
     "cohort_dest_repo": "semester_dest_repo",
     "cohort_dest_path": "semester_dest_path",
 }
 
 
-def read_renamed_keys(
+def not_migrated_keys(
     drops: Drops, entry: dict, where: str, renames: dict[str, str]
-) -> None:
-    """Move every old spelling in `entry` onto its new key, IN PLACE, noting each.
-
-    Called before anything reads the entry (and before `take_lines`, so the note can cite
-    the old key's line). An entry that sets both keeps the new one and is told the old one
-    is ignored: the two could disagree, and the new name is the one the file will keep."""
+) -> bool:
+    """Whether `entry` spells any old key, each noted as NOT_MIGRATED. Called before
+    `take_lines`, so the note can cite the old key's line."""
     lines = entry.get(LINES) if isinstance(entry.get(LINES), dict) else {}
-    for old, new in renames.items():
-        if old not in entry:
-            continue
-        value = entry.pop(old)
-        if new in entry:
-            drops.note(
-                where, old, f"renamed to `{new}:`, which is also set - ignored", lines
-            )
-            continue
-        entry[new] = value
-        if old in lines:
-            lines.setdefault(new, lines[old])
+    found = [old for old in renames if old in entry]
+    for old in found:
         drops.note(
-            where,
-            old,
-            f"renamed to `{new}:` - read under its old name for one release only; "
-            f"rename it",
-            lines,
+            where, old, not_migrated_text(old, renames[old]), lines, NOT_MIGRATED
         )
+    return bool(found)
 
 
 KNOWN_EVENT = frozenset(
@@ -885,7 +874,8 @@ def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[D
         if not isinstance(d, dict):
             _drop(drops, where, "not a mapping", "this copy never ships")
             continue
-        read_renamed_keys(drops, d, where, RENAMED_DEST_KEYS)
+        if not_migrated_keys(drops, d, where, RENAMED_DEST_KEYS):
+            continue
         lines = take_lines(d)
         src_repo, src_path = d.get("course_source_repo"), d.get("course_source_path")
         if not src_repo or not src_path:
@@ -1102,9 +1092,16 @@ def _parse_assignments(
         return out
     sources: dict[str, str] = {}  # course_source_repo -> the slug that claimed it
     names: dict[str, str] = {}  # semester-side name -> the slug that claimed it
-    for slug, entry in mapping.items():
-        if isinstance(entry, dict):
-            read_renamed_keys(drops, entry, f"assignments.{slug}", RENAMED_DEST_KEYS)
+    mapping = {
+        slug: entry
+        for slug, entry in mapping.items()
+        if not (
+            isinstance(entry, dict)
+            and not_migrated_keys(
+                drops, entry, f"assignments.{slug}", RENAMED_DEST_KEYS
+            )
+        )
+    }
     shared = _shared_sources(mapping)  # sources every citing entry names a dest for
     for slug, entry in mapping.items():
         where = f"assignments.{slug}"
@@ -2491,9 +2488,7 @@ def _write_output(line: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument(
-        "--semester-org", "--cohort-org", help="fetch schedule.yml from a semester org"
-    )
+    source.add_argument("--semester-org", help="fetch schedule.yml from a semester org")
     source.add_argument(
         "--file", help="validate a schedule.yml on disk (no GitHub access)"
     )

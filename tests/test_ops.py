@@ -618,7 +618,7 @@ def test_a_failed_refresh_after_a_new_template_is_a_reason_not_a_failure(
     monkeypatch.setattr(scaffold, "main", lambda: 0)
     monkeypatch.setattr(seed, "main", lambda: 1)
     raw = _request(
-        op="assignment.create", args={"number": "2", "tag": "f2026"}, preview=False
+        op="assignment.create", args={"number": "2", "semester": "f2026"}, preview=False
     )
     del raw["semester_org"]
     rc, body, _ = _main(monkeypatch, capsys, raw)

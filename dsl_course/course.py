@@ -27,11 +27,9 @@ GRADEBOOK_PREFIX = "grades-"
 # tell a course org from a semester without another read.
 COURSE_HUB_TOPIC = "dsl-course-hub"
 SEMESTER_TOPIC = "dsl-semester"
-# The semester topic's old spelling: still RECOGNISED for one release (a semester
-# bootstrapped before the rename carries it until Bootstrap semester is re-run), never
-# written. Every reader matches SEMESTER_TOPICS.
+# The semester topic's old spelling (decision 0012). Never read as a tier: an org still
+# carrying it is refused as NOT_MIGRATED, so the migration is what moves it.
 OLD_SEMESTER_TOPIC = "dsl-cohort"
-SEMESTER_TOPICS = (SEMESTER_TOPIC, OLD_SEMESTER_TOPIC)
 # How `scaffold_materials` names every materials repo (`course-materials-<tag>`) - the New
 # materials repo workflow takes only the tag, so this prefix is guaranteed by the toolkit
 # rather than a convention faculty could deviate from. Named here because `seed.refresh`
@@ -670,8 +668,8 @@ def coerce_date(value: object) -> date | None:
 
 
 # A semester's instructors file (decision 0012): ONE `instructors:` list, each entry with
-# a required `role:`. `OLD_PEOPLE_FILE` - a `people:` mapping of role -> list - is still
-# read for one release when the new file is absent, and is never written.
+# a required `role:`. `OLD_PEOPLE_FILE` - a `people:` mapping of role -> list - is never
+# read: a semester that still has it is refused as NOT_MIGRATED (`sync_faculty`).
 INSTRUCTORS_FILE = "instructors.yml"
 OLD_PEOPLE_FILE = "people.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
@@ -682,10 +680,10 @@ INSTRUCTOR_ROLES = {
 
 
 def people_by_role(meta: object) -> dict | None:
-    """A people block as `{role key: [entries]}`, from either shape: the new file's
-    `instructors:` list grouped by each entry's `role:` (an entry without a valid one is
-    left out - `sync_faculty` reports it), or the old `people:` mapping as it stands.
-    None when `meta` carries neither."""
+    """A people block as `{role key: [entries]}`: a semester's `instructors:` list grouped
+    by each entry's `role:` (an entry without a valid one is left out - `sync_faculty`
+    reports it), or a course file's `people:` mapping as it stands. None when `meta`
+    carries neither."""
     if not isinstance(meta, dict):
         return None
     listed = meta.get("instructors")

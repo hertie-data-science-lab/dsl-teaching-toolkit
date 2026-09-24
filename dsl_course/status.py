@@ -553,7 +553,6 @@ def main() -> int:
     parser.add_argument("--course-org", required=True)
     parser.add_argument(
         "--semester-org",
-        "--cohort-org",
         default=None,
         help="Required for the checklist; optional with --json-v1/--write (course only).",
     )

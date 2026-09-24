@@ -47,8 +47,8 @@ Never edit the GitHub teams directly; the file is the auditable record.
        email: "another@example.org"
    ```
 
-   A semester that still has the old `people.yml` keeps working for one release, with a
-   fault asking for the move to `instructors.yml`.
+   A semester that still has the old `people.yml` is refused as `NOT_MIGRATED` until the
+   migration moves it to `instructors.yml`.
 
    `email` is required and private: it is where this semester's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the semester site's instructor card. A `course_admins` entry's `email` is optional, and public, since `dsl-course.yml` is. Leave every entry without one and the semester's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
 

@@ -1235,9 +1235,7 @@ def main() -> int:
         required=True,
         help="COURSE-org repo to hand out from (e.g. assignment-1-f2026)",
     )
-    parser.add_argument(
-        "--semester-org", "--cohort-org", required=True, help="Semester org (target)"
-    )
+    parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
         "--roster",
         default=None,
@@ -1250,8 +1248,7 @@ def main() -> int:
         f"into each student repo. {SOLUTION_WARNING} A later moment belongs on the "
         f"assignment's schedule.yml entry, as `solution_datetime:`.",
     )
-    # The old switch, read for one release: `--solution` is `--solution-datetime now`.
-    parser.add_argument("--solution", action="store_true", help=argparse.SUPPRESS)
+
     parser.add_argument(
         "--slug",
         default="",
@@ -1281,9 +1278,6 @@ def main() -> int:
         "--dry-run", action=argparse.BooleanOptionalAction, default=None
     )
     args = parser.parse_args()
-    if args.solution:
-        log("  [moved] --solution is now --solution-datetime now")
-        args.solution_datetime = args.solution_datetime or SOLUTION_NOW
     when = args.solution_datetime.strip().lower()
     if when not in ("", SOLUTION_NOW):
         parser.error(

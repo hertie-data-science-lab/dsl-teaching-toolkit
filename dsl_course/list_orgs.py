@@ -1,7 +1,7 @@
 """list-orgs -- discover DSL course and semester orgs dynamically from GitHub.
 
 Source of truth: every org's `.github` repo is tagged by `bootstrap_course.py` -
-`dsl-course-hub` for a persistent COURSE org, `dsl-semester` (or the old `dsl-cohort`) for a per-year SEMESTER
+`dsl-course-hub` for a persistent COURSE org, `dsl-semester` for a per-year SEMESTER
 org. This tool searches for both topics across all repos the caller can see, reads
 each org's `.github/dsl-course.yml`, and emits a JSON / Markdown / YAML inventory
 of the two tiers separately.
@@ -24,8 +24,14 @@ import sys
 import yaml
 
 from .central import MissingCentralRef, resolve_central_ref
-from .course import COURSE_CONFIG, COURSE_HUB_TOPIC, SEMESTER_TOPICS
+from .course import (
+    COURSE_CONFIG,
+    COURSE_HUB_TOPIC,
+    OLD_SEMESTER_TOPIC,
+    SEMESTER_TOPIC,
+)
 from .discovery import discover_semesters, org_meta
+from .faults import not_migrated_text
 from .ghcli import gh_json
 from .log import log_err
 from .repos import org_exists
@@ -127,7 +133,7 @@ def discover_course_orgs() -> list[dict]:
 
 
 def discover_semester_orgs() -> list[dict]:
-    """Find every `.github` repo tagged with a semester topic and read its course pointer.
+    """Find every `.github` repo tagged `dsl-semester` and read its course pointer.
 
     Returns a list of dicts with keys: org, readable, course, url - sorted by course org,
     then semester, so the table groups each course's deliveries together. `readable: False`
@@ -135,8 +141,20 @@ def discover_semester_orgs() -> list[dict]:
     end up under Orphaned, saying which.
     """
     semesters = []
-    owners = sorted({o for topic in SEMESTER_TOPICS for o in _tagged_orgs(topic)})
-    for owner in owners:
+    tagged = _tagged_orgs(SEMESTER_TOPIC)
+    # An org still carrying the OLD topic (decision 0012) is listed as unreadable - so the
+    # run's exit code says the picture is partial - and named as NOT_MIGRATED.
+    for owner in sorted(set(_tagged_orgs(OLD_SEMESTER_TOPIC)) - set(tagged)):
+        log_err(f"{owner}: {not_migrated_text(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC)}")
+        semesters.append(
+            {
+                "org": owner,
+                "readable": False,
+                "course": "",
+                "url": f"https://github.com/{owner}",
+            }
+        )
+    for owner in tagged:
         meta = _metadata_or_none(owner)
         semesters.append(
             {

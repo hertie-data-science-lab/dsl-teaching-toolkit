@@ -89,7 +89,7 @@ from .discovery import (
     listing_row,
     org_meta,
 )
-from .faults import ConfigFault
+from .faults import NOT_MIGRATED, ConfigFault, not_migrated_text
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -1002,14 +1002,20 @@ class Dropped(str):
     field: str
     what: str
     allowed: tuple[str, ...]
+    code: str
 
     def __new__(
-        cls, where: str, field: str, what: str, allowed: tuple[str, ...] = ()
+        cls,
+        where: str,
+        field: str,
+        what: str,
+        allowed: tuple[str, ...] = (),
+        code: str = "",
     ) -> Self:
         # `  ! <where>: ` is the run-log form, unchanged; `what` on its own is what a
         # notification says, where the file is already named above it.
         out = super().__new__(cls, f"  ! {where}: {what}")
-        out.field, out.what, out.allowed = field, what, allowed
+        out.field, out.what, out.allowed, out.code = field, what, allowed, code
         return out
 
 
@@ -1062,27 +1068,20 @@ def _formats(value: object, where: str, dropped: list[str]) -> tuple[str, ...]:
     return ()
 
 
-# Settings RENAMED in place (decision 0012), old -> new: the old key is still read for one
-# release - moved onto the new one, with a line naming it - and nothing writes it.
+# Settings RENAMED (decision 0012), old -> new. The old key is never read: it is dropped
+# as NOT_MIGRATED, which names the new one, and the setting takes its default meanwhile.
 RENAMED_SETTINGS = {"format": "formats"}
 
 
-def _read_renamed(data: dict, where: str, dropped: list[str]) -> dict:
-    """`data` with every old key moved onto its new one, each move noted in `dropped`."""
+def _refuse_renamed(data: dict, where: str, dropped: list[str]) -> dict:
+    """`data` without its old keys, each one noted in `dropped` as NOT_MIGRATED."""
     out = dict(data)
     for old, new in RENAMED_SETTINGS.items():
-        if old not in out:
-            continue
-        value = out.pop(old)
-        if new in out:
-            what = f"`{old}:` is the old name of `{new}:`, which is also set - ignored"
-        else:
-            out[new] = value
-            what = (
-                f"`{old}:` is now `{new}:` (a list; the first is the runnable one) - read "
-                f"under its old name for one release only; rename it"
+        if old in out:
+            del out[old]
+            dropped.append(
+                Dropped(where, old, not_migrated_text(old, new), code=NOT_MIGRATED)
             )
-        dropped.append(Dropped(where, old, what))
     return out
 
 
@@ -1390,7 +1389,7 @@ def parse_assignment_defaults(raw: object) -> dict:
     # `formats` here answers New assignment's box, which takes a comma-separated list of
     # starters. Read as the box reads it, and dropped when unusable, so the toolkit's own
     # answer applies rather than `none`.
-    raw = _read_renamed(raw, _DEFAULTS_WHERE, dropped)
+    raw = _refuse_renamed(raw, _DEFAULTS_WHERE, dropped)
     starters = raw.get("formats")
     values = _read_settings(
         {k: v for k, v in raw.items() if k != "formats"},
@@ -1524,7 +1523,7 @@ def parse_grading_spec(text: str) -> GradingSpec:
     if not isinstance(data, dict):
         data = {}
     dropped: list[str] = []
-    data = _read_renamed(data, GRADING_FILE, dropped)
+    data = _refuse_renamed(data, GRADING_FILE, dropped)
     values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
     _late_pair(values)
     _cross_check(values, dropped)
@@ -1621,6 +1620,7 @@ def _spec_fault(
     plain: str = "",
     consequence: str = "",
     per_semester: bool = False,
+    code: str = "",
 ) -> ConfigFault:
     """One value in one assignment's definition that will not grade as written.
 
@@ -1643,6 +1643,7 @@ def _spec_fault(
         plain=plain,
         consequence=consequence,
         per_semester=per_semester,
+        code=code,
     )
 
 
@@ -1703,6 +1704,7 @@ def grading_spec_faults(
             field=dropped.field,
             lineno=lines.get((dropped.field,)),
             fix=_spec_fix(dropped),
+            code=dropped.code,
         )
         for dropped in spec.dropped
         if isinstance(dropped, Dropped)
@@ -1754,6 +1756,8 @@ def _spec_fix(dropped: Dropped) -> str:
     "Correct the value" is not an instruction about a line whose KEY is the mistake: a
     setting that moved here from schedule.yml, or a plain misspelling, has no value to
     correct."""
+    if dropped.code == NOT_MIGRATED:
+        return "run the migration, which rewrites it to the new name"
     if dropped.field not in SPEC_KEYS:
         return f"remove the line above, or spell it as one of: {', '.join(SPEC_KEYS)}"
     allowed = f" (allowed: {'/'.join(dropped.allowed)})" if dropped.allowed else ""
@@ -4903,7 +4907,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     p = sub.add_parser("distribute")
-    p.add_argument("--semester-org", "--cohort-org", required=True)
+    p.add_argument("--semester-org", required=True)
     p.add_argument(
         "--no-notify",
         action="store_true",
