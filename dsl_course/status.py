@@ -1,7 +1,7 @@
 """dsl-course status -- a per-semester checklist of every faculty & instructors input location.
 
 Faculty & instructors currently touch several distinct files across 2 orgs to run a semester: course
-identity, course admins, and classroom-config's roster/teams/grading sheets/schedule.yml (which
+identity, course admins, and semester-config's roster/teams/grading sheets/schedule.yml (which
 now carries the release plan too)/instructors.yml. This module answers one glance-able question -
 what's configured, what's still missing, and where do I go to fix it - by reusing
 each source's existing loader rather than re-deriving anything. Read-only; it
@@ -204,7 +204,7 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
     course_meta = org_meta(course_org)
 
     # Every course-org row lives in .github; every semester row lives in
-    # classroom-config - resolve each default branch once, not once per row.
+    # semester-config - resolve each default branch once, not once per row.
     course_branch = default_branch(course_org, ".github", fallback="main")
     semester_branch = default_branch(
         semester_org, schedule.CONFIG_REPO, fallback="main"
@@ -421,7 +421,7 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
         ),
     )
 
-    # One listing of classroom-config's open issues, read by both fault rows below. The
+    # One listing of semester-config's open issues, read by both fault rows below. The
     # digests are what the unattended runs have ALREADY told somebody about; a status
     # table that did not show them would be the one place a reader looks that disagrees
     # with the mail in their inbox. It raises rather than guessing, like every other read
@@ -467,7 +467,7 @@ def _document(course_org: str, semester_org: str | None) -> dict:
 
 
 def write(course_org: str, semester_org: str | None = None) -> int:
-    """Write `status.json`: the semester's into its private `classroom-config`, or - with no
+    """Write `status.json`: the semester's into its private `semester-config`, or - with no
     semester - the course's into its PUBLIC `.github` (counts only; see `status_json`).
     Returns the error count - a `log.Summary` of what it wrote when that is 0.
 
@@ -571,7 +571,7 @@ def main() -> int:
     add_preview_flag(
         parser,
         "Print the checklist (or, with --json-v1, the document) and write nothing "
-        "(default). --no-preview writes status.json into classroom-config (semester) "
+        "(default). --no-preview writes status.json into semester-config (semester) "
         "or .github (course).",
     )
     args = parser.parse_args()

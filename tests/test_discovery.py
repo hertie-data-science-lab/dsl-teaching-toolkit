@@ -17,7 +17,7 @@ from dsl_course import course, discovery, gh_contents
 INFRA_AND_CONTENT = [
     {"name": ".github", "topics": []},
     {"name": "welcome", "topics": []},
-    {"name": "classroom-config", "topics": []},
+    {"name": "semester-config", "topics": []},
     {"name": "my-course-f2026.github.io", "topics": []},  # the generated site repo
     {"name": "grades-alice", "topics": ["gradebook"]},  # private student gradebook
     {"name": "assignment-1-f2026-alice", "topics": ["submission"]},
@@ -406,7 +406,7 @@ def test_org_tier_reads_the_dotgithub_topic_then_the_semester_only_repos_then_gi
     assert discovery.org_tier([gh("dsl-semester"), {"name": "a1-ada"}]) == "semester"
     assert discovery.org_tier([gh("dsl-course-hub"), {"name": "cm-f2026"}]) == "course"
     assert discovery.org_tier([gh(), {"name": "welcome"}]) == "semester"
-    assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "semester"
+    assert discovery.org_tier([gh(), {"name": "semester-config"}]) == "semester"
     assert discovery.org_tier([gh(), {"name": "assignment-1-ada"}]) is None
     assert discovery.org_tier([{"name": "materials"}]) is None  # no .github at all
 
@@ -451,12 +451,12 @@ def test_student_repo_names_by_topic_or_by_name():
 
 
 def _closed_out(*orgs: str):
-    """`repo_is_archived` as it answers for a semester whose classroom-config is frozen."""
+    """`repo_is_archived` as it answers for a semester whose semester-config is frozen."""
     return lambda org, name: org in orgs
 
 
 def test_live_semesters_leaves_a_closed_out_semester_out(monkeypatch, capsys):
-    # An archived classroom-config IS the "this semester is finished" marker, and every
+    # An archived semester-config IS the "this semester is finished" marker, and every
     # write a course-side sweep would make on such an org 403s. Skipped as a LINE, not an
     # error: being finished is a state somebody chose.
     monkeypatch.setattr(

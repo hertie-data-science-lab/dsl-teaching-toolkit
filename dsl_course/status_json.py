@@ -25,9 +25,9 @@ and a render that matches the file byte for byte makes no commit. The moments in
 this was written.
 Nothing that moves on every scheduler tick is in it - the automation heartbeat
 included, which the console reads off the workflow's run list - or every semester's
-classroom-config would take a commit every quarter hour.
+semester-config would take a commit every quarter hour.
 
-PUBLIC AND PRIVATE. The semester file lives in the private `classroom-config`; the course
+PUBLIC AND PRIVATE. The semester file lives in the private `semester-config`; the course
 file lives in the course org's PUBLIC `.github`, so `render_course` puts nothing in it but
 repo names, counts and the course-side problems that already stand in that repo's own
 digest issue - never a handle, an email or a student repo name.
@@ -81,7 +81,7 @@ from .repos import default_branch
 from .schedule_plan import deploy_dest, deploy_section, row_kind
 from .sync_teams import known_handles
 
-# Where each file lives, inside `classroom-config` (semester) or `.github` (course).
+# Where each file lives, inside `semester-config` (semester) or `.github` (course).
 STATUS_PATH = ".dsl/status.json"
 # How many recent operations the semester file lists.
 RECENT_OPERATIONS = 10
@@ -162,7 +162,7 @@ class SemesterFacts:
 
     org: str
     listing: dict[str, dict] = field(default_factory=dict)
-    # classroom-config's tree, `{path: sha}` - the semester half of `inputs`.
+    # semester-config's tree, `{path: sha}` - the semester half of `inputs`.
     config_paths: dict[str, str] = field(default_factory=dict)
     sched: schedule.Schedule = field(default_factory=schedule.Schedule)
     # schedule.yml's whole digest list: sources not found, entries the parser dropped,
@@ -197,7 +197,7 @@ class SemesterFacts:
 
     @property
     def archived(self) -> bool:
-        """The finished marker (`discovery.semester_is_live`): an archived classroom-config."""
+        """The finished marker (`discovery.semester_is_live`): an archived semester-config."""
         row = self.listing.get(schedule.CONFIG_REPO) or {}
         return bool(row.get("archived"))
 
@@ -304,7 +304,7 @@ _FILES = {
 # marking phase, and the assignment is the entry in its id.
 MARKING = "marking"
 _SHEET = _Where("sheet", "semester", MARKING, "marks", "GRADING_SHEETS")
-# Any other classroom-config file: the semester's own setup.
+# Any other semester-config file: the semester's own setup.
 _OTHER = _Where("config", "semester", "K2", "", "CONFIG")
 # A template fault only one semester pays for (`ConfigFault.per_semester`): the repos it
 # handed out, or its schedule entry. The semester's, in the phase after hand out.
@@ -461,7 +461,7 @@ def _source_sentences(fault: ConfigFault, now: datetime) -> tuple[str, str]:
 
 def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
     """One `problems[]` entry for one fault. `org` is where the fault's file is when the
-    fault does not say otherwise (the semester, for everything in classroom-config).
+    fault does not say otherwise (the semester, for everything in semester-config).
 
     The fix pointer names the repo, path and line to edit and the console screen that
     edits it; a file on a branch other than `main` (a template's `solution`) says which."""
@@ -1128,7 +1128,7 @@ def render_course_file(course: CourseFacts, now: datetime) -> dict:
 
 
 def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) -> dict:
-    """The SEMESTER document, for the private classroom-config.
+    """The SEMESTER document, for the private semester-config.
 
     Problems: every fault in the semester's own files, the course's own two files (every
     semester pays for those), and the templates THIS semester's schedule cites - a template
@@ -1136,12 +1136,12 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
 
     Stage predicates (lifecycle, semester stages):
     - K1 the org resolves (`app_installed` is a stub until decision 0002);
-    - K2 classroom-config, welcome and the site repo exist, and the course registry lists it;
+    - K2 semester-config, welcome and the site repo exist, and the course registry lists it;
     - K3 instructors.yml is read, grants at least one instructor, and every entry has an email;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
     - K5 the roster has rows and every row has been sent a code;
     - K6 the site repo exists and its home page is written;
-    - K7 classroom-config is archived.
+    - K7 semester-config is archived.
     `live` is the finished marker's opposite (`discovery.semester_is_live`), not K1-K5."""
     faults = [
         *facts.schedule_faults,
@@ -1397,7 +1397,7 @@ def collect_course(course_org: str, now: datetime | None = None) -> dict:
 def collect_semester(
     course_org: str, semester_org: str, now: datetime | None = None
 ) -> dict:
-    """The semester document (`dsl.status/1`), for `classroom-config/.dsl/status.json`."""
+    """The semester document (`dsl.status/1`), for `semester-config/.dsl/status.json`."""
     now = now or datetime.now(UTC)
     return render_semester(
         gather_course(course_org), gather_semester(course_org, semester_org, now), now

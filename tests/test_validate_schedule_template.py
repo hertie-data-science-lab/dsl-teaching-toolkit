@@ -32,7 +32,7 @@ BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 7, 12, 0, tzinfo=BERLIN)
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE = ROOT / "templates" / "classroom-config" / "validate-schedule.yml"
+TEMPLATE = ROOT / "templates" / "semester-config" / "validate-schedule.yml"
 RAW = TEMPLATE.read_text()
 JOB = yaml.safe_load(RAW)["jobs"]["validate"]
 
@@ -247,7 +247,7 @@ def test_the_citation_is_a_link_at_the_line_that_needs_editing():
     fault = _fault("releases.lecture_02", timedelta(hours=3), 131)
     body = schedule.source_comment([fault], NOW, "Semester-f2026")
     assert (
-        "[`schedule.yml:131`](https://github.com/Semester-f2026/classroom-config/blob/main"
+        "[`schedule.yml:131`](https://github.com/Semester-f2026/semester-config/blob/main"
         "/schedule.yml#L131)"
     ) in body
     # No semester to build a URL from - run by hand, off a runner - and it is plain code.

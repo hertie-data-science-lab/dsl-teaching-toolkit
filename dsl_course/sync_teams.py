@@ -1,7 +1,7 @@
 """dsl-course sync-teams -- materialise per-(assignment, team) GitHub Teams from teams.csv.
 
 The group "access" half, mirroring sync_roster for enrolment. `teams.csv` (in the semester's
-private classroom-config) is the single source of truth for who is in which project team for
+private semester-config) is the single source of truth for who is in which project team for
 which assignment; this reconciles a GitHub Team `<assignment>-<team>` from each row so the
 team's repo access + @mentions track the CSV. Idempotent.
 

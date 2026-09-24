@@ -58,5 +58,5 @@ No required textbook. Both of these are free and used throughout:
 
 ## 5. Course sessions and readings
 
-Published on the course website, generated from `classroom-config/schedule.yml` and each
+Published on the course website, generated from `semester-config/schedule.yml` and each
 session's `readings/` folder.

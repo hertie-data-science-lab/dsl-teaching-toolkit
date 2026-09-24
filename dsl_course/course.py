@@ -18,7 +18,13 @@ from pathlib import Path
 COURSE_CONFIG = "dsl-course.yml"
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
 # Every semester org has exactly one, under exactly this name.
-CONFIG_REPO = "classroom-config"
+CONFIG_REPO = "semester-config"
+# Its name before decision 0010. Spelt here and in `migrate` only: the engine never reads a
+# repo under it, and `repos.create_repo` refuses to create one - a migrated semester's old
+# name is a live redirect (every clone, API read and sent link resolves through it) for as
+# long as nothing else takes the name.
+OLD_CONFIG_REPO = "classroom-config"
+RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO})
 # The per-student gradebook repo: grades-<handle> (grades.py creates them, discovery reads
 # them back). Named here so the reader and the writer cannot drift.
 GRADEBOOK_PREFIX = "grades-"

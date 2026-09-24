@@ -45,6 +45,6 @@
     ],
     "type": "object"
   },
-  "title": "classroom-config/students.csv",
+  "title": "semester-config/students.csv",
   "type": "array"
 }

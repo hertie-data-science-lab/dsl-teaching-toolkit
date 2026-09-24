@@ -5,16 +5,16 @@ grants, refresh workflows), so it runs against LIVE semesters. `repos.create_rep
 an already-existing repo as success, so the `if create_repo(...)` blocks are no
 first-run guard - the guard has to be per file. These tests pin the split:
 
-- USER-owned (classroom-config roster/teams/schedule/people/grades, welcome's
+- USER-owned (semester-config roster/teams/schedule/people/grades, welcome's
   student-facing README, and the course org's dsl-course.yml SSOT): seeded once, NEVER
   rewritten - a rewrite destroyed a live roster (enrol codes + onboarded handles) in
   hertie-dsl-demo-f2026.
 - SYSTEM-owned (welcome's onboard/team-formation workflows + the issue forms they parse,
-  classroom-config's dispatch-*.yml, its README contract and `*.sample` worked
+  semester-config's dispatch-*.yml, its README contract and `*.sample` worked
   examples, the semester's generated dsl-course.yml pointer): re-pushed on every run so
   fixes reach running semesters.
 
-Every user-editable classroom-config file is a scaffold/sample PAIR - `<file>` seeded once,
+Every user-editable semester-config file is a scaffold/sample PAIR - `<file>` seeded once,
 `<file>.sample` always converged - and the samples are injected from
 example-course/cohort-org/ rather than authored twice.
 
@@ -59,7 +59,7 @@ from tests.conftest import repo_row, stub_bootstrap
 
 # Derived from the seeding table, so a fifth config file cannot silently miss the set
 # these tests police - which is the whole point of the table existing.
-USER_OWNED = set(welcome.CLASSROOM_SCAFFOLDS)
+USER_OWNED = set(welcome.CONFIG_SCAFFOLDS)
 SYSTEM_OWNED = {
     ".github/workflows/dispatch-sync.yml",
     ".github/workflows/dispatch-sync-site.yml",
@@ -67,7 +67,7 @@ SYSTEM_OWNED = {
     ".github/workflows/dispatch-send-codes.yml",
     ".github/workflows/validate-schedule.yml",
     "README.md",
-    *welcome.CLASSROOM_SAMPLES,
+    *welcome.CONFIG_SAMPLES,
 }
 WELCOME_SYSTEM_OWNED = {
     ".github/workflows/onboard.yml",
@@ -160,14 +160,14 @@ def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
     # ran, so a release semester read the schema of code nobody had promoted yet.
     bc.setup_semester_extras("Semester-f2026", "main")
     for path in ("schedule.yml", "instructors.yml"):
-        body = fake.files[("classroom-config", path)]
+        body = fake.files[("semester-config", path)]
         assert f"{CENTRAL}/blob/main/docs/" in body, path
         assert f"{CENTRAL}/blob/release/docs/" not in body, path
 
 
 def test_fresh_semester_seeds_every_file(fake):
     bc.setup_semester_extras("Semester-f2026", "release")
-    assert USER_OWNED | SYSTEM_OWNED == fake.written("classroom-config")
+    assert USER_OWNED | SYSTEM_OWNED == fake.written("semester-config")
     assert fake.written("welcome") == WELCOME_SYSTEM_OWNED | {"README.md"}
     assert fake.skips == []
 
@@ -208,25 +208,25 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         "README.md": "# stale contract from an older engine\n",
         ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
     }
-    fake.files.update({("classroom-config", p): c for p, c in live.items()})
+    fake.files.update({("semester-config", p): c for p, c in live.items()})
     fake.files[("welcome", ".github/workflows/onboard.yml")] = "name: stale onboard\n"
 
     bc.setup_semester_extras("Semester-f2026", "release")
 
     # USER-owned files: untouched, byte for byte.
     for path in USER_OWNED:
-        assert ("classroom-config", path) not in fake.written("classroom-config"), path
-        assert fake.files[("classroom-config", path)] == live[path], path
-    assert fake.written("classroom-config") == SYSTEM_OWNED
+        assert ("semester-config", path) not in fake.written("semester-config"), path
+        assert fake.files[("semester-config", path)] == live[path], path
+    assert fake.written("semester-config") == SYSTEM_OWNED
 
     # SYSTEM-owned files: re-pushed, so the stale copies are replaced by the templates.
-    assert fake.files[("classroom-config", ".github/workflows/dispatch-sync.yml")] == (
-        welcome.template("classroom-config/dispatch-sync.yml")
+    assert fake.files[("semester-config", ".github/workflows/dispatch-sync.yml")] == (
+        welcome.template("semester-config/dispatch-sync.yml")
     )
-    assert fake.files[("classroom-config", "README.md")] == (
-        welcome.template("classroom-config/README.md")
+    assert fake.files[("semester-config", "README.md")] == (
+        welcome.template("semester-config/README.md")
     )
-    assert fake.files[("classroom-config", "teams.csv.sample")] == (
+    assert fake.files[("semester-config", "teams.csv.sample")] == (
         welcome.example_semester_file("teams.csv")
     )
     assert fake.files[("welcome", ".github/workflows/onboard.yml")] == (
@@ -238,14 +238,14 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
 def test_rerun_logs_one_skip_per_preserved_file(fake):
     fake.files.update(
         {
-            ("classroom-config", "students.csv"): "email\na@x.edu\n",
-            ("classroom-config", "schedule.yml"): "timezone: Europe/Berlin\n",
+            ("semester-config", "students.csv"): "email\na@x.edu\n",
+            ("semester-config", "schedule.yml"): "timezone: Europe/Berlin\n",
         }
     )
     bc.setup_semester_extras("Semester-f2026", "release")
     assert fake.skips == [
-        "classroom-config/students.csv",
-        "classroom-config/schedule.yml",
+        "semester-config/students.csv",
+        "semester-config/schedule.yml",
     ]
 
 
@@ -272,7 +272,7 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
 
     assert gh_contents.put_files(
         "Semester-f2026",
-        "classroom-config",
+        "semester-config",
         {
             "students.csv": b"header only\n",
             "teams.csv": b"t\n",
@@ -302,7 +302,7 @@ def test_a_create_only_write_commits_nothing_when_every_file_is_already_there(
     )
     assert gh_contents.put_files(
         "Semester-f2026",
-        "classroom-config",
+        "semester-config",
         {"students.csv": b"x\n"},
         "init: scaffolds",
         create_only=True,
@@ -313,12 +313,12 @@ def test_seed_if_absent_skips_an_empty_existing_file(fake):
     # New contract: a skip means the file IS present as intended, so seed_if_absent returns
     # True (a success, not a failure) and attempts no write. get_file_content returns "" for
     # an existing empty file - falsy but present, so it still counts.
-    fake.files[("classroom-config", "teams.csv")] = ""
+    fake.files[("semester-config", "teams.csv")] = ""
     assert gh_contents.seed_if_absent(
-        "Semester-f2026", "classroom-config", "teams.csv", b"x", "msg"
+        "Semester-f2026", "semester-config", "teams.csv", b"x", "msg"
     )
     assert fake.writes == []
-    assert "classroom-config/teams.csv" in fake.skips
+    assert "semester-config/teams.csv" in fake.skips
 
 
 def test_seed_if_absent_returns_false_only_when_the_write_fails(monkeypatch):
@@ -340,7 +340,7 @@ def test_seeded_scaffolds_render_this_semesters_tag(fake):
     # into a seeded file. A `{tag}` reaching a semester repo is a broken example, and it
     # would only be noticed by the faculty member who copy-pasted it.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
-    people = fake.files[("classroom-config", "instructors.yml")]
+    people = fake.files[("semester-config", "instructors.yml")]
     assert '"2027-09-01"' in people and '"2028-01-31"' in people
     for (repo, path), content in fake.files.items():
         assert "{tag}" not in content and "{year" not in content, f"{repo}/{path}"
@@ -351,7 +351,7 @@ def test_the_seeded_archive_hint_keeps_its_date_token(fake):
     # so the scaffold escapes it and the semester's copy must still read `{date}`. Rendered
     # away here, the suggested wording would teach a date typed out by hand.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
-    assert "{date}" in fake.files[("classroom-config", "schedule.yml")]
+    assert "{date}" in fake.files[("semester-config", "schedule.yml")]
 
 
 def test_the_seeded_people_stub_teaches_every_required_field(fake):
@@ -359,7 +359,7 @@ def test_the_seeded_people_stub_teaches_every_required_field(fake):
     # yield entries the real parser accepts with nothing missing - `email:` included,
     # since an entry without one is granted access but can never be notified.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
-    stub = fake.files[("classroom-config", "instructors.yml")]
+    stub = fake.files[("semester-config", "instructors.yml")]
     block = "# instructors:" + stub.split("# instructors:", 1)[1]
     uncommented = "\n".join(line.removeprefix("# ") for line in block.splitlines())
     faculty = sync_faculty.parse_faculty_from_meta(yaml.safe_load(uncommented) or {})
@@ -383,7 +383,7 @@ def test_the_sample_set_is_the_whole_worked_example_semester():
     # The set is DERIVED from example-course/cohort-org/, not enumerated - that is what
     # makes "every file in cohort-org/ ships as a sample" true rather than aspirational
     # (an enumeration once silently dropped the team-graded grades table).
-    assert set(welcome.CLASSROOM_SAMPLES) == {
+    assert set(welcome.CONFIG_SAMPLES) == {
         "students.csv.sample",
         "teams.csv.sample",
         "schedule.yml.sample",
@@ -391,7 +391,7 @@ def test_the_sample_set_is_the_whole_worked_example_semester():
         "grading_sheets/assignment-1.yml.sample",
         "grading_sheets/assignment-4-project.yml.sample",
     }
-    for path, source in welcome.CLASSROOM_SAMPLES.items():
+    for path, source in welcome.CONFIG_SAMPLES.items():
         assert (welcome.EXAMPLE_COHORT / source).is_file(), f"{path} <- {source}"
 
 
@@ -468,7 +468,7 @@ _SAMPLE_SHEETS = [
 def test_every_sample_sheet_is_what_the_toolkit_would_write(
     slug, key, is_group, phase, submitted, total, derived
 ):
-    # These ship into every semester's classroom-config as `grading_sheets/*.yml.sample`
+    # These ship into every semester's semester-config as `grading_sheets/*.yml.sample`
     # and are the only worked example a grader has. Hand-written, they drifted: their
     # headers quoted points, a late window and `autograde off` that the example course's
     # own grading_config.yml declared none of, and a status line the renderer never
@@ -497,18 +497,18 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
         ("students.csv", roster.FIELDS),
         ("teams.csv", teams.FIELDS),
     ):
-        assert header(welcome.template(f"classroom-config/{name}")) == fields
+        assert header(welcome.template(f"semester-config/{name}")) == fields
         assert header(welcome.example_semester_file(name)) == fields
     # header-only scaffolds: nobody to enrol, and no team to provision, by accident
-    assert roster.parse(welcome.template("classroom-config/students.csv")) == []
-    assert teams.parse(welcome.template("classroom-config/teams.csv")) == {}
+    assert roster.parse(welcome.template("semester-config/students.csv")) == []
+    assert teams.parse(welcome.template("semester-config/teams.csv")) == {}
 
 
 def test_samples_carry_nothing_that_only_makes_sense_inside_this_repo():
     # example-course/cohort-org/ is SHIPPING reference material: each file is pushed into
     # every semester's private config repo, where a repo-relative `docs/...` link resolves to
     # nothing. Full URLs only, as the seeded README already does.
-    for path, source in welcome.CLASSROOM_SAMPLES.items():
+    for path, source in welcome.CONFIG_SAMPLES.items():
         for line in welcome.example_semester_file(source).splitlines():
             assert "docs/" not in line or "https://" in line, f"{path}: {line}"
 
@@ -768,7 +768,7 @@ def test_semester_extras_reds_when_a_repo_cannot_be_created(fake, monkeypatch):
     monkeypatch.setattr(bc, "create_repo", lambda *a, **k: False)
     assert (
         bc.setup_semester_extras("Semester-f2026", "release") == 2
-    )  # welcome + classroom-config
+    )  # welcome + semester-config
     # both seeding blocks skipped - nothing was written into either repo
     assert fake.writes == []
 
@@ -785,7 +785,7 @@ def test_semester_extras_no_longer_repeat_the_org_tighten(fake, monkeypatch):
 
 
 def test_semester_extras_reds_when_a_dispatcher_write_fails(fake, monkeypatch):
-    # A failed SYSTEM-owned write (the classroom-config README contract, or a dispatch-sync
+    # A failed SYSTEM-owned write (the semester-config README contract, or a dispatch-sync
     # workflow) means membership/site sync never triggers, yet the create_repo blocks stay
     # green - so the previously-discarded write return is now counted. The SYSTEM-owned
     # writes go through dsl_course.welcome (shared with the nightly refresh), so that is
@@ -940,14 +940,14 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
     monkeypatch.setattr(seed, "refresh_welcome_workflows", welcome_failures)
-    monkeypatch.setattr(seed, "refresh_classroom_samples", sample_failures)
-    monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
+    monkeypatch.setattr(seed, "refresh_config_samples", sample_failures)
+    monkeypatch.setattr(seed, "refresh_config_system_files", system_failures)
     monkeypatch.setattr(seed, "refresh_semester_pointer", pointer_failures)
     monkeypatch.setattr(seed, "sync_team_lock", lock_failures)
     monkeypatch.setattr(seed, "refresh_status", status_failures)
     # The per-semester loop probes the semester ORG once: gone = unregister + skip. A live org
     # then reads the archived flag off its own listing (empty above = nothing archived),
-    # so org_exists True + an unarchived classroom-config = present and live, proceed.
+    # so org_exists True + an unarchived semester-config = present and live, proceed.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(seed, "org_exists", lambda org: True)
     monkeypatch.setattr(seed, "unregister_semester", lambda course, semester: True)
@@ -1039,13 +1039,13 @@ def test_refresh_leaves_an_archived_assignment_template_alone(monkeypatch):
 @pytest.mark.parametrize(
     "per_semester_job",
     ["welcome_failures", "sample_failures", "system_failures"],
-    ids=["welcome-workflows", "config-samples", "classroom-system-files"],
+    ids=["welcome-workflows", "config-samples", "config-system-files"],
 )
 def test_refresh_reaches_every_registered_semester(monkeypatch, per_semester_job):
     # Every per-semester job is seeded at Bootstrap semester, and then left behind by an
     # engine (and a set of schemas) that keep moving on central main. The nightly Refresh
     # is what closes that gap, so each has to reach EVERY registered semester, not just the
-    # course org. The classroom-config dispatchers/README used to refresh ONLY inside
+    # course org. The semester-config dispatchers/README used to refresh ONLY inside
     # Bootstrap semester, so three live semesters drifted a semester behind the templates.
     refreshed: list[str] = []
     _stub_refresh(
@@ -1057,7 +1057,7 @@ def test_refresh_reaches_every_registered_semester(monkeypatch, per_semester_job
 
 
 def test_refresh_repushes_every_semesters_course_pointer(monkeypatch):
-    # `.github/dsl-course.yml` is what a semester's classroom-config dispatchers read to
+    # `.github/dsl-course.yml` is what a semester's semester-config dispatchers read to
     # find their course org. SYSTEM-owned, but written only by Bootstrap semester's own
     # wiring until now, so every live semester's copy froze the day it was created - same
     # bug class as the landing pages below.
@@ -1079,7 +1079,7 @@ def test_refresh_repushes_every_semesters_course_pointer(monkeypatch):
 def test_refresh_seeds_and_converges_every_semesters_team_lock(monkeypatch):
     # `assignments.lock.yml` is SYSTEM-owned, but DERIVED (from the semester's schedule and
     # each template's grading_config.yml) rather than templated, so it cannot join
-    # welcome.CLASSROOM_SYSTEM_FILES. This loop is what seeds it - Bootstrap semester ends
+    # welcome.CONFIG_SYSTEM_FILES. This loop is what seeds it - Bootstrap semester ends
     # in a refresh - and what converges it every night, exactly like the pointer above.
     locked: list[tuple[str, str]] = []
     _stub_refresh(
@@ -1485,7 +1485,7 @@ def test_propagate_repo_secret_uses_stdin_and_counts_failures(monkeypatch, capsy
 def test_propagate_secret_refuses_a_personal_gh_token(monkeypatch, capsys):
     # The ORG secret has a WIDER blast radius than the repo secret _propagate_repo_secret
     # already guards: publishing a maintainer's personal PAT here hands it to every
-    # workflow in .github/welcome/classroom-config. Refuse, and red the bootstrap - a
+    # workflow in .github/welcome/semester-config. Refuse, and red the bootstrap - a
     # silent skip leaves an org whose buttons all fail weeks later with no auth.
     stub_bootstrap(monkeypatch)
     monkeypatch.delenv("DSL_BOT_TOKEN", raising=False)
@@ -1536,17 +1536,17 @@ def test_set_org_secret_sends_the_value_over_stdin(monkeypatch):
 
 def test_set_org_secret_reds_when_a_private_infra_mirror_fails(monkeypatch, capsys):
     # The org-secret write succeeding is not success on its own: on GitHub Free an org
-    # secret is never delivered to a PRIVATE repo, so a failed classroom-config mirror
+    # secret is never delivered to a PRIVATE repo, so a failed semester-config mirror
     # re-arms exactly the delivery gap the mirror exists to close - its dispatch
     # workflows read an empty DSL_BOT_TOKEN while the bootstrap reports green.
     monkeypatch.setattr(bc, "repo_exists", lambda org, r: True)
-    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "classroom-config")
+    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "semester-config")
     monkeypatch.setattr(
         bc, "gh", lambda *a, **k: (1, "gh: HTTP 403") if "--repo" in a else (0, "")
     )
 
     assert bc.set_org_secret("Course-Org", "DSL_BOT_TOKEN", "s3cret") is False
-    assert "failed to set repo secret on Course-Org/classroom-config" in (
+    assert "failed to set repo secret on Course-Org/semester-config" in (
         capsys.readouterr().err
     )
 
@@ -1645,7 +1645,7 @@ def test_semester_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, cap
         "org-workflows",
         "welcome-workflows",
         "config-samples",
-        "classroom-system-files",
+        "config-system-files",
     ],
 )
 def test_refresh_goes_red_when_it_could_not_converge(
@@ -1681,14 +1681,14 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
     ("job", "extra_args", "message"),
     [
         ("refresh_welcome_workflows", (), "welcome-repo files not written"),
-        ("refresh_classroom_samples", (), "classroom-config samples not written"),
+        ("refresh_config_samples", (), "semester-config samples not written"),
         (
-            "refresh_classroom_system_files",
+            "refresh_config_system_files",
             ("release",),
-            "classroom-config system files not written",
+            "semester-config system files not written",
         ),
     ],
-    ids=["welcome-workflows", "config-samples", "classroom-system-files"],
+    ids=["welcome-workflows", "config-samples", "config-system-files"],
 )
 def test_a_per_semester_refresh_reds_on_a_failed_write_and_claims_nothing(
     monkeypatch, capsys, job, extra_args, message
@@ -1708,15 +1708,15 @@ def test_a_per_semester_refresh_reds_on_a_failed_write_and_claims_nothing(
     assert message in out.err
 
 
-def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypatch):
-    # THE no-clobber invariant. refresh_classroom_system_files runs nightly against LIVE
+def test_the_nightly_config_refresh_touches_only_system_owned_files(monkeypatch):
+    # THE no-clobber invariant. refresh_config_system_files runs nightly against LIVE
     # semesters, so every path it writes is a path overwritten from a template every night.
     # The semester's own config - students.csv (enrol codes + onboarded handles), teams.csv,
     # schedule.yml, instructors.yml - is seeded create-if-missing at bootstrap and must stay
     # that way; adding one of them to the refresh set would destroy a live roster
     # (which is exactly what happened once, in hertie-dsl-demo-f2026).
     #
-    # Hard-coded on purpose: deriving the expectation from welcome.CLASSROOM_SYSTEM_FILES
+    # Hard-coded on purpose: deriving the expectation from welcome.CONFIG_SYSTEM_FILES
     # would make the test agree with any change to it.
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1727,7 +1727,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         ),
     )
 
-    assert welcome.refresh_classroom_system_files("Semester-f2026", "release") == 0
+    assert welcome.refresh_config_system_files("Semester-f2026", "release") == 0
     assert {path for _, path in written} == {
         "README.md",
         ".github/workflows/dispatch-sync.yml",
@@ -1736,7 +1736,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         ".github/workflows/dispatch-send-codes.yml",
         ".github/workflows/validate-schedule.yml",
     }, (
-        "the nightly refresh may only re-push SYSTEM-owned classroom-config files; a "
+        "the nightly refresh may only re-push SYSTEM-owned semester-config files; a "
         "USER-owned file here (students.csv, teams.csv, schedule.yml, instructors.yml) "
         "would be overwritten from the template every night"
     )

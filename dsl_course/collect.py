@@ -12,10 +12,10 @@ sheet, as information for whoever marks it. Faculty & instructors write the mark
   semester/<slug>-<handle>  (individual)   clone @ snapshot, overlay tests, run
   semester/<slug>-<team>    (group)              |
                 v
-  classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
+  semester-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
+  semester-config/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
                                                  completion check ran)
-  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, `info.completion` -
+  semester-config/grading_sheets/<slug>.yml     (`info.autograde`, `info.completion` -
                                                  never a mark)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
@@ -25,7 +25,7 @@ entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to befor
 deadline passes a `rev-list --before` pin. The hourly scheduler therefore freezes each
 assignment shortly after its grading deadline, writing one row per submission repo into
 
-    classroom-config/snapshots/<slug>.csv
+    semester-config/snapshots/<slug>.csv
         repo,sha,recorded_at,submitted_at,submitted_source
 
 and never rewriting it. `submitted_at` is WHEN that submission arrived and
@@ -160,10 +160,10 @@ from .log import (
 )
 from .repos import default_branch, repo_missing
 
-AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
+AUTOGRADE_DIR = "autograde"  # semester-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
 SKIP_RECORD = "_skipped.json"  # the same marker, for an assignment nothing grades
-SNAPSHOT_DIR = "snapshots"  # classroom-config/snapshots/<slug>.csv
+SNAPSHOT_DIR = "snapshots"  # semester-config/snapshots/<slug>.csv
 SNAPSHOT_FIELDS = (
     "repo",
     "sha",
@@ -336,12 +336,12 @@ def _zero_result(note: str) -> dict:
 
 
 def snapshot_path(slug: str) -> str:
-    """Where this assignment's deadline snapshot lives in `classroom-config`."""
+    """Where this assignment's deadline snapshot lives in `semester-config`."""
     return f"{SNAPSHOT_DIR}/{slug}.csv"
 
 
 def autograde_path(slug: str) -> str:
-    """Where this assignment's per-target result archive lives in `classroom-config`."""
+    """Where this assignment's per-target result archive lives in `semester-config`."""
     return f"{AUTOGRADE_DIR}/{slug}"
 
 
@@ -1069,7 +1069,7 @@ def _warn_if_late_commits_only(
 
 
 def has_autograde_results(semester_org: str, slug: str) -> bool:
-    """Whether `slug` carries the autograder's FIRE-ONCE marker in classroom-config: the
+    """Whether `slug` carries the autograder's FIRE-ONCE marker in semester-config: the
     `_graded.json` sentinel of a completed run, or the `_skipped.json` record of a decision
     not to grade. NOT bare `autograde/<slug>/` existence - an aborted run can leave that
     directory populated with archives but no sentinel, and it must then still regrade.
@@ -1919,7 +1919,7 @@ def sync_sheet(
     elif dry_run:
         log(f"    PREVIEW  {path} ({status})")
     else:
-        # The message carries counts, never a handle or a team name: classroom-config is
+        # The message carries counts, never a handle or a team name: semester-config is
         # private, but its commit messages are quoted back in public run logs.
         #
         # `expected_sha` is the sha this run READ the file at, so GitHub refuses the write
@@ -2450,7 +2450,7 @@ COMPLETION_DEP_SKIP = (
 # The ceiling on ANYTHING this module archives per submission - the executed notebook and
 # the grader's reading copy alike. Both are notebooks full of plots, i.e. base64 PNG all
 # the way down. Past this the state/verdict is still recorded and the copy is not:
-# classroom-config is a git repo somebody has to clone, and a term of 40 MB notebooks per
+# semester-config is a git repo somebody has to clone, and a term of 40 MB notebooks per
 # student makes it one nobody can.
 ARCHIVE_MAX_BYTES = 5 * 1024**2
 # The completion check runs OFFLINE. Not a jail - a real one needs a network namespace this
@@ -2989,7 +2989,7 @@ def _grader_document_for(
         if len(content) > ARCHIVE_MAX_BYTES:
             # The same cap the executed notebook gets, for the same reason: an HTML export
             # of a plot-heavy notebook is base64 PNG all the way down, and one per student
-            # makes classroom-config a repo nobody can clone.
+            # makes semester-config a repo nobody can clone.
             return GRADER_TOO_BIG
         # The verdict for a rendered export IS its extension; only the fallback has to
         # ask the file what it is.
@@ -2999,7 +2999,7 @@ def _grader_document_for(
             else source.suffix.lstrip(".")
         )
         # `person=True`: the PATH is `autograde/<slug>/<handle>.pdf`, and this log is
-        # world-readable even where classroom-config is not.
+        # world-readable even where semester-config is not.
         if not put_file(
             semester_org,
             CONFIG_REPO,
@@ -3531,7 +3531,7 @@ def collect(
                 # The notebook as the toolkit ran it, beside the result JSON: `errors:3` is
                 # a number, and the grader has to be able to see WHICH three. Capped,
                 # because a notebook of plots is base64 all the way down and
-                # classroom-config is a repo somebody has to clone. No path in this log -
+                # semester-config is a repo somebody has to clone. No path in this log -
                 # it would name the handle.
                 if len(executed) <= ARCHIVE_MAX_BYTES:
                     archives.append(
@@ -3624,7 +3624,7 @@ def collect(
         archive_ok = True
         for apath, acontent, amsg in archives:
             # `person=True`: the PATH is `autograde/<slug>/<handle>.json`, and this log is
-            # world-readable even when classroom-config is not.
+            # world-readable even when semester-config is not.
             if not put_file(
                 semester_org, CONFIG_REPO, apath, acontent, amsg, person=True
             ):

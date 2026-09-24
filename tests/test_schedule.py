@@ -1,4 +1,4 @@
-"""dsl_course.schedule pure core - classroom-config/schedule.yml is the single home for a
+"""dsl_course.schedule pure core - semester-config/schedule.yml is the single home for a
 semester's release plan (releases), due dates (assignments), and display-only calendar rows
 (events); a wrong parse here silently mis-times a release or mis-pins a grading deadline,
 so it's the bit that must be right. Times are timezone-aware (naive -> Europe/Berlin by
@@ -767,9 +767,9 @@ def test_unparseable_schedule_loads_as_empty_and_says_so_loudly(monkeypatch, cap
     assert sched.unparseable and not sched.releases and not sched.assignments
     err = capsys.readouterr().err
     # self-diagnosing: which semester, which file, the parser's own line/column, what to do
-    assert "Semester-f2026/classroom-config/schedule.yml is NOT valid YAML" in err
+    assert "Semester-f2026/semester-config/schedule.yml is NOT valid YAML" in err
     assert "line 5" in err and "flow mapping" in err
-    assert "fix classroom-config/schedule.yml on main" in err
+    assert "fix semester-config/schedule.yml on main" in err
     assert "NOTHING is scheduled" in err
 
 
@@ -1065,7 +1065,7 @@ def test_load_logs_every_dropped_entry_loudly(monkeypatch, capsys):
     assert sched.assignments == {}
     err = capsys.readouterr().err
     # which semester, which file, which entry, which field, and what it costs
-    assert "Semester-f2026/classroom-config/schedule.yml" in err
+    assert "Semester-f2026/semester-config/schedule.yml" in err
     assert "DROPPED" in err
     assert "assignments.assignment-2" in err
     assert "`due_datetime`" in err
@@ -1109,7 +1109,7 @@ def test_load_file_parses_and_surfaces_drops(tmp_path):
     "path",
     [
         "example-course/cohort-org/schedule.yml",
-        "templates/classroom-config/schedule.yml",
+        "templates/semester-config/schedule.yml",
     ],
 )
 def test_shipped_schedules_parse_with_nothing_dropped(path):
@@ -1527,9 +1527,7 @@ def test_validate_cli_reports_an_unreadable_semester_schedule(monkeypatch, capsy
     # that failed outright now raises - the CLI turns that into a line and a red run,
     # rather than a traceback or a false "OK: nothing dropped".
     def boom(semester_org):
-        raise RuntimeError(
-            "could not read Semester-f2026/classroom-config/schedule.yml"
-        )
+        raise RuntimeError("could not read Semester-f2026/semester-config/schedule.yml")
 
     monkeypatch.setattr(schedule, "load", boom)
     monkeypatch.setattr(

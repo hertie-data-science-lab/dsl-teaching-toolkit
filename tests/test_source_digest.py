@@ -185,7 +185,7 @@ def test_the_body_links_at_the_line_to_edit():
         sd.SCHEDULE, [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, SEMESTER
     )
     assert (
-        "at [`schedule.yml:36`](https://github.com/Semester/classroom-config/blob/main/"
+        "at [`schedule.yml:36`](https://github.com/Semester/semester-config/blob/main/"
         "schedule.yml#L36)"
     ) in body
 
@@ -460,7 +460,7 @@ def test_sync_reports_what_is_owed_a_mail_and_the_issue_to_link_to(gh):
     fault = _f("releases.a", timedelta(hours=3), lineno=36)
     out = sd.sync("Semester", "Course", [fault], NOW)
     assert out.mail == {"releases.a[x].course_source_path": sd.Severity.CRITICAL}
-    assert out.issue_url == "https://github.com/Semester/classroom-config/issues/7"
+    assert out.issue_url == "https://github.com/Semester/semester-config/issues/7"
     assert out.faults_by_key == {"releases.a[x].course_source_path": fault}
 
 

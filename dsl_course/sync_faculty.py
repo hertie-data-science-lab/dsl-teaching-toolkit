@@ -10,7 +10,7 @@ Two independent flows, split by role rather than by "stability":
   `course-admin` team. Unchanged from the original course-org-SSOT design.
 - `instructors`/`teaching_assistants` - genuinely semester-scoped (most semesters have
   different lecturers/TAs). Declared PER SEMESTER, in that semester's own
-  `classroom-config/instructors.yml` (see `load_semester_faculty`) - reconciled into that
+  `semester-config/instructors.yml` (see `load_semester_faculty`) - reconciled into that
   semester's own `instructors` team, AND synced UP into a parallel, tag-scoped
   `instructors-<tag>` team on the COURSE org (push access on just that tag's
   content repos, PLUS the central `.github` repo so its members can also use the
@@ -110,7 +110,7 @@ def _people_fault(
     fault's identity in the digest's state and its heading in the mail, and an entry
     somebody renames is not a new fault. The line is what sends anybody to it - and
     `repo`, with `file`, is what makes that line a place: the same block is a semester's
-    `classroom-config/instructors.yml` and a course org's `.github/dsl-course.yml`."""
+    `semester-config/instructors.yml` and a course org's `.github/dsl-course.yml`."""
     return ConfigFault(
         where,
         what,
@@ -187,7 +187,7 @@ def parse_faculty_from_meta(
     grant anything to, a handle that cannot be a GitHub username (adding it to a team
     would INVITE it, so the sync skips it), and a teaching entry no notification can
     reach. `file` and `repo` name where they are - the same schema is a semester's
-    `classroom-config/instructors.yml` and a course org's `.github/dsl-course.yml`, and a fault
+    `semester-config/instructors.yml` and a course org's `.github/dsl-course.yml`, and a fault
     that cited the wrong one would link a reader at a file that does not exist.
 
     The line stamps (`take_lines`) are consumed here whether or not anybody asked for
@@ -448,7 +448,7 @@ def load_faculty(course_org: str) -> dict[str, list[dict]] | None:
 
 @cache
 def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
-    """Fetch + parse this semester's own classroom-config/instructors.yml - instructors/TAs
+    """Fetch + parse this semester's own semester-config/instructors.yml - instructors/TAs
     only (no course_admins key here; that role stays exclusively course-level).
 
     Returns None when instructors.yml is genuinely ABSENT (do not prune). A file with no
@@ -694,7 +694,7 @@ def sync_semester_instructors(
     assignments: list[str],
     dry_run: bool = False,
 ) -> int:
-    """instructors/TAs: declared in this semester's own classroom-config/instructors.yml,
+    """instructors/TAs: declared in this semester's own semester-config/instructors.yml,
     reconciled into that semester's own `instructors` team AND a parallel, tag-scoped
     `instructors-<tag>` team on the course org - no merge with any other semester.
     `content_repos`/`assignments` are the course org's discovered repos, passed in
@@ -711,7 +711,7 @@ def sync_semester_instructors(
         # ABSENT instructors.yml: reconciling an empty desired set with prune=True would strip
         # this semester's instructors team (and its course-org tag team). Refuse to prune -
         # and stay GREEN, because a file faculty have to write is a CONTENT fault. It is
-        # already on the instructors.yml digest issue in this semester's classroom-config
+        # already on the instructors.yml digest issue in this semester's semester-config
         # (`read_semester_people`), with a mail beside it to the people who can act on it; a
         # red X here opens "Sync membership is failing" in the COURSE org and mails a
         # maintainer who cannot write another org's teaching team. A read that FAILED

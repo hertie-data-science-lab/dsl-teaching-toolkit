@@ -10,6 +10,8 @@ from fnmatch import fnmatch
 from functools import cache
 from typing import NamedTuple
 
+from .course import RETIRED_REPO_NAMES
+from .faults import NOT_MIGRATED
 from .ghcli import gh, is_already_exists, is_missing_resource
 from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
@@ -570,7 +572,16 @@ def create_repo(
 
     Sets `description` only on creation. Bringing an EXISTING repo's description up to a
     reworded one is converge_descriptions' job, off the listing the refresh already
-    holds - not this function's, which would have to pay a read per call to find out."""
+    holds - not this function's, which would have to pay a read per call to find out.
+
+    Refuses a RETIRED name (`course.RETIRED_REPO_NAMES`): a repo created there would end
+    the redirect GitHub keeps from the renamed one, and with it every link already sent."""
+    if name in RETIRED_REPO_NAMES:
+        log_err(
+            f"refused to create {org}/{name}: that name was retired and redirects to "
+            f"its renamed repo - {NOT_MIGRATED}: run the migration"
+        )
+        return False
     args = [
         "api",
         "--method",

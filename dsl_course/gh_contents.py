@@ -599,7 +599,7 @@ def _commit_tree(
         # API will create that first one. So the first write into a freshly-created repo
         # goes file by file through Contents, and every later write takes the batched path.
         #
-        # This is not hypothetical tidying: batching the classroom-config scaffolds into one
+        # This is not hypothetical tidying: batching the semester-config scaffolds into one
         # commit moved them off Contents, and the first semester org bootstrapped afterwards
         # could not seed that repo at all - the roster, schedule and instructors.yml never
         # landed, and every later step that reads them failed in turn.

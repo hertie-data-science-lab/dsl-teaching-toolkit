@@ -110,7 +110,7 @@ def test_the_maintainer_address_travels_by_the_org_secret_route(monkeypatch):
     calls: list = []
     monkeypatch.setenv(mailer.MAINTAINER_ENV, ADDRESS)
     monkeypatch.setattr(bc, "repo_exists", lambda org, r: True)
-    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "classroom-config")
+    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: r == "semester-config")
     monkeypatch.setattr(bc, "gh", lambda *a, **k: calls.append((a, k)) or (0, ""))
 
     assert bc.propagate_maintainer_email("Course-Org") == 0
@@ -118,7 +118,7 @@ def test_the_maintainer_address_travels_by_the_org_secret_route(monkeypatch):
     assert org_call[0][:3] == ("secret", "set", mailer.MAINTAINER_ENV)
     assert org_call[0][org_call[0].index("--visibility") + 1] == "selected"
     assert ".github" in org_call[0][org_call[0].index("--repos") + 1]
-    assert mirror[0][mirror[0].index("--repo") + 1] == "Course-Org/classroom-config"
+    assert mirror[0][mirror[0].index("--repo") + 1] == "Course-Org/semester-config"
     # stdin, never argv: `ps` on a shared runner reads the whole command line.
     for args, kwargs in calls:
         assert ADDRESS not in args

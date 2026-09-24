@@ -1304,7 +1304,7 @@ def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
     # a non-owner instructor's access - and submission repos granted only the student. The
     # group arm RETURNS inside itself, so the grant must sit before the split or every team
     # project repo would go on granting nobody but the team. READ, not write: marking
-    # happens in classroom-config/grading_sheets/<slug>.yml, after the snapshot froze HEAD.
+    # happens in semester-config/grading_sheets/<slug>.yml, after the snapshot froze HEAD.
     faculty = []
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: faculty.append(a))
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
@@ -3159,7 +3159,7 @@ def test_a_shared_handout_makes_one_drop_box_and_grants_every_student_push(
         ("assignment-1-submissions", "ben-k", "push"),
     ]
     # Read for faculty, like every other repo a semester receives: the work is marked in
-    # classroom-config, so a commit here would reach no gradebook.
+    # semester-config, so a commit here would reach no gradebook.
     assert drop_box["faculty"] == [
         ("assignment-1-submissions", assign.FACULTY_READ_ACCESS)
     ]

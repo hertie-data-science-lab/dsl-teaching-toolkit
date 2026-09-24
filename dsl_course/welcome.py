@@ -1,7 +1,7 @@
 """The SYSTEM-owned semester-repo seeding, and the template reader it shares.
 
 Split out of bootstrap_course so `seed.refresh` can re-push a live semester's onboarding
-workflows, config samples and classroom-config system files on its nightly run:
+workflows, config samples and semester-config system files on its nightly run:
 bootstrap_course imports seed, so seed cannot import bootstrap_course back - this module
 is what both sides may import.
 
@@ -29,17 +29,17 @@ TEMPLATES = ROOT / "templates"
 EXAMPLE_COHORT = ROOT / "example-course" / "cohort-org"
 EXAMPLE_COURSE = ROOT / "example-course" / "course-org"
 
-# Every user-editable file in classroom-config ships as a PAIR under one rule: `<file>` is
+# Every user-editable file in semester-config ships as a PAIR under one rule: `<file>` is
 # a minimal commented scaffold, seeded once and never rewritten; `<file>.sample` is a
 # filled, realistic example, always converged.
 #
 # The SCAFFOLD half - the file faculty fill in. `{tag}`/`{year}`/`{year_next}` are
 # rendered for this semester, so every example in a scaffold is copy-paste-correct.
-CLASSROOM_SCAFFOLDS = {
-    "students.csv": "classroom-config/students.csv",
-    "teams.csv": "classroom-config/teams.csv",
-    "schedule.yml": "classroom-config/schedule.yml",
-    "instructors.yml": "classroom-config/instructors.yml",
+CONFIG_SCAFFOLDS = {
+    "students.csv": "semester-config/students.csv",
+    "teams.csv": "semester-config/teams.csv",
+    "schedule.yml": "semester-config/schedule.yml",
+    "instructors.yml": "semester-config/instructors.yml",
 }
 
 # The SAMPLE half - DERIVED, not enumerated: every regular file in the worked example
@@ -48,7 +48,7 @@ CLASSROOM_SCAFFOLDS = {
 # silently dropped the team-graded grades table. The samples are therefore not authored
 # twice - they ARE the worked example the docs link to, and tests/test_bootstrap_seeding.py
 # parses each one with the real parser so none can go schema-stale.
-CLASSROOM_SAMPLES = {
+CONFIG_SAMPLES = {
     f"{rel}.sample": rel
     for rel in sorted(
         p.relative_to(EXAMPLE_COHORT).as_posix()
@@ -87,7 +87,8 @@ def welcome_workflow(rel: str) -> str:
     THE reader for these two files: seeding, refreshing and the tests all go through here,
     so nothing can ship (or assert about) a workflow whose script is only half written.
     Indentation comes from the marker's own line, because the script is a YAML block scalar
-    and a helper at the wrong column is a parse error in every semester at once."""
+    and a helper at the wrong column is a parse error in every semester at once. The
+    config repo's name is substituted, never spelt in the script."""
     out = []
     for line in template(rel).splitlines(keepends=True):
         if line.strip() != SHARED_SCRIPT_MARK:
@@ -98,7 +99,7 @@ def welcome_workflow(rel: str) -> str:
             f"{pad}{shared}\n" if shared.strip() else "\n"
             for shared in template(SHARED_SCRIPT).rstrip("\n").split("\n")
         ]
-    return "".join(out)
+    return "".join(out).replace("__CONFIG_REPO__", CONFIG_REPO)
 
 
 @cache
@@ -232,7 +233,7 @@ def join_team_form(opened: Mapping[str, str]) -> str:
     options = "\n".join(f"        - {slug}" for slug in opened)
     block = (
         f"{ASSIGNMENT_FIELD_START} - AUTO-GENERATED from this semester's\n"
-        "  # `classroom-config/assignments.lock.yml`: the assignments open for team\n"
+        "  # `semester-config/assignments.lock.yml`: the assignments open for team\n"
         "  # formation right now. Edits between these markers are overwritten.\n"
         "  - type: dropdown\n"
         "    id: assignment\n"
@@ -367,8 +368,8 @@ def refresh_welcome_workflows(org: str) -> int:
     return 0
 
 
-def refresh_classroom_samples(org: str) -> int:
-    """Converge a semester's classroom-config `*.sample` files on the worked example.
+def refresh_config_samples(org: str) -> int:
+    """Converge a semester's semester-config `*.sample` files on the worked example.
 
     Samples are machine-owned reference material - the engine never ingests them (only the
     un-suffixed names), and activation is copying rows across - so unlike the scaffolds
@@ -386,17 +387,17 @@ def refresh_classroom_samples(org: str) -> int:
         CONFIG_REPO,
         {
             path: example_semester_file(source).encode()
-            for path, source in CLASSROOM_SAMPLES.items()
+            for path, source in CONFIG_SAMPLES.items()
         },
-        "docs: refresh classroom-config samples from the worked example course",
+        "docs: refresh semester-config samples from the worked example course",
     ):
-        log_err(f"classroom-config samples not written in {org}")
+        log_err(f"semester-config samples not written in {org}")
         return 1
-    log_ok("classroom-config samples up to date")
+    log_ok("semester-config samples up to date")
     return 0
 
 
-# The SYSTEM-owned half of a semester's classroom-config: the schema contract faculty read,
+# The SYSTEM-owned half of a semester's semester-config: the schema contract faculty read,
 # and the workflows that make the repo act on what they put in it, as
 # `(path in the repo, template file)`.
 #
@@ -405,30 +406,30 @@ def refresh_classroom_samples(org: str) -> int:
 # handles); they are seeded create-if-missing by bootstrap_course and stay that way.
 # Adding one here would have the nightly refresh overwrite it every night.
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.
-CLASSROOM_SYSTEM_FILES = (
-    ("README.md", "classroom-config/README.md"),
-    (".github/workflows/dispatch-sync.yml", "classroom-config/dispatch-sync.yml"),
+CONFIG_SYSTEM_FILES = (
+    ("README.md", "semester-config/README.md"),
+    (".github/workflows/dispatch-sync.yml", "semester-config/dispatch-sync.yml"),
     (
         ".github/workflows/dispatch-sync-site.yml",
-        "classroom-config/dispatch-sync-site.yml",
+        "semester-config/dispatch-sync-site.yml",
     ),
     (
         ".github/workflows/dispatch-scheduled-release.yml",
-        "classroom-config/dispatch-scheduled-release.yml",
+        "semester-config/dispatch-scheduled-release.yml",
     ),
     (
         ".github/workflows/dispatch-send-codes.yml",
-        "classroom-config/dispatch-send-codes.yml",
+        "semester-config/dispatch-send-codes.yml",
     ),
     (
         ".github/workflows/validate-schedule.yml",
-        "classroom-config/validate-schedule.yml",
+        "semester-config/validate-schedule.yml",
     ),
 )
 
 
-def classroom_system_files(central_ref: str) -> dict[str, bytes]:
-    """CLASSROOM_SYSTEM_FILES rendered for one semester, read at call time so importing this
+def config_system_files(central_ref: str) -> dict[str, bytes]:
+    """CONFIG_SYSTEM_FILES rendered for one semester, read at call time so importing this
     module never touches the filesystem.
 
     Placeholders rather than `str.format`, because these files are full of `${{ }}` GitHub
@@ -439,13 +440,14 @@ def classroom_system_files(central_ref: str) -> dict[str, bytes]:
     return {
         path: pin_central_ref(template(rel), central_ref)
         .replace("__CENTRAL__", CENTRAL)
+        .replace("__CONFIG_REPO__", CONFIG_REPO)
         .encode()
-        for path, rel in CLASSROOM_SYSTEM_FILES
+        for path, rel in CONFIG_SYSTEM_FILES
     }
 
 
 def refresh_semester_pointer(org: str, course_org: str) -> int:
-    """Re-push a semester's `.github/dsl-course.yml` - the pointer its classroom-config
+    """Re-push a semester's `.github/dsl-course.yml` - the pointer its semester-config
     dispatchers read to find which course org to fire Sync membership / Sync site at.
 
     SYSTEM-owned, but it used to be written ONLY by Bootstrap semester's own wiring, so it
@@ -471,8 +473,8 @@ def refresh_semester_pointer(org: str, course_org: str) -> int:
     return 0
 
 
-def refresh_classroom_system_files(org: str, central_ref: str) -> int:
-    """Re-push a semester's SYSTEM-owned classroom-config files (CLASSROOM_SYSTEM_FILES).
+def refresh_config_system_files(org: str, central_ref: str) -> int:
+    """Re-push a semester's SYSTEM-owned semester-config files (CONFIG_SYSTEM_FILES).
 
     Called both at bootstrap and on the nightly refresh, so a fix to a dispatcher or to
     the schema contract reaches running semesters. It used to run only inside "Bootstrap
@@ -486,10 +488,10 @@ def refresh_classroom_system_files(org: str, central_ref: str) -> int:
     if not put_files(
         org,
         CONFIG_REPO,
-        classroom_system_files(central_ref),
-        "ci: refresh classroom-config contract + dispatchers",
+        config_system_files(central_ref),
+        "ci: refresh semester-config contract + dispatchers",
     ):
-        log_err(f"classroom-config system files not written in {org}")
+        log_err(f"semester-config system files not written in {org}")
         return 1
-    log_ok("classroom-config ready (config preserved, dispatchers refreshed)")
+    log_ok("semester-config ready (config preserved, dispatchers refreshed)")
     return 0

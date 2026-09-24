@@ -517,7 +517,7 @@ def test_archiving_an_archived_semester_had_nothing_to_do(monkeypatch):
     monkeypatch.setattr(
         teardown,
         "list_org_repos",
-        lambda org: [{"name": "classroom-config", "archived": True}],
+        lambda org: [{"name": "semester-config", "archived": True}],
     )
     out = teardown.close_out(COURSE, SEMESTER, dry_run=False)
     assert out == 0 and out.conclusion == "nothing_to_do"

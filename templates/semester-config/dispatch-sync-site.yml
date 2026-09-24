@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Dispatch site sync
 
-# Seeded into a semester's private classroom-config repo as
+# Seeded into a semester's private semester-config repo as
 # .github/workflows/dispatch-sync-site.yml (companion to dispatch-sync.yml, which handles
 # membership). Its only job: fire the course org's Sync site whenever schedule.yml,
 # instructors.yml or teams.csv changes here, so the semester website - which reads its release
@@ -22,7 +22,7 @@ name: Dispatch site sync
 # Reads the course org from THIS semester's own .github/dsl-course.yml `course:` pointer
 # (single source of truth). Fires a repository_dispatch (not workflow_dispatch) so Sync
 # site's ungated automatic path picks it up. Runs under secrets.DSL_BOT_TOKEN, which
-# classroom-config already carries (an infra repo) - unlike the content repos, so a direct
+# semester-config already carries (an infra repo) - unlike the content repos, so a direct
 # edit to a released content repo is instead caught by Sync site's daily cron.
 
 on:

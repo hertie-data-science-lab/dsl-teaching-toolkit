@@ -228,7 +228,7 @@ class ConfigFault:
     repo: str = ""
     path: str = ""
     # The config file this fault is IN, and the repo that holds it: `schedule.yml` in
-    # `classroom-config`. Distinct from `repo`/`path` above, which are the source a
+    # `semester-config`. Distinct from `repo`/`path` above, which are the source a
     # schedule entry POINTS AT. Together they make the citation, the deep link and the
     # blame query that decides who is told.
     file: str = ""
@@ -322,7 +322,7 @@ class ConfigFault:
         is in - is not known.
 
         `org` is where the CALLER is asking from - the semester, for every file in its
-        classroom-config. A fault that knows better says so (`in_org`, `ref`): an
+        semester-config. A fault that knows better says so (`in_org`, `ref`): an
         assignment's definition is a file in the course org on a `solution` branch, and
         the semester's digest is still the issue that carries it."""
         org = self.in_org or org

@@ -1420,7 +1420,7 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     # The grading sheet has its own tests below; here it is a no-op, so an autograding
-    # test does not have to stand up a roster, a snapshot and a classroom-config read.
+    # test does not have to stand up a roster, a snapshot and a semester-config read.
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
 
 
@@ -1428,7 +1428,7 @@ def _recorded_sheet_writes(
     monkeypatch, order: list | None = None, ok: bool = True
 ) -> list[dict]:
     """The `sync_sheet` calls collect makes, in order, and with which autograde counts.
-    `order` interleaves them with the classroom-config writes, which is what the
+    `order` interleaves them with the semester-config writes, which is what the
     sentinel-ordering tests are actually about; `ok` is what each call answers, so a test
     can refuse the freeze."""
     calls: list[dict] = []
@@ -1444,7 +1444,7 @@ def _recorded_sheet_writes(
 
 
 def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
-    """The (path, text) writes collect makes into classroom-config."""
+    """The (path, text) writes collect makes into semester-config."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(
         collect,
@@ -3144,7 +3144,7 @@ def test_the_executed_notebook_is_archived_beside_the_result(monkeypatch):
 def test_an_oversized_executed_notebook_is_recorded_but_not_archived(
     monkeypatch, capsys
 ):
-    # A notebook of plots is base64 all the way down, and classroom-config is a repo
+    # A notebook of plots is base64 all the way down, and semester-config is a repo
     # somebody has to clone. The STATE is the record; the copy is a convenience.
     _stub_collect(monkeypatch, None, grading="formats: [ipynb]\nautograde: false\n")
     monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
@@ -3987,7 +3987,7 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
 
 def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
     # The cron runs four times an hour for the length of the late window. A rewrite per
-    # tick would be a commit per tick in every semester's classroom-config.
+    # tick would be a commit per tick in every semester's semester-config.
     written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
     args = (
         "Course",
@@ -5775,7 +5775,7 @@ def test_a_grader_copy_past_the_archive_cap_is_counted_not_committed(
     monkeypatch, capsys
 ):
     # The same rule the executed notebook follows: an HTML export of a plot-heavy notebook
-    # is base64 PNG all the way down, and one per student makes classroom-config a repo
+    # is base64 PNG all the way down, and one per student makes semester-config a repo
     # nobody can clone. The SOURCE here is small - it is what nbconvert makes of it that
     # blows the cap, so this is the post-render guard, not the pre-read one.
     _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})

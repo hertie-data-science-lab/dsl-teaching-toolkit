@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Dispatch enrolment codes
 
-# Seeded into a semester's private classroom-config repo as
+# Seeded into a semester's private semester-config repo as
 # .github/workflows/dispatch-send-codes.yml (third of the dispatchers, beside
 # dispatch-sync.yml for membership and dispatch-sync-site.yml for the website). Its only
 # job: fire the course org's Send enrolment codes whenever students.csv changes here, so a

@@ -110,7 +110,7 @@ def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
     rewrote its README. A permanently red cron is how real failures stop being noticed.
 
     So it takes the channel this codebase already uses for "true, worth seeing, not a
-    failure" (see `templates/classroom-config/validate-schedule.yml`): a `::warning::`
+    failure" (see `templates/semester-config/validate-schedule.yml`): a `::warning::`
     annotation on a green run, which touches no exit code."""
     log_withheld(
         f"{course_org}/{repo}/{path} was NOT released - it is still the scaffold stub, "

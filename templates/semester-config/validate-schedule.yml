@@ -2,7 +2,7 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Validate schedule
 
-# Seeded into a semester's private classroom-config repo as
+# Seeded into a semester's private semester-config repo as
 # .github/workflows/validate-schedule.yml. Checks schedule.yml the moment it changes, in
 # the repo it lives in - faculty edit here, so the verdict belongs here rather than behind
 # a workflow in the course org.

@@ -134,14 +134,14 @@ _SYLLABUS_STUB = """\
 ## 5. Course sessions and readings
 
 <!-- Alternatively, the course website can publish this session by session, built from
-     `classroom-config/schedule.yml` (each session's title and learning objectives) and
+     `semester-config/schedule.yml` (each session's title and learning objectives) and
      each session's `readings/NN_.../` folder (its reading list). -->
 """
 
 # The filled syllabus faculty copy from, seeded beside their own SYLLABUS.md as
 # SYLLABUS.md.sample. Its BODY is the worked example course's real syllabus
 # (example-course/course-org/course-materials-f2026/SYLLABUS.md) rather than a second copy
-# authored here - the same rule the classroom-config samples follow, so the syllabus the
+# authored here - the same rule the semester-config samples follow, so the syllabus the
 # docs link to as the live example is the one faculty actually receive. Only the ownership
 # notice is added here, at the write site: the example file is a course team's own
 # INSTRUCTOR-OWNED syllabus in its own org, and must not claim otherwise.
@@ -1487,7 +1487,7 @@ def scaffold_assignment(
             f"# Assignment {number} - model solution\n\n"
             "Goes out to students after the deadline, two ways:\n\n"
             "- **On a clock** - set `solution_datetime:` on this assignment in the "
-            "semester's `classroom-config/schedule.yml`, beside its `due_datetime`. The "
+            "semester's `semester-config/schedule.yml`, beside its `due_datetime`. The "
             "hourly cron pushes this folder into every student/team repo at that "
             "moment. Needs `handout_datetime:` set too - the schedule can only push a "
             "solution into repos it provisioned. There is no default: leave it out and "
@@ -1783,7 +1783,7 @@ def main() -> int:
         choices=[*TEAM_FORMATIONS, COURSE_DEFAULT_CHOICE],
         default=COURSE_DEFAULT_CHOICE,
         help="Group assignments only: self_select = students use the welcome repo's "
-        "'Join team' form; assigned = you write classroom-config/teams.csv",
+        "'Join team' form; assigned = you write semester-config/teams.csv",
     )
     pa.add_argument(
         "--submit-via",

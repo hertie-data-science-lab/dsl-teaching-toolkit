@@ -22,9 +22,9 @@ release anything there. Being a course admin, conversely, grants nothing central
 | Right | Declared in | Level | Reaches |
 |---|---|---|---|
 | **Admin**, course-wide | course org `.github/dsl-course.yml` → `people:` `course_admins` (or the `admin` input at bootstrap) | **course** - once, for all years | `course-admin` team on the course org **and mirrored into every semester org** |
-| **Push**, one year's content | that semester's `classroom-config/instructors.yml` → `instructors` / `teaching_assistants` | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>` team |
-| **Read** on released materials | `classroom-config/students.csv` | semester | `students` or `auditors` team (`role` column) |
-| **Write** on a shared project repo | `classroom-config/teams.csv` | semester | `<assignment>-<team>` team |
+| **Push**, one year's content | that semester's `semester-config/instructors.yml` → `instructors` / `teaching_assistants` | **semester** - per year | semester org `instructors` team + course org `instructors-<semester>` team |
+| **Read** on released materials | `semester-config/students.csv` | semester | `students` or `auditors` team (`role` column) |
+| **Write** on a shared project repo | `semester-config/teams.csv` | semester | `<assignment>-<team>` team |
 
 `course_admins` is deliberately **course-level**: a course director should not be re-declared each
 year, and their admin rights need to span every semester. Instructors and TAs are deliberately
@@ -41,9 +41,9 @@ people: course_admins`"] -->|Sync membership| ca["`course-admin team (course org
 admin on .github → every workflow, all semesters`"]
   ca -->|mirrored down| cca["`course-admin team
 (every semester org)`"]
-  py["`SEMESTER org · classroom-config/instructors.yml
+  py["`SEMESTER org · semester-config/instructors.yml
 instructors + teaching_assistants`"] -->|Sync membership| ci["`instructors team (semester org)
-classroom-config + welcome`"]
+semester-config + welcome`"]
   py -->|synced upward| itag["`instructors-<semester> team (course org)
 push on that semester's repos + .github → the workflows`"]
   ui["GitHub Teams UI (hand-add)"] -.->|reverted on next sync| ca
@@ -86,7 +86,7 @@ covered; name per-year content repos `<thing>-<semester>`, or grant that repo by
 by **New materials repo** / **New assignment** is granted **as it is created**, not on some later
 sync.
 
-Semester-side, the same people get write on `classroom-config` and `welcome`.
+Semester-side, the same people get write on `semester-config` and `welcome`.
 
 ## What faculty hold on each repo
 
@@ -95,7 +95,7 @@ Two teams carry every faculty grant: `instructors` (this org's instructors) and 
 | Repo | `instructors` | `course-admin` |
 |---|---|---|
 | course org - **every** repo, `.github` included | push | admin |
-| semester `.github`, `welcome`, `classroom-config` | push | admin |
+| semester `.github`, `welcome`, `semester-config` | push | admin |
 | semester released materials | push | admin |
 | semester submission repos (incl. `<slug>-submissions`), `grades-<handle>` | **read** | admin |
 
@@ -106,7 +106,7 @@ carry the fix back with **Propagate semester edits**, or next year's semester st
 uncorrected version.
 
 Read on what a semester *receives* per person: marks live in
-`classroom-config/grading_sheets/<slug>.yml` (**Distribute grades** rewrites gradebooks from it),
+`semester-config/grading_sheets/<slug>.yml` (**Distribute grades** rewrites gradebooks from it),
 so an edit in the received copy would silently vanish. `.github` keeps push because GitHub
 requires write to trigger a `workflow_dispatch`.
 
@@ -148,7 +148,7 @@ a *population* (who teaches at DSL); the other three name a *role in one course*
 | Team | Lives in | Declared by | Grants |
 | --- | --- | --- | --- |
 | `instructors` | **`hertie-data-science-lab`** | nothing - manual | write on the toolkit → run **Bootstrap Course Org**. No access inside any course. |
-| `instructors` | a **semester** org | that semester's `classroom-config/instructors.yml` | semester-org membership for that year's instructors/TAs; reconciled |
+| `instructors` | a **semester** org | that semester's `semester-config/instructors.yml` | semester-org membership for that year's instructors/TAs; reconciled |
 | `instructors-<semester>` | the **course** org | the same `instructors.yml` (semester = e.g. `f2026`) | push on `.github` + that semester's content repos, i.e. the workflows for that semester; reconciled |
 | `instructors` | the **course** org (generic) | nothing - manual | a rare, permanent escape hatch |
 
@@ -179,8 +179,8 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
   actor's own permissions are only ever used as the gate.
 - **This is rotation, not a security boundary.** `instructors-<semester>` has push on `.github`, and no
   branch protection is configured, so a member could edit `dsl-course.yml` to add themselves to
-  `course_admins`, or extend their own `end` date in `classroom-config`. Fine for trusted
-  instructors; if you need a hard boundary, protect `main` on `.github` and `classroom-config`.
+  `course_admins`, or extend their own `end` date in `semester-config`. Fine for trusted
+  instructors; if you need a hard boundary, protect `main` on `.github` and `semester-config`.
 
 ## Where to look when access seems wrong
 

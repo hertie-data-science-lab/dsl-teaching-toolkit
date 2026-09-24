@@ -168,7 +168,7 @@ writing about that session and always ships.
 ## Live updates to the deployed `<course>.github.io` site
 
 Released materials appear on the site automatically: a release triggers **Sync site**, as
-does a push to `classroom-config/schedule.yml` or `instructors.yml`, and there is a daily sync
+does a push to `semester-config/schedule.yml` or `instructors.yml`, and there is a daily sync
 besides. Run [Sync site](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/sync-site.yml)
 by hand only when you don't want to wait - e.g. after editing a file inside an already-released repo.
 

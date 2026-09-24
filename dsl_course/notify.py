@@ -10,7 +10,7 @@ Two mails, each about a fault whose own channel reaches nobody in time:
   that the sync has just rebuilt over. The issue the sync files there is the record; the
   mail is what tells a person their work is in a commit and not on the site.
 - `notify_semester_archiving` mails the semester's teaching team the fortnight before the
-  whole semester org is frozen read-only. The notice issue in `classroom-config` is the
+  whole semester org is frozen read-only. The notice issue in `semester-config` is the
   record; the mail is what reaches somebody who is not reading GitHub notifications in the
   weeks after a term ends, which is exactly when this fires.
 - `notify_run_failed` mails the MAINTAINER when an unattended run genuinely broke. The

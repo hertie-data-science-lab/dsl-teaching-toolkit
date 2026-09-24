@@ -12,7 +12,7 @@ the order is the whole design:
    the semester - after step 4 every repo in it is read-only - and it is the last chance to
    carry a correction home. It never blocks the seal: a semester is closed whether or not
    faculty ever wanted its edits.
-1. close the toolkit's own open notices in `classroom-config` - the digest issues, the
+1. close the toolkit's own open notices in `semester-config` - the digest issues, the
    cadence alarm and the "archives on <date>" notice - saying the semester is now archived,
    since nothing will ever close them afterwards and an archived repo takes no issue
    write;
@@ -21,19 +21,19 @@ the order is the whole design:
 3. ARCHIVE every repo in the org - students' work first, then `welcome` (the way IN, so a
    finished term cannot still be joined), then the released content, the website and the
    semester's own `.github`;
-4. write the teardown record into the semester's private `classroom-config`;
-5. archive `classroom-config` itself, LAST.
+4. write the teardown record into the semester's private `semester-config`;
+5. archive `semester-config` itself, LAST.
 
 NOBODY IS REVOKED. An archived repo is read-only for everyone, so freezing IS the
 withdrawal of write access - and a student keeps read access to their own work, which is
 the point of closing a semester rather than deleting it. Membership and teams are left
 exactly as they are.
 
-Seal last, because an archived `classroom-config` is what every course-side sweep reads as
+Seal last, because an archived `semester-config` is what every course-side sweep reads as
 "this semester is finished, leave it frozen" (`discovery.semester_is_live`) - so until that
 step lands the semester is still a live one, and a run that died half way is resumed simply
 by running it again. Every step is idempotent: a repo already archived is passed over, and
-a semester whose `classroom-config` is archived is already closed out and does nothing at
+a semester whose `semester-config` is archived is already closed out and does nothing at
 all.
 
 NOTHING IS EVER DELETED. The bot holds no `delete_repo` scope, and every step here is
@@ -197,17 +197,17 @@ def _is_template(repo: dict) -> bool:
 
 
 def freeze_order(semester_org: str, repos: list[dict]) -> list[dict]:
-    """Every repo in the org except `classroom-config`, in the order they are frozen.
+    """Every repo in the org except `semester-config`, in the order they are frozen.
 
     Students' work first, because it is the semester's record and the reason any of this is
     reversible rather than a delete. `welcome` next: its Join issues are how a student
     enrols themselves, and an open one on a finished semester writes into a
-    `classroom-config` that is about to be sealed - a red run instead of a place. Then the
+    `semester-config` that is about to be sealed - a red run instead of a place. Then the
     released content, then the website (after step 2's final sync), and the semester's own
     `.github` last of the live repos, because it holds the dispatchers that wake everything
     else.
 
-    `classroom-config` is not here at all: it is the marker, and the caller freezes it
+    `semester-config` is not here at all: it is the marker, and the caller freezes it
     after the record is written."""
     derived = classify_repos(repos)
     site_repo = pages_repo(semester_org)
@@ -248,7 +248,7 @@ def render_record(
     registrar: str,
     propagated: str,
 ) -> str:
-    """The teardown record, as it is written into the private `classroom-config`.
+    """The teardown record, as it is written into the private `semester-config`.
 
     It names the repos it froze. That is the point of it and it is safe: this file is
     written into the semester's PRIVATE record, beside the roster those names are drawn from,
@@ -339,7 +339,7 @@ def _carry_back(course_org: str, semester_org: str, dry_run: bool) -> tuple[str,
 
 
 def _close_notices(semester_org: str, dry_run: bool) -> int:
-    """Step 1: close the toolkit's own open issues in `classroom-config`.
+    """Step 1: close the toolkit's own open issues in `semester-config`.
 
     Every one of them asks somebody to go and fix a file in a repo that is about to be
     read-only, and nothing will ever close them afterwards - an archived repo takes no
@@ -404,7 +404,7 @@ def _final_sync(course_org: str, semester_org: str, dry_run: bool) -> int:
 
 
 def _freeze(semester_org: str, listing: list[dict], dry_run: bool) -> Closed:
-    """Step 3: archive every repo in the org but `classroom-config`, in `freeze_order`.
+    """Step 3: archive every repo in the org but `semester-config`, in `freeze_order`.
 
     Per-repo lines go through `log_person`, because a `<slug>-<handle>` on stdout of a
     workflow running in the course org's PUBLIC `.github` publishes who was in the
@@ -447,7 +447,7 @@ def close_out(
     `sealed_on` is the real clock either way - it is when the freeze actually happened.
 
     Only a failed FREEZE holds the seal back, because that is the one failure the marker
-    would lie about: a `classroom-config` archived over a repo that is still live tells
+    would lie about: a `semester-config` archived over a repo that is still live tells
     every sweep the semester is finished when it is not. Everything else - the propagate, the
     notices, the final sync - counts towards the exit code and is left for a re-run, which
     is safe because every step here is idempotent.

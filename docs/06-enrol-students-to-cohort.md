@@ -13,7 +13,7 @@
 Live example roster: [`example-course/cohort-org/students.csv`](../example-course/cohort-org/students.csv).
 
 1. **Add the students to the roster.**
-   - Edit `classroom-config/students.csv` in the **semester** org
+   - Edit `semester-config/students.csv` in the **semester** org
    - Editing directly via the web UI is fine, or edit the repo locally, commit & push
    - One row per student: fill the first three columns - `hertie_email`, `name`, and optionally `role` (blank means enrolled; `auditor` gets the materials but no assignments or grades)
    - Leave the rest (`github_handle`, `github_id`, `enrol_code`) blank - onboarding and step 2 fill them in for you
@@ -27,7 +27,7 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
    - **Re-pushing is safe.** Each row records `code_sent_at` just before its code goes out, and only rows without it are emailed - so a later push chases the students who still need a code and leaves the rest alone. To deliberately re-send, clear that row's `code_sent_at` and push.
      > On a semester whose codes went out before `code_sent_at` existed, the first run mails every not-yet-onboarded student their existing code again; fill `code_sent_at` on the rows already mailed to skip it.
 
-   - **A roster the toolkit cannot read stops the send, not the run.** Excel in a German locale saves a `;`-delimited CSV, and a deleted header row reads the same way: nothing is written, nothing is sent, and the run stays **green**. The same push opens *"students.csv has rows the toolkit cannot use"* in the semester's `classroom-config` and emails whoever pushed it, naming the row and the column (never a cell). Save the file as comma-separated UTF-8 and push again. Every file you edit is checked this way - [Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
+   - **A roster the toolkit cannot read stops the send, not the run.** Excel in a German locale saves a `;`-delimited CSV, and a deleted header row reads the same way: nothing is written, nothing is sent, and the run stays **green**. The same push opens *"students.csv has rows the toolkit cannot use"* in the semester's `semester-config` and emails whoever pushed it, naming the row and the column (never a cell). Save the file as comma-separated UTF-8 and push again. Every file you edit is checked this way - [Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
    - **A roster with nothing but its header is green too** - nothing outstanding, nothing to report.
    - **A run that genuinely breaks says so.** Everything else - no roster at all, no mail transport, a write GitHub refused - goes red, opens *"Send enrolment codes is failing"* in the course org's `.github` (cc `course-admin`) and emails the toolkit maintainer the failed step's log. It closes itself on the next successful send.
 
@@ -57,12 +57,12 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 
 - There are 2 methods to form groups:
    1. Students open a **Join team** issue in `welcome`, 
-   2. instructors edit `classroom-config/teams.csv`(`assignment, team, github_handle`)
+   2. instructors edit `semester-config/teams.csv`(`assignment, team, github_handle`)
 - The issue flow only accepts an assignment **declared under `assignments:` in
-  `classroom-config/schedule.yml`**, **whose template says `team_formation: self_select`**,
+  `semester-config/schedule.yml`**, **whose template says `team_formation: self_select`**,
   and **whose team-formation window is open**. It enforces that assignment's
   `max_team_size` (default: the course's `assignment_defaults`, else 5). Every answer
-  reaches the form through the generated mirror `classroom-config/assignments.lock.yml`.
+  reaches the form through the generated mirror `semester-config/assignments.lock.yml`.
   Three outcomes, by label:
   - `team-recorded` (closed): the row is in `teams.csv`. The comment points to step 2 on
     the assignment page, where the team's repo appears within minutes.

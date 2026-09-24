@@ -49,9 +49,9 @@ breaks a live link that faculty click:
 |---|---|
 | `docs/01-new-course-org.md` | `config_digest.COURSE` |
 | `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
-| `docs/05-manage-teaching-team.md` | `templates/classroom-config/instructors.yml`, `config_digest.PEOPLE` |
+| `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
-| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/classroom-config/schedule.yml`, `templates/classroom-config/validate-schedule.yml` |
+| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/validate-schedule.yml` |
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
 | `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS` |
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
@@ -81,7 +81,7 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
-- **`grades.team_lock_text`'s LAYOUT.** `classroom-config/assignments.lock.yml` is parsed by
+- **`grades.team_lock_text`'s LAYOUT.** `semester-config/assignments.lock.yml` is parsed by
   line scanners - one in `templates/welcome/team-formation.yml` (github-script has no YAML
   library), one in `grades.parse_team_lock` - which match a two-space assignment key
   and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
@@ -119,7 +119,7 @@ Things whose *literal spelling* is depended on from outside Python:
   refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-semester`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
-- **An ARCHIVED `classroom-config`** is a semester's "finished" marker. `archive` (`teardown`) archives it
+- **An ARCHIVED `semester-config`** is a semester's "finished" marker. `archive` (`teardown`) archives it
   last, after everything else it archives; `discovery.semester_is_live` is what every
   course-side sweep that WRITES asks (the scheduler, the faculty and membership syncs, the
   enrolment codes, the site build), and `seed.refresh` and `grades.sync_team_lock` read the
@@ -300,7 +300,7 @@ its annotation instead of emailing them
 (`tests/test_validate_schedule_template.py` enforces it).
 
 Nothing converges a semester's addresses either. `email:` is required on every instructor and
-TA entry in a semester's `classroom-config/instructors.yml`, and that file is INSTRUCTOR-OWNED, so
+TA entry in a semester's `semester-config/instructors.yml`, and that file is INSTRUCTOR-OWNED, so
 no refresh can fill it in: until somebody edits it by hand the whole feature is inert on
 that semester - every fault still opens its digest issue and still @mentions the instructors
 team, and no email goes anywhere. `Check semester setup`'s C7 row counts the entries without
@@ -332,9 +332,9 @@ The full rule is the ownership note at the top of `bootstrap_course.py`.
 
 ### The one SYSTEM-OWNED file that is not a template
 
-`classroom-config/assignments.lock.yml` is SYSTEM-OWNED like the dispatchers, but it is
+`semester-config/assignments.lock.yml` is SYSTEM-OWNED like the dispatchers, but it is
 DERIVED - rendered per semester from that semester's `schedule.yml` and each named template's
-`grading_config.yml` - so it cannot join `welcome.CLASSROOM_SYSTEM_FILES`, which maps a
+`grading_config.yml` - so it cannot join `welcome.CONFIG_SYSTEM_FILES`, which maps a
 repo path to a file under `templates/`. Adding a file like this is four places:
 
 1. the renderer and the writer, beside what owns the subject (`grades.team_lock_text` /
@@ -353,9 +353,9 @@ It carries no `.sample` twin and is absent from `example-course/cohort-org/`: no
 it, so there is nothing in it for a person to copy.
 
 `.dsl/status.json` (`dsl.status/1`, built by `status_json`, written by `status.write`) is the
-same kind of file, twice: in each semester's private `classroom-config`, and in the course org's
+same kind of file, twice: in each semester's private `semester-config`, and in the course org's
 public `.github` (counts only, never a handle or an email). `seed.refresh` rewrites every live
-semester's and the course's; the single-semester run of each of the four classroom-config dispatch
+semester's and the course's; the single-semester run of each of the four semester-config dispatch
 targets (scheduler, Sync membership, Send enrolment codes, Sync site) rewrites that semester's;
 every Console run rewrites its semester's and the course's (`status.write_after_op`). It records
 the git shas of its inputs, never a timestamp, so an unchanged render makes no commit.
@@ -462,12 +462,12 @@ with the faults would never match and every run would open a new issue, so these
 
 | issue title | file | where it lives |
 | --- | --- | --- |
-| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | semester `classroom-config` |
-| `people.yml has entries the sync cannot use` | `instructors.yml` | semester `classroom-config` |
-| `students.csv has rows the toolkit cannot use` | `students.csv` | semester `classroom-config` |
-| `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `classroom-config` |
-| `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `classroom-config` |
-| `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `classroom-config` |
+| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | semester `semester-config` |
+| `people.yml has entries the sync cannot use` | `instructors.yml` | semester `semester-config` |
+| `students.csv has rows the toolkit cannot use` | `students.csv` | semester `semester-config` |
+| `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
+| `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
+| `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `semester-config` |
 | `dsl-course.yml / cohort registry has entries the sync cannot use` | both course files | course `.github` |
 
 The body is rewritten every tick (GitHub does not email about that); a comment - which it
@@ -551,7 +551,7 @@ systemd timer on the lab server ds01 - `dsl-scheduled-release.timer` running
 `scripts/maintenance/dsl-scheduled-release.sh`, both in `hertie-data-science-lab/ds01-infra` - which
 POSTs `repository_dispatch: scheduled-release` to the `.github` repo of every `dsl-course-hub`
 org at :00/:15/:30/:45. A push to a semester's `schedule.yml`, `instructors.yml`, `students.csv` or
-`teams.csv` dispatches the same event with `driver: classroom-config`, and that run releases
+`teams.csv` dispatches the same event with `driver: semester-config`, and that run releases
 into **that semester only** (checked against the registry) and asks Sync site for any render
 instead of pushing the site itself. Each driver guards the other; the cron and ds01 runs
 always walk every semester. All of them share the one `scheduled-release` group, which holds a
@@ -566,7 +566,7 @@ offsets deliberately interleave GitHub's :07/:22/:37/:52, so a lost fire costs a
 
 `cadence.py` reads the workflow's own run history on every real all-semesters run (never on a
 preview) and files two self-closing issues. A due moment that shipped more than **60 min** late
-opens *Scheduled release: late delivery* in that semester's private `classroom-config`, which
+opens *Scheduled release: late delivery* in that semester's private `semester-config`, which
 closes once the last **8** qualifying gaps are all 20 min or less. A dispatch-driven run more
 than **2h** old means ds01 is down and opens *Scheduled release: driver health* in the course
 org's `.github`; the last GitHub cron fire is printed there as information and never alarms.
@@ -700,7 +700,7 @@ Promote.
 | `.github/cohort-courses-pages.yml`, key `cohorts:` | `.github/semesters.yml`, key `semesters:` | course org |
 | `cohort_dest_repo:`, `cohort_dest_path:` | `semester_dest_repo:`, `semester_dest_path:` | `schedule.yml` assignment and `deploy:` entries |
 | `cohort_defaults:` | `semester_defaults:` | course org `dsl-course.yml` |
-| `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `classroom-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
+| `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `semester-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
 | `format:` (one word) | `formats:` (a list; the first is the runnable one) | `grading_config.yml` on a template's `solution` branch; `assignment_defaults:` in `dsl-course.yml` |
 | dispatch payload `cohort_org` | `semester_org` | the semester dispatchers (re-rendered by Refresh actions) |
 | dispatch payload `all_cohorts` | `all_semesters` | **ds01-infra's membership timer must switch at Promote.** Until then Sync membership reads `all_cohorts` as a deprecated alias (a log line, no fault) - the one dispatch exception |
@@ -723,12 +723,12 @@ Promote.
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
 | CLI entry `python3 -m dsl_course.teardown` | `python3 -m dsl_course.archive` (the documented entry point; `teardown` stays as the frozen module name) | the Archive semester workflow and the console op |
 | copy "teardown", "close out", "freeze" (a semester) | "archive" | logs, the archive record and notices, forms, docs |
-| archive notice title `Cohort archives on <date>` | `Semester archives on <date>` | semester `classroom-config` issues. The prefix is an append-only chain (`teardown.ARCHIVE_NOTICE_PREFIXES`): an open notice under the old prefix is still found and edited, never duplicated - nothing to migrate |
+| archive notice title `Cohort archives on <date>` | `Semester archives on <date>` | semester `semester-config` issues. The prefix is an append-only chain (`teardown.ARCHIVE_NOTICE_PREFIXES`): an open notice under the old prefix is still found and edited, never duplicated - nothing to migrate |
 | console schema `people.schema.json` | `instructors.schema.json` | `console/schemas/` (the console follows in WP-A3) |
 | workflow env `COHORT_ORG` | `SEMESTER_ORG` | rendered workflows |
 | semester template description `<slug> - cohort assignment template` | `<slug> - semester assignment template` | converged by `repos.SUPERSEDED_DESCRIPTION_ENDINGS` |
 | doc anchors `#closing-the-cohort-out`, `#peopleyml`, `#write-your-terms-plan`, `#carrying-cohort-edits-back`, `#cohort-setup-per-year`, `#only-staff-in-these-teams`, `#what-instructors-tag-reaches`, `#end-of-term` | `#archiving-the-semester`, `#instructorsyml`, `#write-your-semesters-plan`, `#carrying-semester-edits-back`, `#semester-setup-per-year`, `#only-instructors-in-these-teams`, `#what-instructors-semester-reaches`, `#end-of-semester` | docs; each old anchor is kept as an HTML alias above its heading, so a link already posted still lands |
-| paths KEPT, not renamed: `.github/.missing-cohorts`, `classroom-config/cohort-gradebook.csv`, `classroom-config/archive/teardown.md` | unchanged here (WP-A2 moves the records) | the tool must NOT rename them |
+| paths KEPT, not renamed: `.github/.missing-cohorts`, `semester-config/cohort-gradebook.csv`, `semester-config/archive/teardown.md` | unchanged here (WP-A2 moves the records) | the tool must NOT rename them |
 
 Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
 (`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,

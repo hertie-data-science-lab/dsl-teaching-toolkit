@@ -63,7 +63,7 @@ semester config pointer + auto-generated student-facing org page`"]
     welcome["`**welcome**
 
 Join issue → onboard.yml (+ student README)`"]
-    cfg["`**classroom-config**
+    cfg["`**semester-config**
 
 student-list, teams, schedule, grades, deadlines`"]
     cmat["`**released materials**
@@ -106,7 +106,7 @@ A course can optionally also publish a **public** `<course-org>.github.io` open-
 |---------|-------|
 | Chronological index of the e2e workflow | [the workflows](docs/README.md#the-workflows) |
 | An example course setup | [`example course`](example-course/README.md) |
-| Template artefacts | [`templates`](templates/classroom-config/README.md) |
+| Template artefacts | [`templates`](templates/semester-config/README.md) |
 | All available `.github` Actions tab workflows (course org) | [`actions reference`](docs/reference/actions-reference.md) |
 | Who may run those workflows, and which team grants it | [`access reference`](docs/reference/access-reference.md) |
 | **Deployment checklist** | [`DEPLOYMENT-CHECKLIST.md`](docs/DEPLOYMENT-CHECKLIST.md) |

@@ -30,7 +30,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         refused (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
-        **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
+        **Join team** form; `assigned` = you write `semester-config/teams.csv`)
       - `submit_via` = where students hand in. `assignment_repo` = they push to their
         repo, and the cutoff, the receipts and the late window apply; `external` = handed
         in elsewhere (Moodle, Kaggle, in class), so **no repo is created**: the brief and
@@ -268,7 +268,7 @@ is GitHub's cap of ten inputs - every further setting lives in `grading_config.y
 > `team_formation` and `max_team_size` are also what the **Join team** form in each
 > semester's `welcome` repo answers on. The form runs in a public repo and cannot read this
 > file, so the toolkit mirrors those two values into each semester's
-> `classroom-config/assignments.lock.yml` and the form reads that. Editing them here is
+> `semester-config/assignments.lock.yml` and the form reads that. Editing them here is
 > enough: the mirror catches up on the next **Sync membership**, **Release assignment** or
 > nightly **Refresh actions**. Until this template exists, its schedule entry is locked to
 > "no teams", so nobody can form one for it.

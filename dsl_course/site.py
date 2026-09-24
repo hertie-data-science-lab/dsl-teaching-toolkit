@@ -40,6 +40,7 @@ from pathspec import GitIgnoreSpec
 
 from . import schedule, status, teams
 from .course import (
+    CONFIG_REPO,
     CUTOFF_SENTENCE,
     INSTRUCTORS_FILE,
     PUBLISH_FILE,
@@ -120,9 +121,7 @@ def _semester_start(semester_org: str) -> date:
 def _instructors_meta(semester_org: str) -> tuple[dict, str]:
     """A semester's `instructors.yml` and its path. The old `people.yml` is never read
     (decision 0012): a semester that has not migrated gets the instructors-team cards."""
-    return yaml_file(
-        semester_org, "classroom-config", INSTRUCTORS_FILE
-    ), INSTRUCTORS_FILE
+    return yaml_file(semester_org, CONFIG_REPO, INSTRUCTORS_FILE), INSTRUCTORS_FILE
 
 
 def _semester_label(semester_org: str) -> str:
@@ -1601,8 +1600,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # Course identity comes from the course org metadata, semester from the semester tag.
         meta = yaml_file(course_org, ".github", "dsl-course.yml")
         # Schedule is semester-specific (it varies by year), so it comes from the semester's
-        # own classroom-config/schedule.yml. So do this semester's instructors/TAs - read
-        # from its own classroom-config/instructors.yml below, NOT the course org (whose
+        # own semester-config/schedule.yml. So do this semester's instructors/TAs - read
+        # from its own semester-config/instructors.yml below, NOT the course org (whose
         # dsl-course.yml carries only the multi-year instructor cards).
         sched = schedule.load(semester_org)
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
@@ -1761,15 +1760,15 @@ def sync_site(course_org: str, semester_org: str) -> int:
         instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(
             config=config,
-            # People: this semester's own classroom-config/instructors.yml (instructors AND TAs -
+            # People: this semester's own semester-config/instructors.yml (instructors AND TAs -
             # the per-semester teaching team; schema in
-            # templates/classroom-config/instructors.yml), else its instructors team.
+            # templates/semester-config/instructors.yml), else its instructors team.
             files={
                 "README.md": site_readme(semester_org, semester=True),
                 "_data/people.yml": people_yaml(
                     semester_org,
                     instructors_meta,
-                    edit_at=f"{semester_org}/classroom-config/{instructors_path}",
+                    edit_at=f"{semester_org}/semester-config/{instructors_path}",
                     semester=True,
                 ),
                 "_data/nav.yml": nav_yaml(semester=True),

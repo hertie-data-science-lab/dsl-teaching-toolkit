@@ -121,8 +121,8 @@ def _the_central_ref_is_present(monkeypatch):
 def _no_semester_is_closed_out(monkeypatch):
     """Answer `discovery.semester_is_live`'s probe with "still running" by default.
 
-    Every course-side sweep now asks whether a semester's `classroom-config` is archived
-    before writing into it, which is a live `gh api repos/<org>/classroom-config`. A
+    Every course-side sweep now asks whether a semester's `semester-config` is archived
+    before writing into it, which is a live `gh api repos/<org>/semester-config`. A
     running semester is the uninteresting answer for every test but the ones about the skip
     itself, which set their own after this fixture and win."""
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
@@ -148,7 +148,7 @@ def _not_on_a_runner(monkeypatch):
 def _clear_process_memos():
     """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
     paths, a repo's metadata and its last committer, whether a central ref exists, the
-    classroom-config files a run re-reads (students.csv, teams.csv, schedule.yml,
+    semester-config files a run re-reads (students.csv, teams.csv, schedule.yml,
     instructors.yml), an assignment's definition, its course's defaults and its handed-out
     starters, and the login the token belongs to. Tests reuse the same org/repo names
     with different fakes, so clear them between tests."""
@@ -200,7 +200,7 @@ def stub_bootstrap(monkeypatch) -> None:
 
 
 # What the `gh issue create` in `GhFake` prints.
-CREATED_ISSUE_URL = "https://github.com/Semester/classroom-config/issues/12"
+CREATED_ISSUE_URL = "https://github.com/Semester/semester-config/issues/12"
 
 
 class GhFake:

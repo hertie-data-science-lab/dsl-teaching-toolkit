@@ -1,4 +1,4 @@
-"""dsl-course schedule -- the per-semester classroom-config/schedule.yml, this semester's
+"""dsl-course schedule -- the per-semester semester-config/schedule.yml, this semester's
 single home for the timed release plan AND the dates other tools display/enforce:
 
 Each block encodes a BEHAVIOUR: `releases` deploy materials, `assignments` have a
@@ -72,7 +72,7 @@ fault in November), so it is reported alongside the verdict and never folded int
 Usage:
     python3 -m dsl_course.schedule --semester-org hertie-dsl-demo-f2026
     python3 -m dsl_course.schedule --semester-org hertie-dsl-demo-f2026 --validate
-    python3 -m dsl_course.schedule --file classroom-config/schedule.yml --validate
+    python3 -m dsl_course.schedule --file semester-config/schedule.yml --validate
     python3 -m dsl_course.schedule --file schedule.yml --validate \\
         --check-sources hertie-dsl-demo-course-e1234
 """
@@ -1868,7 +1868,7 @@ def _unreadable_fault(what: str, lineno: int | None = None) -> ConfigFault:
 
 
 def load(semester_org: str) -> Schedule:
-    """Fetch + parse schedule.yml from the semester's PRIVATE classroom-config repo. A
+    """Fetch + parse schedule.yml from the semester's PRIVATE semester-config repo. A
     pure loader: a missing file returns an empty Schedule silently (every field
     optional everywhere it's read).
 

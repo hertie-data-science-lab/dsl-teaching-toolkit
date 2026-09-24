@@ -369,7 +369,7 @@ def test_the_fault_points_at_the_line_that_decides_when_the_window_shuts(semeste
         12,
     )
     assert fault.at == "schedule.yml:12"
-    assert fault.in_repo == "classroom-config"
+    assert fault.in_repo == "semester-config"
 
     pinned = _sched(
         **{"assignment-2": _entry(grading_datetime=SHUTS - timedelta(days=1))}
@@ -393,7 +393,7 @@ def test_the_fault_carries_its_own_consequence_and_fix(semester):
         "team cannot hand anything in"
     )
     assert fault.fix() == (
-        "write the missing rows into classroom-config/teams.csv yourself, or move the "
+        "write the missing rows into semester-config/teams.csv yourself, or move the "
         "date on the line above to keep team formation open for longer."
     )
 
@@ -921,7 +921,7 @@ def test_quiet_hours_hold_the_mail_and_claim_nothing(semester, post, capsys):
 
 
 def test_an_archived_semester_mails_nobody(semester, post, monkeypatch):
-    # Its classroom-config is frozen, so the claim could not land anyway - and nobody is
+    # Its semester-config is frozen, so the claim could not land anyway - and nobody is
     # forming a team in a term that is over.
     semester()
     rec, sender = post()
@@ -1422,7 +1422,7 @@ def pressed(monkeypatch):
 
 
 def test_the_cli_refuses_an_archived_semester(pressed, monkeypatch):
-    # Its classroom-config is frozen, so the claim could not land - and nobody is forming
+    # Its semester-config is frozen, so the claim could not land - and nobody is forming
     # a team in a term that is over. Green, as every other sweep treats one, and refused
     # BEFORE the semester is read.
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, repo: True)

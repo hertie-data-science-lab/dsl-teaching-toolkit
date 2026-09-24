@@ -7,10 +7,10 @@ One entrypoint replacing three separate workflows' worth of orchestration:
   (sync_faculty.sync_course_admins) - regardless of which semester (if any) triggered
   this sync, since admin access is course-wide by design.
 - Roster (students.csv), project teams (teams.csv), and each semester's own
-  instructors/TAs (classroom-config/instructors.yml, via
+  instructors/TAs (semester-config/instructors.yml, via
   sync_faculty.sync_semester_instructors) additionally reconcile for whichever
   semester(s) are in scope: one named semester (--semester-org, e.g. a push to that
-  semester's classroom-config), or every registered semester (--all-semesters, e.g. the
+  semester's semester-config), or every registered semester (--all-semesters, e.g. the
   daily cron - a full resync with no single semester in context).
 
 Every reconcile here is FULL (add + remove) - there is no --prune flag at this level;
@@ -20,7 +20,7 @@ revokes access on the very next sync.
 A CONTENT fault never reds this run. A students.csv saved as a `;`-delimited export, a
 teams.csv with no header, a instructors.yml that is not YAML: each skips its semester and is
 reported where the person who left it there will see it - the per-file digest issue in
-that semester's classroom-config, and the mail beside it. The COURSE org's own two files
+that semester's semester-config, and the mail beside it. The COURSE org's own two files
 (`dsl-course.yml`, the semester registry) are the same rule at a wider blast radius: nothing
 is reconciled under the course at all, and the course digest issue and the admin mail are
 what say so. The exit code is kept for the run's own failures (a `gh` write that was
@@ -177,7 +177,7 @@ def sync(
                 course_org, org, content_repos, assignments, dry_run=dry_run
             )
             # The Join-team form's only source of truth, refreshed here because this is
-            # what a push to `schedule.yml` wakes (classroom-config/dispatch-sync.yml) -
+            # what a push to `schedule.yml` wakes (semester-config/dispatch-sync.yml) -
             # and a form answering off a stale mirror either refuses a real team or lets
             # one form for an assignment the template says is individual.
             lock = sync_team_lock(course_org, org, dry_run=dry_run)
@@ -208,13 +208,13 @@ def sync(
             # revoke access from everybody the parse dropped - but the run stays GREEN
             # and files no "Sync membership is failing" issue: the fault already reaches
             # the person who left it there, through the digest issue in this semester's
-            # classroom-config and the mail beside it (`scheduler._preflight_configs`).
+            # semester-config and the mail beside it (`scheduler._preflight_configs`).
             # A red X here said only "something is wrong somewhere", every hour, to a
             # course-admin team that cannot fix a CSV in a semester org.
             log_err(
                 f"semester {org} has a config file the sync cannot read "
                 f"({read_error(exc)}) - "
-                f"skipping this semester. The digest issue in {org}/classroom-config "
+                f"skipping this semester. The digest issue in {org}/semester-config "
                 f"names the line to fix; this run stays green."
             )
         except Exception as exc:

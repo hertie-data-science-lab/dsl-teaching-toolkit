@@ -1,12 +1,12 @@
 """dsl-course grades -- the grading sheet, and sending what a grader wrote in it.
 
-A grader fills ONE file per assignment, `classroom-config/grading_sheets/<slug>.yml`, and
+A grader fills ONE file per assignment, `semester-config/grading_sheets/<slug>.yml`, and
 `distribute` fans it out:
 
     grading_sheets/<slug>.yml   (the grader types here; the toolkit owns only `info:`)
           |
           +--> semester/grades-<handle>   (private; student = read) grades.yml + README.md
-          +--> classroom-config/cohort-gradebook.csv   (the registrar export, never logged)
+          +--> semester-config/cohort-gradebook.csv   (the registrar export, never logged)
           +--> an email saying there is something new to read (no marks in it)
 
 ONE place a mark is written, and it is the student's gradebook. Nothing is posted into a
@@ -164,7 +164,7 @@ def render_yaml(book: dict) -> str:
 
 # ------------------------------------------------------------------- the grading sheet
 
-# `classroom-config/grading_sheets/<slug>.yml` is the ONE place a grader types. One file per
+# `semester-config/grading_sheets/<slug>.yml` is the ONE place a grader types. One file per
 # assignment, one block per submission unit, created at handout and refreshed until the
 # cutoff freezes it; the toolkit then distributes what it holds everywhere a grade goes.
 #
@@ -199,7 +199,7 @@ class SheetUnreadable(RuntimeError):
 
 
 def sheet_path(slug: str) -> str:
-    """Where this assignment's grading sheet lives in `classroom-config`."""
+    """Where this assignment's grading sheet lives in `semester-config`."""
     return f"{SHEETS_DIR}/{slug}.yml"
 
 
@@ -1773,7 +1773,7 @@ def grading_spec_faults(
                 field="visibility",
                 lineno=lines.get(("visibility",)),
                 fix="remove `solution_datetime:` from this assignment's entry in "
-                "classroom-config/schedule.yml - the model answer stays on this "
+                f"{CONFIG_REPO}/schedule.yml - the model answer stays on this "
                 "template's `solution` branch, which is where the instructors read "
                 "it - or give this assignment a private repo per unit here "
                 "(`submit_via: assignment_repo`, `visibility: private`)",
@@ -2036,7 +2036,7 @@ def _undeclared_faults(
 
 # --------------------------------------------------- the team-formation lock file
 
-# `classroom-config/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
+# `semester-config/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
 # the Join-team form in the semester's public `welcome` repo. It exists because of who can
 # read what: the form runs on an `issues: opened` event any stranger can trigger, in a
 # public repo, under a token deliberately scoped away from the course org's assignment
@@ -2272,7 +2272,7 @@ def sync_team_lock(
     now: datetime | None = None,
     dry_run: bool = False,
 ) -> LockWrite:
-    """Mirror every assignment's team rules into `classroom-config/assignments.lock.yml`,
+    """Mirror every assignment's team rules into `semester-config/assignments.lock.yml`,
     and say whether that changed anything.
 
     Written from everything that could have moved one of its inputs: the membership
@@ -2285,7 +2285,7 @@ def sync_team_lock(
     file needs to know when to re-render, and it would otherwise pay a second read to find
     out what this call already knows.
 
-    A CLOSED-OUT semester is skipped: `teardown` archives `classroom-config` last, an
+    A CLOSED-OUT semester is skipped: `teardown` archives `semester-config` last, an
     archived repo is read-only, and the membership sync reaches such a semester every day -
     the registry it fans out over is not what teardown seals. The check lives here rather
     than at one call site because it is the same answer for all of them: a finished term
@@ -3462,7 +3462,7 @@ def render_registrar_csv(
     Every enrolled student is a row, marked or not, and a student who has not onboarded
     yet is a row with no handle: a missing row reads as somebody who left the course, and
     this is the file a grade is transcribed from. Auditors are never assessed and are
-    never rows. It lives in the private classroom-config and is never logged."""
+    never rows. It lives in the private semester-config and is never logged."""
     slugs = sorted({slug for book in books.values() for slug in book})
     by_handle = {handle.casefold(): book for handle, book in books.items()}
 
@@ -3487,7 +3487,7 @@ def render_registrar_csv(
 
 
 def load_sheets(wd: Path) -> dict[str, dict]:
-    """Every grading sheet in a classroom-config checkout, keyed by assignment slug.
+    """Every grading sheet in a semester-config checkout, keyed by assignment slug.
 
     A checkout rather than the API: distribute has the repo cloned already, and reading
     the sheets out of it costs nothing and cannot half-succeed the way a file-by-file
@@ -4242,7 +4242,7 @@ def distribute(
     have one address rather than one per assignment. The per-repo issue is still there and
     still carries the submission receipts (`collect._post_receipts`); it carries no mark.
 
-    ONE clone of classroom-config and one pass over it - the sheets and `distributed.csv`
+    ONE clone of semester-config and one pass over it - the sheets and `distributed.csv`
     are both read locally, so the only per-student calls left are the
     writes. Every one of those is skipped when `distributed.csv` says the same content has
     already gone out, which is what makes a correction to one grade reach one student.
@@ -4257,7 +4257,7 @@ def distribute(
 
     A preview - the default - writes no grades and sends nothing: it prints the counts a
     grader checks before pressing it for real, and posts the per-student detail as an
-    issue in the private classroom-config (`_preview`).
+    issue in the private semester-config (`_preview`).
 
     `receipt_note` also posts `MARKS_RETURNED_NOTE` once per assignment on each returned
     unit's Submission receipts issue; `include_feedback` puts the feedback text into the email. Both
@@ -4544,7 +4544,7 @@ def return_summary(
     return Summary(f"{text}.", out, code=code, conclusion=conclusion)
 
 
-# The dry run's per-student detail: an issue in the PRIVATE classroom-config, found by
+# The dry run's per-student detail: an issue in the PRIVATE semester-config, found by
 # this exact title, rewritten by every dry run and closed by the real one.
 PREVIEW_TITLE = "Distribute grades preview"
 PREVIEW_SENT = (
@@ -4573,7 +4573,7 @@ def _preview(
     them in the preview issue. False when the issue could not be written.
 
     No names, and no marks, in the log: this is the log of a workflow that runs in a
-    PUBLIC repo. Who would get what goes into the issue, in the private classroom-config."""
+    PUBLIC repo. Who would get what goes into the issue, in the private semester-config."""
     told_grades, columns = told
     not_marked = {slug: _not_marked(specs[slug], sheets[slug]) for slug in sheets}
     exported = {slug for book in books.values() for slug in book}
@@ -4974,7 +4974,7 @@ def main() -> int:
     # bare local invocation cannot send by accident.
     add_preview_flag(
         p,
-        "Post who gets what as an issue in classroom-config; push no grades, send nothing (default).",
+        "Post who gets what as an issue in semester-config; push no grades, send nothing (default).",
     )
     args = parser.parse_args()
 

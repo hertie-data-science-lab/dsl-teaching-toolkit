@@ -838,12 +838,12 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
     assert jobs["sync"]["needs"] == "check-team"
 
 
-def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
+def test_semester_config_membership_dispatcher_fires_on_a_schedule_change():
     # Sync membership also rewrites `assignments.lock.yml`, the mirror the Join-team form
     # reads. Without schedule.yml here a new assignment woke NOTHING - the form went on
     # answering off the previous list until the 06:13 cron, and a group project handed out
     # in between could not have a team formed for it.
-    tmpl = (ROOT / "templates" / "classroom-config" / "dispatch-sync.yml").read_text()
+    tmpl = (ROOT / "templates" / "semester-config" / "dispatch-sync.yml").read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
@@ -854,7 +854,7 @@ def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
     ]
 
 
-def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_change():
+def test_semester_config_site_dispatcher_fires_on_schedule_people_or_teams_change():
     # All three feed the site: schedule.yml its dates, instructors.yml its staff cards, and
     # teams.csv the teams an assignment inside its formation window lists. None of them may
     # have to wait for the daily cron - least of all teams.csv, which the Join-team workflow
@@ -862,7 +862,7 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_chan
     # (instructors.yml and teams.csv also fire dispatch-sync.yml - a different workflow, event
     # type sync-membership - which is fine.)
     tmpl = (
-        ROOT / "templates" / "classroom-config" / "dispatch-sync-site.yml"
+        ROOT / "templates" / "semester-config" / "dispatch-sync-site.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
@@ -874,14 +874,14 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_people_or_teams_chan
     assert "sync-site" in tmpl  # dispatches the sync-site event
 
 
-def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
+def test_semester_config_scheduler_dispatcher_fires_on_a_schedule_change():
     # GitHub delivers only a fraction of `schedule:` cron fires, so the promise that a
     # schedule.yml edit takes effect within minutes holds only if the edit itself starts a
     # run. The other three are the hand-edited files the same run checks: a push that
     # leaves one of them unreadable is mailed within the minute rather than at the hour.
     # Grading sheets are deliberately absent - a grader saves one all day.
     tmpl = (
-        ROOT / "templates" / "classroom-config" / "dispatch-scheduled-release.yml"
+        ROOT / "templates" / "semester-config" / "dispatch-scheduled-release.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
@@ -937,13 +937,13 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
     )
 
 
-def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
+def test_semester_config_roster_dispatcher_fires_send_codes_on_students_csv():
     # students.csv is the only file that feeds the codes email, and this dispatcher is the
     # only thing that fires it. It dispatches the same event type the rendered workflow
     # listens for; loop-safety is the send's own `code_sent_at` idempotence, documented in
     # the template.
     tmpl = (
-        ROOT / "templates" / "classroom-config" / "dispatch-send-codes.yml"
+        ROOT / "templates" / "semester-config" / "dispatch-send-codes.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
@@ -1109,12 +1109,12 @@ def test_seed_refresh_steps_carry_dsl_bot_token(name):
 
 
 def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
-    # Seeded into a semester's classroom-config, so it must carry the central repo and ref
+    # Seeded into a semester's semester-config, so it must carry the central repo and ref
     # baked in - the semester repo has no other way to reach the parser.
     from dsl_course.central import CENTRAL, CENTRAL_REF
-    from dsl_course.welcome import classroom_system_files
+    from dsl_course.welcome import config_system_files
 
-    raw = classroom_system_files(CENTRAL_REF)[
+    raw = config_system_files(CENTRAL_REF)[
         ".github/workflows/validate-schedule.yml"
     ].decode()
     assert "__CENTRAL__" not in raw and "__CENTRAL_REF__" not in raw
@@ -1247,7 +1247,7 @@ def _semester_org_repos():
     return [
         {"name": n, "url": "u", "visibility": v, "description": "d", "topics": []}
         for n, v in (
-            ("classroom-config", "PRIVATE"),
+            ("semester-config", "PRIVATE"),
             (f"{org}.github.io", "PUBLIC"),
             ("labs", "PRIVATE"),
             ("materials", "PRIVATE"),
@@ -1285,7 +1285,7 @@ def test_semester_table_runs_students_first_then_config_then_the_site():
         "welcome",
         "materials",
         "labs",
-        "classroom-config",
+        "semester-config",
         "semester-f2026.github.io",
     ]
 
@@ -2107,7 +2107,7 @@ def test_the_core_requirements_carry_no_autograder():
 
 _SCOPED = (
     "(github.event_name == 'repository_dispatch' "
-    "&& github.event.client_payload.driver == 'classroom-config' "
+    "&& github.event.client_payload.driver == 'semester-config' "
     "&& github.event.client_payload.semester_org || '')"
 )
 
@@ -2132,7 +2132,7 @@ def _args_under_bash(script: str, env: dict) -> list[str]:
 
 
 def test_a_config_push_run_releases_into_its_own_semester_only():
-    # A classroom-config push (driver=classroom-config, semester_org=<its org>) also fires
+    # A semester-config push (driver=semester-config, semester_org=<its org>) also fires
     # Sync site, so its run takes that one semester and leaves the site to Sync site's queue.
     # The GitHub cron and the ds01 timer (no semester) still walk every semester.
     release = _jobs_of(ALL_RENDERED["scheduler"])["release"]

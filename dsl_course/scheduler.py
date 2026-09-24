@@ -1,7 +1,7 @@
 """dsl-course scheduler -- datetime-driven auto-release.
 
 The same idempotent release functions as the manual workflows, fired automatically from the
-semester's own `classroom-config/schedule.yml` `releases:` plan (see
+semester's own `semester-config/schedule.yml` `releases:` plan (see
 `dsl_course.schedule`). Each labelled release carries a `when` datetime and a mix of
 actions - `deploy` (copy a source path from a COURSE-org repo into a SEMESTER-org repo) and
 `assignment` (provision one student repo per enrolled student from a template). Grading is
@@ -47,7 +47,7 @@ Every tick also drives each assignment's grading deadline (`grading_datetime`, e
 
 1. FREEZE (release phase). For every assignment whose grading deadline has gone by and that
    has no snapshot yet, record the commit each submission repo is graded at into
-   `classroom-config/snapshots/<slug>.csv` (see `dsl_course.collect`). That timestamp is the
+   `semester-config/snapshots/<slug>.csv` (see `dsl_course.collect`). That timestamp is the
    server's, not the student's, which is the only reason the pin can be trusted.
 2. AUTOGRADE, ONCE (autograde phase). Run the autograder for every frozen assignment -
    template `<slug>-<tag>` in the course org. The fire-once marker is the
@@ -541,7 +541,7 @@ def _autograde_passed_deadlines(
     error count.
 
     Fire-once: the `autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record) in
-    classroom-config is the marker. Absent means never machine-graded, so grade now; present
+    semester-config is the marker. Absent means never machine-graded, so grade now; present
     means graded already, so never again - which is what stops an hourly re-run from recomputing
     scores a marker has since hand-edited. A deliberate re-grade = delete `autograde/<slug>/`
     (delete `autograde/<slug>/` to let a later tick regrade).
@@ -841,7 +841,7 @@ def _config_faults(
     sched: schedule.Schedule,
     listing: dict[str, dict] | None,
 ) -> dict:
-    """Every hand-edited file in this semester's classroom-config EXCEPT schedule.yml, and
+    """Every hand-edited file in this semester's semester-config EXCEPT schedule.yml, and
     what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
     could not read.
 
@@ -898,7 +898,7 @@ def _config_faults(
         config_digest.GRADING_SHEETS,
         lambda found: semester_sheet_faults(course_org, semester_org, sched, found),
     )
-    # The one file here that is not in this semester's classroom-config at all: the
+    # The one file here that is not in this semester's semester-config at all: the
     # assignment's own definition, in the course org. Its faults keep the SOURCE clock -
     # they bite when the assignment is graded - so the engine files them under the rungs
     # and holds them overnight without knowing anything about this file in particular.
@@ -981,7 +981,7 @@ def _preflight_configs(
     dry_run: bool,
     listing: dict[str, dict] | None,
 ) -> int:
-    """Check every hand-edited file in this semester's classroom-config and keep one digest
+    """Check every hand-edited file in this semester's semester-config and keep one digest
     issue per file in step. Always returns 0.
 
     The hourly floor under the push fast path. An edit that leaves students.csv unreadable
@@ -1189,7 +1189,7 @@ _MAILED_MARK = "<!-- dsl-archive-notice: mailed -->"
 
 # The runbook section a reader of the notice is sent to for what an archive does and how
 # to reopen a repo afterwards. An absolute URL into this toolkit, so it resolves from a
-# semester's own `classroom-config` - see the doc-filenames table in
+# semester's own `semester-config` - see the doc-filenames table in
 # docs/reference/maintainers.md.
 _ARCHIVE_DOC = "docs/10-grade-and-return-assignments.md#archiving-the-semester"
 
@@ -1231,7 +1231,7 @@ def _archive_notice_body(
 # What the comment says when an archive notice is closed because its date is no longer
 # the one the schedule names. Closing it silently would read as "this happened".
 _CALLED_OFF_COMMENT = (
-    "This notice no longer matches `classroom-config/schedule.yml`: the archive date has "
+    "This notice no longer matches `semester-config/schedule.yml`: the archive date has "
     "been moved, or the `archive:` block taken away - and a semester with no block is "
     "never archived automatically. Nothing was archived. If the semester should still be "
     "archived, the **Archive semester** button does it."
@@ -1277,7 +1277,7 @@ def _stale_archive_notices(semester_org: str, keep: str, dry_run: bool) -> int:
 def _archive_notice(
     course_org: str, semester_org: str, when: date, now: datetime, dry_run: bool
 ) -> int:
-    """Keep ONE "Semester archives on <date>" issue open in `classroom-config`, and mail the
+    """Keep ONE "Semester archives on <date>" issue open in `semester-config`, and mail the
     teaching team once beside it. Returns the error count.
 
     The mail is the half that reaches anybody: this fires in the weeks after a term ends,
@@ -1342,7 +1342,7 @@ def _archive_phase(
     `teardown.close_out` is idempotent and re-entrant, so a run that died half way is
     simply picked up by the next tick - which is why this needs no fire-once marker of its
     own. The tick after a successful one never reaches here at all: the sealed
-    `classroom-config` takes the semester out of `discovery.live_semesters`."""
+    `semester-config` takes the semester out of `discovery.live_semesters`."""
     archives = sched.archive.when if sched.archive else None
     if archives is None:
         return _stale_archive_notices(semester_org, "", dry_run)
@@ -1668,7 +1668,7 @@ def _release_phase(
     # mean carrying "the site owes a render" somewhere durable, which is a second piece of
     # semester state to write, read and get wrong for a page that is a day stale at worst.
     if (release_changed or lock_changed) and defer_site_sync:
-        # A run fired by a classroom-config push, which (for schedule.yml, instructors.yml or
+        # A run fired by a semester-config push, which (for schedule.yml, instructors.yml or
         # teams.csv) started Sync site too: rendering here as well pushed the site repo
         # alongside it and lost the race. Queued behind Sync site's own concurrency group
         # instead, so the render lands after this release.
@@ -1689,7 +1689,7 @@ def _release_phase(
 
 def _request_site_sync(course_org: str, semester_org: str) -> int:
     """Ask the course org's Sync site to render `semester_org`, by the same `sync-site`
-    dispatch the semester's classroom-config sends. Returns the error count."""
+    dispatch the semester's semester-config sends. Returns the error count."""
     code, out = gh(
         "api",
         "--method",
@@ -1889,7 +1889,7 @@ def main() -> int:
         "--defer-site-sync",
         action="store_true",
         help="Hand the site render to the Sync site workflow (a sync-site dispatch) "
-        "instead of pushing it from here - for a run fired by a classroom-config push, "
+        "instead of pushing it from here - for a run fired by a semester-config push, "
         "which may have started Sync site too.",
     )
     parser.add_argument(
@@ -2000,7 +2000,7 @@ def main() -> int:
     if not args.semester_org:
         log_err("pass --semester-org or --all-semesters.")
         return 1
-    # One semester: a classroom-config push's run, or a laptop. The registry authorises it,
+    # One semester: a semester-config push's run, or a laptop. The registry authorises it,
     # and takes the same answer as the loop above - a semester that has been closed out is
     # frozen, and running it would only spend a tick on 403s.
     semesters, rc = _one_semester(args.course_org, args.semester_org)
@@ -2024,7 +2024,7 @@ def main() -> int:
         defer_site_sync=args.defer_site_sync,
         **phases,
     )
-    # The scoped run is what a classroom-config push fires, and its release pass is where
+    # The scoped run is what a semester-config push fires, and its release pass is where
     # every digest was just brought in line with the files - so the semester's status.json
     # follows here, after it. Never on a dry run (a preview writes nothing), and never
     # counted: the release's exit code is the release's.

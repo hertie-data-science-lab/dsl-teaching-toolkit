@@ -30,11 +30,11 @@ def test_repo_is_archived_reads_the_flag_and_assumes_live_when_it_cannot(monkeyp
     # error would silently stop converging a running semester with nothing in the log to say
     # so; guessing "live" costs a loud 403 from the write itself, which is the right alarm.
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, '{"archived": true}'))
-    assert repos.repo_is_archived("Semester-f2025", "classroom-config") is True
+    assert repos.repo_is_archived("Semester-f2025", "semester-config") is True
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, '{"archived": false}'))
-    assert repos.repo_is_archived("Semester-f2026", "classroom-config") is False
+    assert repos.repo_is_archived("Semester-f2026", "semester-config") is False
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502 - bad gateway"))
-    assert repos.repo_is_archived("Semester-f2026", "classroom-config") is False
+    assert repos.repo_is_archived("Semester-f2026", "semester-config") is False
 
 
 def _forking(monkeypatch, answer: str | tuple[int, str]):

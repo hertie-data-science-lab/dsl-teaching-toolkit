@@ -23,7 +23,7 @@ CLI:
                            each materials repo's SYSTEM-owned files (maintainer guide,
                            syllabus example) and its seeded stubs, rebuild
                            the org profile README, and re-push each registered semester's
-                           welcome workflows + classroom-config SYSTEM-owned files (the
+                           welcome workflows + semester-config SYSTEM-owned files (the
                            schema README, the dispatchers, the schedule validator) and
                            `*.sample` worked examples. (Run by the Bootstrap-semester
                            workflow, and by Refresh actions - on demand and on its nightly
@@ -70,8 +70,8 @@ from .profile_readme import update_profile_readme
 from .repos import converge_descriptions, org_exists
 from .status import refresh as refresh_status
 from .welcome import (
-    refresh_classroom_samples,
-    refresh_classroom_system_files,
+    refresh_config_samples,
+    refresh_config_system_files,
     refresh_semester_pointer,
     refresh_welcome_workflows,
 )
@@ -201,7 +201,7 @@ def _live_semesters(course_org: str) -> tuple[list[str], int]:
     is carried to the next run in MISSES_PATH; a semester that answers again clears it.
 
     Liveness is probed on the ORG itself, never one of its repos - a live org that has only
-    lost its classroom-config must fail loud in refresh_classroom_samples, not be pruned
+    lost its semester-config must fail loud in refresh_config_samples, not be pruned
     away. `org_exists` raises rather than guessing, and "could not tell" reads as LIVE.
     """
     registered = discover_semesters(course_org)
@@ -443,7 +443,7 @@ def _converge_org(
     honest as repos are added, without flattening an instructor's wording around it.
 
     `listing` is that snapshot when the caller already holds one - a semester's refresh reads
-    its archived flag off the same listing rather than probing classroom-config for it.
+    its archived flag off the same listing rather than probing semester-config for it.
 
     The org's own settings are converged here too (gh_teams.converge_org_settings). They
     used to be written only at bootstrap, so every org tightened after its own bootstrap
@@ -479,7 +479,7 @@ def refresh(course_org: str) -> int:
     seeded stubs; repopulate dropdowns; converge each org's repo descriptions, faculty-team
     access and machinery topics (_converge_org_metadata) and rebuild its profile README
     off the same listing; re-push every registered semester's welcome workflows, its
-    classroom-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
+    semester-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
     validate-schedule.yml) and its `*.sample` worked examples (skipping semesters whose
     repos are archived) - never its own config, which stays create-if-missing; (Free-plan
     workaround) propagate the token as a repo secret so those private repos can
@@ -496,7 +496,7 @@ def refresh(course_org: str) -> int:
     # a night later, which is the same "converges eventually, if someone waits" the prune
     # exists to end.
     # ONE read of this org's tier, threaded into everything below: the course org's
-    # workflows, its content repos' workflows, and every semester's classroom-config
+    # workflows, its content repos' workflows, and every semester's semester-config
     # validator all have to be pinned to the same ref, and a semester inherits its course
     # org's (central_ref_for), so re-reading it per semester could only ever disagree.
     central_ref = central_ref_for(course_org)
@@ -572,18 +572,18 @@ def refresh(course_org: str) -> int:
     failures += render(lambda: seed_github_workflows(course_org, central_ref))
     failures += _write_heartbeat(course_org)
     failures += _converge_org(course_org, central_ref)
-    # A semester's onboarding workflows, classroom-config dispatchers and config samples are
+    # A semester's onboarding workflows, semester-config dispatchers and config samples are
     # seeded at Bootstrap semester, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
     log_step(
-        f"Refreshing welcome workflows + classroom-config system files + samples "
+        f"Refreshing welcome workflows + semester-config system files + samples "
         f"in {len(semesters)} semester org(s)"
     )
     not_migrated: list[str] = []
     for semester in semesters:
         # ONE listing of the semester: the archived flag below, and the convergence sweep +
         # profile rebuild at the end of the loop, are all read off this same snapshot. The
-        # flag used to be its own GET of classroom-config, a night after night probe for a
+        # flag used to be its own GET of semester-config, a night after night probe for a
         # field the listing already carries.
         listing = list_org_repos(semester)
         config_repo = next((r for r in listing if r["name"] == CONFIG_REPO), None)
@@ -591,28 +591,26 @@ def refresh(course_org: str) -> int:
         # every write 403s, and the samples are new files so put_file's sha no-op can't
         # absorb it. A past semester is meant to stay frozen anyway, so skip it whole rather
         # than turn the nightly cron red in every org that has ever finished a semester.
-        # A semester with no classroom-config at all is not archived, it is unfinished, and
+        # A semester with no semester-config at all is not archived, it is unfinished, and
         # the writes below are what give it one.
         if config_repo is not None and config_repo.get("archived"):
             log(f"  [skip] {semester} (archived semester - left frozen)")
             continue
         failures += refresh_welcome_workflows(semester)
-        # SYSTEM-owned files only (see welcome.CLASSROOM_SYSTEM_FILES): the semester's own
+        # SYSTEM-owned files only (see welcome.CONFIG_SYSTEM_FILES): the semester's own
         # students.csv/teams.csv/schedule.yml/instructors.yml are never touched here, or this
         # nightly cron would overwrite a live roster every night. Skipped whole when the
         # ref is missing: the set includes validate-schedule.yml, which is rendered at it.
         failures += render(
-            lambda semester=semester: refresh_classroom_system_files(
-                semester, central_ref
-            )
+            lambda semester=semester: refresh_config_system_files(semester, central_ref)
         )
-        failures += refresh_classroom_samples(semester)
+        failures += refresh_config_samples(semester)
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
         # also only ever written by Bootstrap semester until now - same bug class.
         failures += refresh_semester_pointer(semester, course_org)
         # The Join-team form's mirror of every assignment's team rules. SYSTEM-owned like
         # the two above, but DERIVED rather than templated, so it cannot join
-        # welcome.CLASSROOM_SYSTEM_FILES: it is rendered per semester from that semester's
+        # welcome.CONFIG_SYSTEM_FILES: it is rendered per semester from that semester's
         # schedule and each template's grading_config.yml. Here is what seeds it - a
         # Bootstrap semester run ends in this refresh - and what converges it every night.
         failures += 0 if sync_team_lock(course_org, semester).ok else 1

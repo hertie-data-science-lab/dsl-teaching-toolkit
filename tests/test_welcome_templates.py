@@ -89,7 +89,7 @@ def test_workflows_are_gated_on_the_forms_labels():
     assert form["labels"] == ["onboarding"]
     assert team_form["labels"] == ["team-formation"]
     # writes to the private roster repo, not a public one
-    assert "classroom-config" in (WELCOME / "team-formation.yml").read_text()
+    assert "semester-config" in (WELCOME / "team-formation.yml").read_text()
 
 
 @pytest.mark.parametrize("rel,job", sorted(CSV_WORKFLOWS.items()))
@@ -264,7 +264,7 @@ def test_onboarding_workflows_are_minimally_scoped(rel):
     # Bounded jobs and sha-pinned actions are swept over every shipped workflow in
     # test_shipped_workflows.py; what is UNIQUE to these two is the exact scope. The
     # ambient token comments on, labels and closes the issue in THIS repo and gets nothing
-    # else: the CSV they write lives in classroom-config, which only DSL_BOT_TOKEN reaches,
+    # else: the CSV they write lives in semester-config, which only DSL_BOT_TOKEN reaches,
     # so `contents:` here would be scope with no purpose.
     doc = yaml.safe_load((WELCOME / rel).read_text())
     assert doc["permissions"] == {"issues": "write"}

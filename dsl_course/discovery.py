@@ -44,7 +44,7 @@ SEMESTERS_PATH = "semesters.yml"
 # and not the new one, or the old `cohorts:` key, is refused as NOT_MIGRATED.
 OLD_SEMESTERS_PATH = "cohort-courses-pages.yml"
 
-INFRA_REPOS = {"welcome", "classroom-config", ".github"}
+INFRA_REPOS = {"welcome", CONFIG_REPO, ".github"}
 # The topic assign.py stamps on the frozen semester-side template it creates before
 # provisioning a single student repo (ensure_semester_template). Named here, and imported by
 # the one writer and the one reader, so the string cannot drift between them.
@@ -55,7 +55,7 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 # The repos only a semester org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
-SEMESTER_ONLY_REPOS = {"welcome", "classroom-config"}
+SEMESTER_ONLY_REPOS = {"welcome", CONFIG_REPO}
 
 
 def welcome_issue_url(semester_org: str) -> str:
@@ -295,7 +295,7 @@ def _registry_fault(what: str) -> ConfigFault:
     list of org names, so what goes wrong with it is its SHAPE, and the whole course pays
     the same price either way (see `faults.CONSEQUENCE`). `in_repo` is the COURSE org's
     public `.github`, which is what makes the citation and the digest's deep link point at
-    the file somebody has to edit rather than at a semester's classroom-config."""
+    the file somebody has to edit rather than at a semester's semester-config."""
     return ConfigFault(
         SEMESTERS_PATH,
         what,
@@ -478,7 +478,7 @@ def discover_semesters(course_org: str) -> list[str]:
 def semester_is_live(semester_org: str) -> bool:
     """Whether `semester_org` is still running, rather than closed out and left frozen.
 
-    An archived `classroom-config` IS the "this semester is finished" marker - it is the last
+    An archived `semester-config` IS the "this semester is finished" marker - it is the last
     thing `teardown` freezes, for exactly that reason - and everything a course-side sweep
     would do to a finished semester is a write into a read-only org: every one of them 403s,
     every night, for the rest of the course's life. A finished term is a state somebody

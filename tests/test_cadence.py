@@ -155,7 +155,7 @@ def test_prev_executed_ignores_a_cancelled_run_and_a_manual_dispatch():
 
 
 def test_a_run_scoped_to_one_semester_is_no_tick_of_the_course():
-    # A classroom-config push's run releases into ONE semester. Counted, it would shrink the
+    # A semester-config push's run releases into ONE semester. Counted, it would shrink the
     # gap another semester's late release is measured by - and date the dispatcher, which it
     # is not. Its `run-name` says what it was; that is all the listing shows.
     scoped = _run(5, run_id=2) | {
@@ -451,7 +451,7 @@ def test_the_driver_body_carries_only_timestamps_and_minutes():
     )
     assert cadence.read_state(body) == {"dispatch": cadence.DISPATCH_STALE}
     assert body.strip().endswith("-->")  # the marker is last, out of the reader's way
-    for leak in ("classroom-config/", "-anna", "grades-"):
+    for leak in ("semester-config/", "-anna", "grades-"):
         assert leak not in body
 
 
@@ -548,7 +548,7 @@ def test_a_semester_exception_is_counted_never_raised(monkeypatch, capsys):
 # ---- late delivery
 
 
-def test_late_items_open_the_issue_in_the_private_classroom_config(stub):
+def test_late_items_open_the_issue_in_the_private_semester_config(stub):
     s = stub()
     items = [
         _item("releases.lecture_02 -> deploy[0]", 132),
@@ -557,7 +557,7 @@ def test_late_items_open_the_issue_in_the_private_classroom_config(stub):
     v = _verdict(prev_executed_at=NOW - timedelta(minutes=140), recent_gaps=[])
     assert cadence.report_semester("Course-Org", "Semester-f2026", v, items) == 0
     (repo, title, body, comment) = s.upserted[0]
-    assert repo == "Semester-f2026/classroom-config"
+    assert repo == "Semester-f2026/semester-config"
     assert title == cadence.LATE_TITLE
     assert "`releases.lecture_02 -> deploy[0]`: due " in body
     assert "(+132 min)" in body
@@ -610,7 +610,7 @@ def test_eight_healthy_gaps_close_the_late_delivery_issue(stub):
     s = stub(existing=(7, "body"))
     assert cadence.report_semester("Course-Org", "Semester-f2026", _verdict(), []) == 0
     ((repo, title, comment),) = s.closed
-    assert (repo, title) == ("Semester-f2026/classroom-config", cadence.LATE_TITLE)
+    assert (repo, title) == ("Semester-f2026/semester-config", cadence.LATE_TITLE)
     assert str(cadence.HEALTHY_GAPS) in comment
 
 

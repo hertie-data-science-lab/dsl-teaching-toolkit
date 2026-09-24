@@ -31,7 +31,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
     - This seeds: 
       - **`welcome`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
       - its **`README.md`**, telling them how to join - public like the rest of the repo, yours to reword, and never overwritten
-      - **`classroom-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `instructors.yml`
+      - **`semester-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `instructors.yml`
       - **`students` + `auditors` teams** (empty) - do not edit directly these, these will be populated by the workflow, 
       - **`course-admin` team** for this semester
       - **`hertie-dsl-demo-f2026.github.io`** auto-deployed website - what it shows, and what you must not hand-edit: [11](11-configure-cohort-site.md)
@@ -39,12 +39,12 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
 
 ---
 
-4. **Fill in `classroom-config/schedule.yml` for the whole semester** (edit locally or in the web UI → commit to `main`).
+4. **Fill in `semester-config/schedule.yml` for the whole semester** (edit locally or in the web UI → commit to `main`).
     - Full guide for doing so covered in [07-schedule-releases.md](07-schedule-releases.md)
     - Full schema for the schedule [here](DEPLOYMENT-CHECKLIST.md#scheduleyml)
 
 
-5. *(optional)* **Declare this semester's instructors/TAs** in `classroom-config/instructors.yml`.
+5. *(optional)* **Declare this semester's instructors/TAs** in `semester-config/instructors.yml`.
     - This grants them push on this semester and on this year's course content repos, and supplies the semester site's cards.
 
    ```yaml
@@ -65,7 +65,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
       - Full guide, including removing people and how quickly changes land: [05 Manage the instructors](05-manage-teaching-team.md).
 
 6. **Load the student roster.** 
-  - Fill `classroom-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
+  - Fill `semester-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
   - Leave `github_handle, github_id` blank - onboarding fills them. 
   - Add `role: auditor` for anyone who should get the released materials but no assignments and no grades. 
   - The seeded `students.csv.sample` shows a filled row of each kind, and that repo's `README.md` documents every column.

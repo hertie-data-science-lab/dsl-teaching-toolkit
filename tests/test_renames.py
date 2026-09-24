@@ -347,9 +347,9 @@ def test_the_site_cards_read_instructors_yml_only(monkeypatch):
 
 
 def test_a_new_semester_is_seeded_instructors_yml_and_never_people_yml():
-    assert "instructors.yml" in welcome.CLASSROOM_SCAFFOLDS
-    assert "people.yml" not in welcome.CLASSROOM_SCAFFOLDS
-    assert "people.yml.sample" not in welcome.CLASSROOM_SAMPLES
+    assert "instructors.yml" in welcome.CONFIG_SCAFFOLDS
+    assert "people.yml" not in welcome.CONFIG_SCAFFOLDS
+    assert "people.yml.sample" not in welcome.CONFIG_SAMPLES
     shipped = yaml.safe_load(welcome.example_semester_file("instructors.yml"))
     assert {p["role"] for p in shipped["instructors"]} == set(INSTRUCTOR_ROLES)
 

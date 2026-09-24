@@ -430,7 +430,7 @@ def test_a_return_marks_run_end_to_end(monkeypatch, capsys, engine):
     (org, repo, path, content, _msg), _ = engine[0]
     assert (org, repo, path) == (
         SEMESTER,
-        "classroom-config",
+        "semester-config",
         ".dsl/outcomes/grades.return.json",
     )
     assert json.loads(content)["schema"] == "dsl.outcome/1"
@@ -585,7 +585,7 @@ def test_a_real_archive_is_not_a_broken_run(monkeypatch, capsys, engine):
     monkeypatch.setattr(teardown, "main", lambda: 0)
     monkeypatch.setattr(
         outcome_mod, "put_file", lambda *a, **k: False
-    )  # classroom-config is read-only now
+    )  # semester-config is read-only now
     rc, body, _ = _main(
         monkeypatch, capsys, _request(op="cohort.archive", args={}, preview=False)
     )

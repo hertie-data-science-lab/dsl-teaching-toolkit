@@ -544,7 +544,7 @@ def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
 ):
     # THE invariant, and the bug that motivated it. `write_column` reports a refused write
     # by RETURNING - it never raises - so under send-then-stamp a roster that could not be
-    # written (an archived classroom-config, a new branch ruleset, a token that lost write
+    # written (an archived semester-config, a new branch ruleset, a token that lost write
     # scope) meant the batch went out with `code_sent_at` still blank - and the next push
     # to the roster, which the send's own write-back provokes, mailed them all again.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
@@ -789,7 +789,7 @@ def test_a_hand_run_without_dispatched_by_never_consults_the_registry(monkeypatc
 
 
 def test_a_closed_out_semester_is_sent_no_codes(monkeypatch):
-    # Registered, so the trust-boundary check passes - but its classroom-config is
+    # Registered, so the trust-boundary check passes - but its semester-config is
     # read-only, so the `code_sent_at` write-back could not land, and nobody is being
     # enrolled into a term that is over.
     monkeypatch.setattr(enrol_codes, "semester_is_live", lambda org: False)

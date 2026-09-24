@@ -16,5 +16,5 @@
 #                        access. TAs are NOT declared here - they change every
 #                        semester, so a semester's whole teaching team (instructors &
 #                        TAs, their GitHub access AND their semester-site cards) is
-#                        declared PER SEMESTER in that semester's classroom-config/instructors.yml.
+#                        declared PER SEMESTER in that semester's semester-config/instructors.yml.
 # ---------------------------------------------------------------------------

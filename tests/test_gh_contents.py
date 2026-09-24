@@ -143,7 +143,7 @@ def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
     # needs a commit to hang a tree off, and only the Contents API will create that first
     # one. This test used to assert the opposite (that omitting base_tree was enough), with
     # a stub that let the POST succeed - so the real 409 went unnoticed until the first
-    # semester org bootstrapped after the classroom-config scaffolds were batched, whose
+    # semester org bootstrapped after the semester-config scaffolds were batched, whose
     # roster, schedule and instructors.yml never landed at all.
     calls = []
 
@@ -230,11 +230,11 @@ def test_get_file_content_returns_none_only_for_a_genuine_404(monkeypatch):
     # forbidden read has to be loud, or a transient failure looks like an empty course.
     _stub_gh(monkeypatch, lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     assert (
-        gh_contents.get_file_content("Org", "classroom-config", "students.csv") is None
+        gh_contents.get_file_content("Org", "semester-config", "students.csv") is None
     )
     _stub_gh(monkeypatch, lambda *a, **k: (1, "gh: HTTP 403 - rate limited"))
-    with pytest.raises(RuntimeError, match="Org/classroom-config/students.csv"):
-        gh_contents.get_file_content("Org", "classroom-config", "students.csv")
+    with pytest.raises(RuntimeError, match="Org/semester-config/students.csv"):
+        gh_contents.get_file_content("Org", "semester-config", "students.csv")
 
 
 def _b64(text: str) -> str:
@@ -327,10 +327,10 @@ def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
         lambda *a, **k: "people:\n  - email: jan@x.edu: typo\n",
     )
     with pytest.raises(yaml.YAMLError):
-        gh_contents.load_yaml_config("Org", "classroom-config", "instructors.yml")
+        gh_contents.load_yaml_config("Org", "semester-config", "instructors.yml")
     err = capsys.readouterr().err
     assert "jan@x.edu" not in err
-    assert "malformed YAML in Org/classroom-config/instructors.yml: " in err
+    assert "malformed YAML in Org/semester-config/instructors.yml: " in err
     assert "ScannerError: mapping values are not allowed here (line 2)" in err
 
 
@@ -590,7 +590,7 @@ def test_blame_maps_every_line_of_a_range_to_its_author(monkeypatch):
     # A notification has to reach whoever wrote the faulty LINE, and the API answers in
     # ranges - so a caller looking up line 3 would find nothing without the expansion.
     monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: _BLAME)
-    assert gh_contents.blame_logins("Org", "classroom-config", "schedule.yml") == {
+    assert gh_contents.blame_logins("Org", "semester-config", "schedule.yml") == {
         1: "JanG",
         2: "JanG",
         3: "JanG",
@@ -602,14 +602,14 @@ def test_a_commit_from_an_unlinked_email_names_nobody(monkeypatch):
     # `author.user` is null when the commit email belongs to no GitHub account. Line 4 is
     # simply absent above, which reads as "cannot say who" - the fallback every caller has.
     monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: _BLAME)
-    assert 4 not in gh_contents.blame_logins("Org", "classroom-config", "schedule.yml")
+    assert 4 not in gh_contents.blame_logins("Org", "semester-config", "schedule.yml")
 
 
 def test_a_missing_ref_or_file_blames_nobody_rather_than_raising(monkeypatch):
     monkeypatch.setattr(
         gh_contents, "gh_json", lambda *a, **k: {"data": {"repository": None}}
     )
-    assert gh_contents.blame_logins("Org", "classroom-config", "schedule.yml") == {}
+    assert gh_contents.blame_logins("Org", "semester-config", "schedule.yml") == {}
 
 
 def test_a_blame_that_could_not_be_read_raises(monkeypatch):
@@ -620,7 +620,7 @@ def test_a_blame_that_could_not_be_read_raises(monkeypatch):
 
     monkeypatch.setattr(gh_contents, "gh_json", boom)
     with pytest.raises(RuntimeError):
-        gh_contents.blame_logins("Org", "classroom-config", "schedule.yml")
+        gh_contents.blame_logins("Org", "semester-config", "schedule.yml")
 
 
 def test_the_blame_query_is_a_read(monkeypatch):
@@ -630,7 +630,7 @@ def test_the_blame_query_is_a_read(monkeypatch):
     monkeypatch.setattr(
         gh_contents, "gh_json", lambda *a, **k: seen.append(a) or {"data": {}}
     )
-    gh_contents.blame_logins("Org", "classroom-config", "schedule.yml")
+    gh_contents.blame_logins("Org", "semester-config", "schedule.yml")
     (args,) = seen
     assert args[:2] == ("api", "graphql")
     assert not any("mutation" in a for a in args)

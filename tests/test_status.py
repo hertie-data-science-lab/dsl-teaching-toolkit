@@ -53,7 +53,7 @@ def test_render_markdown_c7_instructors_row_present_with_edit_link():
             C7={
                 "label": "Instructors/TAs (instructors.yml)",
                 "org": "Semester-f2026",
-                "repo": "classroom-config",
+                "repo": "semester-config",
                 "path": "instructors.yml",
                 "status": "ok",
                 "detail": "2 active",
@@ -107,7 +107,7 @@ def _stub_every_read(monkeypatch, standing=None):
     monkeypatch.setattr(status, "open_titles", lambda repo: set(standing or ()))
 
 
-def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, capsys):
+def test_main_walks_every_row_and_points_c7_at_semester_config(monkeypatch, capsys):
     # Every row is built on the way to the table, so this is the only test that would
     # have caught `sync_faculty.SEMESTER_CONFIG_REPO` going stale in the module split -
     # an AttributeError that reached the demo org, not CI.
@@ -119,7 +119,7 @@ def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, cap
     assert status.main() == 0
     data = json.loads(capsys.readouterr().out)
     assert set(data) == set(status.ITEMS)
-    assert data["C7"]["repo"] == "classroom-config"
+    assert data["C7"]["repo"] == "semester-config"
     assert data["C7"]["path"] == "instructors.yml"
 
 
@@ -248,9 +248,7 @@ def test_c8_reports_the_release_plans_own_digest(monkeypatch):
     row = status.collect("Course", "Semester-f2026")["C8"]
     assert row["status"] == status.ATTENTION
     assert row["detail"] == "the release plan cites sources nobody has staged"
-    assert (
-        row["edit_url"] == "https://github.com/Semester-f2026/classroom-config/issues"
-    )
+    assert row["edit_url"] == "https://github.com/Semester-f2026/semester-config/issues"
 
 
 def test_c9_names_the_files_whose_digest_issues_are_standing(monkeypatch):

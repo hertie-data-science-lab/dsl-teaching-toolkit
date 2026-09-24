@@ -8,6 +8,7 @@ import json
 
 from .course import (
     AUDITORS_TEAM,
+    CONFIG_REPO,
     COURSE_ADMIN_TEAM,
     GRADEBOOK_PREFIX,
     INSTRUCTORS_TEAM,
@@ -73,7 +74,7 @@ COURSE_TEAM_ACCESS = {INSTRUCTORS_TEAM: "push", COURSE_ADMIN_TEAM: "admin"}
 
 # Faculty access to a repo a semester RECEIVES per person - a submission repo, a gradebook.
 # An edit made there is not durable and looks like one that stuck (a gradebook is rewritten
-# from `classroom-config/grading_sheets/`), so the grant sites say where each one's truth
+# from `semester-config/grading_sheets/`), so the grant sites say where each one's truth
 # actually lives. Released materials used to be in this list and no longer are: a release
 # merges rather than copies over, so an edit there survives (see `deploy._merge_and_push`).
 # `course-admin` stays admin throughout: it is the org's owner of last resort, and read
@@ -85,7 +86,7 @@ FACULTY_READ_ACCESS = {INSTRUCTORS_TEAM: "pull", COURSE_ADMIN_TEAM: "admin"}
 # FACULTY_READ_ACCESS. `.github` is here because GitHub requires write on a repo to trigger
 # a workflow_dispatch at all. A release DEST also ends up at push, granted by every release
 # rather than by this floor: the two agree because the sweep only ever raises.
-SEMESTER_WRITE_REPOS = frozenset({".github", "welcome", "classroom-config"})
+SEMESTER_WRITE_REPOS = frozenset({".github", "welcome", CONFIG_REPO})
 
 # GitHub's repo permissions, weakest first, in the vocabulary a PUT takes (`permission=`).
 # A team-repos LISTING answers in a different one (`role_name`: read/write/...) - which is

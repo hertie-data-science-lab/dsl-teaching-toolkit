@@ -1,7 +1,7 @@
 """dsl-course roster -- read the per-semester students.csv.
 
 The single durable roster artifact is a PRIVATE per-semester `students.csv`, kept in
-the semester org's `classroom-config` repo. Columns:
+the semester org's `semester-config` repo. Columns:
 
     hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at
 
@@ -210,7 +210,7 @@ def reread() -> None:
 def load(
     semester_org: str, faults: list[ConfigFault] | None = None
 ) -> list[Student] | None:
-    """Fetch + parse students.csv from the semester's PRIVATE classroom-config repo.
+    """Fetch + parse students.csv from the semester's PRIVATE semester-config repo.
 
     Returns None (after logging why) when the file can't be fetched at all - callers
     can then distinguish "roster missing/unreadable" (an error) from a roster that

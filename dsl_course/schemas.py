@@ -20,6 +20,7 @@ from pathlib import Path
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
+    CONFIG_REPO,
     FORMATS,
     INSTRUCTOR_ROLES,
     INSTRUCTORS_FILE,
@@ -401,7 +402,7 @@ def schedule_schema() -> dict:
             "enrolment": {"description": "Deprecated and ignored."},
         },
     )
-    return _doc("classroom-config/schedule.yml", _obj(top))
+    return _doc(f"{CONFIG_REPO}/schedule.yml", _obj(top))
 
 
 def instructors_schema() -> dict:
@@ -416,7 +417,7 @@ def instructors_schema() -> dict:
         PEOPLE_REQUIRED,
     )
     return _doc(
-        f"classroom-config/{INSTRUCTORS_FILE}",
+        f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
         _obj({"instructors": {"type": "array", "items": entry}}),
     )
 
@@ -430,7 +431,7 @@ def _csv_schema(title: str, fields, required, overrides: dict | None = None) -> 
 
 def students_schema() -> dict:
     return _csv_schema(
-        "classroom-config/students.csv",
+        f"{CONFIG_REPO}/students.csv",
         ROSTER_FIELDS,
         ROSTER_REQUIRED,
         {"role": _enum(("", ROLE_ENROLLED, ROLE_AUDITOR))},
@@ -438,7 +439,7 @@ def students_schema() -> dict:
 
 
 def teams_schema() -> dict:
-    return _csv_schema("classroom-config/teams.csv", TEAMS_FIELDS, TEAMS_FIELDS)
+    return _csv_schema(f"{CONFIG_REPO}/teams.csv", TEAMS_FIELDS, TEAMS_FIELDS)
 
 
 _SPEC_TYPES = {

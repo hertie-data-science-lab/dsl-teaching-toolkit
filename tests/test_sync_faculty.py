@@ -514,7 +514,7 @@ def test_a_course_admin_handle_no_team_can_be_given_is_a_fault(monkeypatch):
         6,
     )
     # The COURSE org's own .github, so the citation and the deep link land on the file a
-    # course admin actually edits - not on some semester's classroom-config.
+    # course admin actually edits - not on some semester's semester-config.
     assert (fault.file, fault.in_repo) == ("dsl-course.yml", ".github")
     assert fault.link("Course-Org") == (
         "https://github.com/Course-Org/.github/blob/main/dsl-course.yml#L6"

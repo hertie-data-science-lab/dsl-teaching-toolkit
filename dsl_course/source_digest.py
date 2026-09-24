@@ -44,7 +44,7 @@ from .schedule import SCHEDULE_PATH, SourceFault
 
 # What this module IS: schedule.yml's digest, its two frozen titles, its key migration and
 # the CLI the validate workflow calls. `scheduler` uses SCHEDULE, `sync` and `hold`;
-# `templates/classroom-config/validate-schedule.yml` uses `main --title`. The rest are the
+# `templates/semester-config/validate-schedule.yml` uses `main --title`. The rest are the
 # engine's own names, re-exported so schedule.yml's tests can reach it through the same
 # alias they reach the schedule constants through - `notify` and everything else import
 # them from `config_digest` directly.

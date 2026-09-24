@@ -1,6 +1,6 @@
-"""dsl-course teams -- per-assignment group membership from classroom-config/teams.csv.
+"""dsl-course teams -- per-assignment group membership from semester-config/teams.csv.
 
-`teams.csv` (private, in the semester's `classroom-config` repo) is the single source of
+`teams.csv` (private, in the semester's `semester-config` repo) is the single source of
 truth for who is in which team for which assignment:
 
     assignment,team,github_handle
@@ -187,7 +187,7 @@ def load(
     faults: list[ConfigFault] | None = None,
     known_handles: set[str] | None = None,
 ) -> dict[str, dict[str, list[str]]]:
-    """Fetch + parse teams.csv from the semester's PRIVATE classroom-config repo.
+    """Fetch + parse teams.csv from the semester's PRIVATE semester-config repo.
 
     A pure loader: a missing CSV returns {} silently. Whether that is benign (a
     semester with no group assignments yet) or an error (group provisioning/grading

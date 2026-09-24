@@ -5,7 +5,7 @@ Flow and block parse identically, so this is a teaching/readability standard rat
 correctness one: `schedule.yml`, `instructors.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
-`templates/classroom-config/schedule.yml` is `.format()`ed into every new semester org, so the
+`templates/semester-config/schedule.yml` is `.format()`ed into every new semester org, so the
 style regression ships to real courses.
 
 Deliberately NOT covered: GitHub Actions workflows and Issue Forms (see EXCLUDED). Those are
@@ -48,10 +48,10 @@ EXCLUDED = {
     "templates/welcome/team-formation.yml",
     "templates/welcome/ISSUE_TEMPLATE/01-join-course.yml",
     "templates/welcome/ISSUE_TEMPLATE/02-join-team.yml",
-    "templates/classroom-config/dispatch-sync.yml",
-    "templates/classroom-config/dispatch-sync-site.yml",
-    "templates/classroom-config/dispatch-scheduled-release.yml",
-    "templates/classroom-config/dispatch-send-codes.yml",
+    "templates/semester-config/dispatch-sync.yml",
+    "templates/semester-config/dispatch-sync-site.yml",
+    "templates/semester-config/dispatch-scheduled-release.yml",
+    "templates/semester-config/dispatch-send-codes.yml",
 }
 
 FIX = (
@@ -170,11 +170,11 @@ DUMPED = {
 # flow item until bootstrap renders them) and the grading_config.yml written to each
 # solution branch.
 SEEDED = {
-    "classroom-config/schedule.yml (seeded)": lambda: welcome.template(
-        "classroom-config/schedule.yml"
+    "semester-config/schedule.yml (seeded)": lambda: welcome.template(
+        "semester-config/schedule.yml"
     ).format(tag="f2026", year=2026),
-    "classroom-config/instructors.yml (seeded)": lambda: welcome.template(
-        "classroom-config/instructors.yml"
+    "semester-config/instructors.yml (seeded)": lambda: welcome.template(
+        "semester-config/instructors.yml"
     ).format(year=2026, year_next=2027),
     "course/dsl-course.yml (seeded, commented)": lambda: (
         bootstrap_course._course_metadata("Org", "Org Name", "Course", "CODE")

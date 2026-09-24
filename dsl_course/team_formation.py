@@ -103,7 +103,7 @@ NOUN = (
 )
 
 FIX = (
-    "write the missing rows into classroom-config/teams.csv yourself, or move the date on "
+    "write the missing rows into semester-config/teams.csv yourself, or move the date on "
     "the line above to keep team formation open for longer."
 )
 
@@ -354,7 +354,7 @@ def _what(window: Window) -> str:
 
 # ------------------------------------------------------------------- telling the semester
 
-# One row per thing SAID, in the PRIVATE classroom-config, shaped like
+# One row per thing SAID, in the PRIVATE semester-config, shaped like
 # `grades.DISTRIBUTED_PATH`: a re-run says nothing twice, and a message that could not be
 # sent is retried exactly once, because the row holding its claim is given back.
 MAILED_PATH = "team-formation/mailed.csv"
@@ -685,7 +685,7 @@ def _claim(
     actually inserted, or None if no attempt was accepted.
 
     Claim-then-send is `enrol_codes.run`'s ordering, and it is here for its reason: a
-    record that cannot be written (an archived classroom-config, a token that lost write
+    record that cannot be written (an archived semester-config, a token that lost write
     scope, a run of 5xx) must mean NOTHING WAS MAILED, which the next tick retries - not a
     batch that went out with no record of it, which the next tick sends again.
 
@@ -890,7 +890,7 @@ def notify_windows(
        own minute: the lock, the Join-team form, the site's callout and the teaching team's
        fault are all upstream of this call, and only the message waits for 07:00 local,
        because a `handout_datetime` of 00:00 otherwise wakes a semester at 2am;
-    5. a semester that has been closed out - its classroom-config is frozen, so the claim
+    5. a semester that has been closed out - its semester-config is frozen, so the claim
        could not land, and nobody is forming a team in a term that is over;
     6. NO TRANSPORT, asked BEFORE the claim. An org whose GRAPH_* secrets were never set
        claims nothing, says so once, and is offered the same messages by the next tick -
@@ -1145,7 +1145,7 @@ def main() -> int:
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
     # Actions log a one-line error beats a traceback, and the run still goes red.
     try:
-        # A closed-out semester's classroom-config is frozen, so the claim this send depends
+        # A closed-out semester's semester-config is frozen, so the claim this send depends
         # on could not land - and nobody is forming a team in a term that is over. Green,
         # as every other sweep treats one: a finished term is a state somebody chose.
         # `notify_windows` asks the same question again as its own last guard before it

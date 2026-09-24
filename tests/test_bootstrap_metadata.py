@@ -1,7 +1,7 @@
 """bootstrap_course metadata builders: instructors/TAs/course-admins live on the
 persistent course org (the SSOT, mirrored into every semester by sync_faculty). A semester
 org's .github/dsl-course.yml is only a pointer back to it - its schedule lives in
-classroom-config/schedule.yml (seeded from templates/classroom-config/schedule.yml).
+semester-config/schedule.yml (seeded from templates/semester-config/schedule.yml).
 
 The seeded content itself lives in real files under templates/, read at runtime by
 welcome.template - so these also pin what a fresh semester's config repo actually receives."""
@@ -57,7 +57,7 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
     # uncomment what they want to pin. The one live block is `archive:` at the end: the
     # maintainer wants every semester to say in its own file what happens at term end, with
     # the date left to its default and the sentence written out.
-    schedule = welcome.template("classroom-config/schedule.yml")
+    schedule = welcome.template("semester-config/schedule.yml")
     skeleton, live = schedule.split("\narchive:\n")
     assert all(
         line.startswith("#") or not line.strip() for line in skeleton.splitlines()
@@ -98,7 +98,7 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
     # a `{date}` in the template raises KeyError for every bootstrap, and a `{{date}}` the
     # renderer never touched puts a stray brace pair on the Schedule tab and in the
     # Updates box of every semester that uncomments the sentence.
-    seeded = welcome.template("classroom-config/schedule.yml").format(
+    seeded = welcome.template("semester-config/schedule.yml").format(
         tag="f2026", year=2026, year_next=2027
     )
     meta = yaml.safe_load(seeded)
@@ -114,10 +114,10 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
     assert "{" not in row and "}" not in row
 
 
-def test_classroom_readme_documents_the_semester_files_it_holds():
+def test_config_readme_documents_the_semester_files_it_holds():
     # Instructors configure a semester HERE (instructors.yml, schedule.yml, the roster); the README
     # must document those files and never send them back up to the course org.
-    readme = welcome.template("classroom-config/README.md")
+    readme = welcome.template("semester-config/README.md")
     assert "instructors.yml" in readme
     assert "schedule.yml" in readme
     assert "schedule.csv" not in readme
@@ -130,15 +130,15 @@ def test_starter_roster_seeds_the_full_column_set():
     # looking for code-based onboarding and auditors that the columns don't offer. The
     # live file is header-only; the worked example rows live in students.csv.sample
     # (covered by the seeding tests, which validate every shipped sample).
-    starter = welcome.template("classroom-config/students.csv")
+    starter = welcome.template("semester-config/students.csv")
     assert tuple(starter.splitlines()[0].split(",")) == roster.FIELDS
     assert roster.parse(starter) == []  # header-only: nobody to enrol by accident
 
 
-def test_classroom_readme_documents_every_roster_column():
+def test_config_readme_documents_every_roster_column():
     # The README's roster table is what faculty read instead of the schema doc; a column
     # missing from it is a column nobody fills in.
-    readme = welcome.template("classroom-config/README.md")
+    readme = welcome.template("semester-config/README.md")
     documented = set(re.findall(r"^\| `?(\w+)`? \|", readme, re.MULTILINE))
     assert set(roster.FIELDS) <= documented
 
@@ -146,21 +146,21 @@ def test_classroom_readme_documents_every_roster_column():
 def test_every_seeded_template_path_resolves():
     # The seeded content is read from disk at bootstrap time, so a typo'd or renamed path
     # would only surface mid-bootstrap against a real org.
-    # Both seeding modules read templates: bootstrap_course for the course/classroom-config
+    # Both seeding modules read templates: bootstrap_course for the course/semester-config
     # files, welcome for the onboarding workflows it also re-pushes on every refresh.
     source = Path(bc.__file__).read_text() + Path(welcome.__file__).read_text()
     rels = set(re.findall(r"\btemplate\(\s*[\"']([^\"']+)[\"']\s*\)", source))
     # ...plus the two tables that carry a template path instead of calling template()
     # with a literal, and are therefore invisible to the scan above.
-    rels |= set(welcome.CLASSROOM_SCAFFOLDS.values())
-    rels |= {rel for _, rel in welcome.CLASSROOM_SYSTEM_FILES}
+    rels |= set(welcome.CONFIG_SCAFFOLDS.values())
+    rels |= {rel for _, rel in welcome.CONFIG_SYSTEM_FILES}
     assert len(rels) >= 12
     for rel in sorted(rels):
         assert (welcome.TEMPLATES / rel).is_file(), f"missing template: {rel}"
 
 
 def test_semester_metadata_carries_course_pointer():
-    # The semester .github/dsl-course.yml must carry a `course:` line - the classroom-config
+    # The semester .github/dsl-course.yml must carry a `course:` line - the semester-config
     # dispatchers grep it to find where to fire Sync membership / Sync site.
     md = bc._semester_metadata("My-Semester-f2026", "My-Course-E1")
     assert "course: My-Course-E1" in md

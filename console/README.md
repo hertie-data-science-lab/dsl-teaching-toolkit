@@ -101,7 +101,7 @@ who teaches somewhere, and in student mode otherwise.
   archived when that `.github` repo is archived. A semester known only from a course's
   registry has its `.github` read when its student screens open. Org names compare
   case-insensitively.
-- Status: `classroom-config/.dsl/status.json` (semester) and `.github/.dsl/status.json`
+- Status: `semester-config/.dsl/status.json` (semester) and `.github/.dsl/status.json`
   (course), validated against `schemas/status.schema.json`. Staleness compares the file's
   `inputs` with one tree read. An absent file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.

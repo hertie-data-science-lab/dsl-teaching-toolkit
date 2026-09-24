@@ -2,7 +2,7 @@
 scaffolded course repo - so a non-owner instructor can push content to a repo they just
 scaffolded (previously only `.github` was granted, leaving content repos unwritable).
 
-The same policy covers a semester org's infra repos (welcome, classroom-config): the semester
+The same policy covers a semester org's infra repos (welcome, semester-config): the semester
 is `default_repository_permission=none`, so before this only org owners could edit the
 roster/schedule or triage onboarding issues."""
 
@@ -107,12 +107,12 @@ def test_faculty_and_semester_team_sets_are_disjoint():
 
 def test_semester_infra_repos_get_the_faculty_grant():
     # A semester org is default_repository_permission=none, so a non-owner instructor could
-    # not open classroom-config (schedule.yml/students.csv/teams.csv/instructors.yml, and the
+    # not open semester-config (schedule.yml/students.csv/teams.csv/instructors.yml, and the
     # grading sheets)
     # or triage welcome's needs-review onboarding issues without these.
     assert set(bootstrap_course.SEMESTER_FACULTY_REPOS) == {
         "welcome",
-        "classroom-config",
+        "semester-config",
     }
     # ...and single-sourced with the nightly sweep's write floor, so a repo cannot be
     # granted push at bootstrap and then read by the sweep (or the reverse).
@@ -133,8 +133,8 @@ def test_semester_faculty_grant_uses_the_shared_policy(monkeypatch):
     assert set(granted) == {
         ("Course-f2026", "instructors", "welcome", "push"),
         ("Course-f2026", "course-admin", "welcome", "admin"),
-        ("Course-f2026", "instructors", "classroom-config", "push"),
-        ("Course-f2026", "course-admin", "classroom-config", "admin"),
+        ("Course-f2026", "instructors", "semester-config", "push"),
+        ("Course-f2026", "course-admin", "semester-config", "admin"),
     }
 
 
@@ -253,7 +253,7 @@ def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeyp
     listings = {
         "instructors": _listing(
             _row(".github", "write", pull=True, triage=True, push=True),
-            _row("classroom-config", "write", pull=True, triage=True, push=True),
+            _row("semester-config", "write", pull=True, triage=True, push=True),
             _row("materials", "read", pull=True),
         ),
         "course-admin": _listing(
@@ -267,7 +267,7 @@ def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeyp
                 admin=True,
             ),
             _row(
-                "classroom-config",
+                "semester-config",
                 "admin",
                 pull=True,
                 triage=True,
@@ -286,7 +286,7 @@ def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeyp
             ),
         ),
     }
-    repos = [{"name": n} for n in (".github", "classroom-config", "materials")]
+    repos = [{"name": n} for n in (".github", "semester-config", "materials")]
     changed, granted = _sweep(monkeypatch, listings, repos, "semester")
     assert (changed, granted) == (0, [])
 
@@ -700,7 +700,7 @@ def test_a_shared_drop_box_takes_the_read_floor_like_any_student_repo():
     # `<slug>-submissions` derives from the frozen semester template by NAME, so the rule
     # that recognises a student repo already covers it - no new rule, and therefore no
     # rule to forget. The floor is what keeps faculty off a push on the semester's work:
-    # marking happens in classroom-config, so a commit here would reach no gradebook.
+    # marking happens in semester-config, so a commit here would reach no gradebook.
     listing = [
         repo_row("assignment-3", isTemplate=True),
         repo_row("assignment-3-submissions"),

@@ -6,7 +6,7 @@ name: Onboard student
 # .github/workflows/onboard.yml. Students open a "Join course" issue here; the issue AUTHOR is
 # the authenticated GitHub handle (unspoofable). We match the typed ENROLMENT CODE (a
 # random, non-PII token the bot emailed to each student) against the PRIVATE
-# classroom-config/students.csv, reject non-enrolees, record the handle + immutable GitHub
+# semester-config/students.csv, reject non-enrolees, record the handle + immutable GitHub
 # id (building the email <-> GH-id mapping), then grant org membership + the role team the
 # matched row's `role` column names: `students` (enrolled) or `auditors` (read-only - same
 # released materials, no assignment repos). A roster with no `role` column is all-enrolled.
@@ -24,7 +24,7 @@ name: Onboard student
 # guard), so a classmate can't bind your row to their account.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the semester org: Contents R/W on
-# classroom-config, Members R/W (org invite + team), Issues R/W on welcome.
+# semester-config, Members R/W (org invite + team), Issues R/W on welcome.
 
 on:
   issues:
@@ -42,7 +42,7 @@ concurrency:
   cancel-in-progress: false
 
 # The ambient GITHUB_TOKEN comments on, labels and closes the issue in THIS repo. It gets
-# nothing else: the roster write lands in another repo (classroom-config), which only
+# nothing else: the roster write lands in another repo (semester-config), which only
 # DSL_BOT_TOKEN can reach, so `contents:` here would be scope with no purpose.
 permissions:
   issues: write
@@ -64,7 +64,7 @@ jobs:
             const issue  = context.payload.issue;
             const handle = issue.user.login;              // authenticated identity
             const userId = issue.user.id;                 // immutable - key on this
-            const CONFIG = 'classroom-config', FILE = 'students.csv';
+            const CONFIG = '__CONFIG_REPO__', FILE = 'students.csv';
 
             // {shared_script}
 

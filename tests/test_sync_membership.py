@@ -253,7 +253,7 @@ def test_a_clean_multi_semester_run_reports_no_errors(monkeypatch):
 
 def test_every_semesters_sync_refreshes_the_team_formation_lock(monkeypatch):
     # The Join-team form reads `assignments.lock.yml` and nothing else, and this sync is
-    # what a push to schedule.yml wakes (classroom-config/dispatch-sync.yml). Without the
+    # what a push to schedule.yml wakes (semester-config/dispatch-sync.yml). Without the
     # write here, adding an assignment left the form answering off the previous list.
     locked: list[tuple[str, str]] = []
     monkeypatch.setattr(

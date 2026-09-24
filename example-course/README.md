@@ -42,13 +42,13 @@ example-course/
 ```
 
 > Not shown, because nobody writes it: each live semester also carries
-> `assignments.lock.yml` in `classroom-config` - generated from the assignments'
+> `assignments.lock.yml` in `semester-config` - generated from the assignments'
 > `grading_config.yml` files, and the only thing the **Join team** form reads. It is not in
 > the worked example for the same reason there is no `.sample` twin of it: there is nothing
 > in it for a person to copy.
 
 > NB: **`cohort-org/` is shipped, not just documented.** Every file in it is seeded into each
-> semester's private `classroom-config` repo as the `.sample` twin of the scaffold faculty fill
+> semester's private `semester-config` repo as the `.sample` twin of the scaffold faculty fill
 > in - `students.csv` → `students.csv.sample`, and so on for every other file here. The set is
 > derived by walking this directory (`welcome.CLASSROOM_SAMPLES`), so adding a file here ships
 > it; bootstrap and the nightly Refresh both converge them, so editing one updates every

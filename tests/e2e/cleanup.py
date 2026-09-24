@@ -130,7 +130,7 @@ def _clean_repos(org: str, run_id: str, dry_run: bool, left: list[str]) -> int:
 def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
     """Take the fenced block out of schedule.yml and drop this run's artefacts.
 
-    Skipped for an org with no classroom-config, which is every course org."""
+    Skipped for an org with no semester-config, which is every course org."""
     config = course.CONFIG_REPO
     if config not in {row["name"] for row in discovery.list_org_repos(org)}:
         return 0
@@ -160,7 +160,7 @@ def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
 
 
 def _is_artefact(path: str, run_id: str) -> bool:
-    """A classroom-config path inside this run's namespace - `snapshots/<slug>.csv`,
+    """A semester-config path inside this run's namespace - `snapshots/<slug>.csv`,
     `autograde/<slug>/...`, `grading_sheets/<slug>.yml`, for each of the run's per-shape
     slugs.
 

@@ -101,7 +101,7 @@ CONTRACT_OUTCOME = {
             "code": "SOURCE_MISSING",
             "text": "Folder lectures/05_trees was not found in course-materials-f2026.",
             "fix": {
-                "repo": "hertie-dsl-demo-f2026/classroom-config",
+                "repo": "hertie-dsl-demo-f2026/semester-config",
                 "path": "schedule.yml",
                 "line": 41,
                 "screen": "schedule",
@@ -171,7 +171,7 @@ CONTRACT_STATUS = {
             "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
             "stops": "The release on Thu 8 Oct will be skipped.",
             "fix": {
-                "repo": "hertie-dsl-demo-f2026/classroom-config",
+                "repo": "hertie-dsl-demo-f2026/semester-config",
                 "path": "schedule.yml",
                 "line": 41,
                 "screen": "schedule",

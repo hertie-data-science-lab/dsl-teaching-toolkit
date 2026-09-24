@@ -2,8 +2,8 @@
 # from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Dispatch membership sync
 
-# Seed this into a semester's private classroom-config repo as
-# .github/workflows/dispatch-sync.yml. classroom-config has no other workflows of its
+# Seed this into a semester's private semester-config repo as
+# .github/workflows/dispatch-sync.yml. semester-config has no other workflows of its
 # own - this file's only job is to trigger the course org's consolidated Sync
 # membership workflow (in <course-org>/.github) whenever students.csv, teams.csv or
 # instructors.yml changes here, so a commit takes effect immediately without an extra
