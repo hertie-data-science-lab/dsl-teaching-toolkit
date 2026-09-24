@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { APP_PENDING_KEY, APP_SESSION_KEY, AppAuth, AUTHORIZE_URL, type AppAuthOptions } from '../src/auth/app';
+import { APP_PENDING_KEY, APP_SESSION_KEY, AppAuth, AUTHORIZE_URL, NOT_CONFIGURED, type AppAuthOptions } from '../src/auth/app';
 import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
 import type { TokenStore } from '../src/auth/types';
@@ -73,7 +73,7 @@ describe('AppAuth', () => {
     expect(s.map.has(APP_PENDING_KEY)).toBe(false);
     expect((await auth.restore())?.login).toBe('octo');
     expect(relayCalls()[0].url).toBe(`${RELAY}/exchange`);
-    expect(relayCalls()[0].body).toEqual({ code: 'C', code_verifier: 'V' });
+    expect(relayCalls()[0].body).toEqual({ code: 'C', code_verifier: 'V', redirect_uri: HOME });
     expect(auth.token()).toBe('ghu_1');
     expect(gh.seen.find((r) => r.url.endsWith('/user'))?.headers.Authorization).toBe('Bearer ghu_1');
     expect(JSON.parse(s.map.get(APP_SESSION_KEY)!)).toMatchObject({ access_token: 'ghu_1', refresh_token: 'ghr_1', expires_at: Date.now() + 8 * HOUR });
@@ -138,19 +138,73 @@ describe('AppAuth', () => {
     expect(s.map.has(APP_SESSION_KEY)).toBe(false);
   });
 
-  it('retries a refresh the relay could not answer while the token still works', async () => {
+  it('keeps the session through network failures and retries after 30s, 2m, then 10m', async () => {
     let calls = 0;
-    const gh = new FakeGitHub()
+    const base = new FakeGitHub()
       .on('GET', '/user', () => json(user))
-      .on('POST', `${RELAY}/refresh`, () => (++calls === 1 ? json({ error: 'github_unreachable' }, 502) : json({ access_token: 'ghu_new', refresh_token: 'ghr_new', expires_in: 28800 })));
+      .on('POST', `${RELAY}/refresh`, () => json({ access_token: 'ghu_new', refresh_token: 'ghr_new', expires_in: 28800 }));
+    const fetch = (url: string, init?: RequestInit) => {
+      if (url.startsWith(RELAY) && ++calls <= 3) return Promise.reject(new TypeError('Failed to fetch'));
+      return base.fetch(url, init);
+    };
     const s = store();
     s.setItem(APP_SESSION_KEY, JSON.stringify({ access_token: 'ghu_old', refresh_token: 'ghr_old', expires_at: Date.now() + HOUR }));
-    const { auth } = app({ fetch: gh.fetch, store: s });
+    const onLost = vi.fn();
+    const { auth } = app({ fetch, store: s, onLost });
+    await auth.restore();
+    await vi.advanceTimersByTimeAsync(55 * 60 * 1000); // the scheduled refresh: fails
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(30 * 1000); // first retry: fails
+    expect(calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1000 - 1);
+    expect(calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(1); // second retry: fails
+    expect(calls).toBe(3);
+    expect(auth.token()).toBe('ghu_old');
+    expect(s.map.has(APP_SESSION_KEY)).toBe(true);
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000); // third retry: works
+    expect(auth.token()).toBe('ghu_new');
+    expect(onLost).not.toHaveBeenCalled();
+  });
+
+  it('retries a 5xx from the relay, and signs out on another 4xx', async () => {
+    let status = 502;
+    const gh = new FakeGitHub()
+      .on('GET', '/user', () => json(user))
+      .on('POST', `${RELAY}/refresh`, () => json({ error: 'x' }, status));
+    const s = store();
+    s.setItem(APP_SESSION_KEY, JSON.stringify({ access_token: 'ghu_old', refresh_token: 'ghr_old', expires_at: Date.now() + HOUR }));
+    const onLost = vi.fn();
+    const { auth } = app({ fetch: gh.fetch, store: s, onLost });
     await auth.restore();
     await vi.advanceTimersByTimeAsync(55 * 60 * 1000);
     expect(auth.token()).toBe('ghu_old');
-    await vi.advanceTimersByTimeAsync(60 * 1000);
-    expect(auth.token()).toBe('ghu_new');
+    status = 403;
+    await vi.advanceTimersByTimeAsync(30 * 1000);
+    expect(onLost).toHaveBeenCalledOnce();
+    expect(auth.token()).toBeNull();
+  });
+
+  it('says sign-in is not set up when the relay answers not_configured', async () => {
+    const gh = new FakeGitHub().on('POST', `${RELAY}/exchange`, () => json({ error: 'not_configured' }, 503));
+    const s = store();
+    s.setItem(APP_PENDING_KEY, JSON.stringify({ state: 'S', verifier: 'V', back: HOME }));
+    const { auth } = app({ fetch: gh.fetch, store: s, href: `${HOME}?code=C&state=S` });
+    auth.takeCallback();
+    await expect(auth.restore()).rejects.toThrow(NOT_CONFIGURED);
+  });
+
+  it('uses a saved session that is about to run out when the refresh gets no answer, and keeps trying', async () => {
+    let calls = 0;
+    const base = world();
+    const fetch = (url: string, init?: RequestInit) => (url.startsWith(RELAY) && ++calls === 1 ? Promise.reject(new TypeError('offline')) : base.gh.fetch(url, init));
+    const s = store();
+    s.setItem(APP_SESSION_KEY, JSON.stringify({ access_token: 'ghu_old', refresh_token: 'ghr_old', expires_at: Date.now() + 60 * 1000 }));
+    const { auth } = app({ fetch, store: s });
+    expect((await auth.restore())?.login).toBe('octo');
+    expect(auth.token()).toBe('ghu_old');
+    await vi.advanceTimersByTimeAsync(30 * 1000);
+    expect(auth.token()).toBe('ghu_1');
   });
 
   it('refreshes a saved session that is about to run out before using it', async () => {
@@ -199,6 +253,21 @@ describe('ConsoleAuth', () => {
     const auth = new ConsoleAuth(new PatAuth({ store: s }), a);
     expect(await auth.restore()).toBeNull();
     expect(auth.notice).toMatch(/did not match/);
+  });
+
+  it('signs out of both paths, clearing both stores', async () => {
+    const gh = new FakeGitHub().on('GET', '/user', () => json(user, 200, { 'x-oauth-scopes': 'repo, workflow' }));
+    const patStore = store();
+    const appStore = store();
+    patStore.setItem(TOKEN_KEY, 'ghp_saved');
+    appStore.setItem(APP_SESSION_KEY, JSON.stringify({ access_token: 'ghu_saved', refresh_token: 'ghr_saved', expires_at: Date.now() + 4 * HOUR }));
+    const auth = new ConsoleAuth(new PatAuth({ fetch: gh.fetch, store: patStore }), app({ fetch: gh.fetch, store: appStore }).auth);
+    await auth.restore();
+    expect(auth.token()).toBe('ghu_saved');
+    auth.signOut();
+    expect(auth.token()).toBeNull();
+    expect(patStore.map.size).toBe(0);
+    expect(appStore.map.size).toBe(0);
   });
 
   it('has no GitHub path without an App', async () => {

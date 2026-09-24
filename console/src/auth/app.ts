@@ -6,8 +6,9 @@ export const APP_SESSION_KEY = 'dsl-console-app-session';
 export const APP_PENDING_KEY = 'dsl-console-app-pending';
 /** Refresh this long before the access token (8 hours) runs out. */
 const REFRESH_EARLY_MS = 5 * 60 * 1000;
-/** After a refresh that could not reach the relay, try again this much later. */
-const RETRY_MS = 60 * 1000;
+/** After a refresh that got no answer, try again after these waits (the last repeats). */
+const BACKOFF_MS = [30 * 1000, 2 * 60 * 1000, 10 * 60 * 1000];
+export const NOT_CONFIGURED = 'Sign-in is not set up on this deployment; use a token.';
 
 interface Session {
   access_token: string;
@@ -59,6 +60,7 @@ export class AppAuth implements Auth {
   private session: Session | null = null;
   private who: GhUser | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private failures = 0;
   private callback: { code: string; verifier: string } | { error: string } | null = null;
   private readonly opts: AppAuthOptions;
   private readonly fetchFn: Fetch;
@@ -128,14 +130,25 @@ export class AppAuth implements Auth {
     const cb = this.callback;
     this.callback = null;
     if (cb && 'error' in cb) throw new SignInError(cb.error);
-    if (cb) return this.start(await this.relay('/exchange', { code: cb.code, code_verifier: cb.verifier }));
+    if (cb) return this.start(await this.relay('/exchange', { code: cb.code, code_verifier: cb.verifier, redirect_uri: this.opts.redirectUri }));
     const saved = this.read<Session>(APP_SESSION_KEY);
     if (!saved) return null;
     try {
-      if (saved.refresh_token && saved.expires_at - Date.now() < REFRESH_EARLY_MS) return await this.start(await this.relay('/refresh', { refresh_token: saved.refresh_token }));
+      if (saved.refresh_token && saved.expires_at - Date.now() < REFRESH_EARLY_MS) {
+        try {
+          return await this.start(await this.relay('/refresh', { refresh_token: saved.refresh_token }));
+        } catch (e) {
+          // No answer, but the access token still works: use it and keep trying to refresh.
+          if (e instanceof SignInError || saved.expires_at <= Date.now()) throw e;
+          const u = await this.start(saved);
+          this.retryLater();
+          return u;
+        }
+      }
       return await this.start(saved);
-    } catch {
-      this.signOut();
+    } catch (e) {
+      // Refused (by GitHub or the relay): the session is over. No answer: keep it for a reload.
+      if (e instanceof SignInError || e instanceof GitHubError) this.signOut();
       return null;
     }
   }
@@ -150,6 +163,7 @@ export class AppAuth implements Auth {
 
   private keep(s: Session): void {
     this.session = s;
+    this.failures = 0;
     this.write(APP_SESSION_KEY, s);
     if (s.refresh_token && s.expires_at) this.schedule(s.expires_at - Date.now() - REFRESH_EARLY_MS);
   }
@@ -159,23 +173,36 @@ export class AppAuth implements Auth {
     this.timer = setTimeout(() => void this.refresh(), Math.max(0, ms));
   }
 
+  private retryLater(): void {
+    this.schedule(BACKOFF_MS[Math.min(this.failures, BACKOFF_MS.length - 1)]);
+    this.failures++;
+  }
+
   private async refresh(): Promise<void> {
     const s = this.session;
     if (!s) return;
     try {
+      // A refresh token works once: the old pair dies when the new one is issued. A tab
+      // duplicated from this one carries a copy of this sessionStorage, so whichever tab
+      // refreshes second is refused (bad_refresh_token) and signs out; signing in again
+      // there is the fix.
       this.keep(await this.relay('/refresh', { refresh_token: s.refresh_token }));
     } catch (e) {
       if (e instanceof SignInError) {
-        // The relay answered and GitHub refused the refresh token: this session is over.
+        // The relay answered and refused (GitHub said bad_refresh_token, or a 4xx): over.
         this.signOut();
         this.opts.onLost?.();
-      } else if (s.expires_at > Date.now()) {
-        this.schedule(RETRY_MS);
+      } else {
+        // No answer (offline, relay down, rate-limited): keep the session and try again.
+        this.retryLater();
       }
     }
   }
 
-  /** POST to the relay; a SignInError when GitHub refused, a plain Error when unreachable. */
+  /**
+   * POST to the relay. A SignInError when it answered with a refusal (a 4xx other than
+   * 429); a plain Error when there was no usable answer, which is worth retrying.
+   */
   private async relay(path: '/exchange' | '/refresh', body: Record<string, string>): Promise<Session> {
     const res = await this.fetchFn(`${this.opts.relayUrl.replace(/\/+$/, '')}${path}`, {
       method: 'POST',
@@ -183,7 +210,8 @@ export class AppAuth implements Auth {
       body: JSON.stringify(body),
     });
     const out = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string };
-    if (res.status === 400) throw new SignInError(out.error_description || `GitHub did not accept the sign-in (${out.error ?? 'unknown error'}). Try again.`);
+    if (res.status === 503 && out.error === 'not_configured') throw new Error(NOT_CONFIGURED);
+    if (res.status >= 400 && res.status < 500 && res.status !== 429) throw new SignInError(out.error_description || `GitHub did not accept the sign-in (${out.error ?? `status ${res.status}`}). Try again.`);
     if (!res.ok || !out.access_token) throw new Error(`The sign-in relay answered ${res.status}.`);
     return { access_token: out.access_token, refresh_token: out.refresh_token ?? '', expires_at: out.expires_in ? Date.now() + out.expires_in * 1000 : 0 };
   }
