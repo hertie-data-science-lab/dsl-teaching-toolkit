@@ -4,7 +4,8 @@
 // `#marks-<slug>` screens parse to those tabs, so old links still land. Which course or cohort
 // the page is about rides in the query string (`?cohort=<org>` or `?course=<org>`), so a link
 // from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
-// a student's own, or an instructor's Student view.
+// a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
+// of a semester the person is not a member of yet.
 
 import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 
@@ -64,6 +65,8 @@ export interface Selection {
   course?: string;
   /** A semester whose student screens to show. */
   semester?: string;
+  /** A semester to join with an enrolment code (its `welcome` repo is public). */
+  join?: string;
   /** A wizard step to come back to from an editor it opened (`new-cohort-3`). */
   wizard?: string;
   /** A template to prefill a new schedule entry with (New assignment's last step). */
@@ -77,6 +80,7 @@ export function parseSearch(search: string): Selection {
     cohort: q.get('cohort') ?? undefined,
     course: q.get('course') ?? undefined,
     semester: q.get('semester') ?? undefined,
+    join: q.get('join') ?? undefined,
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
     template: q.get('template') ?? undefined,
   };
@@ -132,7 +136,7 @@ export function landing(courses: Course[]): string {
 
 /** The student screens, in nav order, with their labels; `week` is where a semester opens. */
 export const STUDENT_SCREENS: [string, string][] = [
-  ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['instructors', 'Instructors'],
+  ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['marks', 'Marks'], ['materials', 'Materials'], ['join', 'Join'], ['instructors', 'Instructors'],
 ];
 
 /** The link to a semester's student screens. */

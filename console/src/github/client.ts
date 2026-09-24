@@ -62,6 +62,8 @@ export interface TreeEntry {
   mode: string;
   type: 'blob' | 'tree' | 'commit';
   sha: string;
+  /** Bytes, for a blob. */
+  size?: number;
 }
 
 export interface Tree {
@@ -103,6 +105,27 @@ export interface CheckRun {
   conclusion: string | null;
   html_url: string;
   output: { title: string | null; summary: string | null; annotations_count: number };
+}
+
+export interface GhIssue {
+  number: number;
+  title: string;
+  state: string; // open | closed
+  state_reason?: string | null;
+  html_url: string;
+  body?: string | null;
+  created_at: string;
+  comments: number;
+  labels: { name: string }[];
+  user?: { login: string } | null;
+}
+
+export interface GhComment {
+  id: number;
+  body: string;
+  created_at: string;
+  html_url: string;
+  user?: { login: string } | null;
 }
 
 export interface Author {
@@ -157,6 +180,15 @@ export function decodeBase64(b64: string): string {
   const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
   return new TextDecoder().decode(bytes);
 }
+
+/** Bytes of base64 (whitespace allowed). */
+export function decodeBytes(b64: string): Uint8Array {
+  const bin = atob(b64.replace(/\s/g, ''));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+/** The contents API's base64 ceiling: above it a file's bytes come from the blob API. */
+export const ONE_MB = 1024 * 1024;
 
 /** Resolve after `ms` milliseconds: the pause between polls. */
 export const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -471,6 +503,56 @@ export class GitHubClient {
   /** A branch, or null when the repo has no branch of that name. */
   getBranch(owner: string, repo: string, branch: string): Promise<{ name: string } | null> {
     return this.getOrNull<{ name: string }>(`/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`);
+  }
+
+  // ---------------------------------------------------------------- student screens
+
+  /**
+   * A file's bytes, not kept in the ETag cache (a notebook or a PDF can run to megabytes):
+   * the contents API up to 1 MB, the blob API by `sha` above it (both stop at 100 MB).
+   */
+  async getBytes(owner: string, repo: string, path: string, sha: string, size: number): Promise<Uint8Array> {
+    const url = this.url(size > ONE_MB ? `/repos/${owner}/${repo}/git/blobs/${sha}` : `/repos/${owner}/${repo}/contents/${enc(path)}`);
+    const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(), cache: 'no-store' });
+    this.noteRateLimit(res);
+    if (!res.ok) return this.fail(res, url);
+    const body = (await res.json()) as { content?: string; encoding?: string };
+    return decodeBytes(body.content ?? '');
+  }
+
+  /** GitHub's own rendering of markdown (sanitised by GitHub), with `context` (`owner/repo`) for its links. */
+  async renderMarkdown(text: string, context?: string): Promise<string> {
+    const url = this.url('/markdown');
+    const res = await this.fetchFn(url, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ text, mode: 'gfm', ...(context ? { context } : {}) }),
+      cache: 'no-store',
+    });
+    this.noteRateLimit(res);
+    if (!res.ok) return this.fail(res, url);
+    return res.text();
+  }
+
+  /** A repo's issues matching `query` (`labels=...&state=all&creator=...`), newest first, one page. */
+  async listIssues(owner: string, repo: string, query: string): Promise<GhIssue[]> {
+    return (await this.getOrNull<GhIssue[]>(`/repos/${owner}/${repo}/issues?${query}&per_page=30`)) ?? [];
+  }
+
+  /** An issue's comments, oldest first (up to 100: a receipts thread stays well under). */
+  async listIssueComments(owner: string, repo: string, issue: number): Promise<GhComment[]> {
+    return (await this.getOrNull<GhComment[]>(`/repos/${owner}/${repo}/issues/${issue}/comments?per_page=100`)) ?? [];
+  }
+
+  /** The logins of a team the caller can see, or null when it cannot (not a member, or no such team). */
+  async listTeamMembers(org: string, team: string): Promise<string[] | null> {
+    try {
+      const r = await this.getOrNull<{ login: string }[]>(`/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(team)}/members?per_page=100`);
+      return r ? r.map((m) => m.login) : null;
+    } catch (e) {
+      if (e instanceof GitHubError) return null;
+      throw e;
+    }
   }
 
   /** Whether `user` is a member of `org` (as far as the caller may see). */
