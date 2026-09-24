@@ -58,11 +58,11 @@ export interface WeekItem {
 export interface Release {
   id: string;
   when: string;
-  type: string; // lecture | lab | readings
+  type: string | null; // lecture | lab | readings; null when the entry has no deploy block
   title: string;
   state: ReleaseState;
-  source: { repo: string; path: string };
-  dest: { repo: string; path: string };
+  source: { repo: string; path: string } | null;
+  dest: { repo: string; path: string } | null;
   show_on_site: boolean;
   tbc: boolean;
   copies?: unknown;

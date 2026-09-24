@@ -1,5 +1,6 @@
 // One render per screen, with the contracts example as the status fixture.
 
+import { options } from 'preact';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { PatAuth } from '../src/auth/pat';
@@ -15,6 +16,7 @@ import { StaffScreen, StudentsScreen } from '../src/screens/People';
 import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
 import { OperationsScreen, SiteScreen } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
+import { ScreenBoundary } from '../src/ui/boundary';
 import { Footer, Sidenav, Topbar } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
 
@@ -193,6 +195,37 @@ describe('S6 schedule and S11 release', () => {
     expect(t).toContain(`${COURSE_ORG}/course-materials-f2026/lectures/05_trees`);
     expect(t).toContain(`${COHORT_ORG}/materials/lectures/05_trees`);
     expect(t).toContain('Fix the folder');
+  });
+  const unstaged: Loaded = {
+    kind: 'ready', sha: 's', stale: [],
+    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', type: null, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
+  };
+  it('renders a release with no deploy block as nothing staged, with no Release early', () => {
+    const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
+    expect(out).toContain('<b>Session 12</b>: Review');
+    expect(out).toContain('Nothing staged yet: this entry has no deploy block');
+    expect(out).toContain('href="#schedule-lecture-12"');
+    expect(out).not.toContain('Release early');
+  });
+  it('shows the nothing-staged page for a release with no source', () => {
+    const t = text(<ReleaseScreen {...props({ loaded: unstaged, entry: 'lecture-12' })} />);
+    expect(t).toContain('Nothing staged yet: this entry has no deploy block.');
+    expect(t).toContain('Edit entry');
+    expect(t).not.toContain('Release early');
+  });
+});
+
+describe('screen error boundary', () => {
+  // The string renderer honours boundaries only when asked; the browser always does.
+  (options as { errorBoundaries?: boolean }).errorBoundaries = true;
+  it('shows the error instead of the screen that threw', () => {
+    const Boom = (): preact.VNode => {
+      throw new Error('kaboom');
+    };
+    const t = text(<ScreenBoundary><Boom /></ScreenBoundary>);
+    expect(t).toContain('This screen hit an error');
+    expect(t).toContain('kaboom');
+    expect(html(<ScreenBoundary><Boom /></ScreenBoundary>)).toContain('href="#cohort"');
   });
 });
 
