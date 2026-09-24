@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, type GhTeam } from '../src/github/client';
 import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../src/model/discovery';
-import { forgetMyTeams, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
+import { forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
 import { forgetStudentPrefs, lastVisit, localPaths, markVisit, resetVisits, saveLocalPaths, type PrefStore } from '../src/model/prefs';
 import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
@@ -18,7 +18,8 @@ import { ReadingsView, materialHref } from '../src/screens/StudentMaterials';
 import { SetupView, cloneCommand, forkOf, joinPath, vscodeFolder } from '../src/screens/StudentSetup';
 import { InvitedGroup } from '../src/screens/Home';
 import { GhMd } from '../src/ui/rendered';
-import { FakeGitHub, fileBody } from './fake';
+import { FakeGitHub, fileBody, json } from './fake';
+import { StudentNav } from '../src/ui/shell';
 import { FILES, GRADES, ORG, SITE } from './fixtures/site';
 
 const LOGIN = 'octo-student';
@@ -201,6 +202,34 @@ describe('4. the auditor', () => {
     expect(fake.seen.filter((s) => s.url.includes('/teams/auditors/')).map((s) => s.url)).toEqual([`https://api.github.com/orgs/${ORG}/teams/auditors/memberships/${LOGIN}`]);
     const student = await readMine(client(new FakeGitHub().on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])), ORG, LOGIN, []);
     expect(student.auditor).toBe(false);
+  });
+
+  it('fails as a whole when the role cannot be read, and then promises nothing', async () => {
+    const fake = new FakeGitHub()
+      .on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])
+      .on('GET', `/orgs/${ORG}/teams/auditors/memberships/${LOGIN}`, () => json({ message: 'Forbidden' }, 403));
+    await expect(readMine(client(fake), ORG, LOGIN, [])).rejects.toThrow();
+    const t = text(<AssignmentsView org={ORG} facts={await facts()} mine={null} now={NOW} studentView={false} receipts={{}} unknownRole />);
+    expect(t).toContain('Could not read your role');
+    expect(t).not.toContain('Your repo');
+    expect(t).not.toContain('join or create one');
+    expect(t).not.toContain('How to hand in');
+  });
+
+  it('an auditor’s nav has no Marks or Join, and no "Reading your repos and marks" line', async () => {
+    const fake = new FakeGitHub()
+      .on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])
+      .on('GET', `/orgs/${ORG}/teams/auditors/memberships/${LOGIN}`, { state: 'active' });
+    await readMine(client(fake), ORG, LOGIN, []);
+    expect(knownAuditor(ORG.toUpperCase())).toBe(true);
+    const sem: Semester = { org: ORG, term: 'f2026', termLabel: 'Fall 2026', courseOrg: 'c', courseName: 'Deep Learning', archived: false, role: 'student' };
+    const nav = render(<StudentNav courses={[]} cohortStates={{}} semesters={[sem]} semester={sem} current="week" />);
+    expect(nav).not.toContain('#marks');
+    expect(nav).not.toContain('#join');
+    expect(nav).toContain('#materials');
+    await readMine(client(new FakeGitHub().on('GET', new RegExp(`^/orgs/${ORG}/repos`), [])), ORG, LOGIN, []);
+    expect(knownAuditor(ORG)).toBe(false);
+    expect(render(<StudentNav courses={[]} cohortStates={{}} semesters={[sem]} semester={sem} current="week" />)).toContain('#marks');
   });
 
   it('promises no repo, team or marks: "As an auditor you ..."', async () => {

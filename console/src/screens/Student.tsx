@@ -13,7 +13,7 @@ import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
 import { semesterName, type Semester } from '../model/discovery';
 import { dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
-import { gradebookUrl, isMarked, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
+import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { lastVisit, markVisit } from '../model/prefs';
 import { DEFAULT_TZ, IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
 import { weekItems, type WeekItem } from '../model/week';
@@ -97,13 +97,19 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
   if (facts.kind === 'loading') return <Loading what="Reading the semester" />;
   if (facts.kind === 'failed') return <CheckLine cls="bad">The semester’s schedule could not be read: {facts.error}</CheckLine>;
   if (!f) return <NoFacts org={org} />;
-  const mineNote = studentView ? null : mine.kind === 'loading' ? <Loading what="Reading your repos and marks" /> : mine.kind === 'failed' ? <CheckLine cls="warn">Your repos and marks could not be read: {mine.error}</CheckLine> : null;
+  // The role could not be read: nothing below promises a repo, a team or marks.
+  const unknownRole = !studentView && mine.kind === 'failed';
+  const mineNote = studentView ? null
+    : mine.kind === 'loading' ? (knownAuditor(org) ? null : <Loading what="Reading your repos and marks" />)
+    : unknownRole ? <CheckLine cls="warn">Could not read your role in this semester ({mine.error}), so your repos, team and marks are not shown. Reload the page to try again.</CheckLine>
+    : null;
   const tz = f.timezone || DEFAULT_TZ;
   const rc = receipts.kind === 'ready' ? receipts.value : undefined;
   const hasThreads = !!m && f.assignments.some((a) => a.privateRepo && m.units[a.slug]?.repo);
   const body =
     screen === 'schedule' ? <ScheduleView facts={f} mine={m} now={now} org={org} />
-    : screen === 'assignments' ? <AssignmentsView org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} />
+    : screen === 'assignments' ? <AssignmentsView org={org} facts={f} mine={m} now={now} studentView={studentView} receipts={hasThreads ? rc : {}} unknownRole={unknownRole} />
+    : unknownRole && (screen === 'marks' || screen === 'join') ? null
     : screen === 'marks' ? <MarksView org={org} login={login} facts={f} gradebook={m?.gradebook ?? null} studentView={studentView} loaded={mine.kind !== 'loading'} auditor={m?.auditor} />
     : screen === 'materials' ? <div class="stack"><MaterialsView org={org} repos={f.materialsRepos} entry={entry} />{entry ? null : <ReadingsView org={org} facts={f} now={now} />}</div>
     : screen === 'setup' ? <SetupView org={org} facts={f} mine={m} studentView={studentView} />
@@ -111,7 +117,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     : screen === 'instructors' ? <InstructorsView facts={f} org={org} />
     : (
       <>
-        <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org))} tz={tz} org={org} />
+        <WeekList items={weekItems(f, m, now, patchLines(f.assignments, m, rc), studentView || !login ? null : lastVisit(login, org)).filter((i) => !(unknownRole && i.kind === 'teams'))} tz={tz} org={org} />
         <AboutView facts={f} org={org} tz={tz} now={now} />
       </>
     );
@@ -166,7 +172,7 @@ export function ArchivedSemester({ semester, studentView = false }: { semester: 
     </section>
   );
   if (!env || studentView) return head;
-  if (load.kind === 'loading') return <div class="stack">{head}<Loading what="Reading your repos and marks" /></div>;
+  if (load.kind === 'loading') return <div class="stack">{head}{knownAuditor(org) ? null : <Loading what="Reading your repos and marks" />}</div>;
   if (load.kind === 'failed') return <div class="stack">{head}<CheckLine cls="warn">Your repos and marks could not be read: {load.error}</CheckLine></div>;
   const { f, m } = load.value;
   const facts: SemesterFacts = f ?? EMPTY_FACTS;
@@ -384,8 +390,10 @@ const SUBMIT_WORD: Record<string, string> = {
   assignment_repo: 'Push to your repo', shared_dropbox_repo: 'Push to your folder in the shared repo', external: 'Handed in outside GitHub',
 };
 
-export function AssignmentsView({ org, facts, mine, now, studentView, receipts }: {
+export function AssignmentsView({ org, facts, mine, now, studentView, receipts, unknownRole = false }: {
   org: string; facts: SemesterFacts; mine: Mine | null; now: number; studentView: boolean;
+  /** The person's role could not be read: promise them nothing. */
+  unknownRole?: boolean;
   /** Receipts per repo; undefined while they are read. */
   receipts?: Record<string, Receipts | null>;
 }) {
@@ -396,7 +404,7 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts }
   return (
     <div class="stack">
       {list.map((a) => {
-        const auditor = mine?.auditor === true;
+        const auditor = mine?.auditor === true || unknownRole;
         const st = myState(a, isMarked(mine?.gradebook ?? null, a.slug), now, tz);
         const u = mine?.units[a.slug];
         const rc = u?.repo ? receipts?.[u.repo] : undefined;
@@ -419,6 +427,7 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts }
               {a.solutionShown ? <><dt>Solution shown</dt><dd>{fmtWhen(a.solutionShown, tz, year)}</dd></> : null}
               {a.submitVia && !auditor ? <><dt>How to hand in</dt><dd>{SUBMIT_WORD[a.submitVia]}{a.submitVia === 'external' && a.submitUrl ? <>: <a href={a.submitUrl} target="_blank" rel="noopener">{hostOf(a.submitUrl)} <Ext /></a></> : null}</dd></> : null}
               {studentView ? <><dt>Yours</dt><dd class="footnote">A student’s repo, team and receipts show here.</dd></>
+                : unknownRole ? <><dt>Yours</dt><dd class="footnote">Could not read your role: your repo, team and receipts are not shown.</dd></>
                 : auditor ? <><dt>Yours</dt><dd class="footnote">As an auditor you hand in no work for this assignment.</dd></>
                 : <MyUnitRows org={org} a={a} mine={mine} receipts={rc} loading={u?.repo ? receipts === undefined : false} tz={tz} year={year} />}
             </dl>

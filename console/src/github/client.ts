@@ -602,15 +602,10 @@ export class GitHubClient {
     return this.listPages<GhTeam>('/user/teams');
   }
 
-  /** `user`'s membership state of team `team` in `org` (`active` | `pending`), or null when not a member or it cannot tell. A member may read their own membership of a secret team. */
+  /** `user`'s membership state of team `team` in `org` (`active` | `pending`), null when not a member (404); any other failure throws, so a caller never mistakes "could not tell" for "not a member". A member may read their own membership of a secret team. */
   async getTeamMembership(org: string, team: string, user: string): Promise<string | null> {
-    try {
-      const r = await this.getOrNull<{ state: string }>(`/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(team)}/memberships/${encodeURIComponent(user)}`);
-      return r?.state ?? null;
-    } catch (e) {
-      if (e instanceof GitHubError) return null;
-      throw e;
-    }
+    const r = await this.getOrNull<{ state: string }>(`/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(team)}/memberships/${encodeURIComponent(user)}`);
+    return r?.state ?? null;
   }
 
   /** A small file's bytes through the contents API (up to 1 MB), or null when it is absent. */

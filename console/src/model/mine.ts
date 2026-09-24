@@ -6,6 +6,7 @@
 // GitHub shows a student only the repos they were granted, and a team repo counts as theirs
 // only where they can push to it (a demo org's public repos are readable by anyone).
 
+import { signal } from '@preact/signals';
 import { parse } from 'yaml';
 import type { GhIssue, GhRepo, GhTeam, GitHubClient } from '../github/client';
 import type { SemesterAssignment } from './student';
@@ -177,7 +178,26 @@ export function myTeams(client: GitHubClient): Promise<GhTeam[]> {
 /** Drop the session's team list (sign-out). */
 export const forgetMyTeams = (client: GitHubClient) => teamLists.delete(client);
 
-/** Everything the student's own screens need for one semester (a few calls: the repo list, the gradebook, the role, their teams, each team's members). */
+/** Semesters (lower-cased org) where the person is known to audit, from the last readMine: the nav hides Marks and Join there. */
+export const auditing = signal<ReadonlySet<string>>(new Set());
+
+export const knownAuditor = (org: string) => auditing.value.has(org.toLowerCase());
+
+function noteRole(org: string, auditor: boolean) {
+  const k = org.toLowerCase();
+  if (auditor === auditing.value.has(k)) return;
+  const next = new Set(auditing.value);
+  if (auditor) next.add(k);
+  else next.delete(k);
+  auditing.value = next;
+}
+
+/**
+ * Everything the student's own screens need for one semester (a few calls: the repo list, the
+ * gradebook, the role, their teams, each team's members). It fails as a whole when the role
+ * cannot be read: a screen then promises nothing, rather than treating a possible auditor as
+ * a student.
+ */
 export async function readMine(client: GitHubClient, org: string, login: string, assignments: SemesterAssignment[]): Promise<Mine> {
   const book = `grades-${login}`;
   const groups = assignments.some((a) => a.group);
@@ -185,7 +205,7 @@ export async function readMine(client: GitHubClient, org: string, login: string,
     client.listOrgRepos(org),
     client.getContents(org, book, 'grades.yml').catch(() => null),
     client.lastCommitDate(org, book, 'grades.yml').catch(() => null),
-    client.getTeamMembership(org, AUDITORS_TEAM, login).catch(() => null),
+    client.getTeamMembership(org, AUDITORS_TEAM, login),
     groups ? myTeams(client).catch(() => [] as GhTeam[]) : ([] as GhTeam[]),
   ]);
   const slugs = assignments.map((x) => x.slug);
@@ -197,6 +217,7 @@ export async function readMine(client: GitHubClient, org: string, login: string,
     const members = team ? await client.listTeamMembers(org, found?.slug ?? `${a.slug}-${team}`.toLowerCase()) : null;
     units[a.slug] = { ...u, team, members };
   }));
+  noteRole(org, audit === 'active');
   return { units, gradebook: grades ? parseGradebook(grades.text, updated) : null, auditor: audit === 'active' };
 }
 

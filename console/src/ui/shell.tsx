@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { GhUser } from '../github/client';
 import { cohortName, semesterName, type Course, type CohortRef, type Semester } from '../model/discovery';
+import { knownAuditor } from '../model/mine';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import type { Loaded } from '../model/status';
 import { ghUrl } from './bits';
@@ -276,7 +277,10 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
   );
 }
 
-/** The student shell's nav: the switcher, one semester's screens, and the semester on GitHub. */
+/** Screens an auditor has no use for: they get no marks and join no team. */
+const AUDITOR_HIDDEN = ['marks', 'join'];
+
+/** The student shell's nav: the switcher, one semester's screens, and the semester on GitHub. An auditor's omits Marks and Join. */
 export function StudentNav({ courses, cohortStates, semesters, semester, current }: {
   courses: Course[];
   cohortStates: Record<string, Loaded>;
@@ -288,7 +292,7 @@ export function StudentNav({ courses, cohortStates, semesters, semester, current
     <nav>
       <Switcher courses={courses} cohortStates={cohortStates} semesters={semesters} semester={semester} />
       <ul>
-        {STUDENT_SCREENS.map(([k, t]) => <li><a href={studentHref(semester.org, k)} aria-current={k === current ? 'page' : undefined}>{t}</a></li>)}
+        {STUDENT_SCREENS.filter(([k]) => !(knownAuditor(semester.org) && AUDITOR_HIDDEN.includes(k))).map(([k, t]) => <li><a href={studentHref(semester.org, k)} aria-current={k === current ? 'page' : undefined}>{t}</a></li>)}
       </ul>
       <div class="nav-links">
         <hr />
