@@ -6,12 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { badgeFiles, buildTree } from '../src/edit/badges';
 import type { GhRepo } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { StaticFiles, type Files } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { CourseScreen } from '../src/screens/Course';
 import { MaterialsScreen } from '../src/screens/CourseEdit';
-import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos, publicPatterns } from '../src/screens/CourseIndex';
+import { MaterialsIndexScreen, TemplatesIndexScreen, materialsSentence, otherRepos, publicPatterns } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
@@ -59,6 +59,27 @@ describe('file badges', () => {
     const b = badgeFiles(f, ['lectures/**/slides.html', 'nothing-here/'], ['# a comment', '', 'solutions/', '!missing.md']);
     expect(b.unmatched).toEqual({ public: ['nothing-here/'], withheld: ['!missing.md'] });
   });
+  it('publishes a public deck’s _files bundle with it, never a denylisted path', () => {
+    const paths = ['l/05/slides.html', 'l/05/slides_files/fig.png', 'l/05/slides_files/solution/key.png', 'l/05/other_files/x.png', 'l/05/solutions/a.py', 'l/05/tests/t.py', 'l/05/.env.local', 'l/grading_config.yml'];
+    const b = badgeFiles(paths, ['l/**'], []);
+    expect(b.badges['l/05/slides.html']).toBe('public');
+    expect(b.badges['l/05/slides_files/fig.png']).toBe('public');
+    expect(b.badges['l/05/other_files/x.png']).toBe('public');
+    expect(b.badges['l/05/slides_files/solution/key.png']).toBe('never_public');
+    expect(b.badges['l/05/solutions/a.py']).toBe('never_public');
+    expect(b.badges['l/05/tests/t.py']).toBe('never_public');
+    expect(b.badges['l/05/.env.local']).toBe('never_public');
+    expect(b.badges['l/grading_config.yml']).toBe('never_public');
+    const only = badgeFiles(['d/slides.html', 'd/slides_files/a.css', 'd/notes_files/b.css'], ['d/slides.html'], []);
+    expect(only.badges).toEqual({ 'd/slides.html': 'public', 'd/slides_files/a.css': 'public', 'd/notes_files/b.css': 'released' });
+  });
+  it('withholds never-material files whatever the rules say', () => {
+    const b = badgeFiles(['l/.gitkeep', 'l/.DS_Store', 'l/a.md'], ['l/**'], []);
+    expect(b.badges).toEqual({ 'l/.gitkeep': 'withheld', 'l/.DS_Store': 'withheld', 'l/a.md': 'public' });
+  });
+  it('counts the rules of each list', () => {
+    expect(badgeFiles(['a'], [], ['# only a comment', '']).rules).toEqual({ public: 0, withheld: 0 });
+  });
   it('nests paths into folders before files', () => {
     const t = buildTree(['b.md', 'a/x.md', 'a/b/y.md']);
     expect(t.map((n) => n.name)).toEqual(['a', 'b.md']);
@@ -92,6 +113,20 @@ describe('index screens', () => {
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
   });
+  it('says why a materials repo is not ready only when it can tell', () => {
+    expect(materialsSentence('todo', 'absent')).toBe('Not ready yet: there is no publish.yml.');
+    expect(materialsSentence('todo', 'ready')).toBe('Not ready yet: SYLLABUS.md is still the placeholder.');
+    expect(materialsSentence('todo', 'loading')).toBe('Not ready yet.');
+  });
+  it('shows a template still being written neutrally, not as a problem', () => {
+    const st: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, templates: [{ repo: 'assignment-4-f2026', slug: 'assignment-4', state: 'todo' }] } }, sha: 's', stale: [] };
+    for (const v of [<TemplatesIndexScreen {...cp({ loaded: st })} />, <CourseScreen {...cp({ loaded: st })} />]) {
+      const out = render(v);
+      expect(out).toContain('<span class="chip">Not written yet</span>');
+      expect(out).toContain('href="#template-assignment-4">Settings');
+      expect(out).not.toContain('href="#template-assignment-4">Fix');
+    }
+  });
   it('says so when there are no other repos', () => {
     const t = text(<MaterialsIndexScreen {...cp({ files: new StaticFiles({}, {}, {}, { [COURSE_ORG]: [{ name: '.github' }] }) })} />);
     expect(t).toContain('No other repos.');
@@ -119,6 +154,20 @@ describe('materials settings file tree', () => {
     expect(t).toContain('*.key matches no file');
     expect(out).toContain(`https://github.com/${COURSE_ORG}/${MAT}/edit/main/lectures/05_trees/slides.html`);
     expect(out).not.toContain('class="file-list"');
+    expect(t).not.toContain('only part of this repo');
+  });
+  it('says No rules yet, and leaves out Edit links while the default branch is unknown', () => {
+    const bare = new StaticFiles({}, {}, { [`${COURSE_ORG}/${MAT}`]: ['a.md'] });
+    const out = render(<MaterialsScreen {...cp({ entry: MAT, files: bare })} />);
+    expect(out.match(/No rules yet\./g)).toHaveLength(2);
+    expect(out).not.toContain('Edit on GitHub');
+    expect(out).not.toContain('/edit/main/a.md');
+  });
+  it('warns on a truncated tree and does not flag rules as matching nothing', () => {
+    const part: Files = Object.assign(Object.create(files), { tree: (o: string, r: string) => ({ ...files.tree(o, r), truncated: true }) });
+    const t = text(<MaterialsScreen {...cp({ entry: MAT, files: part })} />);
+    expect(t).toContain('GitHub returned only part of this repo’s file list; badges may be incomplete.');
+    expect(t).not.toContain('matches no file');
   });
 });
 
@@ -131,6 +180,13 @@ describe('course nav and overview', () => {
     expect(nav).toMatch(/aria-label="2 problems">2</);
     expect(nav).toContain('class="archived"');
     expect(t).toContain('Assignment templates');
+    const inCohort = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="week" problems={2} />);
+    expect(inCohort.match(/aria-current="page"/g)).toHaveLength(1);
+  });
+  it('shows the term, not the org, while a cohort status loads', () => {
+    const t = text(<CourseScreen {...cp({ cohortStates: { [COHORT_ORG]: { kind: 'loading' } } })} />);
+    expect(t).toContain('Fall 2026 Live Fall 2026');
+    expect(t).not.toContain(OLD_ORG);
   });
   it('shows course problems only, then each cohort with its count', () => {
     const t = text(<CourseScreen {...cp({ loaded: ready })} />);

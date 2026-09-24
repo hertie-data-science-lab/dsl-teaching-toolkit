@@ -8,7 +8,7 @@ import { ago, assignmentIdent, fmtDay } from '../model/format';
 import { FORMATS } from '../tiers/grading';
 import { Crumbs, Help, Loading, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
-import { CourseHeaderActions, courseView } from './Course';
+import { CourseHeaderActions, StateChip, courseView } from './Course';
 import type { CourseProps } from './types';
 
 /** "Fall 2026" from a repo named `...-f2026`, else null. */
@@ -33,6 +33,18 @@ export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRep
   return repos
     .filter((r) => !r.archived && !skip.has(r.name.toLowerCase()) && !/^course-materials-/i.test(r.name) && !/^assignment-/i.test(r.name))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Why a materials repo is or is not ready. The engine calls one ready once SYLLABUS.md is
+ * written and publish.yml exists; the status says only ready or not, so the publish.yml
+ * read tells the two apart: with it present, the syllabus must still be the placeholder.
+ */
+export function materialsSentence(state: string, publishFile: string): string {
+  if (state === 'ready') return 'Syllabus written.';
+  if (publishFile === 'absent') return 'Not ready yet: there is no publish.yml.';
+  if (publishFile === 'ready') return 'Not ready yet: SYLLABUS.md is still the placeholder.';
+  return 'Not ready yet.';
 }
 
 function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
@@ -66,14 +78,14 @@ export function MaterialsIndexScreen(p: CourseProps) {
             <ul class="rows">
               {materials.map((m) => {
                 const pub = files.file(course.org, m.repo, 'publish.yml');
-                const open = pub.kind === 'ready' ? publicPatterns(pub.text).length > 0 : pub.kind === 'loading' ? null : false;
+                const open = pub.kind === 'ready' ? publicPatterns(pub.text).length > 0 : null;
                 const gh = repoOf(files, course.org, m.repo);
                 const term = termLabel(m.repo);
                 return (
                   <li>
-                    <span class="r-title">{m.repo} <span class={`chip ${m.state === 'ready' ? 'ok' : 'amber'}`}>{m.state === 'ready' ? 'Ready' : 'Not written'}</span>{term ? <span class="chip term">{term}</span> : null}</span>
+                    <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" />{term ? <span class="chip term">{term}</span> : null}</span>
                     <span class="r-sub">
-                      {m.state === 'ready' ? 'Syllabus written.' : 'The syllabus is still the template text.'}
+                      {materialsSentence(m.state, pub.kind)}
                       {open === null ? '' : open ? ' Some files published openly.' : ' Nothing published openly.'}
                       {gh?.pushed_at ? ` Last change ${fmtDay(gh.pushed_at)} (${ago(gh.pushed_at, p.now)}).` : ''}
                     </span>
@@ -129,7 +141,7 @@ export function TemplatesIndexScreen(p: CourseProps) {
         {templates.length ? (
           <ul class="rows">
             {templates.map((t) => {
-              const bad = t.state !== 'ready';
+              const bad = t.state === 'problem';
               const f = files.file(course.org, t.repo, 'grading_config.yml', 'solution');
               const y = f.kind === 'ready' ? new YamlText(f.text) : null;
               const cfg = y && !y.errors.length ? obj(y.toJS()) : {};
@@ -139,9 +151,9 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const cohorts = scheduledIn(t.repo);
               return (
                 <li>
-                  <span class="r-title">{assignmentIdent(t.slug)}{title ? `: ${title}` : ''} <span class={`chip ${bad ? 'bad' : 'ok'}`}>{bad ? 'Has a problem' : 'Ready'}</span>{term ? <span class="chip term">{term}</span> : null}</span>
+                  <span class="r-title">{assignmentIdent(t.slug)}{title ? `: ${title}` : ''} <StateChip state={t.state} todo="Not written yet" />{term ? <span class="chip term">{term}</span> : null}</span>
                   <span class={`r-sub${bad ? ' flag' : ''}`}>
-                    {bad ? `${v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.'} ` : ''}
+                    {bad ? `${v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.'} ` : t.state !== 'ready' ? 'The brief (README.md) is not written yet. ' : ''}
                     {how.length ? `${how.join(', ')}. ` : ''}
                     {cohorts.length ? `Scheduled in ${cohorts.join(', ')}. ` : ''}
                     <span class="slug">{t.repo}</span>

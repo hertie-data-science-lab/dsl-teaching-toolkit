@@ -170,8 +170,11 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
   return { problems: (l.status.problems ?? []).length, archived: l.status.cohort?.live === false };
 }
 
-/** The course nav's Cohorts group: each cohort by term with its problems count. */
-function CohortsNav({ course, cohort, cohortStates, current }: { course: Course; cohort?: CohortRef; cohortStates: Record<string, Loaded>; current: string }) {
+/**
+ * The course nav's Cohorts group: each cohort by term with its problems count. No entry
+ * carries aria-current: in a cohort, This week above already marks the page.
+ */
+function CohortsNav({ course, cohortStates }: { course: Course; cohortStates: Record<string, Loaded> }) {
   if (!course.cohorts.length) return null;
   return (
     <>
@@ -181,7 +184,7 @@ function CohortsNav({ course, cohort, cohortStates, current }: { course: Course;
           const f = cohortFlags(cohortStates[k.org]);
           return (
             <li>
-              <a href={`?cohort=${k.org}#cohort`} class={f.archived ? 'archived' : undefined} aria-current={cohort?.org === k.org && current === 'week' ? 'page' : undefined}>
+              <a href={`?cohort=${k.org}#cohort`} class={f.archived ? 'archived' : undefined}>
                 <span>{k.termLabel}{f.archived ? <span class="n-soon"> archived</span> : null}</span>
                 {f.problems ? <span class="n-count" aria-label={`${f.problems} problems`}>{f.problems}</span> : null}
               </a>
@@ -231,7 +234,7 @@ export function Sidenav({ courses, course, cohort, cohortStates, current, proble
             {item('#templates', 'Assignment templates', 'templates')}
             {item('#website', 'Public website', 'website')}
           </ul>
-          <CohortsNav course={course} cohort={cohort} cohortStates={cohortStates} current={current} />
+          <CohortsNav course={course} cohortStates={cohortStates} />
         </>
       ) : null}
       {course && cohort && course.write ? (

@@ -34,6 +34,11 @@ function problemsOf(p: CourseProps, cohortOrg: string): number | null {
   return l && l.kind === 'ready' ? (l.status.problems ?? []).length : null;
 }
 
+/** A template's or materials repo's state as a chip: only `problem` is bad; `todo` is neutral. */
+export function StateChip({ state, todo }: { state: string; todo: string }) {
+  return state === 'problem' ? <span class="chip bad">Has a problem</span> : state === 'ready' ? <span class="chip ok">Ready</span> : <span class="chip">{todo}</span>;
+}
+
 export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
   return (
     <div class="actions">
@@ -102,7 +107,7 @@ export function CourseScreen(p: CourseProps) {
                   return (
                     <li>
                       <span class="r-title">{c.termLabel} <span class={`chip ${live ? 'ok' : ''}`}>{live ? 'Live' : 'Archived'}</span></span>
-                      <span class="r-sub">{l && l.kind === 'ready' && l.status.cohort ? `Week ${l.status.cohort.week} of ${l.status.cohort.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.org}</span>
+                      <span class="r-sub">{l && l.kind === 'ready' && l.status.cohort ? `Week ${l.status.cohort.week} of ${l.status.cohort.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
                       <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#cohort`}>Open</a></span>
                     </li>
                   );
@@ -117,11 +122,11 @@ export function CourseScreen(p: CourseProps) {
             {v.course?.templates?.length ? (
               <ul class="rows">
                 {v.course.templates.map((t) => {
-                  const bad = t.state !== 'ready';
+                  const bad = t.state === 'problem';
                   return (
                     <li>
-                      <span class="r-title">{assignmentIdent(t.slug)} <span class={`chip ${bad ? 'bad' : 'ok'}`}>{bad ? 'Has a problem' : 'Ready'}</span></span>
-                      <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.' : 'Brief written; settings check out.'} <span class="slug">{t.repo}</span></span>
+                      <span class="r-title">{assignmentIdent(t.slug)} <StateChip state={t.state} todo="Not written yet" /></span>
+                      <span class={`r-sub${bad ? ' flag' : ''}`}>{bad ? v.problems.find((x) => x.fix?.entry === t.slug)?.stops ?? 'Has a problem.' : t.state === 'ready' ? 'Brief written; settings check out.' : 'The brief (README.md) is not written yet.'} <span class="slug">{t.repo}</span></span>
                       <span class="r-side"><a class={`btn small ${bad ? '' : 'quiet'}`} href={`#template-${t.slug}`}>{bad ? 'Fix' : 'Settings'}</a></span>
                     </li>
                   );
@@ -135,8 +140,8 @@ export function CourseScreen(p: CourseProps) {
               <ul class="rows">
                 {v.course.materials.map((m) => (
                   <li>
-                    <span class="r-title">{m.repo} <span class={`chip ${m.state === 'ready' ? 'ok' : 'amber'}`}>{m.state === 'ready' ? 'Ready' : 'Not written'}</span></span>
-                    <span class="r-sub">{m.state === 'ready' ? 'Syllabus written.' : 'The syllabus is still the template text; students would see it at the first release.'}</span>
+                    <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" /></span>
+                    <span class="r-sub">{m.state === 'ready' ? 'Syllabus written.' : 'Not ready yet.'}</span>
                     <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
                   </li>
                 ))}
