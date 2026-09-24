@@ -18,8 +18,9 @@ import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, R
 import { Check, Ext } from '../ui/icons';
 import { courseScope, newestScope } from './CourseEdit';
 import type { CourseProps } from './types';
+import { COURSE_REPO } from '../model/names';
 
-/** The course block and course-scoped problems: from the course's own status, else a cohort's. */
+/** The course block and course-scoped problems: from the course's own status, else a semester's. */
 export function courseView(p: CourseProps): { course: CourseStatus | null; problems: Problem[]; computed: boolean } {
   if (p.loaded.kind === 'ready' && p.loaded.status.course)
     return { course: p.loaded.status.course, problems: (p.loaded.status.problems ?? []).filter((x) => x.scope === 'course'), computed: true };
@@ -42,9 +43,9 @@ export function StateChip({ state, todo }: { state: string; todo: string }) {
 export function CourseHeaderActions({ course, ready }: { course: CourseProps['course']; ready: boolean }) {
   return (
     <div class="actions">
-      <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-cohort-1`}>New cohort</a>
+      <a class={ready ? 'btn' : 'btn quiet'} href={`?course=${course.org}#new-semester-1`}>New semester</a>
       <a class="btn outline" href="#website">Publish website</a>
-      {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Check now" title="Check now runs on a cohort; this course has none yet." />}
+      {newestScope({ course }) ? <OpButtons def={{ ...checkNow(newestScope({ course })!), where: course.name }} /> : <Soon label="Check now" title="Check now runs on a semester; this course has none yet." />}
       <a class="btn quiet" href={ghUrl(course.org)} target="_blank" rel="noopener">Course on GitHub <Ext /></a>
     </div>
   );
@@ -76,7 +77,7 @@ export function CourseScreen(p: CourseProps) {
         <div>
           <h1>{course.name}</h1>
           <p class="lede">
-            {!v.computed ? <span>Status not computed yet.</span> : ready ? <span>Ready for a new cohort.</span> : <span class="amber">Not ready for a new cohort: {v.problems.length === 1 ? 'one problem' : `${v.problems.length} problems`} would stop a cohort.</span>}
+            {!v.computed ? <span>Status not computed yet.</span> : ready ? <span>Ready for a new semester.</span> : <span class="amber">Not ready for a new semester: {v.problems.length === 1 ? 'one problem' : `${v.problems.length} problems`} would stop a semester.</span>}
             {v.computed ? <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button> : null}
           </p>
         </div>
@@ -84,7 +85,7 @@ export function CourseScreen(p: CourseProps) {
       </div>
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <Help title="What lives in a course" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a cohort. Some folders can be withheld, or published openly on the public website.</p>
+        <p>Materials live here privately until a scheduled release copies them to a semester. Some folders can be withheld, or published openly on the public website.</p>
         <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch.</p>
       </Help>
       <div class="stack">
@@ -93,27 +94,27 @@ export function CourseScreen(p: CourseProps) {
         ) : null}
         <div class="grid-2">
           <section class="panel section">
-            <div class="problems-head"><h2>Course problems</h2><span class="footnote">They also appear on every cohort they will affect.</span></div>
+            <div class="problems-head"><h2>Course problems</h2><span class="footnote">They also appear on every semester they will affect.</span></div>
             {!v.computed ? <p class="footnote">Status not computed yet.</p> : v.problems.length ? <ProblemCards list={v.problems} /> : <div class="no-problems"><Check /><span>No course problems.</span></div>}
           </section>
           <section class="panel section">
-            <h2>Cohorts</h2>
+            <h2>Semesters</h2>
             {course.cohorts.length ? (
               <ul class="rows">
                 {course.cohorts.map((c) => {
                   const l = p.cohortStates[c.org];
                   const n = problemsOf(p, c.org);
-                  const live = l && l.kind === 'ready' ? l.status.cohort?.live !== false : true;
+                  const live = l && l.kind === 'ready' ? l.status.semester?.live !== false : true;
                   return (
                     <li>
                       <span class="r-title">{c.termLabel} <span class={`chip ${live ? 'ok' : ''}`}>{live ? 'Live' : 'Archived'}</span></span>
-                      <span class="r-sub">{l && l.kind === 'ready' && l.status.cohort ? `Week ${l.status.cohort.week} of ${l.status.cohort.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
-                      <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#cohort`}>Open</a></span>
+                      <span class="r-sub">{l && l.kind === 'ready' && l.status.semester ? `Week ${l.status.semester.week} of ${l.status.semester.weeks}` : l?.kind === 'absent' ? 'Status not computed yet' : c.termLabel}</span>
+                      <span class="r-side">{n !== null ? <Probs n={n} /> : null}<a class="btn small quiet" href={`?cohort=${c.org}#semester`}>Open</a></span>
                     </li>
                   );
                 })}
               </ul>
-            ) : <p class="footnote">No cohorts yet.</p>}
+            ) : <p class="footnote">No semesters yet.</p>}
           </section>
         </div>
         <div class="grid-2">
@@ -159,7 +160,7 @@ export function CourseScreen(p: CourseProps) {
               <dt>Late work</dt><dd>{late} per day, up to {lateDays} days</dd>
               <dt>Team size</dt><dd>Up to {team}</dd>
             </dl>
-            <Lives org={course.org} repo=".github" path="dsl-course.yml" />
+            <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
           </section>
           <div class="stack">
             <section class="panel section">
@@ -248,7 +249,7 @@ export function TemplateScreen(p: CourseProps) {
       y.assign(['questions'], rows.length ? Object.fromEntries(rows.map(([name, n]) => [name.trim(), n === '' ? null : Number.isFinite(Number(n)) ? Number(n) : n])) : undefined);
     }
     if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
-    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the Instructor Console`, statusRepo: [course.org, '.github'] })) {
+    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the Instructor Console`, statusRepo: [course.org, COURSE_REPO] })) {
       setValues(null);
       setQdraft(null);
     }
@@ -261,7 +262,7 @@ export function TemplateScreen(p: CourseProps) {
         <div class="actions"><span class={`chip ${problems.length ? 'bad' : 'ok'}`}>{problems.length ? 'Has a problem' : 'Ready'}</span></div>
       </div>
       <Help title="What these settings do" doc="03-add-assignment-to-course.md">
-        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. These settings apply to every cohort that uses the template; after hand out they reach students only through Update every copy.</p>
+        <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. These settings apply to every semester that uses the template; after hand out they reach students only through Update every copy.</p>
       </Help>
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
@@ -281,7 +282,7 @@ export function TemplateScreen(p: CourseProps) {
             </div>
             <div class="form-section">
               <h3>How it is marked</h3>
-              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['format', 'autograde', 'tests'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
+              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['formats', 'autograde', 'tests'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} advancedOpen={!!errors.late_window_days || !!errors.late_penalty_per_day} />
               <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>

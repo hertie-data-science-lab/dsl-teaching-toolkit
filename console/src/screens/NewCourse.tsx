@@ -8,7 +8,7 @@ import { useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
-import { ABOUT, ASSIGNMENT_DEFAULTS, COHORT_DEFAULTS } from '../tiers/course';
+import { ABOUT, ASSIGNMENT_DEFAULTS, SEMESTER_DEFAULTS } from '../tiers/course';
 import type { Values } from '../tiers/types';
 import { COURSE_ORG } from '../tiers/wizard';
 import { CheckLine, Crumbs, Help } from '../ui/bits';
@@ -19,12 +19,13 @@ import { courseOrgName, openAt } from '../wizards/model';
 import { allOk, checkCourseSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
 import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
 import { AdminRows, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
+import { COURSE_REPO } from '../model/names';
 
 const STEPS = [
   { t: 'Org', s: 'Create it on GitHub' },
   { t: 'Course details', s: 'Name, code, admins' },
-  { t: 'Defaults', s: 'For every assignment and cohort' },
-  { t: 'Check', s: 'Ready for a cohort', check: true },
+  { t: 'Defaults', s: 'For every assignment and semester' },
+  { t: 'Check', s: 'Ready for a semester', check: true },
 ];
 
 export interface NcDraft {
@@ -68,7 +69,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   const [run, setRun] = useState<CentralRun | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [save, runSave, setSave] = useSave(env);
-  const file = step >= 2 && setUp && allOk(setUp) ? files.file(org, '.github', 'dsl-course.yml') : null;
+  const file = step >= 2 && setUp && allOk(setUp) ? files.file(org, COURSE_REPO, 'dsl-course.yml') : null;
   const y = file?.kind === 'ready' ? new YamlText(file.text) : null;
   const meta = y && !y.errors.length ? obj(y.toJS()) : null;
   const before: Details | null = meta ? detailsOf(meta) : null;
@@ -89,7 +90,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
       return false;
     }
     if (out.text === file.text) return true;
-    return runSave({ owner: org, repo: '.github', path: 'dsl-course.yml' }, out.text, file.sha, { message: `course: ${what}, from the Instructor Console` });
+    return runSave({ owner: org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: `course: ${what}, from the Instructor Console` });
   };
 
   const setUpCourse = async () => {
@@ -98,7 +99,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     try {
       const r = await runBootstrap(env.client, { org, orgName: d.org_name || d.course_name || org, code: d.course_code ?? '', admins: d.admins.map((a) => a.github_handle) }, setRun);
       if (r.conclusion !== 'success') setErr('The set-up run did not finish cleanly. Open it on GitHub to see why; running it again is safe.');
-      files.refresh(org, '.github', 'dsl-course.yml');
+      files.refresh(org, COURSE_REPO, 'dsl-course.yml');
       setupLive.run();
       void env.rediscover?.();
     } catch (e) {
@@ -136,7 +137,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
         <SchemaForm id="nc2" schema={null} tiers={tiers} values={about} onChange={(v) => set({ course_name: v.course_name as string, course_code: v.course_code as string, course_description: v.course_description as string, org_name: v.org_name as string })} />
         <div class="field">
           <span class="label">Course admins <span class="default">default: you</span></span>
-          <p class="footnote">Course admins keep every button for this course across years. They can differ from a given term’s instructors, who are set per cohort under Staff.</p>
+          <p class="footnote">Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
           <AdminRows admins={d.admins} id="nca" onChange={(admins) => set({ admins })} />
         </div>
         <dl class="kv"><dt>Org</dt><dd>{org}</dd><dt>Engine version</dt><dd>release <span class="footnote">set by the lab</span></dd><dt>Bot token</dt><dd>Set up for you</dd></dl>
@@ -173,15 +174,15 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     const errs = fieldErrors(null, ASSIGNMENT_DEFAULTS, defaults);
     body = (
       <>
-        <p>These are the course’s defaults. Every one can be overridden per assignment or per cohort.</p>
+        <p>These are the course’s defaults. Every one can be overridden per assignment or per semester.</p>
         <div class="form-section"><h3>Assignment defaults</h3><SchemaForm id="ncx" schema={null} tiers={ASSIGNMENT_DEFAULTS} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
-        <div class="form-section"><h3>Cohort defaults</h3><p class="footnote">Written into each new cohort’s schedule when it is set up.</p><SchemaForm id="ncc" schema={null} tiers={COHORT_DEFAULTS} values={cohort} onChange={(v) => set({ cohort: v })} /></div>
+        <div class="form-section"><h3>Semester defaults</h3><p class="footnote">Written into each new semester’s schedule when it is set up.</p><SchemaForm id="ncc" schema={null} tiers={SEMESTER_DEFAULTS} values={cohort} onChange={(v) => set({ cohort: v })} /></div>
         <div class="form-section">
           <h3>Site links</h3>
           <div class="field">
             <label for="nck">File types the student site links to</label>
             <input type="text" id="nck" value={links} placeholder="pdf, html" onInput={(e) => set({ links: (e.target as HTMLInputElement).value })} />
-            <p class="why">Released files of these types get a direct link on every cohort’s student site. Separate them with commas.</p>
+            <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
           </div>
         </div>
         <SaveLine state={save} />
@@ -189,7 +190,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     );
     foot = (
       <button class="btn" type="button" disabled={Object.keys(errs).length > 0 || save.kind === 'busy' || !before} onClick={async () => {
-        const after = { ...before!, defaults, cohort: effective(COHORT_DEFAULTS, cohort), links };
+        const after = { ...before!, defaults, cohort: effective(SEMESTER_DEFAULTS, cohort), links };
         if (deepEqual(after, before) || (await writeCourse(after, 'set the course defaults'))) {
           set({ defaultsSaved: org });
           go(4);
@@ -208,7 +209,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
       <>
         <Checks list={[...(orgChecks ?? []), ...(setUp ?? []), ...summary]} busy={orgLive.busy || setupLive.busy} />
         <ul class="checks"><li><span class="ck no" /><span>No materials yet</span></li><li><span class="ck no" /><span>No assignment templates yet</span></li></ul>
-        <p>The course is set up. It is ready for a cohort once it has materials and at least one assignment template.</p>
+        <p>The course is set up. It is ready for a semester once it has materials and at least one assignment template.</p>
         <div class="actions">
           <a class="btn" href={`?course=${org}#new-materials`}>Add materials</a>
           <a class="btn outline" href={`?course=${org}#new-assignment-1`}>New assignment</a>
@@ -223,7 +224,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
       <Crumbs items={[{ t: 'All courses', href: '#home' }, { t: 'New course' }]} />
       <div class="page-head"><div><h1>New course</h1></div></div>
       <Help title="What a course is" doc="01-new-course-org.md">
-        <p>A course holds your materials and assignment templates for every term. You set it up once.</p>
+        <p>A course holds your materials and assignment templates for every semester. You set it up once.</p>
       </Help>
       <div class="wizard">
         <Rail steps={STEPS} cur={step} done={done} heading="Three steps, then a check" base="new-course-" />

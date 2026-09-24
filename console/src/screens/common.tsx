@@ -4,6 +4,7 @@ import { parse } from 'yaml';
 import { useEnv } from '../env';
 import { cohortName } from '../model/discovery';
 import { dayKey, zoned } from '../model/format';
+import { CONFIG_REPO } from '../model/names';
 import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -16,7 +17,7 @@ export { cohortName };
 
 export const CHECK_NOW_SOON = 'Sign in to check now.';
 
-export const tzOf = (s: Status) => s.cohort?.timezone ?? 'Europe/Berlin';
+export const tzOf = (s: Status) => s.semester?.timezone ?? 'Europe/Berlin';
 export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
 export const todayOf = (now: number, tz: string) => dayKey(new Date(now).toISOString(), tz);
 
@@ -46,7 +47,7 @@ export function useGradingConfig(p: ReadyProps, template: string): Record<string
   return useMemo(() => parseConfig(text), [text]);
 }
 
-/** Who an operation on this cohort acts for. */
+/** Who an operation on this semester acts for. */
 export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
   return { courseOrg: p.course.org, cohortOrg: p.cohort.org, where: p.cohort.termLabel };
 }
@@ -57,7 +58,7 @@ export function CheckNow({ small, p, label }: { small?: boolean; p?: Pick<Cohort
   return <OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />;
 }
 
-/** The operations of this cohort: the status file's record plus this session's runs. */
+/** The operations of this semester: the status file's record plus this session's runs. */
 export function useOperations(fromStatus: Operation[] | undefined, cohortOrg: string): Operation[] {
   const env = useEnv();
   const mine = (env?.ops.runs.value ?? []).filter((r) => r.cohort === cohortOrg);
@@ -65,7 +66,7 @@ export function useOperations(fromStatus: Operation[] | undefined, cohortOrg: st
 }
 
 function ExportInfo({ org }: { org: string }) {
-  const f = (path: string) => `https://github.com/${org}/classroom-config/${path.includes('.') ? 'blob' : 'tree'}/main/${path}`;
+  const f = (path: string) => `https://github.com/${org}/${CONFIG_REPO}/${path.includes('.') ? 'blob' : 'tree'}/main/${path}`;
   const row = (t: string, sub: string, path: string) => (
     <li><span class="r-title">{t}</span><span class="r-sub">{sub}</span><span class="r-side"><a class="btn small quiet" href={f(path)} target="_blank" rel="noopener">Open <Ext /></a></span></li>
   );
@@ -81,7 +82,7 @@ function ExportInfo({ org }: { org: string }) {
   );
 }
 
-/** The cohort header's overflow menu (revision brief section 9). */
+/** The semester header's overflow menu (revision brief section 9). */
 export function MoreMenu({ p }: { p?: Pick<CohortProps, 'course' | 'cohort'> }) {
   const [open, setOpen] = useState(false);
   const env = useEnv();
@@ -96,9 +97,9 @@ export function MoreMenu({ p }: { p?: Pick<CohortProps, 'course' | 'cohort'> }) 
       <button class="btn outline" type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(!open)}>More</button>
       <div class="popmenu" hidden={!open} role="menu">
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && previewNext(scope))}>Preview the next automatic run</button>
-        <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && keepFuture(scope))}>Keep cohort edits for future terms</button>
+        <button type="button" role="menuitem" disabled={!scope} onClick={() => go(scope && keepFuture(scope))}>Keep for future semesters</button>
         <button type="button" role="menuitem" disabled={!scope} onClick={() => go(exportDef)}>Export <span class="pm-sub">roster, marks, schedule</span></button>
-        <a href="#archive" role="menuitem" onClick={() => setOpen(false)}>Archive this cohort</a>
+        <a href="#archive" role="menuitem" onClick={() => setOpen(false)}>Archive this semester</a>
       </div>
     </div>
   );
@@ -110,12 +111,12 @@ export function StaleNote({ stale }: { stale: string[] }) {
   const files = stale.map((s) => s.replace(/^course\//, '')).join(', ');
   return (
     <p class="note" style="margin-bottom:18px">
-      <b>Not yet checked.</b> {files} changed since this cohort was last checked, so what you see may be out of date. Check now brings it up to date.
+      <b>Not yet checked.</b> {files} changed since this semester was last checked, so what you see may be out of date. Check now brings it up to date.
     </p>
   );
 }
 
-/** The page every cohort screen shows before an org has been refreshed on the new engine. */
+/** The page every semester screen shows before an org has been refreshed on the new engine. */
 export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: string; href?: string }[]; p?: Pick<CohortProps, 'course' | 'cohort'> }) {
   return (
     <>
@@ -129,7 +130,7 @@ export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: 
       </div>
       <section class="panel section stub">
         <h2>Status not computed yet</h2>
-        <p>This cohort has not been checked since it moved to the console's engine, so there is no status to show: no problems list, no term strip, no counts.</p>
+        <p>This semester has not been checked since it moved to the console's engine, so there is no status to show: no problems list, no semester strip, no counts.</p>
         <p>Check now computes it. Automation also computes it at the next nightly refresh.</p>
       </section>
     </>
@@ -137,8 +138,8 @@ export function NotComputed({ title, crumbs, p }: { title: string; crumbs: { t: 
 }
 
 /**
- * Render a cohort screen once its status is ready, or the loading, absent, invalid and error
- * states every cohort screen shares.
+ * Render a semester screen once its status is ready, or the loading, absent, invalid and error
+ * states every semester screen shares.
  */
 export function WithStatus({
   props,
@@ -152,7 +153,7 @@ export function WithStatus({
   children: (p: ReadyProps) => VNode | ComponentChildren;
 }) {
   const l = props.loaded;
-  if (l.kind === 'loading') return <Loading what="Reading the cohort's status" />;
+  if (l.kind === 'loading') return <Loading what="Reading the semester's status" />;
   if (l.kind === 'absent') return <NotComputed title={title} crumbs={crumbs} p={props} />;
   if (l.kind === 'invalid' || l.kind === 'error')
     return (
@@ -161,7 +162,7 @@ export function WithStatus({
         <div class="page-head"><div><h1>{title}</h1></div><div class="actions"><CheckNow p={props} /></div></div>
         <section class="panel section">
           <CheckLine cls="bad">
-            {l.kind === 'invalid' ? `The cohort's status file does not match the expected shape: ${l.errors.slice(0, 3).join('; ')}.` : `Could not read the cohort's status: ${l.message}`}
+            {l.kind === 'invalid' ? `The semester's status file does not match the expected shape: ${l.errors.slice(0, 3).join('; ')}.` : `Could not read the semester's status: ${l.message}`}
           </CheckLine>
         </section>
       </>
@@ -176,7 +177,7 @@ export function WithStatus({
 
 export function cohortCrumbs(p: Pick<CohortProps, 'course' | 'cohort'>, page?: string, mid?: { t: string; href: string }[]) {
   return [
-    { t: cohortName(p), href: page ? '#cohort' : undefined },
+    { t: cohortName(p), href: page ? '#semester' : undefined },
     ...(mid ?? []),
     ...(page ? [{ t: page }] : []),
   ];

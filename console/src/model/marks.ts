@@ -1,4 +1,4 @@
-// A grading sheet (`classroom-config/grading_sheets/<slug>.yml`) as the marks grid reads it,
+// A grading sheet (`grading_sheets/<slug>.yml` in the config repo) as the marks grid reads it,
 // and the arithmetic `grades.py` does on output: a per-question total (a blank question
 // skipped, a non-number making the whole total unknown), then
 // `total x (1 - rate x days_late) + adjustment`, floored at 0. Never stored in the sheet.

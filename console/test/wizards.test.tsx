@@ -182,22 +182,22 @@ describe('what the wizards send', () => {
   it('builds assignment.create args the registry accepts, for alone, teams and a copy', () => {
     const v = { ...initialValues(null, 'f2026'), name: 'Trees', number: 4 };
     const solo = assignmentArgs(v);
-    expect(solo).toEqual({ name: 'Trees', number: '4', tag: 'f2026', type: 'individual', team_formation: undefined, submit_via: 'assignment_repo', visibility: 'private', format: 'ipynb', autograde: false });
+    expect(solo).toEqual({ name: 'Trees', number: '4', semester: 'f2026', type: 'individual', team_formation: undefined, submit_via: 'assignment_repo', visibility: 'private', formats: 'ipynb', autograde: false });
     expect(validateArgs('assignment.create', JSON.parse(JSON.stringify(solo)))).toEqual([]);
     const team = assignmentArgs({ ...v, type: 'group', team_formation: 'assigned', submit_via: 'shared_dropbox_repo', visibility: 'public', autograde: 'true', formats: ['py', 'rmd'] });
-    expect(team).toMatchObject({ type: 'group', team_formation: 'assigned', visibility: 'private', autograde: false, format: 'py,rmd' });
+    expect(team).toMatchObject({ type: 'group', team_formation: 'assigned', visibility: 'private', autograde: false, formats: 'py,rmd' });
     expect(validateArgs('assignment.create', JSON.parse(JSON.stringify(team)))).toEqual([]);
     const copy = assignmentArgs({ ...v, copy_from: 'assignment-2-f2026' });
-    expect(copy).toEqual({ name: 'Trees', number: '4', tag: 'f2026', copy_from: 'assignment-2-f2026' });
+    expect(copy).toEqual({ name: 'Trees', number: '4', semester: 'f2026', copy_from: 'assignment-2-f2026' });
     expect(validateArgs('assignment.create', copy)).toEqual([]);
   });
 
   it('builds materials.create args, nothing public unless asked', () => {
-    expect(materialsArgs({ term: 'f2026', open: false })).toMatchObject({ tag: 'f2026', public_dirs: '(nothing public)' });
+    expect(materialsArgs({ term: 'f2026', open: false })).toMatchObject({ semester: 'f2026', public_dirs: '(nothing public)' });
     const open = materialsArgs({ term: 'f2026', open: true, public_dirs: 'everything', public_types: 'html' });
-    expect(open).toEqual({ tag: 'f2026', public_dirs: 'everything', public_types: 'html' });
+    expect(open).toEqual({ semester: 'f2026', public_dirs: 'everything', public_types: 'html' });
     expect(validateArgs('materials.create', open)).toEqual([]);
-    expect(materialsArgs({ term: 'f2026', open: true, copy_from: 'course-materials-s2026' })).toEqual({ tag: 'f2026', copy_from: 'course-materials-s2026' });
+    expect(materialsArgs({ term: 'f2026', open: true, copy_from: 'course-materials-s2026' })).toEqual({ semester: 'f2026', copy_from: 'course-materials-s2026' });
   });
 
   it('writes only the marking values the request cannot carry into grading_config.yml', () => {
@@ -279,13 +279,13 @@ describe('the wizard screens', () => {
 
   it('New cohort derives hertie-<course-slug>-<term> for the next term', () => {
     const out = render(<NewCohortScreen {...cp()} step={1} />);
-    expect(out).toContain('New cohort: Spring 2027');
+    expect(out).toContain('New semester: Spring 2027');
     expect(out).toContain('value="hertie-dsl-demo-course-s2027"');
     expect(out).toContain('Two steps, then three editors');
   });
 
   it('New cohort counts the three cards from the cohort’s own files', () => {
-    const files = new StaticFiles({ [`${COHORT_ORG}/classroom-config/people.yml`]: 'people:\n  instructors:\n    - github_handle: a-example\n', [`${COHORT_ORG}/classroom-config/students.csv`]: 'hertie_email,name,role\n' });
+    const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n', [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role\n' });
     expect(cardsDone(files, COHORT_ORG)).toEqual({ staff: true, schedule: false, students: false });
   });
 
@@ -306,7 +306,7 @@ describe('the wizard screens', () => {
   });
 
   it('the schedule editor opens a new assignment entry prefilled with the template', () => {
-    const files = new StaticFiles({ [`${COHORT_ORG}/classroom-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments: {}\n' });
+    const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments: {}\n' });
     const p: CohortProps = { course, cohort: course.cohorts[0], loaded: ready, files, now: NOW, entry: 'new', prefill: 'assignment-4-f2026' };
     const out = render(<ScheduleScreen {...p} />);
     expect(out).toContain('Assignment entry');

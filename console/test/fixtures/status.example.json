@@ -2,7 +2,7 @@
   "schema": "dsl.status/1",
   "inputs": {
     "schedule.yml": "sha-0",
-    "people.yml": "sha-1",
+    "instructors.yml": "sha-1",
     "students.csv": "sha-2",
     "teams.csv": "sha-3",
     "grading_sheets": "sha-4",
@@ -35,14 +35,14 @@
         "state": "problem"
       }
     ],
-    "cohorts": [
+    "semesters": [
       "hertie-dsl-demo-f2026"
     ]
   },
-  "cohort": {
+  "semester": {
     "org": "hertie-dsl-demo-f2026",
-    "term": "f2026",
-    "term_label": "Fall 2026",
+    "key": "f2026",
+    "label": "Fall 2026",
     "timezone": "Europe/Berlin",
     "week": 3,
     "weeks": 15,
@@ -61,12 +61,12 @@
   "problems": [
     {
       "id": "schedule:s5:SOURCE_MISSING",
-      "scope": "cohort",
+      "scope": "semester",
       "stage": "K4",
       "text": "Session 5 cites folder lectures/05_trees, which is not in course-materials-f2026.",
       "stops": "The release on Thu 8 Oct will be skipped.",
       "fix": {
-        "repo": "hertie-dsl-demo-f2026/classroom-config",
+        "repo": "hertie-dsl-demo-f2026/semester-config",
         "path": "schedule.yml",
         "line": 41,
         "screen": "schedule",
@@ -91,24 +91,24 @@
   "this_week": [
     {
       "when": "2026-09-24T10:00:00+02:00",
-      "type": "release",
       "ref": "s3",
       "title": "Session 3: Trees",
-      "state": "planned"
+      "state": "planned",
+      "kind": "release"
     },
     {
       "when": "2026-09-27T23:59:00+02:00",
-      "type": "due",
       "ref": "assignment-2",
       "title": "Assignment 2: Regression",
-      "state": "open"
+      "state": "open",
+      "kind": "due"
     }
   ],
   "releases": [
     {
       "id": "s5",
       "when": "2026-10-08T10:00:00+02:00",
-      "type": "lecture",
+      "kind": "lecture",
       "title": "Trees and ensembles",
       "state": "will_be_skipped",
       "source": {
@@ -131,7 +131,7 @@
       "state": "open",
       "handout": "2026-09-15T10:00:00+02:00",
       "due": "2026-09-27T23:59:00+02:00",
-      "late_until": "2026-10-07T23:59:00+02:00",
+      "grading_cutoff_datetime": "2026-10-07T23:59:00+02:00",
       "solution_shown": null,
       "units": 48,
       "submissions": 37,

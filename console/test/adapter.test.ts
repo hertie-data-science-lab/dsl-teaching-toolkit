@@ -38,8 +38,8 @@ function engine(opts: { annotation?: object; privateFile?: object; polls?: numbe
       { path: '.github', start_line: 1, annotation_level: 'notice', title: 'something else', message: 'x' },
       ...(opts.annotation ? [{ path: '.github', start_line: 1, annotation_level: 'notice', title: 'dsl-outcome', message: JSON.stringify(opts.annotation) }] : []),
     ])
-    .on('GET', `/repos/${COHORT}/classroom-config/contents/.dsl/outcomes/roster.send_codes.json`, () =>
-      opts.privateFile ? json(fileBody('.dsl/outcomes/roster.send_codes.json', JSON.stringify(opts.privateFile))) : json({ message: 'Not Found' }, 404));
+    .on('GET', `/repos/${COHORT}/semester-config/contents/.system/outcomes/roster.send_codes.json`, () =>
+      opts.privateFile ? json(fileBody('.system/outcomes/roster.send_codes.json', JSON.stringify(opts.privateFile))) : json({ message: 'Not Found' }, 404));
   return { gh, polls: () => polls, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }) };
 }
 
@@ -47,14 +47,14 @@ const scope = { courseOrg: COURSE, cohortOrg: COHORT, where: 'Fall 2026' };
 
 describe('the request', () => {
   it('follows dsl.request/1 and carries no names', () => {
-    const r = buildRequest('a-example', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: 's5', cohort_dest_repo: '' }, preview: true });
-    expect(r).toEqual({ schema: 'dsl.request/1', op: 'release.early', actor: 'a-example', course_org: COURSE, cohort_org: COHORT, args: { entry: 's5' }, preview: true, client: 'console/0.1' });
+    const r = buildRequest('a-example', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: 's5', semester_dest_repo: '' }, preview: true });
+    expect(r).toEqual({ schema: 'dsl.request/1', op: 'release.early', actor: 'a-example', course_org: COURSE, semester_org: COHORT, args: { entry: 's5' }, preview: true, client: 'console/0.1' });
   });
   it('drops the cohort for a course op and refuses bad args, a missing cohort and an impossible preview', () => {
-    expect(buildRequest('a', { op: 'assignment.derive_starter', courseOrg: COURSE, cohortOrg: COHORT, args: { course_source_repo: 'assignment-3-f2026' }, preview: true }).cohort_org).toBeUndefined();
+    expect(buildRequest('a', { op: 'assignment.derive_starter', courseOrg: COURSE, cohortOrg: COHORT, args: { course_source_repo: 'assignment-3-f2026' }, preview: true }).semester_org).toBeUndefined();
     expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: false })).toThrow(RequestInvalid);
     expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: '-rf' }, preview: false })).toThrow(/pattern/);
-    expect(() => buildRequest('a', { op: 'cohort.check', courseOrg: COURSE, args: {}, preview: false })).toThrow(/needs a cohort/);
+    expect(() => buildRequest('a', { op: 'cohort.check', courseOrg: COURSE, args: {}, preview: false })).toThrow(/needs a semester/);
     expect(() => buildRequest('a', { op: 'site.update', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: true })).toThrow(/no preview/);
   });
 });
@@ -66,7 +66,7 @@ describe('DispatchAdapter', () => {
     const body = e.gh.seen[0].body as { ref: string; inputs: { request: string }; return_run_details: boolean };
     expect(body.ref).toBe('main');
     expect(body.return_run_details).toBe(true);
-    expect(JSON.parse(body.inputs.request)).toMatchObject({ op: 'roster.send_codes', cohort_org: COHORT, preview: true });
+    expect(JSON.parse(body.inputs.request)).toMatchObject({ op: 'roster.send_codes', semester_org: COHORT, preview: true });
     expect(h.runId).toBe(77);
   });
 

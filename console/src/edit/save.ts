@@ -77,7 +77,7 @@ export const CONFLICT =
 
 export interface SaveOptions {
   message: string;
-  /** Where the status that lists this file's problems lives: the cohort's or the course's. */
+  /** Where the status that lists this file's problems lives: the semester's or the course's. */
   statusRepo?: [string, string];
 }
 

@@ -1,4 +1,4 @@
-// S8 Students (the roster grid, Replace from CSV) and S7 Staff (people.yml).
+// S8 Students (the roster grid, Replace from CSV) and S7 Instructors (instructors.yml).
 
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -7,7 +7,7 @@ import { useSave } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { fmtShort } from '../model/format';
-import { ROSTER_HEADER, parsePeople, type Person } from '../model/people';
+import { ROLE_WORD, ROSTER_HEADER, parseInstructors, type Person } from '../model/people';
 import { checkAccess, sendCodes } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { PERSON, displayOnly } from '../tiers/people';
@@ -17,6 +17,7 @@ import { Lock } from '../ui/icons';
 import { StudentCounts } from './Cohort';
 import { WithStatus, cohortCrumbs, cohortScope } from './common';
 import type { CohortProps, ReadyProps } from './types';
+import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
 
 type Row = Record<string, string>;
 const YOURS = ['hertie_email', 'name', 'role'] as const;
@@ -31,7 +32,7 @@ function Students(p: ReadyProps) {
   const { status } = p;
   const env = useEnv();
   const s = status.students ?? { rows: 0, codes_sent: 0, joined: 0 };
-  const file = p.files.file(p.cohort.org, 'classroom-config', 'students.csv');
+  const file = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
   const [edits, setEdits] = useState<Record<number, Row>>({});
   const [added, setAdded] = useState<Row[]>([]);
   const [replacement, setReplacement] = useState<{ rows: Row[]; diff: RosterDiff; name: string } | null>(null);
@@ -68,7 +69,7 @@ function Students(p: ReadyProps) {
     if (badEmail.length) return setSave({ kind: 'bad', text: `${badEmail.length} row${badEmail.length > 1 ? 's have' : ' has'} an email that is not an address; no code can be sent to it.` });
     const rows = current.filter((r) => r.hertie_email || r.name);
     const text = writeTable({ header: table.header, rows });
-    const ok = await runSave({ owner: p.cohort.org, repo: 'classroom-config', path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : `${nEdits} change${nEdits > 1 ? 's' : ''}`}, from the Instructor Console`, statusRepo: [p.cohort.org, 'classroom-config'] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }, text, file.sha, { message: `roster: ${replacement ? `replace from ${replacement.name}` : `${nEdits} change${nEdits > 1 ? 's' : ''}`}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) {
       setEdits({});
       setAdded([]);
@@ -97,7 +98,7 @@ function Students(p: ReadyProps) {
         </div>
       </div>
       <Help title="How joining works" doc="06-enrol-students-to-cohort.md">
-        <p>Adding a row emails that student a code. They redeem it on the cohort’s join form; you see them turn green here.</p>
+        <p>Adding a row emails that student a code. They redeem it on the semester’s join form; you see them turn green here.</p>
         <p>You edit email, name and role. The system columns are written when a student joins; the code itself is never shown.</p>
       </Help>
       <div class="stack">
@@ -178,8 +179,8 @@ function Students(p: ReadyProps) {
           </div>
         ) : null}
         <div class="panel" style="display:grid;gap:10px">
-          <SaveBar state={save} onSave={() => void doSave()} label={saveLabel} disabled={!nEdits} file={{ org: p.cohort.org, repo: 'classroom-config', path: 'students.csv' }} note={nEdits ? `${nEdits} unsaved change${nEdits > 1 ? 's' : ''}` : 'No unsaved changes'} />
-          <Lives org={p.cohort.org} repo="classroom-config" path="students.csv" />
+          <SaveBar state={save} onSave={() => void doSave()} label={saveLabel} disabled={!nEdits} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'students.csv' }} note={nEdits ? `${nEdits} unsaved change${nEdits > 1 ? 's' : ''}` : 'No unsaved changes'} />
+          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="students.csv" />
         </div>
       </div>
     </>
@@ -190,7 +191,7 @@ export function StudentsScreen(p: CohortProps) {
   return <WithStatus props={p} title="Students" crumbs={cohortCrumbs(p, 'Students')}>{(r) => <Students {...r} />}</WithStatus>;
 }
 
-// --------------------------------------------------------------------------- staff
+// --------------------------------------------------------------------------- instructors
 
 function Access({ v }: { v: boolean | null | undefined }) {
   if (v === undefined) return <span class="access"><span class="dot idle" aria-hidden="true" />Checking</span>;
@@ -199,12 +200,10 @@ function Access({ v }: { v: boolean | null | undefined }) {
 }
 
 function dates(x: Person) {
-  return `${x.start ? fmtShort(x.start) : 'term'} to ${x.end ? fmtShort(x.end) : 'end'}`;
+  return `${x.start ? fmtShort(x.start) : 'start'} to ${x.end ? fmtShort(x.end) : 'end'}`;
 }
 
-const LIST: Record<Person['role'], string> = { instructor: 'instructors', ta: 'teaching_assistants' };
-
-/** A person as the form edits them, from people.yml. */
+/** A person as the form edits them, from instructors.yml. */
 function formOf(x: Person, raw: Record<string, unknown>): Record<string, unknown> {
   return { github_handle: x.handle, email: x.email, role: x.role, name: x.name || undefined, title: x.title || undefined, photo: x.photo || undefined, url: x.url || undefined, start: x.start || undefined, end: x.end || undefined, show_email: raw.show_email === true };
 }
@@ -212,36 +211,35 @@ function formOf(x: Person, raw: Record<string, unknown>): Record<string, unknown
 function entryOf(v: Record<string, unknown>, raw: Record<string, unknown>): Record<string, unknown> {
   const t = (k: string) => (typeof v[k] === 'string' && (v[k] as string).trim() ? (v[k] as string).trim() : undefined);
   return {
-    ...raw, github_handle: t('github_handle'), email: t('email'), name: t('name'), title: t('title'), photo: t('photo'), url: t('url'), start: t('start'), end: t('end'),
+    ...raw, github_handle: t('github_handle'), email: t('email'), role: t('role'), name: t('name'), title: t('title'), photo: t('photo'), url: t('url'), start: t('start'), end: t('end'),
     show_email: v.show_email === true ? true : raw.show_email === false ? false : undefined,
   };
 }
 
-function Staff(p: ReadyProps) {
+function Instructors(p: ReadyProps) {
   const { status } = p;
   const env = useEnv();
   const [editing, setEditing] = useState<{ idx: number | 'new'; values: Record<string, unknown> } | null>(null);
   const [removed, setRemoved] = useState<number[]>([]);
   const [save, runSave, setSave] = useSave(env);
-  const file = p.files.file(p.cohort.org, 'classroom-config', 'people.yml');
-  const people = file.kind === 'ready' ? parsePeople(file.text) : [];
+  const file = p.files.file(p.cohort.org, CONFIG_REPO, INSTRUCTORS_FILE);
+  const people = file.kind === 'ready' ? parseInstructors(file.text) : [];
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
-  const doc = (y && !y.errors.length ? y.toJS() : null) as { people?: Record<string, Record<string, unknown>[]> } | null;
-  const indexIn = (x: Person) => people.filter((q) => q.role === x.role).indexOf(x);
+  const doc = (y && !y.errors.length ? y.toJS() : null) as { instructors?: Record<string, unknown>[] } | null;
   // By position, not handle: display-only entries have none.
-  const rawOf = (x: Person) => ((doc?.people?.[LIST[x.role]] ?? [])[indexIn(x)] ?? {}) as Record<string, unknown>;
+  const rawOf = (i: number) => ((doc?.instructors ?? [])[i] ?? {}) as Record<string, unknown>;
   const st = status.staff;
   const ins = people.filter((x) => x.role === 'instructor').length || st?.instructors || 0;
-  const tas = people.filter((x) => x.role === 'ta').length || st?.tas || 0;
+  const tas = people.filter((x) => x.role === 'teaching_assistant').length || st?.tas || 0;
   const admins = p.course.admins;
   const scope = cohortScope(p);
-  const target = { owner: p.cohort.org, repo: 'classroom-config', path: 'people.yml' };
+  const target = { owner: p.cohort.org, repo: CONFIG_REPO, path: INSTRUCTORS_FILE };
 
   const write = async (mutate: (t: YamlText) => void, what: string) => {
     if (!y || file.kind !== 'ready') return false;
     const t = new YamlText(file.text);
     mutate(t);
-    return runSave(target, t.text, file.sha, { message: `staff: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, 'classroom-config'] });
+    return runSave(target, t.text, file.sha, { message: `instructors: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
   };
   const saveForm = async () => {
     if (!editing || !env) return;
@@ -260,46 +258,41 @@ function Staff(p: ReadyProps) {
       }
       if (!ok) return setSave({ kind: 'bad', text: `There is no GitHub account called ${handle}.` });
     }
-    const role = (v.role === 'ta' ? 'ta' : 'instructor') as Person['role'];
+    const idx = editing.idx;
     const done = await write((t) => {
-      if (before && before.role === role) t.assign(['people', LIST[role], indexIn(before)], entryOf(v, rawOf(before)));
-      else {
-        if (before) t.delete(['people', LIST[before.role], indexIn(before)]);
-        const len = people.filter((q) => q.role === role).length - (before && before.role === role ? 1 : 0);
-        t.set(['people', LIST[role], len], entryOf(v, before ? rawOf(before) : {}));
-      }
+      if (idx === 'new') t.set(['instructors', people.length], entryOf(v, {}));
+      else t.assign(['instructors', idx], entryOf(v, rawOf(idx)));
     }, `${before ? 'edit' : 'add'} ${handle || String(v.name).trim()}`);
     if (done) setEditing(null);
   };
   const saveRemovals = async () => {
     const gone = removed.map((i) => people[i]).filter(Boolean);
     const done = await write((t) => {
-      for (const role of ['instructor', 'ta'] as const)
-        gone.filter((x) => x.role === role).map(indexIn).sort((a, b) => b - a).forEach((i) => t.delete(['people', LIST[role], i]));
+      [...removed].sort((a, b) => b - a).forEach((i) => t.delete(['instructors', i]));
     }, `remove ${gone.map((x) => x.handle || x.name).join(', ')}`);
     if (done) setRemoved([]);
   };
   return (
     <>
-      <Crumbs items={cohortCrumbs(p, 'Staff')} />
+      <Crumbs items={cohortCrumbs(p, 'Instructors')} />
       <div class="page-head">
         <div>
-          <h1>Staff</h1>
+          <h1>Instructors</h1>
           <p class="lede">{ins} instructor{ins === 1 ? '' : 's'} and {tas} teaching assistant{tas === 1 ? '' : 's'}.{st && !st.synced ? ' GitHub access does not match this list yet.' : ''}</p>
         </div>
         <div class="actions">
-          <OpOpen def={checkAccess(scope)} cls="btn outline" label="Check staff access" />
+          <OpOpen def={checkAccess(scope)} cls="btn outline" label="Check instructor access" />
           <button class="btn" type="button" disabled={!y} onClick={() => { setEditing({ idx: 'new', values: { role: 'instructor' } }); setSave({ kind: 'idle' }); }}>Add a person</button>
         </div>
       </div>
-      <Help title="Who is staff" doc="05-manage-teaching-team.md">
-        <p>Handles here get the instructor buttons for this cohort; emails here get the problem emails. Check staff access makes GitHub match this list; it never removes access.</p>
-        {admins.length ? <p>Course admins ({admins.join(', ')}) have access to every cohort of the course; they are set on Course details.</p> : null}
+      <Help title="Who is an instructor" doc="05-manage-teaching-team.md">
+        <p>Handles here get the instructor buttons for this semester; emails here get the problem emails. Check instructor access makes GitHub match this list; it never removes access.</p>
+        {admins.length ? <p>Course admins ({admins.join(', ')}) have access to every semester of the course; they are set on Course details.</p> : null}
       </Help>
       <div class="stack">
-        {file.kind === 'loading' ? <Loading what="Reading people.yml" /> : null}
-        {file.kind === 'absent' ? <p class="footnote">There is no people.yml yet.</p> : null}
-        {y && y.errors.length ? <CheckLine cls="bad">people.yml does not parse ({y.errors[0]}); fix it with Edit the file.</CheckLine> : null}
+        {file.kind === 'loading' ? <Loading what={`Reading ${INSTRUCTORS_FILE}`} /> : null}
+        {file.kind === 'absent' ? <p class="footnote">There is no {INSTRUCTORS_FILE} yet.</p> : null}
+        {y && y.errors.length ? <CheckLine cls="bad">{INSTRUCTORS_FILE} does not parse ({y.errors[0]}); fix it with Edit the file.</CheckLine> : null}
         {people.length ? (
           <div class="table-wrap">
             <table class="grid" style="min-width:880px">
@@ -311,13 +304,13 @@ function Staff(p: ReadyProps) {
                   ) : (
                     <tr>
                       <td><b>{x.name || x.handle}</b><br /><span class="slug">{x.handle}</span></td>
-                      <td>{x.role === 'instructor' ? 'Instructor' : 'Teaching assistant'}</td>
+                      <td>{ROLE_WORD[x.role] ?? (x.role ? `${x.role} (not a role)` : 'No role')}</td>
                       <td class="mono" style="font-size:13px">{x.email}</td>
                       <td><Access v={x.handle ? p.files.member(p.cohort.org, x.handle) : null} /></td>
                       <td class="num">{dates(x)}</td>
                       <td>{x.photo ? <span class="chip ok">Photo</span> : <span class="chip">No photo</span>}</td>
                       <td>
-                        <button class="btn small quiet" type="button" onClick={() => { setEditing({ idx: i, values: formOf(x, rawOf(x)) }); setSave({ kind: 'idle' }); }}>Edit</button>
+                        <button class="btn small quiet" type="button" onClick={() => { setEditing({ idx: i, values: formOf(x, rawOf(i)) }); setSave({ kind: 'idle' }); }}>Edit</button>
                         <button class="btn small quiet" type="button" onClick={() => setRemoved([...removed, i])}>Remove</button>
                       </td>
                     </tr>
@@ -327,31 +320,31 @@ function Staff(p: ReadyProps) {
             </table>
           </div>
         ) : null}
-        <p class="footnote">Access states: <b>Has access</b>, <b>Not a member</b> (Check staff access invites them). An invitation that is pending shows as not a member until it is accepted.</p>
+        <p class="footnote">Access states: <b>Has access</b>, <b>Not a member</b> (Check instructor access invites them). An invitation that is pending shows as not a member until it is accepted.</p>
         {removed.length && !editing ? (
-          <div class="panel"><SaveBar state={save} onSave={() => void saveRemovals()} label={`Save ${removed.length} removal${removed.length > 1 ? 's' : ''}`} file={{ org: p.cohort.org, repo: 'classroom-config', path: 'people.yml' }} /></div>
+          <div class="panel"><SaveBar state={save} onSave={() => void saveRemovals()} label={`Save ${removed.length} removal${removed.length > 1 ? 's' : ''}`} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: INSTRUCTORS_FILE }} /></div>
         ) : null}
         {editing ? (
           <div class="person-form">
             <h3>{editing.idx === 'new' ? 'Add a person' : `Edit ${people[editing.idx]?.name || people[editing.idx]?.handle}`}</h3>
             <SchemaForm id="p" schema={null} tiers={PERSON} values={editing.values} onChange={(v) => setEditing({ ...editing, values: v })} />
             {displayOnly(editing.values) ? <CheckLine cls="warn">Display only: this person gets a card on the student site, no GitHub access and no problem emails.</CheckLine> : null}
-            <SaveBar state={save} onSave={() => void saveForm()} file={{ org: p.cohort.org, repo: 'classroom-config', path: 'people.yml' }}>
+            <SaveBar state={save} onSave={() => void saveForm()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: INSTRUCTORS_FILE }}>
               <button class="btn quiet" type="button" onClick={() => setEditing(null)}>Cancel</button>
             </SaveBar>
           </div>
         ) : !removed.length ? (
           <>
             <SaveLine state={save} />
-            <div class="savebar"><EditFile org={p.cohort.org} repo="classroom-config" path="people.yml" /></div>
+            <div class="savebar"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path={INSTRUCTORS_FILE} /></div>
           </>
         ) : null}
-        <Lives org={p.cohort.org} repo="classroom-config" path="people.yml" />
+        <Lives org={p.cohort.org} repo={CONFIG_REPO} path={INSTRUCTORS_FILE} />
       </div>
     </>
   );
 }
 
-export function StaffScreen(p: CohortProps) {
-  return <WithStatus props={p} title="Staff" crumbs={cohortCrumbs(p, 'Staff')}>{(r) => <Staff {...r} />}</WithStatus>;
+export function InstructorsScreen(p: CohortProps) {
+  return <WithStatus props={p} title="Instructors" crumbs={cohortCrumbs(p, 'Instructors')}>{(r) => <Instructors {...r} />}</WithStatus>;
 }

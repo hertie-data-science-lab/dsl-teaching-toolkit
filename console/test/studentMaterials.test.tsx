@@ -169,11 +169,11 @@ describe('opening a file', () => {
 });
 
 describe('Join', () => {
-  const form = (name: string) => parse(readFileSync(new URL(`../../templates/welcome/ISSUE_TEMPLATE/${name}`, import.meta.url), 'utf8')) as { labels: string[]; body: { type: string; id?: string }[] };
+  const form = (name: string) => parse(readFileSync(new URL(`../../templates/join/ISSUE_TEMPLATE/${name}`, import.meta.url), 'utf8')) as { labels: string[]; body: { type: string; id?: string }[] };
 
   it('opens the seeded issue forms, filling in exactly their text inputs by field id', () => {
     const course = new URL(joinCourseUrl(ORG, ' dsl-ab3k9m '));
-    expect(course.pathname).toBe(`/${ORG}/welcome/issues/new`);
+    expect(course.pathname).toBe(`/${ORG}/join/issues/new`);
     expect(course.searchParams.get('template')).toBe('01-join-course.yml');
     expect(form('01-join-course.yml').body.filter((b) => b.type === 'input').map((b) => b.id)).toEqual(['enrol_code']);
     expect(course.searchParams.get('enrol_code')).toBe('dsl-ab3k9m');

@@ -12,7 +12,8 @@ import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { ABOUT, ASSIGNMENT_DEFAULTS, COHORT_DEFAULTS } from '../tiers/course';
+import { ABOUT, ASSIGNMENT_DEFAULTS, SEMESTER_DEFAULTS } from '../tiers/course';
+import { formatsList } from '../tiers/grading';
 import { publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
 import { CheckLine, Crumbs, EditFile, Help, Lives, Loading } from '../ui/bits';
@@ -21,6 +22,7 @@ import { FileTree } from '../ui/FileTree';
 import { Check, Ext } from '../ui/icons';
 import { courseView, CourseHeaderActions } from './Course';
 import type { CourseProps } from './types';
+import { COURSE_REPO } from '../model/names';
 
 const validCourse = validator(courseSchema);
 
@@ -28,7 +30,7 @@ export function courseScope(p: Pick<CourseProps, 'course'>): Scope {
   return { courseOrg: p.course.org, where: p.course.name };
 }
 
-/** The course's newest cohort, for the course-page ops the engine runs per cohort. */
+/** The course's newest semester, for the course-page ops the engine runs per semester. */
 export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {
   const k = p.course.cohorts[0];
   return k ? { courseOrg: p.course.org, cohortOrg: k.org, where: k.termLabel } : null;
@@ -46,7 +48,7 @@ export interface Admin {
 }
 
 export function detailsOf(meta: Record<string, unknown>) {
-  const ad = obj(meta.assignment_defaults), cd = obj(meta.cohort_defaults), arch = obj(cd.archive);
+  const ad = obj(meta.assignment_defaults), cd = obj(meta.semester_defaults), arch = obj(cd.archive);
   const people = obj(meta.people);
   const admins = (Array.isArray(people.course_admins) ? people.course_admins : []).map((a) => {
     const x = obj(a);
@@ -55,7 +57,7 @@ export function detailsOf(meta: Record<string, unknown>) {
   const links = Array.isArray(meta.site_link_extensions) ? meta.site_link_extensions.map(String).join(', ') : typeof meta.site_link_extensions === 'string' ? meta.site_link_extensions : '';
   return {
     about: clean({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description, org_name: meta.org_name }),
-    defaults: clean({ ...ad }),
+    defaults: clean({ ...ad, formats: formatsList(ad.formats)[0] }),
     cohort: clean({ timezone: cd.timezone, archive_auto: arch.auto === false ? false : true, grace_days: arch.grace_days }),
     admins,
     links,
@@ -64,16 +66,23 @@ export function detailsOf(meta: Record<string, unknown>) {
 
 export type Details = ReturnType<typeof detailsOf>;
 
+/** The course's `formats` list with its first (runnable) entry replaced: the others stay. Cleared means the toolkit's default, so no list. */
+export function formatsAfter(meta: Record<string, unknown>, first: unknown): string[] | undefined {
+  if (!first) return undefined;
+  const rest = formatsList(obj(meta.assignment_defaults).formats).slice(1);
+  return [String(first), ...rest.filter((f) => f !== first)];
+}
+
 /** Write only what changed, key by key, into dsl-course.yml. */
 export function writeDetails(y: YamlText, before: Details, after: Details, meta: Record<string, unknown>): void {
   for (const k of Object.keys({ ...before.about, ...after.about })) if (!deepEqual(before.about[k], after.about[k])) y.assign([k], after.about[k]);
   for (const k of Object.keys({ ...before.defaults, ...after.defaults }))
-    if (!deepEqual(before.defaults[k], after.defaults[k])) y.assign(['assignment_defaults', k], after.defaults[k]);
+    if (!deepEqual(before.defaults[k], after.defaults[k])) y.assign(['assignment_defaults', k], k === 'formats' ? formatsAfter(meta, after.defaults[k]) : after.defaults[k]);
   const c = after.cohort, b = before.cohort;
-  if (!deepEqual(b.timezone, c.timezone)) y.assign(['cohort_defaults', 'timezone'], c.timezone);
+  if (!deepEqual(b.timezone, c.timezone)) y.assign(['semester_defaults', 'timezone'], c.timezone);
   if (!deepEqual(b.archive_auto, c.archive_auto) || !deepEqual(b.grace_days, c.grace_days)) {
-    const raw = obj(obj(meta.cohort_defaults).archive);
-    y.assign(['cohort_defaults', 'archive'], { ...raw, auto: c.archive_auto === false ? false : raw.auto === true ? true : undefined, grace_days: c.archive_auto === false ? undefined : c.grace_days });
+    const raw = obj(obj(meta.semester_defaults).archive);
+    y.assign(['semester_defaults', 'archive'], { ...raw, auto: c.archive_auto === false ? false : raw.auto === true ? true : undefined, grace_days: c.archive_auto === false ? undefined : c.grace_days });
   }
   if (!deepEqual(before.admins, after.admins)) {
     const raws = (Array.isArray(obj(meta.people).course_admins) ? (obj(meta.people).course_admins as unknown[]) : []).map(obj);
@@ -91,7 +100,7 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
     if (v && typeof v === 'object' && !Object.keys(v as object).length) y.delete([k]);
   };
   emptyMap('assignment_defaults');
-  emptyMap('cohort_defaults');
+  emptyMap('semester_defaults');
 }
 
 /**
@@ -105,7 +114,7 @@ function tolerated(e: ErrorObject): string | null {
   const key = (e.params as { additionalProperty: string }).additionalProperty;
   if (/^\/people\/instructors\/\d+$/.test(e.instancePath) && (key === 'start' || key === 'end'))
     return 'a course instructor card has start or end dates; the student site honours them';
-  if (e.instancePath === '/people' && key === 'teaching_assistants') return 'it lists course-level teaching assistants; the engine ignores them, since assistants are set per cohort under Staff';
+  if (e.instancePath === '/people' && key === 'teaching_assistants') return 'it lists course-level teaching assistants; the engine ignores them, since assistants are set per semester under Instructors';
   return null;
 }
 
@@ -164,7 +173,7 @@ export function AdminRows({ admins, onChange, id }: { admins: Admin[]; onChange:
 export function DetailsScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
-  const file = p.files.file(course.org, '.github', 'dsl-course.yml');
+  const file = p.files.file(course.org, COURSE_REPO, 'dsl-course.yml');
   const [draft, setDraft] = useState<Details | null>(null);
   const [save, runSave, setSave] = useSave(env);
   const [warning, setWarning] = useState('');
@@ -181,14 +190,15 @@ export function DetailsScreen(p: CourseProps) {
   const doSave = async () => {
     setWarning('');
     if (!y || file.kind !== 'ready') return;
+    if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const after = { ...d, cohort: effective(COHORT_DEFAULTS, d.cohort) };
+    const after = { ...d, cohort: effective(SEMESTER_DEFAULTS, d.cohort) };
     const out = courseFileAfter(file.text, before, after, meta);
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     const missing = await missingAdmin(env, before.admins, after.admins);
     if (missing) return setSave({ kind: 'bad', text: `There is no GitHub account called ${missing}.` });
     // The note describes a file that was written, so it shows only once the save went through.
-    if (await runSave({ owner: course.org, repo: '.github', path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the Instructor Console', statusRepo: [course.org, '.github'] })) {
+    if (await runSave({ owner: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) {
       setDraft(null);
       setWarning(out.warning ?? '');
     }
@@ -197,12 +207,12 @@ export function DetailsScreen(p: CourseProps) {
     <>
       <Crumbs items={[{ t: course.name, href: '#course' }, { t: 'Course details' }]} />
       <div class="page-head">
-        <div><h1>Course details</h1><p class="lede">What every cohort’s student site shows about the course, and the course’s defaults.</p></div>
+        <div><h1>Course details</h1><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
         <CourseHeaderActions course={course} ready={ready} />
       </div>
       <Help title="Course admins and defaults" doc="01-setup-course-org.md">
-        <p>Course admins keep every button for this course across years. They can differ from a given term’s instructors, who are set per cohort under Staff.</p>
-        <p>These are the course’s defaults. Every one can be overridden per assignment or per cohort.</p>
+        <p>Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
+        <p>These are the course’s defaults. Every one can be overridden per assignment or per semester.</p>
       </Help>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -217,7 +227,7 @@ export function DetailsScreen(p: CourseProps) {
             </div>
             <div class="form-section">
               <h3>Course admins</h3>
-              <p class="footnote">Course admins keep every button for this course across years. They can differ from a given term’s instructors, who are set per cohort under Staff.</p>
+              <p class="footnote">Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
               <AdminRows admins={d.admins} id="cda" onChange={(admins) => set({ admins })} />
             </div>
             <div class="form-section">
@@ -225,22 +235,22 @@ export function DetailsScreen(p: CourseProps) {
               <SchemaForm id="cdx" schema={null} tiers={ASSIGNMENT_DEFAULTS} values={d.defaults} onChange={(v) => set({ defaults: v })} />
             </div>
             <div class="form-section">
-              <h3>Cohort defaults</h3>
-              <p class="footnote">Written into each new cohort’s schedule when it is set up; a cohort can change them in its own schedule.</p>
-              <SchemaForm id="cdc" schema={null} tiers={COHORT_DEFAULTS} values={d.cohort} onChange={(v) => set({ cohort: v })} />
+              <h3>Semester defaults</h3>
+              <p class="footnote">Written into each new semester’s schedule when it is set up; a semester can change them in its own schedule.</p>
+              <SchemaForm id="cdc" schema={null} tiers={SEMESTER_DEFAULTS} values={d.cohort} onChange={(v) => set({ cohort: v })} />
             </div>
             <div class="form-section">
               <h3>Site links</h3>
               <div class="field">
                 <label for="cdk">File types the student site links to</label>
                 <input type="text" id="cdk" value={d.links} placeholder="pdf, html" onInput={(e) => set({ links: (e.target as HTMLInputElement).value })} />
-                <p class="why">Released files of these types get a direct link on every cohort’s student site. Separate them with commas.</p>
+                <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
               </div>
             </div>
             <div class="form-section">
               {warning ? <CheckLine cls="warn">{warning}</CheckLine> : null}
-              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before)} file={{ org: course.org, repo: '.github', path: 'dsl-course.yml' }} />
-              <Lives org={course.org} repo=".github" path="dsl-course.yml" />
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }} />
+              <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
             </div>
           </div>
         </div>
@@ -310,7 +320,7 @@ function Unmatched({ rules, total, loading, partial }: { rules: string[]; total:
   ) : <p class="footnote">Every rule matches at least one file.</p>;
 }
 
-const PUBLISH_STUB = '# INSTRUCTOR-OWNED - yours. What the cohort site hosts PUBLICLY; same syntax as .gitignore.\npublic:\n';
+const PUBLISH_STUB = '# INSTRUCTOR-OWNED - yours. What the semester site hosts PUBLICLY; same syntax as .gitignore.\npublic:\n';
 
 export function MaterialsScreen(p: CourseProps) {
   const { course, entry } = p;
@@ -342,12 +352,12 @@ export function MaterialsScreen(p: CourseProps) {
     const y = new YamlText(pubFile.kind === 'ready' ? pubFile.text : PUBLISH_STUB);
     if (y.errors.length) return;
     y.assign(['public'], pubLines.length ? pubLines : []);
-    if (await runPub({ owner: course.org, repo, path: 'publish.yml' }, y.text, pubFile.kind === 'ready' ? pubFile.sha : null, { message: 'materials: edit what is published openly, from the Instructor Console', statusRepo: [course.org, '.github'] })) setPub(null);
+    if (await runPub({ owner: course.org, repo, path: 'publish.yml' }, y.text, pubFile.kind === 'ready' ? pubFile.sha : null, { message: 'materials: edit what is published openly, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) setPub(null);
   };
   const saveIgn = async () => {
     if (ign === null) return;
     const text = ign.endsWith('\n') || !ign ? ign : `${ign}\n`;
-    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the Instructor Console', statusRepo: [course.org, '.github'] })) setIgn(null);
+    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
   };
   return (
     <>
@@ -357,7 +367,7 @@ export function MaterialsScreen(p: CourseProps) {
         <div class="actions"><a class="btn quiet" href={`https://github.com/${course.org}/${repo}`} target="_blank" rel="noopener">Open on GitHub <Ext /></a></div>
       </div>
       <Help title="Public and withheld" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a cohort. Files matching the withheld patterns never reach students. Files matching the public patterns also appear on the public website. Both use the same pattern syntax as .gitignore.</p>
+        <p>Materials live here privately until a scheduled release copies them to a semester. Files matching the withheld patterns never reach students. Files matching the public patterns also appear on the public website. Both use the same pattern syntax as .gitignore.</p>
       </Help>
       <div class="stack">
         <section class="panel section">
@@ -366,7 +376,7 @@ export function MaterialsScreen(p: CourseProps) {
           <div class="actions"><EditFile org={course.org} repo={repo} path="SYLLABUS.md" /></div>
           {scope ? (
             <>
-              <p class="footnote">Builds a paste-ready ‘Course sessions and readings’ block from the cohort schedule and the <code>readings/NN_*</code> folders. Write saves it as <code>SYLLABUS.sessions.md</code> in this repo; <code>SYLLABUS.md</code> is yours and is never touched.</p>
+              <p class="footnote">Builds a paste-ready ‘Course sessions and readings’ block from the semester schedule and the <code>readings/NN_*</code> folders. Write saves it as <code>SYLLABUS.sessions.md</code> in this repo; <code>SYLLABUS.md</code> is yours and is never touched.</p>
               <div class="actions"><OpButtons def={generateSyllabus(scope, repo)} small previewLabel="Preview the session list" /></div>
             </>
           ) : null}

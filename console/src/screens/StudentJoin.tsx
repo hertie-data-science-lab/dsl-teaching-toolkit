@@ -3,10 +3,10 @@
 // body: the console fills a form and opens GitHub's own issue form with those answers, and
 // the student presses Create there. It cannot create the issue itself: GitHub drops labels
 // on an issue created through the API by anyone without push on the repo, and the
-// `welcome` workflows run only on the form's label (`onboarding`, `team-formation`). GitHub
+// join repo's workflows run only on the form's label (`onboarding`, `team-formation`). GitHub
 // fills an issue form's text inputs from the link, not its dropdowns, so the Action (and an
 // assignment offered as a dropdown) is chosen once more on GitHub; the form says which.
-// The answer is read back by polling the student's own issues in `welcome` (ETag'd, free
+// The answer is read back by polling the student's own issues in the join repo (ETag'd, free
 // when nothing changed).
 
 import { useEffect, useState } from 'preact/hooks';
@@ -15,16 +15,17 @@ import type { GhComment, GhIssue } from '../github/client';
 import { invitationUrl } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
+import { JOIN_REPO } from '../model/names';
 import type { SemesterFacts } from '../model/student';
 import { ORG_RE } from '../router';
 import { Crumbs, Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 
-export const WELCOME = 'welcome';
+export const WELCOME = JOIN_REPO;
 export const TEAM_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 export const ENROL_CODE = /^dsl-[a-z0-9]{6}$/i;
 
-/** GitHub's Join course form in `welcome`, with the code filled in. */
+/** GitHub's Join course form in the join repo, with the code filled in. */
 export const joinCourseUrl = (org: string, code: string) =>
   `https://github.com/${org}/${WELCOME}/issues/new?template=01-join-course.yml&enrol_code=${encodeURIComponent(code.trim())}`;
 
@@ -52,7 +53,7 @@ interface Asked {
   reply: GhComment | null;
 }
 
-/** The person's Join course and Join team issues in `welcome`, newest first, each with the automation's last reply. */
+/** The person's Join course and Join team issues in the join repo, newest first, each with the automation's last reply. */
 async function readAsked(env: NonNullable<ReturnType<typeof useEnv>>, org: string): Promise<Asked[]> {
   const mine = (await env.client.listIssues(org, WELCOME, `creator=${encodeURIComponent(env.user.login)}&state=all`))
     .filter((i) => i.labels.some((l) => ROUTES.includes(l.name)))
@@ -220,7 +221,7 @@ export function JoinCourseForm({ org }: { org: string }) {
   );
 }
 
-/** `?join=<org>`: joining a semester you are not a member of yet (its `welcome` repo is public). */
+/** `?join=<org>`: joining a semester you are not a member of yet (its join repo is public). */
 export function JoinCourseScreen({ org }: { org: string }) {
   return (
     <>

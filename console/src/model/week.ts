@@ -10,7 +10,7 @@ import { DEFAULT_TZ, instant, startOfDay, type SemesterFacts } from './student';
 
 export type WeekKind = 'due' | 'hand_out' | 'release' | 'exam' | 'event' | 'marks' | 'teams' | 'news' | 'patch';
 
-/** A note on a Submission receipts thread that the instructors updated files in the student's repo. */
+/** A note on a Submission receipts issue that the instructors updated files in the student's repo. */
 export interface PatchLine {
   slug: string;
   when: string;

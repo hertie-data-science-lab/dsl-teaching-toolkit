@@ -43,19 +43,19 @@ describe('status', () => {
 
   it('reports an absent file as not computed yet', async () => {
     const c = new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch });
-    expect(await loadStatus(c, 'o', 'classroom-config')).toEqual({ kind: 'absent' });
+    expect(await loadStatus(c, 'o', 'semester-config')).toEqual({ kind: 'absent' });
   });
 
   it('loads, validates and checks staleness with one tree read', async () => {
     const t = matching();
     const gh = new FakeGitHub()
-      .on('GET', `/repos/o/classroom-config/contents/${STATUS_PATH}`, fileBody(STATUS_PATH, JSON.stringify(example), 'st'))
-      .on('GET', '/repos/o/classroom-config/git/trees/HEAD', t);
-    const l = await loadStatus(new GitHubClient({ token: () => 't', fetch: gh.fetch }), 'o', 'classroom-config');
+      .on('GET', `/repos/o/semester-config/contents/${STATUS_PATH}`, fileBody(STATUS_PATH, JSON.stringify(example), 'st'))
+      .on('GET', '/repos/o/semester-config/git/trees/HEAD', t);
+    const l = await loadStatus(new GitHubClient({ token: () => 't', fetch: gh.fetch }), 'o', 'semester-config');
     expect(l.kind).toBe('ready');
     if (l.kind === 'ready') {
       expect(l.stale).toEqual([]);
-      expect(l.status.cohort?.term_label).toBe('Fall 2026');
+      expect(l.status.semester?.label).toBe('Fall 2026');
     }
     expect(gh.seen.filter((s) => s.url.includes('/git/trees/'))).toHaveLength(1);
   });

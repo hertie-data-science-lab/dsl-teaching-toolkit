@@ -15,7 +15,7 @@ describe('the tiered form', () => {
 
   it('puts Ask and Default in the body, Conditional under its trigger, Advanced behind the reveal', () => {
     const solo = layout(tiers, fromConfig({ type: 'individual' }));
-    expect(solo.main.map((i) => i.key)).toEqual(['title', 'type', 'submit_via', 'visibility', 'format', 'autograde']);
+    expect(solo.main.map((i) => i.key)).toEqual(['title', 'type', 'submit_via', 'visibility', 'formats', 'autograde']);
     expect(solo.advanced.map((i) => i.key)).toEqual(['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day']);
     const team = layout(tiers, fromConfig({ type: 'group', submit_via: 'external', autograde: true }));
     const type = team.main.find((i) => i.key === 'type')!;
@@ -59,7 +59,7 @@ describe('the tiered form', () => {
   });
 
   it('round-trips grading_config.yml and the schema accepts the result', async () => {
-    const cfg = { title: 'Group project', type: 'group', team_formation: 'assigned', max_team_size: 4, submit_via: 'assignment_repo', visibility: 'private', format: 'ipynb', autograde: true, completion_check: false };
+    const cfg = { title: 'Group project', type: 'group', team_formation: 'assigned', max_team_size: 4, submit_via: 'assignment_repo', visibility: 'private', formats: ['ipynb'], autograde: true, completion_check: false };
     const back = Object.fromEntries(Object.entries(toConfig(effective(tiers, fromConfig(cfg)))).filter(([, x]) => x !== undefined));
     expect(back).toEqual(cfg);
     const { default: Ajv } = await import('ajv/dist/2020');

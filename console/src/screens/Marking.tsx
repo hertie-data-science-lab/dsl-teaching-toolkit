@@ -1,5 +1,5 @@
 // The assignment hub's Marks tab (S12, the grading sheet as a grid) and Teams tab (S9,
-// teams.csv for a team assignment), and the cohort's read-only Marks overview.
+// teams.csv for a team assignment), and the semester's read-only Marks overview.
 
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -21,6 +21,7 @@ import type { TabProps } from './Assignments';
 import { readSchedule } from './Cohort';
 import { WithStatus, cohortCrumbs, cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
+import { CONFIG_REPO, LEDGER_PATH } from '../model/names';
 
 function courseDefault(p: ReadyProps, key: string): unknown {
   return ((p.course.meta?.assignment_defaults ?? {}) as Record<string, unknown>)[key];
@@ -41,7 +42,7 @@ export function MarksTab(p: TabProps) {
   const [folded, setFolded] = useState<Record<string, boolean>>({});
   const [save, runSave, setSave] = useSave(env);
   const path = `grading_sheets/${a.slug}.yml`;
-  const file = p.files.file(p.cohort.org, 'classroom-config', path);
+  const file = p.files.file(p.cohort.org, CONFIG_REPO, path);
   const text = file.kind === 'ready' ? file.text : null;
   const parsed = useMemo(() => {
     if (text === null) return null;
@@ -141,7 +142,7 @@ export function MarksTab(p: TabProps) {
   const doSave = async () => {
     const out = new YamlText(file.text);
     for (const [k, val] of Object.entries(edits)) out.assign(JSON.parse(k) as Path, val);
-    const ok = await runSave({ owner: p.cohort.org, repo: 'classroom-config', path }, out.text, file.sha, { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the Instructor Console`, statusRepo: [p.cohort.org, 'classroom-config'] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path }, out.text, file.sha, { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) setEdits({});
   };
   return (
@@ -150,7 +151,7 @@ export function MarksTab(p: TabProps) {
       <Help title="How marks work" doc="10-grade-and-return-assignments.md">
         <p>Submission details come from the repos and cannot be edited. You enter {qs.length ? 'points per question' : 'one score'}, feedback that students see, an adjustment, and private notes that are never shared. {rate !== null ? `The penalty is ${round(rate * 100)}% of the total per late day.` : 'No late penalty applies.'} Nothing reaches a student until you return marks.</p>
       </Help>
-      {sheet.frozen ? <p class="note" style="margin-bottom:12px"><b>Frozen at the cutoff.</b> The submission details no longer change; your marks and feedback are still yours to edit.</p> : null}
+      {sheet.frozen ? <p class="note" style="margin-bottom:12px"><b>Frozen at the late cutoff.</b> The submission details no longer change; your marks and feedback are still yours to edit.</p> : null}
       <div class="table-wrap" style="max-height:620px;overflow:auto">
         <table class="grid marks">
           <thead>
@@ -173,8 +174,8 @@ export function MarksTab(p: TabProps) {
         </table>
       </div>
       <div class="panel" style="display:grid;gap:10px;margin-top:14px">
-        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} file={{ org: p.cohort.org, repo: 'classroom-config', path }} note={changed ? `${changed} ${sheet.group ? 'team' : 'student'}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
-        <Lives org={p.cohort.org} repo="classroom-config" path={path} />
+        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} file={{ org: p.cohort.org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${sheet.group ? 'team' : 'student'}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
+        <Lives org={p.cohort.org} repo={CONFIG_REPO} path={path} />
       </div>
     </>
   );
@@ -197,8 +198,8 @@ export function TeamsTab(p: TabProps) {
   const [newTeam, setNewTeam] = useState('');
   const [teamError, setTeamError] = useState('');
   const [save, runSave, setSave] = useSave(env);
-  const file = p.files.file(p.cohort.org, 'classroom-config', 'teams.csv');
-  const roster = p.files.file(p.cohort.org, 'classroom-config', 'students.csv');
+  const file = p.files.file(p.cohort.org, CONFIG_REPO, 'teams.csv');
+  const roster = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
   const cfg = useGradingConfig(p, a.template);
   const maxSize = Number(cfg.max_team_size ?? courseDefault(p, 'max_team_size') ?? 5) || 5;
   const formation = cfg.team_formation === 'assigned' ? 'You assign them' : 'Students form their own';
@@ -240,7 +241,7 @@ export function TeamsTab(p: TabProps) {
     const mine = cur.teams.flatMap((t) => (t.members.length ? t.members : ['']).map((h) => ({ assignment: a.slug, team: t.name, github_handle: h })));
     const header = table.header.length ? table.header : TEAMS_HEADER;
     const text = writeTable({ header, rows: [...others, ...mine.filter((r) => r.github_handle)] });
-    const ok = await runSave({ owner: p.cohort.org, repo: 'classroom-config', path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, 'classroom-config'] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) setDraft(null);
   };
   // As the engine's formation window: hand out to the grading pin (grading_datetime, else due).
@@ -325,8 +326,8 @@ export function TeamsTab(p: TabProps) {
           {empty.length && dirty ? <p class="footnote">{empty.length} empty team{empty.length > 1 ? 's are' : ' is'} kept only until you leave this page.</p> : null}
         </section>
         <div class="panel" style="display:grid;gap:10px">
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: 'classroom-config', path: 'teams.csv' }} note={dirty ? 'Unsaved changes' : undefined} />
-          <Lives org={p.cohort.org} repo="classroom-config" path="teams.csv" />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }} note={dirty ? 'Unsaved changes' : undefined} />
+          <Lives org={p.cohort.org} repo={CONFIG_REPO} path="teams.csv" />
         </div>
       </div>
     </>
@@ -336,14 +337,14 @@ export function TeamsTab(p: TabProps) {
 // --------------------------------------------------------------------------- overview
 
 const SHEETS = 'grading_sheets';
-const LEDGER = 'gradebook/distributed.csv';
+const LEDGER = LEDGER_PATH;
 
 function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes: Map<string, string> | null }) {
   const { a, status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
   const path = `${SHEETS}/${a.slug}.yml`;
-  const changed = p.hasSheet ? p.files.lastChange(p.cohort.org, 'classroom-config', path) : null;
-  const sheet = a.returned && p.hasSheet ? p.files.file(p.cohort.org, 'classroom-config', path) : null;
+  const changed = p.hasSheet ? p.files.lastChange(p.cohort.org, CONFIG_REPO, path) : null;
+  const sheet = a.returned && p.hasSheet ? p.files.file(p.cohort.org, CONFIG_REPO, path) : null;
   const text = sheet?.kind === 'ready' ? sheet.text : null;
   const doc = text !== null ? new YamlText(text) : null;
   const on = text !== null && doc && !doc.errors.length && p.writes ? returnedOn(readSheet(text, doc.toJS()), p.writes) : null;
@@ -361,9 +362,9 @@ function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes:
 
 function MarksOverview(p: ReadyProps) {
   const list = p.status.assignments ?? [];
-  const dir = p.files.dir(p.cohort.org, 'classroom-config', SHEETS);
+  const dir = p.files.dir(p.cohort.org, CONFIG_REPO, SHEETS);
   const sheets = new Set(dir.kind === 'ready' ? dir.entries.map((e) => e.name) : []);
-  const ledger = p.files.file(p.cohort.org, 'classroom-config', LEDGER);
+  const ledger = p.files.file(p.cohort.org, CONFIG_REPO, LEDGER);
   const writes = ledger.kind === 'ready' ? gradebookWrites(ledger.text) : ledger.kind === 'loading' ? null : new Map<string, string>();
   const returned = list.filter((a) => a.returned).length;
   const toMark = list.reduce((n, a) => n + (sheets.has(`${a.slug}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
@@ -373,14 +374,14 @@ function MarksOverview(p: ReadyProps) {
       <div class="page-head">
         <div>
           <h1>Marks</h1>
-          <p class="lede">{sheets.size ? `${returned} of ${list.length} assignment${list.length === 1 ? '' : 's'} returned; ${toMark} mark${toMark === 1 ? '' : 's'} still to enter.` : 'Where marking stands this term, one row per assignment.'}</p>
+          <p class="lede">{sheets.size ? `${returned} of ${list.length} assignment${list.length === 1 ? '' : 's'} returned; ${toMark} mark${toMark === 1 ? '' : 's'} still to enter.` : 'Where marking stands this semester, one row per assignment.'}</p>
         </div>
       </div>
       <Help title="Where marks are entered" doc="10-grade-and-return-assignments.md">
         <p>This page only reads. Open an assignment to enter its marks and return them to students.</p>
       </Help>
       {dir.kind === 'loading' ? <Loading what="Reading the mark sheets" /> : dir.kind === 'error' ? (
-        <CheckLine cls="bad">Could not list the mark sheets in classroom-config/{SHEETS}: {dir.message}</CheckLine>
+        <CheckLine cls="bad">Could not list the mark sheets in {CONFIG_REPO}/{SHEETS}: {dir.message}</CheckLine>
       ) : !sheets.size ? (
         <section class="panel section stub">
           <h2>No mark sheets yet</h2>

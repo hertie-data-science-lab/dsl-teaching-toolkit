@@ -21,13 +21,13 @@ export function orgField(why: string): FieldTier {
 export const COURSE_ORG: Tiers = {
   course_name: { tier: 'ask', label: 'Course name', reason: 'Used to derive the org name.', check: (x) => (x ? null : 'Needed.') },
   course_code: { tier: 'ask', label: 'Course code', reason: 'Upper case here; lower case in the org name.', check: (x) => (x ? null : 'Needed.') },
-  org: orgField('hertie-, the course name, the code; lower case, no year. Name it after the course, not the term.'),
+  org: orgField('hertie-, the course name, the code; lower case, no year. Name it after the course, not the semester.'),
 };
 
 export function cohortOrg(terms: string[]): Tiers {
   return {
-    term: { tier: 'default', label: 'Term', widget: 'select', defaultLabel: 'default: next term', reason: 'Used to derive the org name.', options: terms.map((t) => opt(t, termLabel(t))) },
-    org: orgField('hertie-, the course’s short name, the term tag. One org per term; students join this org, never the course.'),
+    term: { tier: 'default', label: 'Semester', widget: 'select', defaultLabel: 'default: next semester', reason: 'Used to derive the org name.', options: terms.map((t) => opt(t, termLabel(t))) },
+    org: orgField('hertie-, the course’s short name, the semester (f2026). One org per semester; students join this org, never the course.'),
   };
 }
 
@@ -37,10 +37,10 @@ export function assignmentWhat(terms: string[], next: number, templates: string[
   return {
     name: { tier: 'ask', label: 'Name', reason: 'Becomes the title students see, and part of their repo name.', check: (x) => (x && String(x).trim() ? null : 'Needed.') },
     number: {
-      tier: 'default', label: 'Number', widget: 'number', defaultLabel: `next free: ${next}`, reason: 'Must be free this term.',
+      tier: 'default', label: 'Number', widget: 'number', defaultLabel: `next free: ${next}`, reason: 'Must be free this semester.',
       check: (x) => (x === undefined ? 'Needed.' : Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 999 ? null : 'A whole number from 1 to 999.'),
     },
-    term: { tier: 'default', label: 'Term', widget: 'select', defaultLabel: 'default: newest cohort', reason: 'The term that first uses this assignment template.', options: terms.map((t) => opt(t, termLabel(t))) },
+    term: { tier: 'default', label: 'Semester', widget: 'select', defaultLabel: 'default: newest semester', reason: 'The semester that first uses this assignment template.', options: terms.map((t) => opt(t, termLabel(t))) },
     copy_from: {
       tier: 'advanced', label: 'Copy an existing assignment template', widget: 'select', default: '', defaultLabel: 'default: start fresh',
       reason: 'Copying takes its settings too, so the next two questions are skipped.',
@@ -61,7 +61,7 @@ export function assignmentWork(d: CourseDefaults): Tiers {
     visibility: {
       tier: 'advanced', label: 'Who can see each student’s repo', widget: 'radio', default: 'private', irreversible: true,
       reason: 'Set once, at creation. Choose private unless you are sure.',
-      options: [opt('private', 'Private', 'The student and staff. The default.'), opt('public', 'Public', 'Anyone on the internet. The solution cannot be shown automatically.'), opt('student_choice', 'Student’s choice', 'Each student decides for their own repo.')],
+      options: [opt('private', 'Private', 'The student and instructors. The default.'), opt('public', 'Public', 'Anyone on the internet. The solution cannot be shown automatically.'), opt('student_choice', 'Student’s choice', 'Each student decides for their own repo.')],
       forced: (v) => (v.submit_via && v.submit_via !== 'assignment_repo' ? { value: 'private', reason: VIS_WHY[String(v.submit_via)] ?? 'Private.' } : null),
     },
   };
@@ -91,8 +91,8 @@ export function newMaterials(terms: string[], repos: string[]): Tiers {
   const copying = (v: Record<string, unknown>) => !!v.copy_from;
   return {
     term: {
-      tier: 'default', label: 'Term', widget: 'select', defaultLabel: 'default: the newest cohort',
-      reason: 'Materials are usually per term. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
+      tier: 'default', label: 'Semester', widget: 'select', defaultLabel: 'default: the newest semester',
+      reason: 'Materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
     },
     open: {
       tier: 'default', label: 'Publish some of it openly', widget: 'checkbox', default: false, defaultLabel: 'default: off keeps everything private to enrolled students',

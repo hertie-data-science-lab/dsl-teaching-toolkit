@@ -15,13 +15,14 @@ import { asgSummary } from './Cohort';
 import { MarksTab, TeamsTab } from './Marking';
 import { WithStatus, cohortCrumbs, cohortName, cohortScope, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
+import { CONFIG_REPO } from '../model/names';
 
 function nextDate(a: Assignment, tz: string, year: number): string {
   switch (a.state) {
     case 'open':
       return `Due ${fmtWhen(a.due, tz, year)}`;
     case 'late_window':
-      return `Late work until ${fmtWhen(a.late_until, tz, year)}`;
+      return `Late work until ${fmtWhen(a.grading_cutoff_datetime, tz, year)}`;
     case 'marking':
     case 'returned':
       return a.solution_shown ? `Solution shown ${fmtDay(a.solution_shown, tz, year)}` : '';
@@ -32,8 +33,8 @@ function nextDate(a: Assignment, tz: string, year: number): string {
 
 /** Joined students in no team of `slug`, as the Teams tab counts them; null until both files are read. */
 function teamless(p: ReadyProps, slug: string): number | null {
-  const roster = p.files.file(p.cohort.org, 'classroom-config', 'students.csv');
-  const teams = p.files.file(p.cohort.org, 'classroom-config', 'teams.csv');
+  const roster = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
+  const teams = p.files.file(p.cohort.org, CONFIG_REPO, 'teams.csv');
   if (roster.kind === 'loading' || teams.kind === 'loading') return null;
   const joined = roster.kind === 'ready' ? parseRoster(roster.text).rows.filter((s) => s.handle) : [];
   const placed = new Set(
@@ -57,7 +58,7 @@ function Index(p: ReadyProps) {
         <div>
           <h1>Assignments</h1>
           <p class="lede">
-            {list.length === 1 ? 'One' : list.length} this term.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
+            {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
         </div>
         <div class="actions"><a class="btn" href={`?course=${p.course.org}#new-assignment-1`}>New assignment</a></div>
@@ -158,8 +159,8 @@ function Overview(p: TabProps) {
     'In the schedule',
     group ? (cur === 1 ? `${a.teams} teams so far` : cur > 1 ? 'Closed' : 'Before hand out') : 'Skipped: students work alone',
     cur === 2 ? `${a.submissions} of ${a.units} in` : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}` : `Opens ${a.handout ? fmtDay(a.handout, tz, year) : 'at hand out'}`,
-    cur === 3 ? `Until ${fmtDay(a.late_until, tz, year)}` : cur > 3 ? `Closed ${fmtDay(a.late_until, tz, year)}` : `Opens after ${fmtDay(a.due, tz, year)}`,
-    cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.late_until, tz, year)}`,
+    cur === 3 ? `Until ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : `Opens after ${fmtDay(a.due, tz, year)}`,
+    cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
   ];
   const dueIn = a.due ? Math.round((Date.parse(a.due) - now) / 864e5) : null;
@@ -169,7 +170,7 @@ function Overview(p: TabProps) {
   );
   const lede =
     a.state === 'open' ? `Open. Due ${fmtDay(a.due, tz, year)} at ${fmtTime(a.due, tz)}; ${a.submissions} of ${a.units} submitted so far.`
-    : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.late_until, tz, year)}; ${a.submissions} of ${a.units} submitted.`
+    : a.state === 'late_window' ? `Late window. Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted.`
     : a.state === 'marking' ? `Marking. ${a.marks.filled} of ${a.marks.total} marked.`
     : a.state === 'returned' ? 'Returned. Marks are with students.'
     : a.state === 'teams_forming' ? `Teams forming. Hands out ${fmtDay(a.handout, tz, year)} at ${fmtTime(a.handout, tz)}.`
@@ -217,7 +218,7 @@ function Overview(p: TabProps) {
           <div class="dates">
             <div><div class="l">Hand out</div><div class="v">{a.handout ? fmtWhen(a.handout, tz, year) : 'By hand'}</div><div class="s">{handedOut ? `${a.units} repos created` : a.handout ? 'scheduled' : 'from this page'}</div></div>
             <div><div class="l">Due</div><div class="v">{fmtWhen(a.due, tz, year)}</div><div class="s">{dueIn !== null && dueIn >= 0 && a.state === 'open' ? `in ${dueIn} day${dueIn === 1 ? '' : 's'}` : a.due && a.due.slice(0, 10) < today ? 'passed' : ''}</div></div>
-            <div><div class="l">Late work until</div><div class="v">{fmtWhen(a.late_until, tz, year) || 'No late work'}</div><div class="s">with the late penalty</div></div>
+            <div><div class="l">Late work until</div><div class="v">{fmtWhen(a.grading_cutoff_datetime, tz, year) || 'No late work'}</div><div class="s">with the late penalty</div></div>
             <div><div class="l">Solution shown</div><div class="v">{a.solution_shown ? fmtWhen(a.solution_shown, tz, year) : 'Not shown'}</div><div class="s">{a.solution_shown ? 'in materials' : 'off for this assignment'}</div></div>
           </div>
         </section>
@@ -247,7 +248,7 @@ function Overview(p: TabProps) {
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
             {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the student site; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 || cur === 3 ? 'now' : cur > 3 ? 'past' : 'later', 'Open, late window',
-              cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.late_until, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each receipts thread. Collect now pulls the latest work.',
+              cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (
                 <>
                   <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
@@ -255,7 +256,7 @@ function Overview(p: TabProps) {
                 </>
               ) : null)}
             {row(cur === 4 ? 'now' : cur > 4 ? 'past' : 'later', 'Marking',
-              cur < 4 ? `Opens after late work closes${a.late_until ? `, ${fmtDay(a.late_until, tz, year)}` : ''}.` : 'Marks and feedback go to students; your private notes do not.',
+              cur < 4 ? `Opens after late work closes${a.grading_cutoff_datetime ? `, ${fmtDay(a.grading_cutoff_datetime, tz, year)}` : ''}.` : 'Marks and feedback go to students; your private notes do not.',
               cur === 4 ? (
                 <>
                   <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>

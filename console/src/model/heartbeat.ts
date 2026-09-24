@@ -2,6 +2,7 @@
 // than stored in status.json (a field that moved every tick would commit every 15 minutes).
 
 import type { GitHubClient, WorkflowRun } from '../github/client';
+import { COURSE_REPO } from './names';
 
 export const SCHEDULER_WORKFLOW = 'scheduled-release.yml';
 /** A gap longer than this between executed ticks means automation is late (cadence.HEALTHY_GAP). */
@@ -25,7 +26,7 @@ export function heartbeatOf(runs: WorkflowRun[], now: number): Heartbeat {
 
 export async function loadHeartbeat(client: GitHubClient, courseOrg: string, now: number): Promise<Heartbeat | null> {
   try {
-    return heartbeatOf(await client.listWorkflowRuns(courseOrg, '.github', SCHEDULER_WORKFLOW, 30), now);
+    return heartbeatOf(await client.listWorkflowRuns(courseOrg, COURSE_REPO, SCHEDULER_WORKFLOW, 30), now);
   } catch {
     return null;
   }

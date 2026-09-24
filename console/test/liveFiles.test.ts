@@ -33,7 +33,7 @@ describe('the live demo files', () => {
     const out = courseFileAfter(COURSE, before, { ...before, about: { ...before.about, course_code: 'E1235' } }, meta);
     expect('text' in out && out.text).toContain('course_code: E1235');
     expect('warning' in out && out.warning).toBe(
-      'Saved without the console’s check, which does not know these yet: a course instructor card has start or end dates; the student site honours them. Also, it lists course-level teaching assistants; the engine ignores them, since assistants are set per cohort under Staff.',
+      'Saved without the console’s check, which does not know these yet: a course instructor card has start or end dates; the student site honours them. Also, it lists course-level teaching assistants; the engine ignores them, since assistants are set per semester under Instructors.',
     );
   });
 

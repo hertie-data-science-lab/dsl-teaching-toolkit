@@ -1,7 +1,7 @@
 // A student's own facts in one semester, read from GitHub with their own token: which
 // assignment repos they hold (their own `<slug>-<handle>`, their team's `<slug>-<team>`, the
 // shared drop box), their team (from the repo, or from their GitHub teams where the shape
-// makes no team repo) and its members, whether they audit, the Submission receipts thread in
+// makes no team repo) and its members, whether they audit, the Submission receipts issue in
 // each repo, and their gradebook `grades-<handle>/grades.yml`. Nothing here reads another student's data:
 // GitHub shows a student only the repos they were granted, and a team repo counts as theirs
 // only where they can push to it (a demo org's public repos are readable by anyone).
@@ -12,7 +12,7 @@ import type { GhIssue, GhRepo, GhTeam, GitHubClient } from '../github/client';
 import type { SemesterAssignment } from './student';
 import type { PatchLine } from './week';
 
-/** The receipts issue's labels, newest first: `dsl-receipts` since the rename, `dsl-feedback` on older issues (course.RECEIPTS_ISSUE_LABELS). */
+/** The receipts issue's labels, newest first: `dsl-receipts` since the rename, the old label on older issues (course.RECEIPTS_ISSUE_LABELS). */
 export const RECEIPTS_LABELS = ['dsl-receipts', 'dsl-feedback'];
 export const RECEIPTS_TITLE = 'Submission receipts';
 /** The semester's read-only role team (course.AUDITORS_TEAM). Secret, but a member may read their own membership. */
@@ -221,7 +221,7 @@ export async function readMine(client: GitHubClient, org: string, login: string,
   return { units, gradebook: grades ? parseGradebook(grades.text, updated) : null, auditor: audit === 'active' };
 }
 
-/** What a comment on the receipts thread is: a receipt, a note that the instructors updated files, the marks-returned note, or anyone's comment. */
+/** What a comment on the Submission receipts issue is: a receipt, a note that the instructors updated files, the marks-returned note, or anyone's comment. */
 export type ThreadKind = 'receipt' | 'patch' | 'marks' | 'comment';
 
 export interface ThreadEntry {
@@ -278,7 +278,7 @@ export async function readReceipts(client: GitHubClient, org: string, repo: stri
 export const repoUrl = (org: string, repo: string) => `https://github.com/${org}/${repo}`;
 export const gradebookUrl = (org: string, login: string) => `https://github.com/${org}/grades-${login}`;
 
-/** The Submission receipts threads of the student's private repos in the semester, by repo (a thread that cannot be read is null). */
+/** The Submission receipts issues of the student's private repos in the semester, by repo (one that cannot be read is null). */
 export async function readAllReceipts(client: GitHubClient, org: string, assignments: SemesterAssignment[], mine: Mine): Promise<Record<string, Receipts | null>> {
   const repos = assignments.filter((a) => a.privateRepo).map((a) => mine.units[a.slug]?.repo).filter((r): r is string => !!r);
   return Object.fromEntries(await Promise.all(repos.map(async (r) => [r, await readReceipts(client, org, r).catch(() => null)] as const)));

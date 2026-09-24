@@ -1,22 +1,24 @@
 // Which course and semester orgs the signed-in person can see, and their role in each
 // (decision 0011 rule 2). The orgs come from whatever listings the token kind answers,
 // merged; each is classified by the topics on its `.github` repo: `dsl-course-hub` is a
-// course (its semesters come from its registry, `.github/cohort-courses-pages.yml`),
-// `dsl-cohort` / `dsl-semester` is a semester. Push on an org's `.github` makes the person an
-// instructor there; membership without it makes them a student of a semester org.
+// course (its semesters come from its registry, `.github/semesters.yml`), `dsl-semester` is
+// a semester; an org still on the retired topic is not listed (model/migration). Push on an
+// org's `.github` makes the person an instructor there; membership without it makes them a
+// student of a semester org.
 
 import { parse } from 'yaml';
 import type { GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
+import { SEMESTER_TOPIC } from './migration';
+import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE } from './names';
 
 export const COURSE_HUB_TOPIC = 'dsl-course-hub';
-export const SEMESTER_TOPICS = ['dsl-cohort', 'dsl-semester'];
-export const REGISTRY_PATH = 'cohort-courses-pages.yml';
+export const REGISTRY_PATH = REGISTRY_FILE;
 export const COURSE_META_PATH = 'dsl-course.yml';
 
 export interface CohortRef {
   org: string;
-  term: string; // the tag, e.g. f2026
+  term: string; // the semester key, e.g. f2026
   termLabel: string; // "Fall 2026"
 }
 
@@ -43,7 +45,7 @@ export function termOf(org: string): { term: string; label: string } {
   return { term: `${m[1]}${m[2]}`, label: `${SEASON[m[1]]} ${m[2]}` };
 }
 
-/** The registry's cohort list: `{cohorts: [...]}` or a bare list; anything else is empty. */
+/** The registry's semester list: `{semesters: [...]}` or a bare list; anything else is empty. */
 export function parseRegistry(text: string | null | undefined): string[] {
   if (!text) return [];
   let data: unknown;
@@ -52,17 +54,17 @@ export function parseRegistry(text: string | null | undefined): string[] {
   } catch {
     return [];
   }
-  const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { cohorts?: unknown }).cohorts : data;
+  const list = data && typeof data === 'object' && !Array.isArray(data) ? (data as { semesters?: unknown }).semesters : data;
   return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string' && c.length > 0) : [];
 }
 
 /** The course `org` is, reading its `.github` repo unless the caller already has it; null when it is not a course. */
 export async function discoverCourse(client: GitHubClient, org: string, known?: GhRepo): Promise<Course | null> {
-  const repo = known ?? (await client.getRepo(org, '.github'));
+  const repo = known ?? (await client.getRepo(org, COURSE_REPO));
   if (!repo) return null;
   const topics = await topicsOf(client, org, repo);
   if (!topics.includes(COURSE_HUB_TOPIC)) return null;
-  const [registry, meta] = await Promise.all([client.getContents(org, '.github', REGISTRY_PATH), readMeta(client, org)]);
+  const [registry, meta] = await Promise.all([client.getContents(org, COURSE_REPO, REGISTRY_PATH), readMeta(client, org)]);
   const people = (meta?.people ?? {}) as { course_admins?: { github_handle?: string }[] };
   const cohorts = parseRegistry(registry?.text).map((c) => {
     const t = termOf(c);
@@ -81,11 +83,19 @@ export async function discoverCourse(client: GitHubClient, org: string, known?: 
   };
 }
 
-const topicsOf = async (client: GitHubClient, org: string, repo: GhRepo) => repo.topics ?? (await client.getRepoTopics(org, '.github'));
+const topicsOf = async (client: GitHubClient, org: string, repo: GhRepo) => repo.topics ?? (await client.getRepoTopics(org, COURSE_REPO));
 
-/** An org's `.github/dsl-course.yml` as parsed; null when absent or unreadable. */
-async function readMeta(client: GitHubClient, org: string): Promise<Record<string, unknown> | null> {
-  const f = await client.getContents(org, '.github', COURSE_META_PATH);
+/** A course org's `.github/dsl-course.yml` as parsed; null when absent or unreadable. */
+const readMeta = (client: GitHubClient, org: string) => readYamlMap(client, org, COURSE_REPO, COURSE_META_PATH);
+
+/**
+ * A semester's pointer to its course (`.system/dsl-course.yml` in its config repo); null when
+ * absent or unreadable. The config repo is private, so a student reads null here.
+ */
+const readPointer = (client: GitHubClient, org: string) => readYamlMap(client, org, CONFIG_REPO, POINTER_PATH);
+
+async function readYamlMap(client: GitHubClient, org: string, repo: string, path: string): Promise<Record<string, unknown> | null> {
+  const f = await client.getContents(org, repo, path);
   try {
     const m = f ? parse(f.text) : null;
     return m && typeof m === 'object' ? (m as Record<string, unknown>) : null;
@@ -104,7 +114,7 @@ export type Mode = 'instructor' | 'student';
 
 /** A semester org the person is a member of. */
 export interface Semester extends CohortRef {
-  /** The course org its `.github/dsl-course.yml` points back to; '' when it names none. */
+  /** The course org its pointer (`.system/dsl-course.yml` in the config repo) names; '' when it names none or cannot be read. */
   courseOrg: string;
   courseName: string;
   /** Archiving a semester archives its `.github` last but one, so an archived `.github` means an archived semester. */
@@ -194,15 +204,15 @@ export async function memberOrgs(client: GitHubClient, kind: TokenKind, login: s
 type Found = { course: Course } | { semester: Omit<Semester, 'courseName'> } | null;
 
 async function classify(client: GitHubClient, org: string): Promise<Found> {
-  const repo = await client.getRepo(org, '.github');
+  const repo = await client.getRepo(org, COURSE_REPO);
   if (!repo) return null;
   const topics = await topicsOf(client, org, repo);
   if (topics.includes(COURSE_HUB_TOPIC)) {
     const course = await discoverCourse(client, org, repo);
     return course ? { course } : null;
   }
-  if (!topics.some((t) => SEMESTER_TOPICS.includes(t))) return null;
-  const meta = await readMeta(client, org);
+  if (!topics.includes(SEMESTER_TOPIC)) return null;
+  const meta = await readPointer(client, org);
   const t = termOf(org);
   return {
     semester: {

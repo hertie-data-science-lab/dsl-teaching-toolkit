@@ -17,7 +17,7 @@ export interface Fix {
 
 export interface Problem {
   id: string;
-  scope: 'course' | 'cohort';
+  scope: 'course' | 'semester';
   stage: string;
   text: string;
   stops: string;
@@ -32,13 +32,13 @@ export interface CourseStatus {
   ready: boolean;
   materials: { repo: string; state: string }[];
   templates: { repo: string; slug: string; state: string }[];
-  cohorts: string[];
+  semesters: string[];
 }
 
-export interface CohortStatus {
+export interface SemesterStatus {
   org: string;
-  term: string;
-  term_label: string;
+  key: string; // f2026
+  label: string; // Fall 2026
   timezone: string;
   week: number;
   weeks: number;
@@ -49,7 +49,7 @@ export interface CohortStatus {
 
 export interface WeekItem {
   when: string;
-  type: string; // release | handout | due | event ...
+  kind: string; // release | handout | due | event ...
   ref: string;
   title: string;
   state: string;
@@ -58,7 +58,7 @@ export interface WeekItem {
 export interface Release {
   id: string;
   when: string;
-  type: string | null; // lecture | lab | readings; null when the entry has no deploy block
+  kind: string | null; // lecture | lab | readings; null when the entry has no deploy block
   title: string;
   state: ReleaseState;
   source: { repo: string; path: string } | null;
@@ -75,7 +75,7 @@ export interface Assignment {
   state: AssignmentState;
   handout: string | null;
   due: string | null;
-  late_until: string | null;
+  grading_cutoff_datetime: string | null;
   solution_shown: string | null;
   units: number;
   submissions: number;
@@ -97,7 +97,7 @@ export interface Status {
   schema: 'dsl.status/1';
   inputs: Record<string, string>;
   course?: CourseStatus;
-  cohort?: CohortStatus;
+  semester?: SemesterStatus;
   problems?: Problem[];
   this_week?: WeekItem[];
   releases?: Release[];
@@ -109,7 +109,7 @@ export interface Status {
   operations?: Operation[];
 }
 
-/** A private outcome file, `classroom-config/.dsl/outcomes/<op>.json` (contracts section 2). */
+/** A private outcome file, `<config repo>/.system/outcomes/<op>.json` (contracts section 2). */
 export interface Outcome {
   schema: 'dsl.outcome/1';
   op: string;

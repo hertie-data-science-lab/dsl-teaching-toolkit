@@ -11,10 +11,10 @@ import type { CohortProps, ReadyProps } from './types';
 function Archive(p: ReadyProps) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
-  const date = status.cohort?.archive_date ?? null;
+  const date = status.semester?.archive_date ?? null;
   const when = date ? fmtDay(date, tz, year) : null;
   const passed = !!date && date.slice(0, 10) <= today;
-  const archived = status.cohort?.live === false;
+  const archived = status.semester?.live === false;
   const t = p.cohort.termLabel;
   return (
     <>
@@ -31,7 +31,7 @@ function Archive(p: ReadyProps) {
           <h2>What happens</h2>
           <ul class="checks">
             <li><span class="ck ok"><Check /></span><span>Every repo in {p.cohort.org} becomes read-only: student repos, marks repos, the student site, the join form, the settings repo.</span></li>
-            <li><span class="ck ok"><Check /></span><span>Students and staff keep read access.</span></li>
+            <li><span class="ck ok"><Check /></span><span>Students and instructors keep read access.</span></li>
             <li><span class="ck ok"><Check /></span><span>Nothing is deleted. The student site stays online.</span></li>
           </ul>
         </section>

@@ -5,9 +5,10 @@ import { signal, type Signal } from '@preact/signals';
 import schema from '../../schemas/status.schema.json';
 import type { GitHubClient, Tree } from '../github/client';
 import type { Status } from './types';
+import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './names';
 import { validator } from './validate';
 
-export const STATUS_PATH = '.dsl/status.json';
+export { STATUS_PATH };
 
 export type Loaded =
   | { kind: 'loading' }
@@ -27,7 +28,7 @@ export function validateStatus(data: unknown): string[] {
  * The inputs whose sha no longer matches the tree: a file edited, added under a tracked name
  * or removed since the status was computed. `inputs` keys are paths in the repo that holds the
  * status file; a key under `course/` names a file in the course's `.github` and is compared
- * only when `courseTree` is given (a cohort read makes one tree read, of its own repo).
+ * only when `courseTree` is given (a semester read makes one tree read, of its own repo).
  */
 export function staleInputs(inputs: Record<string, string>, tree: Tree, courseTree?: Tree): string[] {
   const shaOf = (t: Tree, path: string) => t.tree.find((e) => e.path === path)?.sha;
@@ -84,14 +85,14 @@ export class StatusStore {
     return s;
   }
 
-  /** The cohort's private status, in `classroom-config`. */
+  /** The semester's private status, in its config repo. */
   cohort(org: string): Signal<Loaded> {
-    return this.get(org, 'classroom-config');
+    return this.get(org, CONFIG_REPO);
   }
 
   /** The course's public status, in `.github` (counts only). */
   course(org: string): Signal<Loaded> {
-    return this.get(org, '.github');
+    return this.get(org, COURSE_REPO);
   }
 
   forget(): void {

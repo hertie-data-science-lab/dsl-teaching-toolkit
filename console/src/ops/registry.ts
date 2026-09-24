@@ -6,7 +6,7 @@ import ops from '../../schemas/ops.json';
 export interface OpSpec {
   name: string;
   runs_as: 'dispatch' | 'edit';
-  scope: 'course' | 'cohort';
+  scope: 'course' | 'semester';
   required_team: string;
   args_schema: Record<string, unknown> & { properties?: Record<string, Record<string, unknown>>; required?: string[] };
   help: string;
@@ -43,7 +43,7 @@ export const PREVIEW_ONLY = new Set(['cohort.preview_automation']);
 export type OpMode = 'gated' | 'preview' | 'direct' | 'previewOnly';
 
 /**
- * How the panel offers an op. A gated op whose engine has no dry run cannot be previewed
+ * How the panel offers an op. A gated op whose engine has no preview cannot be previewed
  * (the engine refuses `preview: true` with NO_PREVIEW), so it runs direct and asks for an
  * explicit confirmation instead.
  */

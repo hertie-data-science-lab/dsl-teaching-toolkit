@@ -1,9 +1,11 @@
-// Hash routes are the mockup's tokens (`#cohort`, `#schedule-s5`, `#template-assignment-3`);
+// Hash routes are the mockup's tokens (`#semester`, `#schedule-s5`, `#template-assignment-3`);
 // a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. An assignment's tabs
 // ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
-// `#marks-<slug>` screens parse to those tabs, so old links still land. Which course or cohort
-// the page is about rides in the query string (`?cohort=<org>` or `?course=<org>`), so a link
-// from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
+// `#marks-<slug>` screens parse to those tabs, and the hashes decision 0012 renamed
+// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`) to their new names, so old links
+// still land. Which course or semester the page is about rides in the query string
+// (`?cohort=<org>` or `?course=<org>`: `?semester=` is taken by the student screens), so a
+// link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
 // of a semester the person is not a member of yet.
 
@@ -21,9 +23,18 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 
 const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
 
+/** Hashes decision 0012 renamed, old -> new. */
+const RENAMED: [RegExp, string][] = [
+  [/^cohort$/, 'semester'],
+  [/^staff$/, 'instructors'],
+  [/^new-cohort(-\d)?$/, 'new-semester$1'],
+  [/^schedule-term$/, 'schedule-semester'],
+];
+
 export function parseHash(hash: string): Route {
-  const r = decodeURIComponent(hash.replace(/^#/, ''));
+  let r = decodeURIComponent(hash.replace(/^#/, ''));
   if (!r) return { screen: '' };
+  for (const [re, to] of RENAMED) if (re.test(r)) r = r.replace(re, to);
   if (r === 'teams') return { screen: 'assignments' };
   for (const s of ENTRY_SCREENS) {
     if (!r.startsWith(`${s}-`)) continue;
@@ -43,7 +54,7 @@ export function hashOf(r: Route): string {
   return `#${r.screen}${r.entry ? `-${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}`;
 }
 
-/** The hash to write instead of `hash` (an old Teams or Marks link), or null when it is already canonical. */
+/** The hash to write instead of `hash` (an old Teams, Marks or renamed link), or null when it is already canonical. */
 export function movedHash(hash: string): string | null {
   if (!hash || hash === '#') return null;
   const canonical = hashOf(parseHash(hash));
@@ -65,9 +76,9 @@ export interface Selection {
   course?: string;
   /** A semester whose student screens to show. */
   semester?: string;
-  /** A semester to join with an enrolment code (its `welcome` repo is public). */
+  /** A semester to join with an enrolment code (its join repo is public). */
   join?: string;
-  /** A wizard step to come back to from an editor it opened (`new-cohort-3`). */
+  /** A wizard step to come back to from an editor it opened (`new-semester-3`). */
   wizard?: string;
   /** A template to prefill a new schedule entry with (New assignment's last step). */
   template?: string;
@@ -86,10 +97,10 @@ export function parseSearch(search: string): Selection {
   };
 }
 
-/** Screens that need a cohort, and the nav key each lights up. */
+/** Screens that need a semester, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
-  cohort: 'week', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
-  students: 'students', roster: 'students', marks: 'marks', staff: 'staff', site: 'site', operations: 'operations', archive: 'archive',
+  semester: 'week', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
+  students: 'students', roster: 'students', marks: 'marks', instructors: 'instructors', site: 'site', operations: 'operations', archive: 'archive',
 };
 /** Screens about the course. */
 export const COURSE_SCREENS: Record<string, string> = {
@@ -99,24 +110,24 @@ export const COURSE_SCREENS: Record<string, string> = {
 /** A GitHub organisation name, as `?join=` must spell one. */
 export const ORG_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
-const WIZARD_RE = /^new-(course|cohort|assignment)-[1-4]$/;
+const WIZARD_RE = /^new-(course|semester|assignment)-[1-4]$/;
 
 /** A wizard route: `new-assignment-2` is New assignment at step 2; `new-materials` is one page. */
 export function wizardOf(screen: string): { name: string; step?: number } | null {
-  const m = /^(new-(?:course|cohort|assignment))(?:-(\d))?$/.exec(screen);
+  const m = /^(new-(?:course|semester|assignment))(?:-(\d))?$/.exec(screen);
   if (m) return { name: m[1], step: m[2] ? Number(m[2]) : undefined };
   return screen === 'new-materials' ? { name: screen } : null;
 }
 
 /** The nav key each wizard lights up. */
-export const WIZARD_NAV: Record<string, string> = { 'new-course': 'home', 'new-cohort': 'details', 'new-assignment': 'templates', 'new-materials': 'materials' };
+export const WIZARD_NAV: Record<string, string> = { 'new-course': 'home', 'new-semester': 'details', 'new-assignment': 'templates', 'new-materials': 'materials' };
 
 export interface Context {
   course?: Course;
   cohort?: CohortRef;
 }
 
-/** The course and cohort a URL is about, falling back to the newest cohort of the first writable course. */
+/** The course and cohort a URL is about, falling back to the newest semester of the first writable course. */
 export function resolveContext(courses: Course[], sel: Selection, route: Route): Context {
   if (sel.cohort) {
     for (const c of courses) {
@@ -131,10 +142,10 @@ export function resolveContext(courses: Course[], sel: Selection, route: Route):
   return first ? { course: first, cohort: first.cohorts[0] } : {};
 }
 
-/** Where sign-in lands: This week when there is exactly one writable course with a cohort, else Home. */
+/** Where sign-in lands: This week when there is exactly one writable course with a semester, else Home. */
 export function landing(courses: Course[]): string {
   const writable = courses.filter((c) => c.write && c.cohorts.length);
-  return writable.length === 1 ? 'cohort' : 'home';
+  return writable.length === 1 ? 'semester' : 'home';
 }
 
 /** The student screens, in nav order, with their labels; `week` is where a semester opens. */

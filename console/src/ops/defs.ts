@@ -1,5 +1,5 @@
 // Every dispatch operation as the panel offers it, with the mockup's copy. A screen builds
-// the def for the thing on it (a release, an assignment, the cohort) and hands it to the
+// the def for the thing on it (a release, an assignment, the semester) and hands it to the
 // panel; the op name and args follow the registry (schemas/ops.json).
 
 import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ALWAYS, publishWebsite as publishTiers, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
@@ -8,7 +8,7 @@ import type { OpDef } from './session';
 export interface Scope {
   courseOrg: string;
   cohortOrg?: string;
-  /** The eyebrow's second half: the term ("Fall 2026") or the course name. */
+  /** The eyebrow's second half: the semester ("Fall 2026") or the course name. */
   where: string;
 }
 
@@ -39,8 +39,8 @@ export function scheduledPreview(s: Scope): OpDef {
 
 export function keepFuture(s: Scope): OpDef {
   return {
-    ...base(s, 'release.propagate_back', 'cohort'), name: 'Keep cohort edits for future terms', title: `Every edit made in ${s.where}`, where: `${s.where} to the course`,
-    intro: 'Proposes the edits made to the cohort’s copies back to the course materials, as changes for you to accept on GitHub.',
+    ...base(s, 'release.propagate_back', 'cohort'), name: 'Keep for future semesters', title: `Every edit made in ${s.where}`, where: `${s.where} to the course`,
+    intro: 'Proposes the edits made to the semester’s copies back to the course materials, as changes for you to accept on GitHub.',
     verb: 'Propose the changes', running: 'Proposing changes', cancel: 'Stop', args: {},
   };
 }
@@ -110,7 +110,7 @@ export function handout(s: Scope, a: AsgRef): OpDef {
 export function updateCopies(s: Scope, a: AsgRef, files: string[]): OpDef {
   return {
     ...base(s, 'assignment.update_copies', a.slug), name: 'Update every copy', title: a.title, where: `${a.units} student repos`,
-    intro: 'Pushes an assignment template file to every student copy and posts a note on each receipts thread.',
+    intro: 'Pushes an assignment template file to every student copy and posts a note on each Submission receipts issue.',
     verb: `Update ${a.units} copies`, running: 'Updating every copy', cancel: 'Stop; copies already updated stay updated',
     args: { course_source_repo: a.template, slug: a.slug }, options: copiesTiers(files),
   };
@@ -146,16 +146,16 @@ export function sendCodes(s: Scope, waiting: number): OpDef {
 export function updateSite(s: Scope): OpDef {
   return {
     ...base(s, 'site.update', 'site'), name: 'Update site', title: 'Student site', where: s.where,
-    intro: 'Rebuilds the student site from the schedule, staff and materials. Automation does this after every change; do it by hand after a failure.',
+    intro: 'Rebuilds the student site from the schedule, instructors and materials. Automation does this after every change; do it by hand after a failure.',
     verb: 'Update site', running: 'Updating the student site', cancel: 'Stop; the site keeps its current version', args: {},
   };
 }
 
 export function checkAccess(s: Scope): OpDef {
   return {
-    ...base(s, 'access.check', 'access'), name: 'Check staff access', title: 'Staff access', where: s.where,
-    intro: 'Makes GitHub match the staff list. It never removes access.',
-    verb: 'Check staff access', running: 'Checking staff access', cancel: 'Stop', args: {},
+    ...base(s, 'access.check', 'access'), name: 'Check instructor access', title: 'Instructor access', where: s.where,
+    intro: 'Makes GitHub match the instructors list. It never removes access.',
+    verb: 'Check instructor access', running: 'Checking instructor access', cancel: 'Stop', args: {},
   };
 }
 
@@ -199,7 +199,7 @@ export function derive(s: Scope, slug: string, repo: string, title: string): OpD
 export function generateSyllabus(s: Scope, repo: string): OpDef {
   return {
     ...base(s, 'assignment.generate_syllabus', repo), name: 'Generate the session list', title: repo, where: `From ${s.where}’s schedule`,
-    intro: 'Writes SYLLABUS.sessions.md: one line per session from the cohort’s schedule.',
+    intro: 'Writes SYLLABUS.sessions.md: one line per session from the semester’s schedule.',
     verb: 'Write the session list', running: 'Writing the session list', cancel: 'Stop', args: { course_source_repo: repo },
   };
 }
@@ -209,7 +209,7 @@ export function generateSyllabus(s: Scope, repo: string): OpDef {
 export function bootstrapCohort(s: Scope & { cohortOrg: string }, courseName: string): OpDef {
   return {
     ...base(s, 'cohort.bootstrap', s.cohortOrg), name: 'Set up', title: `${courseName}, ${s.where}`, where: s.cohortOrg,
-    intro: 'Makes the student site, the join form and the cohort’s settings in the new org. It takes about a minute.',
+    intro: 'Makes the student site, the join form and the semester’s settings in the new org. It takes about a minute.',
     verb: `Set up ${s.where}`, running: `Setting up ${s.where}`, cancel: 'Stop; what is already made stays and a second run finishes it', args: {},
   };
 }
@@ -225,7 +225,7 @@ export function createAssignment(s: Scope, repo: string, title: string, args: Re
 export function createMaterials(s: Scope, repo: string, args: Record<string, unknown>): OpDef {
   return {
     ...base(s, 'materials.create', repo), name: 'New materials', title: repo, where: s.where,
-    intro: `Creates ${repo}, private to staff until releases copy it to a cohort.`,
+    intro: `Creates ${repo}, private to instructors until releases copy it to a semester.`,
     verb: 'Create materials repo', running: `Creating ${repo}`, cancel: 'Stop', args,
   };
 }

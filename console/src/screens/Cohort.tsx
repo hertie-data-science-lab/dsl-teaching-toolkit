@@ -1,4 +1,4 @@
-// S4 Cohort overview ("This week").
+// S4 Semester overview ("This week").
 
 import { useState } from 'preact/hooks';
 import {
@@ -12,9 +12,10 @@ import type { Release } from '../model/types';
 import { Crumbs, Help, Legend, OpsList, ProblemCards, Probs, Rail, fixHref } from '../ui/bits';
 import { CheckNow, MoreMenu, WithStatus, cohortName, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
+import { CONFIG_REPO } from '../model/names';
 
 export function readSchedule(p: CohortProps): Schedule | null {
-  const f = p.files.file(p.cohort.org, 'classroom-config', 'schedule.yml');
+  const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
   return f.kind === 'ready' ? parseSchedule(f.text) : null;
 }
 
@@ -29,7 +30,7 @@ export function asgSummary(a: Assignment, tz: string, year: number): string {
     case 'open':
       return `Due ${fmtWhen(a.due, tz, year)}; ${a.submissions} of ${a.units} submitted`;
     case 'late_window':
-      return `Late work until ${fmtDay(a.late_until, tz, year)}; ${a.submissions} of ${a.units} submitted`;
+      return `Late work until ${fmtDay(a.grading_cutoff_datetime, tz, year)}; ${a.submissions} of ${a.units} submitted`;
     case 'marking':
       return `${a.marks.filled} of ${a.marks.total} marked`;
     case 'returned':
@@ -64,14 +65,14 @@ export function termStart(status: Status, sched: Schedule | null, now: number): 
   if (sched?.start) return sched.start;
   const tz = tzOf(status), today = todayOf(now, tz);
   const monday = addDays(today, -((zoned(today).dow + 6) % 7));
-  return addDays(monday, -7 * ((status.cohort?.week ?? 1) - 1));
+  return addDays(monday, -7 * ((status.semester?.week ?? 1) - 1));
 }
 
 const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
 const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'term date' };
 
 export function TermStrip({ status, rows, start, now }: { status: Status; rows: Row[]; start: string; now: number }) {
-  const tz = tzOf(status), weeks = status.cohort?.weeks ?? 15, today = todayOf(now, tz);
+  const tz = tzOf(status), weeks = status.semester?.weeks ?? 15, today = todayOf(now, tz);
   const thisWeek = Math.floor(daysBetween(start, today) / 7) + 1;
   const cells = [];
   for (let w = 1; w <= weeks; w++) {
@@ -98,7 +99,7 @@ export function TermStrip({ status, rows, start, now }: { status: Status; rows: 
       <div class="term-strip" style={weeks !== 15 ? `grid-template-columns:repeat(${weeks},minmax(0,1fr))` : undefined}>{cells}</div>
       <div class="strip-legend">
         <span><i class="m lec" />Lecture</span><span><i class="m lab" />Lab</span><span><i class="m asg" />Assignment</span>
-        <span><i class="m exam" />Exam</span><span><i class="m evt" />Event</span><span><i class="m term" />Term date</span>
+        <span><i class="m exam" />Exam</span><span><i class="m evt" />Event</span><span><i class="m term" />Semester date</span>
         <span style="color:var(--bad-ink);font-weight:600">! A release will be skipped</span>
       </div>
     </div>
@@ -122,11 +123,11 @@ function WeekItems({ status, p }: { status: Status; p: CohortProps }) {
       {items.map((it) => {
         const rel = releases.find((r) => r.id === it.ref);
         const asg = (status.assignments ?? []).find((a) => a.slug === it.ref);
-        let chip = it.type, cls = TYPE_CLASS[it.type] ?? 'evt', detail = '', buttons = null;
-        if (it.type === 'release') {
+        let chip = it.kind, cls = TYPE_CLASS[it.kind] ?? 'evt', detail = '', buttons = null;
+        if (it.kind === 'release') {
           const ref = rel ? releaseRef(rel, releases, tz, zoned(it.when, tz).y) : null;
           chip = 'Release';
-          cls = TYPE_CLASS[rel ? rel.type ?? 'release' : 'lecture'];
+          cls = TYPE_CLASS[rel ? rel.kind ?? 'release' : 'lecture'];
           const ident = rel ? releaseIdent(rel, releases) : it.title.split(':')[0];
           detail = rel && !rel.source ? `${NOTHING_TO_RELEASE}.` : rel?.state === 'will_be_skipped' ? 'Will be skipped: its folder was not found.' : rel?.state === 'released' ? 'Released.' : 'Goes to students at its time; the site row goes live.';
           buttons = (
@@ -135,10 +136,10 @@ function WeekItems({ status, p }: { status: Status; p: CohortProps }) {
               <a class="textlink" href={`#release-${it.ref}`}>Details</a>
             </>
           );
-        } else if (it.type === 'due' || it.type === 'handout') {
-          chip = it.type === 'due' ? 'Due' : 'Hand out';
+        } else if (it.kind === 'due' || it.kind === 'handout') {
+          chip = it.kind === 'due' ? 'Due' : 'Hand out';
           cls = 'asg';
-          detail = it.type === 'due' && asg ? `${asg.submissions} of ${asg.units} submitted so far.` : 'Hands out at its time.';
+          detail = it.kind === 'due' && asg ? `${asg.submissions} of ${asg.units} submitted so far.` : 'Hands out at its time.';
           buttons = <a class="btn small quiet" href={`#assignment-${it.ref}`}>Open assignment</a>;
         }
         return (
@@ -173,16 +174,16 @@ export function StudentCounts({ status }: { status: Status }) {
 
 export function AutomationHead({ heartbeat, now }: { heartbeat: CohortProps['heartbeat']; now: number }) {
   if (heartbeat === undefined)
-    return <div class="auto-head"><span class="dot idle" aria-hidden="true" /><div><b>Reading automation</b><div class="sub">Automation checks this cohort every 15 minutes.</div></div></div>;
+    return <div class="auto-head"><span class="dot idle" aria-hidden="true" /><div><b>Reading automation</b><div class="sub">Automation checks this semester every 15 minutes.</div></div></div>;
   if (heartbeat === null)
-    return <div class="auto-head"><span class="dot idle" aria-hidden="true" /><div><b>Automation's runs cannot be read</b><div class="sub">Automation checks this cohort every 15 minutes.</div></div></div>;
+    return <div class="auto-head"><span class="dot idle" aria-hidden="true" /><div><b>Automation's runs cannot be read</b><div class="sub">Automation checks this semester every 15 minutes.</div></div></div>;
   const late = heartbeat.late;
   return (
     <div class="auto-head">
       <span class={`dot ${late ? 'bad' : 'ok'}`} aria-hidden="true" />
       <div>
         <b>{heartbeat.lastTick ? (late ? `No check for ${ago(heartbeat.lastTick, now).replace(' ago', '')}` : `Checked ${ago(heartbeat.lastTick, now)}`) : 'No check yet'}</b>
-        <div class="sub">Automation checks this cohort every 15 minutes.</div>
+        <div class="sub">Automation checks this semester every 15 minutes.</div>
       </div>
     </div>
   );
@@ -193,12 +194,12 @@ function Overview(p: ReadyProps) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
   const problems = status.problems ?? [];
-  const stages = status.cohort?.stages ?? {};
+  const stages = status.semester?.stages ?? {};
   const amber = Object.values(stages).filter((s) => s === 'problem').length;
   const sched = readSchedule(p);
   const rows = scheduleRows(status, sched, now, tz);
   const start = termStart(status, sched, now);
-  const end = sched?.end ?? addDays(start, 7 * (status.cohort?.weeks ?? 15) - 3);
+  const end = sched?.end ?? addDays(start, 7 * (status.semester?.weeks ?? 15) - 3);
   const sunday = addDays(today, (7 - zoned(today).dow) % 7);
   const late = (status.releases ?? []).filter((r) => r.state === 'late');
   const s = status.students;
@@ -215,9 +216,9 @@ function Overview(p: ReadyProps) {
         <div>
           <h1>{cohortName(p)}</h1>
           <p class="lede">
-            {status.cohort ? <span>Week {status.cohort.week} of {status.cohort.weeks}.</span> : null}
+            {status.semester ? <span>Week {status.semester.week} of {status.semester.weeks}.</span> : null}
             {amber ? <span class="amber">Setup done, but {amber} {amber > 1 ? 'stages have a problem' : 'stage has a problem'}</span> : <span>Setup complete</span>}
-            {status.cohort?.archive_date ? <span>; archive scheduled {fmtDay(status.cohort.archive_date, tz, year)}.</span> : null}
+            {status.semester?.archive_date ? <span>; archive scheduled {fmtDay(status.semester.archive_date, tz, year)}.</span> : null}
             <button class="textlink" type="button" aria-expanded={showSetup} onClick={() => setShowSetup(!showSetup)}>{showSetup ? 'Hide setup' : 'Show setup'}</button>
           </p>
         </div>
@@ -232,13 +233,13 @@ function Overview(p: ReadyProps) {
           <section class="panel section">
             <div class="section-head"><h2>Setup</h2><Legend /></div>
             <Rail scope="cohort" stages={stages} problems={problems} acts={{
-              K3: <a class="btn small quiet" href="#staff">Staff</a>, K4: fixOf('K4'), K5: fixOf('K5'),
+              K3: <a class="btn small quiet" href="#instructors">Instructors</a>, K4: fixOf('K4'), K5: fixOf('K5'),
               K6: <a class="btn small quiet" href="#site">Site</a>, K7: <a class="btn small quiet" href="#archive">Archive</a>,
             }} />
           </section>
         ) : null}
         <section class="panel section">
-          <div class="section-head"><h2>Term</h2><span class="meta">{fmtDay(start, tz, year)} to {fmtDay(end, tz, year)}, {tz}</span></div>
+          <div class="section-head"><h2>Semester</h2><span class="meta">{fmtDay(start, tz, year)} to {fmtDay(end, tz, year)}, {tz}</span></div>
           <TermStrip status={status} rows={rows} start={start} now={now} />
         </section>
         <section class="section">
@@ -270,7 +271,7 @@ function Overview(p: ReadyProps) {
           <section class="panel section">
             <div class="section-head">
               <h2>Automation</h2>
-              <span class="actions"><OpOpen def={checkAccess(cohortScope(p))} cls="btn small quiet" label="Check staff access" /><a class="btn small quiet" href="#operations">All operations</a></span>
+              <span class="actions"><OpOpen def={checkAccess(cohortScope(p))} cls="btn small quiet" label="Check instructor access" /><a class="btn small quiet" href="#operations">All operations</a></span>
             </div>
             <AutomationHead heartbeat={p.heartbeat} now={now} />
             <OpsList list={ops.slice(0, 3)} now={now} runRepo={`${p.course.org}/.github`} />

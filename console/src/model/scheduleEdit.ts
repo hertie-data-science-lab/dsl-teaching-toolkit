@@ -49,7 +49,7 @@ export interface AssignmentDraft {
   details: string;
   show: boolean;
   tbc: boolean;
-  cohortRepo: string;
+  semesterRepo: string;
 }
 
 export interface EventDraft {
@@ -64,8 +64,8 @@ export interface EventDraft {
   tbc: boolean;
 }
 
-export interface TermDraft {
-  kind: 'term';
+export interface SemesterDraft {
+  kind: 'semester';
   start: string;
   end: string;
   tz: string;
@@ -79,13 +79,13 @@ export interface ArchiveDraft {
   details: string;
   show: boolean;
   tbc: boolean;
-  /** Days after the term ends that the default archive date falls; '' while the box is empty. */
+  /** Days after the semester ends that the default archive date falls; '' while the box is empty. */
   graceDays: number | '';
 }
 
 export const ARCHIVE_GRACE_DAYS = 60;
 
-export type Draft = ReleaseDraft | AssignmentDraft | EventDraft | TermDraft | ArchiveDraft;
+export type Draft = ReleaseDraft | AssignmentDraft | EventDraft | SemesterDraft | ArchiveDraft;
 
 type Raw = Record<string, unknown>;
 
@@ -124,9 +124,9 @@ export function blockOf(doc: Raw, id: string): Block | null {
   return null;
 }
 
-/** The sheet's key for an entry: "term", "archive", or the id (ids are unique across blocks in practice). */
+/** The sheet's key for an entry: "semester", "archive", or the id (ids are unique across blocks in practice). */
 export function readDraft(doc: Raw, key: string): Draft | null {
-  if (key === 'term') return { kind: 'term', start: s(doc.semester_start), end: s(doc.semester_end), tz: s(doc.timezone) };
+  if (key === 'semester') return { kind: 'semester', start: s(doc.semester_start), end: s(doc.semester_end), tz: s(doc.timezone) };
   if (key === 'archive') {
     const a = doc.archive === undefined ? null : obj(doc.archive);
     return { kind: 'archive', on: a !== null, date: splitWhen(a?.event_datetime)[0], title: s(a?.title), details: s(a?.details), show: a?.show_on_site !== false, tbc: a?.tbc === true, graceDays: typeof a?.grace_days === 'number' ? a.grace_days : ARCHIVE_GRACE_DAYS };
@@ -140,9 +140,9 @@ export function readDraft(doc: Raw, key: string): Draft | null {
     const deploys = (Array.isArray(e.deploy) ? e.deploy : []).map((d: unknown) => {
       const x = obj(d);
       const [atDate, atTime] = splitWhen(x.deploy_datetime);
-      return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.cohort_dest_repo), path: s(x.cohort_dest_path), diff: !!x.deploy_datetime, atDate, atTime };
+      return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.semester_dest_repo), path: s(x.semester_dest_path), diff: !!x.deploy_datetime, atDate, atTime };
     });
-    return { kind: 'releases', ...common, type: s(e.type), date, time, deploys };
+    return { kind: 'releases', ...common, type: s(e.kind), date, time, deploys };
   }
   if (b === 'assignments') {
     const [handoutDate, handoutTime] = splitWhen(e.handout_datetime);
@@ -151,11 +151,11 @@ export function readDraft(doc: Raw, key: string): Draft | null {
     const [solutionDate, solutionTime] = splitWhen(e.solution_datetime);
     return {
       kind: 'assignments', ...common, template: s(e.course_source_repo), manual: !e.handout_datetime, handoutDate, handoutTime, dueDate, dueTime, lateDate, lateTime,
-      solutionOn: !!e.solution_datetime, solutionDate, solutionTime, cohortRepo: s(e.cohort_dest_repo),
+      solutionOn: !!e.solution_datetime, solutionDate, solutionTime, semesterRepo: s(e.semester_dest_repo),
     };
   }
   const [date, time] = splitWhen(e.event_datetime);
-  return { kind: 'events', ...common, type: s(e.type) || 'special_event', date, time, tbc: common.tbc || s(e.event_datetime).toLowerCase() === 'tbc' };
+  return { kind: 'events', ...common, type: s(e.kind) || 'special_event', date, time, tbc: common.tbc || s(e.event_datetime).toLowerCase() === 'tbc' };
 }
 
 /** A value to write: `v`, unless it is the default and the file did not already spell it. */
@@ -177,15 +177,15 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
     return {
       ...raw,
       event_datetime: whenOf(raw.event_datetime, d.date, d.time),
-      type: text(d.type),
+      kind: text(d.type),
       ...display(raw, d),
       deploy: d.deploys.length
         ? d.deploys.map((dp, i) => {
             const r = obj(rawDeploys[i]);
             return {
               ...r, course_source_repo: dp.repo, course_source_path: dp.folder,
-              cohort_dest_repo: dp.dest && (dp.dest !== 'materials' || r.cohort_dest_repo) ? dp.dest : undefined,
-              cohort_dest_path: text(dp.path), deploy_datetime: dp.diff ? whenOf(r.deploy_datetime, dp.atDate, dp.atTime) : undefined,
+              semester_dest_repo: dp.dest && (dp.dest !== 'materials' || r.semester_dest_repo) ? dp.dest : undefined,
+              semester_dest_path: text(dp.path), deploy_datetime: dp.diff ? whenOf(r.deploy_datetime, dp.atDate, dp.atTime) : undefined,
             };
           })
         : undefined,
@@ -193,7 +193,7 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
   }
   if (d.kind === 'assignments') {
     return {
-      ...raw, ...display(raw, d), course_source_repo: d.template, cohort_dest_repo: text(d.cohortRepo),
+      ...raw, ...display(raw, d), course_source_repo: d.template, semester_dest_repo: text(d.semesterRepo),
       handout_datetime: d.manual ? undefined : whenOf(raw.handout_datetime, d.handoutDate, d.handoutTime),
       due_datetime: whenOf(raw.due_datetime, d.dueDate, d.dueTime),
       grading_datetime: whenOf(raw.grading_datetime, d.lateDate, d.lateTime),
@@ -201,14 +201,14 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
     };
   }
   return {
-    ...raw, type: keep(raw.type, d.type, 'special_event'), ...display(raw, d),
+    ...raw, kind: keep(raw.kind, d.type, 'special_event'), ...display(raw, d),
     event_datetime: whenOf(raw.event_datetime, d.date, d.time) ?? 'tbc', tbc: d.date ? keep(raw.tbc, d.tbc, false) : undefined,
   };
 }
 
 /** Write one draft into the file. */
 export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
-  if (d.kind === 'term') {
+  if (d.kind === 'semester') {
     y.assign(['semester_start'], text(d.start));
     y.assign(['semester_end'], text(d.end));
     y.assign(['timezone'], text(d.tz));
@@ -256,7 +256,7 @@ export function slugOfTemplate(template: string): string {
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {
   const common = { id: '', title: '', details: '', show: true, tbc: false };
   if (type === 'handout')
-    return { kind: 'assignments', ...common, template: '', manual: false, handoutDate: '', handoutTime: '10:00', dueDate: '', dueTime: '23:59', lateDate: '', lateTime: '', solutionOn: false, solutionDate: '', solutionTime: '', cohortRepo: '' };
+    return { kind: 'assignments', ...common, template: '', manual: false, handoutDate: '', handoutTime: '10:00', dueDate: '', dueTime: '23:59', lateDate: '', lateTime: '', solutionOn: false, solutionDate: '', solutionTime: '', semesterRepo: '' };
   if (type === 'exam' || type === 'special_event') return { kind: 'events', ...common, type, date: '', time: '' };
   return { kind: 'releases', ...common, type, date: '', time: '10:00', deploys: [{ repo: defaults.repo, folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] };
 }
@@ -283,11 +283,11 @@ export function draftErrors(d: Draft, others: { templateUsers: (template: string
     const sol = joinWhen(d.solutionDate, d.solutionTime);
     if (d.solutionOn && !d.manual && !sol) e.solution = 'Give the date the solution is shown.';
     if (d.solutionOn && sol && h && sol <= h) e.solution = 'Must be after the hand out.';
-    if (d.template && others.templateUsers(d.template) > 1 && !d.cohortRepo) e.cohortRepo = 'Two entries hand out this template: give each its own repo name.';
+    if (d.template && others.templateUsers(d.template) > 1 && !d.semesterRepo) e.semesterRepo = 'Two entries hand out this template: give each its own repo name.';
   } else if (d.kind === 'events') {
     if (!d.title.trim()) e.title = 'A title is needed; the student site shows only this.';
-  } else if (d.kind === 'term') {
-    if (d.start && d.end && d.end <= d.start) e.end = 'The term must end after it starts.';
+  } else if (d.kind === 'semester') {
+    if (d.start && d.end && d.end <= d.start) e.end = 'The semester must end after it starts.';
   } else if (d.kind === 'archive') {
     if (d.on && d.graceDays !== '' && !(Number.isInteger(d.graceDays) && d.graceDays >= 0)) e.graceDays = 'A whole number of days, 0 or more.';
   }

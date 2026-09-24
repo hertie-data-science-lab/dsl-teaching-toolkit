@@ -54,13 +54,13 @@ describe('GitHubClient', () => {
   });
 
   it('writes sha-conditionally, as the signed-in user', async () => {
-    const gh = new FakeGitHub().on('PUT', '/repos/o/classroom-config/contents/people.yml', { content: { sha: 'new' }, commit: { sha: 'c1' } });
+    const gh = new FakeGitHub().on('PUT', '/repos/o/semester-config/contents/instructors.yml', { content: { sha: 'new' }, commit: { sha: 'c1' } });
     const author = authorOf({ login: 'octo', id: 7, name: null, email: null, avatar_url: '' });
-    const r = await client(gh).putContents({ owner: 'o', repo: 'classroom-config', path: 'people.yml', text: 'people: {}\n', sha: 'old', message: 'staff: edit', author });
+    const r = await client(gh).putContents({ owner: 'o', repo: 'semester-config', path: 'instructors.yml', text: 'instructors: []\n', sha: 'old', message: 'instructors: edit', author });
     const body = gh.seen[0].body as Record<string, unknown>;
     expect(body.sha).toBe('old');
     expect(body.author).toEqual({ name: 'octo', email: '7+octo@users.noreply.github.com' });
-    expect(decodeBase64(body.content as string)).toBe('people: {}\n');
+    expect(decodeBase64(body.content as string)).toBe('instructors: []\n');
     expect(r).toEqual({ sha: 'new', commit: 'c1' });
   });
 

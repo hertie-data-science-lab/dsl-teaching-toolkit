@@ -1,5 +1,5 @@
-// The cohort's schedule.yml, read for what status.json does not carry: the Details text
-// students see, the events, the term dates and the archive entry. States come from status.
+// The semester's schedule.yml, read for what status.json does not carry: the Details text
+// students see, the events, the semester dates and the archive entry. States come from status.
 
 import { parse } from 'yaml';
 import { obj } from '../edit/yamlText';
@@ -12,7 +12,7 @@ export interface SchedEntry {
   tbc: boolean;
   show: boolean;
   when: string | null;
-  type: string;
+  kind: string;
   grading: string | null; // an assignment's explicit grading_datetime
 }
 
@@ -40,7 +40,7 @@ function entry(raw: unknown, dflt: Partial<SchedEntry> = {}): SchedEntry {
     tbc: e.tbc === true || when.toLowerCase() === 'tbc',
     show: e.show_on_site !== false,
     when: when && when.toLowerCase() !== 'tbc' ? when : null,
-    type: s(e.type) || dflt.type || '',
+    kind: s(e.kind) || dflt.kind || '',
     grading: s(e.grading_datetime) || null,
   };
 }
@@ -64,7 +64,7 @@ export function parseSchedule(text: string | null | undefined): Schedule | null 
   for (const [k, v] of Object.entries(obj(doc.releases))) releases[k] = entry(v);
   const assignments: Record<string, SchedEntry> = {};
   for (const [k, v] of Object.entries(obj(doc.assignments))) assignments[k] = entry(v);
-  const events = Object.entries(obj(doc.events)).map(([k, v]) => ({ id: k, ...entry(v, { title: pretty(k), type: 'special_event' }) }));
+  const events = Object.entries(obj(doc.events)).map(([k, v]) => ({ id: k, ...entry(v, { title: pretty(k), kind: 'special_event' }) }));
   return {
     timezone: s(doc.timezone) || null,
     start: s(doc.semester_start) || null,
@@ -72,7 +72,7 @@ export function parseSchedule(text: string | null | undefined): Schedule | null 
     releases,
     assignments,
     events,
-    archive: doc.archive ? entry(doc.archive, { title: 'Cohort archived' }) : null,
+    archive: doc.archive ? entry(doc.archive, { title: 'Semester archived' }) : null,
   };
 }
 
@@ -92,7 +92,7 @@ export interface Row {
   fault: boolean;
 }
 
-/** Every row of the term, in date order, the way the schedule screen and the term strip read it. */
+/** Every row of the semester, in date order, the way the schedule screen and the semester strip read it. */
 export function scheduleRows(status: Status, sched: Schedule | null, now: number, tz: string): Row[] {
   const rows: Row[] = [];
   const releases: Release[] = status.releases ?? [];
@@ -101,7 +101,7 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
   for (const r of releases) {
     const e = sched?.releases[r.id];
     rows.push({
-      entry: r.id, block: 'releases', type: r.type ?? 'release', when: r.when, ident: releaseIdent(r, releases), name: r.title,
+      entry: r.id, block: 'releases', type: r.kind ?? 'release', when: r.when, ident: releaseIdent(r, releases), name: r.title,
       state: RELEASE_WORD[r.state] ?? r.state, details: e?.details ?? '', tbc: r.tbc, show: r.show_on_site, fault: r.state === 'will_be_skipped',
     });
   }
@@ -114,15 +114,15 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
   if (sched) {
     for (const ev of sched.events)
       rows.push({
-        entry: ev.id, block: 'events', type: ev.type === 'exam' ? 'exam' : 'special_event', when: ev.when, ident: ev.type === 'exam' ? 'Exam' : 'Event',
+        entry: ev.id, block: 'events', type: ev.kind === 'exam' ? 'exam' : 'special_event', when: ev.when, ident: ev.kind === 'exam' ? 'Exam' : 'Event',
         name: ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show, fault: false,
       });
-    if (sched.start) rows.push({ entry: 'term', block: 'events', type: 'term', when: sched.start, ident: 'Term', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true, fault: false });
-    if (sched.end) rows.push({ entry: 'term', block: 'events', type: 'term', when: sched.end, ident: 'Term', name: 'Ends', state: past(sched.end) ? 'past' : 'upcoming', details: '', tbc: false, show: true, fault: false });
+    if (sched.start) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.start, ident: 'Semester', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true, fault: false });
+    if (sched.end) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.end, ident: 'Semester', name: 'Ends', state: past(sched.end) ? 'past' : 'upcoming', details: '', tbc: false, show: true, fault: false });
   }
-  const archive = sched?.archive?.when ?? status.cohort?.archive_date ?? null;
-  if (archive) rows.push({ entry: 'archive', block: 'events', type: 'archive', when: archive, ident: 'Archive', name: sched?.archive?.title || 'Cohort archived', state: 'scheduled', details: (sched?.archive?.details ?? '').replace('{date}', archive), tbc: false, show: sched?.archive?.show ?? true, fault: false });
-  // TBC with no date sorts at the end of term, as the site does.
+  const archive = sched?.archive?.when ?? status.semester?.archive_date ?? null;
+  if (archive) rows.push({ entry: 'archive', block: 'events', type: 'archive', when: archive, ident: 'Archive', name: sched?.archive?.title || 'Semester archived', state: 'scheduled', details: (sched?.archive?.details ?? '').replace('{date}', archive), tbc: false, show: sched?.archive?.show ?? true, fault: false });
+  // TBC with no date sorts at the end of the semester, as the site does.
   rows.sort((a, b) => (a.when ? sortKey(a.when, tz) : '9999') .localeCompare(b.when ? sortKey(b.when, tz) : '9999'));
   return rows;
 }
