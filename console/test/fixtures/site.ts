@@ -243,7 +243,7 @@ instructors:
     profile_pic: "https://github.com/LynnKaack.png"
     webpage: "https://www.hertie-school.org/de/research/faculty-and-researchers/profile/person/kaack"
     title: "Assistant Professor of Computer Science and Public Policy"
-    email: "kaack@hertie-school.org"
+    email: "instructor@example.org"
 teaching_assistants:
   - name: "Henry Baker"
     profile_pic: "/_images/pp/henrycgbaker.jpg"

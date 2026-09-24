@@ -341,7 +341,7 @@ describe('11. the instructors', () => {
   it('shows an email only where the card carries one, and resolves a site picture', async () => {
     const f = await facts();
     const out = render(<InstructorsView facts={f} org={ORG} />);
-    expect(out).toContain('href="mailto:kaack@hertie-school.org"');
+    expect(out).toContain('href="mailto:instructor@example.org"');
     expect(out.match(/mailto:/g)).toHaveLength(1);
     expect(pictureOf('/_images/pp/x.jpg', ORG)).toBe(`https://${ORG}.github.io/_images/pp/x.jpg`);
     expect(pictureOf('https://github.com/a.png', ORG)).toBe('https://github.com/a.png');
