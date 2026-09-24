@@ -89,7 +89,7 @@ Each screen reads with the student's own account:
 |---|---|---|
 | This week (per semester, and on Home across the semesters shown) | rows due, handed out, released or on in the next 7 days; releases of the last 7; open team formation | gradebook's last change (marks returned); whether they have a team |
 | Schedule | rows by week, coloured by kind | their state on hand-out and due rows; rows for their repos marked |
-| Assignments | dates, late cutoff, late rule, how to hand in, solution shown | `<slug>-<handle>`, a team repo they can push to (team from its name, members from the team), the drop box; the Submission receipts issue (label `dsl-feedback`) and its newest receipt |
+| Assignments | dates, late cutoff, late rule, how to hand in, solution shown | `<slug>-<handle>`, a team repo they can push to (team from its name, members from the team), the drop box; the Submission receipts issue (label `dsl-receipts`, or `dsl-feedback` on older repos) and its newest receipt |
 | Marks | assignment titles | `grades-<handle>/grades.yml`: final grade, score (per question when given), penalty, feedback overall and per question, team and team feedback, a term total if present |
 | Materials | the materials repos | the repo's recursive tree; each file read when opened |
 | Join | assignments forming teams | their own Join course / Join team issues in `welcome` and the automation's last reply |
@@ -97,7 +97,7 @@ Each screen reads with the student's own account:
 
 The shared facts come through one interface, `StudentData` (`src/model/student.ts`). Today
 it is `SiteSource`: the public site repo's generated files, read through the API
-(`_lectures/`, `_events/`, `_assignments/` front matter; `_data/people.yml`,
+(`_lectures/`, `_events/`, `_assignments/` front matter, `kind` or the older `type`; `_data/people.yml`,
 `late_policy.yml`, `materials.yml`). Once the engine writes a public-safe
 `.github/.system/student-status.json`, a source reading that one file replaces it (WP-D4).
 In a Student view nothing of the student's own is read. An archived semester is listed
@@ -108,8 +108,15 @@ GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook
 text and images; an HTML page with its `<stem>_files/` bundle inlined (stylesheets as
 `<style>`, images and fonts as data: URLs) in a frame sandboxed with no permissions. The
 page's policy (no inline scripts, no `'unsafe-eval'`, no frames other than srcdoc) is inherited by every
-document the console makes, so a deck that needs its scripts (reveal.js, Quarto) is offered
-as one self-contained file to download instead; it runs when opened from disk. PDFs open in
+document made from the console page, so a deck that needs its scripts (reveal.js, Quarto) opens in
+the **deck viewer** instead: `deck.html`, a second document in the build with its own policy
+(`default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src
+data: blob:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'`). The
+console opens it with `noopener` and hands it the inlined deck over a `BroadcastChannel` named
+by a random id in its URL fragment (`src/model/deckTab.ts`); the viewer clears its session
+storage, drops the fragment and shows the deck in a frame sandboxed to `allow-scripts` only (an
+opaque origin: no storage, no cookies, `top.opener` null). The deck also downloads as one
+self-contained file. PDFs open in
 a new tab or download; anything else downloads. Files over 1 MB come from the blob API; the
 API serves nothing over 100 MB.
 
@@ -127,7 +134,8 @@ unchanged 304 costs nothing): opening a semester reads its site once, about 4 + 
 generated file (about 40 on the demo; 1 once `student-status.json` exists), then the repo
 list, the gradebook and its last commit, and one call per team. Assignments adds two calls
 per private repo (receipts issue, comments). A file costs one call, a markdown file or notebook
-two, an HTML page one per bundle file it uses (at most 80). Home's This week repeats the
+two, an HTML page one per bundle file it uses (at most 80); file bytes are kept by blob sha
+(up to 64 MB), so reopening costs nothing. Home's This week repeats the
 semester read for each semester shown.
 
 ## What it reads

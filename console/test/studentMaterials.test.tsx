@@ -101,7 +101,7 @@ describe('opening a file', () => {
     expect(f.seen.some((x) => x.url.includes('unused.js'))).toBe(false);
     expect(f.seen.some((x) => x.url.includes('fonts/x.woff'))).toBe(true);
     const out = render(<ShownView shown={s} name="deck.html" />);
-    expect(out).toContain('This deck runs scripts, which the console does not run.');
+    expect(out).toContain('Open the deck');
     expect(out).not.toContain('<iframe');
   });
 
