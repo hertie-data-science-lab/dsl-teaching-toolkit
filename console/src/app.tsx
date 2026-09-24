@@ -3,8 +3,7 @@
 import { signal } from '@preact/signals';
 import { EnvCtx, type Env } from './env';
 import { useEffect } from 'preact/hooks';
-import { PatAuth } from './auth/pat';
-import type { Auth } from './auth/types';
+import { createAuth, type ConsoleAuth } from './auth/console';
 import { GitHubClient, type GhUser } from './github/client';
 import { discoverCourses, type Course } from './model/discovery';
 import { LiveFiles } from './model/files';
@@ -36,12 +35,12 @@ import { ScreenBoundary } from './ui/boundary';
 import { Footer, Sidenav, Topbar } from './ui/shell';
 
 export interface AppDeps {
-  auth: Auth;
+  auth: ConsoleAuth;
   client: GitHubClient;
 }
 
 export function createDeps(): AppDeps {
-  const auth = new PatAuth();
+  const auth = createAuth();
   const client = new GitHubClient({ token: () => auth.token() });
   return { auth, client };
 }
@@ -271,5 +270,6 @@ export function createState({ auth, client }: AppDeps) {
       document.body.classList.toggle('nav-open', st.navOpen.value);
     },
   };
+  auth.onLost = () => st.signOut();
   return st;
 }

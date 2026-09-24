@@ -1,25 +1,10 @@
 import { GitHubError, type Fetch, type GhUser, API } from '../github/client';
-import { SignInError, type Auth } from './types';
+import { SignInError, browserStore, type Auth, type TokenStore } from './types';
 
 export const TOKEN_KEY = 'dsl-console-token';
 export const REQUIRED_SCOPES = ['repo', 'workflow'];
 export const NEW_TOKEN_URL =
   'https://github.com/settings/tokens/new?scopes=repo,workflow&description=DSL%20Instructor%20Console';
-
-/** The subset of Storage PatAuth needs; sessionStorage in the browser, a Map in tests. */
-export interface TokenStore {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
-
-function browserStore(): TokenStore | null {
-  try {
-    return globalThis.sessionStorage ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Sign-in with a pasted classic personal access token carrying `repo` and `workflow`.

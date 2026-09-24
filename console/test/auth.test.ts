@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PatAuth, TOKEN_KEY, type TokenStore } from '../src/auth/pat';
+import { PatAuth, TOKEN_KEY } from '../src/auth/pat';
+import type { TokenStore } from '../src/auth/types';
 import { FakeGitHub, json } from './fake';
 
 function store(): TokenStore & { map: Map<string, string> } {

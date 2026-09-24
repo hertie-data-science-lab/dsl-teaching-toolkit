@@ -2,7 +2,7 @@
 // read-only view.
 
 import { useState } from 'preact/hooks';
-import type { Auth } from '../auth/types';
+import type { ConsoleAuth } from '../auth/console';
 import { NEW_TOKEN_URL } from '../auth/pat';
 import type { GhUser } from '../github/client';
 import { cohortName, type Course, type CohortRef } from '../model/discovery';
@@ -112,23 +112,46 @@ export function HomeScreen({ courses, cohortStates, user }: HomeProps) {
 
 // --------------------------------------------------------------------------- S0
 
-export function SignInScreen({ auth, onSignedIn }: { auth: Auth; onSignedIn: (u: GhUser) => void }) {
+export function SignInScreen({ auth, onSignedIn }: { auth: ConsoleAuth; onSignedIn: (u: GhUser) => void }) {
   const [token, setToken] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'token' | 'app' | null>(null);
+  const [error, setError] = useState<string | null>(auth.notice);
   const [who, setWho] = useState<GhUser | null>(null);
   const submit = async (e: Event) => {
     e.preventDefault();
-    setBusy(true);
+    setBusy('token');
     setError(null);
     try {
       setWho(await auth.signIn(token));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+  const withGitHub = () => {
+    setBusy('app');
+    setError(null);
+    auth.signInWithApp().catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    });
+  };
+  const tokenForm = (
+    <form onSubmit={submit}>
+      <div class="field">
+        <label for="pat">GitHub token</label>
+        <input type="password" id="pat" autocomplete="off" spellcheck={false} value={token} onInput={(e) => setToken((e.target as HTMLInputElement).value)} aria-invalid={error ? 'true' : undefined} />
+        <p class="hint">
+          A classic personal access token with the <code>repo</code> and <code>workflow</code> scopes.{' '}
+          <a href={NEW_TOKEN_URL} target="_blank" rel="noopener">Create one on GitHub <Ext /></a>
+        </p>
+      </div>
+      <div class="actions"><button class={auth.app ? 'btn outline' : 'btn'} type="submit" disabled={busy !== null}>{busy === 'token' ? 'Checking…' : 'Sign in with the token'}</button></div>
+      <p class="footnote">For a console set up without a sign-in relay, or when signing in with GitHub is blocked. The token stays in this browser tab only and is forgotten when you close it.</p>
+    </form>
+  );
+  const problem = error ? <div class="invalid-msg"><span /><span>{error}</span></div> : null;
   return (
     <div class="signin">
       <div class="page-head" style="margin-bottom:0"><div><h1>Sign in</h1><p class="lede">The console works with your GitHub account: it can change exactly what you can change on GitHub, and nothing else.</p></div></div>
@@ -137,20 +160,21 @@ export function SignInScreen({ auth, onSignedIn }: { auth: Auth; onSignedIn: (u:
           <div class="who-card"><img src={who.avatar_url} alt="" /><div><b>{who.name || who.login}</b><div class="footnote">Signed in as {who.login}</div></div></div>
           <div class="actions"><button class="btn" type="button" onClick={() => onSignedIn(who)}>Continue</button></div>
         </section>
+      ) : auth.app ? (
+        <section class="panel section">
+          {problem}
+          <div class="actions"><button class="btn" type="button" onClick={withGitHub} disabled={busy !== null}>{busy === 'app' ? 'Going to GitHub…' : 'Sign in with GitHub'}</button></div>
+          <p class="footnote">You approve the lab’s GitHub App on github.com once; the sign-in lasts until you close this tab.</p>
+          <details class="fold">
+            <summary>Use a token instead</summary>
+            {tokenForm}
+          </details>
+        </section>
       ) : (
-        <form class="panel section" onSubmit={submit}>
-          <div class="field">
-            <label for="pat">GitHub token</label>
-            <input type="password" id="pat" autocomplete="off" spellcheck={false} value={token} onInput={(e) => setToken((e.target as HTMLInputElement).value)} aria-invalid={error ? 'true' : undefined} />
-            <p class="hint">
-              A classic personal access token with the <code>repo</code> and <code>workflow</code> scopes.{' '}
-              <a href={NEW_TOKEN_URL} target="_blank" rel="noopener">Create one on GitHub <Ext /></a>
-            </p>
-          </div>
-          {error ? <div class="invalid-msg"><span /><span>{error}</span></div> : null}
-          <div class="actions"><button class="btn" type="submit" disabled={busy}>{busy ? 'Checking…' : 'Sign in'}</button></div>
-          <p class="footnote">The token stays in this browser tab only and is forgotten when you close it. Sign-in with the lab’s GitHub App replaces this later.</p>
-        </form>
+        <section class="panel section">
+          {problem}
+          {tokenForm}
+        </section>
       )}
     </div>
   );
