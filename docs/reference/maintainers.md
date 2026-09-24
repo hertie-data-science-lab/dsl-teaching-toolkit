@@ -136,11 +136,6 @@ Things whose *literal spelling* is depended on from outside Python:
   (`course.RETIRED_REPO_NAMES`) are live redirects, and `repos.create_repo` refuses them -
   a repo created at one ends the redirect. The shipped JavaScript reads the config repo
   and the lock path substituted, never spelt.
-- **The gate variable `DSL_PAUSED`** (`central.PAUSE_VARIABLE`): every job of every seeded
-  workflow is gated on it (`central.pausable`, applied at the write site). A belt and
-  braces only: org variables do not reach private repos on GitHub Free, and a workflow
-  rendered before the gate has none. Nothing relies on it - `migrate` pauses an org by
-  disabling Actions in each repo.
 - **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is a filename faculty type into their
   own content repos. A rename silently stops withholding whatever the old name held back -
   worse than an outage, because the release still goes green. Nothing re-spells it: the

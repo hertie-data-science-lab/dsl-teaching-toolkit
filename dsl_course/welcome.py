@@ -18,7 +18,7 @@ from functools import cache
 from pathlib import Path
 
 from . import records
-from .central import CENTRAL, pausable, pin_central_ref
+from .central import CENTRAL, pin_central_ref
 from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
 from .grades import TEAM_LOCK_PATH, parse_team_lock
@@ -81,7 +81,7 @@ def join_workflow(rel: str) -> str:
             f"{pad}{shared}\n" if shared.strip() else "\n"
             for shared in template(SHARED_SCRIPT).rstrip("\n").split("\n")
         ]
-    return pausable(
+    return (
         "".join(out)
         .replace("__CONFIG_REPO__", CONFIG_REPO)
         .replace("__LOCK__", TEAM_LOCK_PATH)
@@ -391,7 +391,7 @@ def config_system_files(central_ref: str) -> dict[str, bytes]:
     validator checks the toolkit out at it, and the set is written as one commit anyway.
     """
     return {
-        path: pausable(pin_central_ref(template(rel), central_ref))
+        path: pin_central_ref(template(rel), central_ref)
         .replace("__CENTRAL__", CENTRAL)
         .replace("__CONFIG_REPO__", CONFIG_REPO)
         .replace("__POINTER__", records.path("pointer"))
