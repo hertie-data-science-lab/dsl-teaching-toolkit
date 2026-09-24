@@ -153,6 +153,18 @@ Things whose *literal spelling* is depended on from outside Python:
   content: every reader resolves `repos.default_branch`, which is exactly what keeps
   `upstream` invisible to the site, discovery and status.
 
+## A student who switched GitHub account
+
+Faculty edit the row's `github_handle` and nothing else; `relink.sync`, first in each
+cohort's Sync membership pass, moves every handle-keyed thing - repos, grants, `teams.csv`,
+sheet keys, `distributed.csv` email rows, `autograde/` files, the welcome throttle issues -
+and writes `github_id` LAST: it is the pending marker, so a run that stops anywhere is
+finished by the next. Nothing is deleted: an untouched new-name repo is renamed
+`relink-aside-<n>` and archived, and anything a person wrote on both sides holds the relink
+until faculty settle it. A handle whose stored id onboard itself linked (`roster: link
+@<handle> (id <id>)`) is a rename taken over by a stranger and is never relinked. Onboard
+records every "bound elsewhere" refusal in `enrolment/refusals/<issue>.json`.
+
 ## The two modules that keep one record open
 
 `issues` and `pulls` each own an idempotency rule that their callers - unattended crons,

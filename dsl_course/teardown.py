@@ -92,8 +92,9 @@ _RECORD_BANNER = (
 _RETENTION_NOTE = f"""This repository is the cohort's private record and is now read-only.
 It holds the roster (`students.csv`), the project teams (`teams.csv`), the teaching team
 (`people.yml`), the term plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
-the autograde detail (`autograde/`), what was sent to whom (`gradebook/distributed.csv`)
-and the registrar export (`{COHORT_CSV_NAME}`). Together those are this cohort's record of
+the autograde detail (`autograde/`), what was sent to whom (`gradebook/distributed.csv`),
+the enrolment refusals and account relinks (`enrolment/`) and the registrar export
+(`{COHORT_CSV_NAME}`). Together those are this cohort's record of
 assessment: delete the repository when your institution's retention period for that record
 expires, and the archived student repos with it."""
 

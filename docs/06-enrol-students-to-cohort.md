@@ -39,6 +39,7 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
    - Success: label `onboarded`, issue closed, student added to the org and to `students` | `auditors`. They must accept the org invite before they see anything.
    - Failure: one neutral "could not be matched" message, whether the code is unknown or already claimed. **Triage `needs-review` issues, then delete them** - the code stays readable in the body's edit history until the issue is deleted (or rotate the code: blank the row's `enrol_code` and its `code_sent_at`, then push).
    - Students must never paste a code in a **comment** (public, never redacted). Blank issues are disabled in `welcome`.
+   - **A student who switched GitHub account** is refused (their code is bound to the old one); the reason is recorded privately in `classroom-config/enrolment/refusals/<issue>.json`. Put their new login in the row's `github_handle` and push: the next **Sync membership** moves their repos, gradebook, grading-sheet and team rows to it and closes their stuck Join issues. Leave `github_id` as it is - the sync rewrites it last.
 
    > The cohort org's `welcome` repo is automatically seeded when the cohort org is [bootstrapped by the course org](04-new-cohort-org.md#steps).
 
