@@ -96,7 +96,9 @@ describe('the Marks overview', () => {
     expect(out).toContain('1 of 2 assignments returned; 0 marks still to enter.');
     expect(out).toContain('href="#assignment-assignment-1/marks">Assignment 1: Intro');
     expect(out).toContain('<td class="num">2 / 2</td>');
-    expect(out).toContain('<span class="chip ok">Yes</span> Fri 11 Sep');
+    expect(out).toContain('<th>Gradebooks last updated</th>');
+    expect(out).toContain('<td><span class="chip ok">Yes</span></td><td class="num">Fri 11 Sep</td>');
+    expect(out).toContain('Every return rewrites every student’s gradebook');
     expect(out).toContain('Wed 9 Sep');
     expect(out).toContain('No mark sheet yet');
     expect(out).not.toContain('<input');

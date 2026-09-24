@@ -352,7 +352,8 @@ function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes:
       <td><a class="rowlink" href={tabHref(a.slug, 'marks')}>{assignmentTitle(a)}</a></td>
       <td><span class={`chip ${a.state === 'marking' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span></td>
       <td class="num">{p.hasSheet ? `${a.marks.filled} / ${a.marks.total}` : <span class="footnote">No mark sheet yet</span>}</td>
-      <td>{a.returned ? <><span class="chip ok">Yes</span>{on ? ` ${fmtDay(on, tz, year)}` : ''}</> : 'No'}</td>
+      <td>{a.returned ? <span class="chip ok">Yes</span> : 'No'}</td>
+      <td class="num">{on ? fmtDay(on, tz, year) : ''}</td>
       <td class="num">{changed === undefined ? '…' : changed ? fmtWhen(changed, tz, year) : ''}</td>
     </tr>
   );
@@ -386,12 +387,12 @@ function MarksOverview(p: ReadyProps) {
       ) : (
         <>
           <div class="table-wrap">
-            <table class="grid" style="min-width:680px">
-              <thead><tr><th>Assignment</th><th>State</th><th>Marked</th><th>Returned</th><th>Last change</th></tr></thead>
+            <table class="grid" style="min-width:820px">
+              <thead><tr><th>Assignment</th><th>State</th><th>Marked</th><th>Returned</th><th>Gradebooks last updated</th><th>Last change</th></tr></thead>
               <tbody>{list.map((a) => <OverviewRow {...p} a={a} hasSheet={sheets.has(`${a.slug}.yml`)} writes={writes} />)}</tbody>
             </table>
           </div>
-          <p class="footnote" style="margin-top:8px">Returned: the day the last student’s marks repo was updated. Last change: the newest edit to the mark sheet.</p>
+          <p class="footnote" style="margin-top:8px">Gradebooks last updated: the newest write to this assignment’s students’ gradebooks. Every return rewrites every student’s gradebook, so this date moves forward for all returned assignments whenever any assignment is returned. Last change: the newest edit to the mark sheet.</p>
         </>
       )}
     </>
