@@ -54,6 +54,10 @@ export class LiveFiles implements Files {
     const s = this.files.get(k);
     if (s) s.value = v;
     else this.files.set(k, signal<FileState>(v));
+    // A write is a new commit on this path: read its date again, into the same signal so
+    // a screen already showing it updates.
+    const c = this.changes.get(`${owner}/${repo}/${path}`);
+    if (c) this.loadChange(owner, repo, path, c);
     const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
     const d = this.dirs.get(`${owner}/${repo}/${dir}`);
     if (d)
@@ -147,15 +151,19 @@ export class LiveFiles implements Files {
     const k = `${owner}/${repo}/${path}`;
     let s = this.changes.get(k);
     if (!s) {
-      const sig = signal<string | null | undefined>(undefined);
-      s = sig;
-      this.changes.set(k, sig);
-      this.client
-        .lastCommitDate(owner, repo, path)
-        .then((v) => (sig.value = v))
-        .catch(() => (sig.value = null));
+      s = signal<string | null | undefined>(undefined);
+      this.changes.set(k, s);
+      this.loadChange(owner, repo, path, s);
     }
     return s.value;
+  }
+
+  private loadChange(owner: string, repo: string, path: string, sig: Signal<string | null | undefined>): void {
+    sig.value = undefined;
+    this.client
+      .lastCommitDate(owner, repo, path)
+      .then((v) => (sig.value = v))
+      .catch(() => (sig.value = null));
   }
 
   forget(): void {

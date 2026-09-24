@@ -1,9 +1,10 @@
 // The assignment hub (decision 0008): tabs, the default tab by state, and the old hashes.
 
 import { render } from 'preact-render-to-string';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { StaticFiles } from '../src/model/files';
+import { LiveFiles, StaticFiles } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
 import { hashOf, parseHash } from '../src/router';
@@ -147,5 +148,23 @@ describe('entry releases', () => {
       expect(Object.keys(def.options ?? {})).toEqual([]);
     }
     expect(Object.keys(releaseAdhoc(scope, ['course-materials-f2026']).options ?? {})).toContain('cohort_dest_repo');
+  });
+});
+
+describe('last change', () => {
+  it('is read again after the console writes the file', async () => {
+    const dates = ['2026-09-01T10:00:00Z', '2026-09-24T12:00:00Z'];
+    const client = { lastCommitDate: vi.fn(async () => dates.shift() ?? null) } as unknown as GitHubClient;
+    const live = new LiveFiles(client);
+    const path = 'grading_sheets/assignment-2.yml';
+    expect(live.lastChange(COHORT_ORG, 'classroom-config', path)).toBeUndefined();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(live.lastChange(COHORT_ORG, 'classroom-config', path)).toBe('2026-09-01T10:00:00Z');
+    live.put(COHORT_ORG, 'classroom-config', path, undefined, 'submissions: {}\n', 'new');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(live.lastChange(COHORT_ORG, 'classroom-config', path)).toBe('2026-09-24T12:00:00Z');
+    expect(client.lastCommitDate).toHaveBeenCalledTimes(2);
   });
 });
