@@ -742,3 +742,17 @@ textarea.code { font-family: var(--font-code); font-size: 13px; min-height: 120p
 [hidden] { display: none !important; }
 .asg-list .a-side .chip { align-self: start; }
 .cohort-card > .chip { justify-self: start; }
+
+/* the help screen's diagram: every colour a theme token */
+.help-diagram { width: 100%; height: auto; display: block; max-width: 760px; }
+.help-diagram .hd-box { fill: var(--surface-2); stroke: var(--rule-strong); stroke-width: 1.5; }
+.help-diagram .hd-now { fill: var(--asg-bg); stroke: var(--asg-ink); }
+.help-diagram .hd-people { fill: var(--lab-bg); stroke: var(--lab-ink); }
+.help-diagram .hd-h { font-family: var(--font-display); font-weight: 700; font-size: 18px; fill: var(--ink); }
+.help-diagram .hd-sub { font-size: 13.5px; fill: var(--muted); }
+.help-diagram .hd-item { font-size: 15px; fill: var(--ink-2); }
+.help-diagram .hd-note { font-size: 12.5px; fill: var(--muted); }
+.help-diagram .hd-line { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+.help-diagram .hd-head { fill: var(--ink-2); }
+.where-list { display: grid; gap: 8px; padding-left: 20px; max-width: 75ch; }
+.help-btn { min-width: 32px; padding: 3px 0; text-align: center; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }

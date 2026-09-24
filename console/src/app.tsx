@@ -24,6 +24,7 @@ import { HomeScreen, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { StaffScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
 import { OperationsScreen, SiteScreen } from './screens/Site';
+import { HelpScreen } from './screens/Help';
 import { MarksOverviewScreen } from './screens/Marking';
 import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
@@ -132,6 +133,8 @@ export function App({ state: s }: { state: AppState }) {
   let body;
   if (wiz?.name === 'new-course') {
     body = <NewCourseScreen files={s.files} step={wiz.step} />;
+  } else if (screen === 'help') {
+    body = <HelpScreen />;
   } else if (screen === 'home') {
     body = <HomeScreen courses={courses} cohortStates={cohortStates} now={s.now.value} user={user} />;
   } else if (!ctx.course) {

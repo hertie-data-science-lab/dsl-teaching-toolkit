@@ -69,6 +69,7 @@ export function Topbar({ user, course, cohort, onSignOut, navOpen, onMenu }: {
               <span class="who-name">{user.name || user.login}</span>
             </div>
           ) : null}
+          {user ? <a class="pill-ghost help-btn" href="#help" aria-label="Help: how the console is organised" title="Help">?</a> : null}
           <button class="pill-ghost" type="button" aria-label="Switch colour theme" onClick={toggle}>{dark ? 'Light' : 'Dark'}</button>
           {user && onSignOut ? <button class="pill-ghost" type="button" onClick={onSignOut}>Sign out</button> : null}
         </div>
