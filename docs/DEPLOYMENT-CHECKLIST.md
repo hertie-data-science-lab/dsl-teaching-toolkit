@@ -51,9 +51,7 @@ Live example: [`example-course/course-org/dsl-course.yml`](../example-course/cou
 - Bootstrap writes it; edit it as needed.
 
 ```yaml
-org: hertie-dsl-demo-course-e1234
-org_name: DSL Demo Course        # names the ORG - the websites never show it
-course_name: Deep Learning       # the semester websites' title
+course_name: Deep Learning       # the course's name: every site's title
 course_code: E1234               # shown beside it
 course_description: One or two sentences, on one line - the sites' blurb
 site_link_extensions: [pdf, html]  # optional - semester sites only; see below
@@ -73,19 +71,15 @@ display-only cards; TAs are declared per semester in [`instructors.yml`](#instru
 Runbook: [05](05-manage-teaching-team.md).
 
 An admin's `email` is optional. When any admin has one, a fault in this file is mailed to
-those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret. This
-file is public, so an address written here is public too.
+those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret (retiring
+after one release). This file is public, so an address written here is public too.
 
-`assignment_defaults:` is what **New assignment** stamps into each new assignment's
-`grading_config.yml`: `max_team_size`, `late_window_days` and `late_penalty_per_day`, plus
-`formats`, `submit_via`, `team_formation` and `visibility`, which answer the button's boxes
-of the same name when they are left at `(course default)`.
-
-`semester_defaults:` is what **Bootstrap semester** writes into a new semester's `schedule.yml`:
-`timezone:`, and `archive: {auto, grace_days}` - `auto: false` seeds no `archive:` block,
-so that semester is never archived automatically; `grace_days` sets how long after
-`semester_end` it is. Unset, a new semester gets today's skeleton. Neither block changes a
-semester or an assignment that already exists.
+`assignment_defaults:` (optional) is this course's defaults for its assignments:
+`max_team_size`, `late_window_days`, `late_penalty_per_day`, `team_formation`,
+`visibility` apply to every assignment that does not set its own; unset, the institution's
+apply. `formats`, `submit_via`, `team_formation` and `visibility` also answer New
+assignment's boxes left at `(course default)`. A semester's timezone and archive grace are
+set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 days).
 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).

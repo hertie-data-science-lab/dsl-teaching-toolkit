@@ -9,7 +9,7 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | To change | Edit | Field |
 |---|---|---|
 | Course blurb under the title | course org `.github/dsl-course.yml` | `course_description` |
-| Course title + code | course org `.github/dsl-course.yml` | `course_name`, `course_code` - **not** `org_name` |
+| Course title + code | course org `.github/dsl-course.yml` | `course_name`, `course_code` |
 | Semester + year | *nothing to set* | inferred from the semester org's `fYYYY`/`sYYYY` semester (`hertie-dsl-demo-f2026` → "Fall 2026") |
 | Instructor / TA cards | semester `semester-config/instructors.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
 | Instructor photos | site repo `<semester-org>.github.io` | commit the image under `_images/pp/`, then `photo: /_images/pp/jane.jpg`. Can also use a URL that allows hotlinking |
