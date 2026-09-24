@@ -66,11 +66,18 @@ export function detailsOf(meta: Record<string, unknown>) {
 
 export type Details = ReturnType<typeof detailsOf>;
 
+/** The course's `formats` list with its first (runnable) entry replaced: the others stay. Cleared means the toolkit's default, so no list. */
+export function formatsAfter(meta: Record<string, unknown>, first: unknown): string[] | undefined {
+  if (!first) return undefined;
+  const rest = formatsList(obj(meta.assignment_defaults).formats).slice(1);
+  return [String(first), ...rest.filter((f) => f !== first)];
+}
+
 /** Write only what changed, key by key, into dsl-course.yml. */
 export function writeDetails(y: YamlText, before: Details, after: Details, meta: Record<string, unknown>): void {
   for (const k of Object.keys({ ...before.about, ...after.about })) if (!deepEqual(before.about[k], after.about[k])) y.assign([k], after.about[k]);
   for (const k of Object.keys({ ...before.defaults, ...after.defaults }))
-    if (!deepEqual(before.defaults[k], after.defaults[k])) y.assign(['assignment_defaults', k], k === 'formats' && after.defaults[k] ? [after.defaults[k]] : after.defaults[k]);
+    if (!deepEqual(before.defaults[k], after.defaults[k])) y.assign(['assignment_defaults', k], k === 'formats' ? formatsAfter(meta, after.defaults[k]) : after.defaults[k]);
   const c = after.cohort, b = before.cohort;
   if (!deepEqual(b.timezone, c.timezone)) y.assign(['semester_defaults', 'timezone'], c.timezone);
   if (!deepEqual(b.archive_auto, c.archive_auto) || !deepEqual(b.grace_days, c.grace_days)) {
@@ -183,6 +190,7 @@ export function DetailsScreen(p: CourseProps) {
   const doSave = async () => {
     setWarning('');
     if (!y || file.kind !== 'ready') return;
+    if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const after = { ...d, cohort: effective(SEMESTER_DEFAULTS, d.cohort) };
     const out = courseFileAfter(file.text, before, after, meta);
@@ -241,7 +249,7 @@ export function DetailsScreen(p: CourseProps) {
             </div>
             <div class="form-section">
               {warning ? <CheckLine cls="warn">{warning}</CheckLine> : null}
-              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before)} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }} />
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }} />
               <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
             </div>
           </div>

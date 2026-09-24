@@ -4,6 +4,21 @@
 import { notMigratedText, type Leftover } from '../model/migration';
 import { CheckLine } from '../ui/bits';
 
+/** The check itself could not be made: nothing of the org loads, and the next page asks again. */
+export function MigrationUnknownScreen({ what, org }: { what: 'semester' | 'course'; org: string }) {
+  return (
+    <>
+      <div class="page-head">
+        <div>
+          <h1>Could not check whether this {what} is migrated</h1>
+          <p class="lede">GitHub did not answer for {org}, so the console cannot tell whether it still uses retired names.</p>
+        </div>
+      </div>
+      <section class="panel section"><p>Open the page again to check again.</p></section>
+    </>
+  );
+}
+
 export function NotMigratedScreen({ what, org, leftovers }: { what: 'semester' | 'course'; org: string; leftovers: Leftover[] }) {
   return (
     <>

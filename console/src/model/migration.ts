@@ -3,6 +3,7 @@
 // say so, on one screen, with the engine's NOT_MIGRATED sentence. This module is the only
 // place in src/ that spells a retired name.
 
+import { parse } from 'yaml';
 import type { GitHubClient } from '../github/client';
 import { CONFIG_REPO, COURSE_REPO, INSTRUCTORS_FILE, JOIN_REPO, NAMES, REGISTRY_FILE } from './names';
 
@@ -22,7 +23,11 @@ export const RETIRED = {
   people_file: 'people.yml',
   registry_file: 'cohort-courses-pages.yml',
   semester_topic: 'dsl-cohort',
+  registry_key: 'cohorts',
+  semester_defaults: 'cohort_defaults',
 } as const;
+
+export const COURSE_META = 'dsl-course.yml';
 
 export const SEMESTER_TOPIC = 'dsl-semester';
 
@@ -49,18 +54,39 @@ export async function semesterLeftovers(client: GitHubClient, org: string, topic
   if (oldJoin && !join) out.push({ old: RETIRED.join_repo, new: JOIN_REPO });
   const repo = cfg ? CONFIG_REPO : oldCfg ? RETIRED.config_repo : null;
   const tree = repo ? await client.listTree(org, repo, 'HEAD') : null;
+  if (repo && !tree) throw new Error(`${org}/${repo} could not be listed`);
   const paths = tree?.tree.map((e) => e.path) ?? [];
   if (has(paths, RETIRED.people_file)) out.push({ old: RETIRED.people_file, new: INSTRUCTORS_FILE });
   if (has(paths, RETIRED.system_dir)) out.push({ old: `${RETIRED.system_dir}/`, new: `${NAMES.system_dir}/` });
   return out;
 }
 
-/** What a course org's `.github` still carries under a retired name: the registry and `.dsl/`. */
+/** The top-level keys of a YAML map; none when absent or unreadable (the engine reports those). */
+const keysOf = (text: string | undefined): string[] => {
+  try {
+    const d: unknown = text ? parse(text) : null;
+    return d && typeof d === 'object' && !Array.isArray(d) ? Object.keys(d) : [];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * What a course org's `.github` still carries under a retired name: the registry file or its
+ * `cohorts:` key, `cohort_defaults:` in dsl-course.yml, and `.dsl/`.
+ */
 export async function courseLeftovers(client: GitHubClient, org: string): Promise<Leftover[]> {
   const tree = await client.listTree(org, COURSE_REPO, 'HEAD');
-  const paths = tree?.tree.map((e) => e.path) ?? [];
+  if (!tree) throw new Error(`${org}/${COURSE_REPO} could not be listed`);
+  const paths = tree.tree.map((e) => e.path);
+  const [registry, meta] = await Promise.all([
+    has(paths, REGISTRY_FILE) ? client.getContents(org, COURSE_REPO, REGISTRY_FILE) : null,
+    has(paths, COURSE_META) ? client.getContents(org, COURSE_REPO, COURSE_META) : null,
+  ]);
   const out: Leftover[] = [];
   if (has(paths, RETIRED.registry_file) && !has(paths, REGISTRY_FILE)) out.push({ old: RETIRED.registry_file, new: REGISTRY_FILE });
+  if (keysOf(registry?.text).includes(RETIRED.registry_key)) out.push({ old: `${RETIRED.registry_key}:`, new: 'semesters:' });
+  if (keysOf(meta?.text).includes(RETIRED.semester_defaults)) out.push({ old: `${RETIRED.semester_defaults}:`, new: 'semester_defaults:' });
   if (has(paths, RETIRED.system_dir)) out.push({ old: `${RETIRED.system_dir}/`, new: `${NAMES.system_dir}/` });
   return out;
 }

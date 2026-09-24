@@ -34,8 +34,8 @@ import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
+import { MigrationUnknownScreen, NotMigratedScreen } from './screens/NotMigrated';
 import { StudentScreen, forgetStudentData, studentScreen } from './screens/Student';
-import { NotMigratedScreen } from './screens/NotMigrated';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
 import { Loading } from './ui/bits';
@@ -174,21 +174,30 @@ export function App({ state: s }: { state: AppState }) {
   const r = { ...route, screen };
   const ctx = resolveContext(courses, sel, r);
   const wiz = wizardOf(screen);
-  // An org still on retired names gets one screen, before anything of it is read.
-  const courseLeft = ctx.course && screen !== 'home' && wiz?.name !== 'new-course' ? s.leftovers('course', ctx.course.org) : [];
-  const semLeft = ctx.cohort && ctx.course?.write && !wiz && !(screen in COURSE_SCREENS) ? s.leftovers('semester', ctx.cohort.org) : [];
-  const unmigrated = courseLeft?.length ? { what: 'course' as const, org: ctx.course!.org, list: courseLeft } : semLeft?.length ? { what: 'semester' as const, org: ctx.cohort!.org, list: semLeft } : null;
+  // An org still on retired names gets one screen, before anything of it is read. Only the
+  // orgs the page is about are checked: a semester only when one of its screens opens.
+  const nav = s.search.value + s.hash.value;
+  const aboutCourse = !!ctx.course && screen !== 'home' && screen !== 'help' && wiz?.name !== 'new-course';
+  const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && screen !== 'home' && screen !== 'help' && !(screen in COURSE_SCREENS);
+  const courseLeft = aboutCourse ? s.leftovers('course', ctx.course!.org, nav) : [];
+  const semLeft = semesterPage ? s.leftovers('semester', ctx.cohort!.org, nav) : [];
+  const failed = courseLeft === 'failed' ? { what: 'course' as const, org: ctx.course!.org } : semLeft === 'failed' ? { what: 'semester' as const, org: ctx.cohort!.org } : null;
+  const pending = courseLeft === undefined || semLeft === undefined;
+  const unmigrated = Array.isArray(courseLeft) && courseLeft.length ? { what: 'course' as const, org: ctx.course!.org, list: courseLeft } : Array.isArray(semLeft) && semLeft.length ? { what: 'semester' as const, org: ctx.cohort!.org, list: semLeft } : null;
+  const blocked = !!unmigrated || !!failed || pending;
   const cohortStates: Record<string, Loaded> = {};
-  const wanted = unmigrated || courseLeft === undefined ? [] : screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
+  const wanted = blocked ? [] : screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
   for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org).value;
-  const cohortLoaded = ctx.cohort && ctx.course?.write && !unmigrated && semLeft !== undefined ? s.statuses.cohort(ctx.cohort.org).value : undefined;
+  const cohortLoaded = ctx.cohort && ctx.course?.write && !blocked ? s.statuses.cohort(ctx.cohort.org).value : undefined;
   const problems = cohortLoaded?.kind === 'ready' ? (cohortLoaded.status.problems ?? []).length : 0;
   const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
 
   let body;
   if (unmigrated) {
     body = <NotMigratedScreen what={unmigrated.what} org={unmigrated.org} leftovers={unmigrated.list} />;
-  } else if (courseLeft === undefined || semLeft === undefined) {
+  } else if (failed) {
+    body = <MigrationUnknownScreen what={failed.what} org={failed.org} />;
+  } else if (pending) {
     body = <Loading what="Opening" />;
   } else if (wiz?.name === 'new-course') {
     body = <NewCourseScreen files={s.files} step={wiz.step} />;
@@ -201,7 +210,7 @@ export function App({ state: s }: { state: AppState }) {
   } else if (!ctx.course.write) {
     body = <ReadonlyScreen course={ctx.course} cohort={ctx.cohort} />;
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
+    const cp: CourseProps = { migrated: Array.isArray(courseLeft) && !courseLeft.length, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
@@ -261,7 +270,7 @@ export function createState({ auth, client }: AppDeps) {
   const files = new LiveFiles(client);
   const beats = new Map<string, ReturnType<typeof signal<Heartbeat | null | undefined>>>();
   const archived = new Map<string, ReturnType<typeof signal<boolean | undefined>>>();
-  const left = new Map<string, ReturnType<typeof signal<Leftover[] | undefined>>>();
+  const left = new Map<string, { sig: ReturnType<typeof signal<Leftover[] | 'failed' | undefined>>; nav: string }>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
     onFinished: (def) => {
@@ -319,18 +328,21 @@ export function createState({ auth, client }: AppDeps) {
       }
       return a.value;
     },
-    /** What an org still carries under a retired name, read once on first ask; undefined until it answers. */
-    leftovers(kind: 'course' | 'semester', org: string): Leftover[] | undefined {
+    /**
+     * What an org still carries under a retired name; undefined until it answers. An answer is
+     * kept; a check that failed is 'failed' until the next navigation (`nav` changes), which
+     * asks again. A failure is never taken for "migrated".
+     */
+    leftovers(kind: 'course' | 'semester', org: string, nav: string): Leftover[] | 'failed' | undefined {
       const k = `${kind}:${org.toLowerCase()}`;
       let l = left.get(k);
-      if (!l) {
-        const sig = signal<Leftover[] | undefined>(undefined);
-        l = sig;
-        left.set(k, sig);
-        // A check that fails says nothing: the screens then show what they can read.
-        void (kind === 'course' ? courseLeftovers(client, org) : semesterLeftovers(client, org)).then((v) => (sig.value = v), () => (sig.value = []));
+      if (!l || (l.sig.value === 'failed' && l.nav !== nav)) {
+        const sig = signal<Leftover[] | 'failed' | undefined>(undefined);
+        l = { sig, nav };
+        left.set(k, l);
+        void (kind === 'course' ? courseLeftovers(client, org) : semesterLeftovers(client, org)).then((v) => (sig.value = v), () => (sig.value = 'failed'));
       }
-      return l.value;
+      return l.sig.value;
     },
     async rediscover() {
       try {

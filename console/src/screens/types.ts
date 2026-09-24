@@ -27,6 +27,8 @@ export interface ReadyProps extends CohortProps {
 }
 
 export interface CourseProps {
+  /** The course's names were checked and are current; saves wait for it. Absent in render tests. */
+  migrated?: boolean;
   course: Course;
   loaded: Loaded; // the course's public status
   cohortStates: Record<string, Loaded>;
