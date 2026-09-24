@@ -6,9 +6,9 @@ the order of `maintainers.md`'s "Migration" table."""
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 import yaml
@@ -483,9 +483,63 @@ def test_a_course_default_under_the_old_format_key_is_not_read():
 # ------------------------------------------------ preview (dry_run, write) and notify
 
 
-def _preview_clis() -> set[str]:
-    root = Path(__file__).resolve().parents[1] / "dsl_course"
-    return {p.stem for p in root.glob("*.py") if "add_preview_flag(" in p.read_text()}
+class _Parsed(Exception):
+    def __init__(self, parser):
+        self.parser = parser
+
+
+def _preview_clis(monkeypatch) -> set[str]:
+    """Every CLI module whose PARSER takes `--preview`, read off the parser each `main()`
+    builds - not off its source text - so a CLI that grows the flag any other way is in."""
+    import importlib
+    import pkgutil
+
+    import dsl_course
+    from dsl_course.log import CLIParser
+
+    def caught(self, args=None, namespace=None):
+        raise _Parsed(self)
+
+    monkeypatch.setattr(CLIParser, "parse_known_args", caught)
+    monkeypatch.setattr(sys, "argv", ["cli"])
+    found = set()
+    for info in pkgutil.iter_modules(dsl_course.__path__):
+        module = importlib.import_module(f"dsl_course.{info.name}")
+        if not callable(getattr(module, "main", None)):
+            continue
+        try:
+            module.main()
+        except _Parsed as got:
+            if "--preview" in got.parser._known_flags():
+                found.add(info.name)
+        except Exception:
+            continue
+    return found
+
+
+def _invocations(run: str, cli: str) -> list[str]:
+    """Each run of `python3 -m dsl_course.<cli>` in a run block, as the text that decides
+    its flags: the command itself (with its continuation lines), plus - when it passes an
+    `args` array - every line before it that builds that array."""
+    lines = run.splitlines()
+    out = []
+    for i, line in enumerate(lines):
+        if not re.search(rf"-m dsl_course\.{cli}(\s|\"|$)", line):
+            continue
+        own = [line]
+        j = i
+        while own[-1].rstrip().endswith("\\") and j + 1 < len(lines):
+            j += 1
+            own.append(lines[j])
+        text = "\n".join(own)
+        if "${args[@]}" in text:
+            text += "\n" + "\n".join(
+                earlier
+                for earlier in lines[:i]
+                if re.search(r"(^|\W)args\+?=\(", earlier)
+            )
+        out.append(text)
+    return out
 
 
 def test_every_cli_previews_unless_told_otherwise(monkeypatch, capsys):
@@ -515,22 +569,76 @@ def test_every_cli_previews_unless_told_otherwise(monkeypatch, capsys):
     )
 
 
-def test_every_rendered_run_of_a_previewing_cli_says_which_it_is():
-    # The CLI default is preview, so a rendered step that spelt neither flag would preview
-    # for ever on a green run - a cron that released nothing, a roster push that sent no
-    # codes. Every step that runs one of those CLIs spells `--preview` or `--no-preview`.
-    clis = _preview_clis()
-    assert {"scheduler", "assign", "enrol_codes", "sync_membership"} <= clis
+def test_every_rendered_run_of_a_previewing_cli_says_which_it_is(monkeypatch):
+    # The CLI default is preview, so a rendered command that spelt neither flag would
+    # preview for ever on a green run - a cron that released nothing, a roster push that
+    # sent no codes. Checked per INVOCATION: each one spells `--preview` or `--no-preview`,
+    # and every one in a job that runs unattended (no check-team gate: a cron, a
+    # repository_dispatch, a config push) spells `--no-preview`.
+    clis = _preview_clis(monkeypatch)
+    assert {
+        "scheduler",
+        "assign",
+        "enrol_codes",
+        "sync_membership",
+        "collect",
+        "deploy",
+        "teardown",
+        "archive",
+    } <= clis
+    seen = 0
     for name, rendered in ALL_RENDERED.items():
         for job in (yaml.safe_load(rendered).get("jobs") or {}).values():
+            unattended = "check-team" not in str(job.get("needs", ""))
             for step in job.get("steps") or []:
                 run = str(step.get("run") or "")
                 for cli in clis:
-                    if (
-                        f"-m dsl_course.{cli} " in run
-                        or f"-m dsl_course.{cli}\n" in run
-                    ):
-                        assert "--no-preview" in run or "--preview" in run, (name, cli)
+                    for text in _invocations(run, cli):
+                        seen += 1
+                        assert "--no-preview" in text or "--preview" in text, (
+                            name,
+                            cli,
+                        )
+                        if unattended and cli != "console":
+                            assert "--no-preview" in text, (name, cli, "unattended")
+    assert seen >= 15
+
+
+@pytest.mark.parametrize("event", ["schedule", "repository_dispatch"])
+def test_the_scheduler_acts_on_every_unattended_arrival(event):
+    from test_renderers import _args_under_bash
+
+    from dsl_course import workflows_render as w
+
+    gate = "args=()\n" + w._SCHEDULED_PREVIEW_GATE
+    for preview in ("", "true", "false"):
+        got = _args_under_bash(gate, {"EVENT": event, "PREVIEW": preview})
+        assert got == ["--no-preview"], (event, preview)
+    press = {"EVENT": "workflow_dispatch"}
+    assert _args_under_bash(gate, press | {"PREVIEW": ""}) == ["--preview"]
+    assert _args_under_bash(gate, press | {"PREVIEW": "false"}) == ["--no-preview"]
+
+
+def test_every_console_op_acts_only_when_asked_and_says_so():
+    from dsl_course.ops.registry import command
+    from dsl_course.ops.request import Request
+
+    for op in REGISTRY.values():
+        if not op.preview_flag:
+            continue
+        args = {
+            "course_source_repo": "a1",
+            "entry": "s5",
+            "number": "1",
+            "semester": "f2026",
+        }
+        real = command(op, Request(op.name, "prof", "C", "S", args, False))
+        preview = command(op, Request(op.name, "prof", "C", "S", args, True))
+        assert "--preview" in preview, op.name
+        if op.name == "cohort.preview_automation":
+            assert "--no-preview" not in real
+        else:
+            assert real[-1] == "--no-preview", op.name
 
 
 def test_every_button_previews_by_default_and_no_old_box_is_left():
