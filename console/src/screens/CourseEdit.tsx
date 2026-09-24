@@ -274,16 +274,19 @@ export function WebsiteScreen(p: CourseProps) {
 // --------------------------------------------------------------------------- materials repo settings
 
 function FileList({ files, patterns, cls, tag }: { files: string[]; patterns: string[]; cls: string; tag: string }) {
-  const shown = files.slice(0, 400);
   const rules = compileAll(patterns);
+  const hits = files.filter((f) => matchRules(rules, f));
+  const shown = hits.slice(0, 400);
   return (
-    <ul class="file-list">
-      {shown.map((f) => {
-        const hit = matchRules(rules, f);
-        return <li class={hit ? 'hit' : ''}><span>{f}</span>{hit ? <span class={`tag ${cls}`}>{tag}</span> : null}</li>;
-      })}
-      {files.length > shown.length ? <li>… and {files.length - shown.length} more</li> : null}
-    </ul>
+    <>
+      <p class="hint">{hits.length} of {files.length} files</p>
+      {hits.length ? (
+        <ul class="file-list">
+          {shown.map((f) => <li class="hit"><span>{f}</span><span class={`tag ${cls}`}>{tag}</span></li>)}
+          {hits.length > shown.length ? <li>… and {hits.length - shown.length} more</li> : null}
+        </ul>
+      ) : <p class="footnote">No file matches yet</p>}
+    </>
   );
 }
 
