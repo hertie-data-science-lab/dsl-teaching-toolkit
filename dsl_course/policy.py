@@ -220,3 +220,14 @@ def load() -> dict:
 def defaults() -> dict:
     """The institution's defaults block."""
     return load()["defaults"]
+
+
+def kinds() -> list[dict]:
+    """The row kinds, in display order: `key`, `label`, `colour`, `background`, `system`."""
+    return load()["kinds"]
+
+
+def content_kinds() -> tuple[str, ...]:
+    """The kinds a `releases:` entry may declare (every kind the engine does not create
+    rows for itself), in display order."""
+    return tuple(k["key"] for k in kinds() if not k["system"])

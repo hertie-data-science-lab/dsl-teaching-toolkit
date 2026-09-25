@@ -11,8 +11,9 @@ lifecycle, `events` are display-only calendar rows.
         event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
         title: Linear regression           # the session's name - the site's TITLE column
         details: Least squares by hand     # its DETAILS column, and the session's own page
-        type: lecture                      # optional override: lecture/lab/readings.
-                                           # Omitted, the deploy path decides, as before.
+        kind: lecture                      # optional: a policy kind (lecture, lab,
+                                           # readings, ...). Omitted, inferred from
+                                           # the folder the first copy lands in.
         show_on_site: true                 # optional (default true) - false deploys
         deploy:                            # silently, off the site's schedule.
           - course_source_repo: course-materials-f2026   # course_source_repo + course_source_path
@@ -319,23 +320,16 @@ class Release:
     # under the session's heading on the Lectures/Labs/Readings tabs. One word per column:
     # `title` is the Title cell everywhere, `details` the Details cell everywhere.
     details: str = ""
-    # Which schedule row this entry belongs to: 'lecture' | 'lab' | 'readings', or ""
-    # to infer it from where the deploys LAND, which is what every semester relies on today.
-    # An override for an entry whose destination path cannot say - materials that belong
-    # to a lab but do not land under `labs/`. It travels with the DESTINATION
-    # (`schedule_plan.dest_row_kind`), so the plan and the discovered folder place the
-    # same row rather than one each.
-    # 'readings' names no row of its own, exactly as a `readings-N` label does.
+    # The row's kind, one of the policy's content kinds, or "" to infer it once from the
+    # section its first copy lands in (`schedule_plan.entry_kind`).
     kind: str = ""
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
     tbc: bool = False
-    # `show_on_site: false` = a SILENT release: it deploys exactly as written, but tells
-    # the site's schedule nothing - no date, no title, no not-yet-released placeholder.
-    # For content that ships against a session without being an occasion of its own, a
-    # session's readings being the case it exists for: they land in the same site row as
-    # that session's lecture, and an entry dated a week earlier than the class would
-    # otherwise pull the row's date - and its name - back to the day the PDFs went up.
+    # `show_on_site: false` = a SILENT release: it deploys exactly as written and stays
+    # off the site's schedule and Updates box - no date, no not-yet-released placeholder.
+    # Once its files have landed it is listed on its kind's tab (a week's readings), unless
+    # all it landed is root files (the syllabus), which are course documents.
     # Default true: an entry says what it is on the schedule unless faculty opt out.
     show_on_site: bool = True
 
@@ -657,10 +651,9 @@ RENAMED_ROW_KEYS = {"type": "kind"}
 RETIRED_RELEASE_KEYS = {
     "assignment": "an assignment hands out at its `assignments.<key>.handout_datetime`",
 }
-# What `releases.<label>.kind` may say. 'readings' is here and is not a row: it declares
-# that the entry belongs to no session row of its own, exactly as a `readings-N` label
-# does (`schedule_plan._LABEL_ROW_KINDS`, which is the one table both routes read).
-KNOWN_ROW_KINDS = frozenset({"lecture", "lab", "readings"})
+# What `releases.<label>.kind` may say: the policy's content kinds (`policy.yml` `kinds:`,
+# every kind the engine does not create rows for itself). Anything else lands on `other`.
+KNOWN_ROW_KINDS = frozenset(policy.content_kinds())
 KNOWN_DEPLOY = frozenset(
     {
         "course_source_repo",
@@ -977,11 +970,9 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
     the site row "(TBC)". An entry with no date and no tbc can never fire or be shown,
     so it's dropped.
 
-    `type:` is an OPTIONAL override of which row the entry belongs to. Left out - which is
-    every semester today - the row is placed by where the deploys land, unchanged. A value
-    that is not a known row type is flagged and ignored rather than dropping the entry:
-    the cost of a typo here is a row in the wrong column, never a session missing from the
-    schedule."""
+    `kind:` is the row's kind (the policy's content kinds). Left out, it is inferred once
+    from where the first copy lands (`schedule_plan.entry_kind`). A value the policy does
+    not know is flagged and shown as `other` rather than dropping the entry."""
     out: list[Release] = []
     mapping = _require_mapping(
         raw, drops, "releases", "label", "the whole release plan is ignored"
@@ -1045,39 +1036,18 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
             )
         kind = str(entry.get("kind") or "").strip().lower()
         if kind and kind not in KNOWN_ROW_KINDS:
-            # Flagged, not dropped, and not obeyed: the entry keeps its row, placed by
-            # where its files land exactly as an entry that declared no type at all. A
-            # typo'd override must not be able to take a session off the schedule.
+            # Flagged, not dropped: the entry keeps its row, under `other`, so a typo
+            # cannot take a session off the site.
             _flag_bad_value(
                 drops,
                 where,
                 "kind",
                 kind,
-                "the row is placed by where its deploys land, as if no kind were "
-                f"declared (expected one of {', '.join(sorted(KNOWN_ROW_KINDS))})",
+                f"the row is shown as `{policy.FALLBACK_KIND}` (expected one of "
+                f"{', '.join(policy.content_kinds())})",
                 lines,
             )
-            kind = ""
-        if kind == "readings":
-            # `type: readings` says the entry claims no row of its own, so its display
-            # text has nowhere to render: the session's row is named and described by the
-            # entry that RAISES it, and a readings entry only folds its destinations in.
-            # Kept-but-ignored, like an unknown key or an unusable value - the entry
-            # deploys exactly as written. Flagged rather than swallowed because faculty
-            # writing a title here are not making a typo: docs/07 offers both fields on
-            # any `releases:` entry, so they are writing prose they expect to read on the
-            # schedule, and an empty cell is the one outcome they cannot tell apart from
-            # a rendering bug.
-            for key in ("title", "details"):
-                if str(entry.get(key) or "").strip():
-                    drops.note(
-                        where,
-                        key,
-                        "ignored, because a `type: readings` entry claims no row of its "
-                        "own - so nothing on the site shows this. Write it on the entry "
-                        "that raises the session's row instead",
-                        lines,
-                    )
+            kind = policy.FALLBACK_KIND
         out.append(
             Release(
                 label=str(label),

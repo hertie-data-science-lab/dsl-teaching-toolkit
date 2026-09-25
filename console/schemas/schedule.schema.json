@@ -150,8 +150,11 @@
           },
           "kind": {
             "enum": [
+              "drop-in",
+              "exam",
               "lab",
               "lecture",
+              "other",
               "readings"
             ],
             "type": "string"
