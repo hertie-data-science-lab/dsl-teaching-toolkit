@@ -1,5 +1,7 @@
 # SYSTEM-OWNED - do not edit. This form's field ids are a contract with .github/workflows/team-formation.yml,
 # which parses them; both are re-pushed by every bootstrap and nightly refresh.
+# The student console opens the same issue through the API, with this form's body under a
+# hidden first line, `<!-- dsl:join-team -->`, which routes it in place of the label.
 name: Join team
 description: Join or form a team for a group assignment
 title: "Join team"

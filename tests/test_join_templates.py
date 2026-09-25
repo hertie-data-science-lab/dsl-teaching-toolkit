@@ -88,6 +88,33 @@ def test_workflows_are_gated_on_the_forms_labels():
     )
     assert form["labels"] == ["onboarding"]
     assert team_form["labels"] == ["team-formation"]
+
+
+def test_an_api_opened_issue_is_routed_by_its_hidden_first_line():
+    # GitHub drops a form label on an issue an account without push creates through the
+    # API, so the student console's Join issues carry a marker line instead. Each workflow
+    # matches its own marker at the START of the body, and each form names it.
+    for rel, job, label, marker, form in (
+        (
+            "onboard.yml",
+            "onboard",
+            "onboarding",
+            course.JOIN_COURSE_MARKER,
+            "01-join-course.yml",
+        ),
+        (
+            "team-formation.yml",
+            "form-team",
+            "team-formation",
+            course.JOIN_TEAM_MARKER,
+            "02-join-team.yml",
+        ),
+    ):
+        gate = yaml.safe_load((WELCOME / rel).read_text())["jobs"][job]["if"]
+        assert f"contains(github.event.issue.labels.*.name, '{label}')" in gate
+        assert f"startsWith(github.event.issue.body, '{marker}')" in gate
+        assert marker in (WELCOME / "ISSUE_TEMPLATE" / form).read_text()
+    assert course.JOIN_COURSE_MARKER != course.JOIN_TEAM_MARKER
     # writes to the private roster repo, not a public one
     assert "semester-config" in (WELCOME / "team-formation.yml").read_text()
 

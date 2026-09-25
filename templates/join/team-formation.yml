@@ -48,8 +48,12 @@ permissions:
 jobs:
   form-team:
     # Routed by the FORM's label, not the title: the title is a fixed default the student
-    # never edits (this workflow retitles the issue from the author + form fields).
-    if: contains(github.event.issue.labels.*.name, 'team-formation')
+    # never edits (this workflow retitles the issue from the author + form fields). An
+    # issue the student console opens through the API has no label (GitHub drops it for an
+    # author without push), so its hidden first line routes it instead.
+    if: >-
+      contains(github.event.issue.labels.*.name, 'team-formation') ||
+      startsWith(github.event.issue.body, '<!-- dsl:join-team -->')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

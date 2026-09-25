@@ -2,6 +2,10 @@
   "assignments_file": "assignments.yml",
   "config_repo": "semester-config",
   "instructors_file": "instructors.yml",
+  "join_markers": {
+    "join_course": "<!-- dsl:join-course -->",
+    "join_team": "<!-- dsl:join-team -->"
+  },
   "join_repo": "join",
   "records": {
     "archive": ".system/archive.md",

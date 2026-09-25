@@ -50,8 +50,12 @@ permissions:
 jobs:
   onboard:
     # Routed by the FORM's label, not the title: the title is a fixed default the student
-    # never edits (this workflow retitles the issue from the authenticated author).
-    if: contains(github.event.issue.labels.*.name, 'onboarding')
+    # never edits (this workflow retitles the issue from the authenticated author). An
+    # issue the student console opens through the API has no label (GitHub drops it for an
+    # author without push), so its hidden first line routes it instead.
+    if: >-
+      contains(github.event.issue.labels.*.name, 'onboarding') ||
+      startsWith(github.event.issue.body, '<!-- dsl:join-course -->')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

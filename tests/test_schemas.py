@@ -274,8 +274,13 @@ def test_names_json_is_the_engines_own_names():
     names = schemas.names_json()
     assert set(names) == {
         "config_repo", "join_repo", "system_dir", "instructors_file",
-        "assignments_file", "registry_file", "records",
+        "assignments_file", "registry_file", "records", "join_markers",
     }  # fmt: skip
+    assert names["join_markers"] == {
+        "join_course": course.JOIN_COURSE_MARKER,
+        "join_team": course.JOIN_TEAM_MARKER,
+    }
+    assert names["records"]["student_status"] == ".system/student-status.json"
     assert (names["config_repo"], names["join_repo"]) == (
         course.CONFIG_REPO,
         course.JOIN_REPO,

@@ -28,7 +28,9 @@ from .course import (
     FORMATS,
     INSTRUCTOR_ROLES,
     INSTRUCTORS_FILE,
+    JOIN_COURSE_MARKER,
     JOIN_REPO,
+    JOIN_TEAM_MARKER,
     LABELS,
     PUBLISH_FILE,
     SOLUTION_WARNING,
@@ -597,6 +599,11 @@ def names_json() -> dict:
         "assignments_file": ASSIGNMENTS_FILE,
         "registry_file": SEMESTERS_PATH,
         "records": {kind: records.path(kind) for kind in records.RECORDS},
+        # The hidden first line that routes a Join issue opened through the API.
+        "join_markers": {
+            "join_course": JOIN_COURSE_MARKER,
+            "join_team": JOIN_TEAM_MARKER,
+        },
     }
 
 
