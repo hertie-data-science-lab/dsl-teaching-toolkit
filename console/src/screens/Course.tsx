@@ -7,6 +7,7 @@ import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { assignmentIdent } from '../model/format';
+import { questionPoints, questionsFromRows } from '../model/marks';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { fromConfig, settingsTiers, toConfig, type CourseDefaults } from '../tiers/grading';
@@ -232,7 +233,7 @@ export function TemplateScreen(p: CourseProps) {
   const tiers = settingsTiers(defaults, newest ? `?cohort=${newest.org}#assignment-${slug}/teams` : undefined);
   const base = fromConfig(cfg);
   const cur = values ?? base;
-  const baseQ: [string, string][] = cfg.questions && typeof cfg.questions === 'object' ? Object.entries(cfg.questions as Record<string, unknown>).map(([q, n]) => [q, String(n ?? '')]) : [];
+  const baseQ: [string, string][] = cfg.questions && typeof cfg.questions === 'object' ? Object.entries(cfg.questions as Record<string, unknown>).map(([q, n]) => [q, String(questionPoints(n) ?? '')]) : [];
   const q = qdraft ?? baseQ;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = (values !== null && !deepEqual(effective(tiers, values), effective(tiers, base))) || (qdraft !== null && !deepEqual(qdraft, baseQ));
@@ -245,8 +246,7 @@ export function TemplateScreen(p: CourseProps) {
     const was = toConfig(effective(tiers, base)), now = toConfig(effective(tiers, cur));
     for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
     if (qdraft !== null && !deepEqual(qdraft, baseQ)) {
-      const rows = qdraft.filter(([name]) => name.trim());
-      y.assign(['questions'], rows.length ? Object.fromEntries(rows.map(([name, n]) => [name.trim(), n === '' ? null : Number.isFinite(Number(n)) ? Number(n) : n])) : undefined);
+      y.assign(['questions'], questionsFromRows(qdraft, cfg.questions));
     }
     if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
     if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the Instructor Console`, statusRepo: [course.org, COURSE_REPO] })) {

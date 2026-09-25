@@ -343,6 +343,17 @@ describe('S2 course and S17 template', () => {
     expect(out).toContain('/edit/solution/grading_config.yml');
     expect(out).toContain('Derive student version');
   });
+  it('shows a question marked from another file by its points', () => {
+    const tagged = new StaticFiles(
+      { [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING.replace('analysis: 30', 'analysis: {points: 30, file: report.tex}') },
+      {},
+      TREE,
+    );
+    const out = html(<TemplateScreen {...cp} files={tagged} entry="assignment-3" />);
+    expect(out).toContain('value="30"');
+    expect(out).toContain('<td>50</td>');
+    expect(out).not.toContain('[object Object]');
+  });
 });
 
 describe('read only and the shell', () => {

@@ -8,7 +8,7 @@ import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { ASSIGNMENT_WORD, assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
-import { cellValue, finalGrade, gradebookWrites, penaltyRate, penaltyText, readSheet, returnedOn, round, scoreTotal, type Unit } from '../model/marks';
+import { cellValue, finalGrade, gradebookWrites, penaltyRate, penaltyText, questionFile, questionPoints, readSheet, returnedOn, round, scoreTotal, type Unit } from '../model/marks';
 import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
@@ -54,7 +54,7 @@ export function MarksTab(p: TabProps) {
   const qs = questions ? Object.entries(questions) : [];
   const rateText = cfg.late_penalty_per_day ?? courseDefault(p, 'late_penalty_per_day') ?? '10%';
   const rate = penaltyRate(rateText);
-  const max = qs.reduce((s, [, n]) => s + (Number(n) || 0), 0);
+  const max = qs.reduce((s, [, n]) => s + (Number(questionPoints(n)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
   const scope = cohortScope(p);
   const head = (
@@ -96,7 +96,7 @@ export function MarksTab(p: TabProps) {
     const days = u.info?.days_late;
     const nosub = u.info !== null && !u.info?.submitted;
     const scoreCells = qs.length
-      ? qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q} (out of ${m}) for ${u.key}`)}</td>)
+      ? qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q} (out of ${String(questionPoints(m) ?? '')}) for ${u.key}`)}</td>)
       : [<td>{input(u.scorePath, typeof u.score === 'object' ? null : u.score, 'q', `Score for ${u.key}`)}</td>];
     const sys = [
       <td class="sys">{info(u, 'submitted').replace('T', ' ') || (u.info ? 'Nothing' : '—')}</td>,
@@ -167,7 +167,7 @@ export function MarksTab(p: TabProps) {
             </tr>
             <tr>
               <th class="sys">Submitted</th><th class="sys">Days late</th><th class="sys">Tests</th><th class="sys">Completion</th>
-              {qs.length ? qs.map(([q, m]) => <th>{q}<span class="grp">/ {String(m)}</span></th>) : <th>{max ? `/ ${max}` : 'score'}</th>}
+              {qs.length ? qs.map(([q, m]) => <th>{q}<span class="grp">/ {String(questionPoints(m) ?? '')}{questionFile(m) ? ` · ${questionFile(m)}` : ''}</span></th>) : <th>{max ? `/ ${max}` : 'score'}</th>}
             </tr>
           </thead>
           <tbody>{rows}</tbody>
