@@ -607,12 +607,13 @@ def retired_course_faults(
     return [
         ConfigFault(
             COURSE_CONFIG,
-            f"`{key}:` is no longer read (decision 0009)",
+            f"`{key}:` is no longer read - remove it",
             field=key,
             file=COURSE_CONFIG,
             in_repo=".github",
             lineno=line_of(lines or {}, key),
-            fix_text="run the migration, which removes it",
+            fix_text=f"delete the `{key}:` line, or run the migration "
+            "(`python -m dsl_course.migrate`), which strips it",
             code=NOT_MIGRATED,
         )
         for key in RETIRED_COURSE_KEYS
