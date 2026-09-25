@@ -508,10 +508,10 @@
             "type": "string"
           },
           "kind": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
+          },
+          "kind_inferred": {
+            "type": "boolean"
           },
           "show_on_site": {
             "type": "boolean"

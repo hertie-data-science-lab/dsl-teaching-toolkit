@@ -60,7 +60,6 @@ from .course import (
     COURSE_CONFIG,
     INSTRUCTORS_TEAM,
     JOIN_REPO,
-    MATERIALS_REPO_PREFIX,
     PUBLISH_FILE,
     SOLUTION_BRANCH,
     active_today,
@@ -86,10 +85,12 @@ from .gh_contents import (
 )
 from .gh_teams import get_team_members
 from .ghcli import gh
+from .materials import DEFAULT_SYLLABUS, Declared, is_materials_repo
+from .materials import read as read_materials
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
 from .repos import default_branch
-from .schedule_plan import deploy_dest, deploy_section, row_kind
+from .schedule_plan import deploy_dest, entry_kind
 from .sync_teams import known_handles
 
 # Where each file lives, inside `semester-config` (semester) or `.github` (course).
@@ -97,7 +98,6 @@ STATUS_PATH = records.path("status")
 # How many recent operations the semester file lists.
 RECENT_OPERATIONS = 10
 
-SYLLABUS_FILE = "SYLLABUS.md"
 README_FILE = "README.md"
 SITE_HOME = "index.md"
 
@@ -143,11 +143,14 @@ class TemplateFacts:
 
 @dataclass
 class MaterialsFacts:
-    """One `course-materials-*` repo, as far as C4 asks about it."""
+    """One materials repo (topic `dsl-materials`), as far as C4 asks about it.
+    `syllabus` is the declared syllabus's text when it is markdown, "" when it is another
+    file that is there (a PDF), None when it is absent."""
 
     repo: str
     syllabus: str | None = None
     has_publish: bool = False
+    syllabus_path: str = DEFAULT_SYLLABUS
 
 
 @dataclass
@@ -202,6 +205,9 @@ class SemesterFacts:
     # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
+    # `{source repo: its materials.yml folder aliases}` - what an undeclared kind is
+    # inferred through.
+    aliases: dict[str, dict[str, str]] = field(default_factory=dict)
     site_home: str | None = None
     site_last_update: datetime | None = None
     config_last_update: datetime | None = None
@@ -607,9 +613,15 @@ def _written(text: str | None) -> bool:
     return bool(text and text.strip()) and not is_untouched_stub(text or "")
 
 
+def _syllabus_written(m: MaterialsFacts) -> bool:
+    """The declared syllabus is there, and a markdown one is no longer our stub."""
+    return m.syllabus == "" or _written(m.syllabus)
+
+
 def materials_state(m: MaterialsFacts) -> str:
-    """C4, per repo: `ready` once SYLLABUS.md is written and publish.yml is there."""
-    return "ready" if _written(m.syllabus) and m.has_publish else TODO
+    """C4, per repo: `ready` once its declared syllabus is written and publish.yml is
+    there."""
+    return "ready" if _syllabus_written(m) and m.has_publish else TODO
 
 
 def template_state(t: TemplateFacts) -> str:
@@ -682,8 +694,10 @@ def render_course(
 
 
 def _materials_why(m: MaterialsFacts) -> str:
-    if not _written(m.syllabus):
-        return f"{m.repo}'s SYLLABUS.md is still the placeholder"
+    if m.syllabus is None:
+        return f"{m.repo} has no {m.syllabus_path} yet"
+    if not _syllabus_written(m):
+        return f"{m.repo}'s {m.syllabus_path} is still the placeholder"
     return f"{m.repo} has no {PUBLISH_FILE} yet"
 
 
@@ -777,14 +791,6 @@ def release_state(
     if not release.deploy and release.when is not None and release.when <= now:
         return "released"
     return "planned"
-
-
-def _release_kind(release: schedule.Release) -> str | None:
-    if release.kind:
-        return release.kind
-    if release.deploy:
-        return row_kind(deploy_section(release.deploy[0]))
-    return None
 
 
 def sheet_counts(
@@ -946,11 +952,15 @@ def render_releases(
     for r in facts.sched.releases:
         own = [f for f in faults if f.is_source and f.where == f"releases.{r.label}"]
         first = r.deploy[0] if r.deploy else None
+        kind, inferred = entry_kind(r, lambda repo: facts.aliases.get(repo, {}))
         rows.append(
             {
                 "id": r.label,
                 "when": _iso(r.when),
-                "kind": _release_kind(r),
+                # Inferred when the entry declares none, and said so: the console shows
+                # it for the instructor to confirm once.
+                "kind": kind,
+                "kind_inferred": inferred,
                 "title": r.title,
                 "state": release_state(r, facts, own, now),
                 "source": {
@@ -1270,6 +1280,34 @@ def _last_commit_at(org: str, repo: str, path: str = "") -> datetime | None:
         return None
 
 
+def _declaration(org: str, repo: str) -> Declared:
+    """`repo`'s `materials.yml`, or the defaults when it does not parse: the status is no
+    place to stop over it, and the site sync names the fault."""
+    try:
+        return read_materials(org, repo)
+    except (ValueError, yaml.YAMLError):
+        return Declared()
+
+
+def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
+    """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
+    only looked for) and whether it has a publish.yml."""
+    path = _declaration(course_org, repo).syllabus
+    if path.lower().endswith((".md", ".markdown")):
+        syllabus = get_file_content(course_org, repo, path)
+    else:
+        tree = repo_path_shas(
+            course_org, repo, default_branch(course_org, repo, fallback="main")
+        )
+        syllabus = "" if path in (tree or {}) else None
+    return MaterialsFacts(
+        repo,
+        syllabus,
+        get_file_content(course_org, repo, PUBLISH_FILE) is not None,
+        path,
+    )
+
+
 def gather_course(course_org: str) -> CourseFacts:
     """Read the course org. A listing or tree that could not be read raises: a status that
     reported an unreadable org as an empty one would tell the console to start again."""
@@ -1288,14 +1326,8 @@ def gather_course(course_org: str) -> CourseFacts:
         row = listing[name]
         if row.get("archived"):
             continue
-        if name.startswith(MATERIALS_REPO_PREFIX):
-            facts.materials.append(
-                MaterialsFacts(
-                    name,
-                    get_file_content(course_org, name, SYLLABUS_FILE),
-                    get_file_content(course_org, name, PUBLISH_FILE) is not None,
-                )
-            )
+        if is_materials_repo(row):
+            facts.materials.append(_materials_facts(course_org, name))
         elif name.startswith("assignment-") and row.get("isTemplate"):
             t = TemplateFacts(name, get_file_content(course_org, name, README_FILE))
             text = get_file_content(
@@ -1409,6 +1441,10 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
                 semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
             )
     facts.returned_at = _returned_at(semester_org)
+    for repo in sorted(
+        {d.course_source_repo for r in sched.releases for d in r.deploy}
+    ):
+        facts.aliases[repo] = dict(_declaration(course_org, repo).kinds)
     for repo in sorted(
         {d.semester_dest_repo for r in sched.releases for d in r.deploy}
     ):

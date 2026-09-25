@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 from datetime import date, datetime, timedelta
 from functools import cache
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -16,10 +17,9 @@ import yaml
 from dsl_course import (
     course,
     discovery,
-    gh_contents,
     ghcli,
     grades,
-    schedule_plan,
+    materials,
     settings,
     site,
     site_repo,
@@ -35,7 +35,7 @@ from dsl_course.schedule import (
 )
 from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
-from tests.conftest import BareOrigins, entry_links
+from tests.conftest import BareOrigins
 
 UTC = ZoneInfo("UTC")
 
@@ -75,90 +75,6 @@ def _noacting_login(monkeypatch):
 
 def _sched(releases: list[Release]) -> Schedule:
     return Schedule(releases=releases)
-
-
-# A RELEASED row - non-empty sources, so these pin the released branch rather than the
-# placeholder one (they read `[]` before the placeholder branch existed, which silently
-# moved their subject).
-RELEASED = [("materials", "lectures", "02_week-2")]
-
-
-def _row(when, **kw):
-    """The plan's view of a row - what `_lecture_entry` renders from. Built here so a test
-    states only the plan fields it is actually about."""
-    return schedule_plan.PlannedRow(when=when, **kw)
-
-
-def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
-    monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    md = site._lecture_entry(
-        "Semester",
-        "2",
-        _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)),
-        RELEASED,
-        hosted={},
-    )
-    assert "date: 2026-09-15T14:30:00" in md
-    assert "not yet released" not in md
-
-
-def test_lecture_entry_falls_back_to_0900_for_a_bare_date(monkeypatch):
-    monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    md = site._lecture_entry(
-        "Semester", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
-    )
-    assert "date: 2026-09-15T09:00:00" in md
-
-
-def test_lecture_entry_renders_a_lab_row_as_its_own_type(monkeypatch):
-    monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    md = site._lecture_entry(
-        "Semester", "3", _row(date(2026, 9, 17)), RELEASED, "lab", hosted={}
-    )
-    assert "type: lab" in md
-    assert 'title: "Lab 3"' in md
-    assert "Session 3" not in md
-    lec = site._lecture_entry(
-        "Semester", "3", _row(date(2026, 9, 15)), RELEASED, hosted={}
-    )
-    assert "type: lecture" in lec and 'title: "Session 3"' in lec
-
-
-def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
-    # The prose says it, but a flag is what lets the theme badge or grey the row - and
-    # what tells a placeholder apart from a released folder that holds no files.
-    monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    assert "unreleased: true" not in site._lecture_entry(
-        "Semester", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
-    )
-    assert "unreleased: true" in site._lecture_entry(
-        "Semester", "2", _row(date(2026, 9, 15)), [], hosted={}
-    )
-
-
-def test_a_provisional_session_date_is_marked_on_both_kinds_of_row(monkeypatch):
-    # `tbc:` was parsed on `releases:` and rendered nowhere: the plan carried it, the row
-    # never wrote it and the lecture template never read it, so a faculty member marking a
-    # class date provisional got a schedule that looked settled. Display-only, as it is on
-    # every other block - and on the released and unreleased row alike, since it says
-    # something about the DATE rather than about the materials.
-    monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    for kind, sources in (("lecture", RELEASED), ("lab", RELEASED), ("lecture", [])):
-        marked = site._lecture_entry(
-            "Semester", "2", _row(date(2026, 9, 15), tbc=True), sources, kind, hosted={}
-        )
-        plain = site._lecture_entry(
-            "Semester", "2", _row(date(2026, 9, 15)), sources, kind, hosted={}
-        )
-        assert "tbc: true" in marked
-        assert "tbc" not in plain
-        # Display only: the date the row shows - and the deploys fire on - is unchanged.
-        assert "date: 2026-09-15T09:00:00" in marked
 
 
 def test_event_entry_renders_a_display_only_schedule_row():
@@ -1178,25 +1094,30 @@ def _plan(
     sched: Schedule,
     sources=(),
     assignments=(),
-    files=None,
+    trees=None,
     handed_out=(),
+    declared=None,
+    content=lambda *a, **k: "",
 ):
-    """Run sync_site against a faked org and return the _SitePlan it built. `files` fakes
-    the per-source file listing (default: every source is empty)."""
+    """Run sync_site against a faked org and return the SitePlan it built. `trees` is each
+    semester content repo's released tree (`{repo: (path, ...)}`, default: none);
+    `declared` each source repo's `materials.yml` (default: absent)."""
+    trees = trees or {}
     captured: dict = {}
     monkeypatch.setattr(
         site,
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    # ONE semester listing answers both of the build's questions of the org. Everything in
-    # it carries the handed-out topic, so it names the templates and no content repos.
+    # ONE semester listing answers both of the build's questions of the org: the content
+    # repos, and the handed-out templates (which carry the topic).
     monkeypatch.setattr(
         site,
         "list_org_repos",
-        lambda org: [
-            {"name": n, "topics": ["assignment-template"]} for n in handed_out
-        ],
+        lambda org: (
+            [{"name": n, "topics": []} for n in trees]
+            + [{"name": n, "topics": ["assignment-template"]} for n in handed_out]
+        ),
     )
     monkeypatch.setattr(
         site, "discover_release_sources", lambda org, repos: list(sources)
@@ -1207,15 +1128,15 @@ def _plan(
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(
         site,
-        "_session_files",
-        files or (lambda org, repo, subpath, folder, hosted: []),
+        "read_materials",
+        lambda org, repo: (declared or {}).get(repo, materials.Declared()),
     )
-    # The memoised tree, which `_session_links` reads the default branch from to build its
-    # folder-link URLs. Stubbed even where `_session_files` is faked: without it the fake
-    # covers the file list but the branch lookup still reaches GitHub, which passes on an
-    # authenticated dev box and fails in CI.
-    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", ())))
-    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(
+        site,
+        "_repo_tree",
+        cache(lambda org, repo: ("main", tuple(trees.get(repo, ())))),
+    )
+    monkeypatch.setattr(site, "get_file_content", content)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
     return captured["plan"]
 
@@ -1266,38 +1187,6 @@ def test_semester_site_links_back_to_the_semester_org(monkeypatch, tmp_path):
     # must point at THIS semester org, not the template default or the course org.
     plan = _plan(monkeypatch, tmp_path, Schedule())
     assert plan.config["github_org"] == "Semester-f2026"
-
-
-def test_a_mixed_week_becomes_a_lecture_row_and_a_lab_row(monkeypatch, tmp_path):
-    plan = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(
-            releases=[
-                Release(
-                    "lecture-2",
-                    datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                    deploy=[Deploy("cm", "lectures/02_week-2", "materials", None)],
-                ),
-                Release(
-                    "lab-2",
-                    datetime(2026, 9, 10, 14, 0, tzinfo=BERLIN),
-                    deploy=[Deploy("cm", "labs/02_week-2", "materials", None)],
-                ),
-            ]
-        ),
-        sources=[
-            ("materials", "lectures", "02_week-2", 2),
-            ("materials", "readings", "02_week-2", 2),
-            ("materials", "labs", "02_week-2", 2),
-        ],
-    )
-    lectures = plan.collections["_lectures"]
-    assert sorted(lectures) == ["lab-02.md", "session-02.md"]
-    assert "type: lecture" in lectures["session-02.md"]
-    assert "date: 2026-09-08T10:00:00" in lectures["session-02.md"]
-    assert "type: lab" in lectures["lab-02.md"]
-    assert "date: 2026-09-10T14:00:00" in lectures["lab-02.md"]  # its OWN release time
 
 
 def test_course_description_flows_from_course_metadata_into_config(
@@ -1384,166 +1273,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     assert "is NOT valid YAML" in capsys.readouterr().err
 
 
-def test_a_week_with_only_one_kind_gets_only_that_row(monkeypatch, tmp_path):
-    lab_only = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(),
-        sources=[("materials", "labs", "03_week-3", 3)],
-    )
-    assert sorted(lab_only.collections["_lectures"]) == ["lab-03.md"]
-    lecture_only = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(),
-        sources=[("materials", "lectures", "04_week-4", 4)],
-    )
-    assert sorted(lecture_only.collections["_lectures"]) == ["session-04.md"]
-
-
-def test_the_whole_planned_term_gets_rows_before_anything_is_released(
-    monkeypatch, tmp_path
-):
-    # The plan IS the schedule: a session faculty have written down shows on the site from
-    # that moment, not from the day its materials happen to ship.
-    plan = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(
-            releases=[
-                Release(
-                    "lecture-2",
-                    datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                    deploy=[Deploy("cm", "lectures/02_week-2", "materials", None)],
-                ),
-                Release(
-                    "lab-2",
-                    datetime(2026, 9, 10, 14, 0, tzinfo=BERLIN),
-                    deploy=[Deploy("cm", "labs/02_week-2", "materials", None)],
-                ),
-            ]
-        ),
-        sources=[],  # nothing released yet
-    )
-    lectures = plan.collections["_lectures"]
-    assert sorted(lectures) == ["lab-02.md", "session-02.md"]
-    # Dated from the plan, and openly marked as having nothing to open yet.
-    assert "date: 2026-09-10T14:00:00" in lectures["lab-02.md"]
-    assert "links: []" in lectures["lab-02.md"]
-    assert "lab 2 are not yet released" in lectures["lab-02.md"]
-    assert "session 2 are not yet released" in lectures["session-02.md"]
-
-
-def test_an_unreleased_row_names_where_its_materials_will_land(monkeypatch, tmp_path):
-    # Mirrors the assignment row's placeholder: say what is coming and where, rather than
-    # leaving an empty cell that reads as a mistake.
-    plan = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(
-            releases=[
-                Release(
-                    "lecture-3",
-                    datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
-                    deploy=[
-                        Deploy("cm", "lectures/03_week-3", "lecture-materials", None),
-                        Deploy("cm", "readings/03_week-3", "lecture-materials", None),
-                    ],
-                )
-            ]
-        ),
-    )
-    body = plan.collections["_lectures"]["session-03.md"]
-    assert "`lecture-materials/lectures/03_week-3`" in body
-    assert "`lecture-materials/readings/03_week-3`" in body
-    # The row says what is coming and where, and stops there - naming the semester org as
-    # well made the schedule table's cell two clauses long for no reader's benefit.
-    assert "`Semester-f2026`" not in body
-
-
-def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_path):
-    sched = Schedule(
-        releases=[
-            Release(
-                "lab-2",
-                datetime(2026, 9, 10, 14, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "labs/02_week-2", "materials", None)],
-            )
-        ]
-    )
-    plan = _plan(
-        monkeypatch,
-        tmp_path,
-        sched,
-        sources=[("materials", "labs", "02_week-2", 2)],
-        files=lambda org, repo, subpath, folder, hosted: [
-            Link("lab.pdf", "https://x/lab.pdf")
-        ],
-    )
-    body = plan.collections["_lectures"]["lab-02.md"]
-    assert ("lab", "lab.pdf") in entry_links(body)
-    assert "not yet released" not in body
-
-
-def test_a_declared_lab_row_keeps_one_row_once_its_files_ship(monkeypatch, tmp_path):
-    # The case `type:` exists for: lab material that does not land under `labs/`. The plan
-    # placed it as a lab and discovery placed the same folder as a lecture, so the day the
-    # files shipped the schedule grew a SECOND row - a lab stuck on "not yet released" for
-    # the rest of term, beside a lecture row holding that lab's links. Both sides go
-    # through `dest_row_kind` now, so there is one row and it is the declared kind.
-    plan = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(
-            releases=[
-                Release(
-                    "clinic-3",
-                    datetime(2026, 9, 24, 14, 0, tzinfo=BERLIN),
-                    deploy=[Deploy("cm", "clinics/03_week-3", "materials", None)],
-                    kind="lab",
-                )
-            ]
-        ),
-        sources=[("materials", "clinics", "03_week-3", 3)],
-        files=lambda org, repo, subpath, folder, hosted: [
-            Link("clinic.pdf", "https://x/clinic.pdf")
-        ],
-    )
-    lectures = plan.collections["_lectures"]
-    assert sorted(lectures) == ["lab-03.md"]
-    body = lectures["lab-03.md"]
-    assert "type: lab" in body
-    assert ("clinic", "clinic.pdf") in entry_links(body)
-    assert "unreleased: true" not in body
-    assert "not yet released" not in body
-
-
-def test_a_row_released_off_plan_survives_the_planned_rows(monkeypatch, tmp_path):
-    # Discovery still leads: the manual Release button ships folders the plan never named,
-    # and those rows must not be dropped just because they are absent from schedule.yml.
-    plan = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(
-            releases=[
-                Release(
-                    "lecture-2",
-                    datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                    deploy=[Deploy("cm", "lectures/02_week-2", "materials", None)],
-                )
-            ],
-            semester_start=date(2026, 9, 1),
-        ),
-        sources=[("materials", "labs", "05_bonus", 5)],
-    )
-    assert sorted(plan.collections["_lectures"]) == ["lab-05.md", "session-02.md"]
-    assert "not yet released" in plan.collections["_lectures"]["session-02.md"]
-    assert "not yet released" not in plan.collections["_lectures"]["lab-05.md"]
-
-
 def test_an_undated_release_raises_no_placeholder_row(monkeypatch, tmp_path):
     # `event_datetime: tbc` cannot place a session on a dated table, so it stays off the
-    # schedule until faculty give it a date - same rule _planned_sessions applies to dating.
+    # schedule until faculty give it a date - same rule `schedule_plan.planned_rows` applies.
     plan = _plan(
         monkeypatch,
         tmp_path,
@@ -1558,29 +1290,6 @@ def test_an_undated_release_raises_no_placeholder_row(monkeypatch, tmp_path):
         ),
     )
     assert plan.collections["_lectures"] == {}
-
-
-def test_the_lecture_row_never_carries_the_weeks_lab_links(monkeypatch, tmp_path):
-    # Labs are their own entries; a lab file linked from the lecture row too would show
-    # the lab twice (schedule + the theme's labs page).
-    plan = _plan(
-        monkeypatch,
-        tmp_path,
-        Schedule(),
-        sources=[
-            ("materials", "lectures", "02_week-2", 2),
-            ("materials", "labs", "02_week-2", 2),
-        ],
-        files=lambda org, repo, subpath, folder, hosted: [
-            Link(f"{subpath}.pdf", f"https://x/{subpath}")
-        ],
-    )
-    session = plan.collections["_lectures"]["session-02.md"]
-    assert ("lecture", "lectures.pdf") in entry_links(session)
-    assert not [s for s, _n in entry_links(session) if s == "lab"]
-    assert ("lab", "labs.pdf") in entry_links(
-        plan.collections["_lectures"]["lab-02.md"]
-    )
 
 
 def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
@@ -1824,22 +1533,6 @@ def test_two_plan_entries_citing_one_template_stay_two_assignments(
 
 
 # ---------------------------------------------- fail-loud reads (fixes 5 and 6)
-
-
-def test_session_files_missing_tree_is_empty(monkeypatch):
-    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
-    assert (
-        site._session_files("Semester-f2026", "materials", "lectures", "03_x", {}) == []
-    )
-
-
-def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monkeypatch):
-    # A swallowed failure returned (), the site republished with every material link gone.
-    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
-    with pytest.raises(RuntimeError):
-        site._session_files("Semester-f2026", "materials", "lectures", "03_x", {})
 
 
 def test_team_people_missing_team_is_empty(monkeypatch):
@@ -2123,67 +1816,6 @@ def test_display_only_rows_come_from_events_alone(monkeypatch, tmp_path):
 
 
 # ------------------------------------------------- a session's declared name + blurb
-def test_a_row_carries_the_title_and_details_the_plan_declared(monkeypatch):
-    monkeypatch.setattr(
-        site, "_session_files", lambda *a: [Link("s.pdf", "https://x/1")]
-    )
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    out = site._lecture_entry(
-        "Semester-f2026",
-        "1",
-        _row(
-            datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
-            subtitle="Probability Theory",
-            details="Sample spaces and Bayes' rule.",
-        ),
-        RELEASED,
-        hosted={},
-    )
-    # `title` stays the ordinal - what the theme has always assumed it is - and the
-    # declared name rides `subtitle` beside it.
-    assert 'title: "Session 1"' in out
-    assert 'subtitle: "Probability Theory"' in out
-    assert 'details: "Sample spaces and Bayes\' rule."' in out
-
-
-def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
-    # Omitted, not written blank: the theme tests for them, so an empty string would
-    # render an empty line where there should be nothing at all.
-    monkeypatch.setattr(
-        site, "_session_files", lambda *a: [Link("s.pdf", "https://x/1")]
-    )
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    out = site._lecture_entry(
-        "Semester-f2026",
-        "1",
-        _row(datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)),
-        RELEASED,
-        hosted={},
-    )
-    assert "subtitle:" not in out and "details:" not in out
-
-
-def test_an_unreleased_row_still_says_what_the_session_is_about():
-    out = site._lecture_entry(
-        "Semester-f2026",
-        "3",
-        _row(
-            datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
-            dests={"materials/lectures/03_week-3": None},
-            subtitle="Expectation",
-            details="Linearity of expectation.",
-        ),
-        [],
-        hosted={},
-    )
-    # What the session covers is known the day the plan is written, so it is published
-    # then - the term reads as a syllabus from day one. Only the FILES wait for release,
-    # which is what the body says.
-    assert 'subtitle: "Expectation"' in out
-    assert 'details: "Linearity of expectation."' in out
-    assert "will appear in `materials/lectures/03_week-3` when they are." in out
-
-
 def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
     # It used to say "pages ... are never rewritten. Change them freely", while every sync
     # overwrites the tab pages - so following it lost the edit AND opened an
@@ -2196,34 +1828,6 @@ def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
     assert "pages, `Gemfile`" not in semester_readme
     assert "`_data/materials.yml`" in semester_readme
     assert "`_data/materials.yml`" not in site_repo.site_readme("org", semester=False)
-
-
-def test_readings_pending_reaches_the_rendered_row():
-    # End to end: the flag and the "will appear in" sentence are what the whole fold is
-    # for, and both were unreachable for the layout the toolkit ships as its example.
-    s = _sched(
-        [
-            Release(
-                "readings-2",
-                datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "readings/02_x", "materials", None)],
-                show_on_site=False,
-            ),
-            Release(
-                "lecture-2",
-                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
-            ),
-        ]
-    )
-    row = schedule_plan.planned_sessions(s)[("2", "lecture")]
-    # live_repos empty -> _dest_link renders plain code and makes no tree call
-    page = site._lecture_entry(
-        "SEMESTER", "2", row, sources=[], live_repos=frozenset(), hosted={}
-    )
-    assert "readings_pending: true" in page
-    assert "materials/readings/02_x" in page
-    assert "not yet released" in page
 
 
 # --------------------------------------------------------------- rows from a bare label
@@ -2360,21 +1964,17 @@ def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
     )
 
 
+def _one_link(monkeypatch, path, hosted):
+    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", (path,))))
+    deploy = Deploy("cm", "lectures/01_a", "materials", None)
+    return site._landed("Semester-f2026", deploy, frozenset(), hosted, False).links[0]
+
+
 def test_a_published_file_is_linked_to_the_hosted_copy_and_to_its_source(monkeypatch):
     # The row a published deck renders as: the NAME opens the site's own copy, `url` is
     # still the file on GitHub so the template can offer `[source]` beside it.
-    monkeypatch.setattr(
-        site,
-        "_repo_tree",
-        cache(lambda org, repo: ("main", ("lectures/01_a/slides.html",))),
-    )
-    link = site._session_files(
-        "Semester-f2026",
-        "materials",
-        "lectures",
-        "01_a",
-        {"materials": frozenset({"lectures/01_a/slides.html"})},
-    )[0]
+    path = "lectures/01_a/slides.html"
+    link = _one_link(monkeypatch, path, {"materials": frozenset({path})})
     assert link.url == (
         "https://github.com/Semester-f2026/materials/blob/main/lectures/01_a/slides.html"
     )
@@ -2396,27 +1996,14 @@ def test_a_published_file_is_linked_to_the_hosted_copy_and_to_its_source(monkeyp
 def test_only_a_format_a_browser_renders_is_linked_to_its_copy(
     monkeypatch, path, linked
 ):
-    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", (path,))))
-    link = site._session_files(
-        "Semester-f2026",
-        "materials",
-        "lectures",
-        "01_a",
-        {"materials": frozenset({path})},
-    )[0]
+    link = _one_link(monkeypatch, path, {"materials": frozenset({path})})
     assert bool(link.view_url) is linked
 
 
 def test_a_file_that_was_not_copied_is_never_linked_to_a_copy(monkeypatch):
     # The whole point of reading what the mirror DID: a deck dropped for its size, or
     # left behind by a clone that failed, must render as today's row rather than as a 404.
-    monkeypatch.setattr(
-        site,
-        "_repo_tree",
-        cache(lambda org, repo: ("main", ("lectures/01_a/slides.html",))),
-    )
-    link = site._session_files("Semester-f2026", "materials", "lectures", "01_a", {})[0]
-    assert link.view_url == ""
+    assert _one_link(monkeypatch, "lectures/01_a/slides.html", {}).view_url == ""
 
 
 def test_a_course_that_publishes_nothing_writes_the_front_matter_it_always_did():
@@ -2904,3 +2491,328 @@ def test_a_team_member_is_published_as_a_salted_digest_of_their_handle():
     assert site.member_digest("Cohort-f2026", "Ada-L") == vector
     # Salted with the org: the same student is a different digest in another semester.
     assert site.member_digest("Semester-s2027", "ada-l") != vector
+
+
+# ------------------------------------------------------------ rows from schedule entries
+# A row is a `releases:` entry: dated, named and kinded by the entry, linking whatever its
+# copies landed. The three layouts real courses have must all render without loss.
+
+
+def _at(month: int, day: int, hour: int = 10) -> datetime:
+    return datetime(2026, month, day, hour, 0, tzinfo=BERLIN)
+
+
+def _copy(path, repo="course-materials-f2026", dest_repo="materials", dest=None):
+    return Deploy(repo, path, dest_repo, dest)
+
+
+def _front(text: str) -> dict:
+    return yaml.safe_load(text.split("---\n")[1])
+
+
+def _rows(plan) -> dict[str, dict]:
+    return {name: _front(text) for name, text in plan.collections["_lectures"].items()}
+
+
+def _linked(plan) -> set[str]:
+    """Every URL any row links."""
+    return {
+        link["url"] for row in _rows(plan).values() for link in row.get("links") or []
+    }
+
+
+def _reaches(linked: set[str], org: str, repo: str, path: str) -> bool:
+    """Whether a released file is one click from a row: linked itself, or inside a
+    folder a row links."""
+    blob = f"https://github.com/{org}/{repo}/blob/main/{quote(path)}"
+    parts = path.split("/")
+    folders = {
+        f"https://github.com/{org}/{repo}/tree/main/{quote('/'.join(parts[:i]))}"
+        for i in range(1, len(parts))
+    }
+    return blob in linked or bool(folders & linked)
+
+
+# The demo semester, as released on 24 Sep 2026 (paths trimmed to one file a folder).
+DEMO_TREE = (
+    "SYLLABUS.md",
+    "code/dldemo/uncertainty.py",
+    "labs/01_deep-learning-in-public-policy/Lab_Session_1.ipynb",
+    "labs/09_further-topics/Lab_Session_9_&_10.ipynb",
+    "lectures/01_deep-learning-in-public-policy/Session1_demo_deck.html",
+    "lectures/01_deep-learning-in-public-policy/Session1_demo_deck_files/a.js",
+    "lectures/02_deep-neural-networks-1/Session2_E1394_DL.pdf",
+    "readings/01_deep-learning-in-public-policy/READINGS.md",
+    "readings/02_deep-neural-networks-1/READINGS.md",
+    "readings/02_deep-neural-networks-1/paper.pdf",
+)
+DEMO_SCHEDULE = Schedule(
+    semester_start=date(2026, 8, 4),
+    releases=[
+        Release(
+            "course-intro", _at(7, 28, 9), [_copy("SYLLABUS.md")], show_on_site=False
+        ),
+        Release(
+            "readings-01",
+            _at(7, 30, 9),
+            [_copy("readings/01_deep-learning-in-public-policy")],
+            show_on_site=False,
+        ),
+        Release(
+            "lecture-01",
+            _at(8, 4),
+            [_copy("lectures/01_deep-learning-in-public-policy")],
+            title="Deep learning in public policy",
+        ),
+        Release(
+            "lab-01",
+            _at(8, 6, 14),
+            [_copy("labs/01_deep-learning-in-public-policy")],
+            title="Lab 1",
+        ),
+        Release(
+            "readings-02",
+            _at(8, 6, 9),
+            [_copy("readings/02_deep-neural-networks-1")],
+            show_on_site=False,
+        ),
+        Release(
+            "lecture-02",
+            _at(8, 11),
+            [_copy("lectures/02_deep-neural-networks-1")],
+            title="Deep neural networks (1)",
+        ),
+        # Code from a second repo into a folder no ordinal names: its row links it now.
+        Release(
+            "lecture-09",
+            _at(9, 29),
+            [
+                _copy(
+                    "dldemo/uncertainty.py",
+                    repo="lecture-code-f2026",
+                    dest="code/dldemo/uncertainty.py",
+                )
+            ],
+            title="Further topics in deep learning",
+        ),
+        Release("lab-09", _at(10, 1, 14), [_copy("labs/09_further-topics")]),
+        Release("lecture-12", _at(10, 20), [], title="Tutorial presentations"),
+    ],
+)
+
+
+def _demo(monkeypatch, tmp_path):
+    return _plan(
+        monkeypatch,
+        tmp_path,
+        DEMO_SCHEDULE,
+        sources=[("materials", "lectures", "01_x", 1)],
+        trees={"materials": DEMO_TREE},
+        content=lambda org, repo, path: f"# {path.split('/')[1]}\n\n- A paper.",
+    )
+
+
+def test_the_demo_renders_every_row_by_kind_in_date_order(monkeypatch, tmp_path):
+    rows = _rows(_demo(monkeypatch, tmp_path))
+    assert {name: (r["title"], r["kind"]) for name, r in rows.items()} == {
+        "readings-01.md": ("Readings 1", "readings"),
+        "session-01.md": ("Lecture 1", "lecture"),
+        "readings-02.md": ("Readings 2", "readings"),
+        "lab-01.md": ("Lab 1", "lab"),
+        "session-02.md": ("Lecture 2", "lecture"),
+        "session-03.md": ("Lecture 3", "lecture"),
+        "lab-02.md": ("Lab 2", "lab"),
+        "session-04.md": ("Lecture 4", "lecture"),
+    }
+    # "Week N" from semester_start: the lecture of 11 Aug is in week 2.
+    assert rows["session-02.md"]["week"] == 2 and "week" not in rows["readings-01.md"]
+    # The old theme key rides beside the new one until the theme moves to `kind`.
+    assert all(r["type"] == r["kind"] for r in rows.values())
+
+
+def test_the_demo_loses_no_released_file(monkeypatch, tmp_path):
+    plan = _demo(monkeypatch, tmp_path)
+    linked = _linked(plan)
+    for path in DEMO_TREE:
+        if path == "SYLLABUS.md" or path.endswith("READINGS.md"):
+            continue  # a course document; reading lists are inlined, not linked
+        assert _reaches(linked, "Semester-f2026", "materials", path), path
+    rows = _rows(plan)
+    assert rows["readings-01.md"]["reading_list"] == (
+        "### 01_deep-learning-in-public-policy\n\n- A paper.\n"
+    )
+    # The code file from the second repo is on lecture 3's row.
+    assert [x["name"] for x in rows["session-03.md"]["links"]] == ["uncertainty.py"]
+    # The syllabus copy raises no row; the home page pins it.
+    index = yaml.safe_load(plan.files["_data/materials.yml"])
+    assert index["syllabus"].endswith("/materials/blob/main/SYLLABUS.md")
+
+
+def test_silent_rows_are_on_their_tab_only_and_only_once_landed(monkeypatch, tmp_path):
+    plan = _demo(monkeypatch, tmp_path)
+    rows = _rows(plan)
+    assert rows["readings-02.md"]["silent"] is True
+    assert "silent" not in rows["session-01.md"]
+    # An unreleased silent entry is no placeholder, unlike a shown one.
+    assert rows["session-04.md"]["unreleased"] is True
+    sched = dataclasses.replace(
+        DEMO_SCHEDULE,
+        releases=[
+            *DEMO_SCHEDULE.releases,
+            Release(
+                "readings-12", _at(10, 15), [_copy("readings/12_x")], show_on_site=False
+            ),
+        ],
+    )
+    assert (
+        len(_rows(_plan(monkeypatch, tmp_path, sched, trees={"materials": DEMO_TREE})))
+        == 8
+    )
+
+
+def test_the_demo_gets_a_tab_per_kind_it_has(monkeypatch, tmp_path):
+    plan = _demo(monkeypatch, tmp_path)
+    nav = [i["url"] for i in yaml.safe_load(plan.files["_data/nav.yml"])["items"]]
+    assert nav[2:5] == ["/lectures/", "/labs/", "/readings/"]
+    assert {"lectures.md", "labs.md", "readings.md"} <= set(plan.files)
+    assert "drop-ins.md" in plan.retire and "labs.md" not in plan.retire
+    assert "key: drop-in" in plan.files["_data/kinds.yml"]
+
+
+# Maths: folders named per kind, deck assets in `media/`, a flat `quiz/`, a package.
+MATHS_TREE = (
+    "lectures/01_lecture/deck.html",
+    "lectures/01_lecture/deck_files/libs/x.js",
+    "lectures/01_lecture/media/fig.png",
+    "labs/01_lab/lab.ipynb",
+    "readings/01_week-1/READINGS.md",
+    "readings/01_week-1/ch1.pdf",
+    "quiz/quiz_01.pdf",
+    "m4ds/__init__.py",
+    "m4ds/images/logo.png",
+)
+MATHS_SCHEDULE = Schedule(
+    semester_start=date(2026, 9, 1),
+    releases=[
+        Release("lecture-1", _at(9, 1), [_copy("lectures/01_lecture", repo="cm")]),
+        Release("lab-1", _at(9, 3), [_copy("labs/01_lab", repo="cm")]),
+        Release(
+            "readings-1",
+            _at(8, 28),
+            [_copy("readings/01_week-1", repo="cm")],
+            show_on_site=False,
+        ),
+        Release("quiz-1", _at(9, 4), [_copy("quiz/quiz_01.pdf", repo="cm")]),
+        Release("package", _at(9, 1, 9), [_copy("m4ds", repo="cm")], kind="lab"),
+    ],
+)
+
+
+def test_a_maths_style_layout_renders_without_loss(monkeypatch, tmp_path):
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        MATHS_SCHEDULE,
+        trees={"materials": MATHS_TREE},
+        # `quiz/` is an exam in this course: the one line materials.yml needs.
+        declared={"cm": materials.Declared(kinds={"quiz": "exam"})},
+    )
+    rows = _rows(plan)
+    assert {r["title"] for r in rows.values()} == {
+        "Readings 1",
+        "Lab 1",
+        "Lecture 1",
+        "Lab 2",
+        "Exam 1",
+    }
+    linked = _linked(plan)
+    for path in MATHS_TREE:
+        if not path.endswith("READINGS.md"):
+            assert _reaches(linked, "Semester-f2026", "materials", path), path
+    assert "exams.md" in plan.files
+
+
+def test_a_repo_per_kind_layout_takes_its_kind_from_the_repo(monkeypatch, tmp_path):
+    trees = {
+        "lectures": ("01_intro/slides.pdf",),
+        "labs": ("01_intro/lab.ipynb",),
+        "readings": ("01_intro/READINGS.md", "01_intro/paper.pdf"),
+    }
+    sched = Schedule(
+        releases=[
+            Release(
+                f"{repo}-1",
+                _at(9, day),
+                [_copy("01_intro", repo=f"{repo}-f2026", dest_repo=repo)],
+            )
+            for day, repo in ((1, "lectures"), (2, "labs"), (3, "readings"))
+        ]
+    )
+    rows = _rows(_plan(monkeypatch, tmp_path, sched, trees=trees))
+    assert {r["title"]: [x["name"] for x in r["links"]] for r in rows.values()} == {
+        "Lecture 1": ["slides.pdf"],
+        "Lab 1": ["lab.ipynb"],
+        "Readings 1": ["paper.pdf"],
+    }
+
+
+def test_several_copies_are_one_row_linking_everything_that_landed(
+    monkeypatch, tmp_path
+):
+    sched = Schedule(
+        releases=[
+            Release(
+                "week-3",
+                _at(9, 15),
+                [
+                    _copy("lectures/03"),
+                    _copy("datasets/week3.csv"),
+                    _copy("lectures/03_extra"),  # not landed yet
+                ],
+            )
+        ]
+    )
+    trees = {"materials": ("lectures/03/a.pdf", "datasets/week3.csv")}
+    (row,) = _rows(_plan(monkeypatch, tmp_path, sched, trees=trees)).values()
+    assert [(x["section"], x["name"]) for x in row["links"]] == [
+        ("lecture", "a.pdf"),
+        ("dataset", "week3.csv"),
+    ]
+    assert "unreleased" not in row
+
+
+def test_an_unreleased_row_names_where_its_copies_will_land(monkeypatch, tmp_path):
+    sched = Schedule(
+        releases=[
+            Release(
+                "lecture-3",
+                _at(9, 15),
+                [_copy("lectures/03_week-3", dest_repo="lecture-materials")],
+                title="Expectation",
+                details="Linearity of expectation.",
+                tbc=True,
+            )
+        ]
+    )
+    text = _plan(monkeypatch, tmp_path, sched).collections["_lectures"]["session-01.md"]
+    row = _front(text)
+    assert (row["unreleased"], row["tbc"], row["links"]) == (True, True, [])
+    # What the session is about is published from the day it is written.
+    assert (row["subtitle"], row["details"]) == (
+        "Expectation",
+        "Linearity of expectation.",
+    )
+    assert (
+        "will appear in `lecture-materials/lectures/03_week-3` when they are." in text
+    )
+    assert "Materials for lecture 1 are not yet released" in text
+
+
+def test_a_declared_title_that_repeats_the_rows_name_is_not_said_twice(
+    monkeypatch, tmp_path
+):
+    sched = Schedule(
+        releases=[Release("lab-1", _at(9, 3), [], kind="lab", title="Lab 1")]
+    )
+    (row,) = _rows(_plan(monkeypatch, tmp_path, sched)).values()
+    assert row["title"] == "Lab 1" and "subtitle" not in row

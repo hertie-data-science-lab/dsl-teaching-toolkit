@@ -1,0 +1,26 @@
+---
+# SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ in the
+# toolkit; every sync rewrites it.
+layout: page
+---
+
+{{ content }}
+
+{% include open_in.html %}
+
+{% comment %}
+One tab per row kind the semester has (Lectures, Labs, Readings, Drop-ins, ...): the page's
+own `kind` selects its rows out of the _lectures collection, in date order, each through
+the shared session block. A readings row's inlined reading list sits where a row's
+details do. A silent row (`show_on_site: false`) is listed here once it has landed; only
+the schedule and the Updates box leave it out.
+{% endcomment %}
+{% assign entries = site.lectures | where: "kind", page.kind | sort: 'date' %}
+{% for entry in entries %}
+<section class="session">
+{% capture citations %}{% if entry.reading_list %}<div class="reading-list markdown-content">{{ entry.reading_list | markdownify }}</div>{% endif %}{% endcapture %}
+{% include session_entry.html entry=entry extra=citations %}
+</section>
+{% unless forloop.last %}<hr class="session-rule"/>{% endunless %}
+{% endfor %}
+{% if entries.size == 0 %}<p>Nothing released yet.</p>{% endif %}

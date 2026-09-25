@@ -25,6 +25,7 @@ from dsl_course import (
 )
 from dsl_course.faults import ConfigFault, FaultKind, header_fault
 from dsl_course.gh_contents import load_yaml_lines
+from dsl_course.materials import Declared
 from dsl_course.ops.request import validate
 from tests.conftest import repo_row
 
@@ -420,6 +421,39 @@ def test_release_states_follow_the_destination():
     )
 
 
+def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
+    semester = _semester()
+    semester.aliases = {"course-materials-f2026": {"lectures": "drop-in"}}
+    doc = _render(semester=semester)
+    s3 = next(r for r in doc["releases"] if r["id"] == "s3")
+    assert (s3["kind"], s3["kind_inferred"]) == ("drop-in", True)
+    semester.sched.releases[0].kind = "lab"
+    s3 = next(r for r in _render(semester=semester)["releases"] if r["id"] == "s3")
+    assert (s3["kind"], s3["kind_inferred"]) == ("lab", False)
+
+
+def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
+    monkeypatch.setattr(
+        status_json,
+        "read_materials",
+        lambda org, repo: Declared(syllabus="E1282_syllabus.pdf"),
+    )
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(
+        status_json, "get_file_content", lambda org, repo, path, ref="": "public: []"
+    )
+    present = {"E1282_syllabus.pdf": "5ha"}
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda org, repo, b: present)
+    facts = status_json._materials_facts(COURSE, "nlp-materials")
+    assert status_json.materials_state(facts) == "ready"
+    present.clear()
+    facts = status_json._materials_facts(COURSE, "nlp-materials")
+    assert status_json.materials_state(facts) == "todo"
+    assert status_json._materials_why(facts) == (
+        "nlp-materials has no E1282_syllabus.pdf yet"
+    )
+
+
 def test_an_archived_semester_is_not_live_and_k7_is_done():
     semester = _semester()
     semester.listing["semester-config"] = repo_row("semester-config", archived=True)
@@ -733,7 +767,9 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     listings = {
         COURSE: [
             repo_row(".github"),
-            repo_row("course-materials-f2026"),
+            repo_row("course-materials-f2026", topics=["dsl-materials"]),
+            # Content, but not a materials repo: no topic.
+            repo_row("lecture-code-f2026"),
             repo_row("assignment-2-f2026", isTemplate=True),
         ],
         SEMESTER: [
@@ -748,6 +784,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     }
     for module in (status_json, schedule, grades):
         monkeypatch.setattr(module, "get_file_content", content)
+    monkeypatch.setattr(status_json, "read_materials", lambda org, repo: Declared())
     schedule._schedule_text.cache_clear()
     monkeypatch.setattr(status_json, "list_org_repos", lambda org: listings[org])
     monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
@@ -805,6 +842,10 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     assert "template:assignment-2:GRADING_CONFIG" in [p["id"] for p in doc["problems"]]
     course = status_json.collect_course(COURSE, NOW)
     assert course["course"]["templates"][0]["state"] == "problem"
+    # The topic makes a materials repo, not the name: the code repo is not one.
+    assert course["course"]["materials"] == [
+        {"repo": "course-materials-f2026", "state": "ready"}
+    ]
 
 
 def test_every_render_validates_against_the_exported_schema():

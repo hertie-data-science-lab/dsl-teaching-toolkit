@@ -82,7 +82,7 @@ def _no_live_gh(monkeypatch):
     Nothing here is meant to reach GitHub (see the module docstring), but a tokenless CI
     box and an authenticated dev box disagree about what happens when something does: CI
     errors and the developer's machine quietly succeeds against real orgs. That is how a
-    test that stubbed `site._session_files` but not `site._repo_tree` passed locally for a
+    test that stubbed the file listing but not `site._repo_tree` passed locally for a
     whole branch and failed only on the PR.
 
     Guards the `gh` BINARY rather than `ghcli.gh`, so the retry ladder and return-pair

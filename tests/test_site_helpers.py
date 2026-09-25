@@ -9,13 +9,21 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from textwrap import indent
-from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
 
-from dsl_course import gh_contents, public_site, repos, schedule_plan, site, site_repo
+from dsl_course import (
+    gh_contents,
+    materials,
+    policy,
+    public_site,
+    repos,
+    site,
+    site_repo,
+)
+from dsl_course.schedule import Deploy, Release, Schedule
 from dsl_course.site_repo import Link
 from tests.conftest import entry_links, repo_row
 
@@ -242,33 +250,6 @@ def test_public_lecture_entry_reading_list_mode_has_no_links():
     assert "enrolled" not in e  # public-facing, no student gate language
 
 
-def test_lecture_entry_labels_links_by_repo_or_subpath():
-    def fake_session_files(org, repo, subpath, folder, hosted):
-        return {
-            ("labs", ""): [
-                Link("intro.pdf", "https://x/1")
-            ],  # root shape: label = repo
-            ("materials", "lectures"): [
-                Link("slides.pdf", "https://x/2")
-            ],  # nested: label = subpath
-        }.get((repo, subpath), [])
-
-    with (
-        patch.object(site, "_session_files", side_effect=fake_session_files),
-        patch.object(site, "_repo_tree", return_value=("main", ())),
-    ):
-        entry = site._lecture_entry(
-            "Semester-f2026",
-            "1",
-            schedule_plan.PlannedRow(when=date(2026, 9, 7)),
-            [("labs", "", "01_intro"), ("materials", "lectures", "01_intro")],
-            hosted={},
-        )
-    assert "https://x/1" in entry and "https://x/2" in entry
-    assert ("lab", "intro.pdf") in entry_links(entry)
-    assert ("lecture", "slides.pdf") in entry_links(entry)
-
-
 def test_public_lecture_entry_actual_readings_mode_links_are_local():
     lec = [Link("s.pdf", "/public-materials/m/session-1/lectures/s.pdf")]
     rds = [Link("r.pdf", "/public-materials/m/session-1/readings/r.pdf")]
@@ -346,77 +327,184 @@ def _tree_gh(*args, **kwargs):
     return (0, "false\n" + _TREE)
 
 
-def test_session_files_lists_nested_files_by_path(monkeypatch):
-    # release.py copytrees a session folder wholesale, so nested files ARE released -
-    # a non-recursive listing dropped them from the site entirely.
+def _deploy(path, repo="materials", dest=None):
+    return Deploy("cm", path, repo, dest)
+
+
+def _landed(monkeypatch, deploy, readings=False, gh=_tree_gh):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(gh_contents, "gh", _tree_gh)
-    links = site._session_files(
-        "Semester-f2026", "materials", "lectures", "03_week-3", {}
+    monkeypatch.setattr(gh_contents, "gh", gh)
+    return site._landed("Semester-f2026", deploy, frozenset(), {}, readings)
+
+
+def test_a_landed_folder_links_its_files_and_folds_its_subfolders(monkeypatch):
+    # A release copies a folder wholesale, so nested files ARE released: they are one
+    # folded link away, and the prefix-sharing `03_week-30` is not this folder.
+    landed = _landed(monkeypatch, _deploy("lectures/03_week-3"))
+    assert [x.name for x in landed.links] == ["notes.pdf", "handouts/ (2 files)"]
+    assert landed.section == "lectures" and not landed.root_file
+    assert landed.links[0].url == (
+        "https://github.com/Semester-f2026/materials/blob/main/lectures/03_week-3/notes.pdf"
     )
-    assert [x.name for x in links] == [
-        "handouts/deep/further.md",  # sorted by path, so nested first
-        "handouts/extra notes.pdf",
-        "notes.pdf",
-    ]
-    urls = {x.name: x.url for x in links}
+
+
+def test_a_landed_file_is_one_link_wherever_it_sits(monkeypatch):
+    # The demo's lecture code: a single file outside any session folder, now linked.
+    landed = _landed(
+        monkeypatch, _deploy("dldemo/a.pdf", dest="lectures/04_week-4/other.pdf")
+    )
+    assert [x.name for x in landed.links] == ["other.pdf"]
+    assert not landed.root_file
+    assert _landed(monkeypatch, _deploy("README.md")).root_file
+
+
+def test_a_whole_repo_copy_lands_the_repo(monkeypatch):
+    landed = _landed(monkeypatch, _deploy(""))
+    assert landed.section == "materials"
+    assert "README.md" in [x.name for x in landed.links]
+
+
+def test_nothing_landed_yet_is_none_and_a_failed_read_raises(monkeypatch):
+    assert _landed(monkeypatch, _deploy("lectures/05_week-5")) is None
+    # A genuine 404 (repo/tree absent) has landed nothing.
+    site._repo_tree.cache_clear()
     assert (
-        urls["notes.pdf"]
-        == "https://github.com/Semester-f2026/materials/blob/main/lectures/03_week-3/notes.pdf"
-    )
-    assert "extra%20notes.pdf" in urls["handouts/extra notes.pdf"]  # spaces encoded
-
-
-def test_session_files_root_shape_and_other_sessions_excluded(monkeypatch):
-    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(gh_contents, "gh", _tree_gh)
-    # subpath="" - the release landed at the repo root (default destination)
-    assert site._session_files("Semester-f2026", "lectures", "", "01_intro", {}) == [
-        Link(
-            "root-shape.pdf",
-            "https://github.com/Semester-f2026/lectures/blob/main/01_intro/root-shape.pdf",
+        _landed(
+            monkeypatch,
+            _deploy("lectures/03_week-3", repo="gone"),
+            gh=lambda *a, **k: (1, "gh: Not Found (HTTP 404)"),
         )
-    ]
+        is None
+    )
+    # Any other failure must not read as "not released" - it raises.
+    site._repo_tree.cache_clear()
+    with pytest.raises(RuntimeError, match="could not read the tree"):
+        _landed(
+            monkeypatch,
+            _deploy("x", repo="flaky"),
+            gh=lambda *a, **k: (1, "gh: HTTP 500 Server Error"),
+        )
 
 
-def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
-    # A semester site asks for the files of every released session, nearly always from the
-    # same repo - one tree fetch must serve them all, not one fetch per session.
+def test_the_tree_is_fetched_once_per_repo(monkeypatch):
     calls = []
 
     def counting_gh(*args, **kwargs):
         calls.append(args)
         return (0, _TREE)
 
-    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(gh_contents, "gh", counting_gh)
-    for folder in ("03_week-3", "04_week-4", "03_week-30"):
-        assert site._session_files(
-            "Semester-f2026", "materials", "lectures", folder, {}
-        )
+    site._repo_tree.cache_clear()
+    for folder in ("lectures/03_week-3", "lectures/04_week-4", "01_intro"):
+        assert _landed(monkeypatch, _deploy(folder, repo="once"), gh=counting_gh)
     assert len(calls) == 1
 
 
-def test_session_files_absent_repo_is_empty(monkeypatch):
-    # A genuine 404 (repo/tree absent) is empty - gh's real wording, case included.
-    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
+_READINGS_TREE = (
+    "readings/01_week-1/READINGS.md",
+    "readings/01_week-1/notes.md",
+    "readings/01_week-1/refs.bib",
+    "readings/01_week-1/ch1.pdf",
+)
+
+
+def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
+    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {}, True)
+    # Only the overlay is taken out: an uploaded `notes.md` or `refs.bib` is a reading.
+    assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
+    assert landed.overlays == ["readings/01_week-1/READINGS.md"]
     monkeypatch.setattr(
-        gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
+        site, "get_file_content", lambda org, repo, path: "# Week 1\n\n- Blitzstein."
     )
+    assert site._reading_list("C", [landed]) == "### Week 1\n\n- Blitzstein."
+    # Any other kind keeps the overlay as a file.
+    other = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {}, False)
+    assert "READINGS.md" in [x.name for x in other.links] and not other.overlays
+
+
+def test_a_reading_list_read_failure_propagates(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("could not read")
+
+    monkeypatch.setattr(site, "get_file_content", boom)
+    landed = site._Landed("materials", "readings", [], ["readings/01/READINGS.md"])
+    with pytest.raises(RuntimeError):
+        site._reading_list("C", [landed])
+
+
+def _syllabus(monkeypatch, releases, tree, declared=None):
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", tree))
+    monkeypatch.setattr(
+        site, "read_materials", lambda o, r: declared or materials.Declared()
+    )
+    return site._declared_syllabus(
+        "C", "S", Schedule(releases=releases), frozenset({"materials"}), {}
+    )
+
+
+def _intro(*deploys):
+    return Release(
+        "course-intro", datetime(2026, 9, 1, tzinfo=ZoneInfo("UTC")), list(deploys)
+    )
+
+
+def test_the_default_syllabus_is_pinned_where_its_copy_landed(monkeypatch):
+    link = _syllabus(monkeypatch, [_intro(_deploy("SYLLABUS.md"))], ("SYLLABUS.md",))
+    assert link == Link(
+        "SYLLABUS.md", "https://github.com/S/materials/blob/main/SYLLABUS.md"
+    )
+
+
+def test_a_declared_syllabus_is_pinned_under_any_name(monkeypatch):
+    # NLP's case: the syllabus is a PDF named for the course code.
+    declared = materials.Declared(syllabus="E1282_syllabus.pdf")
+    for deploy, tree in (
+        (_deploy("E1282_syllabus.pdf"), ("E1282_syllabus.pdf",)),
+        (_deploy(""), ("E1282_syllabus.pdf", "lectures/01/a.pdf")),  # the whole repo
+        (_deploy("", dest="docs"), ("docs/E1282_syllabus.pdf",)),
+    ):
+        link = _syllabus(monkeypatch, [_intro(deploy)], tree, declared)
+        assert link.name == "E1282_syllabus.pdf", deploy
+
+
+def test_nothing_is_pinned_until_the_declared_file_has_landed(monkeypatch):
+    # Not by a name that merely looks like one, either: a screenshot is not the syllabus.
     assert (
-        site._session_files("Semester-f2026", "materials", "lectures", "03_x", {}) == []
+        _syllabus(
+            monkeypatch,
+            [_intro(_deploy("SYLLABUS.md"))],
+            ("lectures/01/pics/ids-syllabus-2024.png", "SYLLABUS-draft.pdf"),
+        )
+        is None
     )
 
 
-def test_session_files_real_failure_raises(monkeypatch):
-    # A non-404 failure must NOT be read as "no files" (which republishes the site with
-    # every material link stripped) - it raises instead.
-    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(
-        gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error")
+def test_a_deck_carries_its_asset_folders_with_it():
+    assert site._bundle_prefixes("lectures/01_lecture/deck.html") == (
+        "lectures/01_lecture/deck_files/",
+        "lectures/01_lecture/media/",
+        "lectures/01_lecture/libs/",
+        "lectures/01_lecture/images/",
     )
-    with pytest.raises(RuntimeError, match="could not read the tree"):
-        site._session_files("Semester-f2026", "materials", "lectures", "03_x", {})
+
+
+def test_a_hosted_deck_takes_a_media_folder_but_not_a_neighbours(tmp_path):
+    # Maths keeps its deck assets in `media/` beside the deck.
+    paths = (
+        "lectures/01_lecture/deck.html",
+        "lectures/01_lecture/media/fig.png",
+        "lectures/01_lecture/notes.pdf",
+        "lectures/02_lecture/media/other.png",
+    )
+    for rel in paths:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x")
+    spec = site.parse_patterns("**/*.html")
+    kept = site._public_selection(tmp_path, "materials", paths, (spec,))
+    assert kept == {
+        "lectures/01_lecture/deck.html",
+        "lectures/01_lecture/media/fig.png",
+    }
 
 
 # --------------------------------------------------------------- display link shaping
@@ -612,99 +700,6 @@ def test_block_keeps_liquid_verbatim_and_expands_tabs():
     )
 
 
-def _readings_sources():
-    return [("materials", "readings", "01_week-1"), ("materials", "lectures", "01_x")]
-
-
-def test_released_reading_list_inlines_text_and_ignores_the_pdf(monkeypatch):
-    files = {
-        ("materials", "readings", "01_week-1"): [
-            Link("READINGS.md", "u"),
-            Link("blitzstein_ch1.pdf", "u"),
-        ],
-        ("materials", "lectures", "01_x"): [Link("slides.pdf", "u")],
-    }
-    monkeypatch.setattr(
-        site, "_session_files", lambda o, r, s, f, hosted: files.get((r, s, f), [])
-    )
-    monkeypatch.setattr(
-        site,
-        "get_file_content",
-        lambda org, repo, path: (
-            "- Blitzstein, ch. 1-2." if path.endswith("READINGS.md") else ""
-        ),
-    )
-    out = site._released_reading_list("Semester-f2026", _readings_sources())
-    # The citation text is the list; the PDF is left to the links beside it (this site
-    # repo is public, so it never hosts the reading itself).
-    assert out == "- Blitzstein, ch. 1-2."
-
-
-def test_released_reading_list_propagates_a_read_failure(monkeypatch):
-    # A rate-limited read must not republish the row with the reading list silently
-    # emptied - same rule as every other fail-loud read in this module.
-    monkeypatch.setattr(
-        site,
-        "_session_files",
-        lambda o, r, s, f, hosted: [Link("READINGS.md", "u")],
-    )
-
-    def boom(*a, **k):
-        raise RuntimeError("could not read")
-
-    monkeypatch.setattr(site, "get_file_content", boom)
-    with pytest.raises(RuntimeError):
-        site._released_reading_list(
-            "Semester-f2026", [("materials", "readings", "01_a")]
-        )
-
-
-def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
-    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
-    monkeypatch.setattr(
-        site,
-        "_session_files",
-        lambda o, r, s, f, hosted: [
-            Link("READINGS.md", "https://x/md"),
-            Link("ch1.pdf", "https://x/pdf"),
-        ],
-    )
-    names = [
-        x.name
-        for x in site._row_links("C", "materials", "readings", "01_a", frozenset(), {})
-    ]
-    assert names == ["ch1.pdf"]  # READINGS.md IS the list, not a download beside it
-    # Any other section keeps its text files - only `readings` inlines the overlay.
-    names = [
-        x.name
-        for x in site._row_links("C", "materials", "lectures", "01_a", frozenset(), {})
-    ]
-    assert "READINGS.md" in names
-
-
-def test_row_links_keeps_an_uploaded_text_file_that_is_not_the_overlay(monkeypatch):
-    # The bug the name-based rule fixes: subtracting by EXTENSION took an uploaded
-    # `notes.md` or `refs.bib` - a reading in its own right - out of the downloads too, so a
-    # student could not get it. Only the overlay is ever subtracted.
-    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
-    monkeypatch.setattr(
-        site,
-        "_session_files",
-        lambda o, r, s, f, hosted: [
-            Link("READINGS.md", "https://x/overlay"),
-            Link("notes.md", "https://x/notes"),
-            Link("refs.bib", "https://x/refs"),
-            Link("ch1.pdf", "https://x/pdf"),
-        ],
-    )
-    names = [
-        x.name
-        for x in site._row_links("C", "materials", "readings", "01_a", frozenset(), {})
-    ]
-    assert "READINGS.md" not in names  # its content is already inlined on the row
-    assert sorted(names) == ["ch1.pdf", "notes.md", "refs.bib"]
-
-
 # ------------------------------------------------------- the All Materials catch-all index
 # The two shapes real semesters actually have. Both must land where a reader expects, and the
 # ordinal must decide only the LEVEL a section is read at - never whether a file is listed.
@@ -874,27 +869,35 @@ def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
     assert _docs(monkeypatch, repos) == ["aaa.md"]
 
 
-def test_theme_pages_split_readings_out_only_where_there_is_an_index():
-    semester = site_repo.theme_pages(semester=True)
-    assert "layout: readings" in semester["readings.md"]
-    assert "layout: materials" in semester["materials.md"]
+def test_a_semester_gets_a_tab_per_kind_it_has_rows_of():
+    semester = site_repo.theme_pages(semester=True, kinds=["lab", "drop-in"])
+    assert "labs.md" in semester and "drop-ins.md" in semester
+    assert "lectures.md" not in semester and "readings.md" not in semester
+    assert (
+        "layout: kind\n" in semester["labs.md"] and "kind: lab\n" in semester["labs.md"]
+    )
+    assert "permalink: /drop-ins/" in semester["drop-ins.md"]
+    assert "title: Drop-ins" in semester["drop-ins.md"]
     assert "All Materials" in semester["materials.md"]
-    # A public course site has no semester repos to index, so /materials/ stays the readings
-    # page it has always been rather than becoming an empty catch-all.
+    # The tab of a kind with no rows is retired, so a stale one leaves the site.
+    assert set(site_repo.retired_kind_pages(["lab", "drop-in"])) == {
+        "lectures.md",
+        "readings.md",
+        "exams.md",
+        "others.md",
+    }
+    # A public course site keeps its own pages: /materials/ is its readings page.
     public = site_repo.theme_pages(semester=False)
     assert "readings.md" not in public
     assert "layout: readings" in public["materials.md"]
-    assert "permalink: /materials/" in public["materials.md"]
+    assert "layout: lectures" in public["lectures.md"]
 
 
 def test_every_page_states_its_own_access_rule():
-    semester = site_repo.theme_pages(semester=True)
-    # Each page's gate is its own sentence, because they genuinely differ: readings are a
-    # public citation list over gated files, the rest are gated outright.
-    # auditors read released materials but get no assignments, so the three materials
-    # pages name them and the assignments page does not
+    semester = site_repo.theme_pages(semester=True, kinds=["lecture", "readings"])
+    # auditors read released materials but get no assignments, so the materials pages
+    # name them and the assignments page does not
     assert "enrolled students & auditors." in semester["lectures.md"]
-    assert "enrolled students & auditors." in semester["labs.md"]
     assert "enrolled students & auditors." in semester["readings.md"]
     assert "only accessible to enrolled students/auditors." in semester["materials.md"]
     assert "only accessible to enrolled students." in semester["assignments.md"]
@@ -903,6 +906,22 @@ def test_every_page_states_its_own_access_rule():
     # gate anywhere.
     for page in site_repo.theme_pages(semester=False).values():
         assert "enrolled" not in page
+
+
+def test_the_kinds_data_carries_every_policy_kind_with_its_label_and_colours():
+    kinds = yaml.safe_load(site_repo.kinds_yaml())
+    assert [k["key"] for k in kinds] == [k["key"] for k in policy.kinds()]
+    lab = next(k for k in kinds if k["key"] == "lab")
+    assert lab == {
+        "key": "lab",
+        "label": "Lab",
+        "plural": "Labs",
+        "colour": "#3c763d",
+        "background": "#dff0d8",
+        "system": False,
+        "tab": "/labs/",
+    }
+    assert next(k for k in kinds if k["key"] == "term")["tab"] == ""
 
 
 def test_your_profile_is_the_last_semester_tab():
@@ -949,11 +968,10 @@ def test_nav_order_does_not_depend_on_a_string_tie_break():
     # Assignments used to be pinned to integer position 5, which tied with the fourth
     # generated page - so the tab order came down to comparing "/assignments/" against
     # "/materials/". It now follows the page it belongs behind.
-    names = [
-        i["name"] for i in yaml.safe_load(site_repo.nav_yaml(semester=True))["items"]
-    ]
-    # Assignments is a generated page now, so its position comes from the page table like
-    # every other - no integer slots, nothing to tie.
+    nav = site_repo.nav_yaml(semester=True, kinds=["readings", "lecture", "lab"])
+    names = [i["name"] for i in yaml.safe_load(nav)["items"]]
+    # The kind tabs in the policy's order, then Assignments and All Materials.
+    assert names[2:5] == ["Lectures", "Labs", "Readings"]
     assert names.index("Assignments") == names.index("Readings") + 1
     assert names.index("All Materials") == names.index("Assignments") + 1
 
@@ -1006,29 +1024,6 @@ def test_a_planned_destination_links_only_where_something_exists(monkeypatch):
 
 
 # ----------------------------------------------------- finding a released syllabus
-def test_the_syllabus_is_found_under_any_name_and_format(monkeypatch):
-    # Faculty name it; we only have to find it. ITDS really does use the PDF.
-    for name in ("SYLLABUS.md", "SYLLABUS.pdf", "syllabus-2026.docx", "Syllabus.MD"):
-        monkeypatch.setattr(site, "_repo_tree", lambda o, r, n=name: ("main", (n,)))
-        assert site._released_syllabus("C", ["materials"], {}) == Link(
-            name, f"https://github.com/C/materials/blob/main/{name}"
-        )
-
-
-def test_a_syllabus_image_inside_a_session_folder_is_not_the_syllabus(monkeypatch):
-    # A live semester has `lectures/01_introduction/pics/ids-syllabus-2024.png`. Root files
-    # only, or the home page links a screenshot.
-    monkeypatch.setattr(
-        site,
-        "_repo_tree",
-        lambda o, r: (
-            "main",
-            ("lectures/01_x/pics/ids-syllabus-2024.png", "lectures/01_x/deck.html"),
-        ),
-    )
-    assert site._released_syllabus("C", ["materials"], {}) is None
-
-
 def test_no_syllabus_means_no_key_at_all(monkeypatch):
     # The home page shows no line rather than an empty one, so the key must be absent -
     # not present and blank.
@@ -1050,35 +1045,6 @@ def test_no_syllabus_means_no_key_at_all(monkeypatch):
         )
     )
     assert hosted["syllabus"] == "https://site/S.html"
-
-
-def test_an_exact_syllabus_stem_beats_a_longer_name(monkeypatch):
-    # Plain sorting put `SYLLABUS-draft.pdf` ahead of `SYLLABUS.pdf` ('-' sorts before
-    # '.'), so a semester shipping a draft alongside the real thing pinned the draft on its
-    # front page.
-    monkeypatch.setattr(
-        site,
-        "_repo_tree",
-        lambda o, r: ("main", ("SYLLABUS-draft.pdf", "SYLLABUS.pdf")),
-    )
-    assert site._released_syllabus("C", ["m"], {}).url.endswith("/SYLLABUS.pdf")
-
-
-def test_a_longer_name_is_still_used_when_it_is_all_there_is(monkeypatch):
-    monkeypatch.setattr(
-        site, "_repo_tree", lambda o, r: ("main", ("syllabus-2026.docx",))
-    )
-    assert site._released_syllabus("C", ["m"], {}).url.endswith("/syllabus-2026.docx")
-
-
-def test_the_syllabus_choice_is_stable_when_a_semester_has_two(monkeypatch):
-    # A link that moves between syncs is worse than either choice. Determinism comes from
-    # the caller's sorted repo list and _repo_tree's sorted paths, not from re-sorting.
-    trees = {"zzz": ("SYLLABUS.md",), "aaa": ("SYLLABUS.md",)}
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", trees[r]))
-    assert site._released_syllabus("C", ["aaa", "zzz"], {}).url.endswith(
-        "/aaa/blob/main/SYLLABUS.md"
-    )
 
 
 def _repos(*names):

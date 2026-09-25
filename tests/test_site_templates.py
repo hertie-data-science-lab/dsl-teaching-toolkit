@@ -67,7 +67,7 @@ _DOC_KEY = re.compile(
 _LIQUID_ACCESSORS = ("size", "first", "last")
 
 # Jekyll puts these on every document whatever its front matter says.
-JEKYLL_DOC_FIELDS = frozenset({"url", "content"})
+JEKYLL_DOC_FIELDS = frozenset({"url", "content", "collection"})
 
 # Front matter the sync deliberately never writes: hand-authored fields a template renders
 # only behind an `{% if %}`. Listed rather than tolerated, so the check below stays an
@@ -377,13 +377,22 @@ _WHEN_INCLUDE = re.compile(
 )
 
 
-def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(documents):
+def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(generated):
     # The schedule dispatches on `type`, so a row kind added to site.py without a branch
     # renders as the neutral fallback row - silently, on the live schedule. What each
     # branch includes is its own business, so this checks only that the branch exists and
-    # that the template it names ships.
+    # that the template it names ships. A release row, of any kind, is the one generic row.
+    documents = [
+        _front_matter(text)
+        for name, entries in generated["collections"].items()
+        if name != "_lectures"
+        for text in entries.values()
+    ]
     emitted = {doc["type"] for doc in documents if doc.get("type")}
     emitted |= {doc["due_event"]["type"] for doc in documents if doc.get("due_event")}
+    schedule = _strip_comments(_templates()["_layouts/schedule.html"])
+    assert 'event.collection == "lectures"' in schedule
+    assert "include schedule_row_lecture.html event=event kind=kind.label" in schedule
     branches = {
         m["kind"]: m["include"]
         for m in _WHEN_INCLUDE.finditer(_templates()["_layouts/schedule.html"])
@@ -436,7 +445,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
     "flag",
     [
         "unreleased",
-        "readings_pending",
+        "silent",
         "handout_pending",
         "tbc",
         "dateless",
@@ -1144,6 +1153,7 @@ def test_the_hosted_copy_is_served_from_the_path_the_link_names(tmp_path):
 # buttons rather than for the set-up line.
 _OPEN_IN_LAYOUTS = frozenset(
     {
+        "_layouts/kind.html",
         "_layouts/lectures.html",
         "_layouts/labs.html",
         "_layouts/readings.html",
