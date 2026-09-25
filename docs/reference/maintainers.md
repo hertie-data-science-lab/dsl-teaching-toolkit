@@ -828,15 +828,27 @@ semester on `main`, run the e2e there, then - on the user's go-ahead, outside te
 hours - migrate every live real org and Promote in the same window (with ds01's switch to
 `all_semesters`). `.project/build/migration-runbook.md` holds the order.
 
-**Hold (real orgs).** The tier must move while every org of the course is paused, so:
-`python -m dsl_course.migrate --hold <course> --no-preview` (the course and each live
-semester, one record per org marked `hold`: quiet across all first, then every record,
-then the switch) -> Promote / move the tier -> `migrate <course>` -> `migrate <semester>`
-for each -> `--release <course> --no-preview` (every held org back as recorded, semesters
-first, then one catch-up for every semester). Under a hold a migration never pauses and
-never unpauses: its bracket steps only mark the org `migrated` in its record; a stop
-restores nothing. `--status <course>` prints who is paused; previews work throughout.
-`--release` also abandons a hold, naming each org not migrated inside it.
+**Hold (real orgs).** A Promote refreshes every org on `release`, so the tier moves once, while
+every real course is held:
+
+1. `python -m dsl_course.migrate --hold <course> --no-preview` for EVERY real course (the
+   course and each live semester, one record per org marked `hold`: quiet across all first,
+   then every record, then the switch; a semester migration in flight is taken over).
+2. One Promote, with the ds01-infra switch in the same window. Unmigrated orgs are refused
+   `NOT_MIGRATED` until their turn.
+3. Per course: `migrate <course> --no-preview`, then each live semester; `--status <course>`
+   must read `migrated` for every org.
+4. `--release <course>` - preview first: no "NOT migrated inside the hold" - then
+   `--no-preview` (semesters first, then one catch-up for every semester). Refused while an
+   org is not migrated; `--abandon` releases anyway, naming them.
+5. Check now per semester, one preview of the next automatic run, the catch-up runs green.
+
+One course at a time instead: pin its `central_ref` to the new ref rather than Promote.
+Under a hold a migration never pauses and never unpauses: its bracket steps only mark the
+org `migrated` in its record; a stop restores nothing. `--status` and `--release` also find
+a semester archived or unregistered during the hold (the course's record names every held
+semester). Avoid 05:20-06:45 UTC: the daily Refresh, Publish, Sync membership and Sync site
+fire then (the switch waits past each cron tick, but a run's jobs outlast it).
 
 **The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, with
 every move, delete and re-rendered file per step, nothing written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
@@ -853,15 +865,17 @@ repo's own setting (`enabled`, `allowed_actions`) is recorded in
 was off stays off), reads it back and deletes the record. The order is: wait until no run is
 unfinished (queued, in progress, waiting, requested, pending) in those repos or as a central
 Deploy / Promote - polled for up to 4 minutes, and never ending within 60 s of a tick (ds01
-on the quarter hour, the cron at 7 past): it waits past the tick - THEN record, THEN switch
-off; a run switched off mid-flight loses its unstarted jobs. The verify reads the setting
+on the quarter hour, and every rendered cron: `migrate.TICK_CRONS`): it waits past the
+tick - THEN record, THEN check the tick again right before the switch, THEN switch off; a run switched off mid-flight loses its unstarted jobs. The verify reads the setting
 back and waits the same way for a run that slipped in during the switch. A preview never
 waits. An org with no workflow repo counts as paused. From the pause to the verified
 unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded repos and the
 record; a semester's stop first puts the COURSE's repos back on (every semester shares
 them; its own stay off until the rerun). A semester waits until its course's migration is complete (no course
-record left, its Actions on) - or resumes its own stopped run (its record is there) - so no
-run re-enables a course mid-migration and two semesters of one course never overlap.
+record left, its Actions on) - or resumes its own stopped run (its record is there) - and
+while any OTHER semester of the course has an unfinished (non-hold) record: a stopped run
+puts the course back on, so only the record says it is unfinished. So no run re-enables a
+course mid-migration and two semesters of one course never overlap.
 
 Preflight names, by file, where the checkout differs from the ref the course pins (`git
 diff --name-only origin/<ref> -- dsl_course templates`, as of the last fetch): the
