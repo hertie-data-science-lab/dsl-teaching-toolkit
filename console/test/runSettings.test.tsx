@@ -115,12 +115,14 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
     expect(out).toContain('href="#assignment-assignment-3/teams">Open Teams</a>');
   });
 
-  it('does not offer Update every copy or Collect now when two entries share the template', () => {
+  it('names the entry to Update every copy and Collect now, so two entries may share one template', () => {
     const shared = SCHEDULE.replace('course_source_repo: assignment-3-f2026', 'course_source_repo: assignment-2-f2026');
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files: filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: shared }) })} />);
-    expect(out).toContain('assignment-2 and assignment-3 use the same assignment template');
-    expect(out).not.toContain('>Collect now<');
-    expect(html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview' })} />)).toContain('>Collect now<');
+    expect(out).toContain('>Collect now<');
+    const ref = { slug: 'assignment-2', title: 'x', template: 'assignment-2-f2026', units: 1, group: false, when: '' };
+    const scope = { courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' };
+    expect(defs.collect(scope, ref).args).toEqual({ course_source_repo: 'assignment-2-f2026', assignment: 'assignment-2' });
+    expect(defs.updateCopies(scope, ref, []).args).toEqual({ course_source_repo: 'assignment-2-f2026', assignment: 'assignment-2' });
   });
 });
 

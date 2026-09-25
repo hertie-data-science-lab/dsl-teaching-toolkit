@@ -14,7 +14,6 @@ import { Crumbs, Help, ProblemCards } from '../ui/bits';
 import { asgSummary } from './Cohort';
 import { MarksTab, TeamsTab } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
-import { scheduleFile } from '../model/cascade';
 import { WithStatus, cohortCrumbs, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
@@ -117,14 +116,6 @@ function stepOf(state: AssignmentState): number {
   return LIFE.findIndex(([, s]) => s.includes(state));
 }
 
-/** The schedule keys whose entry uses `template`: Update every copy and Collect now act on a template, so they cannot pick between two. */
-export function sharedBy(p: Pick<ReadyProps, 'files' | 'cohort'>, template: string): string[] {
-  const sf = scheduleFile(p.files, p.cohort.org);
-  if (!sf || sf === 'loading') return [];
-  const entries = (sf.doc.assignments ?? {}) as Record<string, { course_source_repo?: unknown }>;
-  return Object.entries(entries).filter(([, e]) => e && e.course_source_repo === template).map(([k]) => k);
-}
-
 export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
 
 /** The tab an assignment opens on: Teams while teams form, Marks once marking starts. */
@@ -190,8 +181,6 @@ function Overview(p: TabProps) {
   const bigOf = cur === 4 || cur === 5 ? a.marks.total : a.units;
   const scope = cohortScope(p);
   const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand' };
-  const sharers = sharedBy(p, a.template);
-  const shared = sharers.length > 1 ? `${sharers.join(' and ')} share one assignment template; Collect now and Update every copy come back when each has its own template.` : null;
   const tree = p.files.tree(p.course.org, a.template);
   const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
   return (
@@ -255,12 +244,8 @@ function Overview(p: TabProps) {
               cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (
                 <>
-                  {shared ? <p class="footnote">{shared}</p> : (
-                    <>
-                      <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
-                      <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
-                    </>
-                  )}
+                  <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
+                  <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
                 </>
               ) : null)}
             {row(cur === 4 ? 'now' : cur > 4 ? 'past' : 'later', 'Marking',
