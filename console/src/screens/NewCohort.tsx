@@ -17,8 +17,7 @@ import { allOk, checkCohortSetUp, checkOrg, useLive, type Check } from '../wizar
 import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified } from '../wizards/Wizard';
 import type { CourseProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
-import { obj } from '../edit/yamlText';
-import { parse as parseYamlText } from 'yaml';
+import { YamlText, obj } from '../edit/yamlText';
 
 const STEPS = [
   { t: 'Org', s: 'Create it on GitHub' },
@@ -38,13 +37,10 @@ export function nkDone(d: NkDraft, org: string, orgChecks: Check[] | null, setUp
   return [orgOk, orgOk && (setUp ? allOk(setUp) : d.setUp === org), false];
 }
 
-function parseYaml(text: string): unknown {
-  try {
-    return parseYamlText(text);
-  } catch {
-    return null;
-  }
-}
+const yamlDoc = (text: string): unknown => {
+  const y = new YamlText(text);
+  return y.errors.length ? null : y.toJS();
+};
 
 /** Which of the cards are done, from the semester's own files; `defaults` (optional) once assignments.yml states any. */
 export function cardsDone(files: Files, org: string): { staff: boolean; schedule: boolean; students: boolean; defaults: boolean } {
@@ -57,7 +53,7 @@ export function cardsDone(files: Files, org: string): { staff: boolean; schedule
     staff: parseInstructors(f(INSTRUCTORS_FILE)).length > 0,
     schedule: !!sched && Object.keys(sched.releases).length + Object.keys(sched.assignments).length > 0,
     students: parseRoster(f('students.csv')).rows.length > 0,
-    defaults: Object.keys(obj(obj(parseYaml(f(ASSIGNMENTS_FILE))).defaults)).length > 0,
+    defaults: Object.keys(obj(obj(yamlDoc(f(ASSIGNMENTS_FILE))).defaults)).length > 0,
   };
 }
 

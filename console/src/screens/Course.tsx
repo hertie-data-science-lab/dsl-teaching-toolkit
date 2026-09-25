@@ -5,14 +5,14 @@ import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
-import { SchemaForm, effective, fieldErrors } from '../forms/Form';
+import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { assignmentIdent } from '../model/format';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { courseBlock, effectiveWord, institutionLayer, lateWord, resolve, type Layers } from '../model/cascade';
 import { DEFAULT_FORMATS } from '../model/policy';
-import { formatsList, fromConfig, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
+import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
@@ -192,7 +192,10 @@ function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: Questio
               <tr>
                 <td><input type="text" value={r.name} aria-label={`Question ${i + 1} name`} onInput={(e) => edit(i, { name: (e.target as HTMLInputElement).value })} /></td>
                 <td><input type="number" min="0" value={r.points} aria-label={`Question ${i + 1} points`} style="max-width:90px" onInput={(e) => edit(i, { points: (e.target as HTMLInputElement).value })} /></td>
-                <td><input type="text" list="q-files" value={r.file} placeholder="the runnable file" aria-label={`Question ${i + 1} file`} onInput={(e) => edit(i, { file: (e.target as HTMLInputElement).value })} /></td>
+                <td>
+                  <input type="text" list="q-files" value={r.file} placeholder="the runnable file" aria-label={`Question ${i + 1} file`} aria-invalid={questionFileError(r.file) ? 'true' : undefined} onInput={(e) => edit(i, { file: (e.target as HTMLInputElement).value })} />
+                  {questionFileError(r.file) ? <Invalid>{questionFileError(r.file)}</Invalid> : null}
+                </td>
                 <td><button class="x" type="button" aria-label={`Remove question ${i + 1}`} onClick={() => set(rows.filter((_, j) => j !== i))}>&times;</button></td>
               </tr>
             ))}
@@ -238,7 +241,8 @@ export function TemplateScreen(p: CourseProps) {
   const cur = values ?? base;
   const baseQ = questionRows(cfg.questions);
   const q = qdraft ?? baseQ;
-  const errors = { ...fieldErrors(null, tiers, cur), ...(formatError(cur) ? { formats: formatError(cur)! } : {}) };
+  const fileErr = q.map((r) => questionFileError(r.file)).find(Boolean);
+  const errors = { ...fieldErrors(null, tiers, cur), ...(formatError(cur) ? { formats: formatError(cur)! } : {}), ...(fileErr ? { questions: fileErr } : {}) };
   const dirty = (values !== null && !deepEqual(effective(tiers, values), effective(tiers, base))) || (qdraft !== null && !deepEqual(qdraft, baseQ));
   const title = String(cfg.title ?? '');
   const scope = courseScope(p);
@@ -291,7 +295,7 @@ export function TemplateScreen(p: CourseProps) {
             </div>
             <div class="form-section">
               <h3>How it is marked</h3>
-              <FormatPicker id="g-fmt" v={cur} set={change} />
+              <FormatPicker id="g-fmt" v={cur} set={change} fallback={fallbackFormats.length ? { formats: fallbackFormats, source: 'course' } : undefined} />
               <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests'])} values={cur} onChange={change} />
               <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
               <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />

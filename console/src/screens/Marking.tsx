@@ -33,6 +33,12 @@ function asgRef(a: Assignment, group: boolean): AsgRef {
 
 const key = (path: Path) => JSON.stringify(path);
 
+/** " (out of 5)" for a question with a maximum, nothing for one without (a `{file}`-only entry). */
+function outOf(m: unknown): string {
+  const pts = questionPoints(m);
+  return pts == null || pts === '' ? '' : ` (out of ${String(pts)})`;
+}
+
 /** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day`, null while it is read. */
 function penaltyOf(p: ReadyProps, slug: string): { rate: number | null; known: boolean } {
   const layers = assignmentSettings(p, slug);
@@ -113,7 +119,7 @@ export function MarksTab(p: TabProps) {
     const days = u.info?.days_late;
     const nosub = u.info !== null && !u.info?.submitted;
     const scoreCells = qs.length
-      ? qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q} (out of ${String(questionPoints(m))}) for ${u.key}`)}</td>)
+      ? qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q}${outOf(m)} for ${u.key}`)}</td>)
       : [<td>{input(u.scorePath, typeof u.score === 'object' ? null : u.score, 'q', `Score for ${u.key}`)}</td>];
     const membersOpen = !folds[`m:${u.key}`];
     const qToggle = qs.length ? <><br />{toggle(`q:${u.key}`, qOpen(u), `${qOpen(u) ? 'Hide' : 'Show'} feedback per question for ${u.key}`, 'Feedback per question')}</> : null;
@@ -180,7 +186,7 @@ export function MarksTab(p: TabProps) {
       {top}
       <Help title="How marks work" doc="10-grade-and-return-assignments.md">
         <p>Submission details come from the repos and cannot be edited. You enter {qs.length ? 'points per question, with optional feedback on each,' : 'one score'} feedback that students see, an adjustment, and private notes that are never shared. {rate !== null ? `The penalty is ${round(rate * 100)}% of the total per late day.` : 'No late penalty applies.'} Nothing reaches a student until you return marks.</p>
-        {sheet.group ? <p>A team’s score and its feedback, overall and per question, reach every member; each member can get their own feedback and adjustment too.</p> : null}
+        {sheet.group ? <p>A team’s marks and its feedback, overall and per question, reach every member; each member can get their own feedback and adjustment too.</p> : null}
       </Help>
       {sheet.frozen ? <p class="note" style="margin-bottom:12px"><b>Frozen at the late cutoff.</b> The submission details no longer change; your marks and feedback are still yours to edit.</p> : null}
       <div class="table-wrap" style="max-height:620px;overflow:auto">
@@ -198,7 +204,7 @@ export function MarksTab(p: TabProps) {
             </tr>
             <tr>
               <th class="sys">Submitted</th><th class="sys">Days late</th><th class="sys">Tests</th><th class="sys">Completion</th>
-              {qs.length ? qs.map(([q, m]) => <th>{q}<span class="grp">/ {String(questionPoints(m))}{questionFile(m) ? <> · <code>{questionFile(m)}</code></> : null}</span></th>) : <th>{max ? `/ ${max}` : 'score'}</th>}
+              {qs.length ? qs.map(([q, m]) => <th>{q}<span class="grp">{questionPoints(m) != null && questionPoints(m) !== '' ? `/ ${String(questionPoints(m))}` : ''}{questionFile(m) ? <>{questionPoints(m) != null && questionPoints(m) !== '' ? ' · ' : ''}<code>{questionFile(m)}</code></> : null}</span></th>) : <th>{max ? `/ ${max}` : 'score'}</th>}
             </tr>
           </thead>
           <tbody>{rows}</tbody>
