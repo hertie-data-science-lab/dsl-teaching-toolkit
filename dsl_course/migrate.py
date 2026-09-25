@@ -765,16 +765,22 @@ class Pause:
         if not self.disabled():
             log_err("Actions did not read back as disabled")
             return False
+        # Only a run still going counts: one dispatched in the same second as the pause
+        # that has since finished wrote nothing after this run's first write.
         since = f"created=%3E%3D{self.started}"
         late = [
             "/".join(self._live(k))
             for k in self.saved
-            if self.started and _run_count(*self._live(k), since)
+            if self.started
+            and any(
+                _run_count(*self._live(k), f"{since}&status={s}")
+                for s in LIVE_RUN_STATES
+            )
         ]
         if late:
             log_err(
-                f"a run started after the pause in {', '.join(late)} - wait for it "
-                f"to finish, then re-run the migration"
+                f"a run started after the pause in {', '.join(late)} is not finished - "
+                f"wait for it to finish, then re-run the migration"
             )
             return False
         return self.quiet(list(self.saved))

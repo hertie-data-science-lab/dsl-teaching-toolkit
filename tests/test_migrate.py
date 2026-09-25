@@ -91,6 +91,7 @@ class FakeGitHub:
         self.fail_rename = False
         self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
         self.run_after_pause: tuple[str, str] | None = None
+        self.run_after_pause_state = "in_progress"
         self.clock = "Thu, 24 Sep 2026 10:00:00 GMT"  # GitHub's, in its Date header
         self.central_runs: dict[
             str, list[str]
@@ -220,7 +221,9 @@ class FakeGitHub:
                 }
                 self.puts.append((*key, on))
                 if not on and self.run_after_pause == key:
-                    self.runs.setdefault(key, []).append(("9999-12-31T00:00:00Z", "x"))
+                    self.runs.setdefault(key, []).append(
+                        ("9999-12-31T00:00:00Z", self.run_after_pause_state)
+                    )
                 return 0, ""
             state = self.setting(*key)
             body = {"enabled": state["enabled"]}
@@ -228,12 +231,15 @@ class FakeGitHub:
                 body["allowed_actions"] = state["allowed_actions"]
             return 0, json.dumps(body)
         if parts[3:] == ["actions", "runs"]:
-            runs = self.runs.get(key, [])
-            if query.startswith("status="):
-                state = query.split("=", 1)[1]
-                return 0, str(sum(s == state for _, s in runs))
-            since = query.split("%3E%3D", 1)[1]
-            return 0, str(sum(at >= since for at, _ in runs))
+            params = dict(p.split("=", 1) for p in query.split("&"))
+            since = params.get("created", "%3E%3D").split("%3E%3D", 1)[1]
+            state = params.get("status")
+            return 0, str(
+                sum(
+                    at >= since and state in (None, s)
+                    for at, s in self.runs.get(key, [])
+                )
+            )
         if len(parts) == 3 and method == "PATCH":
             if self.fail_rename:
                 return 1, "HTTP 403: Forbidden"
@@ -583,12 +589,24 @@ def test_a_run_that_starts_after_the_pause_stops_it(
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT]
 
 
+def test_a_run_dispatched_with_the_pause_that_has_finished_passes_it(
+    fake, semester, monkeypatch, capsys
+):
+    # The rehearsal's Sync membership, dispatched in the same second as the pause and
+    # finished before the verify read the runs: it wrote nothing after the pause.
+    fake.run_after_pause = (COURSE, ".github")
+    fake.run_after_pause_state = "completed"
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert "a run started after the pause" not in capsys.readouterr().err
+
+
 def test_the_pause_starts_at_githubs_clock_not_the_laptops(
     fake, semester, monkeypatch, capsys
 ):
-    # A run created seconds after GitHub's pause moment: a laptop clock a day ahead would
-    # have counted it as before the pause.
-    fake.runs[(COURSE, ".github")] = [("2026-09-24T10:00:05Z", "completed")]
+    # A run created seconds after GitHub's pause moment and still going: a laptop clock
+    # a day ahead would have counted it as before the pause.
+    fake.runs[(COURSE, ".github")] = [("2026-09-24T10:00:05Z", "in_progress")]
+    monkeypatch.setattr(migrate, "_alive", lambda targets: [])
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     assert (
         f"a run started after the pause in {COURSE}/.github" in capsys.readouterr().err
