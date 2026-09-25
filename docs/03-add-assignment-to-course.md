@@ -44,12 +44,16 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         `student_choice` (private, and the student is its admin: theirs to publish once the
         grading cutoff has passed). Read when the repo is created, so editing it afterwards
         moves nothing
-   - Everything else - the team cap, the late window, the penalty - takes the nearest
-     default: this assignment's own setting, else the course's `assignment_defaults:` in
+   - Everything else - the team cap, the late window, the penalty, and `team_formation`
+     or `visibility` left at `(course default)` - takes the nearest default: this
+     assignment's own setting, else the semester's `semester-config/assignments.yml`
+     (coming with the next release), else the course's `assignment_defaults:` in
      `.github/dsl-course.yml`, else the institution's (Hertie: teams of 5,
      `late_penalty_per_day: 10%` of the grade per day started, `late_window_days: 10`).
-     A course default applies to every assignment that does not set its own, from the
-     next run on. Write `late_window_days: 0` to accept nothing after the deadline.
+     New assignment writes these into `grading_config.yml` commented out, showing the
+     value and where it comes from; uncomment a line to set it for this assignment. A
+     course default applies to every assignment that does not set its own, from the next
+     run on. Write `late_window_days: 0` to accept nothing after the deadline.
    - this creates **`assignment-1-f2026`** with two branches of stubs for you to replace:
 
    | Branch | Holds | Who sees it |

@@ -120,8 +120,10 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
     )
     assert seen["formats"] == ["py"]
     assert seen["submit_via"] == "shared_dropbox_repo"
-    assert seen["team_formation"] == "assigned"
-    assert seen["visibility"] == "private"
+    # The two run boxes are passed on unanswered: the file writes them commented and the
+    # cascade answers them at read time.
+    assert seen["team_formation"] == SENTINEL
+    assert seen["visibility"] == SENTINEL
 
 
 def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):

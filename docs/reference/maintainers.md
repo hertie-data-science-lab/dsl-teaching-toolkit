@@ -444,7 +444,11 @@ A run setting (`settings.RUN_KEYS`: `team_formation`, `max_team_size`, `late_win
 The late pair is one rule: a layer stating either half answers both, the other half none.
 An absent `assignments.yml` leaves its two layers empty. Until WP-B2 moves them, a run key
 the template's `grading_config.yml` declares sits in the assignment layer, below the
-`assignments.yml` block. `grades.load_grading_spec(course, template, semester_org=, slug=)`
+`assignments.yml` block, so New assignment writes a run key live only when its box was
+answered, and otherwise commented with its current value and source. A read of
+`dsl-course.yml` or `assignments.yml` that fails other than with a 404 raises and is not
+cached; a value a reader refuses states nothing, and the next layer answers.
+`grades.load_grading_spec(course, template, semester_org=, slug=)`
 hands every reader the effective values, with `GradingSpec.sources`; `status.json` carries
 them per assignment (`settings`). `settings` is the only module that reads
 `assignment_defaults` (`tests/test_settings.py`).

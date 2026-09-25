@@ -191,13 +191,14 @@ _READINGS_STUB = (
     b"schedule.yml.\n"
 )
 
-# The assignment's own definition, written from what New assignment was asked for and
-# what the course's defaults resolve to (`settings`: the course's `assignment_defaults`,
-# else the institution's policy). INSTRUCTOR-OWNED from the moment it lands: nothing ever
-# rewrites it, and every setting in it is meant to be edited here afterwards. A setting the
-# course has no default for is seeded COMMENTED OUT, so the file teaches the whole
-# vocabulary without asserting an opinion nobody expressed - except the late-work pair,
-# which the institution has an opinion about and is written live.
+# The assignment's own definition, written from what New assignment was asked for.
+# INSTRUCTOR-OWNED from the moment it lands: nothing ever rewrites it, and every setting in
+# it is meant to be edited here afterwards. A RUN setting (`settings.RUN_KEYS`) is written
+# live only when New assignment was given an explicit answer for it: until the run keys
+# move to `assignments.yml`, a run key in this file IS the assignment layer of the
+# cascade, so a stamped default would hide the semester's and the course's for ever. The
+# rest are seeded COMMENTED OUT, showing the value they resolve to now and where it comes
+# from, so the file still teaches the whole vocabulary and states the numbers.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the semester's schedule.yml."
@@ -236,6 +237,24 @@ class _Flow(list):
     """A list `_setting` writes inline, `[a, b]`."""
 
 
+# What a commented run setting says about the value it shows (`settings.resolve`'s source).
+_SOURCE_NOTE = {
+    "course": "this course's default (dsl-course.yml)",
+    "institution": "institution default",
+}
+
+
+def _run_setting(key: str, value: object, source: str, comment: str, live: bool) -> str:
+    """A run setting's line: live only when it was asked for (and applies to this shape);
+    otherwise commented, saying where the value shown comes from when the cascade gave it
+    (`source`, empty for an answer somebody gave)."""
+    if live:
+        return _setting(key, value, comment)
+    if source:
+        comment = f"{_SOURCE_NOTE[source]}; set here to override. {comment}"
+    return _setting(key, value, comment, live=False)
+
+
 def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
     """One line of grading_config.yml: `key: value` padded to a common column, then its
     explanation. `live=False` comments the whole line out - the setting is documented and
@@ -249,6 +268,17 @@ def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
     if not live:
         line = f"# {line}"
     return f"{line:<29} # {comment}".rstrip()
+
+
+_FORMATION_HELP = (
+    "self_select (students use the Join-team form) | assigned (you write teams.csv)"
+)
+_VISIBILITY_HELP = (
+    "private (the student and the instructors) | public (the whole internet: "
+    "portfolio work, no Submission receipts issue) | student_choice (private, and the "
+    "student is its admin: theirs to publish after the late cutoff, and no "
+    "Submission receipts issue) - read at hand-out only"
+)
 
 
 # What the three per-unit stages say on a `shared_dropbox_repo` assignment, where none of
@@ -267,7 +297,9 @@ def _grading_config(
     autograde: bool,
     defaults: dict,
 ) -> str:
-    """`grading_config.yml` as New assignment writes it."""
+    """`grading_config.yml` as New assignment writes it. `team_formation` and
+    `visibility` at `COURSE_DEFAULT_CHOICE` (or empty) were not asked for: they are
+    written commented, at the value the course, else the institution, gives them."""
     group = kind == "group"
     # A drop box is hand-marked, and the parse says so: all three per-unit stages are
     # refused for `submit_via: shared_dropbox_repo` (`grades._cross_check`), because each
@@ -277,8 +309,18 @@ def _grading_config(
     # digest issue - a fault about nothing anybody typed.
     marked_by_hand = submit_via == "shared_dropbox_repo"
     stack = [("course", defaults), ("institution", settings.institution_defaults())]
+
+    def run(key: str, given: str = "") -> tuple[object, str, bool]:
+        """`(value, source, asked)` for one run key: the answer given, else the cascade's."""
+        if given and given != COURSE_DEFAULT_CHOICE:
+            return given, "", True
+        value, source = settings.resolve(key, stack)
+        return value, source, False
+
+    formation, formation_from, formation_asked = run("team_formation", team_formation)
+    shown_visibility, visibility_from, visibility_asked = run("visibility", visibility)
     cap, cap_from = settings.resolve("max_team_size", stack)
-    window, _ = settings.resolve("late_window_days", stack)
+    window, late_from = settings.resolve("late_window_days", stack)
     penalty, _ = settings.resolve("late_penalty_per_day", stack)
     lines = [
         _GRADING_STAMP,
@@ -286,18 +328,14 @@ def _grading_config(
             "title", title, "the assignment's name, shown to graders and on the site"
         ),
         _setting("type", kind, "individual | group"),
-        _setting(
+        _run_setting(
             "team_formation",
-            team_formation,
-            "self_select (students use the Join-team form) | assigned (you write teams.csv)",
-            live=group,
+            formation,
+            formation_from,
+            _FORMATION_HELP,
+            live=group and formation_asked,
         ),
-        _setting(
-            "max_team_size",
-            cap,
-            "group only",
-            live=group and cap_from == "course",
-        ),
+        _run_setting("max_team_size", cap, cap_from, "group only", live=False),
         _setting(
             "submit_via",
             submit_via,
@@ -317,18 +355,16 @@ def _grading_config(
             "external only: the `Submit on ...` button on the site (https only)",
             live=False,
         ),
-        # Live only where there IS a repo for it to describe: an `external` assignment
-        # creates none, and the parse drops the key there. Read when each repo is CREATED,
-        # so the comment says what editing it afterwards does - which is nothing to the
-        # repos, and a digest fault until the line matches them again.
-        _setting(
+        # Live only where it was asked for AND there is a repo for it to describe: an
+        # `external` assignment creates none, and the parse drops the key there. Read when
+        # each repo is CREATED, so the comment says what editing it afterwards does -
+        # which is nothing to the repos, and a digest fault until the line matches them.
+        _run_setting(
             "visibility",
-            visibility,
-            "private (the student and the instructors) | public (the whole internet: "
-            "portfolio work, no Submission receipts issue) | student_choice (private, and the "
-            "student is its admin: theirs to publish after the late cutoff, and no "
-            "Submission receipts issue) - read at hand-out only",
-            live=creates_unit_repos(submit_via),
+            shown_visibility,
+            visibility_from,
+            _VISIBILITY_HELP,
+            live=visibility_asked and creates_unit_repos(submit_via),
         ),
         # EVERY starter seeded, in the order it was named: the FIRST is the runnable one
         # (the completion check and the autograder run it), the rest are there to be read.
@@ -342,20 +378,24 @@ def _grading_config(
         "",
         _QUESTIONS_STUB.rstrip(),
         "",
-        # Both LIVE, whatever the course declares: these two are the one setting the
-        # institution has an opinion about when nobody else does (`policy.yml`, the
-        # Hertie syllabus rule), and a commented-out line carrying the numbers an
-        # assignment will actually be graded by is a file that hides its own policy. A
-        # course default naming one half alone is its whole rule: the other half is none.
-        _setting(
+        # Commented, carrying the numbers the assignment is graded by today and where
+        # they come from: New assignment never asks for the late rule, so a live pair
+        # here would pin the course's or the institution's rule over every semester's
+        # `assignments.yml`. A layer naming one half alone is its whole rule: the other
+        # half is none.
+        _run_setting(
             "late_window_days",
             window if window is not None else 0,
+            late_from,
             "0 = nothing after the due date is accepted",
+            live=False,
         ),
-        _setting(
+        _run_setting(
             "late_penalty_per_day",
             penalty or "0%",
+            late_from,
             "of the EARNED grade, per day started",
+            live=False,
         ),
         "",
         _setting(
@@ -1326,9 +1366,9 @@ def scaffold_assignment(
     kind: str = "individual",
     *,
     name: str = "",
-    team_formation: str = "self_select",
+    team_formation: str = COURSE_DEFAULT_CHOICE,
     submit_via: str = "assignment_repo",
-    visibility: str = "private",
+    visibility: str = COURSE_DEFAULT_CHOICE,
     autograde: bool = False,
     copy_from: str = "",
 ) -> int:
@@ -1337,9 +1377,10 @@ def scaffold_assignment(
     Every argument but `formats` lands verbatim in the solution branch's
     `grading_config.yml`, which is what the handout, the grading sheet and the Join-team
     form all read - so the answers given on the button are the ones the rest of the term
-    obeys, and nothing has to be hand-edited in afterwards. What the button does NOT ask -
-    the team cap, the late window, the penalty - comes from the course's own
-    `assignment_defaults`.
+    obeys, and nothing has to be hand-edited in afterwards. A run setting left at
+    `COURSE_DEFAULT_CHOICE` (`team_formation`, `visibility`), and every one the button
+    does not ask - the team cap, the late window, the penalty - is written commented, so
+    the cascade (`settings`) answers it at read time.
 
     `formats` is the exception: it picks which starter stubs are seeded on `main`, one
     each with its model answer on `solution`, and nothing else. The grader reads whatever
@@ -1825,19 +1866,15 @@ def main() -> int:
     args = parser.parse_args()
     if args.cmd == "assignment" and not args.copy_from:
         # A copy ignores these boxes, so it pays for no read of the course's defaults.
+        # The two RUN boxes (`team_formation`, `visibility`) stay as given: one left at
+        # the course default is written commented and the cascade answers it at read
+        # time (`_grading_config`).
         answers = resolve_answers(
-            {
-                "formats": args.formats,
-                "team_formation": args.team_formation,
-                "submit_via": args.submit_via,
-                "visibility": args.visibility,
-            },
+            {"formats": args.formats, "submit_via": args.submit_via},
             settings.course_defaults(args.org),
         )
         args.formats = answers["formats"]
-        args.team_formation = answers["team_formation"]
         args.submit_via = answers["submit_via"]
-        args.visibility = answers["visibility"]
     if args.cmd == "assignment":
         # Normalised once, here, so an un-refreshed org's workflow sending the legacy
         # `github` still scaffolds an `assignment_repo` shape and never re-writes the old
