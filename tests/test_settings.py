@@ -175,16 +175,56 @@ def test_a_course_visibility_says_nothing_about_an_assignment_with_no_repo(
     assert grades.load_grading_spec("C", "assignment-1-f2026").visibility == "private"
 
 
-def test_no_module_but_settings_reads_assignment_defaults():
-    """The course layer has one reader. The literal key appears in code nowhere else."""
+def _names_the_block(node: ast.AST) -> bool:
+    """`"assignment_defaults"`, or the constant that spells it, however imported."""
+    if isinstance(node, ast.Constant):
+        return node.value == settings.ASSIGNMENT_DEFAULTS_KEY
+    if isinstance(node, ast.Name):
+        return node.id == "ASSIGNMENT_DEFAULTS_KEY"
+    return isinstance(node, ast.Attribute) and node.attr == "ASSIGNMENT_DEFAULTS_KEY"
+
+
+def _block_reads(tree: ast.AST) -> list[int]:
+    """The lines that READ the block out of a mapping: `meta[key]` or `meta.get(key)`
+    (and `pop`/`setdefault`), by the literal or by the constant."""
     found = []
-    for path in sorted(PACKAGE.rglob("*.py")):
-        if path.name == "settings.py":
-            continue
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Constant) and node.value == "assignment_defaults":
-                found.append(f"{path.name}:{node.lineno}")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and _names_the_block(node.slice) or (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("get", "pop", "setdefault")
+            and node.args
+            and _names_the_block(node.args[0])
+        ):
+            found.append(node.lineno)
+    return found
+
+
+# `settings` is the course layer's one reader; `migrate` reads the block only to strip
+# and rewrite it.
+_MAY_READ_THE_BLOCK = {"settings.py", "migrate.py"}
+
+
+def test_no_module_but_settings_reads_assignment_defaults():
+    """The course layer has one reader: no other module reads the block, whether by the
+    literal key or by the constant."""
+    found = [
+        f"{path.name}:{line}"
+        for path in sorted(PACKAGE.rglob("*.py"))
+        if path.name not in _MAY_READ_THE_BLOCK
+        for line in _block_reads(ast.parse(path.read_text()))
+    ]
     assert found == []
+
+
+def test_the_read_check_sees_a_read_by_the_constant():
+    tree = ast.parse(
+        "from .settings import ASSIGNMENT_DEFAULTS_KEY\n"
+        "x = meta.get(ASSIGNMENT_DEFAULTS_KEY)\n"
+        "y = meta['assignment_defaults']\n"
+        "z = {ASSIGNMENT_DEFAULTS_KEY: 1}\n"
+    )
+    assert _block_reads(tree) == [2, 3]
 
 
 def test_the_digest_checks_the_spec_the_handout_resolves(monkeypatch):
