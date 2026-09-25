@@ -299,6 +299,12 @@ export function folderKinds(folders: string[], kinds: Record<string, string>): {
 
 const FROM_WORD = { declared: 'set here', name: 'from its name', default: 'the default' };
 
+/** The override's "not set here" option: the kind the folder gets without `materials.yml`, and why. */
+export function resetLabel(folder: string): string {
+  const { kind, named } = inferKind(folder);
+  return `${KIND_LABEL[kind] ?? kind} (${named ? FROM_WORD.name : FROM_WORD.default})`;
+}
+
 /** `materials.yml` with the syllabus and kinds written: blank syllabus and no kinds remove the keys. */
 export function writeHolds(text: string | null, h: Holds): string | null {
   const y = new YamlText(text ?? MATERIALS_STUB);
@@ -405,7 +411,7 @@ export function MaterialsScreen(p: CourseProps) {
                 <li>
                   <code>{k.folder}/</code> <span class="chip">{KIND_LABEL[k.kind] ?? k.kind}</span> <span class="footnote">{FROM_WORD[k.from]}</span>
                   <label class="inline"> This folder is: <select aria-label={`Kind of ${k.folder}`} onChange={(e) => setKind(k.folder, (e.target as HTMLSelectElement).value)}>
-                    <option value="" selected={k.from !== 'declared'}>{k.from === 'declared' ? 'from its name' : `${KIND_LABEL[k.kind] ?? k.kind} (${FROM_WORD[k.from]})`}</option>
+                    <option value="" selected={k.from !== 'declared'}>{resetLabel(k.folder)}</option>
                     {CONTENT_KINDS.map((x) => <option value={x} selected={k.from === 'declared' && k.kind === x}>{KIND_LABEL[x] ?? x}</option>)}
                   </select></label>
                 </li>

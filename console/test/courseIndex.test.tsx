@@ -10,7 +10,7 @@ import { StaticFiles, type Files } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { CourseScreen } from '../src/screens/Course';
-import { MaterialsScreen, WebsiteScreen, folderKinds, writeHolds } from '../src/screens/CourseEdit';
+import { MaterialsScreen, WebsiteScreen, folderKinds, resetLabel, writeHolds } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, materialsSentence, otherRepos, publicPatterns } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { Sidenav } from '../src/ui/shell';
@@ -224,6 +224,10 @@ describe('materials settings: syllabus file and folder kinds', () => {
     expect(out).toContain('value="E1282.pdf"');
     expect(out).toContain(`/edit/main/E1282.pdf`);
     expect(out).toContain('<span class="ft-name">Tutorials/</span><span class="chip">Lab</span>');
+  });
+  it('names the kind a folder falls back to, and why', () => {
+    expect(resetLabel('quiz')).toBe('Lecture (the default)');
+    expect(resetLabel('Tutorials')).toBe('Lab (from its name)');
   });
   it('writes materials.yml with only what is declared', () => {
     expect(writeHolds(null, { syllabus: 'E1282.pdf', kinds: { quiz: 'exam' } })).toBe(
