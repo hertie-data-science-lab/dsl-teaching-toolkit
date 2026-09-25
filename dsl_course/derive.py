@@ -1,6 +1,6 @@
 """dsl-course derive -- write a template's student starter from its model solution.
 
-ONE authored file, two branches. Faculty keep the notebook (or Rmd/qmd/py) they actually
+ONE authored file, two branches. Faculty keep the notebook (or Rmd/qmd/py/tex) they actually
 teach from on the template's `solution` branch, under `solution/`, with the answers fenced
 off in the nbgrader/Otter vocabulary every notebook toolchain already speaks:
 
@@ -67,9 +67,13 @@ from .log import (
 
 # nbgrader writes `### BEGIN SOLUTION`, Otter writes `# BEGIN SOLUTION`, and people type
 # `#BEGIN SOLUTION`. All three are the same instruction, so the match is on the WORDS: a
-# line that is nothing but comment hashes and the phrase. Case-insensitive, because a
-# marker that reads correctly to a human and not to this parser is the worst of both.
-_MARKER = re.compile(r"^\s*#*\s*(BEGIN|END)\s+SOLUTION\s*$", re.IGNORECASE)
+# line that is nothing but comment hashes (or LaTeX's `%`) and the phrase.
+# Case-insensitive, because a marker that reads correctly to a human and not to this
+# parser is the worst of both.
+_MARKER = re.compile(r"^\s*[#%]*\s*(BEGIN|END)\s+SOLUTION\s*$", re.IGNORECASE)
+# The LaTeX spelling `scaffold` seeds, since `#` is not a comment there.
+TEX_BEGIN_SOLUTION = "% BEGIN SOLUTION"
+TEX_END_SOLUTION = "% END SOLUTION"
 # The spelling to WRITE when something seeds a fenced file - `scaffold` seeds the model
 # answer this button reads, and a seed the button then refuses to derive is a red run on
 # the toolkit's own template. nbgrader's three-hash form, which `_MARKER` also matches.
@@ -97,11 +101,12 @@ _CHUNK_CLOSE = re.compile(r"^\s*`{3,}\s*$")
 PY_PLACEHOLDER = "pass  # YOUR CODE HERE"
 CODE_PLACEHOLDER = "# YOUR CODE HERE"
 TEXT_PLACEHOLDER = "_YOUR ANSWER HERE_"
+TEX_PLACEHOLDER = "% YOUR ANSWER HERE"
 
 # The suffixes this knows how to strip. Anything else under `solution/` is left where it is:
 # writing a faculty data file or a stray PDF onto `main` from a button called "derive the
 # student version" is a surprise, and `Release materials` is how a file gets published.
-DERIVABLE = (".ipynb", ".rmd", ".qmd", ".py", ".r")
+DERIVABLE = (".ipynb", ".rmd", ".qmd", ".py", ".r", ".tex")
 
 COMMIT_MESSAGE = "chore: derive the student starter from the solution branch"
 
@@ -303,7 +308,9 @@ def strip_source(path: str, text: str) -> Stripped:
         return strip_notebook(text, path)
     if suffix in (".rmd", ".qmd"):
         return strip_rmd(text, path)
-    placeholder = PY_PLACEHOLDER if suffix == ".py" else CODE_PLACEHOLDER
+    placeholder = {".py": PY_PLACEHOLDER, ".tex": TEX_PLACEHOLDER}.get(
+        suffix, CODE_PLACEHOLDER
+    )
     derived, regions = strip_regions(text, placeholder, path)
     return Stripped(derived, regions, 0)
 
