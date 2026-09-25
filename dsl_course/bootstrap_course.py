@@ -359,7 +359,7 @@ def add_course_admins(org: str, handles: str) -> int:
 #
 # TAs are never declared here (they change every semester); instructors appear here only as
 # OPTIONAL open-courseware display cards (templates/course/people-cards.yml - the schema
-# site_repo._people_from_meta reads for the course-site headshots). A semester's real teaching team
+# site_repo.people_cards reads for the course-site headshots). A semester's real teaching team
 # - GitHub access AND semester-site cards - is declared per semester in that semester's own
 # semester-config/instructors.yml (seeded alongside schedule.yml at Bootstrap semester).
 #

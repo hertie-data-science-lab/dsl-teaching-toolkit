@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import materials, policy, records
+from . import materials, policy, records, student_status
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
@@ -94,7 +94,7 @@ PEOPLE_ENTRY_KEYS = (
 )
 PEOPLE_REQUIRED = ("github_handle", "role", "email")
 COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
-# Course cards, instructors and TAs alike: what `site_repo._people_from_meta` reads, the
+# Course cards, instructors and TAs alike: what `site_repo.people_cards` reads, the
 # optional start/end bounding when a card shows.
 COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url", "start", "end")
 # dsl-course.yml keys beyond `people` and `assignment_defaults`.
@@ -695,6 +695,10 @@ def all_schemas() -> dict[str, dict]:
         "assignments.schema.json": assignments_schema(),
         "dsl_course.schema.json": dsl_course_schema(),
         "materials.schema.json": materials_schema(),
+        # The semester's PUBLIC student file, closed at every level (its allow-list).
+        "student-status.schema.json": _doc(
+            "student-status.json", student_status.json_schema()
+        ),
     }
 
 

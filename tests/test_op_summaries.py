@@ -286,7 +286,7 @@ def test_status_write_returns_the_summary(monkeypatch):
         "problems": [{}],
         "this_week": [],
     }
-    monkeypatch.setattr(status, "_document", lambda course, semester: doc)
+    monkeypatch.setattr(status, "_documents", lambda course, semester: (doc, None))
     monkeypatch.setattr(status, "put_file", lambda *a, **k: True)
     out = status.write(COURSE, SEMESTER)
     assert out == 0

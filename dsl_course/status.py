@@ -28,7 +28,7 @@ import io
 import json
 import os
 import sys
-from datetime import date
+from datetime import UTC, date, datetime
 
 import yaml
 
@@ -40,6 +40,7 @@ from . import (
     schedule,
     source_digest,
     status_json,
+    student_status,
     sync_faculty,
     teams,
 )
@@ -225,7 +226,7 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
     )
 
     # Access is granted by github_handle alone (sync_faculty's actual criterion) -
-    # site_repo._people_from_meta requires a display `name` too (it's for website cards),
+    # site_repo.people_cards requires a display `name` too (it's for website cards),
     # so it undercounts here. Reuse the already-fetched course_raw. course-admin only
     # - a course-level `instructors`/`teaching_assistants` entry is a legitimate,
     # display-only website card (see the People section in
@@ -470,6 +471,21 @@ def _document(course_org: str, semester_org: str | None) -> dict:
     return status_json.collect_course(course_org)
 
 
+def _documents(course_org: str, semester_org: str | None) -> tuple[dict, dict | None]:
+    """`_document`, plus - for a live semester - its public `student-status.json`, both off
+    one read of the semester."""
+    if not semester_org:
+        return status_json.collect_course(course_org), None
+    now = datetime.now(UTC)
+    course = status_json.gather_course(course_org)
+    facts = status_json.gather_semester(course_org, semester_org, now)
+    doc = status_json.render_semester(course, facts, now)
+    if facts.archived:
+        return doc, None
+    extra = student_status.gather(course, facts, now)
+    return doc, student_status.render(course, facts, extra, now)
+
+
 def write(course_org: str, semester_org: str | None = None) -> int:
     """Write `status.json`: the semester's into its private `semester-config`, or - with no
     semester - the course's into its PUBLIC `.github` (counts only; see `status_json`).
@@ -479,7 +495,10 @@ def write(course_org: str, semester_org: str | None = None) -> int:
     tried twice: the four dispatchers a config push fires all end here within the same
     minute, and the loser of that race is refused for a sha that moved under it - the
     second attempt re-reads it. An archived semester is left alone: it is read-only, and a
-    finished term's status is whatever it last said."""
+    finished term's status is whatever it last said.
+
+    A live semester's `student-status.json` goes to its PUBLIC `.github` in the same run
+    (`student_status`), so the student console and the instructor's status agree."""
     if semester_org:
         org, repo = semester_org, schedule.CONFIG_REPO
     else:
@@ -487,7 +506,7 @@ def write(course_org: str, semester_org: str | None = None) -> int:
     # This run's memo of students.csv can predate a Send codes that stamped it since; the
     # status counts the codes sent, so it reads the file as it is now.
     roster.reread()
-    doc = _document(course_org, semester_org)
+    doc, student = _documents(course_org, semester_org)
     # The semester can arrive in a dispatch payload, which whoever holds a semester's bot
     # token writes: the course's own registry decides, as it does for every dispatch.
     registered = {c.casefold() for c in doc["course"]["semesters"]}
@@ -507,8 +526,24 @@ def write(course_org: str, semester_org: str | None = None) -> int:
         org, repo, status_json.STATUS_PATH, content, message
     ):
         log_ok(f"status.json current in {org}/{repo}")
+        if student is not None and not _write_student(org, student):
+            return 1
         return refreshed(doc)
     return 1
+
+
+def _write_student(org: str, doc: dict) -> bool:
+    """`student-status.json` into the semester's `.github`, tried twice like status.json."""
+    content = student_status.dumps(doc)
+    message = "ci: refresh student-status.json"
+    repo, path = student_status.REPO, student_status.PATH
+    if put_file(org, repo, path, content, message) or put_file(
+        org, repo, path, content, message
+    ):
+        log_ok(f"student-status.json current in {org}/{repo}")
+        return True
+    log_err(f"could not write {path} in {org}/{repo}")
+    return False
 
 
 def refreshed(doc: dict) -> Summary:

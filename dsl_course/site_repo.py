@@ -657,7 +657,7 @@ def _card(entry: dict) -> dict:
     return ordered
 
 
-def _people_from_meta(
+def people_cards(
     meta: dict, *, semester: bool = False
 ) -> tuple[list[dict], list[dict]] | None:
     """Declared people from a `people:` block - either the COURSE org's
@@ -737,7 +737,7 @@ def people_yaml(
     share one GitHub team (there's no separate `teaching-assistants` team - see
     course.FACULTY_TEAMS), so the fallback can't distinguish TAs from
     instructors; declare a `people:` block to get separate TA cards."""
-    override = _people_from_meta(meta or {}, semester=semester)
+    override = people_cards(meta or {}, semester=semester)
     if override is not None:
         instructors, tas = override
         note = "declared in the `people:` block"

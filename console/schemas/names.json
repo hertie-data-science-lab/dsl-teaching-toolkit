@@ -22,6 +22,7 @@
     "solution_preview": ".system/solution-preview.json",
     "solutions": ".system/solutions",
     "status": ".system/status.json",
+    "student_status": ".system/student-status.json",
     "syllabus_sample": ".system/SYLLABUS.md.sample",
     "syllabus_sessions": ".system/SYLLABUS.sessions.md",
     "team_formation": ".system/team-formation"

@@ -18,6 +18,8 @@ SYSTEM_DIR = ".system"
 RECORDS = {
     # semester-config and the course org's `.github` (counts only there: it is public)
     "status": "status.json",
+    # the semester org's PUBLIC `.github`: what every student may know (`student_status`)
+    "student_status": "student-status.json",
     "outcomes": "outcomes",
     # semester-config: the pointer to the course org, and the semester's records
     "pointer": "dsl-course.yml",

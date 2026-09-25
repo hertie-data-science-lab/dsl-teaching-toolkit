@@ -253,7 +253,7 @@ def test_the_contract_examples_validate():
 
 def test_the_example_course_file_validates():
     # The demo course's dsl-course.yml has this shape: dated instructor cards and a
-    # course-level TA list, both of which the site reads (`site_repo._people_from_meta`).
+    # course-level TA list, both of which the site reads (`site_repo.people_cards`).
     example = ROOT / "example-course" / "course-org" / "dsl-course.yml"
     meta = yaml.safe_load(example.read_text())
     assert meta["people"]["teaching_assistants"]
