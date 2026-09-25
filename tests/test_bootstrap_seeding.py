@@ -53,6 +53,8 @@ from dsl_course import (
 )
 from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
+from dsl_course.course import OLD_SEMESTER_TOPIC
+from dsl_course.faults import NOT_MIGRATED
 from dsl_course.grades import LockWrite
 from dsl_course.repos import Converged
 from tests.conftest import repo_row, stub_bootstrap
@@ -1094,6 +1096,100 @@ def test_refresh_rewrites_every_semesters_status_and_the_courses(monkeypatch):
         ("Course-Org", "Semester-s2027"),
         ("Course-Org", None),
     ]
+
+
+def test_the_course_migrations_refresh_leaves_every_semester_alone(monkeypatch, capsys):
+    # The course migration re-renders the course before any semester is migrated: every
+    # semester still carries the old topic, so a write into one is NOT_MIGRATED. Its
+    # re-render touches the course's own repos only - the semesters still fill the
+    # dropdowns - and each semester is re-rendered by its own migration later.
+    touched: list[str] = []
+    record = lambda org, *a: touched.append(org) or 0
+    wrote: list[tuple[str, str | None]] = []
+    _stub_refresh(
+        monkeypatch,
+        join_failures=record,
+        system_failures=record,
+        pointer_failures=record,
+        lock_failures=lambda course, semester: (
+            touched.append(semester) or LockWrite(True, False)
+        ),
+        status_failures=lambda course, semester=None: (
+            wrote.append((course, semester)) or 0
+        ),
+    )
+    listed: list[str] = []
+    monkeypatch.setattr(
+        seed,
+        "list_org_repos",
+        lambda org: (
+            listed.append(org)
+            or [{"name": ".github", "topics": [OLD_SEMESTER_TOPIC], "archived": False}]
+        ),
+    )
+    monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["cm-f2026"])
+    monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
+    dropdowns: list[list[str]] = []
+    monkeypatch.setattr(
+        seed,
+        "push_content_workflows",
+        lambda org, repo, semesters, assignments, ref, *, workflows: (
+            dropdowns.append(semesters) or 0
+        ),
+    )
+
+    assert seed.refresh("Course-Org", course_only=True) == 0
+    assert touched == [] and wrote == [("Course-Org", None)]
+    assert "Semester-f2026" not in listed and "Semester-s2027" not in listed
+    assert dropdowns == [["Semester-f2026", "Semester-s2027"]]
+    out = capsys.readouterr()
+    assert NOT_MIGRATED not in out.out + out.err
+    assert "semester org(s)" not in out.out
+
+
+@pytest.mark.parametrize("course_only", [True, False], ids=["course-only", "nightly"])
+def test_a_refresh_with_no_bot_token_reds_only_outside_the_course_migration(
+    monkeypatch, capsys, course_only
+):
+    # The course migration runs from a laptop, where DSL_BOT_TOKEN is usually not set:
+    # the secret is the org's next Refresh actions run's to mirror, and the re-render is
+    # not failed over it. Anywhere else a missing token still reds the refresh.
+    propagate = seed._propagate_repo_secret  # the real one, over the stubbed `gh`
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["cm-f2026"])
+    monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
+    monkeypatch.setattr(seed, "push_content_workflows", lambda *a, **k: 0)
+    monkeypatch.setattr(seed, "_propagate_repo_secret", propagate)
+    monkeypatch.delenv("DSL_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    assert seed.refresh("Course-Org", course_only=course_only) == (
+        0 if course_only else 1
+    )
+    out = capsys.readouterr()
+    if course_only:
+        assert "[note] DSL_BOT_TOKEN not set here" in out.out
+        assert "next Refresh actions run mirrors it" in out.out
+        assert "DSL_BOT_TOKEN" not in out.err
+    else:
+        assert "cannot set the DSL_BOT_TOKEN repo secret" in out.err
+
+
+def test_the_course_migrations_refresh_sets_the_secret_when_it_holds_the_token(
+    monkeypatch,
+):
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["cm-f2026"])
+    monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
+    monkeypatch.setattr(seed, "push_content_workflows", lambda *a, **k: 0)
+    secreted: list[list[str]] = []
+    monkeypatch.setattr(
+        seed, "_propagate_repo_secret", lambda org, repos: secreted.append(repos) or 1
+    )
+    monkeypatch.setenv("DSL_BOT_TOKEN", "s3cret")
+
+    assert seed.refresh("Course-Org", course_only=True) == 1
+    assert secreted == [["cm-f2026"]]
 
 
 def test_a_status_that_did_not_land_only_warns(monkeypatch, capsys):

@@ -33,6 +33,7 @@ CLI:
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -471,7 +472,7 @@ def _converge_org(
     )
 
 
-def refresh(course_org: str) -> int:
+def refresh(course_org: str, *, course_only: bool = False) -> int:
     """Refresh both layers: the run-from-repo actions in every content repo and
     assignment template, AND the central org-level workflows in .github; converge each
     materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its
@@ -486,7 +487,13 @@ def refresh(course_org: str) -> int:
 
     Non-zero if any file could not be written: this runs nightly on a cron, so a run that
     silently failed to converge an org would go unnoticed until someone ran a workflow
-    that was never seeded."""
+    that was never seeded.
+
+    `course_only` is the course migration's re-render (migrate.Course): the course org's
+    own repos and settings, and no semester - each semester is migrated, and re-rendered,
+    by its own run, and until then every write into it would be NOT_MIGRATED. It runs from
+    a laptop, where DSL_BOT_TOKEN is usually not set: the repo secret is then left to the
+    org's next Refresh actions run, with a note, not a failure."""
     # Converge the registry FIRST, so `semesters` is the live list for everything below.
     # Every org-level workflow dropdown, the run-from-repo workflows in every content
     # repo and the profile README's semester list are all rendered from it further down;
@@ -566,19 +573,27 @@ def refresh(course_org: str) -> int:
     # a read.
     for repo in live_templates:
         failures += place(repo, TEMPLATE_WORKFLOWS)
-    failures += _propagate_repo_secret(course_org, targets + live_templates)
+    if course_only and not os.environ.get("DSL_BOT_TOKEN"):
+        log(
+            "  [note] DSL_BOT_TOKEN not set here - the repo secret is left as it is; "
+            f"{course_org}'s next Refresh actions run mirrors it"
+        )
+    else:
+        failures += _propagate_repo_secret(course_org, targets + live_templates)
     failures += render(lambda: seed_github_workflows(course_org, central_ref))
     failures += _write_heartbeat(course_org)
     failures += _converge_org(course_org, central_ref)
     # A semester's onboarding workflows and semester-config dispatchers are
     # seeded at Bootstrap semester, and would otherwise stay frozen for the whole semester
-    # while the engine they call moves on.
-    log_step(
-        f"Refreshing join workflows + semester-config system files "
-        f"in {len(semesters)} semester org(s)"
-    )
+    # while the engine they call moves on. Not in the course migration's re-render: see
+    # `course_only`.
+    if not course_only:
+        log_step(
+            f"Refreshing join workflows + semester-config system files "
+            f"in {len(semesters)} semester org(s)"
+        )
     not_migrated: list[str] = []
-    for semester in semesters:
+    for semester in [] if course_only else semesters:
         # ONE listing of the semester: the archived flag below, and the convergence sweep +
         # profile rebuild at the end of the loop, are all read off this same snapshot. The
         # flag used to be its own GET of semester-config, a night after night probe for a
