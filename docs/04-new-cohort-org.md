@@ -25,7 +25,7 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
 
 2. **Invite `hertie-dsl-bot` as Owner** (Org → People → Invite → role *Owner*).
 
-3. **Run [Bootstrap semester](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/bootstrap-cohort.yml)**
+3. **Run [Bootstrap semester](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/bootstrap-semester.yml)**
     - From the **course** org's `.github` Actions tab: `Bootstrap semester`.
     - `semester_org` = select the newly created `hertie-<course-slug>-<termtag>`. 
     - This seeds: 
@@ -91,4 +91,4 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
 
 ---
 **Demo:** semester [`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026), bootstrapped from
-[`hertie-dsl-demo-course-e1234`](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/bootstrap-cohort.yml).
+[`hertie-dsl-demo-course-e1234`](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/bootstrap-semester.yml).

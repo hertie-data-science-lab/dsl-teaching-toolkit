@@ -295,10 +295,12 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/open-team-formation.yml": render_open_team_formation(
             semesters
         ),
-        ".github/workflows/propagate-cohort.yml": render_propagate_semester(semesters),
-        ".github/workflows/archive-cohort.yml": render_archive_semester(semesters),
-        ".github/workflows/bootstrap-cohort.yml": render_bootstrap_semester(),
-        ".github/workflows/check-cohort-setup.yml": render_status(semesters),
+        ".github/workflows/propagate-semester.yml": render_propagate_semester(
+            semesters
+        ),
+        ".github/workflows/archive-semester.yml": render_archive_semester(semesters),
+        ".github/workflows/bootstrap-semester.yml": render_bootstrap_semester(),
+        ".github/workflows/check-semester-setup.yml": render_status(semesters),
         ".github/workflows/refresh-actions.yml": render_refresh(),
         ".github/workflows/scheduled-release.yml": render_scheduler(),
         ".github/workflows/console.yml": render_console(),
@@ -307,6 +309,26 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         path: for_placement(content, central_ref).encode()
         for path, content in rendered.items()
     }
+
+
+# Retired org-level workflows - removed from orgs seeded before the change, so faculty never
+# see two workflows for one job. sync-enrolment/sync-teams were consolidated into
+# sync-membership.yml; status.yml became check-cohort-setup.yml (same workflow, a name that
+# says what it checks); the three grading buttons became two - Collect submissions
+# refreshes the grading sheet, Distribute grades sends what a grader typed into it, and the
+# preview PR is gone; and the four `*-cohort*.yml` files took the semester's name.
+RETIRED_GITHUB_WORKFLOWS = (
+    ".github/workflows/sync-enrolment.yml",
+    ".github/workflows/sync-teams.yml",
+    ".github/workflows/status.yml",
+    ".github/workflows/grade-assignment.yml",
+    ".github/workflows/sync-gradebooks.yml",
+    ".github/workflows/render-grades.yml",
+    ".github/workflows/propagate-cohort.yml",
+    ".github/workflows/archive-cohort.yml",
+    ".github/workflows/bootstrap-cohort.yml",
+    ".github/workflows/check-cohort-setup.yml",
+)
 
 
 def seed_github_workflows(course_org: str, central_ref: str) -> int:
@@ -331,20 +353,7 @@ def seed_github_workflows(course_org: str, central_ref: str) -> int:
         ".github",
         files,
         "ci: refresh org workflows",
-        # Retired workflows - remove any copies already seeded into orgs bootstrapped before
-        # the change, so faculty never see two workflows for one job. sync-enrolment/sync-teams
-        # were consolidated into sync-membership.yml; status.yml was renamed to
-        # check-cohort-setup.yml (same workflow, a name that says what it checks); and the
-        # three grading buttons became two - Collect submissions refreshes the grading sheet,
-        # Distribute grades sends what a grader typed into it, and the preview PR is gone.
-        delete=(
-            ".github/workflows/sync-enrolment.yml",
-            ".github/workflows/sync-teams.yml",
-            ".github/workflows/status.yml",
-            ".github/workflows/grade-assignment.yml",
-            ".github/workflows/sync-gradebooks.yml",
-            ".github/workflows/render-grades.yml",
-        ),
+        delete=RETIRED_GITHUB_WORKFLOWS,
     ):
         log_err(f"org workflows not written to {course_org}/.github")
         return 1

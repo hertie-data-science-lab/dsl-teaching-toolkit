@@ -755,7 +755,8 @@ Promote.
 | request field `cohort_org`; op args `cohort_dest_repo`, `cohort_dest_path`, `tag`, `format`, `include_solution` | `semester_org`; `semester_dest_repo`, `semester_dest_path`, `semester`, `formats`, `solution_datetime: now` | `dsl.request/1` (the console) |
 | CLI `--cohort-org`, `--all-cohorts`, `--list-cohorts`, `--cohort-dest-repo`, `--cohort-dest-path`, `--cohort`, `--tag`, `--format`, `--solution` | `--semester-org`, `--all-semesters`, `--list-semesters`, `--semester-dest-repo`, `--semester-dest-path`, `--semester`, `--semester`, `--formats`, `--solution-datetime now` | every CLI; rendered workflows use the new ones |
 | workflow inputs `cohort_org`, `cohort_dest_repo`, `cohort_dest_path`, `tag`, `semester_tag`, `format`, `include_solution` | `semester_org`, `semester_dest_repo`, `semester_dest_path`, `semester`, `semester`, `formats`, `solution_datetime` | rendered workflows (Refresh actions re-renders them) |
-| workflow names Archive cohort, Bootstrap cohort, Check cohort setup, Propagate cohort edits | Archive semester, Bootstrap semester, Check semester setup, Propagate semester edits | display names only; the workflow FILE paths are unchanged |
+| workflow names Archive cohort, Bootstrap cohort, Check cohort setup, Propagate cohort edits | Archive semester, Bootstrap semester, Check semester setup, Propagate semester edits | display names |
+| workflow files `archive-cohort.yml`, `bootstrap-cohort.yml`, `check-cohort-setup.yml`, `propagate-cohort.yml` | `archive-semester.yml`, `bootstrap-semester.yml`, `check-semester-setup.yml`, `propagate-semester.yml` | course `.github`; Refresh actions writes the new file and deletes the old one (`seed.RETIRED_GITHUB_WORKFLOWS`) |
 | `status.json` `cohort`, `cohorts`, `cohort.term`, `cohort.term_label`, assignment `late_until` | `semester`, `semesters`, `semester.key`, `semester.label`, `grading_cutoff_datetime` | `dsl.status/1` (rewritten by the engine; the console follows) |
 | config repo description "...configure for this cohort ... term schedule..." | "...configure for this semester ... schedule..." | converged by the existing `SUPERSEDED_SEMESTER_DESCRIPTIONS` chain |
 | copy "cohort", "term", "tag"; "staff", "teaching team"; "grading cutoff", "the cutoff" | "semester"; "instructors"; "late cutoff" | logs, mails, forms, docs |
@@ -791,9 +792,7 @@ Promote.
 | status `inputs` key `assignments.lock.yml` | `.system/assignments.lock.yml` | `dsl.status/1` |
 | toolkit `templates/classroom-config/`, `templates/welcome/`, `templates/cohort/` | `templates/semester-config/`, `templates/join/`, `templates/semester/` | this repo only |
 
-Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
-(`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,
-`check-cohort-setup.yml`), the digest issue titles (so `people.yml has entries the sync
+Not renamed here, deliberately: the frozen doc filenames, the digest issue titles (so `people.yml has entries the sync
 cannot use` keeps its old word), the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
 name (not a CLI), and the site's `files/materials/` dest.

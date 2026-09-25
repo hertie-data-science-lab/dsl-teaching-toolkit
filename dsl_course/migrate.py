@@ -1564,7 +1564,7 @@ class Course:
         for row in templates:
             if not row.get("archived"):
                 wanted[row["name"]] = hosted(row["name"], TEMPLATE_WORKFLOWS)
-        retired = [
+        retired = _retired(self.org, ".github", seed.RETIRED_GITHUB_WORKFLOWS) + [
             line
             for repo in wanted
             if repo != ".github"

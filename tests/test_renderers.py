@@ -766,14 +766,18 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     )  # three grading buttons became two, the two end-of-term ones, the team nudge, Console
     assert ".github/workflows/console.yml" in files
     assert all(path.startswith(".github/workflows/") for path in files)
-    assert deleted == [
-        ".github/workflows/sync-enrolment.yml",
-        ".github/workflows/sync-teams.yml",
-        ".github/workflows/status.yml",
-        ".github/workflows/grade-assignment.yml",
-        ".github/workflows/sync-gradebooks.yml",
-        ".github/workflows/render-grades.yml",
-    ]
+    assert deleted == list(seed.RETIRED_GITHUB_WORKFLOWS)
+    # A renamed button is deleted under its old name and written under the new one.
+    for old in (
+        "propagate-cohort.yml",
+        "archive-cohort.yml",
+        "bootstrap-cohort.yml",
+        "check-cohort-setup.yml",
+    ):
+        assert f".github/workflows/{old}" in deleted
+        assert f".github/workflows/{old}" not in files
+    assert ".github/workflows/check-semester-setup.yml" in files
+    assert ".github/workflows/archive-semester.yml" in files
 
 
 def test_scaffold_buttons_route_inputs_through_env_not_the_shell():

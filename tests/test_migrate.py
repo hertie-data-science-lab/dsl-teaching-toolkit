@@ -1063,6 +1063,22 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     )
 
 
+def test_a_renamed_org_workflow_is_planned_as_a_deletion_and_verified_gone(
+    fake, course, monkeypatch, capsys
+):
+    old = ".github/workflows/archive-cohort.yml"
+    fake.tree(COURSE, ".github")[old] = b"old button"
+    assert _main(monkeypatch, COURSE) == 0
+    capsys.readouterr()
+    migrate._forget()
+    # Once the registry is migrated the re-render's plan names it; a refresh that leaves
+    # it behind does not verify.
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert f".github/{old} (retired: deleted)" in err
+    assert "re-render did not verify" in err
+
+
 def test_a_course_stopped_at_the_re_render_finishes_on_the_next_run(
     fake, course, monkeypatch, capsys
 ):
