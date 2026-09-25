@@ -465,6 +465,16 @@ def derivable_sources(tree: tuple[str, ...] | list[str]) -> list[str]:
 # -------------------------------------------------------------------------- the button
 
 
+def _missing_fences(path: str, tick: str) -> str:
+    """The fences a file with none could have used, in its own vocabulary."""
+    if PurePosixPath(path).suffix.lower() == ".tex":
+        return f"{tick}{TEX_BEGIN_SOLUTION}{tick} region"
+    return (
+        f"{tick}BEGIN SOLUTION{tick} region, no {tick}{SOLUTION_TAG}{tick} cell tag "
+        f"and no {tick}solution=TRUE{tick} chunk"
+    )
+
+
 def _refused(code: str, text: str) -> dict:
     return {"code": code, "text": text}
 
@@ -533,16 +543,14 @@ def derive_student_version(
             continue
         if not stripped.replaced:
             log_err(
-                f"  ! {path} has no `BEGIN SOLUTION` region, no `{SOLUTION_TAG}` cell tag "
-                f"and no `solution=TRUE` chunk - NOT written, because the starter derived "
-                f"from it would be the model answer itself"
+                f"  ! {path} has no {_missing_fences(path, '`')} - NOT written, because "
+                f"the starter derived from it would be the model answer itself"
             )
             reasons.append(
                 _refused(
                     "NO_SOLUTION_REGION",
-                    f"{path} has no BEGIN SOLUTION region, no {SOLUTION_TAG} cell tag "
-                    f"and no solution=TRUE chunk, so the starter would be the model "
-                    f"answer.",
+                    f"{path} has no {_missing_fences(path, '')}, so the starter would be "
+                    f"the model answer.",
                 )
             )
             continue

@@ -548,3 +548,14 @@ def test_a_latex_write_up_derives_with_percent_fences():
     assert derive.derivable_sources(["solution/starter.tex"]) == [
         "solution/starter.tex"
     ]
+
+
+def test_an_unfenced_write_up_is_refused_naming_the_latex_fence(monkeypatch, capsys):
+    _Repo({"solution/report.tex": "\\section{A}\nThe answer.\n"}).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert out == 1
+    assert out.reasons[0]["text"] == (
+        "solution/report.tex has no % BEGIN SOLUTION region, so the starter would be "
+        "the model answer."
+    )
+    assert "no `% BEGIN SOLUTION` region - NOT written" in capsys.readouterr().err
