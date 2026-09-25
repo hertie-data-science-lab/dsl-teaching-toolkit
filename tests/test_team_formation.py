@@ -1086,9 +1086,9 @@ def test_the_message_carries_what_a_student_needs_in_order_to_act(semester, post
     assert "up to 4 people" in body, "the cap the Join-team form enforces"
     assert "closes on 4th Oct" in body, "the day, in the semester's own zone"
     assert f"https://github.com/{SEMESTER}/join/issues/new/choose" in body
-    assert (
-        "https://semester-f2026.github.io/assignments/02-assignment-2.html" in body
-    ), "the assignment's page, which lists the teams"
+    assert f"?semester={SEMESTER}#join" in body, (
+        "the console's Join, which lists the teams"
+    )
     # No Join-course line: every recipient is onboarded by construction, and a student
     # who is not enters `waiting` on the tick after they join and is sent this then.
     assert "Join course" not in body

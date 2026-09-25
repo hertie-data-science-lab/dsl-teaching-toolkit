@@ -17,7 +17,7 @@ import pytest
 import yaml
 from conftest import source_fault
 
-from dsl_course import course, gh_contents, schedule, settings
+from dsl_course import course, gh_contents, policy, schedule, settings
 from dsl_course import faults as faults_module
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -2969,8 +2969,9 @@ def test_assignment_pages_are_numbered_as_the_site_numbers_them():
         (3, "team-project", "project"),  # the plan's own, before its template exists
     ]
     assert pages[2].stem == "03-team-project"
-    assert pages[2].url("Semester-F2026") == (
-        "https://semester-f2026.github.io/assignments/03-team-project.html"
+    # Every page's link is the semester's Join screen in the student console.
+    assert pages[2].url("Semester-F2026") == policy.console_link(
+        "Semester-F2026", "join"
     )
 
 

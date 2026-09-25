@@ -228,6 +228,13 @@ def kinds() -> list[dict]:
     return load()["kinds"]
 
 
+def console_link(semester_org: str, screen: str = "week") -> str:
+    """One semester's screen in the student console (`institution.console_url`), or "" when
+    the institution runs no console."""
+    url = load()["institution"].get("console_url") or ""
+    return f"{url}?semester={semester_org}#{screen}" if url else ""
+
+
 def content_kinds() -> tuple[str, ...]:
     """The kinds a `releases:` entry may declare (every kind the engine does not create
     rows for itself), in display order."""

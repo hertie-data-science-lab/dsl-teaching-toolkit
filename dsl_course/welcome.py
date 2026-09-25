@@ -160,26 +160,22 @@ def open_formations(lock_text: str) -> dict[str, str]:
 # are spliced over. Pinned against the template by a test: a rewording there with no
 # rewording here would silently stop the splice.
 TEAM_LIST_SENTENCE = (
-    "The teams that already exist, and how much room each has left, are listed on the "
-    "assignment's page on the semester site."
+    "The teams that already exist, and how much room each has left, are listed in the "
+    "student console, under Join."
 )
 
 
 def _team_list_header(opened: Mapping[str, str]) -> str:
-    """The header sentence, linking the page a student can actually open.
-
-    One open assignment is the ordinary case and gets one link inside the sentence; several
-    get a line each, because "listed on these two pages" with both links inline is a
-    sentence nobody reads to the end of. A slug whose page is not known is left out rather
-    than linked to nowhere, and a header that knows none of them is the template's own."""
-    links = [(s, u) for s, u in opened.items() if u]
-    if not links:
+    """The header sentence, linking the page a student can actually open: the semester's
+    Join screen in the student console, one for every assignment (`AssignmentPage.url`). A
+    header that knows no link is the template's own."""
+    url = next((u for u in opened.values() if u), "")
+    if not url:
         return TEAM_LIST_SENTENCE
-    lead = "The teams that already exist, and how much room each has left, are listed"
-    if len(links) == 1:
-        return f"{lead} on [the assignment's page]({links[0][1]})."
-    listed = "\n".join(f"        - [{slug}]({url})" for slug, url in links)
-    return f"{lead} on each assignment's page:\n\n{listed}"
+    return (
+        "The teams that already exist, and how much room each has left, are listed in "
+        f"[the student console, under Join]({url})."
+    )
 
 
 def join_team_form(opened: Mapping[str, str]) -> str:

@@ -1718,9 +1718,13 @@ class AssignmentPage(NamedTuple):
         return f"{self.number:02d}-{self.name}"
 
     def url(self, semester_org: str) -> str:
-        """Where the semester site serves it: the collection's default permalink, at the org
-        root the site is published to (`_view_url`'s base)."""
-        return f"https://{pages_repo(semester_org)}/assignments/{self.stem}.html"
+        """Where a student sees this assignment's teams and joins one: the semester's Join
+        screen in the student console (the site has no assignment pages, decision 0011
+        rule 5), else the semester site's home."""
+        return (
+            policy.console_link(semester_org, "join")
+            or f"https://{pages_repo(semester_org)}/"
+        )
 
 
 def assignment_pages(

@@ -478,8 +478,8 @@ def _render(
         opening = f"{title} in {course} is a group assignment."
         cap_line = f"Teams are up to {cap} people. Team formation closes on {day}."
     listed = (
-        f"\n\nThe teams that exist, and how much room each has, are listed on the "
-        f"assignment's page:\n  {page_url}"
+        f"\n\nThe teams that exist, and how much room each has, are listed in the "
+        f"student console, where you can join or start one:\n  {page_url}"
         if page_url
         else ""
     )
