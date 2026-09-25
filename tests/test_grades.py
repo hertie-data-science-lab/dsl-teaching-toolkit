@@ -706,6 +706,7 @@ def _distribute(
     preview_issues: list[dict] | None = None,
     assignment: str | None = None,
     include_feedback: bool = False,
+    intent_ok: bool = True,
 ) -> dict:
     """`distribute` over a local semester-config clone, writing to nothing.
 
@@ -749,6 +750,7 @@ def _distribute(
         "comments": [],
         "gradebooks": [],
         "config": [],
+        "intent": [],
         "outbox": [],
         "issues": [],
         "gradebook_calls": [],
@@ -795,6 +797,10 @@ def _distribute(
         org, repo, files, message, *, delete=(), create_only=False, person=False
     ):
         target = "config" if repo == grades.CONFIG_REPO else "gradebooks"
+        if target == "config" and message.startswith(grades.INTENT_MESSAGE):
+            # The record of the emails about to go, committed before they are sent.
+            effects["intent"].append({k: v.decode() for k, v in files.items()})
+            return intent_ok
         if target == "gradebooks":
             # The repo is named after the student, so the write has to be marked as one:
             # without it, a gradebook GitHub could not read published its own name.
@@ -2782,6 +2788,52 @@ def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
     assert grades.dispatch_refusal("C", "sem", "a1") == ""
     assert "not due" in grades.dispatch_refusal("C", "Sem", "a2")
     assert "not a semester" in grades.dispatch_refusal("C", "Other", "a1")
+
+
+# ------------------------------------------------ the record written before the emails
+
+
+def test_the_emails_are_recorded_before_they_are_sent(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path)
+    ((intent),) = out["intent"]
+    assert ",email," in intent[grades.DISTRIBUTED_PATH]
+    assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_a_lost_final_record_re_mails_nobody(tmp_path, monkeypatch):
+    # The register's case: the mail went and `distributed.csv` would not land. Every
+    # following run (and the automatic return, every quarter-hour) mailed everyone again.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        put_files_ok=lambda files: grades.DISTRIBUTED_PATH not in files,
+    )
+    assert first["rc"] == 1 and first["outbox"]
+    ((intent),) = first["intent"]
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=intent[grades.DISTRIBUTED_PATH],
+    )
+    assert again["outbox"] == []
+
+
+def test_no_email_goes_when_the_record_before_it_cannot_be_written(
+    tmp_path, monkeypatch
+):
+    out = _distribute(monkeypatch, tmp_path, intent_ok=False)
+    assert out["rc"] == 1
+    assert out["outbox"] == [] and out["config"] == []
+
+
+def test_a_failed_email_does_not_hold_back_the_returned_record(tmp_path, monkeypatch):
+    # A refused address would otherwise keep the automatic return asking, and failing,
+    # every quarter-hour; the row stays untold, so the next Return marks run retries it.
+    out = _distribute(monkeypatch, tmp_path, assignment="assignment-1", sent=0)
+    assert out["rc"] == 1
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
+    assert ",email," not in cfg_files[grades.DISTRIBUTED_PATH]
 
 
 # ------------------------------------------------------------- per-question feedback

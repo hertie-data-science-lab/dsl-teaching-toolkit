@@ -3954,6 +3954,35 @@ def _commit_record(
     return False
 
 
+# The commit message of the record written before the emails go (`_record_before_mail`).
+INTENT_MESSAGE = "grades: record the emails about to be sent"
+
+
+def _record_before_mail(
+    semester_org: str,
+    record: Distributed,
+    pending: list[str],
+    live: dict[str, str],
+    now: str,
+    migrating: bool,
+) -> bool:
+    """Commit `distributed.csv` with every pending address marked told BEFORE the mail
+    goes. A record commit that fails after the send can then never mail anybody twice:
+    without this the next run, and the scheduler's automatic return every quarter-hour,
+    re-mailed everyone. The final commit restores the row of an address whose mail
+    failed, so only a failed send AND a failed final commit together lose a notification
+    (the gradebook still holds the marks)."""
+    intent = dict(record)
+    for handle in pending:
+        intent[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
+    return _commit_record(
+        semester_org,
+        {DISTRIBUTED_PATH: dump_distributed(intent).encode()},
+        f"{INTENT_MESSAGE} ({len(pending)} notification(s))",
+        [NOTIFIED_PATH] if migrating else [],
+    )
+
+
 def _returned_units(
     specs: dict[str, SheetSpec],
     sheets: dict[str, dict],
@@ -4285,6 +4314,17 @@ def distribute(
             return 1
         return return_summary(counts, len(pending) if notify else 0, dry_run=True)
 
+    delete = [*([NOTIFIED_PATH] if migrating else []), *retired]
+    if (
+        notify
+        and pending
+        and not _record_before_mail(semester_org, record, pending, live, now, migrating)
+    ):
+        log_err(
+            f"{DISTRIBUTED_PATH} could not be written before the emails went, so none "
+            f"was sent - the next run sends them"
+        )
+        return return_summary(counts, 0, dry_run=False, code=1)
     failed_mail, told = (
         _email_updates(
             semester_org,
@@ -4323,9 +4363,12 @@ def distribute(
         )
     else:
         writes[SEMESTER_CSV_NAME] = render_registrar_csv(students, books).encode()
-    if assignment and not counts["failed"] and not failed_mail:
+    if assignment and not counts["failed"]:
         # Returned, in the same commit as the record of it: the automatic return at
-        # `marks_return_datetime` does not ask again.
+        # `marks_return_datetime` does not ask again. A notification that failed does
+        # not hold it back - every gradebook holds the marks, the run goes red for the
+        # mail, and the next Return marks run retries that address - since a refused
+        # address would otherwise be retried, and the run redden, every quarter-hour.
         writes[marks_return_record(assignment)] = (
             json.dumps({"returned": now}, indent=2) + "\n"
         ).encode()
@@ -4334,12 +4377,12 @@ def distribute(
         writes,
         f"grades: distribute ({counts['gradebooks']} gradebook(s), "
         f"{counts['emails']} email(s))",
-        [*([NOTIFIED_PATH] if migrating else []), *retired],
+        delete,
     )
     if not recorded:
         log_err(
             f"grades were sent but {DISTRIBUTED_PATH} could not be written - the "
-            f"next run re-posts and re-emails what it cannot see was already sent"
+            f"emails were recorded before they went, so the next run re-sends none"
         )
     # The dry run's preview is out of date once anything has gone out. Not a reason to red
     # the run: a preview left open is closed by the next real one.
