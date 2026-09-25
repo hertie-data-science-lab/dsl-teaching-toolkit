@@ -198,7 +198,7 @@ DATED_RENDERED = {
     "propagate_semester": workflows_render.render_propagate_semester(SEMESTERS_2),
     "archive_semester": workflows_render.render_archive_semester(SEMESTERS_2),
     "sync_site": workflows_render.render_sync_site(SEMESTERS_2),
-    "publish_site": workflows_render.render_publish_site(REPOS_2),
+    "publish_site": workflows_render.render_publish_site(REPOS_2, REPOS_2),
     "status": workflows_render.render_status(SEMESTERS_2),
 }
 
@@ -266,18 +266,30 @@ def test_publish_site_inputs():
 def test_publish_site_defaults_to_the_newest_materials_repo():
     # Publishing REPLACES what the site serves. The dropdown's default used to be the
     # alphabetically last option of the newest year, so a faculty member clicking Run with
-    # the defaults republished from a code repo and wiped a live site's materials.
+    # the defaults republished from a code repo and wiped a live site's materials. A
+    # materials repo is one with the topic, whatever its name.
+    repos = ["course-materials-f2025", "course-materials-s2026", "lecture-code-f2026"]
+    repos += ["slides-f2026"]
+    materials = ["course-materials-f2025", "course-materials-s2026", "slides-f2026"]
+    inp = workflow_inputs(workflows_render.render_publish_site(repos, materials))
+    assert inp["source_repo"]["default"] == "slides-f2026"
+
+
+def test_the_release_and_syllabus_dropdowns_default_to_the_newest_materials_repo():
+    repos = ["course-materials-f2026", "lecture-code-f2026"]
+    for rendered in (
+        workflows_render.render_central_release(repos, SEMESTERS_2, repos[:1]),
+        workflows_render.render_generate_syllabus(repos, SEMESTERS_2, repos[:1]),
+    ):
+        inp = workflow_inputs(rendered)["course_source_repo"]
+        assert inp["default"] == "course-materials-f2026"
+
+
+def test_publish_site_prefers_a_materials_repo_when_no_name_carries_a_term():
     inp = workflow_inputs(
-        workflows_render.render_publish_site(
-            [
-                "course-materials-f2025",
-                "course-materials-f2026",
-                "course-materials-s2026",
-                "lecture-code-f2026",
-            ]
-        )
+        workflows_render.render_publish_site(["lecture-code", "slides"], ["slides"])
     )
-    assert inp["source_repo"]["default"] == "course-materials-f2026"
+    assert inp["source_repo"]["default"] == "slides"
 
 
 def test_publish_site_without_a_materials_repo_defaults_to_the_first_option():
@@ -745,6 +757,9 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
         seed, "discover_content_repos", lambda org: ["course-materials"]
     )
     monkeypatch.setattr(
+        seed, "discover_materials_repos", lambda org: ["course-materials"]
+    )
+    monkeypatch.setattr(
         seed, "discover_assignments", lambda org: ["assignment-1-f2026"]
     )
     commits = []
@@ -1067,15 +1082,15 @@ def test_the_copy_forward_dropdown_starts_on_the_fresh_starter(rendered):
     assert spec["required"] is False
 
 
-def test_the_copy_forward_dropdown_lists_only_materials_repos():
-    # New materials repo is fed the course org's CONTENT repos, which include the code and
-    # dataset ones - and none of those is a materials repo to start the year from.
+def test_the_copy_forward_dropdown_lists_the_materials_repos():
+    # Fed the topic's repos (`discover_materials_repos`), whatever they are named.
     rendered = workflows_render.render_new_materials(
-        ["course-materials-f2026", "lecture-code-f2026"]
+        ["course-materials-f2026", "slides"]
     )
     assert workflow_inputs(rendered)["copy_from"]["options"] == [
         workflows_render._FRESH_STARTER,
         "course-materials-f2026",
+        "slides",
     ]
 
 

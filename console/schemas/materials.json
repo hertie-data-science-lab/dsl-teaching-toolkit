@@ -1,0 +1,519 @@
+{
+  "aliases": {
+    "lab": "lab",
+    "labs": "lab",
+    "lecture": "lecture",
+    "lectures": "lecture",
+    "literature": "readings",
+    "reading": "readings",
+    "readings": "readings",
+    "tutorials": "lab"
+  },
+  "bundle_dirs": [
+    "media",
+    "libs",
+    "images"
+  ],
+  "cases": [
+    {
+      "hosted": [],
+      "name": "nothing declared",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": []
+    },
+    {
+      "hosted": [
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/09_exam/review.html"
+      ],
+      "name": "decks carry their bundles",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "lectures/**/*.html"
+      ]
+    },
+    {
+      "hosted": [
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/09_exam/review.html"
+      ],
+      "name": "decks in any case",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "*.html",
+        "*.HTML"
+      ]
+    },
+    {
+      "hosted": [
+        "a[b]/notes.pdf",
+        "labs/01_intro/lab.pdf",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/09_exam/review.html"
+      ],
+      "name": "everything but readings",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "**/*.html",
+        "**/*.pdf",
+        "!readings/**"
+      ]
+    },
+    {
+      "hosted": [
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb"
+      ],
+      "name": "a session carved out",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "lectures/**",
+        "!lectures/09_*/**"
+      ]
+    },
+    {
+      "hosted": [
+        "SYLLABUS.md",
+        "a[b]/notes.pdf",
+        "labs/01_intro/data/a.csv",
+        "labs/01_intro/lab.pdf",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf"
+      ],
+      "name": "everything",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "**"
+      ]
+    },
+    {
+      "hosted": [
+        "labs/01_intro/data/a.csv"
+      ],
+      "name": "a folder, unanchored",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "data/"
+      ]
+    },
+    {
+      "hosted": [
+        "labs/01_intro/data/a.csv"
+      ],
+      "name": "a folder, then a file re-included",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "labs/",
+        "!labs/01_intro/lab.pdf"
+      ]
+    },
+    {
+      "hosted": [
+        "SYLLABUS.md"
+      ],
+      "name": "anchored at the root",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "/SYLLABUS.md",
+        "/lab.pdf"
+      ]
+    },
+    {
+      "hosted": [
+        "labs/01_intro/lab.pdf",
+        "lectures/01_intro/notes.pdf"
+      ],
+      "name": "one character and a class",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "labs/0?_intro/*.pdf",
+        "lectures/0[12]_*/*.pdf"
+      ]
+    },
+    {
+      "hosted": [
+        "readings/01_intro/READINGS.md"
+      ],
+      "name": "comments and blanks",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "# a note",
+        "",
+        "readings/**/*.md"
+      ]
+    },
+    {
+      "hosted": [
+        "labs/01_intro/lab.pdf"
+      ],
+      "name": "a folder excluded with a trailing slash",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "labs/**",
+        "!labs/01_intro/data/"
+      ]
+    },
+    {
+      "hosted": [
+        "SYLLABUS.md",
+        "a[b]/notes.pdf",
+        "labs/01_intro/lab.pdf",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf"
+      ],
+      "name": "an unanchored folder excluded",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "**",
+        "!data/"
+      ]
+    },
+    {
+      "hosted": [
+        "a[b]/notes.pdf"
+      ],
+      "name": "an escaped bracket",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "public": [
+        "a\\[b]/*"
+      ]
+    }
+  ],
+  "deck_extensions": [
+    "html",
+    "htm"
+  ],
+  "default_kind": "lecture",
+  "default_syllabus": "SYLLABUS.md",
+  "denylist": [
+    "solution",
+    "solutions",
+    "grading_config.yml",
+    "grading.yml",
+    "tests",
+    ".env",
+    ".env.*",
+    ".git"
+  ],
+  "file": "materials.yml",
+  "never_material": [
+    ".DS_Store",
+    ".gitkeep",
+    ".ipynb_checkpoints",
+    "Thumbs.db",
+    "__pycache__",
+    "desktop.ini"
+  ],
+  "publish_file": "publish.yml",
+  "topic": "dsl-materials"
+}

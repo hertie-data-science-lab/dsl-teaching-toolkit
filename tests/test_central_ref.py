@@ -138,6 +138,9 @@ def test_every_org_level_workflow_is_pinned_to_the_orgs_ref(monkeypatch):
         seed, "discover_content_repos", lambda org: ["course-materials"]
     )
     monkeypatch.setattr(
+        seed, "discover_materials_repos", lambda org: ["course-materials"]
+    )
+    monkeypatch.setattr(
         seed, "discover_assignments", lambda org: ["assignment-1-f2026"]
     )
     written: dict[str, bytes] = {}
@@ -282,6 +285,9 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     )
     monkeypatch.setattr(seed, "_live_semesters", lambda org: (["Semester-f2026"], 0))
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
+    monkeypatch.setattr(
+        seed, "discover_materials_repos", lambda org: ["materials-f2026"]
+    )
     monkeypatch.setattr(seed, "discover_assignment_repos", lambda org: [])
     monkeypatch.setattr(seed, "push_content_workflows", renders("content-workflows"))
     monkeypatch.setattr(

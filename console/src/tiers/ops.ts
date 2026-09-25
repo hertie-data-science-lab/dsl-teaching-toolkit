@@ -15,7 +15,7 @@ function releaseDest(sourcePath: string): Tiers {
 
 export function releaseAdhoc(repos: string[]): Tiers {
   return {
-    course_source_repo: { tier: 'ask', label: 'From repo', widget: 'select', options: [opt('', 'Choose a materials repo'), ...repos.map((r) => opt(r, r))] },
+    course_source_repo: { tier: 'ask', label: 'From repo', widget: 'select', options: [opt('', 'Choose a repo'), ...repos.map((r) => opt(r, r))] },
     course_source_path: { tier: 'ask', label: 'Folders', reason: 'Several folders: separate them with commas.', placeholder: 'readings/week04' },
     ...releaseDest(''),
   };

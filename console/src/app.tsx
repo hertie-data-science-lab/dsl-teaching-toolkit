@@ -217,7 +217,7 @@ export function App({ state: s }: { state: AppState }) {
       : screen === 'template' ? <TemplateScreen {...cp} />
       : screen === 'details' ? <DetailsScreen {...cp} />
       : screen === 'website' ? <WebsiteScreen {...cp} />
-      : screen === 'materials' && route.entry ? <MaterialsScreen {...cp} />
+      : screen === 'materials' && route.entry ? <MaterialsScreen key={route.entry} {...cp} />
       : screen === 'materials' ? <MaterialsIndexScreen {...cp} />
       : screen === 'templates' ? <TemplatesIndexScreen {...cp} />
       : <CourseScreen {...cp} />;

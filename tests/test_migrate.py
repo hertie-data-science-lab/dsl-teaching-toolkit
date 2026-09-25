@@ -1306,6 +1306,17 @@ def test_a_materials_clash_in_one_repo_writes_no_other(
     assert not [c for c in fake.commits if c[1].startswith("course-materials-")]
 
 
+def test_the_materials_files_move_in_every_repo_with_the_topic(
+    fake, course, monkeypatch
+):
+    # The topic marks a materials repo, whatever its name; a code repo keeps its files.
+    fake.add(COURSE, "slides", {"MAINTAINING.md": b"x"}, topics=["dsl-materials"])
+    fake.add(COURSE, "lecture-code-f2026", {"MAINTAINING.md": b"y"})
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert "MAINTAINING.md" not in fake.tree(COURSE, "slides")
+    assert "MAINTAINING.md" in fake.tree(COURSE, "lecture-code-f2026")
+
+
 def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     fake, course, monkeypatch, capsys
 ):

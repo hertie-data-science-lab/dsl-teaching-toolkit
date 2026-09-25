@@ -37,7 +37,6 @@ from textwrap import indent
 from urllib.parse import quote
 
 import yaml
-from pathspec import GitIgnoreSpec
 
 from . import policy, schedule, status, teams
 from .course import (
@@ -74,14 +73,19 @@ from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .grades import load_grading_spec, spoken_day, team_cap, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
-from .materials import DEFAULT_SYLLABUS, alias_kind
+from .materials import (
+    DECK_EXTENSIONS,
+    DEFAULT_SYLLABUS,
+    Feed,
+    alias_kind,
+    hosted_copy,
+    publishable,
+)
 from .materials import read as read_materials
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
-from .releaseignore import parse as parse_patterns
 from .repos import (
     default_branch,
-    has_denied_component,
     has_never_material_component,
 )
 from .schedule_plan import (
@@ -168,13 +172,10 @@ def _ext(name: str) -> str:
 # does not begin with `_`, so nothing has to be declared for these to be published.
 SITE_FILES_DIR = "files"
 
-# A rendered deck: the format GitHub shows as SOURCE, which is the whole reason this
-# exists, and the one whose assets sit in a `<stem>_files/` directory beside it.
-_DECK_EXTENSIONS = frozenset({"html", "htm"})
 # What is worth linking a hosted copy for - a deck, plus pdf, on which the browser opens
 # its own viewer. Everything else (`ipynb`, `md`, `csv`) GitHub already renders, so a
 # second copy would only be a second place for it to go stale.
-_RENDERED_EXTENSIONS = _DECK_EXTENSIONS | {"pdf"}
+_RENDERED_EXTENSIONS = frozenset({*DECK_EXTENSIONS, "pdf"})
 
 # GitHub refuses a file over 100 MB on a push, so one carried into the site repo fails the
 # sync's own push rather than the release that put it in the materials repo.
@@ -187,16 +188,15 @@ Hosted = dict[str, frozenset[str]]
 
 
 @cache
-def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
-    """What `publish.yml` in `source_repo` declares public, or None when it declares
-    nothing.
+def _publish_policy(course_org: str, source_repo: str) -> tuple[str, ...]:
+    """What `publish.yml` in `source_repo` declares public: its `public:` patterns, empty
+    when it declares nothing.
 
     The policy is COURSE-level and lives in the source repo faculty actually edit, not in
-    each semester's copy: one file per course, applying to every semester of it. Memoised for
-    the run because `--all-semesters` asks the same course the same question once per semester.
-
-    Patterns go through the same parser faculty's `.releaseignore` goes through, so the one
-    syntax they already know covers both directions of the same question.
+    each semester's copy: one file per course, applying to every semester of it. Its
+    patterns match THAT repo's paths (`materials.hosted_copy` translates a renamed copy
+    back). Memoised for the run because `--all-semesters` asks the same course the same
+    question once per semester.
 
     A file that is absent or empty is "nothing public", said deliberately, and the mirror
     may then delete what an earlier sync copied. A file that does not PARSE, or whose
@@ -205,55 +205,48 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
     would unpublish a whole course's rendered decks over a typo, on a green run."""
     declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
     if declared is None:
-        return None
+        return ()
     if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
         raise ValueError(
             f"{course_org}/{source_repo}/{PUBLISH_FILE}: `public:` must be a list of "
             "patterns"
         )
-    return parse_patterns("\n".join(declared)) if declared else None
+    return tuple(declared)
 
 
 def _publish_policies(
     course_org: str, sched: schedule.Schedule, content_repos: list[str]
-) -> dict[str, tuple[GitIgnoreSpec, ...]]:
-    """Each semester content repo the schedule releases into, mapped to the policies of the
-    source repos that feed it.
+) -> dict[str, tuple[Feed, ...]]:
+    """Each semester content repo the schedule releases into, mapped to the source repos
+    that feed it: each one's patterns and the (source, semester) path pairs of its copies.
 
     Keyed on the DESTINATION, because that is the repo whose files the site links and
-    whose bytes the mirror copies - the policy is read from the source repo the plan names
-    as feeding it. Several sources may feed one destination (`lectures/` from the materials
-    repo, `datasets/` from another), so a path is public if ANY of their policies says so.
+    whose bytes the mirror copies. Several sources may feed one destination (`lectures/`
+    from the materials repo, `datasets/` from another), so a path is public if the
+    policy of the source it came from says so.
 
-    A repo with no policies at all is still a key: that is the instruction to delete what
-    an earlier sync copied for it. A repo no release plan names is absent, because nothing
+    Every source repo is a feed, patterns or none: a copy from a repo that hosts nothing
+    still owns the folder it lands in (`materials.hosted_copy`). A destination whose feeds
+    declare nothing is the instruction to delete what an earlier sync copied for it. A repo no release plan names is absent, because nothing
     was ever copied for it.
 
     The schedule's declared destinations, not discovery's findings: this decides what gets
     CLONED and copied into a public site repo, so it reads a faculty declaration rather
     than a heuristic over an org listing (the same argument `_indexable_repos` makes)."""
-    sources: dict[str, set[str]] = {}
+    pairs: dict[str, dict[str, set[tuple[str, str]]]] = {}
     for release in sched.releases:
         for d in release.deploy:
             if d.semester_dest_repo in content_repos:
-                sources.setdefault(d.semester_dest_repo, set()).add(
-                    d.course_source_repo
-                )
+                pairs.setdefault(d.semester_dest_repo, {}).setdefault(
+                    d.course_source_repo, set()
+                ).add((d.course_source_path, deploy_dest(d)))
     return {
         repo: tuple(
-            spec
-            for source in sorted(source_repos)
-            if (spec := _publish_policy(course_org, source)) is not None
+            Feed(_publish_policy(course_org, source), tuple(sorted(copies)))
+            for source, copies in sorted(sources.items())
         )
-        for repo, source_repos in sources.items()
+        for repo, sources in pairs.items()
     }
-
-
-def _publishable(path: str) -> bool:
-    """Whether a path may be published at all, whatever a pattern says. The denylist
-    (`solution/`, `tests/`, `grading_config.yml`, `.env`) and the never-material names,
-    at any depth - the same two lists every other outbound copy is filtered through."""
-    return not has_denied_component(path) and not has_never_material_component(path)
 
 
 def _view_url(semester_org: str, repo: str, path: str) -> str:
@@ -266,15 +259,14 @@ def _view_url(semester_org: str, repo: str, path: str) -> str:
 
 
 def _public_selection(
-    src: Path, repo: str, paths: tuple[str, ...], specs: tuple[GitIgnoreSpec, ...]
+    src: Path, repo: str, paths: tuple[str, ...], feeds: tuple[Feed, ...]
 ) -> frozenset[str]:
     """Which paths of `repo` the site can host, out of its released tree.
 
-    Everything a policy matches - last match wins WITHIN one policy, which is what makes
-    `!lectures/09_*/**` carve a session back out - plus the asset folders beside each
-    matched deck (`_bundle_prefixes`): a rendered deck without its bundle loads with no figures and no
-    styles, and no faculty member should have to write a pattern for a directory their
-    renderer invented. The denylist gates every candidate, bundles included, and cannot be
+    `materials.hosted_copy`: each path judged under the source path it was released from,
+    by the policy of the repo it came from (last match wins, which is what makes
+    `!lectures/09_*/**` carve a session back out), plus the asset folders beside each
+    matched deck. The denylist gates every candidate, bundles included, and cannot be
     written around.
 
     A file GitHub would refuse on a push is dropped with a warning rather than failing the
@@ -286,17 +278,8 @@ def _public_selection(
 
     Judged over the same tree the links are built from (`_repo_tree`); the clone is only
     where the bytes and the sizes come from."""
-    matched = {
-        path
-        for path in paths
-        if _publishable(path) and any(spec.check_file(path).include for spec in specs)
-    }
-    for path in list(matched):
-        if _ext(path) in _DECK_EXTENSIONS:
-            prefixes = _bundle_prefixes(path)
-            matched |= {a for a in paths if a.startswith(prefixes) and _publishable(a)}
     keep = set()
-    for path in matched:
+    for path in hosted_copy(paths, feeds):
         try:
             st = (src / path).lstat()
         except OSError:
@@ -313,23 +296,8 @@ def _public_selection(
     return frozenset(keep)
 
 
-# Asset folders a rendered deck may keep beside it besides `<stem>_files/` (Quarto,
-# reveal.js and hand-made decks). They travel with every hosted deck in their folder.
-_BUNDLE_DIRS = ("media", "libs", "images")
-
-
-def _bundle_prefixes(path: str) -> tuple[str, ...]:
-    """The directories a rendered deck's assets sit in, beside it: `<stem>_files/`, plus
-    `media/`, `libs/` and `images/` in the deck's own folder."""
-    folder = f"{path.rsplit('/', 1)[0]}/" if "/" in path else ""
-    return (
-        f"{path.rsplit('.', 1)[0]}_files/",
-        *(f"{folder}{name}/" for name in _BUNDLE_DIRS),
-    )
-
-
 def _mirror_public(
-    site_wd: Path, semester_org: str, policies: dict[str, tuple[GitIgnoreSpec, ...]]
+    site_wd: Path, semester_org: str, policies: dict[str, tuple[Feed, ...]]
 ) -> Hosted:
     """Copy every publicly declared file of this semester's content repos into the site's
     own `files/<repo>/` tree, and say what actually landed there.
@@ -351,7 +319,7 @@ def _mirror_public(
     root = site_wd / SITE_FILES_DIR
     for repo in sorted(policies):
         served = root / repo
-        if not policies[repo]:
+        if not any(feed.public for feed in policies[repo]):
             # Nothing declared public. No clone is needed to know it, and an earlier
             # sync's copy has to go.
             if served.exists():
@@ -760,7 +728,7 @@ def _materials_index(
             # The second check is the harmless twin of the first and stays a separate
             # list: nothing on it leaks anything, it is what a machine drops in a folder
             # (see `repos.NEVER_MATERIAL`).
-            if not _publishable(path):
+            if not publishable(path):
                 continue
             if "/" not in path:
                 doc = _file_link(semester_org, repo, branch, path, path, hosted)
@@ -990,7 +958,7 @@ def _offplan_folders(
                 folder = parts[0]
             else:
                 continue
-            if not _publishable(path) or covered(repo, folder):
+            if not publishable(path) or covered(repo, folder):
                 continue
             found.setdefault((repo, folder), kind)
     return [(repo, folder, kind) for (repo, folder), kind in found.items()]

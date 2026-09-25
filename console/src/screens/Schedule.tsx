@@ -7,7 +7,7 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
 import { parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
   blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
@@ -32,6 +32,8 @@ import { parse } from 'yaml';
 import { RunRows, applicableKeys, assignmentsAfterSchedule, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
+import { CONTENT_KINDS, DEFAULT_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
+import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 const validSchedule = validator(scheduleSchema);
@@ -115,16 +117,35 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
   return <span class="valid-msg"><Check />Ready; {files.length} file{files.length === 1 ? '' : 's'}{withheld ? `, ${withheld} withheld` : ''}</span>;
 }
 
+/** The kind an entry that names none takes (`schedule_plan.entry_kind`): from where its first copy lands. */
+export function inferredKind(p: ReadyProps, d: ReleaseDraft): string {
+  const first = d.deploys[0];
+  if (!first) return DEFAULT_KIND;
+  const mat = first.repo ? p.files.file(p.course.org, first.repo, MATERIALS_FILE) : null;
+  const aliases = (mat?.kind === 'ready' ? readDeclared(mat.text) : null)?.kinds ?? {};
+  return inferKind(landingSection(first, DEFAULT_DEST_REPO), aliases).kind;
+}
+
+/** Every repo a copy may come from: the materials repos, then the course's Other repos. */
+export function sourceRepos(p: ReadyProps, materials: string[]): { materials: string[]; others: string[] } {
+  const listing = p.files.repos(p.course.org);
+  const known = [...materials, ...(p.status.course?.templates ?? []).map((t) => t.repo)];
+  return { materials, others: listing.kind === 'ready' ? otherRepos(p.course.org, listing.repos, known).map((r) => r.name) : [] };
+}
+
 function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDraft; set: Setter<ReleaseDraft>; errors: Record<string, string>; repos: string[] }) {
   const tz = tzOf(p.status);
   const setDeploy = (i: number, patch: Partial<DeployDraft>) => set({ deploys: d.deploys.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+  const inferred = inferredKind(p, d);
+  const kinds = [...CONTENT_KINDS, ...(d.type && !CONTENT_KINDS.includes(d.type) ? [d.type] : [])];
+  const from = sourceRepos(p, repos);
   return (
     <>
       <div class="row-2">
-        <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Type', widget: 'select', defaultLabel: 'default: from where it lands', reason: 'Sets the row’s colour and its identifier.', options: [{ value: '', label: 'from the folder' }, { value: 'lecture', label: 'lecture' }, { value: 'lab', label: 'lab' }, { value: 'readings', label: 'readings' }] }} />
+        <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', defaultLabel: 'default: inferred from where it lands', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
         <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the folder name', reason: 'The name, shown after the identifier. Plain text.' }} />
       </div>
-      {d.type === 'readings' ? <p class="footnote">On the student site, readings appear inside the week’s lecture or lab row, not as their own row.</p> : null}
+      {(d.type || inferred) === 'readings' ? <p class="footnote">On the student site, untitled readings join the next lecture’s row; titled readings are their own row.</p> : null}
       <div class="row-2">
         <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
@@ -143,7 +164,9 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
                 <div class="field">
                   <label for={`e-d${i}-repo`}>From repo</label>
                   <select id={`e-d${i}-repo`} onChange={(e) => setDeploy(i, { repo: (e.target as HTMLSelectElement).value })}>
-                    {[...new Set([...repos, dp.repo].filter(Boolean))].map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}
+                    <optgroup label="Materials repos">{from.materials.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup>
+                    {from.others.length ? <optgroup label="Other repos">{from.others.map((r) => <option value={r} selected={r === dp.repo}>{r}</option>)}</optgroup> : null}
+                    {dp.repo && !from.materials.includes(dp.repo) && !from.others.includes(dp.repo) ? <option value={dp.repo} selected>{dp.repo}</option> : null}
                     {!dp.repo ? <option value="" selected>Choose a repo</option> : null}
                   </select>
                   {errors[`deploy${i}.repo`] ? <Invalid>{errors[`deploy${i}.repo`]}</Invalid> : null}
@@ -586,7 +609,7 @@ function View(p: ReadyProps) {
           <details class="fold adv-bottom">
             <summary>Advanced</summary>
             <div class="fold-body">
-              <div class="savebar"><span class="footnote">Release a folder that is not in the schedule, for a one-off or a correction.</span><OpOpen def={releaseAdhoc(scope, repos)} cls="btn small outline" label="Release something unscheduled…" /></div>
+              <div class="savebar"><span class="footnote">Release a folder that is not in the schedule, for a one-off or a correction.</span><OpOpen def={releaseAdhoc(scope, [...repos, ...sourceRepos(p, repos).others])} cls="btn small outline" label="Release something unscheduled…" /></div>
               <div class="savebar"><span class="footnote">See what automation’s next scheduled release run would do.</span><OpOpen def={scheduledPreview(scope)} cls="btn small outline" label="Preview scheduled releases" /></div>
             </div>
           </details>

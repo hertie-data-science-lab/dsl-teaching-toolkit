@@ -72,7 +72,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
         <CourseHeaderActions course={course} ready={v.course?.ready ?? false} />
       </div>
       <Help title="What lives in a materials repo" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a semester. Some files can be withheld from students, or published openly on the public website.</p>
+        <p>Materials live here privately until a scheduled release copies them to a semester. Some files can be withheld from students, and decks hosted on the student site.</p>
       </Help>
       <div class="stack">
         <section class="panel section">
@@ -89,7 +89,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                     <span class="r-title">{m.repo} <StateChip state={m.state} todo="Not ready yet" />{term ? <span class="chip term">{term}</span> : null}</span>
                     <span class="r-sub">
                       {materialsSentence(m.state, pub.kind)}
-                      {open === null ? '' : open ? ' Some files published openly.' : ' Nothing published openly.'}
+                      {open === null ? '' : open ? ' Some files hosted on the student site.' : ' Nothing hosted on the student site.'}
                       {gh?.pushed_at ? ` Last change ${fmtDay(gh.pushed_at)} (${ago(gh.pushed_at, p.now)}).` : ''}
                     </span>
                     <span class="r-side"><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>

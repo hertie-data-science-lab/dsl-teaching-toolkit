@@ -494,34 +494,6 @@ def test_an_off_plan_copy_of_the_syllabus_is_pinned(monkeypatch):
     assert link.name == "SYLLABUS.md"
 
 
-def test_a_deck_carries_its_asset_folders_with_it():
-    assert site._bundle_prefixes("lectures/01_lecture/deck.html") == (
-        "lectures/01_lecture/deck_files/",
-        "lectures/01_lecture/media/",
-        "lectures/01_lecture/libs/",
-        "lectures/01_lecture/images/",
-    )
-
-
-def test_a_hosted_deck_takes_a_media_folder_but_not_a_neighbours(tmp_path):
-    # Maths keeps its deck assets in `media/` beside the deck.
-    paths = (
-        "lectures/01_lecture/deck.html",
-        "lectures/01_lecture/media/fig.png",
-        "lectures/01_lecture/notes.pdf",
-        "lectures/02_lecture/media/other.png",
-    )
-    for rel in paths:
-        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / rel).write_text("x")
-    spec = site.parse_patterns("**/*.html")
-    kept = site._public_selection(tmp_path, "materials", paths, (spec,))
-    assert kept == {
-        "lectures/01_lecture/deck.html",
-        "lectures/01_lecture/media/fig.png",
-    }
-
-
 # --------------------------------------------------------------- display link shaping
 # A released session folder is copied WHOLESALE, so a rendered Quarto/Rmd deck arrives as
 # one deliverable plus hundreds of assets. These pin the split between what SHIPS (all of

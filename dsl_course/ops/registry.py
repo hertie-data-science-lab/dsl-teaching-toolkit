@@ -707,8 +707,8 @@ _OPS = (
             {
                 "semester": _string(SEMESTER_PATTERN, "Semester, e.g. f2026"),
                 "copy_from": _string(REPO_PATTERN, "Materials repo to copy forward"),
-                "public_dirs": _enum(PUBLIC_DIRS),
-                "public_types": _enum(PUBLIC_TYPES),
+                "public_dirs": {**_enum(PUBLIC_DIRS), "default": NOTHING_PUBLIC},
+                "public_types": {**_enum(PUBLIC_TYPES), "default": PUBLIC_HTML_PDF},
             },
             required=("semester",),
         ),

@@ -178,7 +178,7 @@ export function assignmentTitle(a: Pick<Assignment, 'slug' | 'title'>): string {
   return a.title ? `${id}: ${a.title}` : id;
 }
 
-const KIND_LABEL: Record<string, string> = Object.fromEntries(
+export const KIND_LABEL: Record<string, string> = Object.fromEntries(
   (policy.kinds as { key: string; label: string }[]).map((k) => [k.key, k.label]),
 );
 

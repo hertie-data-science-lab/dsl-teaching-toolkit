@@ -207,6 +207,18 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('lectures/05_trees_and_ensembles');
     expect(out).toContain('schedule.yml#L5');
   });
+  it('pre-selects the inferred kind, from the folder the copy lands in and the repo’s own aliases', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
+    expect(out).toContain('<option value selected>Lecture (inferred)</option>');
+    const aliased = new StaticFiles({ ...Object.fromEntries(['schedule.yml'].map((f) => [`${COHORT_ORG}/semester-config/${f}`, SCHEDULE])), [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'kinds:\n  lectures: lab\n' }, {}, TREE);
+    expect(html(<ScheduleScreen {...props({ entry: 's5', files: aliased })} />)).toContain('<option value selected>Lab (inferred)</option>');
+  });
+  it('lists the materials repos and the Other repos to release from', () => {
+    const listed = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE }, {}, TREE, { [COURSE_ORG]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code-f2026' }, { name: 'assignment-3-f2026' }] });
+    const out = html(<ScheduleScreen {...props({ entry: 's5', files: listed })} />);
+    expect(out).toMatch(/<optgroup label="Materials repos"><option value="course-materials-f2026" selected>/);
+    expect(out).toContain('<optgroup label="Other repos"><option value="lecture-code-f2026">lecture-code-f2026</option></optgroup>');
+  });
   it('renders a release with its source, destination and problem', () => {
     const t = text(<ReleaseScreen {...props({ entry: 's5' })} />);
     expect(t).toContain('Lecture 5 : Trees and ensembles');

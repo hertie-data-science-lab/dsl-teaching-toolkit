@@ -10,7 +10,7 @@ import { StaticFiles, type Files } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { CourseScreen } from '../src/screens/Course';
-import { MaterialsScreen } from '../src/screens/CourseEdit';
+import { MaterialsScreen, WebsiteScreen, folderKinds, resetLabel, writeHolds } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, materialsSentence, otherRepos, publicPatterns } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { Sidenav } from '../src/ui/shell';
@@ -107,7 +107,7 @@ describe('index screens', () => {
     expect(t).toContain(MAT);
     expect(t).toContain('Ready');
     expect(t).toContain('Fall 2026');
-    expect(t).toContain('Some files published openly.');
+    expect(t).toContain('Some files hosted on the student site.');
     expect(t).toContain('Last change');
     expect(t).toContain('New materials');
     expect(t).toContain('lecture-code-f2026');
@@ -150,7 +150,7 @@ describe('materials settings file tree', () => {
   it('badges every file, flags the rule that matches nothing and links each file to its editor', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);
-    expect(t).toContain('published openly');
+    expect(t).toContain('hosted on the student site');
     expect(t).toContain('withheld');
     expect(t).toContain('released to students');
     expect(t).toContain('nothing-here/ matches no file');
@@ -200,5 +200,44 @@ describe('course nav and overview', () => {
     expect(t).toContain('2 problems');
     const none = text(<CourseScreen {...cp({ loaded: { kind: 'ready', status: { ...STATUS, problems: [] }, sha: 's', stale: [] } })} />);
     expect(none).toContain('No course problems.');
+  });
+});
+
+describe('materials settings: syllabus file and folder kinds', () => {
+  const tree = ['E1282.pdf', 'lectures/01/a.pdf', 'Tutorials/01/b.ipynb', 'quiz/q1.md', 'datasets/x.csv'];
+  const withYml = new StaticFiles({ [`${COURSE_ORG}/${MAT}/materials.yml`]: 'syllabus: E1282.pdf\nkinds:\n  quiz: exam\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: tree });
+
+  it('gives each top-level folder its kind and says where it came from', () => {
+    expect(folderKinds(['lectures', 'Tutorials', 'quiz', 'datasets'], { quiz: 'exam' })).toEqual([
+      { folder: 'datasets', kind: 'lecture', from: 'default' },
+      { folder: 'lectures', kind: 'lecture', from: 'name' },
+      { folder: 'quiz', kind: 'exam', from: 'declared' },
+      { folder: 'Tutorials', kind: 'lab', from: 'name' },
+    ]);
+  });
+  it('shows the kinds and the declared syllabus, and edits that file', () => {
+    const out = render(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
+    const t = text(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
+    expect(t).toContain('quiz/ Exam set here');
+    expect(t).toContain('Tutorials/ Lab from its name');
+    expect(t).toContain('datasets/ Lecture the default');
+    expect(out).toContain('value="E1282.pdf"');
+    expect(out).toContain(`/edit/main/E1282.pdf`);
+    expect(out).toContain('<span class="ft-name">Tutorials/</span><span class="chip">Lab</span>');
+  });
+  it('names the kind a folder falls back to, and why', () => {
+    expect(resetLabel('quiz')).toBe('Lecture (the default)');
+    expect(resetLabel('Tutorials')).toBe('Lab (from its name)');
+  });
+  it('writes materials.yml with only what is declared', () => {
+    expect(writeHolds(null, { syllabus: 'E1282.pdf', kinds: { quiz: 'exam' } })).toBe(
+      '# INSTRUCTOR-OWNED - yours. What the folder names cannot say: the syllabus file and folder kinds.\nsyllabus: E1282.pdf\nkinds:\n  quiz: exam\n',
+    );
+    expect(writeHolds('syllabus: a.pdf\nkinds:\n  quiz: exam\n', { syllabus: '', kinds: {} })).toBe('');
+  });
+  it('the public website does not claim to follow publish.yml', () => {
+    const t = text(<WebsiteScreen {...cp()} />);
+    expect(t).not.toContain('Public patterns');
+    expect(t).toContain('not a materials repo’s publish.yml');
   });
 });

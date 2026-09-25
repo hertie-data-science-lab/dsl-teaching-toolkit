@@ -38,6 +38,7 @@ from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log, log_err, log_ok
+from .materials import is_materials_repo
 from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
 
 # The standalone semester registry in the course org's .github repo.
@@ -677,6 +678,16 @@ def handed_out_assignments(repos: list[dict]) -> frozenset[str]:
     the site for, withholding the brief it had just handed out."""
     return frozenset(
         r["name"] for r in repos if ASSIGNMENT_TEMPLATE_TOPIC in (r.get("topics") or [])
+    )
+
+
+def discover_materials_repos(course_org: str) -> list[str]:
+    """The course's live materials repos: those carrying the `dsl-materials` topic (the
+    name `course-materials-<tag>` is only the scaffold's default)."""
+    return sorted(
+        r["name"]
+        for r in list_org_repos(course_org)
+        if is_materials_repo(r) and not r.get("archived")
     )
 
 

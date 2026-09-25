@@ -2,7 +2,8 @@
 
 Three wire shapes (`dsl.request/1`, `dsl.outcome/1`, `dsl.status/1`), the operations
 registry (`ops.json`), the engine's names (`names.json`), the words for its values
-(`labels.json`) and institution policy (`policy.json`), and one schema per instructor-owned file the console edits. Every
+(`labels.json`), the materials-repo rules (`materials.json`) and institution policy
+(`policy.json`), and one schema per instructor-owned file the console edits. Every
 enum and every key set is READ off the constant the engine itself parses with, so a value
 added to the engine reaches the console's forms with no second edit; the committed copies
 under `console/schemas/` are held to a fresh export by `tests/test_schemas.py`.
@@ -29,6 +30,7 @@ from .course import (
     INSTRUCTORS_FILE,
     JOIN_REPO,
     LABELS,
+    PUBLISH_FILE,
     SOLUTION_WARNING,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
@@ -46,6 +48,7 @@ from .ops.registry import (
     public_view,
 )
 from .ops.request import REQUEST_JSON_SCHEMA
+from .repos import NEVER_MATERIAL, PUBLICATION_DENYLIST
 from .roster import FIELDS as ROSTER_FIELDS
 from .roster import REQUIRED_FIELDS as ROSTER_REQUIRED
 from .roster import ROLE_AUDITOR, ROLE_ENROLLED
@@ -597,6 +600,74 @@ def names_json() -> dict:
     }
 
 
+# The cases `materials_json` answers with the engine's own `hosted_paths`: the console's
+# Files badges are tested against them, so the two cannot disagree unnoticed.
+_TREE = (
+    "SYLLABUS.md",
+    "lectures/01_intro/slides.html",
+    "lectures/01_intro/slides_files/libs/reveal.js",
+    "lectures/01_intro/media/fig.png",
+    "lectures/01_intro/notes.pdf",
+    "lectures/01_intro/solutions/answers.pdf",
+    "lectures/01_intro/.DS_Store",
+    "lectures/02_trees/deck.HTML",
+    "lectures/02_trees/images/tree.svg",
+    "lectures/02_trees/lab.ipynb",
+    "lectures/09_exam/review.html",
+    "labs/01_intro/lab.pdf",
+    "labs/01_intro/Tests/test_lab.py",
+    "labs/01_intro/data/a.csv",
+    "readings/01_intro/READINGS.md",
+    "readings/01_intro/paper.pdf",
+    "grading_config.yml",
+    ".env.local",
+    "a[b]/notes.pdf",
+)
+PUBLISH_CASES = (
+    ("nothing declared", ()),
+    ("decks carry their bundles", ("lectures/**/*.html",)),
+    ("decks in any case", ("*.html", "*.HTML")),
+    ("everything but readings", ("**/*.html", "**/*.pdf", "!readings/**")),
+    ("a session carved out", ("lectures/**", "!lectures/09_*/**")),
+    ("everything", ("**",)),
+    ("a folder, unanchored", ("data/",)),
+    ("a folder, then a file re-included", ("labs/", "!labs/01_intro/lab.pdf")),
+    ("anchored at the root", ("/SYLLABUS.md", "/lab.pdf")),
+    ("one character and a class", ("labs/0?_intro/*.pdf", "lectures/0[12]_*/*.pdf")),
+    ("comments and blanks", ("# a note", "", "readings/**/*.md")),
+    ("a folder excluded with a trailing slash", ("labs/**", "!labs/01_intro/data/")),
+    ("an unanchored folder excluded", ("**", "!data/")),
+    ("an escaped bracket", ("a\\[b]/*",)),
+)
+
+
+def materials_json() -> dict:
+    """The materials-repo rules the console applies itself: the topic, the files, the
+    folder -> kind aliases, and the `publish.yml` rule (`materials.hosted_paths`) as the
+    lists it reads plus cases answered by the engine."""
+    return {
+        "topic": materials.MATERIALS_TOPIC,
+        "file": materials.MATERIALS_FILE,
+        "publish_file": PUBLISH_FILE,
+        "default_syllabus": materials.DEFAULT_SYLLABUS,
+        "default_kind": materials.DEFAULT_KIND,
+        "aliases": materials.BUILTIN_ALIASES,
+        "denylist": list(PUBLICATION_DENYLIST),
+        "never_material": sorted(NEVER_MATERIAL),
+        "deck_extensions": list(materials.DECK_EXTENSIONS),
+        "bundle_dirs": list(materials.BUNDLE_DIRS),
+        "cases": [
+            {
+                "name": name,
+                "paths": list(_TREE),
+                "public": list(public),
+                "hosted": sorted(materials.hosted_paths(_TREE, public)),
+            }
+            for name, public in PUBLISH_CASES
+        ],
+    }
+
+
 def labels_json() -> dict:
     """The words the console shows for the engine's values (`course.LABELS`) and the
     solution warning every surface offering `solution_datetime: now` carries."""
@@ -612,6 +683,7 @@ def all_schemas() -> dict[str, dict]:
         "ops.json": ops_json(),
         "names.json": names_json(),
         "labels.json": labels_json(),
+        "materials.json": materials_json(),
         # The institution policy the engine runs on (`policy.load`): the defaults, kinds,
         # site block, contact and licences, so the console holds no literal of its own.
         "policy.json": policy.load(),

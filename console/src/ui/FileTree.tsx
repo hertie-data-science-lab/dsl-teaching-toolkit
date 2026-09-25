@@ -11,7 +11,7 @@ function counts(n: TreeNode, badges: Record<string, Badge>, out: Record<Badge, n
   return out;
 }
 
-function Node({ n, badges, org, repo, branch, depth }: { n: TreeNode; badges: Record<string, Badge>; org: string; repo: string; branch: string | null; depth: number }) {
+function Node({ n, badges, org, repo, branch, depth, kinds }: { n: TreeNode; badges: Record<string, Badge>; org: string; repo: string; branch: string | null; depth: number; kinds: Record<string, string> }) {
   if (!n.children) {
     const b = badges[n.path] ?? 'released';
     return (
@@ -28,17 +28,18 @@ function Node({ n, badges, org, repo, branch, depth }: { n: TreeNode; badges: Re
       <details open={depth === 0}>
         <summary>
           <span class="ft-name">{n.name}/</span>
-          {c.public ? <span class="chip ok">{c.public} published openly</span> : null}
+          {depth === 0 && kinds[n.name] ? <span class="chip">{kinds[n.name]}</span> : null}
+          {c.public ? <span class="chip ok">{c.public} hosted</span> : null}
           {c.withheld ? <span class="chip amber">{c.withheld} withheld</span> : null}
         </summary>
-        <ul>{n.children.map((x) => <Node n={x} badges={badges} org={org} repo={repo} branch={branch} depth={depth + 1} />)}</ul>
+        <ul>{n.children.map((x) => <Node n={x} badges={badges} org={org} repo={repo} branch={branch} depth={depth + 1} kinds={kinds} />)}</ul>
       </details>
     </li>
   );
 }
 
-/** `branch` is the repo's default branch; while it is unknown (null) the Edit links are left out. */
-export function FileTree({ files, badges, org, repo, branch }: { files: string[]; badges: Record<string, Badge>; org: string; repo: string; branch: string | null }) {
+/** `branch` is the repo's default branch; while it is unknown (null) the Edit links are left out. `kinds` labels a top-level folder with its kind. */
+export function FileTree({ files, badges, org, repo, branch, kinds = {} }: { files: string[]; badges: Record<string, Badge>; org: string; repo: string; branch: string | null; kinds?: Record<string, string> }) {
   if (!files.length) return <p class="footnote">The repo has no files yet.</p>;
-  return <ul class="file-tree">{buildTree(files).map((n) => <Node n={n} badges={badges} org={org} repo={repo} branch={branch} depth={0} />)}</ul>;
+  return <ul class="file-tree">{buildTree(files).map((n) => <Node n={n} badges={badges} org={org} repo={repo} branch={branch} depth={0} kinds={kinds} />)}</ul>;
 }

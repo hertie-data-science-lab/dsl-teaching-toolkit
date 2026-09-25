@@ -7,7 +7,7 @@
 import { settingsTiers } from './grading';
 import { opt, type FieldTier, type Tiers } from './types';
 import { ORG_NAME_RE } from '../model/policy';
-import { autogradeBlock, termLabel } from '../wizards/model';
+import { PUBLIC_DIRS, PUBLIC_TYPES, PUBLIC_TYPES_DEFAULT, autogradeBlock, termLabel } from '../wizards/model';
 
 const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
@@ -74,8 +74,6 @@ export function assignmentMarking(): Tiers {
 
 // ------------------------------------------------------------------ New materials
 
-export const PUBLIC_DIRS = ['lectures', 'everything except readings', 'everything'];
-export const PUBLIC_TYPES = ['html', 'html + pdf', 'all files'];
 
 export function newMaterials(terms: string[], repos: string[]): Tiers {
   const copying = (v: Record<string, unknown>) => !!v.copy_from;
@@ -85,15 +83,15 @@ export function newMaterials(terms: string[], repos: string[]): Tiers {
       reason: 'Materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
     },
     open: {
-      tier: 'default', label: 'Publish some of it openly', widget: 'checkbox', default: false, defaultLabel: 'default: off keeps everything private to enrolled students',
+      tier: 'default', label: 'Host some of it on the student site', widget: 'checkbox', default: false, defaultLabel: 'default: off keeps everything private to enrolled students',
       forced: (v) => (copying(v) ? { value: false, reason: 'Copying takes its publish settings too, so there is nothing to choose here.' } : null),
     },
     public_dirs: {
-      tier: 'conditional', under: 'open', when: (v) => v.open === true && !copying(v), label: 'Which folders', widget: 'select', default: 'lectures', defaultLabel: 'default: lectures',
-      reason: 'Seeds publish.yml; you can change it on the repo’s settings later.', options: PUBLIC_DIRS.map((x) => opt(x, x)),
+      tier: 'conditional', under: 'open', when: (v) => v.open === true && !copying(v), label: 'Which folders', widget: 'select', default: PUBLIC_DIRS[0], defaultLabel: `default: ${PUBLIC_DIRS[0]}`,
+      reason: 'By kind: the starter’s lecture or readings folders. Seeds publish.yml; you can change it on the repo’s settings later.', options: PUBLIC_DIRS.map((x) => opt(x, x)),
     },
     public_types: {
-      tier: 'conditional', under: 'open', when: (v) => v.open === true && !copying(v), label: 'Which file types', widget: 'select', default: 'html + pdf', defaultLabel: 'default: html + pdf',
+      tier: 'conditional', under: 'open', when: (v) => v.open === true && !copying(v), label: 'Which file types', widget: 'select', default: PUBLIC_TYPES_DEFAULT, defaultLabel: `default: ${PUBLIC_TYPES_DEFAULT}`,
       options: PUBLIC_TYPES.map((x) => opt(x, x)),
     },
     copy_from: {

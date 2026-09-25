@@ -55,6 +55,7 @@ from .discovery import (
     discover_assignment_repos,
     discover_assignments,
     discover_content_repos,
+    discover_materials_repos,
     discover_semesters,
     list_org_repos,
     org_tier,
@@ -265,10 +266,11 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
     any of it."""
     semesters = discover_semesters(course_org)
     source_repos = discover_content_repos(course_org)
+    materials = discover_materials_repos(course_org)
     assignments = discover_assignments(course_org)
     rendered = {
         ".github/workflows/release-materials.yml": render_central_release(
-            source_repos, semesters
+            source_repos, semesters, materials
         ),
         ".github/workflows/release-assignment.yml": render_provision(
             semesters, assignments
@@ -279,16 +281,18 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/patch-assignment.yml": render_patch_assignment(
             semesters, assignments
         ),
-        ".github/workflows/new-materials.yml": render_new_materials(source_repos),
+        ".github/workflows/new-materials.yml": render_new_materials(materials),
         ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
-            source_repos, semesters
+            source_repos, semesters, materials
         ),
         ".github/workflows/new-assignment.yml": render_new_assignment(assignments),
         ".github/workflows/derive-student-version.yml": render_derive_student_version(
             assignments
         ),
         ".github/workflows/sync-site.yml": render_sync_site(semesters),
-        ".github/workflows/publish-site.yml": render_publish_site(source_repos),
+        ".github/workflows/publish-site.yml": render_publish_site(
+            source_repos, materials
+        ),
         ".github/workflows/sync-membership.yml": render_sync_membership(semesters),
         ".github/workflows/send-codes.yml": render_send_codes(),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(semesters),
@@ -516,6 +520,7 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
     central_ref = central_ref_for(course_org)
     semesters, unregistered = _live_semesters(course_org)
     targets = discover_content_repos(course_org)
+    materials = set(discover_materials_repos(course_org))
     # Org-wide; discovered once, not per repo. Two lists off the one listing: every
     # template names itself in the dropdowns this refresh renders, and the LIVE ones are
     # the only ones it may write into.
@@ -566,9 +571,9 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
 
     for repo in sorted(targets):
         failures += place(repo, RELEASE_WORKFLOWS)
-        # A no-op on the code and dataset repos this sweep also returns; the gate is
-        # inside, so no caller can forget it.
-        failures += scaffold.refresh_materials_system_files(course_org, repo)
+        # The materials repos only: this sweep also returns the code and dataset repos.
+        if repo in materials:
+            failures += scaffold.refresh_materials_system_files(course_org, repo)
     # An assignment template hosts the hand-out button and nothing else (see
     # `TEMPLATE_WORKFLOWS`), so faculty can release the assignment they are editing
     # without leaving its Actions tab. Here as well as at New assignment, so a template
