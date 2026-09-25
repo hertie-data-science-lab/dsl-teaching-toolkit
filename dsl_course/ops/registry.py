@@ -25,6 +25,7 @@ from .. import policy
 from ..course import (
     ASSIGNMENT_TYPES,
     COURSE_ADMIN_TEAM,
+    COURSE_DEFAULT_CHOICE,
     INSTRUCTORS_TEAM,
     NOTHING_PUBLIC,
     PUBLIC_DIRS,
@@ -345,6 +346,8 @@ def _new_materials(request: Request) -> list[str]:
 
 
 def _new_assignment(request: Request) -> list[str]:
+    # A box left out is the course's default, else the institution's - as the workflow's
+    # own dropdowns send it (`scaffold.resolve_answers`, `scaffold._grading_config`).
     argv = [
         "assignment",
         "--org",
@@ -356,15 +359,15 @@ def _new_assignment(request: Request) -> list[str]:
         "--name",
         _a(request, "name", ""),
         "--formats",
-        _a(request, "formats", "ipynb"),
+        _a(request, "formats", COURSE_DEFAULT_CHOICE),
         "--type",
         _a(request, "type", "individual"),
         "--team-formation",
-        _a(request, "team_formation", "self_select"),
+        _a(request, "team_formation", COURSE_DEFAULT_CHOICE),
         "--submit-via",
-        _a(request, "submit_via", "assignment_repo"),
+        _a(request, "submit_via", COURSE_DEFAULT_CHOICE),
         "--visibility",
-        _a(request, "visibility", "private"),
+        _a(request, "visibility", COURSE_DEFAULT_CHOICE),
         "--autograde",
         "true" if _a(request, "autograde") else "false",
     ]

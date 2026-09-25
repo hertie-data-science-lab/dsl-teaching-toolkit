@@ -4,11 +4,14 @@ seeds names the institution's defaults and copies none of them."""
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import yaml
 
 from dsl_course import bootstrap_course, course, policy, scaffold, schedule, settings
+from dsl_course.ops.registry import REGISTRY
+from dsl_course.ops.request import parse_request
 from dsl_course.welcome import template
 
 SENTINEL = course.COURSE_DEFAULT_CHOICE
@@ -124,6 +127,24 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
     # cascade answers them at read time.
     assert seen["team_formation"] == SENTINEL
     assert seen["visibility"] == SENTINEL
+
+
+def test_the_console_s_new_assignment_leaves_unanswered_boxes_to_the_cascade():
+    request = parse_request(
+        json.dumps(
+            {
+                "schema": "dsl.request/1",
+                "op": "assignment.create",
+                "actor": "prof",
+                "course_org": "Course",
+                "args": {"number": "1", "semester": "f2026"},
+                "preview": False,
+            }
+        )
+    )
+    argv = REGISTRY["assignment.create"].argv(request)
+    for flag in ("--formats", "--team-formation", "--submit-via", "--visibility"):
+        assert argv[argv.index(flag) + 1] == SENTINEL
 
 
 def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
