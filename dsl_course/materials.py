@@ -191,6 +191,11 @@ def _under(path: str, prefix: str) -> bool:
     return not prefix or path == prefix or path.startswith(f"{prefix}/")
 
 
+def _translate(path: str, src: str, dst: str) -> str:
+    rest = path[len(dst) :].lstrip("/") if dst else path
+    return "/".join(x for x in (src, rest) if x)
+
+
 def source_path(path: str, pairs: Iterable[tuple[str, str]]) -> str | None:
     """The source path a semester path was copied from: the copy with the longest
     semester prefix covering it, translated back; None when no copy covers it."""
@@ -199,28 +204,39 @@ def source_path(path: str, pairs: Iterable[tuple[str, str]]) -> str | None:
         key=lambda pair: len(pair[1]),
         default=None,
     )
-    if best is None:
-        return None
-    src, dst = best
-    rest = path[len(dst) :].lstrip("/") if dst else path
-    return "/".join(x for x in (src, rest) if x)
+    return None if best is None else _translate(path, *best)
 
 
 def hosted_copy(paths: Iterable[str], feeds: Iterable[Feed]) -> frozenset[str]:
-    """Which paths of a SEMESTER repo the site hosts: each path is judged under the
-    source path it was released from, by the patterns of the repo it came from. A path
-    no copy of the plan covers (released by hand) is judged as it is named."""
+    """Which paths of a SEMESTER repo the site hosts. Each path belongs to ONE copy: the
+    one, across every source repo, whose destination is the longest prefix covering it
+    (a code repo copied into `lectures/05/code` owns that folder, not the repo copied
+    to `lectures`). It is judged under its source path by that repo's patterns only, and
+    a repo with no patterns hosts nothing. A path no copy covers (released by hand) is
+    judged as it is named, by every repo's patterns."""
     paths, feeds = tuple(paths), tuple(feeds)
-    covered = {p for p in paths for f in feeds if source_path(p, f.pairs) is not None}
+    copies = [
+        (i, _root(src), _root(dst))
+        for i, feed in enumerate(feeds)
+        for src, dst in feed.pairs
+    ]
+    owned: list[dict[str, list[str]]] = [{} for _ in feeds]
+    loose: list[str] = []
+    for p in paths:
+        best = max(
+            (c for c in copies if _under(p, c[2])),
+            key=lambda c: len(c[2]),
+            default=None,
+        )
+        if best is None:
+            loose.append(p)
+        else:
+            i, src, dst = best
+            owned[i].setdefault(_translate(p, src, dst), []).append(p)
     out: set[str] = set()
-    for feed in feeds:
-        back: dict[str, list[str]] = {}
-        for p in paths:
-            src = source_path(p, feed.pairs)
-            if src is None and p not in covered:
-                src = p
-            if src is not None:
-                back.setdefault(src, []).append(p)
+    for feed, back in zip(feeds, owned):
+        for p in loose:
+            back.setdefault(p, []).append(p)
         chosen = hosted_paths(back, feed.public)
         out |= {p for src in chosen for p in back[src] if publishable(p)}
     return frozenset(out)

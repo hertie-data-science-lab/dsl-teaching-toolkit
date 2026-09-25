@@ -131,3 +131,14 @@ def test_each_copy_is_judged_by_the_repo_it_came_from():
     assert materials.hosted_copy(paths, feeds) == {"s1/lecture/a.html", "s1/code/x.py"}
     feeds += (materials.Feed(("extra/**",), (("other", "elsewhere"),)),)
     assert "extra/c.html" in materials.hosted_copy(paths, feeds)
+
+
+def test_a_copy_into_another_copys_folder_owns_it():
+    # A copies `lectures` whole with `lectures/**` public; B, which hosts nothing, copies a
+    # code repo into `lectures/05/code`. B's files are B's: not hosted.
+    feeds = (
+        materials.Feed(("lectures/**",), (("lectures", "lectures"),)),
+        materials.Feed((), (("dldemo", "lectures/05/code"),)),
+    )
+    paths = ("lectures/05/slides.pdf", "lectures/05/code/serving.py")
+    assert materials.hosted_copy(paths, feeds) == {"lectures/05/slides.pdf"}

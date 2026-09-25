@@ -225,8 +225,9 @@ def _publish_policies(
     from the materials repo, `datasets/` from another), so a path is public if the
     policy of the source it came from says so.
 
-    A repo with no policies at all is still a key: that is the instruction to delete what
-    an earlier sync copied for it. A repo no release plan names is absent, because nothing
+    Every source repo is a feed, patterns or none: a copy from a repo that hosts nothing
+    still owns the folder it lands in (`materials.hosted_copy`). A destination whose feeds
+    declare nothing is the instruction to delete what an earlier sync copied for it. A repo no release plan names is absent, because nothing
     was ever copied for it.
 
     The schedule's declared destinations, not discovery's findings: this decides what gets
@@ -241,9 +242,8 @@ def _publish_policies(
                 ).add((d.course_source_path, deploy_dest(d)))
     return {
         repo: tuple(
-            Feed(public, tuple(sorted(copies)))
+            Feed(_publish_policy(course_org, source), tuple(sorted(copies)))
             for source, copies in sorted(sources.items())
-            if (public := _publish_policy(course_org, source))
         )
         for repo, sources in pairs.items()
     }
@@ -319,7 +319,7 @@ def _mirror_public(
     root = site_wd / SITE_FILES_DIR
     for repo in sorted(policies):
         served = root / repo
-        if not policies[repo]:
+        if not any(feed.public for feed in policies[repo]):
             # Nothing declared public. No clone is needed to know it, and an earlier
             # sync's copy has to go.
             if served.exists():

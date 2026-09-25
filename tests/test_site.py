@@ -2092,7 +2092,9 @@ def test_a_course_with_no_publish_file_is_never_cloned(monkeypatch, origins, tmp
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(site, "clone", _never_cloned)
     policies = site._publish_policies("Course-Org", _one_deploy(), ["materials"])
-    assert policies == {"materials": ()}
+    assert policies == {
+        "materials": (materials.Feed((), (("lectures/01_a", "lectures/01_a"),)),)
+    }
     assert _mirror(monkeypatch, origins, tmp_path, {}, policies) == ({}, [])
 
 
@@ -2209,6 +2211,31 @@ def test_a_renamed_copy_is_hosted_by_the_pattern_written_for_its_source(
         "materials/week-1/slides_files/a.css",
     ]
     assert hosted["materials"] == frozenset(tree)
+
+
+def test_a_repo_with_no_publish_file_still_owns_the_folder_it_lands_in(monkeypatch):
+    # The review's case: the code repo has no publish.yml, and its files under the
+    # materials repo's `lectures/` must not be hosted by the materials repo's patterns.
+    monkeypatch.setattr(
+        site,
+        "yaml_file",
+        lambda org, repo, path: {"public": ["lectures/**"]} if repo == "cm" else {},
+    )
+    sched = Schedule(
+        releases=[
+            Release(
+                "s1",
+                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
+                deploy=[
+                    Deploy("cm", "lectures", "materials"),
+                    Deploy("dldemo", "", "materials", "lectures/05/code"),
+                ],
+            )
+        ]
+    )
+    feeds = site._publish_policies("Course-Org", sched, ["materials"])["materials"]
+    paths = ("lectures/05/slides.pdf", "lectures/05/code/serving.py")
+    assert materials.hosted_copy(paths, feeds) == {"lectures/05/slides.pdf"}
 
 
 def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
