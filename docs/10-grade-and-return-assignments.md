@@ -30,9 +30,6 @@ teams:
       days_late: 0
       contributions: |
         Anna: model architecture. Ben: training loop.
-    score_group:                # yours
-      Q1: 14                    # /15
-      Q2: 13                    # /15
     feedback_group: |
       Excellent model design; the evaluation section is thin.
     members:
@@ -40,6 +37,12 @@ teams:
         adjustment_individual: +4
         feedback_individual:
         notes_not_shared_with_students:
+    score_group:                # yours
+      Q1: 14                    # /15
+      Q2: 13                    # /15 · report.tex
+    feedback_per_question:
+      Q1:
+      Q2: One baseline is not a comparison.
 ```
 
 | Field | Owner | Student sees |
@@ -47,6 +50,7 @@ teams:
 | `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.completion`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
 | `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
+| `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes, under each question; a blank cell is not sent |
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
 | `adjustment_individual` | you - the ONLY override, in both shapes | **no** - only the final grade it produced |
 | `notes_not_shared_with_students` | you | **never** |
@@ -157,10 +161,11 @@ could change is not it.
 - **An email** with a link and no marks in it.
 
 Nothing is said twice: every send is recorded in `.system/gradebook/distributed.csv`, so a re-run
-after one correction reaches one student. Untick `notify` to skip the email.
+after one correction reaches one student. The emails are recorded just before they go, so a
+run that fails afterwards never mails anyone twice. Untick `notify` to skip the email.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
-the email. `receipt_note` posts one line, "Marks returned: see your marks repo.", on each
+the email: the overall feedback, then each question's. `receipt_note` posts one line, "Marks returned: see your marks repo.", on each
 returned student's or team's Submission receipts issue - once per assignment, however often you run
 it. The note carries no mark.
 
@@ -269,7 +274,9 @@ their own line in an Rmd/qmd) - and set `grader_pdf: true` in the template's
 `grading_config.yml`. At the cutoff every submission is filtered down to just those
 questions and archived beside the autograde detail, as
 `semester-config/.system/autograde/<slug>/<key>.pdf`. Setup cells, imports and machine-marked
-work are left out, so you read the answers rather than the repo.
+work are left out, so you read the answers rather than the repo. A question marked from
+another file (`file:` in `questions:`) gets that file archived beside it as
+`<key>.<file>`, read as its compiled `.pdf` when one is committed.
 
 It is **not** behind `autograde:`, deliberately: the fences delimit what a *person* marks,
 so an all-manual assignment is the one that wants this most.
