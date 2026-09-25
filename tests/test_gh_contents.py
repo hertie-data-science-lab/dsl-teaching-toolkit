@@ -742,7 +742,9 @@ def test_a_move_whose_target_differs_refuses_the_whole_commit(monkeypatch, capsy
     assert _posted(calls) == []
     assert not any("PATCH" in args for args, _ in calls)
     err = capsys.readouterr().err
-    assert "both old.json and .system/old.json exist and differ" in err
+    assert "org/repo: 1 move(s) onto a file that differs (under .system)" in err
+    # The paths can carry a handle: per-person log only.
+    assert "old.json" not in err
 
 
 def test_a_move_whose_target_is_absent_moves(monkeypatch):

@@ -76,6 +76,7 @@ from .gh_contents import (
     get_file_content,
     load_yaml_lines,
     move_files,
+    refuse_clashes,
     repo_blob_shas,
 )
 from .ghcli import gh, git
@@ -484,30 +485,29 @@ def _run_count(org: str, repo: str, query: str, workflow: str = "") -> int:
 
 # Every state a run is in before it has finished.
 LIVE_RUN_STATES = ("queued", "in_progress", "waiting", "requested", "pending")
-# The central toolkit's workflows that re-render every org on a tier, by tier: one of them
-# running while the migration writes is the 422 race (two writers on one branch).
-CENTRAL_REFRESHERS = {
-    "main": "deploy-main.yml",
-    "preview": "deploy-preview.yml",
-    "release": "promote.yml",
-}
+# The central toolkit's workflows that re-render the orgs of a tier: one of them running
+# while the migration writes is the 422 race (two writers on one branch). All three are
+# checked whatever the org's tier: a deploy may have picked its orgs before a tier flip.
+CENTRAL_REFRESHERS = ("deploy-main.yml", "deploy-preview.yml", "promote.yml")
 
 
-def _alive(targets: list[tuple[str, str]], ref: str) -> list[str]:
-    """The target repos with a run not yet finished, and the central toolkit's deploy of
-    tier `ref` (the course's `central_ref`) when one of those is not finished either."""
+def _alive(targets: list[tuple[str, str]]) -> list[str]:
+    """The target repos with a run not yet finished, and each central deploy not yet
+    finished."""
     out = [
         f"{org}/{repo}"
         for org, repo in targets
         if any(_run_count(org, repo, f"status={s}") for s in LIVE_RUN_STATES)
     ]
-    workflow = CENTRAL_REFRESHERS.get(ref)
     central_org, central_repo = CENTRAL.split("/", 1)
-    if workflow and any(
-        _run_count(central_org, central_repo, f"status={s}", workflow)
-        for s in LIVE_RUN_STATES
-    ):
-        out.append(f"{CENTRAL} ({workflow})")
+    out += [
+        f"{CENTRAL} ({workflow})"
+        for workflow in CENTRAL_REFRESHERS
+        if any(
+            _run_count(central_org, central_repo, f"status={s}", workflow)
+            for s in LIVE_RUN_STATES
+        )
+    ]
     return out
 
 
@@ -617,6 +617,10 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
         if preview:
             log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
             return 0
+        if pause.record() is not None:
+            # A run that stopped paused: Actions are off from here on, whatever is left.
+            paused = True
+            pause.load()
         for step in steps:
             if step.bracket == "pause" and not idle:
                 paused = True
@@ -659,10 +663,8 @@ class Pause:
     switched - what each was set to, so the unpause restores exactly that and a run that
     stops (or is interrupted) can always be resumed or released by hand."""
 
-    def __init__(
-        self, org: str, targets: Callable[[], list[tuple[str, str]]], course: str
-    ) -> None:
-        self.org, self.targets, self.course = org, targets, course
+    def __init__(self, org: str, targets: Callable[[], list[tuple[str, str]]]) -> None:
+        self.org, self.targets = org, targets
         self.saved: dict[str, dict] = {}  # "org/repo" -> its setting before the pause
         self.started = ""
 
@@ -703,7 +705,7 @@ class Pause:
         )
 
     def quiet(self, keys: list[str]) -> bool:
-        alive = _alive([self._live(k) for k in keys], central_ref_for(self.course))
+        alive = _alive([self._live(k) for k in keys])
         if alive:
             log_err(
                 f"a workflow run is queued or running in {', '.join(alive)} - wait "
@@ -890,7 +892,7 @@ class Semester:
     def __init__(self, org: str, course_org: str) -> None:
         self.org, self.course = org, course_org
         self.people = ""
-        self.pause = Pause(org, self.targets, course_org)
+        self.pause = Pause(org, self.targets)
         self.renamed_now: dict[str, str] = {}  # old -> new, renamed by this run
 
     def config(self) -> str:
@@ -1112,8 +1114,18 @@ class Semester:
         }
         return _drift(self.org, wanted)
 
+    def ready_to_render(self) -> bool:
+        """Every step before the re-render done: only then does this engine's render of
+        the semester (its schedule, its lock) read files that are there."""
+        return (
+            self.renamed()
+            and self.layout_done()
+            and self.keys_done()
+            and self.topic_done()
+        )
+
     def rerender_done(self) -> bool:
-        return self.renamed() and self.layout_done() and not self.drift()
+        return self.ready_to_render() and not self.drift()
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
@@ -1172,13 +1184,19 @@ class Semester:
             Step(
                 "re-render",
                 done=self.rerender_done,
-                plan=lambda: [
-                    (
-                        "re-write every SYSTEM-OWNED file that differs "
-                        "(as they read now, before the steps above):"
-                    ),
-                    *(f"  {path}" for path in self.drift()),
-                ],
+                plan=lambda: (
+                    [
+                        "re-write every SYSTEM-OWNED file that differs:",
+                        *(f"  {path}" for path in self.drift()),
+                    ]
+                    if self.ready_to_render()
+                    else [
+                        (
+                            "re-write every SYSTEM-OWNED file that differs (listed once "
+                            "the steps above have run)"
+                        )
+                    ]
+                ),
                 do=self.rerender,
                 verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
@@ -1195,7 +1213,7 @@ class Semester:
 class Course:
     def __init__(self, org: str) -> None:
         self.org = org
-        self.pause = Pause(org, self.targets, org)
+        self.pause = Pause(org, self.targets)
 
     def targets(self) -> list[tuple[str, str]]:
         """`.github` and every content repo and template that carries a workflow."""
@@ -1313,6 +1331,13 @@ class Course:
         }
 
     def move_materials(self) -> bool:
+        """Every repo's moves checked before the first is written: a clash in one repo
+        must not land after another's commit."""
+        work = self.materials_moves()
+        if any(
+            refuse_clashes(self.org, r, _files(self.org, r), m) for r, m in work.items()
+        ):
+            return False
         return all(
             move_files(self.org, repo, moves, LAYOUT_COMMIT)
             for repo, moves in self.materials_moves().items()
@@ -1441,10 +1466,19 @@ class Course:
             Step(
                 "re-render",
                 done=self.rerender_done,
-                plan=lambda: [
-                    "Refresh actions from this checkout; these files differ now:",
-                    *(f"  {path}" for path in self.drift()),
-                ],
+                plan=lambda: (
+                    [
+                        "Refresh actions from this checkout; these files differ now:",
+                        *(f"  {path}" for path in self.drift()),
+                    ]
+                    if self.registry_done()
+                    else [
+                        (
+                            "Refresh actions from this checkout (the files are listed once "
+                            "the registry step has run)"
+                        )
+                    ]
+                ),
                 do=lambda: seed.refresh(self.org) == 0,
                 verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
@@ -1510,11 +1544,17 @@ def preflight(org: str) -> Course | Semester | None:
         course_on = parent.pause.record() is None and all(
             _actions_enabled(o, r) for o, r in parent.targets()
         )
-        if not parent.work_done() or not (course_on or resuming):
+        if not parent.work_done() or parent.pause.record() is not None:
             log_err(
-                f"{course} is not fully migrated, or another migration under it is "
-                f"in flight - finish that first: `python -m dsl_course.migrate {course} "
-                f"--no-preview`, then this semester"
+                f"{course} is not fully migrated - finish that first: "
+                f"`python -m dsl_course.migrate {course} --no-preview`, then this semester"
+            )
+            return None
+        if not (course_on or resuming):
+            log_err(
+                f"another semester's migration under {course} is in flight (the course's "
+                f"Actions are off, with no pause record of {org}'s) - let it finish, then "
+                f"this semester"
             )
             return None
     else:
@@ -1522,8 +1562,7 @@ def preflight(org: str) -> Course | Semester | None:
             f"{org}'s .github carries neither {COURSE_HUB_TOPIC} nor a semester topic"
         )
         return None
-    course = target.course if isinstance(target, Semester) else org
-    alive = _alive(target.targets(), central_ref_for(course))
+    alive = _alive(target.targets())
     if alive:
         log_err(
             f"a workflow run is queued or running in {', '.join(alive)} - wait for it "
