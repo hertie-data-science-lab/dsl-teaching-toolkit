@@ -193,10 +193,12 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
   }
   if (d.kind === 'assignments') {
     return {
-      ...raw, ...display(raw, d), course_source_repo: d.template, semester_dest_repo: text(d.semesterRepo),
+      // Timings only (decision 0009): the title is the template's, the repo name and the
+      // late cutoff are assignments.yml's - none of them is written here.
+      ...raw, ...display(raw, d), title: undefined, course_source_repo: d.template, semester_dest_repo: undefined,
       handout_datetime: d.manual ? undefined : whenOf(raw.handout_datetime, d.handoutDate, d.handoutTime),
       due_datetime: whenOf(raw.due_datetime, d.dueDate, d.dueTime),
-      grading_datetime: whenOf(raw.grading_datetime, d.lateDate, d.lateTime),
+      grading_datetime: undefined,
       solution_datetime: d.solutionOn && !d.manual ? whenOf(raw.solution_datetime, d.solutionDate, d.solutionTime) : undefined,
     };
   }

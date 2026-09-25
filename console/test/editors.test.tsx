@@ -124,9 +124,8 @@ describe('the schedule entry sheet model', () => {
     const doc = y.toJS() as Record<string, unknown>;
     writeDraft(y, { ...(readDraft(doc, 's5') as ReleaseDraft), title: 'Trees and ensembles' }, doc);
     writeDraft(y, { ...(readDraft(doc, 'a2') as never as object), title: 'Regression' } as never, doc);
-    expect(y.text).toBe(
-      `${src.replace('title: Trees\n', 'title: Trees and ensembles\n')}    title: Regression\n`,
-    );
+    // An assignment's title is its template's (decision 0009): never written here.
+    expect(y.text).toBe(src.replace('title: Trees\n', 'title: Trees and ensembles\n'));
   });
 
   it('turns automatic archiving off by removing the block, and checks an assignment’s dates', () => {

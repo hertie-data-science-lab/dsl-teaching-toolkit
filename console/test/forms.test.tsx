@@ -47,8 +47,8 @@ describe('the tiered form', () => {
     const out = render(<SchemaForm id="t" schema={null} tiers={tiers} values={v} onChange={() => {}} />);
     expect(out).toContain('Applies to copies handed out after this change; existing copies keep theirs.');
     expect(out).not.toContain('cannot be changed');
-    expect(toConfig(effective(tiers, v)).visibility).toBe('public');
-    expect(toConfig(effective(tiers, { ...v, submit_via: 'external', submit_url: 'https://x' })).visibility).toBe('private');
+    // A run setting: shown, but saved per semester in assignments.yml, never here (B4).
+    expect(toConfig(effective(tiers, v)).visibility).toBeUndefined();
   });
 
   it('validates inline: the bad value in the file, https only, both or neither', () => {
@@ -59,7 +59,8 @@ describe('the tiered form', () => {
   });
 
   it('round-trips grading_config.yml and the schema accepts the result', async () => {
-    const cfg = { title: 'Group project', type: 'group', team_formation: 'assigned', max_team_size: 4, submit_via: 'assignment_repo', visibility: 'private', formats: ['ipynb'], autograde: true, completion_check: false };
+    // The template's own keys only: its run settings are each semester's assignments.yml.
+    const cfg = { title: 'Group project', type: 'group', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: true, completion_check: false };
     const back = Object.fromEntries(Object.entries(toConfig(effective(tiers, fromConfig(cfg)))).filter(([, x]) => x !== undefined));
     expect(back).toEqual(cfg);
     const { default: Ajv } = await import('ajv/dist/2020');
