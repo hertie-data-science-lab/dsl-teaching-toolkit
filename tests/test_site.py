@@ -82,7 +82,7 @@ def _sched(releases: list[Release]) -> Schedule:
 def test_event_entry_renders_a_display_only_schedule_row():
     e = Event("project-clinic", "", datetime(2026, 11, 17, 10, 0, tzinfo=BERLIN))
     out = site._event_entry(e, END_OF_TERM)
-    assert "type: special_event" in out
+    assert "kind: special_event" in out
     # `title`, which the theme renders in the TITLE column - the EVENT column is where
     # every row type prints its KIND, and this row's kind is "Event"
     assert 'title: "Project Clinic"' in out  # prettified from the label
@@ -99,7 +99,7 @@ def test_event_entry_renders_a_display_only_schedule_row():
 def test_event_entry_renders_an_exam_as_an_exam_row():
     e = Event("mid-term", "MidTerm Exam", date(2026, 11, 3), kind="exam")
     out = site._event_entry(e, END_OF_TERM)
-    assert "type: exam" in out
+    assert "kind: exam" in out
     assert 'title: "MidTerm Exam"' in out
     assert "date: 2026-11-03T09:00:00" in out  # whole day -> the placeholder time
     assert "name:" not in out  # the exam row reads `title`, not `name`
@@ -131,7 +131,7 @@ def test_tbc_rows_render_with_theme_flags():
     out = site._event_entry(
         Event("resit", "Resit Exam", None, "exam", True), END_OF_TERM
     )
-    assert "type: exam" in out and "dateless: true" in out
+    assert "kind: exam" in out and "dateless: true" in out
     out = site._event_entry(
         Event("mid-term", "MidTerm Exam", date(2026, 11, 3), "exam", True), END_OF_TERM
     )
@@ -156,7 +156,7 @@ def _said(out: str) -> object:
 def test_the_archive_row_is_a_special_event_that_says_what_freezes():
     said = "Everything here goes read-only. You keep read access."
     out = site._archive_entry(_archive_row(said), date(2026, 12, 20))
-    assert "type: special_event" in out
+    assert "kind: special_event" in out
     assert 'title: "Semester archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
     assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
@@ -260,7 +260,7 @@ def test_a_row_with_nothing_to_say_is_not_announced():
 
 def test_term_date_entry_hides_the_placeholder_time():
     out = site._term_date_entry("Semester starts", date(2026, 9, 7))
-    assert "type: term_date" in out
+    assert "kind: term_date" in out
     assert "date: 2026-09-07T09:00:00" in out
     assert "hide_time: true" in out  # a term boundary is a whole day, not a 09:00 slot
     # The name is the row's TITLE. It used to be `name:`, which the theme prints in the
@@ -1306,8 +1306,8 @@ def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
         ),
     )
     events = plan.collections["_events"]
-    assert "type: exam" in events["01-mid-term.md"]
-    assert "type: special_event" in events["02-project-clinic.md"]
+    assert "kind: exam" in events["01-mid-term.md"]
+    assert "kind: special_event" in events["02-project-clinic.md"]
     # a schedule that names its own exams gets no synthesised stubs
     assert "midterm.md" not in events and "final.md" not in events
 
@@ -1323,7 +1323,7 @@ def test_synthesised_exams_appear_when_the_schedule_names_none(monkeypatch, tmp_
     events = plan.collections["_events"]
     assert 'title: "MidTerm Exam"' in events["midterm.md"]
     assert 'title: "Final Exam"' in events["final.md"]
-    assert "type: special_event" in events["01-project-clinic.md"]
+    assert "kind: special_event" in events["01-project-clinic.md"]
 
 
 def test_the_archive_row_ships_with_the_rest_of_the_schedule(monkeypatch, tmp_path):
@@ -1842,14 +1842,14 @@ def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
 
 def test_a_generated_page_states_its_ownership_inside_its_front_matter():
     page = site_repo._stamp_front_matter(
-        '---\ntype: lecture\ntitle: "Session 1"\n---\n'
+        '---\nkind: lecture\ntitle: "Session 1"\n---\n'
     )
     # Jekyll needs `---` on line 1, so the notice cannot go above it
     assert page.startswith("---\n# SYSTEM-OWNED - do not edit.")
-    assert "type: lecture" in page and 'title: "Session 1"' in page
+    assert "kind: lecture" in page and 'title: "Session 1"' in page
     import yaml
 
-    assert yaml.safe_load(page.split("---")[1])["type"] == "lecture"
+    assert yaml.safe_load(page.split("---")[1])["kind"] == "lecture"
 
 
 def test_stamping_a_page_with_no_front_matter_leaves_it_untouched():

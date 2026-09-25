@@ -142,15 +142,14 @@ def test_publishes_every_discovered_section_not_just_lectures(published):
 
 
 def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
-    # As on the semester site: `kind: lab` is what the labs page selects on (`type:` rides
-    # beside it for the pinned theme), and a lab linked from the session row too would
-    # appear twice.
+    # As on the semester site: `kind: lab` is what the labs page selects on, and a lab
+    # linked from the session row too would appear twice.
     files = published(readings_mode="none")
     assert "kind: lab" in files["_lectures/lab-02.md"]
-    assert "type: lab" in files["_lectures/lab-02.md"]
+    assert "type:" not in files["_lectures/lab-02.md"]
     assert 'title: "Lab 2"' in files["_lectures/lab-02.md"]
     session2 = files["_lectures/session-02.md"]  # session 2 also has a faq section
-    assert "kind: lecture" in session2 and "type: lecture" in session2
+    assert "kind: lecture" in session2
     assert not [s for s, _n in entry_links(session2) if s == "lab"]
     # session 1 has ONLY labs (and readings, off here) - so no lecture row at all
     assert "_lectures/session-01.md" not in files

@@ -378,7 +378,7 @@ _WHEN_INCLUDE = re.compile(
 
 
 def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(generated):
-    # The schedule dispatches on `type`, so a row kind added to site.py without a branch
+    # The schedule dispatches on `kind`, so a row kind added to site.py without a branch
     # renders as the neutral fallback row - silently, on the live schedule. What each
     # branch includes is its own business, so this checks only that the branch exists and
     # that the template it names ships. A release row, of any kind, is the one generic row.
@@ -388,8 +388,8 @@ def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(generated)
         if name != "_lectures"
         for text in entries.values()
     ]
-    emitted = {doc["type"] for doc in documents if doc.get("type")}
-    emitted |= {doc["due_event"]["type"] for doc in documents if doc.get("due_event")}
+    emitted = {doc["kind"] for doc in documents if doc.get("kind")}
+    emitted |= {doc["due_event"]["kind"] for doc in documents if doc.get("due_event")}
     schedule = _strip_comments(_templates()["_layouts/schedule.html"])
     assert 'event.collection == "lectures"' in schedule
     assert "include schedule_row_lecture.html event=event kind=kind.label" in schedule
@@ -400,6 +400,16 @@ def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(generated)
     for kind in sorted(emitted):
         assert kind in branches, kind
         assert f"_includes/{branches[kind]}" in _templates(), kind
+
+
+def test_no_generated_row_carries_the_retired_type_key(generated):
+    # `kind` replaced `type`, which no template reads any more.
+    for name, entries in generated["collections"].items():
+        for file, text in entries.items():
+            doc = _front_matter(text)
+            assert "type" not in doc and "type" not in (doc.get("due_event") or {}), (
+                f"{name}/{file}"
+            )
 
 
 def test_every_row_that_can_carry_a_provisional_date_marks_it():
