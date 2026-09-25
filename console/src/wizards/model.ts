@@ -6,6 +6,7 @@ import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
 import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import type { Values } from '../tiers/types';
+import { opSpec } from '../ops/registry';
 
 /** The lab's bot: an owner of every course and semester org until the console app replaces it. */
 export const BOT = 'hertie-dsl-bot';
@@ -151,9 +152,18 @@ export function assignmentArgs(v: Values): Record<string, unknown> {
   };
 }
 
+// The engine's answers (`materials.create` in ops.json): it writes the patterns from the new
+// repo's own folders by kind (`scaffold.publish_patterns`), so no folder name is spelt here.
+const PUBLISH_ARGS = opSpec('materials.create').args_schema.properties as Record<string, { enum: string[]; default: string }>;
+/** The answer that publishes nothing: the engine's default. */
+export const NOTHING_PUBLIC = PUBLISH_ARGS.public_dirs.default;
+export const PUBLIC_DIRS = PUBLISH_ARGS.public_dirs.enum.filter((x) => x !== NOTHING_PUBLIC);
+export const PUBLIC_TYPES = PUBLISH_ARGS.public_types.enum;
+export const PUBLIC_TYPES_DEFAULT = PUBLISH_ARGS.public_types.default;
+
 /** The `materials.create` args for the New materials form. */
 export function materialsArgs(v: Values): Record<string, unknown> {
   if (v.copy_from) return { semester: v.term, copy_from: v.copy_from };
   const open = v.open === true;
-  return { semester: v.term, public_dirs: open ? v.public_dirs ?? 'lectures' : '(nothing public)', public_types: open ? v.public_types ?? 'html + pdf' : undefined };
+  return { semester: v.term, public_dirs: open ? v.public_dirs ?? PUBLIC_DIRS[0] : NOTHING_PUBLIC, public_types: open ? v.public_types ?? PUBLIC_TYPES_DEFAULT : undefined };
 }
