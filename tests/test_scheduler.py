@@ -4686,7 +4686,9 @@ def test_a_returned_assignment_reads_no_sheet_and_raises_nothing(monkeypatch):
     assert reads == [grades_mod.marks_return_record("assignment-1")]
 
 
-def test_the_tick_returns_a_complete_sheet_once_and_records_it(monkeypatch):
+def test_the_tick_asks_distribute_grades_to_return_the_due_assignment(monkeypatch):
+    # The return runs in Distribute grades (a `return-marks` dispatch), so a button press
+    # and the automatic return share one queue; it is scoped to the one assignment.
     _stub_snapshots(monkeypatch, existing={"assignment-1"})
     _no_sheet_refresh(monkeypatch)
     monkeypatch.setattr(
@@ -4695,29 +4697,23 @@ def test_the_tick_returns_a_complete_sheet_once_and_records_it(monkeypatch):
         lambda semester: _assignments(**{"assignment-1": _marks_entry()}),
     )
     monkeypatch.setattr(scheduler, "marks_due", lambda *a: ([], ["assignment-1"]))
-    sent: list[tuple] = []
-    recorded: list[list[str]] = []
-    monkeypatch.setattr(
-        scheduler,
-        "distribute",
-        lambda org, notify, dry_run, assignment: (
-            sent.append((org, notify, dry_run, assignment)) or 0
-        ),
-    )
-    monkeypatch.setattr(
-        scheduler,
-        "record_marks_returned",
-        lambda org, sched, keys, now: recorded.append(keys) or True,
-    )
+    asked: list[tuple] = []
+
+    def gh(*args, **kwargs):
+        if "event_type=return-marks" in args:
+            asked.append(args)
+        return 0, ""
+
+    monkeypatch.setattr(scheduler, "gh", gh)
     assert scheduler.run("Course-Org", "Semester-f2026", _AFTER_MARKS) == 0
-    # Scoped: this assignment's marks only, never another sheet's.
-    assert sent == [("Semester-f2026", True, False, "assignment-1")]
-    assert recorded == [["assignment-1"]]
-    # A preview sends nothing and records nothing.
-    sent.clear()
-    recorded.clear()
+    (call,) = asked
+    assert "repos/Course-Org/.github/dispatches" in call
+    assert "client_payload[semester_org]=Semester-f2026" in call
+    assert "client_payload[assignment]=assignment-1" in call
+    # A preview asks nothing.
+    asked.clear()
     scheduler.run("Course-Org", "Semester-f2026", _AFTER_MARKS, dry_run=True)
-    assert sent == [] and recorded == []
+    assert asked == []
 
 
 def test_the_tick_sends_nothing_for_an_unfinished_sheet_and_files_the_fault(
@@ -4732,7 +4728,13 @@ def test_the_tick_sends_nothing_for_an_unfinished_sheet_and_files_the_fault(
         lambda semester: _assignments(**{"assignment-1": _marks_entry()}),
     )
     monkeypatch.setattr(
-        scheduler, "distribute", lambda *a, **k: pytest.fail("nothing is sent")
+        scheduler,
+        "gh",
+        lambda *a, **k: (
+            pytest.fail("nothing is asked")
+            if "event_type=return-marks" in a
+            else (0, "")
+        ),
     )
     filed: list = []
     monkeypatch.setattr(

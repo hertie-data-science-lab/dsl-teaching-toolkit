@@ -1146,8 +1146,12 @@ def render_distribute_grades(semester_orgs: list[str]) -> str:
 # and each gradebook still shows every assignment already returned.
 # Preview first; it writes no grades, sends no mail, and posts who gets what as a
 # "Distribute grades preview" issue in semester-config. Needs the GRAPH_* secrets to mail.
+# The scheduler's automatic return (an assignment's `marks_return_datetime`) arrives here
+# as a `return-marks` dispatch, so it and a button press share this workflow's queue.
 
 on:
+  repository_dispatch:
+    types: [return-marks]
   workflow_dispatch:
     inputs:
 {_semester_dropdown(semester_orgs)}
@@ -1175,15 +1179,19 @@ on:
 {_concurrency("distribute-grades")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   distribute-grades:
+    # A button press waits for its check-team gate; the scheduler's dispatch has none
+    # (no actor), and `--dispatched-by` checks what it names instead.
+    if: always() && (github.event_name == 'repository_dispatch' || needs.check-team.result == 'success')
 {_run_preamble(_TIMEOUT_GRADING)}      - name: Distribute grades
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
-          PREVIEW: ${{{{ inputs.preview }}}}
+          SEMESTER_ORG: ${{{{ github.event_name == 'repository_dispatch' && {_PAYLOAD_SEMESTER} || inputs.semester_org }}}}
+          PREVIEW: ${{{{ github.event_name == 'repository_dispatch' && 'false' || inputs.preview }}}}
           NOTIFY: ${{{{ inputs.notify }}}}
           RECEIPT_NOTE: ${{{{ inputs.receipt_note }}}}
           INCLUDE_FEEDBACK: ${{{{ inputs.include_feedback }}}}
-          ASSIGNMENT: ${{{{ inputs.assignment }}}}
+          ASSIGNMENT: ${{{{ github.event_name == 'repository_dispatch' && github.event.client_payload.assignment || inputs.assignment }}}}
+          DISPATCHED_BY: ${{{{ github.event_name == 'repository_dispatch' && github.repository_owner || '' }}}}
 {_MAIL_ENV}
         run: |
           args=(--semester-org "$SEMESTER_ORG")
@@ -1192,6 +1200,7 @@ on:
           [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
           [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
           [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
+          [ -n "$DISPATCHED_BY" ] && args+=(--dispatched-by "$DISPATCHED_BY")
           python3 -m dsl_course.grades distribute "${{args[@]}}"
 """
 

@@ -113,11 +113,9 @@ from .faults import ConfigFault, FaultKind, Severity, Unusable
 from .gh_contents import get_file_content
 from .ghcli import gh
 from .grades import (
-    distribute,
     grading_config_faults,
     load_grading_spec,
     marks_due,
-    record_marks_returned,
     semester_sheet_faults,
     sheet_path,
     sync_team_lock,
@@ -1662,7 +1660,7 @@ def _release_phase(
             course_org, semester_org, due, now, listing
         )
         errors += release_errors
-    errors += _return_marks(semester_org, sched, marks_ready, now)
+    errors += _return_marks(course_org, semester_org, sched, marks_ready)
 
     # THE one website sync of the tick, and the only place it is decided: a release that
     # provisioned something, or a team-formation window that moved, and nothing else. Both
@@ -1698,22 +1696,34 @@ def _release_phase(
 
 
 def _return_marks(
-    semester_org: str, sched: schedule.Schedule, ready: list[str], now: datetime
+    course_org: str, semester_org: str, sched: schedule.Schedule, ready: list[str]
 ) -> int:
-    """Return marks (`grades.distribute`, scoped to the one assignment) for each
-    assignment whose `marks_return_datetime` has come with every unit marked, then mark it
-    returned so the next tick does not ask again. Returns the error count."""
-    if not ready:
-        return 0
+    """Ask the course org's Distribute grades to return each assignment whose
+    `marks_return_datetime` has come with every unit marked (a `return-marks` dispatch,
+    scoped to the one assignment). It runs in THAT workflow, so an automatic return and a
+    button press share one concurrency group and never overlap; the run writes the
+    fire-once marker when it succeeds, and until then each tick asks again (the group
+    holds one pending run). Returns the error count."""
     errors = 0
     for key in ready:
         name = schedule.semester_name(key, sched.assignments[key])
-        log_step(f"marks_return_datetime reached for {key}, every unit marked")
-        if distribute(semester_org, notify=True, dry_run=False, assignment=name):
-            log_err(f"Return marks for {key} failed - retried on the next tick")
+        code, out = gh(
+            "api",
+            "--method",
+            "POST",
+            f"repos/{course_org}/.github/dispatches",
+            "-f",
+            "event_type=return-marks",
+            "-f",
+            f"client_payload[semester_org]={semester_org}",
+            "-f",
+            f"client_payload[assignment]={name}",
+        )
+        if code != 0:
+            log_err(f"could not ask Distribute grades to return {key}: {out[:200]}")
             errors += 1
-        elif not record_marks_returned(semester_org, sched, [key], now):
-            errors += 1
+        else:
+            log_ok(f"asked Distribute grades to return {key} (marks_return_datetime)")
     return errors
 
 
