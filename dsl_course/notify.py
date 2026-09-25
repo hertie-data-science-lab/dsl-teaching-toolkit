@@ -262,7 +262,7 @@ def _declared_admin_emails(course_org: str, now: datetime) -> list[str]:
 
 def _fallback_to(course_org: str, now: datetime) -> tuple[str, ...]:
     """The To line for a semester fault its own instructors.yml can address nobody for: the course
-    ADMINS, then the MAINTAINER, then nobody.
+    ADMINS, else the MAINTAINER (`mailer.maintainer_address`, which always has one).
 
     A semester with no `email:` anywhere is not a semester with nothing to hear: its releases
     still ship nothing, and its digest issue is still open. Left to the @mention alone the
@@ -277,11 +277,8 @@ def _fallback_to(course_org: str, now: datetime) -> tuple[str, ...]:
     if admins:
         log(f"  [fallback] no semester address - mailing {len(admins)} course admin(s)")
         return admins
-    maintainer = mailer.maintainer_address()
-    if maintainer:
-        log("  [fallback] no semester address - mailing the maintainer")
-        return (maintainer,)
-    return ()
+    log("  [fallback] no semester address - mailing the maintainer")
+    return (mailer.maintainer_address(),)
 
 
 def _teaching_contacts(semester_org: str, now: datetime) -> list[sync_faculty.Contact]:
@@ -1181,12 +1178,6 @@ def notify_run_failed(course_org: str, workflow: str, run_url: str, tail: str) -
     team's, and the log tail can carry anything the job was doing when it died - so it
     goes to one mailbox and is never echoed into the public run log."""
     to = mailer.maintainer_address()
-    if to is None:
-        log(
-            f"  [skip] mail not configured - the failure issue in {course_org} is the "
-            f"only channel"
-        )
-        return 0
     subject = f"[{course_org}] {workflow} is failing"
     body = "\n".join(
         [run_url, "", "Last lines of the failed step:", "", _tail(tail), ""]

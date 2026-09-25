@@ -536,18 +536,6 @@ def test_nothing_owed_sends_nothing(wired):
     assert sent.batches == []
 
 
-def test_a_semester_with_no_addresses_at_all_says_so_once(wired, admins, capsys):
-    # ...and holds nothing: no address is a standing state, and a held crossing would be
-    # recomputed - and commented on - every tick for the rest of the term. Nobody means
-    # nobody here: no admin secret and no maintainer either, so both fallbacks are spent.
-    admins(None)
-    sent = wired(blame={}, committer=None, people={"people": {}}, maintainer=None)
-    routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
-    assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent()
-    assert sent.batches == []
-    assert "[skip] no notification address for" in capsys.readouterr().out
-
-
 def test_an_org_with_no_mail_transport_says_so_once(wired, capsys):
     sent = wired(blame={131: "JanG"}, committer=None, configured=False)
     routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
@@ -695,17 +683,6 @@ def test_the_log_tail_is_capped_in_lines_and_in_bytes():
     # One line of a stack-trace dump can be very long indeed, and a mail is not a log file.
     assert notify._tail("\n".join(str(i) for i in range(100))).startswith("70\n")
     assert len(notify._tail("x" * 10_000).encode()) <= notify._TAIL_BYTES
-
-
-def test_with_no_maintainer_address_the_failure_issue_is_the_only_channel(
-    monkeypatch, capsys
-):
-    sent = _Sent()
-    monkeypatch.setattr(notify.mailer, "send_bulk", sent)
-    monkeypatch.setattr(notify.mailer, "maintainer_address", lambda: None)
-    assert notify.notify_run_failed(COURSE, "Refresh actions", "https://run/1", "") == 0
-    assert sent.batches == []
-    assert "[skip] mail not configured" in capsys.readouterr().out
 
 
 # --------------------------------------------------- a file the toolkit cannot read
@@ -1419,11 +1396,6 @@ def test_a_semester_with_no_mail_transport_says_so_rather_than_claiming_it_told_
     # `False` is what stops the scheduler stamping "mailed" into the notice issue, so a
     # tick after somebody wires the transport up sends the mail instead of going quiet.
     went, sent = _archiving(wired, configured=False)
-    assert (went, sent.calls) == (False, 0)
-
-
-def test_a_semester_with_no_address_anywhere_mails_nobody(wired):
-    went, sent = _archiving(wired, people={"people": {}}, maintainer=None)
     assert (went, sent.calls) == (False, 0)
 
 

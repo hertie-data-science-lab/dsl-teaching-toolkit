@@ -149,7 +149,7 @@ def graph_config_from_env() -> GraphConfig | None:
 
 
 def maintainer_address() -> str:
-    """Where to mail the toolkit maintainer about a fault, or None if nowhere.
+    """Where to mail the toolkit maintainer about a fault. Always an address.
 
     `DSL_MAINTAINER_EMAIL` when the org has it, else `GRAPH_SENDER` - the shared mailbox
     the toolkit already sends AS is a mailbox the maintainer can read, which beats a fault
