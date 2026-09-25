@@ -183,7 +183,7 @@ SEEDED = {
         bootstrap_course._course_metadata("Course", "CODE", admins=["adminhandle"])
     ),
     "semester/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
-        "Org", "Course"
+        "Course"
     ),
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(
         title="Neural networks from scratch",

@@ -414,12 +414,12 @@ def _course_metadata(
     return identity + tier + _course_admins_block(admins)
 
 
-def _semester_metadata(org: str, course: str) -> str:
+def _semester_metadata(course: str) -> str:
     """dsl-course.yml for a SEMESTER org's .github repo: a pointer back to its persistent
     course org. This is the single source the semester's semester-config dispatchers
     (dispatch-sync / dispatch-sync-site) read to find where to fire Sync membership /
     Sync site - so without it those auto-triggers can't resolve the course org."""
-    return template("semester/dsl-course.yml").format(course=course, org=org)
+    return template("semester/dsl-course.yml").format(course=course)
 
 
 def create_profile_repo(
@@ -909,7 +909,7 @@ def _run(args: argparse.Namespace) -> int:
                 args.org,
                 CONFIG_REPO,
                 records.path("pointer"),
-                _semester_metadata(args.org, args.course).encode(),
+                _semester_metadata(args.course).encode(),
                 "ci: seed semester -> course pointer (dispatchers read this)",
             ):
                 steps.append((1, ""))

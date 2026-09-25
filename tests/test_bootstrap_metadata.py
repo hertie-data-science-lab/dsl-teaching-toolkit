@@ -161,9 +161,9 @@ def test_every_seeded_template_path_resolves():
 def test_semester_metadata_carries_course_pointer():
     # The semester .github/dsl-course.yml must carry a `course:` line - the semester-config
     # dispatchers grep it to find where to fire Sync membership / Sync site.
-    md = bc._semester_metadata("My-Semester-f2026", "My-Course-E1")
+    md = bc._semester_metadata("My-Course-E1")
     assert "course: My-Course-E1" in md
-    assert "org: My-Semester-f2026" in md
+    assert "org:" not in md
     # the dispatchers do: grep '^course:' | cut -d: -f2- | xargs
     course = next(
         ln.split(":", 1)[1].strip()

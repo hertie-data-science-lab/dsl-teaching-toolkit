@@ -826,11 +826,7 @@ class Semester:
         return moves, files, deletes, old_pointer
 
     def pointer(self) -> bytes:
-        return (
-            template("semester/dsl-course.yml")
-            .format(course=self.course, org=self.org)
-            .encode()
-        )
+        return template("semester/dsl-course.yml").format(course=self.course).encode()
 
     def layout_done(self) -> bool:
         if not self.renamed():
