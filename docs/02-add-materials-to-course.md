@@ -83,6 +83,9 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
      seminars: lab
    ```
 
+   *`kinds:` keys name the top folder the copy LANDS in (its semester-side path), in any
+   case. A file that does not parse stops the site sync and says so.*
+
 3. **Run Refresh actions** in the course org's `.github` Actions tab - only after creating a
    *new repo*, not after pushing content into one.
    - What it repopulates is the repo dropdowns - `course_source_repo`, the assignment list,
