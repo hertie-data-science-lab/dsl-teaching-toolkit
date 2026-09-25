@@ -2221,10 +2221,12 @@ class Semester:
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
-        failures = refresh_join_workflows(self.org)
+        # The lock first: the Join team form is rendered from it, and the verify renders
+        # from the synced lock.
+        failures = 0 if sync_team_lock(self.course, self.org).ok else 1
+        failures += refresh_join_workflows(self.org)
         failures += refresh_config_system_files(self.org, ref)
         failures += refresh_semester_pointer(self.org, self.course)
-        failures += 0 if sync_team_lock(self.course, self.org).ok else 1
         failures += update_profile_readme(self.org, central_ref=ref)
         return failures == 0
 

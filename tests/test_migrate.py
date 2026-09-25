@@ -444,7 +444,8 @@ def semester(fake, monkeypatch):
         migrate,
         "sync_team_lock",
         lambda c, s: (
-            _render(fake, s, CONFIG_REPO, {records.path("lock"): lock})
+            calls.append("lock")
+            or _render(fake, s, CONFIG_REPO, {records.path("lock"): lock})
             or SimpleNamespace(ok=True)
         ),
     )
@@ -560,7 +561,7 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     )
     assert all(fake.paused_at_commit[1:-1]) and not fake.paused_at_commit[-1]
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
-    assert semester == ["join", "config", "profile", "status"]
+    assert semester == ["lock", "join", "config", "profile", "status"]
     # The ticks the pause dropped, dispatched once Actions are back, scoped to this
     # semester exactly as its semester-config push would send them.
     assert fake.dispatches == [
@@ -791,7 +792,7 @@ def test_a_semester_re_render_that_failed_off_the_files_is_run_again(
     semester.clear()
     monkeypatch.setattr(migrate, "sync_team_lock", synced)
     assert _main(monkeypatch, SEM, "--no-preview") == 0
-    assert semester == ["join", "config", "profile", "status"]
+    assert semester == ["lock", "join", "config", "profile", "status"]
 
 
 def test_an_archived_semester_is_never_touched(fake, semester, monkeypatch, capsys):
@@ -2248,3 +2249,40 @@ def test_a_template_s_seeded_lines_take_the_semester_wording():
         old = new.replace("whole semester", "whole cohort")
         assert "whole cohort" in old
         assert migrate.seeded_yaml(old, "main", COURSE) == new
+
+
+# ---------------------------------------------------------------- the join form and lock
+
+
+def test_the_join_form_is_rendered_from_the_synced_lock(fake, semester, monkeypatch):
+    # The Join team form is rendered from the lock as it is in the repo. The re-render
+    # syncs the lock FIRST, so a lock that changes in this run is the one the form (and
+    # the verify, which renders from the synced lock) reads.
+    old, new = b"assignments: {old: {}}\n", b"assignments: {new: {}}\n"
+    fake.tree(SEM, OLD_CONFIG_REPO)["assignments.lock.yml"] = old
+
+    def form(org):
+        lock = fake.tree(org, CONFIG_REPO).get(records.path("lock"), b"")
+        return {".github/ISSUE_TEMPLATE/team-form.yml": b"form from " + lock}
+
+    monkeypatch.setattr(migrate, "join_files", form)
+    monkeypatch.setattr(migrate, "team_lock_content", lambda course, sem: new)
+    monkeypatch.setattr(
+        migrate,
+        "refresh_join_workflows",
+        lambda org: semester.append("join") or _render(fake, org, JOIN_REPO, form(org)),
+    )
+    monkeypatch.setattr(
+        migrate,
+        "sync_team_lock",
+        lambda c, s: (
+            semester.append("lock")
+            or _render(fake, s, CONFIG_REPO, {records.path("lock"): new})
+            or SimpleNamespace(ok=True)
+        ),
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert semester[:2] == ["lock", "join"]
+    assert fake.tree(SEM, JOIN_REPO)[".github/ISSUE_TEMPLATE/team-form.yml"] == (
+        b"form from " + new
+    )
