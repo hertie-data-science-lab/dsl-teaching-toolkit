@@ -56,7 +56,13 @@ from .course import (
     canonical_submit_via,
     pages_repo,
 )
-from .derive import BEGIN_SOLUTION, END_SOLUTION, SOLUTION_CHUNK_OPT
+from .derive import (
+    BEGIN_SOLUTION,
+    END_SOLUTION,
+    SOLUTION_CHUNK_OPT,
+    TEX_BEGIN_SOLUTION,
+    TEX_END_SOLUTION,
+)
 from .discovery import central_ref_for, discover_assignments, discover_semesters
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
@@ -204,7 +210,8 @@ _RUN_SETTINGS_NOTE = (
 _QUESTIONS_STUB = """\
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
 #   Q1: 15                    # each blank in the grading sheet. The total is their sum;
-#   Q2: 10                    # there is no `points:` field anywhere.
+#   Q2: 10                    # there is no other total anywhere.
+#   Q3: {points: 5, file: starter.tex}   # marked from another starter than the first
 """
 
 
@@ -406,6 +413,10 @@ def _py_docstring(text: str) -> str:
     return safe or "Assignment"
 
 
+# The body `_latex_starter` leaves for the student, which the model answer fences instead.
+_LATEX_TASK = "Replace this section with your answer.\n"
+
+
 def _latex_starter(title: str) -> str:
     """A document that compiles as it stands - `pdflatex starter.tex` and no more."""
     return (
@@ -426,7 +437,7 @@ def _latex_starter(title: str) -> str:
         "\\begin{document}\n"
         "\\maketitle\n\n"
         "\\section{Task}\n\n"
-        "Replace this section with your answer.\n\n"
+        f"{_LATEX_TASK}\n"
         "\\end{document}\n"
     )
 
@@ -648,8 +659,8 @@ def _model_answer(number: int, fmt: str) -> str | None:
     non-notebook assignment - put a second file beside the real starter instead of becoming
     it: `starter.py` landing next to an untouched `starter.Rmd`.
 
-    `latex` and `none` seed nothing at all: `.tex` is not derivable and `none` has no
-    starter to become, so a stub there could only ever be a file the button refuses."""
+    `latex` is the starter with its task fenced in `%` comments; `none` seeds nothing, as
+    it has no starter to become."""
     title = f"Assignment {number} - model solution (stub)"
     if fmt == "ipynb":
         return _notebook([f"# {title}"], _MODEL_PY)
@@ -667,6 +678,11 @@ def _model_answer(number: int, fmt: str) -> str | None:
             f"```{{r {SOLUTION_CHUNK_OPT}}}\n"
             f"{_MODEL_R}\n"
             "```\n"
+        )
+    if fmt == "latex":
+        return _latex_starter(title).replace(
+            _LATEX_TASK,
+            f"{TEX_BEGIN_SOLUTION}\nThe model answer: 42.\n{TEX_END_SOLUTION}\n",
         )
     return None
 

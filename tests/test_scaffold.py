@@ -776,7 +776,10 @@ def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     assert seeded.replaced == 1 and "return 42" not in seeded.text
 
 
-@pytest.mark.parametrize("fmt, name", [("rmd", "starter.Rmd"), ("qmd", "starter.qmd")])
+@pytest.mark.parametrize(
+    "fmt, name",
+    [("rmd", "starter.Rmd"), ("qmd", "starter.qmd"), ("latex", "starter.tex")],
+)
 def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
     fake, monkeypatch, fmt, name
 ):
@@ -794,14 +797,11 @@ def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
     assert seeded.replaced == 1 and "42" not in seeded.text
 
 
-@pytest.mark.parametrize("formats", [["latex"], []], ids=["latex", "no-starter"])
-def test_a_format_derive_cannot_read_is_seeded_no_model_answer(
-    fake, monkeypatch, formats
-):
-    # `.tex` is not derivable and a template with no starter has nothing to become, so a
-    # stub either way could only ever be a file the button refuses.
+def test_a_template_with_no_starter_is_seeded_no_model_answer(fake, monkeypatch):
+    # A template with no starter has nothing to become, so a stub could only ever be a
+    # file the button refuses.
     written = _solution_files(monkeypatch)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", formats) == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", []) == 0
 
     assert [path for path in written if path.startswith("solution/")] == [
         "solution/README.md"
