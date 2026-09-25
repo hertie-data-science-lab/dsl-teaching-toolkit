@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from dsl_course import discovery, migrate, records, repos
+from dsl_course import discovery, migrate, records, repos, scaffold
 from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
@@ -23,6 +23,7 @@ from dsl_course.course import (
 )
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.gh_contents import blob_sha
+from dsl_course.welcome import template
 
 SEM, COURSE = "Sem-f2026", "Course-E1"
 WORKFLOW = {".github/workflows/any.yml": b"on: push\n"}
@@ -877,6 +878,133 @@ def test_an_outcome_of_a_renamed_op_takes_the_new_id(
     )
 
 
+SEEDED_SCHEDULE = """# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This cohort's schedule + auto-release plan. Instructors edit it directly.
+#
+# - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
+# Our cohort meets on Tuesdays.
+timezone: Europe/Berlin
+archive:
+  title: Cohort archived      # optional - the row's Title column
+  details: >-
+    This cohort is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
+"""
+
+
+def test_seeded_text_takes_the_new_names_and_the_instructors_words_are_listed(
+    fake, semester, monkeypatch, capsys
+):
+    config = fake.tree(SEM, OLD_CONFIG_REPO)
+    config["schedule.yml"] = SEEDED_SCHEDULE.encode()
+    fake.tree(SEM, OLD_JOIN_REPO)["README.md"] = (
+        b"Open a [Join course](https://github.com/Sem-f2026/welcome/issues/new/choose)"
+        b" issue.\nThe whole cohort reads this.\n"
+    )
+    fake.tree(SEM, ".github")["profile/README.md"] = (
+        b"Enrol in [`welcome`](https://github.com/Sem-f2026/welcome/issues/new/choose).\n"
+        b"Instructors: `classroom-config/people.yml`.\n"
+    )
+    assert _main(monkeypatch, SEM) == 0
+    out = capsys.readouterr().out
+    assert "old repo names and seeded wording rewritten in:" in out
+    assert f"-   {CONFIG_REPO}/schedule.yml" in out
+    assert f"-   {JOIN_REPO}/README.md" in out
+    assert "wording for the instructor to review (left as it is):" in out
+    # By line, never quoted: a person's words may name someone.
+    assert f"-   {CONFIG_REPO}/schedule.yml: line(s) 6" in out
+    assert f"-   {JOIN_REPO}/README.md: line(s) 2" in out
+    assert "Tuesdays" not in out and "whole cohort" not in out
+
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    text = fake.tree(SEM, CONFIG_REPO)["schedule.yml"].decode()
+    assert "# This semester's schedule + auto-release plan." in text
+    assert "example-course/semester-org/schedule.yml" in text
+    assert "  title: Semester archived      # optional" in text
+    assert "    This semester is archived on {date}: every repository" in text
+    assert "# Our cohort meets on Tuesdays." in text  # theirs, left
+    instructors = fake.tree(SEM, CONFIG_REPO)[INSTRUCTORS_FILE].decode()
+    assert (
+        "# This semester's own instructors: its instructors and teaching" in instructors
+    )
+    join = fake.tree(SEM, JOIN_REPO)["README.md"].decode()
+    assert "https://github.com/Sem-f2026/join/issues/new/choose" in join
+    assert "The whole cohort reads this." in join
+    profile = fake.tree(SEM, ".github")["profile/README.md"].decode()
+    assert "[`join`](https://github.com/Sem-f2026/join/issues/new/choose)" in profile
+    assert "`semester-config/instructors.yml`" in profile
+    layout = [c[1] for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT]
+    assert layout == [CONFIG_REPO, ".github", JOIN_REPO]
+
+    commits = list(fake.commits)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert fake.commits == commits
+
+
+def test_a_course_s_seeded_text_takes_the_new_names(fake, course, monkeypatch, capsys):
+    tree = fake.tree(COURSE, ".github")
+    tree["dsl-course.yml"] = (
+        b"course_name: X\n"
+        b"# This is the persistent COURSE org - it spans many cohorts (years). Cohorts are\n"
+        b"# registered separately in .github/cohort-courses-pages.yml.\n"
+        b"# Our cohorts are small.\n"
+    )
+    solution = fake.tree(COURSE, "assignment-1-f2026", "solution")
+    solution["grading_config.yml"] = (
+        b"# INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's "
+        b"schedule.yml.\nformat: ipynb\n"
+    )
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "seeded wording rewritten in .github/dsl-course.yml" in out
+    assert "rewritten in assignment-1-f2026@solution/grading_config.yml" in out
+    assert "-   .github/dsl-course.yml: line(s) 4" in out
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    meta = fake.tree(COURSE, ".github")["dsl-course.yml"].decode()
+    assert "it spans many semesters (years). Semesters are" in meta
+    assert "# registered separately in .github/semesters.yml." in meta
+    assert "# Our cohorts are small." in meta
+    grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
+    assert grading.decode().splitlines()[0] == scaffold._GRADING_STAMP
+    assert (
+        COURSE,
+        "assignment-1-f2026",
+        "solution",
+        migrate.TEXT_COMMIT,
+    ) in fake.commits
+
+
+def test_every_new_seeded_line_is_the_current_templates():
+    # The new side of the table is what Bootstrap semester / New assignment / a new
+    # course seed today: a template reworded later fails here, not in a migrated org.
+    current = set(
+        "\n".join(
+            [
+                migrate.semester_scaffold(SEM, "schedule.yml", "main"),
+                migrate.semester_scaffold(SEM, INSTRUCTORS_FILE, "main"),
+                template("course/dsl-course.yml"),
+                scaffold._GRADING_STAMP,
+            ]
+        ).split("\n")
+    )
+    missing = [
+        new for new in migrate.seeded_wording("main").values() if new not in current
+    ]
+    assert missing == []
+
+
+def test_the_renames_are_mechanical_and_leave_other_words():
+    text = (
+        "https://github.com/o/welcome/issues and https://github.com/o/welcome-x and "
+        "classroom-config/people.yml and classroom-config-2 and cohort-courses-pages.yml"
+    )
+    assert migrate.renamed(text) == (
+        "https://github.com/o/join/issues and https://github.com/o/welcome-x and "
+        "semester-config/instructors.yml and classroom-config-2 and semesters.yml"
+    )
+    assert migrate.renamed(migrate.renamed(text)) == migrate.renamed(text)
+
+
 def test_the_seeded_skeleton_becomes_the_new_skeleton(fake, semester, monkeypatch):
     skeleton = (
         "# INSTRUCTOR-OWNED\n#\n# people:\n#   instructors:\n#     - github_handle: x\n"
@@ -1017,7 +1145,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 18
+    assert capsys.readouterr().out.count("already migrated") == 20
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -1128,6 +1256,7 @@ def test_a_course_stopped_at_the_re_render_finishes_on_the_next_run(
         ".system/ in .github",
         "dsl-course.yml keys",
         "template keys",
+        "seeded text",
         "materials files",
     ):
         assert f"[skip] {step}: already migrated" in out

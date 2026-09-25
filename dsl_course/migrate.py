@@ -159,6 +159,9 @@ OUTCOMES_DIR = records.path("outcomes")
 SAMPLE_SUFFIX = ".sample"
 WORKFLOWS_DIR = ".github/workflows/"
 LAYOUT_COMMIT = "migrate: layout"
+TEXT_COMMIT = "migrate: seeded text"
+PROFILE_README = "profile/README.md"
+JOIN_README = "README.md"
 KEYS_COMMIT = "migrate: keys"
 
 
@@ -464,6 +467,194 @@ def fix_header(text: str, ref: str) -> str:
             )
         out.append(line)
     return "\n".join(out)
+
+
+# ------------------------------------------------------------------ seeded text
+# Repo names and paths that moved (decisions 0010 and 0012), inside text the toolkit
+# seeded: rewritten directly - a link to an old name is not a wording choice. Longest
+# first, so `classroom-config/people.yml` is not caught by `classroom-config` alone.
+TEXT_RENAMES = (
+    (
+        re.compile(rf"\b{OLD_CONFIG_REPO}/{re.escape(OLD_PEOPLE_FILE)}(?![\w.])"),
+        f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
+    ),
+    (re.compile(rf"\b{re.escape(OLD_SEMESTERS_PATH)}"), SEMESTERS_PATH),
+    (re.compile(rf"\b{OLD_CONFIG_REPO}(?![\w-])"), CONFIG_REPO),
+    (
+        re.compile(rf"(github\.com/[\w.-]+/){OLD_JOIN_REPO}(?![\w-])"),
+        rf"\g<1>{JOIN_REPO}",
+    ),
+    (re.compile(rf"`{OLD_JOIN_REPO}`"), f"`{JOIN_REPO}`"),
+)
+# Words a person may have written: listed for review, never rewritten.
+_OLD_WORD = re.compile(r"(?i)\bcohorts?\b")
+
+
+def renamed(text: str) -> str:
+    """`text` with every old repo name and path in `TEXT_RENAMES` rewritten."""
+    for old, new in TEXT_RENAMES:
+        text = old.sub(new, text)
+    return text
+
+
+def seeded_wording(ref: str) -> dict[str, str]:
+    """`{line as the old templates seeded it: the new template's line}`, for the seeded
+    lines that said `cohort` or named a deleted sample. A line still exactly as seeded is
+    the toolkit's wording, not the instructor's, so it takes the new one. The new side is
+    held to the current templates by `tests/test_migrate.py`."""
+    schedule_example = _worked_example(ref, schedule.SCHEDULE_PATH)
+    return {
+        # semester-config/schedule.yml
+        "# This cohort's schedule + auto-release plan. Instructors edit it directly.": (
+            "# This semester's schedule + auto-release plan. Instructors edit it directly."
+        ),
+        "# - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/"
+        "blob/main/schedule.yml": f"# - worked example: {schedule_example}",
+        "#   releases:     entries that DEPLOY materials (course org -> this cohort org)": (
+            "#   releases:     entries that DEPLOY materials (course org -> this semester "
+            "org)"
+        ),
+        "# What follows is a SKELETON: uncomment and fill what you want. For a full "
+        "worked term -": (
+            "# What follows is a SKELETON: uncomment and fill what you want. For a full "
+            "worked semester -"
+        ),
+        "# a real release plan, a group project, exams - see `schedule.yml.sample`.": (
+            "# a real release plan, a group project, exams - see the worked example above."
+        ),
+        "# semester_start:                   # OPTIONAL - default: inferred from the "
+        "cohort tag (f2026 -> 1 Sep 2026)": (
+            "# semester_start:                   # OPTIONAL - default: inferred from the "
+            "semester tag (f2026 -> 1 Sep 2026)"
+        ),
+        "#         cohort_dest_repo:         # OPTIONAL - default: materials": (
+            "#         semester_dest_repo:         # OPTIONAL - default: materials"
+        ),
+        "#         cohort_dest_path:         # OPTIONAL - default: mirrors "
+        "course_source_path": (
+            "#         semester_dest_path:         # OPTIONAL - default: mirrors "
+            "course_source_path"
+        ),
+        "#         cohort_dest_repo:": "#         semester_dest_repo:",
+        "#         cohort_dest_path:": "#         semester_dest_path:",
+        "#     cohort_dest_repo:             # OPTIONAL - default: the slug above (here "
+        "assignment-1)": (
+            "#     semester_dest_repo:             # OPTIONAL - default: the slug above "
+            "(here assignment-1)"
+        ),
+        "  title: Cohort archived      # optional - the row's Title column": (
+            "  title: Semester archived      # optional - the row's Title column"
+        ),
+        '  show_on_site: true          # a "Cohort archived" row on the site\'s Schedule '
+        "tab, also sends a notice email 14 days out": (
+            '  show_on_site: true          # a "Semester archived" row on the site\'s '
+            "Schedule tab, also sends a notice email 14 days out"
+        ),
+        "    This cohort is archived on {date}: every repository in it becomes "
+        "read-only. You keep read access, so you can still fork or clone anything you "
+        "want to keep working on into your own account.": (
+            "    This semester is archived on {date}: every repository in it becomes "
+            "read-only. You keep read access, so you can still fork or clone anything "
+            "you want to keep working on into your own account."
+        ),
+        # semester-config/people.yml, now instructors.yml
+        "# This cohort's own instructors/TAs": (
+            "# This semester's own instructors: its instructors and teaching assistants, "
+            "one list."
+        ),
+        "# - the SSOT for who is emailed when this cohort needs attention (see `email` "
+        "below).": (
+            "# - the SSOT for who is emailed when this semester needs attention (see "
+            "`email` below)."
+        ),
+        "#                                     # notifications about this cohort go "
+        "here. Private: not shown on the cohort site unless the entry adds "
+        "`show_email: true`": (
+            "#                                     # notifications about this semester "
+            "go here. Private: not shown on the semester site unless the entry adds "
+            "`show_email: true`"
+        ),
+        # a template's grading_config.yml (its first line)
+        "# INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's "
+        "schedule.yml.": (
+            "# INSTRUCTOR-OWNED - defines the assignment. Dates live in the semester's "
+            "schedule.yml."
+        ),
+        # the course's dsl-course.yml
+        "#   # else.) Cohorts inherit this; setting it in a cohort's own file does "
+        "nothing.": (
+            "#   # else.) Semesters inherit this; setting it in a semester's own file "
+            "does nothing."
+        ),
+        "# course_description: One or two sentences, on ONE line - the blurb on every "
+        "cohort site.": (
+            "# course_description: One or two sentences, on ONE line - the blurb on "
+            "every semester site."
+        ),
+        "# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, "
+        "link ONLY": (
+            "# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER "
+            "sites, link ONLY"
+        ),
+        "#   # WHICH of those files the cohort site hosts publicly, so an HTML deck "
+        "opens rendered": (
+            "#   # WHICH of those files the semester site hosts publicly, so an HTML deck "
+            "opens rendered"
+        ),
+        "# `course_name`, `course_code` and `course_description` are what reach the "
+        "cohort": (
+            "# `course_name`, `course_code` and `course_description` are what reach the "
+            "semester"
+        ),
+        "# websites. Editing them here re-syncs every cohort site already bootstrapped "
+        "from this": (
+            "# websites. Editing them here re-syncs every semester site already "
+            "bootstrapped from this"
+        ),
+        "# This is the persistent COURSE org - it spans many cohorts (years). Cohorts "
+        "are": (
+            "# This is the persistent COURSE org - it spans many semesters (years). "
+            "Semesters are"
+        ),
+    }
+
+
+def seeded_yaml(text: str, ref: str) -> str:
+    """A seeded YAML file with every line still exactly as the old template seeded it
+    replaced by the new template's (`seeded_wording`), and the old repo names renamed in
+    its comment lines. Values and the instructor's own comments are otherwise theirs."""
+    wording = seeded_wording(ref)
+    out = []
+    for line in text.split("\n"):
+        if line.rstrip() in wording:
+            line = wording[line.rstrip()]
+        elif line.lstrip().startswith("#"):
+            line = renamed(line)
+        out.append(line)
+    return "\n".join(out)
+
+
+def review_lines(text: str) -> list[int]:
+    """The line numbers of `text` that still say `cohort`: a person's words, for them to
+    reword - listed, never rewritten, and never quoted (they may name someone)."""
+    return [n for n, line in enumerate(text.split("\n"), 1) if _OLD_WORD.search(line)]
+
+
+def review_plan(texts: dict[str, str]) -> list[str]:
+    """The plan's "wording for the instructor to review" block for `texts` (`{"repo/path":
+    the text as the step leaves it}`), or nothing when none says `cohort`."""
+    found = {
+        where: lines for where, text in texts.items() if (lines := review_lines(text))
+    }
+    if not found:
+        return []
+    return [
+        "wording for the instructor to review (left as it is):",
+        *(
+            f"  {where}: line(s) {', '.join(map(str, lines))}"
+            for where, lines in found.items()
+        ),
+    ]
 
 
 # ------------------------------------------------------------------ GitHub, narrowly
@@ -1164,11 +1355,42 @@ class Semester:
         new = people_to_instructors(old)
         if new is None:
             return None
-        new = fix_header(new, ref)
+        new = seeded_yaml(fix_header(new, ref), ref)
         try:
             return new if same_people(old, new) else None
         except yaml.YAMLError:
             return None
+
+    def text_files(self) -> list[tuple[str, str, bool]]:
+        """`(repo, path, is YAML)` for each seeded text the layout step rewrites."""
+        return [
+            (self.config(), schedule.SCHEDULE_PATH, True),
+            (self.config(), INSTRUCTORS_FILE, True),
+            (self.join(), JOIN_README, False),
+            (".github", PROFILE_README, False),
+        ]
+
+    def texts(self) -> dict[tuple[str, str], tuple[str, str]]:
+        """`{(repo, path): (text now, text after the layout step)}` for each seeded text
+        that is there."""
+        ref = central_ref_for(self.course)
+        out = {}
+        for repo, path, is_yaml in self.text_files():
+            text = get_file_content(self.org, repo, path)
+            if text is not None:
+                out[repo, path] = (
+                    text,
+                    seeded_yaml(text, ref) if is_yaml else renamed(text),
+                )
+        return out
+
+    def text_work(self) -> dict[str, dict[str, bytes]]:
+        """`{repo: {path: new bytes}}` for each seeded text the layout still rewrites."""
+        out: dict[str, dict[str, bytes]] = {}
+        for (repo, path), (text, new) in self.texts().items():
+            if new != text:
+                out.setdefault(repo, {})[path] = new.encode()
+        return out
 
     def outcome_work(self, live: dict[str, str]) -> dict[str, str]:
         """`{path now: path under the new op id}` for each outcome record of a renamed op,
@@ -1213,7 +1435,7 @@ class Semester:
         if not self.renamed():
             return False
         moves, files, deletes, old_pointer = self.layout_work()
-        return not (moves or files or deletes or old_pointer)
+        return not (moves or files or deletes or old_pointer or self.text_work())
 
     def layout_plan(self) -> list[str]:
         moves, files, deletes, old_pointer = self.layout_work()
@@ -1243,7 +1465,23 @@ class Semester:
             out += [f"  {p}" for p in samples]
         if old_pointer:
             out.append(f"delete {OLD_POINTER_REPO}/{COURSE_CONFIG} (the old pointer)")
-        return out
+        texts = self.texts()
+        work = self.text_work()
+        if work:
+            out.append("old repo names and seeded wording rewritten in:")
+            out += [
+                f"  {REPO_RENAMES.get(r, r)}/{path}"
+                for r, paths in work.items()
+                for path in paths
+            ]
+        final = {
+            f"{REPO_RENAMES.get(r, r)}/{p}": new for (r, p), (_, new) in texts.items()
+        }
+        if files.get(INSTRUCTORS_FILE):
+            final[f"{CONFIG_REPO}/{INSTRUCTORS_FILE}"] = files[
+                INSTRUCTORS_FILE
+            ].decode()
+        return out + review_plan(final)
 
     def layout(self) -> bool:
         repo = self.config()
@@ -1257,15 +1495,29 @@ class Semester:
             return False
         self.before = _files(self.org, repo)
         self.people = get_file_content(self.org, repo, OLD_PEOPLE_FILE) or ""
+        text = self.text_work()
         if not move_files(
-            self.org, repo, moves, LAYOUT_COMMIT, files=files, delete=deletes
+            self.org,
+            repo,
+            moves,
+            LAYOUT_COMMIT,
+            files={**text.pop(repo, {}), **files},
+            delete=deletes,
         ):
             return False
-        if old_pointer:
-            return move_files(
-                self.org, OLD_POINTER_REPO, {}, LAYOUT_COMMIT, delete=[COURSE_CONFIG]
-            )
-        return True
+        if (old_pointer or OLD_POINTER_REPO in text) and not move_files(
+            self.org,
+            OLD_POINTER_REPO,
+            {},
+            LAYOUT_COMMIT,
+            files=text.pop(OLD_POINTER_REPO, {}),
+            delete=[COURSE_CONFIG] if old_pointer else [],
+        ):
+            return False
+        return all(
+            move_files(self.org, other, {}, LAYOUT_COMMIT, files=written)
+            for other, written in text.items()
+        )
 
     def layout_verified(self) -> bool:
         repo = self.config()
@@ -1580,6 +1832,45 @@ class Course:
             log_err(f"{repo}@{SOLUTION_BRANCH}/{GRADING_FILE} is still NOT_MIGRATED")
         return not self.templates_left() and not bad
 
+    # seeded text -----------------------------------------------------------
+    def texts(self) -> dict[tuple[str, str, str], tuple[str, str]]:
+        """`{(repo, branch, path): (text now, text after this step)}` for `dsl-course.yml`
+        and each live template's `grading_config.yml` (on its solution branch)."""
+        ref = central_ref_for(self.org)
+        where = [(".github", "", COURSE_CONFIG)]
+        where += [(r, SOLUTION_BRANCH, GRADING_FILE) for r in self.templates()]
+        out = {}
+        for repo, branch, path in where:
+            text = get_file_content(self.org, repo, path, ref=branch)
+            if text is not None:
+                out[repo, branch, path] = (text, seeded_yaml(text, ref))
+        return out
+
+    def text_work(self) -> dict[tuple[str, str], dict[str, bytes]]:
+        out: dict[tuple[str, str], dict[str, bytes]] = {}
+        for (repo, branch, path), (text, new) in self.texts().items():
+            if new != text:
+                out.setdefault((repo, branch), {})[path] = new.encode()
+        return out
+
+    def text_plan(self) -> list[str]:
+        where = lambda repo, branch, path: (
+            f"{repo}@{branch}/{path}" if branch else f"{repo}/{path}"
+        )
+        out = [
+            f"old repo names and seeded wording rewritten in {where(r, b, p)}"
+            for (r, b), files in self.text_work().items()
+            for p in files
+        ]
+        final = {where(*key): new for key, (_, new) in self.texts().items()}
+        return out + review_plan(final)
+
+    def rewrite_text(self) -> bool:
+        return all(
+            move_files(self.org, repo, {}, TEXT_COMMIT, files=files, branch=branch)
+            for (repo, branch), files in self.text_work().items()
+        )
+
     # materials ---------------------------------------------------------------
     def materials_moves(self) -> dict[str, dict[str, str]]:
         return {
@@ -1705,6 +1996,17 @@ class Course:
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit on each template's "
                     f"{SOLUTION_BRANCH} branch"
+                ),
+            ),
+            Step(
+                "seeded text",
+                done=lambda: not self.text_work(),
+                plan=self.text_plan,
+                do=self.rewrite_text,
+                verify=lambda: not self.text_work(),
+                rollback=(
+                    f"git revert the '{TEXT_COMMIT}' commit in {dotgithub} and on each "
+                    f"template's {SOLUTION_BRANCH} branch"
                 ),
             ),
             Step(
