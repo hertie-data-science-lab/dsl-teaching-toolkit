@@ -123,9 +123,6 @@ export function scoreTotal(score: unknown, questions?: Record<string, unknown> |
   return marked ? total : null;
 }
 
-/** `late_penalty_per_day` as a fraction: the one reading, in the policy module. */
-export { penaltyRate } from './policy';
-
 export function finalGrade(total: number | null, rate: number | null, daysLate: unknown, adjustment: unknown): number | null {
   if (total === null) return null;
   let earned = total;

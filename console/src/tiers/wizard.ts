@@ -6,14 +6,15 @@
 
 import { settingsTiers } from './grading';
 import { opt, type FieldTier, type Tiers } from './types';
-import { ORG_RE, autogradeBlock, termLabel } from '../wizards/model';
+import { ORG_NAME_RE } from '../model/policy';
+import { autogradeBlock, termLabel } from '../wizards/model';
 
 const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
 export function orgField(why: string): FieldTier {
   return {
     tier: 'default', label: 'Org name', defaultLabel: 'derived; you can edit it', reason: why,
-    check: (x) => (!x ? 'Needed.' : ORG_RE.test(String(x)) ? null : 'Letters, digits and dashes, up to 39.'),
+    check: (x) => (!x ? 'Needed.' : ORG_NAME_RE.test(String(x)) ? null : 'Letters, digits and dashes, up to 39.'),
   };
 }
 

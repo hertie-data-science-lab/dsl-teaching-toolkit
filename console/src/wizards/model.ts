@@ -4,7 +4,7 @@
 
 import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
-import { DEFAULT_FORMATS, ORG_NAME_RE } from '../model/policy';
+import { DEFAULT_FORMATS } from '../model/policy';
 import type { Values } from '../tiers/types';
 
 /** The lab's bot: an owner of every course and semester org until the console app replaces it. */
@@ -29,7 +29,6 @@ export function cohortOrgName(courseOrg: string, code: string, term: string): st
   return `hertie-${courseSlugOf(courseOrg, code)}-${term}`;
 }
 
-export const ORG_RE = ORG_NAME_RE;
 export const TERM_RE = /^[fs]\d{4}$/;
 
 export function termLabel(term: string): string {

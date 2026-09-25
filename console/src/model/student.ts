@@ -169,14 +169,13 @@ function bytesToBase64(b: Uint8Array): string {
   return btoa(bin);
 }
 
-export const DEFAULT_TZ = DEFAULT_TIMEZONE;
 /** How long a semester's facts are reused before they are read again (ETag'd: an unchanged file costs no rate limit). */
 export const FRESH_MS = 10 * 60 * 1000;
 
 // --------------------------------------------------------------------------- time
 
 /** `iso` as an epoch millisecond. A time with no offset is wall-clock time in `tz`; a date alone is its midnight. */
-export function instant(iso: string, tz = DEFAULT_TZ): number {
+export function instant(iso: string, tz = DEFAULT_TIMEZONE): number {
   if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)) return Date.parse(iso);
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(iso.trim());
   if (!m) return Date.parse(iso);
@@ -196,7 +195,7 @@ function offsetAt(t: number, tz: string): number {
 }
 
 /** Midnight at the start of the day `now` falls on, in `tz`. */
-export function startOfDay(now: number, tz = DEFAULT_TZ): number {
+export function startOfDay(now: number, tz = DEFAULT_TIMEZONE): number {
   const d = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
   return instant(d, tz);
 }
@@ -220,7 +219,7 @@ export const MY_STATE_WORD: Record<MyState, string> = {
   not_handed_out: 'not handed out', open: 'open', late_window: 'late window', marking: 'marking', returned: 'marks returned',
 };
 
-export function myState(a: SemesterAssignment, marked: boolean, now: number, tz = DEFAULT_TZ): MyState {
+export function myState(a: SemesterAssignment, marked: boolean, now: number, tz = DEFAULT_TIMEZONE): MyState {
   if (marked) return 'returned';
   if (!a.handedOut && (!a.handout || now < instant(a.handout, tz))) return 'not_handed_out';
   if (!a.due || now < instant(a.due, tz)) return 'open';
@@ -440,7 +439,7 @@ export class SiteSource implements StudentData {
     announcements.sort((a, b) => instant(b.when) - instant(a.when));
     return {
       courseName: str(cfg.course_name),
-      timezone: str(cfg.timezone) || DEFAULT_TZ,
+      timezone: str(cfg.timezone) || DEFAULT_TIMEZONE,
       rows,
       assignments,
       instructors: [...cardsOf(ppl.instructors, 'instructor', org), ...cardsOf(ppl.teaching_assistants, 'teaching_assistant', org)],
@@ -490,6 +489,6 @@ export function materialsReposOf(text: string, org: string): string[] {
 }
 
 /** The rows sorted by when they happen. */
-export function sortedRows(rows: ScheduleRow[], tz = DEFAULT_TZ): ScheduleRow[] {
+export function sortedRows(rows: ScheduleRow[], tz = DEFAULT_TIMEZONE): ScheduleRow[] {
   return [...rows].sort((a, b) => instant(a.when, tz) - instant(b.when, tz) || a.id.localeCompare(b.id));
 }

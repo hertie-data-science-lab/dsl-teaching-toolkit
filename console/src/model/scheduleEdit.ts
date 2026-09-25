@@ -81,7 +81,6 @@ export interface ArchiveDraft {
   graceDays: number | '';
 }
 
-export { ARCHIVE_GRACE_DAYS };
 
 export type Draft = ReleaseDraft | AssignmentDraft | EventDraft | SemesterDraft | ArchiveDraft;
 

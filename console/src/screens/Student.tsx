@@ -8,6 +8,7 @@
 // materials and the schedule, and nothing that promises a repo, a team or marks. An archived
 // semester is history: the student's own repos and marks, read-only, and nothing is run.
 
+import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
@@ -15,7 +16,7 @@ import { semesterName, type Semester } from '../model/discovery';
 import { dayKey, fmtDay, fmtTime, fmtWhen, sortKey } from '../model/format';
 import { gradebookUrl, isMarked, knownAuditor, patchLines, patchNotes, readAllReceipts, readMine, repoUrl, type Gradebook, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { lastVisit, markVisit } from '../model/prefs';
-import { DEFAULT_TZ, IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
+import { IMG_HOSTS, MY_STATE_WORD, STUDENT_CHOICE, SiteSource, instant, myState, sortedRows, type FileLink, type InstructorCard, type ScheduleRow, type SemesterAssignment, type SemesterFacts, type StudentData } from '../model/student';
 import { weekItems, type WeekItem } from '../model/week';
 import { STUDENT_SCREENS, studentHref } from '../router';
 import { CheckLine, Crumbs, Loading, Md, ghUrl } from '../ui/bits';
@@ -103,7 +104,7 @@ function SemesterBody({ semester, screen, studentView, entry, now }: Required<Om
     : mine.kind === 'loading' ? (knownAuditor(org) ? null : <Loading what="Reading your repos and marks" />)
     : unknownRole ? <CheckLine cls="warn">Could not read your role in this semester ({mine.error}), so your repos, team and marks are not shown. Reload the page to try again.</CheckLine>
     : null;
-  const tz = f.timezone || DEFAULT_TZ;
+  const tz = f.timezone || DEFAULT_TIMEZONE;
   const rc = receipts.kind === 'ready' ? receipts.value : undefined;
   const hasThreads = !!m && f.assignments.some((a) => a.privateRepo && m.units[a.slug]?.repo);
   const body =
@@ -195,7 +196,7 @@ export function ArchivedSemester({ semester, studentView = false }: { semester: 
 }
 
 const EMPTY_FACTS: SemesterFacts = {
-  courseName: '', timezone: DEFAULT_TZ, rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null,
+  courseName: '', timezone: DEFAULT_TIMEZONE, rows: [], assignments: [], instructors: [], archive: null, latePolicy: [], materialsRepos: [], homeMarkdown: '', announcements: [], syllabus: null,
 };
 
 export function ArchiveNotice({ when, tz, now }: { when: string; tz: string; now: number }) {
@@ -266,7 +267,7 @@ export function StudentWeekHome({ semesters, now }: { semesters: Semester[]; now
     <section class="section" aria-labelledby="h-week">
       <h2 id="h-week">This week</h2>
       {load.kind === 'loading' ? <Loading what="Reading your semesters" /> : load.kind === 'failed' ? <CheckLine cls="bad">This week could not be read: {load.error}</CheckLine> : (
-        <WeekList items={load.value} tz={DEFAULT_TZ} org={live[0].org} semesterOf={(i) => (i as WeekLine).semester ?? ''} />
+        <WeekList items={load.value} tz={DEFAULT_TIMEZONE} org={live[0].org} semesterOf={(i) => (i as WeekLine).semester ?? ''} />
       )}
     </section>
   );
@@ -327,7 +328,7 @@ function mondayOf(iso: string, tz: string): string {
 }
 
 export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; mine: Mine | null; now: number; org: string }) {
-  const tz = facts.timezone || DEFAULT_TZ;
+  const tz = facts.timezone || DEFAULT_TIMEZONE;
   const rows = sortedRows(facts.rows, tz);
   if (!rows.length) return <p class="footnote">The schedule has no entries yet.</p>;
   const year = new Date(now).getFullYear();
@@ -397,7 +398,7 @@ export function AssignmentsView({ org, facts, mine, now, studentView, receipts, 
   /** Receipts per repo; undefined while they are read. */
   receipts?: Record<string, Receipts | null>;
 }) {
-  const tz = facts.timezone || DEFAULT_TZ;
+  const tz = facts.timezone || DEFAULT_TIMEZONE;
   const year = new Date(now).getFullYear();
   if (!facts.assignments.length) return <p class="footnote">No assignments are planned yet.</p>;
   const list = [...facts.assignments].sort((a, b) => (a.due ? instant(a.due, tz) : Infinity) - (b.due ? instant(b.due, tz) : Infinity));
