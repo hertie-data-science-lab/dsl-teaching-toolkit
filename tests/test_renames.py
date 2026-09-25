@@ -762,7 +762,7 @@ def test_the_site_emits_kind_beside_the_pinned_themes_type():
     out = site._event_entry(
         schedule.Event("mid", "Mid", date(2026, 11, 3), kind="exam"), date(2026, 9, 1)
     )
-    assert "kind: exam" in out and "type: exam" in out
+    assert "kind: exam" in out and "type:" not in out
 
 
 def test_status_json_rows_say_kind():

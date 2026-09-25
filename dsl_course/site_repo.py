@@ -263,13 +263,13 @@ def _upsert_config(text: str, key: str, body: str) -> str:
     return new if n else text.rstrip("\n") + "\n\n" + written
 
 
-# The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
-# `_layouts/lectures.html`, `labs.html`, `readings.html`, `materials.html`,
-# `assignments.html`), so these are the front matter that points at one plus the page's own
-# intro line. Owned here, not left to the site template, because a template edit only
+# The session pages. Their CONTENT is a layout in templates/site/ (`_layouts/kind.html`,
+# `materials.html`, `assignments.html`; the open-courseware site's `lectures.html`,
+# `labs.html`, `readings.html`), so these are the front matter that points at one plus the
+# page's own intro line. Owned here, not left to the site template, because a template edit only
 # reaches orgs created after it - the rendering used to live as inline Liquid in each site
 # repo, and by the time it needed changing there were seven live sites to hand-patch. Every
-# later change to how sessions render now ships from the theme alone.
+# later change to how sessions render now ships from templates/site/.
 #
 # `_overwritten_edits` still reports a hand edit these replace, as it does for any other
 # generated surface. (It does NOT fire on the first sync that takes them over: the page a

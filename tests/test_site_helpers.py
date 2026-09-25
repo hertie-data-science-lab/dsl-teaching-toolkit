@@ -45,7 +45,7 @@ def test_exam_entry_date_only_keeps_the_nine_am_placeholder():
     out = site._event_row("exam", "MidTerm Exam", date(2026, 11, 3))
     assert "date: 2026-11-03T09:00:00" in out
     assert 'title: "MidTerm Exam"' in out
-    assert "type: exam" in out
+    assert "kind: exam" in out
 
 
 def test_exam_entry_renders_the_real_time_when_one_was_given():
@@ -271,7 +271,7 @@ def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
         "",
         "lab",
     )
-    assert "type: lab" in e
+    assert "kind: lab" in e
     assert 'title: "Lab 2"' in e
     assert ("lab", "lab.ipynb") in entry_links(e)
 

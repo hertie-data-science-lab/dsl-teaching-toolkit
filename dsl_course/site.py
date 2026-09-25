@@ -885,8 +885,7 @@ def _row_entry(
 
     `title` is the kind's label and the row's number ("Lecture 3", "Lab 9"; the label
     alone when unnumbered); `subtitle` and `details` are the entry's `title:` and
-    `details:`, omitted when empty. `kind` names it and `type` repeats it for templates
-    that have not moved to `kind` yet. `tabs` are the kind tabs that list it: a lecture
+    `details:`, omitted when empty. `kind` names it. `tabs` are the kind tabs that list it: a lecture
     carrying its week's readings is on the Readings tab too, under the same name.
 
     Nothing landed (its own copies or its readings) is the not-yet-released row:
@@ -931,7 +930,6 @@ def _row_entry(
     return (
         f"---\n"
         f"kind: {row.kind}\n"
-        f"type: {row.kind}\n"  # the key the pinned theme reads, until its next release
         + (f"number: {row.number}\n" if row.number is not None else "")
         + (f"date: {iso_when(row.when)}\n" if row.when is not None else "")
         + f'title: "{q(title)}"\n'
@@ -1535,7 +1533,6 @@ def _assignment_entry(
     return (
         f"---\n"
         f"kind: assignment\n"
-        f"type: assignment\n"  # the pinned theme's key, until its next release
         f"date: {released}\n"
         f'title: "{q(title)}"\n'
         f"{sub_fm}"
@@ -1550,7 +1547,6 @@ def _assignment_entry(
         f"{team_fm}"
         f"due_event:\n"
         f"    kind: due\n"
-        f"    type: due\n"
         f"    date: {due}\n"
         f'    title: "{q(title)}"\n'
         f"{sub_due}"
@@ -1619,7 +1615,6 @@ def _event_row(
     return (
         f"---\n"
         f"kind: {kind}\n"
-        f"type: {kind}\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(title)}"\n'
@@ -1706,7 +1701,6 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
     return (
         f"---\n"
         f"kind: special_event\n"
-        f"type: special_event\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(archive.title)}"\n'
@@ -1727,7 +1721,6 @@ def _term_date_entry(name: str, when: date) -> str:
     return (
         f"---\n"
         f"kind: term_date\n"
-        f"type: term_date\n"  # the pinned theme's key, until its next release
         f"date: {iso_when(when)}\n"
         f"hide_time: true\n"
         f'title: "{q(name)}"\n'
