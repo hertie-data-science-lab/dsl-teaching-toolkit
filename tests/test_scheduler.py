@@ -35,6 +35,8 @@ from dsl_course import collect as collect_mod
 from dsl_course import faults as faults_mod
 from dsl_course import grades as grades_mod
 from dsl_course import issues as issues_mod
+from dsl_course import schedule as schedule_mod
+from dsl_course import settings as settings_mod
 from dsl_course.collect import Target
 from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec, LockWrite
@@ -3604,6 +3606,7 @@ def _config_preflight(
     sheet_faults=None,
     spec_faults=None,
     vetted_against=None,
+    sched=None,
 ):
     """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
     was handed.
@@ -3662,7 +3665,7 @@ def _config_preflight(
         lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
     )
     rc = scheduler._preflight_configs(
-        "Course-Org", "Semester-Org", Schedule(), WHEN, False, None
+        "Course-Org", "Semester-Org", sched or Schedule(), WHEN, False, None
     )
     return rc, synced, mailed
 
@@ -3709,6 +3712,32 @@ def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch)
     _rc, synced, _mailed = _config_preflight(monkeypatch, roster_faults=[fault])
     assert synced["students.csv"] == [fault]
     assert synced["teams.csv"] == []
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "    due_datetime: 2026-10-01T09:00\n    cohort_dest_repo: work\n",  # NOT_MIGRATED
+        "    due_datetime: not-a-date\n",  # an entry dropped
+    ],
+)
+def test_a_dropped_assignment_leaves_the_assignment_digests_as_they_are(
+    monkeypatch, entry
+):
+    # The sheets and definition checks walk only the assignments that survived the parse:
+    # with one dropped they find nothing about it, and syncing that closed an open issue
+    # as fixed (demo, 25 Sep: #14 closed, reopened as #19). That is "could not look".
+    sched = schedule_mod.parse(
+        yaml.safe_load("assignments:\n  a1:\n" + entry),
+        settings_mod.parse_instance(None),
+    )
+    assert not sched.assignments
+    _rc, synced, mailed = _config_preflight(
+        monkeypatch, sheet_faults=[], spec_faults=[], sched=sched
+    )
+    for file in ("grading_sheets/", "grading_config.yml", "assignments.yml"):
+        assert file not in synced and file not in mailed
+    assert "students.csv" in synced  # the files that do not hang off the plan still are
 
 
 def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
