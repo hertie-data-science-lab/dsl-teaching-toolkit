@@ -476,6 +476,7 @@ function View(p: ReadyProps) {
           <div class="entry-body">
             <div class="type-pick">{NEW_TYPES.map(([t, label, cls]) => <button type="button" class={`trow ${cls}`} style="display:block;min-height:44px" onClick={() => setDraft('new', blankDraft(t, { repo: repos[0] ?? '' }))}>{label}</button>)}</div>
             <p class="footnote">A hand out is an assignment entry: assignment template, hand out, due and late work together.</p>
+            <SaveLine state={save} />
           </div>
         </div>
       );
