@@ -488,3 +488,22 @@ def test_the_registry_still_lists_a_closed_out_semester(monkeypatch):
     )
     monkeypatch.setattr(discovery, "repo_is_archived", _closed_out("Course-f2025"))
     assert discovery.discover_semesters("Course") == ["Course-f2025"]
+
+
+def test_the_materials_repos_are_the_live_ones_with_the_topic(monkeypatch):
+    rows = [
+        {"name": "course-materials-f2026", "topics": ["dsl-materials"]},
+        {"name": "slides", "topics": ["dsl-materials", "x"]},
+        {
+            "name": "course-materials-f2025",
+            "topics": ["dsl-materials"],
+            "archived": True,
+        },
+        {"name": "course-materials-s2027", "topics": []},
+        {"name": "lecture-code-f2026"},
+    ]
+    monkeypatch.setattr(discovery, "list_org_repos", lambda org: rows)
+    assert discovery.discover_materials_repos("Course") == [
+        "course-materials-f2026",
+        "slides",
+    ]
