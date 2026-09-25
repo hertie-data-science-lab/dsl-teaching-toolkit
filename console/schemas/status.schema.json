@@ -513,6 +513,12 @@
           "kind_inferred": {
             "type": "boolean"
           },
+          "number": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "show_on_site": {
             "type": "boolean"
           },

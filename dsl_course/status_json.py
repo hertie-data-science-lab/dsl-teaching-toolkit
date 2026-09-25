@@ -60,6 +60,7 @@ from .course import (
     COURSE_CONFIG,
     INSTRUCTORS_TEAM,
     JOIN_REPO,
+    MATERIALS_REPO_PREFIX,
     PUBLISH_FILE,
     SOLUTION_BRANCH,
     active_today,
@@ -76,7 +77,7 @@ from .discovery import (
     org_meta,
     read_semester_registry,
 )
-from .faults import ConfigFault, FaultKind, Unusable
+from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
 from .gh_contents import (
     get_file_content,
     is_untouched_stub,
@@ -85,12 +86,17 @@ from .gh_contents import (
 )
 from .gh_teams import get_team_members
 from .ghcli import gh
-from .materials import DEFAULT_SYLLABUS, Declared, is_materials_repo
+from .materials import (
+    DEFAULT_SYLLABUS,
+    MATERIALS_TOPIC,
+    Declared,
+    is_materials_repo,
+)
 from .materials import read as read_materials
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
 from .repos import default_branch
-from .schedule_plan import deploy_dest, entry_kind
+from .schedule_plan import deploy_dest, entry_kind, planned_rows, site_rows
 from .sync_teams import known_handles
 
 # Where each file lives, inside `semester-config` (semester) or `.github` (course).
@@ -151,6 +157,8 @@ class MaterialsFacts:
     syllabus: str | None = None
     has_publish: bool = False
     syllabus_path: str = DEFAULT_SYLLABUS
+    # False for a `course-materials-*` repo without the `dsl-materials` topic yet.
+    topic: bool = True
 
 
 @dataclass
@@ -619,9 +627,33 @@ def _syllabus_written(m: MaterialsFacts) -> bool:
 
 
 def materials_state(m: MaterialsFacts) -> str:
-    """C4, per repo: `ready` once its declared syllabus is written and publish.yml is
-    there."""
+    """C4, per repo: `problem` until the migration gives it the topic; `ready` once its
+    declared syllabus is written and publish.yml is there."""
+    if not m.topic:
+        return PROBLEM
     return "ready" if _syllabus_written(m) and m.has_publish else TODO
+
+
+def materials_problem(m: MaterialsFacts, org: str) -> dict:
+    """The NOT_MIGRATED problem of a materials repo that has no topic yet."""
+    return {
+        "id": f"materials:{_slugify(m.repo)}:{NOT_MIGRATED}",
+        "scope": "course",
+        "stage": "C4",
+        "text": (
+            f"{m.repo} is a materials repo by its old name only: it has no "
+            f"{MATERIALS_TOPIC} topic yet."
+        ),
+        "stops": "Run the migration, which adds the topic.",
+        "fix": {
+            "repo": f"{org}/{m.repo}",
+            "path": "",
+            "line": None,
+            "screen": None,
+            "entry": None,
+            "url": f"https://github.com/{org}/{m.repo}",
+        },
+    }
 
 
 def template_state(t: TemplateFacts) -> str:
@@ -662,6 +694,9 @@ def render_course(
     - C6 the public website repo exists.
     `ready` is C1-C5 done: nothing on the course side would stop a semester."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
+    problems += [
+        materials_problem(m, facts.org) for m in facts.materials if not m.topic
+    ]
     for t in facts.templates:
         problems += [problem_from_fault(f, facts.org, now) for f in t.faults]
     meta = facts.meta
@@ -694,6 +729,8 @@ def render_course(
 
 
 def _materials_why(m: MaterialsFacts) -> str:
+    if not m.topic:
+        return f"{m.repo} is not migrated yet (no {MATERIALS_TOPIC} topic)"
     if m.syllabus is None:
         return f"{m.repo} has no {m.syllabus_path} yet"
     if not _syllabus_written(m):
@@ -949,10 +986,16 @@ def render_releases(
     """One row per `releases:` entry. Source and destination are the entry's FIRST copy;
     `copies` says how many it has."""
     rows = []
+    aliases = lambda repo: facts.aliases.get(repo, {})
+    # The number the site gives each row (`schedule_plan.site_rows`); None for a row it
+    # does not number (silent, attached readings, undated).
+    numbers = {
+        sr.row.key: sr.number for sr in site_rows(planned_rows(facts.sched, aliases))
+    }
     for r in facts.sched.releases:
         own = [f for f in faults if f.is_source and f.where == f"releases.{r.label}"]
         first = r.deploy[0] if r.deploy else None
-        kind, inferred = entry_kind(r, lambda repo: facts.aliases.get(repo, {}))
+        kind, inferred = entry_kind(r, aliases)
         rows.append(
             {
                 "id": r.label,
@@ -961,6 +1004,7 @@ def render_releases(
                 # it for the instructor to confirm once.
                 "kind": kind,
                 "kind_inferred": inferred,
+                "number": numbers.get(r.label),
                 "title": r.title,
                 "state": release_state(r, facts, own, now),
                 "source": {
@@ -1207,6 +1251,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     problems += [problem_from_fault(f, course.org, now) for f in course.faults]
     problems += [problem_from_fault(f, course.org, now) for f in facts.template_faults]
     problems += _no_email_problem(facts.org, facts.people)
+    problems += [
+        materials_problem(m, course.org) for m in course.materials if not m.topic
+    ]
     problems = _unique_ids(problems)
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"]
@@ -1285,7 +1332,7 @@ def _declaration(org: str, repo: str) -> Declared:
     place to stop over it, and the site sync names the fault."""
     try:
         return read_materials(org, repo)
-    except (ValueError, yaml.YAMLError):
+    except Unusable:
         return Declared()
 
 
@@ -1328,6 +1375,12 @@ def gather_course(course_org: str) -> CourseFacts:
             continue
         if is_materials_repo(row):
             facts.materials.append(_materials_facts(course_org, name))
+        elif name.startswith(MATERIALS_REPO_PREFIX):
+            # A materials repo by its old mark, the name: listed, and NOT_MIGRATED until
+            # the migration's topic step gives it the topic (decision 0013).
+            m = _materials_facts(course_org, name)
+            m.topic = False
+            facts.materials.append(m)
         elif name.startswith("assignment-") and row.get("isTemplate"):
             t = TemplateFacts(name, get_file_content(course_org, name, README_FILE))
             text = get_file_content(

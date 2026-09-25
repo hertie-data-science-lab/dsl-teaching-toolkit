@@ -304,6 +304,7 @@ def status_schema() -> dict:
             "when": nullable,
             "kind": _str(),
             "kind_inferred": {"type": "boolean"},
+            "number": {"type": ["integer", "null"]},
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
@@ -415,6 +416,7 @@ def schedule_schema() -> dict:
             KNOWN_RELEASE,
             {
                 "kind": _enum(KNOWN_ROW_KINDS),
+                "number": {"type": "integer"},
                 "deploy": {"type": "array", "items": deploy},
                 "event_datetime": _str(),
             },

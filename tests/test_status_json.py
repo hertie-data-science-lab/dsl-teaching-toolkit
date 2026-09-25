@@ -432,6 +432,23 @@ def test_an_undeclared_kind_is_inferred_through_the_repos_aliases_and_says_so():
     assert (s3["kind"], s3["kind_inferred"]) == ("lab", False)
 
 
+def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
+    old = status_json.MaterialsFacts("course-materials-f2025", "# S", True, topic=False)
+    doc = _render(_course(materials=[old]))
+    assert doc["course"]["materials"] == [
+        {"repo": "course-materials-f2025", "state": "problem"}
+    ]
+    (problem,) = [p for p in doc["problems"] if p["id"].startswith("materials:")]
+    assert problem["id"] == "materials:course-materials-f2025:NOT_MIGRATED"
+    assert "dsl-materials" in problem["text"] and problem["stage"] == "C4"
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_release_carries_the_number_the_site_gives_it():
+    doc = _render()
+    assert {r["id"]: r["number"] for r in doc["releases"]} == {"s3": 3, "s5": 5}
+
+
 def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     monkeypatch.setattr(
         status_json,
