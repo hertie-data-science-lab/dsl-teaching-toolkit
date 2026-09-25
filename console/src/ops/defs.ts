@@ -128,9 +128,9 @@ export function collect(s: Scope, a: AsgRef): OpDef {
 export function returnMarks(s: Scope, a: AsgRef, marked: number): OpDef {
   return {
     ...base(s, 'grades.return', a.slug), name: 'Return marks', title: a.title, where: 'Marking',
-    intro: 'Sends each student their marks and feedback. Your private notes stay private.',
+    intro: 'Sends each student their marks and feedback for this assignment, beside the ones already returned. Your private notes stay private.',
     verb: `Return marks to ${marked} ${a.group ? 'teams' : 'students'}`, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
-    args: {}, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
+    args: { assignment: a.slug }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
   };
 }
 

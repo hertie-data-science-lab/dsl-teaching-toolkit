@@ -257,7 +257,8 @@ const FILES: Record<string, string> = {
     [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\nassignment-3,team-alpha,ben-b\n',
     [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`]: '# GRADING SHEET\n# Status: OPEN\nsubmissions:\n  anna-a:\n    info:\n      submitted: 2026-09-27T20:00\n      days_late: 2\n    score_individual:\n      Q1: 14\n      Q2: 20\n    adjustment_individual: 1\n    feedback_individual: |\n      Good.\n    notes_not_shared_with_students:\n',
     [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'questions:\n  Q1: 15\n  Q2: 25\n',
-    [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\nmax_team_size: 3\n',
+    [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\n',
+    [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    max_team_size: 3\n',
     [`${COURSE_ORG}/.github/dsl-course.yml`]: '# INSTRUCTOR-OWNED\norg: hertie-dsl-demo-course-e1234\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\nassignment_defaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n',
     [`${COURSE_ORG}/course-materials-f2026/publish.yml`]: 'public:\n  - "lectures/**/*.html"\n',
     [`${COURSE_ORG}/course-materials-f2026/.releaseignore`]: 'solutions/\n',
@@ -282,7 +283,7 @@ describe('editing screens', () => {
     expect(out).toContain('Check instructor access');
     expect(out).toContain('>Edit<');
   });
-  it('teams shows the window, the team size from the template and who has no team', () => {
+  it('teams shows the window, the team size from assignments.yml and who has no team', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
     expect(out).toContain('<h1>Assignment 3: Group project</h1>');
     expect(out).toContain('2 of 3 joined students in 1 teams; 1 without a team.');
@@ -306,7 +307,7 @@ describe('editing screens', () => {
     );
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks', files: tagged })} />);
     expect(out).toContain('Total / 40');
-    expect(out).toContain('/ 25 · report.tex');
+    expect(out).toContain('/ 25 · <code>report.tex</code>');
     expect(out).not.toContain('[object Object]');
   });
   it('archive offers Preview and the gated verb', () => {
@@ -319,7 +320,7 @@ describe('editing screens', () => {
     const out = html(<DetailsScreen {...cp} />);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
-    expect(out).toContain('Assignment defaults');
+    expect(out).toContain('Defaults for this course’s assignments');
     expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
   });
   it('materials settings previews what is public and what is withheld', () => {
