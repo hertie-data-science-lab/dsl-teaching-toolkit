@@ -194,11 +194,12 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
   if (d.kind === 'assignments') {
     return {
       // Timings only (decision 0009): the title is the template's, the repo name and the
-      // late cutoff are assignments.yml's - none of them is written here.
-      ...raw, ...display(raw, d), title: undefined, course_source_repo: d.template, semester_dest_repo: undefined,
+      // late cutoff are assignments.yml's. None is written here, and a retired key the
+      // file still carries is left exactly as it is: the engine faults it and the
+      // migration moves it.
+      ...raw, ...display(raw, d), title: raw.title, course_source_repo: d.template,
       handout_datetime: d.manual ? undefined : whenOf(raw.handout_datetime, d.handoutDate, d.handoutTime),
       due_datetime: whenOf(raw.due_datetime, d.dueDate, d.dueTime),
-      grading_datetime: undefined,
       solution_datetime: d.solutionOn && !d.manual ? whenOf(raw.solution_datetime, d.solutionDate, d.solutionTime) : undefined,
     };
   }
@@ -264,7 +265,7 @@ export function blankDraft(type: string, defaults: { repo: string }): ReleaseDra
 }
 
 /** What is wrong with a draft, by field; empty when it can be saved. */
-export function draftErrors(d: Draft, others: { templateUsers: (template: string) => number }): Record<string, string> {
+export function draftErrors(d: Draft, _others?: { templateUsers: (template: string) => number }): Record<string, string> {
   const e: Record<string, string> = {};
   if (d.kind === 'releases') {
     if (!d.date) e.date = 'When is needed.';
@@ -280,12 +281,9 @@ export function draftErrors(d: Draft, others: { templateUsers: (template: string
     const h = joinWhen(d.handoutDate, d.handoutTime) ?? '';
     const due = joinWhen(d.dueDate, d.dueTime) ?? '';
     if (h && due && due < h) e.due = 'Due must come after the hand out.';
-    const late = joinWhen(d.lateDate, d.lateTime);
-    if (late && due && late < due) e.late = 'Late work must end after the due date.';
     const sol = joinWhen(d.solutionDate, d.solutionTime);
     if (d.solutionOn && !d.manual && !sol) e.solution = 'Give the date the solution is shown.';
     if (d.solutionOn && sol && h && sol <= h) e.solution = 'Must be after the hand out.';
-    if (d.template && others.templateUsers(d.template) > 1 && !d.semesterRepo) e.semesterRepo = 'Two entries hand out this template: give each its own repo name.';
   } else if (d.kind === 'events') {
     if (!d.title.trim()) e.title = 'A title is needed; the student site shows only this.';
   } else if (d.kind === 'semester') {

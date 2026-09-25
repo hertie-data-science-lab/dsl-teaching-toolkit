@@ -200,7 +200,6 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
           : d.template ? <span class="valid-msg"><Check />Assignment template ready</span> : null}
         <p class="why">Must exist and be ready.</p>
       </div>
-      <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the assignment template', reason: 'The name after the assignment’s number. Also feeds repo names.' }} />
       <div class="field">
         <span class="label">Hand out</span>
         <div class="choices">
@@ -218,10 +217,7 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
         <F id="e-due" k="dueDate" d={d} set={set} error={errors.due} t={{ tier: 'ask', label: 'Due', widget: 'date' }} />
         <F id="e-duet" k="dueTime" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
-      <div class="row-2">
-        <F id="e-late" k="lateDate" d={d} set={set} error={errors.late} t={{ tier: 'default', label: 'Late work until', widget: 'date', defaultLabel: `default: due + ${lateDays} days`, reason: 'Late work is accepted with the penalty until then; marking starts after.' }} />
-        <F id="e-latet" k="lateTime" d={d} set={set} t={{ tier: 'default', label: 'At', widget: 'time' }} />
-      </div>
+      <div class="field"><span class="label">Late work</span><div class="readonly">Until the due date plus {lateDays} days unless this semester sets otherwise. The title is the assignment template’s; the late rule and the repo name are set in assignments.yml, coming with the next console release.</div></div>
       {vis !== 'private' ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">Not available: student repos are not private, so the solution cannot be pushed automatically.</div></div>
       ) : d.manual ? (
@@ -239,12 +235,6 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
       )}
       <F id="e-det" k="details" d={d} set={set} t={MD('Details', 'Shown to students under the title.')} />
       <Common d={d} set={set} />
-      <details class="fold" open={!!errors.semesterRepo || !!d.semesterRepo}>
-        <summary>Advanced <span class={`cnt${d.semesterRepo ? ' changed' : ''}`}>({d.semesterRepo ? '1 changed' : 'none changed'})</span></summary>
-        <div class="fold-body">
-          <F id="e-crepo" k="semesterRepo" d={d} set={set} error={errors.semesterRepo} t={{ tier: 'advanced', label: 'Repo name in the semester', defaultLabel: 'derived', placeholder: slugOfTemplate(d.template), reason: 'Needed only when two entries hand out the same template; each must differ.' }} />
-        </div>
-      </details>
       {d.id ? <a class="textlink" href={`#assignment-${d.id}`}>Open the assignment</a> : null}
     </>
   );

@@ -137,7 +137,17 @@ describe('the schedule entry sheet model', () => {
     const e = draftErrors(a as never, { templateUsers: () => 2 });
     expect(e.due).toBe('Due must come after the hand out.');
     expect(e.solution).toBe('Must be after the hand out.');
-    expect(e.semesterRepo).toContain('give each its own repo name');
+    // The repo name is assignments.yml's now: nothing here asks for it.
+    expect(e.semesterRepo).toBeUndefined();
+  });
+
+  it('leaves a retired key an unmigrated entry still carries exactly as it is', () => {
+    const src = 'assignments:\n  a2:\n    course_source_repo: assignment-2-f2026\n    semester_dest_repo: homework-2\n    title: Regression\n    due_datetime: 2026-09-27T23:59:00+02:00\n    grading_datetime: 2026-10-07\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    writeDraft(y, { ...(readDraft(doc, 'a2') as never as object), details: 'Fit it.' } as never, doc);
+    const a2 = (parse(y.text).assignments as Record<string, Record<string, unknown>>).a2;
+    expect(a2).toMatchObject({ semester_dest_repo: 'homework-2', title: 'Regression', grading_datetime: '2026-10-07', details: 'Fit it.' });
   });
 
   it('edits the archive grace days, writing the key only once it differs from 60', () => {

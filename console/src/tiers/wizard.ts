@@ -49,22 +49,11 @@ export function assignmentWhat(terms: string[], next: number, templates: string[
   };
 }
 
-const VIS_WHY: Record<string, string> = {
-  shared_dropbox_repo: 'Private: a shared drop box is always private.',
-  external: 'Private: the repo holds the brief only.',
-};
-
+/** How students work on it: the template's own keys. How each semester runs it (teams,
+ * max team size, visibility, the submit link, the late rule) is that semester's
+ * assignments.yml, edited in the next console release (decision 0009). */
 export function assignmentWork(d: CourseDefaults): Tiers {
-  const s = settingsTiers(d);
-  return {
-    ...pick(s, ['type', 'team_formation', 'max_team_size', 'submit_via', 'submit_url']),
-    visibility: {
-      tier: 'advanced', label: 'Who can see each student’s repo', widget: 'radio', default: 'private', irreversible: true,
-      reason: 'Set once, at creation. Choose private unless you are sure.',
-      options: [opt('private', 'Private', 'The student and instructors. The default.'), opt('public', 'Public', 'Anyone on the internet. The solution cannot be shown automatically.'), opt('student_choice', 'Student’s choice', 'Each student decides for their own repo.')],
-      forced: (v) => (v.submit_via && v.submit_via !== 'assignment_repo' ? { value: 'private', reason: VIS_WHY[String(v.submit_via)] ?? 'Private.' } : null),
-    },
-  };
+  return pick(settingsTiers(d), ['type', 'submit_via']);
 }
 
 export function assignmentMarking(d: CourseDefaults): Tiers {
@@ -78,7 +67,7 @@ export function assignmentMarking(d: CourseDefaults): Tiers {
       },
     },
     tests: { ...s.tests, when: (v) => v.autograde === 'true' && !autogradeBlock(v) },
-    ...pick(s, ['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day']),
+    ...pick(s, ['completion_check', 'grader_pdf']),
   };
 }
 

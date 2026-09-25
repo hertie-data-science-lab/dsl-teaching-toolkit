@@ -107,25 +107,14 @@ describe('which step a wizard opens at', () => {
 });
 
 describe('conditional fields', () => {
-  it('shows the team fields only under "In teams" and the link only under "Elsewhere"', () => {
+  it('asks only what the template is: no run setting, which is each semester\'s', () => {
     const t = assignmentWork(D);
-    const solo = layout(t, initialValues(null, 'f2026'));
-    expect(solo.main.map((i) => i.key)).toEqual(['type', 'submit_via']);
-    expect(solo.main[0].under).toEqual([]);
     const team = layout(t, { ...initialValues(null, 'f2026'), type: 'group', submit_via: 'external' });
-    expect(team.main[0].under.map((i) => i.key)).toEqual(['team_formation', 'max_team_size']);
-    expect(team.main[1].under.map((i) => i.key)).toEqual(['submit_url']);
-  });
-
-  it('keeps visibility under Advanced, labelled irreversible, and forces private away from their own repo', () => {
-    const t = assignmentWork(D);
-    const v = { ...initialValues(null, 'f2026'), visibility: 'public' };
-    const own = layout(t, v);
-    expect(own.advanced.map((i) => i.key)).toEqual(['visibility']);
-    expect(own.changed).toBe(1);
-    expect(t.visibility.irreversible).toBe(true);
-    expect(t.visibility.forced?.({ ...v, submit_via: 'shared_dropbox_repo' })).toEqual({ value: 'private', reason: 'Private: a shared drop box is always private.' });
-    expect(layout(t, { ...v, submit_via: 'external' }).changed).toBe(0);
+    expect(team.main.map((i) => i.key)).toEqual(['type', 'submit_via']);
+    expect(team.main.flatMap((i) => i.under)).toEqual([]);
+    expect(team.advanced).toEqual([]);
+    for (const k of ['team_formation', 'max_team_size', 'submit_url', 'visibility']) expect(t).not.toHaveProperty(k);
+    expect(assignmentMarking(D)).not.toHaveProperty('late_window_days');
   });
 
   it('refuses tests for a drop box and a written report, and shows the tests folder only when tests run', () => {
