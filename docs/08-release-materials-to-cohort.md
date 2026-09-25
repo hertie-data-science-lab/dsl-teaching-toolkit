@@ -127,9 +127,7 @@ Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!
 re-include, `/` to anchor or to mean a directory, `#` comments.
 
 It applies to every copy out of the repo it sits in: the semester release, the public course
-site, the assignment handout, and the semester site's public copy of a file named in
-`publish.yml` - that copy is made from the RELEASED semester repo, so a file withheld here
-never reaches it ([11](11-configure-cohort-site.md)).
+site and the assignment handout.
 
 What that means in practice:
 
@@ -168,7 +166,7 @@ writing about that session and always ships.
 ## Live updates to the deployed `<course>.github.io` site
 
 Released materials appear on the site automatically, on the row of the schedule entry that
-names them (a path no entry names is on **All Materials** only): a release triggers **Sync site**, as
+names them (a path no entry names is in the student console's Materials only): a release triggers **Sync site**, as
 does a push to `semester-config/schedule.yml` or `instructors.yml`, and there is a daily sync
 besides. Run [Sync site](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/sync-site.yml)
 by hand only when you don't want to wait - e.g. after editing a file inside an already-released repo.
