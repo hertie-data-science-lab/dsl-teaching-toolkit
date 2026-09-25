@@ -23,7 +23,8 @@ workflows, for the window, and enabled again at the end. (An org variable cannot
 on GitHub Free org variables do not reach private repos, and the workflows already live in
 an org carry no gate until they are re-rendered.) It waits for quiet before it switches
 anything. GitHub drops, rather than queues, what fires into a disabled repo, so the unpause
-dispatches one Scheduled release and one Sync membership in its place. For a real course
+dispatches one Scheduled release and one Sync membership in its place, and waits (bounded)
+for those runs, so the next org's migration finds the course quiet. For a real course
 the tier moves inside a HOLD of every org of the course (`--hold`, `--release`); a
 migration under a hold neither pauses nor unpauses.
 
@@ -41,7 +42,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import sleep
 from time import time as clock
@@ -1323,6 +1324,10 @@ TICK_SECONDS = sorted(
 # How long a real run waits for the runs in flight to finish, and how often it looks.
 QUIET_WAIT = 4 * 60
 QUIET_POLL = 15
+# How long the catch-up waits for the runs it dispatched: the next org's migration (the
+# runbook runs course -> semester -> semester back to back) waits only QUIET_WAIT for
+# quiet in the course's `.github` before it pauses.
+CATCH_UP_WAIT = 10 * 60
 
 
 def next_tick(at: float) -> float:
@@ -1563,9 +1568,12 @@ class Pause:
 
     # after the unpause ---------------------------------------------------------
     def catch_up(self) -> None:
-        """Dispatch what the pause dropped, and say where each run shows up. Not waited
-        for, and never a failure of the migration: the org is migrated by now, and the
-        next tick (at most 15 minutes, the next hour for membership) covers a miss."""
+        """Dispatch what the pause dropped, say where each run shows up, then wait for
+        those runs (`await_catch_up`), so the next org's migration starts clear. Never a
+        failure of the migration: the org is migrated by now, and the next tick (at most
+        15 minutes, the next hour for membership) covers a miss."""
+        since = datetime.fromtimestamp(clock(), UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        sent = 0
         for tick in lost_ticks(self.semester_org):
             url = _runs_url(self.course_org, tick.workflow)
             code, out = gh(
@@ -1578,12 +1586,47 @@ class Pause:
                 *tick.payload,
             )
             if code == 0:
+                sent += 1
                 log_ok(f"dispatched {tick.what}: {url}")
             else:
                 log_err(
                     f"could not dispatch {tick.what} ({out[:200]}) - the next tick "
                     f"catches up; the runs: {url}"
                 )
+        if sent:
+            try:
+                self.await_catch_up(sent, since)
+            except RuntimeError as exc:
+                log_err(f"could not follow the catch-up run(s): {exc}")
+
+    def await_catch_up(self, count: int, since: str) -> None:
+        """Wait, up to CATCH_UP_WAIT, until the `count` runs dispatched at `since` have
+        started in the course's `.github` and none is still going. A `repository_dispatch`
+        answers with no run id: the runs are the dispatched ones created since then."""
+        query = f"event=repository_dispatch&created=%3E%3D{since}"
+        where = f"{self.course_org}/.github"
+        log(
+            f"  waiting for the catch-up run(s) in {where} to finish (up to "
+            f"{CATCH_UP_WAIT // 60} minutes), so the next migration starts clear"
+        )
+        deadline = clock() + CATCH_UP_WAIT
+        while True:
+            started = _run_count(self.course_org, ".github", query)
+            going = sum(
+                _run_count(self.course_org, ".github", f"{query}&status={state}")
+                for state in LIVE_RUN_STATES
+            )
+            if started >= count and not going:
+                log_ok(f"the catch-up run(s) in {where} finished")
+                return
+            if clock() >= deadline:
+                log(
+                    f"  the catch-up run(s) in {where} are still going after "
+                    f"{CATCH_UP_WAIT // 60} minutes - the next migration waits for them "
+                    f"before it pauses"
+                )
+                return
+            sleep(QUIET_POLL)
 
     def steps(self) -> tuple[Step, Step]:
         names = lambda: ", ".join(f"{o}/{r}" for o, r in self.targets())
@@ -1616,6 +1659,10 @@ class Pause:
                     f"dispatch {t.what} in {self.course_org}/.github (the tick the "
                     f"pause dropped)"
                     for t in lost_ticks(self.semester_org)
+                ),
+                (
+                    f"wait for those runs to finish (up to {CATCH_UP_WAIT // 60} "
+                    "minutes)"
                 ),
             ]
 

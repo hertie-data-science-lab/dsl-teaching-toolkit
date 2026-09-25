@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -81,6 +82,10 @@ OLD_RECORDS = {
 }
 
 
+def _iso(at: float) -> str:
+    return datetime.fromtimestamp(at, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 class FakeClock:
     """The wall clock `settle` reads and the sleep it waits with: a sleep moves the clock,
     and says so in `calls` (shared with the fake GitHub, so a test reads one sequence)."""
@@ -112,6 +117,8 @@ class FakeGitHub:
         self.paused_at_commit: list[bool] = []
         self.puts: list[tuple[str, str, bool]] = []
         self.dispatches: list[tuple[str, dict]] = []  # (org/repo, the fields sent)
+        # the state a dispatched run is in when it shows up (its hooks may move it)
+        self.dispatched_state = "completed"
         self.fail_dispatch = False
         self.fail_rename = False
         self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
@@ -248,6 +255,9 @@ class FakeGitHub:
             if self.fail_dispatch:
                 return 1, "HTTP 422: Unprocessable"
             self.dispatches.append((f"{org}/{name}", fields))
+            self.runs.setdefault(key, []).append(
+                (_iso(self.clock.at), self.dispatched_state)
+            )
             return 0, ""
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
@@ -2286,3 +2296,47 @@ def test_the_join_form_is_rendered_from_the_synced_lock(fake, semester, monkeypa
     assert fake.tree(SEM, JOIN_REPO)[".github/ISSUE_TEMPLATE/team-form.yml"] == (
         b"form from " + new
     )
+
+
+# ---------------------------------------------------------------- the catch-up
+
+
+def test_the_catch_up_waits_for_the_runs_it_dispatched(
+    fake, semester, monkeypatch, capsys
+):
+    # The runs start queued and finish a poll later: the tool waits, then says so, so
+    # the next org's preflight finds the course's `.github` quiet.
+    fake.dispatched_state = "queued"
+
+    def finish(_at):
+        for key, runs in fake.runs.items():
+            fake.runs[key] = [(at, "completed") for at, _ in runs]
+
+    real = fake.gh
+
+    def gh(*args, **kwargs):
+        out = real(*args, **kwargs)
+        if "dispatches" in " ".join(args) and finish not in fake.clock.hooks:
+            fake.clock.hooks.append(finish)
+        return out
+
+    monkeypatch.setattr(migrate, "gh", gh)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    out = capsys.readouterr().out
+    assert f"waiting for the catch-up run(s) in {COURSE}/.github to finish" in out
+    assert f"the catch-up run(s) in {COURSE}/.github finished" in out
+    assert fake.calls[-1] == "runs Course-E1/.github"
+    assert "sleep 15" in fake.calls[fake.calls.index(f"on {SEM}/{CONFIG_REPO}") :]
+
+
+def test_a_catch_up_still_running_at_the_bound_is_said_and_is_no_failure(
+    fake, semester, monkeypatch, capsys
+):
+    fake.dispatched_state = "in_progress"
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    out = capsys.readouterr().out
+    assert (
+        f"the catch-up run(s) in {COURSE}/.github are still going after 10 minutes - "
+        "the next migration waits for them before it pauses"
+    ) in out
+    assert f"{SEM} is migrated" in out
