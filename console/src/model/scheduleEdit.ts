@@ -5,6 +5,7 @@
 
 import { obj, type YamlText } from '../edit/yamlText';
 import { kebab } from './format';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO } from './policy';
 
 export type Block = 'releases' | 'assignments' | 'events';
 
@@ -41,15 +42,12 @@ export interface AssignmentDraft {
   handoutTime: string;
   dueDate: string;
   dueTime: string;
-  lateDate: string;
-  lateTime: string;
   solutionOn: boolean;
   solutionDate: string;
   solutionTime: string;
   details: string;
   show: boolean;
   tbc: boolean;
-  semesterRepo: string;
 }
 
 export interface EventDraft {
@@ -83,7 +81,7 @@ export interface ArchiveDraft {
   graceDays: number | '';
 }
 
-export const ARCHIVE_GRACE_DAYS = 60;
+export { ARCHIVE_GRACE_DAYS };
 
 export type Draft = ReleaseDraft | AssignmentDraft | EventDraft | SemesterDraft | ArchiveDraft;
 
@@ -147,11 +145,10 @@ export function readDraft(doc: Raw, key: string): Draft | null {
   if (b === 'assignments') {
     const [handoutDate, handoutTime] = splitWhen(e.handout_datetime);
     const [dueDate, dueTime] = splitWhen(e.due_datetime);
-    const [lateDate, lateTime] = splitWhen(e.grading_datetime);
     const [solutionDate, solutionTime] = splitWhen(e.solution_datetime);
     return {
-      kind: 'assignments', ...common, template: s(e.course_source_repo), manual: !e.handout_datetime, handoutDate, handoutTime, dueDate, dueTime, lateDate, lateTime,
-      solutionOn: !!e.solution_datetime, solutionDate, solutionTime, semesterRepo: s(e.semester_dest_repo),
+      kind: 'assignments', ...common, template: s(e.course_source_repo), manual: !e.handout_datetime, handoutDate, handoutTime, dueDate, dueTime,
+      solutionOn: !!e.solution_datetime, solutionDate, solutionTime,
     };
   }
   const [date, time] = splitWhen(e.event_datetime);
@@ -184,7 +181,7 @@ export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEn
             const r = obj(rawDeploys[i]);
             return {
               ...r, course_source_repo: dp.repo, course_source_path: dp.folder,
-              semester_dest_repo: dp.dest && (dp.dest !== 'materials' || r.semester_dest_repo) ? dp.dest : undefined,
+              semester_dest_repo: dp.dest && (dp.dest !== DEFAULT_DEST_REPO || r.semester_dest_repo) ? dp.dest : undefined,
               semester_dest_path: text(dp.path), deploy_datetime: dp.diff ? whenOf(r.deploy_datetime, dp.atDate, dp.atTime) : undefined,
             };
           })
@@ -259,7 +256,7 @@ export function slugOfTemplate(template: string): string {
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {
   const common = { id: '', title: '', details: '', show: true, tbc: false };
   if (type === 'handout')
-    return { kind: 'assignments', ...common, template: '', manual: false, handoutDate: '', handoutTime: '10:00', dueDate: '', dueTime: '23:59', lateDate: '', lateTime: '', solutionOn: false, solutionDate: '', solutionTime: '', semesterRepo: '' };
+    return { kind: 'assignments', ...common, template: '', manual: false, handoutDate: '', handoutTime: '10:00', dueDate: '', dueTime: '23:59', solutionOn: false, solutionDate: '', solutionTime: '' };
   if (type === 'exam' || type === 'special_event') return { kind: 'events', ...common, type, date: '', time: '' };
   return { kind: 'releases', ...common, type, date: '', time: '10:00', deploys: [{ repo: defaults.repo, folder: '', dest: '', path: '', diff: false, atDate: '', atTime: '' }] };
 }

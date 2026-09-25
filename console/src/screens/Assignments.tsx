@@ -13,7 +13,8 @@ import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { Crumbs, Help, ProblemCards } from '../ui/bits';
 import { asgSummary } from './Cohort';
 import { MarksTab, TeamsTab } from './Marking';
-import { WithStatus, cohortCrumbs, cohortName, cohortScope, todayOf, tzOf, yearOf } from './common';
+import { AssignmentRun, SemesterDefaults, scheduleFile } from './RunSettings';
+import { WithStatus, cohortCrumbs, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 
@@ -64,8 +65,9 @@ function Index(p: ReadyProps) {
         <div class="actions"><a class="btn" href={`?course=${p.course.org}#new-assignment-1`}>New assignment</a></div>
       </div>
       <Help title="How assignments move" doc="09-release-assignment-to-cohort.md">
-        <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; settings live on the assignment template.</p>
+        <p>Declared, then open at hand out, then the late window after the due date, then marking, then returned. Dates live in the schedule; how this semester runs each assignment (teams, late work, who sees each repo) lives in assignments.yml, with the defaults below; what the task is lives on the assignment template.</p>
       </Help>
+      <div style="margin-bottom:18px"><SemesterDefaults p={p} /></div>
       <div class="table-wrap">
         <table class="grid" style="min-width:960px">
           <thead><tr><th>Assignment</th><th>State</th><th>Next date</th><th>Progress</th><th>Teams</th><th>Marked</th><th>Returned</th><th>Problem</th></tr></thead>
@@ -114,6 +116,14 @@ function stepOf(state: AssignmentState): number {
   return LIFE.findIndex(([, s]) => s.includes(state));
 }
 
+/** The schedule keys whose entry uses `template`: Update every copy and Collect now act on a template, so they cannot pick between two. */
+export function sharedBy(p: Pick<ReadyProps, 'files' | 'cohort'>, template: string): string[] {
+  const sf = scheduleFile(p.files, p.cohort.org);
+  if (!sf || sf === 'loading') return [];
+  const entries = (sf.doc.assignments ?? {}) as Record<string, { course_source_repo?: unknown }>;
+  return Object.entries(entries).filter(([, e]) => e && e.course_source_repo === template).map(([k]) => k);
+}
+
 export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
 
 /** The tab an assignment opens on: Teams while teams form, Marks once marking starts. */
@@ -152,7 +162,7 @@ export interface TabProps extends ReadyProps {
 
 function Overview(p: TabProps) {
   const { status, now, a } = p;
-  const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
+  const tz = tzOf(status), year = yearOf(now, tz);
   const cur = stepOf(a.state), group = isGroup(a);
   const handedOut = cur >= 2;
   const subs = [
@@ -163,7 +173,6 @@ function Overview(p: TabProps) {
     cur === 4 ? `${a.marks.filled} of ${a.marks.total} marked` : cur > 4 ? 'Done' : `Opens after ${fmtDay(a.grading_cutoff_datetime, tz, year)}`,
     cur === 5 ? 'Returned' : 'Opens after marks are returned',
   ];
-  const dueIn = a.due ? Math.round((Date.parse(a.due) - now) / 864e5) : null;
   const tplProblems = (status.problems ?? []).filter((x) => x.fix?.screen === 'template' && x.fix.entry === a.slug);
   const row = (cls: string, state: string, why: string, ops?: preact.ComponentChildren) => (
     <li class={cls}><span class="sa-state">{state}</span><div class="sa-body"><span class="sa-why">{why}</span>{ops}</div></li>
@@ -180,13 +189,14 @@ function Overview(p: TabProps) {
   const bigOf = cur === 4 || cur === 5 ? a.marks.total : a.units;
   const scope = cohortScope(p);
   const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand' };
+  const sharers = sharedBy(p, a.template);
+  const shared = sharers.length > 1 ? `${sharers.join(' and ')} use the same assignment template, so the engine cannot tell which to act on; run it from GitHub per entry, or give each its own template.` : null;
   const tree = p.files.tree(p.course.org, a.template);
   const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
   return (
     <>
       <div class="page-head">
         <div><h1>{assignmentTitle(a)}</h1><p class="lede">{lede}</p></div>
-        <div class="actions"><a class="btn quiet" href={`#schedule-${a.slug}`}>Edit dates</a></div>
       </div>
       {p.tabs}
       <Help title="What happens now" doc="10-grade-and-return-assignments.md">
@@ -214,14 +224,7 @@ function Overview(p: TabProps) {
             })}
           </ol>
         </section>
-        <section class="panel" aria-label="Dates">
-          <div class="dates">
-            <div><div class="l">Hand out</div><div class="v">{a.handout ? fmtWhen(a.handout, tz, year) : 'By hand'}</div><div class="s">{handedOut ? `${a.units} repos created` : a.handout ? 'scheduled' : 'from this page'}</div></div>
-            <div><div class="l">Due</div><div class="v">{fmtWhen(a.due, tz, year)}</div><div class="s">{dueIn !== null && dueIn >= 0 && a.state === 'open' ? `in ${dueIn} day${dueIn === 1 ? '' : 's'}` : a.due && a.due.slice(0, 10) < today ? 'passed' : ''}</div></div>
-            <div><div class="l">Late work until</div><div class="v">{fmtWhen(a.grading_cutoff_datetime, tz, year) || 'No late work'}</div><div class="s">with the late penalty</div></div>
-            <div><div class="l">Solution shown</div><div class="v">{a.solution_shown ? fmtWhen(a.solution_shown, tz, year) : 'Not shown'}</div><div class="s">{a.solution_shown ? 'in materials' : 'off for this assignment'}</div></div>
-          </div>
-        </section>
+        <AssignmentRun p={p} a={a} group={group} />
         <div class="grid-2">
           <section class="panel section">
             <div class="section-head"><h2>{cur >= 4 ? 'Marking' : cur <= 1 ? (group ? 'Teams' : 'Submissions') : 'Submissions'}</h2></div>
@@ -251,8 +254,12 @@ function Overview(p: TabProps) {
               cur < 2 ? 'Opens after hand out.' : cur > 3 ? `Closed ${fmtDay(a.grading_cutoff_datetime, tz, year)}.` : 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.',
               cur === 2 || cur === 3 ? (
                 <>
-                  <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
-                  <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
+                  {shared ? <p class="footnote">{shared}</p> : (
+                    <>
+                      <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
+                      <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
+                    </>
+                  )}
                 </>
               ) : null)}
             {row(cur === 4 ? 'now' : cur > 4 ? 'past' : 'later', 'Marking',

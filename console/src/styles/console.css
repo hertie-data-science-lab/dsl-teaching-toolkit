@@ -693,6 +693,14 @@ table.marks tr.nosub td { color: var(--muted); }
 table.marks tr.team-row td { background: var(--sunk); font-weight: 600; border-top: 1px solid var(--rule-strong); }
 table.marks tr.member-row td { font-weight: 400; }
 table.marks .fold-toggle { border: 0; background: none; padding: 0 6px 0 0; min-height: 0; cursor: pointer; color: var(--ink-2); font: inherit; }
+table.marks td textarea { border-color: var(--rule-strong); background: var(--surface); min-height: 30px; padding: 3px 6px; }
+table.marks textarea.fb { min-width: 180px; }
+table.marks textarea.qfb { width: 100%; min-width: 120px; font-size: 13px; }
+table.marks tr.qfb-row td { border-top: 0; font-weight: 400; }
+
+/* run settings: effective value and source, and the links to change it */
+.run-row .eff { font-weight: 600; }
+.run-row .run-links { display: flex; flex-wrap: wrap; gap: 14px; margin: 2px 0 0; }
 table.marks th.grp-h { text-align: center; border-bottom: 1px solid var(--rule); }
 
 /* materials: pattern editors with previews */

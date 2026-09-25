@@ -16,7 +16,9 @@ import { cohortOrgName, cohortTerms, openAt, TERM_RE, termLabel } from '../wizar
 import { allOk, checkCohortSetUp, checkOrg, useLive, type Check } from '../wizards/verify';
 import { Checks, LiveChecks, OrgLinks, Rail, StepCard, Verified } from '../wizards/Wizard';
 import type { CourseProps } from './types';
-import { CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
+import { ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
+import { obj } from '../edit/yamlText';
+import { parse as parseYamlText } from 'yaml';
 
 const STEPS = [
   { t: 'Org', s: 'Create it on GitHub' },
@@ -36,8 +38,16 @@ export function nkDone(d: NkDraft, org: string, orgChecks: Check[] | null, setUp
   return [orgOk, orgOk && (setUp ? allOk(setUp) : d.setUp === org), false];
 }
 
-/** Which of the three cards are done, from the semester's own files. */
-export function cardsDone(files: Files, org: string): { staff: boolean; schedule: boolean; students: boolean } {
+function parseYaml(text: string): unknown {
+  try {
+    return parseYamlText(text);
+  } catch {
+    return null;
+  }
+}
+
+/** Which of the cards are done, from the semester's own files; `defaults` (optional) once assignments.yml states any. */
+export function cardsDone(files: Files, org: string): { staff: boolean; schedule: boolean; students: boolean; defaults: boolean } {
   const f = (path: string) => {
     const s = files.file(org, CONFIG_REPO, path);
     return s.kind === 'ready' ? s.text : '';
@@ -47,6 +57,7 @@ export function cardsDone(files: Files, org: string): { staff: boolean; schedule
     staff: parseInstructors(f(INSTRUCTORS_FILE)).length > 0,
     schedule: !!sched && Object.keys(sched.releases).length + Object.keys(sched.assignments).length > 0,
     students: parseRoster(f('students.csv')).rows.length > 0,
+    defaults: Object.keys(obj(obj(parseYaml(f(ASSIGNMENTS_FILE))).defaults)).length > 0,
   };
 }
 
@@ -127,8 +138,9 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           {card('Instructors', 'instructors', c.staff, 'Who gets the instructor buttons and the problem emails.', 'At least one person listed.')}
           {card('Schedule', 'schedule-semester', c.schedule, 'Semester dates, releases, assignments, events.', 'Releases or assignments scheduled.')}
           {card('Students', 'students', c.students, 'The roster; adding a row sends a code.', 'Roster started.')}
+          {card('Assignment defaults', 'assignments', c.defaults, 'Optional. Late work, teams and who sees each repo for this semester’s assignments; left alone, the course’s defaults apply.', 'This semester’s defaults set.')}
         </div>
-        {n === 3 ? <Verified>{label} is live. Automation takes it from here.</Verified> : <p class="footnote">{n} of 3 done. The semester goes live when all three are done.</p>}
+        {n === 3 ? <Verified>{label} is live. Automation takes it from here.</Verified> : <p class="footnote">{n} of 3 done. The semester goes live when instructors, schedule and students are done.</p>}
       </>
     );
     foot = <a class="btn outline" href={`?cohort=${org}#semester`}>Open {label}</a>;
