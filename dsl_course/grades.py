@@ -1295,6 +1295,7 @@ def grading_spec_faults(
     fires: datetime | None,
     handed_out: list[dict] | None = None,
     releases_solution: bool = False,
+    semester_org: str = "",
 ) -> tuple[list[ConfigFault], GradingSpec | None]:
     """Everything in ONE `grading_config.yml` the parse had to refuse, as faults - and the
     spec that parse produced, so the caller does not read and parse the same file again.
@@ -1315,7 +1316,12 @@ def grading_spec_faults(
 
     `releases_solution` is whether this assignment's `schedule.yml` entry carries a
     `solution_datetime:` - the one fact about it that the definition here can contradict
-    (see below), and the only thing read from outside this file."""
+    (see below), and the only thing read from outside this file.
+
+    The checks against the handed-out repos and the solution release read the RESOLVED
+    spec (`with_run_settings` for `slug` of `semester_org`), the one the handout acts on:
+    a visibility set in `assignments.yml` or the course's defaults is what the repos were
+    created with, and the template alone would give the digest a second answer."""
     try:
         spec = parse_grading_spec(text)
     except NotMigrated as exc:
@@ -1348,6 +1354,7 @@ def grading_spec_faults(
                 f"the assignment is marked on the toolkit's defaults.",
             )
         ], None
+    spec = with_run_settings(spec, course_org, semester_org, slug)
     lines = key_lines(text)
     faults = [
         _spec_fault(
@@ -1477,6 +1484,7 @@ def grading_config_faults(
             fires,
             handed_out,
             releases_solution=entry.solution_datetime is not None,
+            semester_org=semester_org,
         )
         faults += spec_faults
         if handed_out and spec is not None and spec.visibility_is_students:

@@ -185,3 +185,31 @@ def test_no_module_but_settings_reads_assignment_defaults():
             if isinstance(node, ast.Constant) and node.value == "assignment_defaults":
                 found.append(f"{path.name}:{node.lineno}")
     assert found == []
+
+
+def test_the_digest_checks_the_spec_the_handout_resolves(monkeypatch):
+    """`assignments.yml` makes a1 public on a template that says nothing about visibility:
+    the digest reads the same answer the handout does."""
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: "assignments:\n  a1:\n    visibility: public\n",
+    )
+    template = "type: individual\nsubmit_via: assignment_repo\n"
+    handed_out = [{"visibility": "public"}] * 3
+    faults, spec = grades.grading_spec_faults(
+        "a1",
+        "assignment-1-f2026",
+        "C",
+        template,
+        None,
+        handed_out,
+        releases_solution=True,
+        semester_org="Sem",
+    )
+    assert spec.visibility == "public" and dict(spec.sources)["visibility"] == (
+        "assignment"
+    )
+    texts = [f.what for f in faults]
+    assert not any("does not describe the repos" in t for t in texts)
+    assert any("`solution_datetime:`" in t for t in texts)
