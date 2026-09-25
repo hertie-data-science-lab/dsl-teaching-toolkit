@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -955,3 +955,46 @@ def test_an_arg_that_went_is_refused_with_where_it_lives_now(op, arg):
             )
         )
     assert caught.value.code == NOT_MIGRATED and "no longer read" in caught.value.text
+
+
+def _gate_store(monkeypatch, *, put_ok=True) -> dict:
+    store: dict = {}
+    monkeypatch.setattr(
+        assign, "get_file_content", lambda org, repo, path, ref="": store.get(path)
+    )
+
+    def put(org, repo, path, body, msg, **k):
+        if put_ok:
+            store[path] = body.decode()
+        return put_ok
+
+    monkeypatch.setattr(assign, "put_file", put)
+    monkeypatch.setenv("GITHUB_ACTOR", "Prof")
+    return store
+
+
+def test_a_preview_of_one_template_does_not_license_another(monkeypatch):
+    _gate_store(monkeypatch)
+    assert assign.preview_first("S", "assignment-1-f2026", preview=True) is None
+    refused = assign.preview_first("S", "assignment-2-f2026", preview=False)
+    assert refused is not None and refused.reasons[0]["code"] == assign.PREVIEW_FIRST
+
+
+def test_a_preview_older_than_a_day_no_longer_counts(monkeypatch):
+    _gate_store(monkeypatch)
+    then = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
+    assert assign.preview_first("S", "t", preview=True, now=then) is None
+    late = then + assign.PREVIEW_VALID + timedelta(minutes=1)
+    assert assign.preview_first("S", "t", preview=False, now=late) is not None
+
+
+def test_a_spend_that_fails_refuses_and_a_failed_preview_says_so(monkeypatch):
+    store = _gate_store(monkeypatch)
+    assert assign.preview_first("S", "t", preview=True) is None
+    # The spend fails: nothing may be handed out on a preview still good for another run.
+    monkeypatch.setattr(assign, "put_file", lambda *a, **k: False)
+    refused = assign.preview_first("S", "t", preview=False)
+    assert refused is not None and "could not be marked as used" in refused.text
+    assert store  # the record was not spent
+    refused = assign.preview_first("S", "t", preview=True)
+    assert refused is not None and "could not be recorded" in refused.text

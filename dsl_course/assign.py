@@ -56,7 +56,7 @@ import os
 import sys
 import tempfile
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -1311,7 +1311,9 @@ def main() -> int:
             listing=listing_by_name(args.semester_org),
         )
         if when == SOLUTION_NOW and args.preview and rc == 0:
-            preview_first(args.semester_org, args.template, preview=True)
+            refused = preview_first(args.semester_org, args.template, preview=True)
+            if refused is not None:
+                return refused
         return rc
     except RuntimeError as exc:
         log_err(str(exc))
@@ -1327,46 +1329,69 @@ def _actor() -> str:
     return os.environ.get("GITHUB_ACTOR") or acting_login() or ""
 
 
-def preview_first(semester_org: str, template: str, preview: bool) -> Summary | None:
+# How long a preview counts for: the real run is meant to follow it, not a week later.
+PREVIEW_VALID = timedelta(hours=24)
+
+
+def _refusal(text: str) -> Summary:
+    log_err(text)
+    return Summary(text, reasons=[{"code": PREVIEW_FIRST, "text": text}], code=1)
+
+
+def preview_first(
+    semester_org: str, template: str, preview: bool, now: datetime | None = None
+) -> Summary | None:
     """The one gate on a hand out WITH the solution (`--solution-datetime now`): it pushes
     the model answer and rubric into every student's repo, and cannot be undone. A preview
-    records who previewed which template (`SOLUTION_PREVIEW`, private); the real run goes
-    ahead only when the last record is that person's preview of that template, and then
-    spends it. None = go ahead; a refusal otherwise. Fail closed: an unreadable record
-    refuses."""
+    records who previewed which template, and when (`SOLUTION_PREVIEW`, private); the real
+    run goes ahead only when the last record is that person's preview of that template
+    from the last `PREVIEW_VALID`, and then spends it. None = go ahead; a refusal
+    otherwise. Fail closed: a record that cannot be read or spent refuses."""
+    now = now or datetime.now(timezone.utc)
     actor = _actor()
     want = {"actor": actor.casefold(), "template": template, "solution": SOLUTION_NOW}
     if preview:
-        body = (json.dumps(want, indent=2, sort_keys=True) + "\n").encode()
-        put_file(
+        body = json.dumps({**want, "at": now.isoformat()}, indent=2, sort_keys=True)
+        if not put_file(
             semester_org,
             CONFIG_REPO,
             SOLUTION_PREVIEW,
-            body,
+            (body + "\n").encode(),
             "Record a preview of a hand out with the solution",
-        )
+        ):
+            return _refusal(
+                "The preview could not be recorded, so the hand out with the solution "
+                "that follows it will be refused: run the preview again."
+            )
         return None
     try:
         last = json.loads(
             get_file_content(semester_org, CONFIG_REPO, SOLUTION_PREVIEW) or "{}"
         )
-    except (RuntimeError, json.JSONDecodeError):
-        last = {}
-    if actor and last == want:
-        put_file(
+        at = datetime.fromisoformat(str(last.pop("at", "")))
+    except (RuntimeError, ValueError, AttributeError):
+        last, at = {}, None
+    fresh = at is not None and at.tzinfo is not None and now - at <= PREVIEW_VALID
+    if actor and last == want and fresh:
+        # Spent BEFORE anything is handed out: a spend that fails must not leave the
+        # preview good for another run.
+        if put_file(
             semester_org,
             CONFIG_REPO,
             SOLUTION_PREVIEW,
             b"{}\n",
             "Spend the preview of a hand out with the solution",
+        ):
+            return None
+        return _refusal(
+            "The preview could not be marked as used, so nothing was handed out: run "
+            "the preview again, then the hand out."
         )
-        return None
-    text = (
+    return _refusal(
         "Handing out with the solution pushes the model answer and rubric into every "
-        "student's repo, and cannot be undone: preview this hand out first, then run it."
+        "student's repo, and cannot be undone: preview this hand out first (within "
+        "24 hours), then run it."
     )
-    log_err(text)
-    return Summary(text, reasons=[{"code": PREVIEW_FIRST, "text": text}], code=1)
 
 
 def solution_record_path(slug: str) -> str:
