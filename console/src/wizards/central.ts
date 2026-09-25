@@ -5,12 +5,11 @@
 // the run's conclusion is the verdict and the org's live state is the proof.
 
 import { wait, type GitHubClient } from '../github/client';
+import { HANDLE_RE } from '../model/policy';
 import { ORG_RE } from './model';
 
 export const CENTRAL = { owner: 'hertie-data-science-lab', repo: 'dsl-teaching-toolkit', workflow: 'bootstrap-org.yml', ref: 'main' } as const;
 export const CENTRAL_ACTIONS = `https://github.com/${CENTRAL.owner}/${CENTRAL.repo}/actions/workflows/${CENTRAL.workflow}`;
-
-const HANDLE_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
 export interface BootstrapCourse {
   org: string;

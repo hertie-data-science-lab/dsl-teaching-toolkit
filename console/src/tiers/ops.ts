@@ -2,12 +2,13 @@
 // tables). Keys are the op's args-schema properties; anything not listed is Derived or
 // Hidden and never a field.
 
+import { DEFAULT_DEST_REPO } from '../model/policy';
 import { opt, type Tiers } from './types';
 
-/** An unscheduled release's destination: Advanced, defaulting to materials and the source path. */
+/** An unscheduled release's destination: Advanced, defaulting to the institution's release repo and the source path. */
 function releaseDest(sourcePath: string): Tiers {
   return {
-    semester_dest_repo: { tier: 'advanced', label: 'To repo', default: 'materials', defaultLabel: 'default: materials', reason: 'In the semester. Blank means materials.', placeholder: 'materials' },
+    semester_dest_repo: { tier: 'advanced', label: 'To repo', default: DEFAULT_DEST_REPO, defaultLabel: `default: ${DEFAULT_DEST_REPO}`, reason: `In the semester. Blank means ${DEFAULT_DEST_REPO}.`, placeholder: DEFAULT_DEST_REPO },
     semester_dest_path: { tier: 'advanced', label: 'To path', defaultLabel: 'default: same as the folder', placeholder: sourcePath },
   };
 }

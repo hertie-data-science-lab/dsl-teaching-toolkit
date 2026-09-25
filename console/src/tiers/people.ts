@@ -1,9 +1,8 @@
 // Instructors (`instructors.yml` in the semester's config repo): design/inputs.md "Teaching team".
 
 import { EMAIL_RE } from '../edit/csv';
+import { HANDLE_RE } from '../model/policy';
 import type { Tiers } from './types';
-
-const HANDLE_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
 const blank = (x: unknown) => !String(x ?? '').trim();
 

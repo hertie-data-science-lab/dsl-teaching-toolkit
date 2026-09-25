@@ -15,7 +15,7 @@ export interface FieldTier {
   reason?: string;
   /** The value that counts as unchanged, for "Advanced (n changed)" and the default marker. */
   default?: unknown;
-  /** How the default is written beside the label: "default: 10%". */
+  /** How the default is written beside the label: "institution default: <value>". */
   defaultLabel?: string;
   widget?: Widget;
   options?: { value: string; label: string; sub?: string; off?: string; href?: string }[];

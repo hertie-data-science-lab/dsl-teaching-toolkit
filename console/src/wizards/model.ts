@@ -4,6 +4,7 @@
 
 import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
+import { DEFAULT_FORMATS, ORG_NAME_RE } from '../model/policy';
 import type { Values } from '../tiers/types';
 
 /** The lab's bot: an owner of every course and semester org until the console app replaces it. */
@@ -28,7 +29,7 @@ export function cohortOrgName(courseOrg: string, code: string, term: string): st
   return `hertie-${courseSlugOf(courseOrg, code)}-${term}`;
 }
 
-export const ORG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+export const ORG_RE = ORG_NAME_RE;
 export const TERM_RE = /^[fs]\d{4}$/;
 
 export function termLabel(term: string): string {
@@ -146,7 +147,7 @@ export function assignmentArgs(v: Values): Record<string, unknown> {
     ...base,
     type: group ? 'group' : 'individual',
     submit_via: submit,
-    formats: ((v.formats as string[] | undefined) ?? ['ipynb']).join(','),
+    formats: ((v.formats as string[] | undefined) ?? DEFAULT_FORMATS).join(','),
     autograde: !autogradeBlock(v) && v.autograde === 'true',
   };
 }

@@ -13,6 +13,7 @@
 import { parse } from 'yaml';
 import type { DirEntry, GitHubClient } from '../github/client';
 import { addDays, str } from './format';
+import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './policy';
 
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant. */
 export interface ScheduleRow {
@@ -67,7 +68,7 @@ export interface SemesterAssignment {
   due: string | null;
   /** The late cutoff: due + the late window; null when the source does not say. */
   lateCutoff: string | null;
-  /** "10% per day, up to 10 days" */
+  /** "<penalty> per day, up to <n> days" */
   lateRule: string;
   /** "What is on main at the grading cutoff is what is marked." */
   cutoffSentence: string;
@@ -168,7 +169,7 @@ function bytesToBase64(b: Uint8Array): string {
   return btoa(bin);
 }
 
-export const DEFAULT_TZ = 'Europe/Berlin';
+export const DEFAULT_TZ = DEFAULT_TIMEZONE;
 /** How long a semester's facts are reused before they are read again (ETag'd: an unchanged file costs no rate limit). */
 export const FRESH_MS = 10 * 60 * 1000;
 
@@ -200,7 +201,7 @@ export function startOfDay(now: number, tz = DEFAULT_TZ): number {
   return instant(d, tz);
 }
 
-/** The late cutoff from the late rule's window ("up to 10 days"; "not accepted after the deadline" is the deadline). */
+/** The late cutoff from the late rule's window ("up to <n> days"; "not accepted after the deadline" is the deadline). */
 export function cutoffFrom(due: string | null, lateRule: string): string | null {
   if (!due) return null;
   if (/not accepted/i.test(lateRule)) return due;
@@ -478,14 +479,14 @@ function yamlOf(text: string | undefined): Record<string, unknown> {
   }
 }
 
-/** The repos `_data/materials.yml` links into; `materials` when it names none. */
+/** The repos `_data/materials.yml` links into; the institution's release repo when it names none. */
 export function materialsReposOf(text: string, org: string): string[] {
   const repos = new Set<string>();
   for (const m of text.matchAll(/https:\/\/github\.com\/[^\s"']+/g)) {
     const rp = repoPath(m[0], org);
     if (rp) repos.add(rp.repo);
   }
-  return repos.size ? [...repos] : ['materials'];
+  return repos.size ? [...repos] : [DEFAULT_DEST_REPO];
 }
 
 /** The rows sorted by when they happen. */
