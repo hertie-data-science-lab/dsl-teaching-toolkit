@@ -189,12 +189,16 @@ def _block_reads(tree: ast.AST) -> list[int]:
     (and `pop`/`setdefault`), by the literal or by the constant."""
     found = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Subscript) and _names_the_block(node.slice) or (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in ("get", "pop", "setdefault")
-            and node.args
-            and _names_the_block(node.args[0])
+        if (
+            isinstance(node, ast.Subscript)
+            and _names_the_block(node.slice)
+            or (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("get", "pop", "setdefault")
+                and node.args
+                and _names_the_block(node.args[0])
+            )
         ):
             found.append(node.lineno)
     return found
