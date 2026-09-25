@@ -5,12 +5,14 @@ throughout, and a second run finds every step already migrated and writes nothin
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
-from dsl_course import discovery, migrate, records, repos, scaffold
+from dsl_course import discovery, migrate, records, repos, scaffold, workflows_render
 from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
@@ -122,6 +124,8 @@ class FakeGitHub:
         # look for live runs), "record <org>" (a pause record written), "off <org>/<repo>"
         # / "on <org>/<repo>" (an Actions switch), "sleep <s>".
         self.calls: list[str] = []
+        self.run_query_seconds = 0  # how long each runs listing takes on the fake clock
+        self.off_at: list[float] = []  # the fake clock at each switch off
 
     def add(self, org, name, files=None, *, topics=(), archived=False, template=False,
             branches=None, description=""):  # fmt: skip
@@ -256,6 +260,8 @@ class FakeGitHub:
                 }
                 self.puts.append((*key, on))
                 self.calls.append(f"{'on' if on else 'off'} {key[0]}/{key[1]}")
+                if not on:
+                    self.off_at.append(self.clock.at)
                 if not on and self.run_after_pause == key:
                     self.runs.setdefault(key, []).append(
                         ("9999-12-31T00:00:00Z", self.run_after_pause_state)
@@ -268,6 +274,7 @@ class FakeGitHub:
             return 0, json.dumps(body)
         if parts[3:] == ["actions", "runs"]:
             self.calls.append(f"runs {key[0]}/{key[1]}")
+            self.clock.at += self.run_query_seconds
             params = dict(p.split("=", 1) for p in query.split("&"))
             since = params.get("created", "%3E%3D").split("%3E%3D", 1)[1]
             state = params.get("status")
@@ -2006,8 +2013,10 @@ def test_hold_pauses_every_live_org_then_migrations_never_unpause_then_release(
 
     # A second run under the hold finds nothing to do.
     commits = list(fake.commits)
+    capsys.readouterr()
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     assert fake.commits == commits
+    assert capsys.readouterr().err == ""  # no "still DISABLED" note on a finished run
 
     assert _main(monkeypatch, "--status", COURSE) == 0
     out = capsys.readouterr().out
@@ -2056,15 +2065,139 @@ def test_a_stop_under_hold_restores_nothing(fake, semester, monkeypatch, capsys)
     assert _hold_record(fake, SEM)["migrated"] is False
 
 
-def test_release_names_an_org_not_migrated_inside_the_hold(
+def test_release_is_refused_until_every_held_org_is_migrated_unless_abandoned(
+    fake, semester, monkeypatch, capsys
+):
+    _hold_stubs(fake, monkeypatch)
+    assert _main(monkeypatch, "--hold", COURSE, "--no-preview") == 0
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0  # the course only
+    capsys.readouterr()
+    for argv in (("--release", COURSE), ("--release", COURSE, "--no-preview")):
+        assert _main(monkeypatch, *argv) == 1
+        captured = capsys.readouterr()
+        assert f"{SEM} (NOT migrated inside the hold)" in captured.out
+        assert f"not migrated inside the hold: {SEM}" in captured.err
+        assert "--abandon" in captured.err
+    assert not [c for c in fake.calls if c.startswith("on ")]
+    assert not fake.enabled(SEM, OLD_CONFIG_REPO)
+
+    assert _main(monkeypatch, "--release", COURSE, "--abandon", "--no-preview") == 0
+    assert f"abandoning the hold of {SEM} (not migrated)" in capsys.readouterr().err
+    assert all(fake.enabled(*k) for k in fake.workflow_repos())
+
+
+def test_status_and_release_find_a_semester_archived_during_the_hold(
     fake, semester, monkeypatch, capsys
 ):
     assert _main(monkeypatch, "--hold", COURSE, "--no-preview") == 0
+    fake._repo(SEM, OLD_CONFIG_REPO)["archived"] = True
     capsys.readouterr()
-    assert _main(monkeypatch, "--release", COURSE) == 0  # a preview
-    out = capsys.readouterr().out
-    assert f"{SEM} (NOT migrated inside the hold)" in out
-    assert not [c for c in fake.calls if c.startswith("on ")]
+    assert _main(monkeypatch, "--status", COURSE) == 0
+    assert f"{SEM}: on hold, not migrated yet" in capsys.readouterr().out
+    assert _main(monkeypatch, "--release", COURSE, "--abandon", "--no-preview") == 0
+    assert migrate.PAUSE_RECORD not in fake.tree(SEM, ".github")
+
+
+def test_hold_takes_over_a_semester_migration_in_flight(
+    fake, semester, monkeypatch, capsys
+):
+    # A semester run that is paused right now: the course's repos are off because of
+    # IT. Read now they would say "off", and the release would leave them off for good.
+    _hold_stubs(fake, monkeypatch)
+    fake.fail_rename = True
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    for key in ((COURSE, ".github"), (COURSE, "course-materials-f2026")):
+        fake.actions[key] = {"enabled": False, "allowed_actions": None}
+    fake.fail_rename = False
+    assert _main(monkeypatch, "--hold", COURSE) == 0  # the preview says so
+    assert f"{SEM}: take over the record of its migration in flight" in (
+        capsys.readouterr().out
+    )
+    assert _main(monkeypatch, "--hold", COURSE, "--no-preview") == 0
+    on = {"enabled": True, "allowed_actions": "all"}
+    assert _hold_record(fake, COURSE)["repos"] == {
+        f"{COURSE}/.github": on,
+        f"{COURSE}/course-materials-f2026": on,
+    }
+    assert set(_hold_record(fake, SEM)["repos"]) == {
+        f"{SEM}/{OLD_CONFIG_REPO}",
+        f"{SEM}/{OLD_JOIN_REPO}",
+        f"{SEM}/sem-f2026.github.io",
+    }
+    for org in (COURSE, SEM):
+        assert _main(monkeypatch, org, "--no-preview") == 0
+    assert _main(monkeypatch, "--release", COURSE, "--no-preview") == 0
+    assert all(fake.enabled(*k) for k in fake.workflow_repos())
+
+
+def test_hold_refuses_two_records_that_both_hold_the_course(
+    fake, semester, monkeypatch, capsys
+):
+    fake.fail_rename = True
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    course_record = {"hold": False, "repos": {f"{COURSE}/.github": {"enabled": True}}}
+    fake.tree(COURSE, ".github")[migrate.PAUSE_RECORD] = json.dumps(
+        course_record
+    ).encode()
+    capsys.readouterr()
+    assert _main(monkeypatch, "--hold", COURSE, "--no-preview") == 1
+    assert f"the pause records of {SEM}, {COURSE} both hold" in capsys.readouterr().err
+
+
+def test_a_semester_waits_for_another_semester_s_unfinished_migration(
+    fake, semester, monkeypatch, capsys
+):
+    # A stops (and puts the course back on); B must not start: A's rerun would turn the
+    # course on under B's migration.
+    other = "Sem-b"
+    fake.tree(COURSE, ".github")["semesters.yml"] = (
+        f"semesters:\n- {SEM}\n- {other}\n".encode()
+    )
+    fake.add(other, ".github", {"dsl-course.yml": f"course: {COURSE}\n".encode()},
+             topics=[OLD_SEMESTER_TOPIC])  # fmt: skip
+    fake.add(other, OLD_CONFIG_REPO, {"schedule.yml": b"timezone: Europe/Berlin\n"})
+    fake.fail_rename = True
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert fake.enabled(COURSE, ".github")
+    capsys.readouterr()
+    assert _main(monkeypatch, other, "--no-preview") == 1
+    assert (
+        f"another semester's migration under {COURSE} has not finished ({SEM})"
+        in capsys.readouterr().err
+    )
+    assert fake.enabled(COURSE, ".github")
+
+
+def test_the_switch_waits_past_a_tick_the_slow_poll_ran_into(
+    fake, semester, monkeypatch, capsys
+):
+    # Clear of the tick when the poll starts, inside the margin by the time it ends: the
+    # switch is re-checked immediately before it lands.
+    fake.clock.at = 1_790_337_780.0 + 12 * 60 - 90  # 90 s before the quarter hour
+    fake.run_query_seconds = 2  # 25 listings: 50 s, into the margin
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    quarter = 1_790_337_780.0 + 12 * 60
+    assert fake.off_at and min(fake.off_at) > quarter
+    assert all(migrate.next_tick(t) >= migrate.TICK_MARGIN for t in fake.off_at[:1])
+    assert "waiting past it" in capsys.readouterr().out
+
+
+def test_the_ticks_cover_every_rendered_cron():
+    rendered = [
+        workflows_render.render_scheduler(),
+        workflows_render.render_refresh(),
+        workflows_render.render_sync_membership(["S"]),
+        workflows_render.render_sync_site(["S"]),
+        workflows_render.render_publish_site(["course-materials-x"]),
+        *(p.read_text() for p in Path(migrate.ROOT, "templates").rglob("*.yml")),
+    ]
+    crons = [cron for text in rendered for cron in re.findall(r'cron: "([^"]+)"', text)]
+    assert len(crons) >= 6
+    for cron in crons:
+        minute, hour = cron.split()[:2]
+        for m in migrate._cron_field(minute, 60):
+            for h in migrate._cron_field(hour, 24):
+                assert h * 3600 + m * 60 in migrate.TICK_SECONDS, cron
 
 
 def test_hold_takes_a_course_org_only(fake, semester, monkeypatch, capsys):
