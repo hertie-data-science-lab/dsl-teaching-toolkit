@@ -609,7 +609,7 @@ function View(p: ReadyProps) {
           <details class="fold adv-bottom">
             <summary>Advanced</summary>
             <div class="fold-body">
-              <div class="savebar"><span class="footnote">Release a folder that is not in the schedule, for a one-off or a correction.</span><OpOpen def={releaseAdhoc(scope, repos)} cls="btn small outline" label="Release something unscheduled…" /></div>
+              <div class="savebar"><span class="footnote">Release a folder that is not in the schedule, for a one-off or a correction.</span><OpOpen def={releaseAdhoc(scope, [...repos, ...sourceRepos(p, repos).others])} cls="btn small outline" label="Release something unscheduled…" /></div>
               <div class="savebar"><span class="footnote">See what automation’s next scheduled release run would do.</span><OpOpen def={scheduledPreview(scope)} cls="btn small outline" label="Preview scheduled releases" /></div>
             </div>
           </details>
