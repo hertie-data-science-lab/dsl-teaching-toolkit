@@ -91,6 +91,7 @@ from .grades import (
     team_lock_content,
 )
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
+from .materials import MATERIALS_TOPIC, is_materials_repo
 from .profile_readme import profile_files, update_profile_readme
 from .repos import (
     current_description,
@@ -2226,6 +2227,29 @@ class Course:
             for repo, moves in self.materials_moves().items()
         )
 
+    def untopicked_materials(self) -> list[str]:
+        """The `course-materials-*` repos that do not carry the materials topic yet: the
+        prefix was how a materials repo was told, the topic is now."""
+        return [
+            repo
+            for repo, row in sorted(_listing(self.org).items())
+            if repo.startswith(MATERIALS_REPO_PREFIX)
+            and not row.get("archived")
+            and not is_materials_repo(row)
+        ]
+
+    def topic_materials(self) -> bool:
+        return all(
+            set_repo_topics(
+                self.org,
+                repo,
+                sorted(
+                    {*(_listing(self.org)[repo].get("topics") or []), MATERIALS_TOPIC}
+                ),
+            )
+            for repo in self.untopicked_materials()
+        )
+
     # re-render ---------------------------------------------------------------
     def drift(self) -> list[str]:
         """Every file the course re-render (`seed.refresh`) writes that is not what this
@@ -2349,6 +2373,17 @@ class Course:
                     f"git revert the '{TEXT_COMMIT}' commit in {dotgithub} and on each "
                     f"template's {SOLUTION_BRANCH} branch"
                 ),
+            ),
+            Step(
+                "materials topic",
+                done=lambda: not self.untopicked_materials(),
+                plan=lambda: [
+                    f"{repo}: add the topic {MATERIALS_TOPIC}"
+                    for repo in self.untopicked_materials()
+                ],
+                do=self.topic_materials,
+                verify=lambda: not self.untopicked_materials(),
+                rollback=f"remove the {MATERIALS_TOPIC} topic from the materials repos",
             ),
             Step(
                 "materials files",

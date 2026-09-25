@@ -67,6 +67,7 @@ from .discovery import central_ref_for, discover_assignments, discover_semesters
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
+from .materials import MATERIALS_TOPIC
 from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
 from .repos import (
@@ -1095,6 +1096,10 @@ def scaffold_materials(
     grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
     failures = 0
+    # The topic is what makes it a materials repo (the name is only the default).
+    if not set_repo_topics(org, repo, [MATERIALS_TOPIC]):
+        log_err(f"could not mark {org}/{repo} as a materials repo ({MATERIALS_TOPIC})")
+        failures += 1
     # Copying comes FIRST, before a single API write: `_copy_branches` pushes whole
     # branches, and a `main` the Contents API had already opened would make that push a
     # non-fast-forward. The skeleton is then not written at all - a copied repo already
