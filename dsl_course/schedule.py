@@ -577,6 +577,27 @@ class Drops:
         self._add(f"{loc}: {what}", where, field_name, what, lines, code)
 
 
+# The words every thrown-away entry's fault carries (`_drop`), which `drops_assignments`
+# reads back.
+ENTRY_DROPPED = "entry dropped"
+
+
+def drops_assignments(sched: Schedule) -> bool:
+    """Whether this parse left out an assignment the file declares: an `assignments:`
+    entry (or the whole block) dropped, or any NOT_MIGRATED fault - a file this engine
+    only partly reads. A check that walks only the surviving assignments then sees less
+    than the semester has, so its silence is not "fixed"."""
+    return any(
+        f.code == NOT_MIGRATED
+        or (
+            f.where.split(".", 1)[0] == "assignments"
+            and f.file == SCHEDULE_PATH
+            and ENTRY_DROPPED in f.what
+        )
+        for f in sched.faults
+    )
+
+
 def _drop(
     drops: Drops,
     where: str,
@@ -588,7 +609,7 @@ def _drop(
     """Record a thrown-away entry: where it is in the YAML, what is wrong, and what the
     semester loses by it. The cost is the point - "entry dropped" alone tells faculty
     nothing about whether their term still runs."""
-    what = f"{why} - entry dropped, so {cost}"
+    what = f"{why} - {ENTRY_DROPPED}, so {cost}"
     drops._add(f"{where}: {what}", where, field_name, what, lines)
 
 

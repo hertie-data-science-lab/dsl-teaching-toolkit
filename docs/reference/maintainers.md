@@ -513,8 +513,10 @@ Every file faculty edit by hand can be wrong in a way the toolkit detects and on
 can fix. One type carries all of them (`faults.ConfigFault`), one engine keeps their issues
 (`config_digest`), one notifier addresses them (`notify`).
 
-**Seven digest issues**, one per file, each found by its EXACT title - a title that varied
-with the faults would never match and every run would open a new issue, so these are frozen:
+**Eight digest issues**, one per file, each found by its EXACT title - a title that varied
+with the faults would never match and every run would open a new issue, so these are frozen.
+A reworded title is appended to the digest's chain (`Digest.older_titles`): an issue open
+under an older one is still found, updated and closed.
 
 | issue title | file | where it lives |
 | --- | --- | --- |
@@ -524,7 +526,8 @@ with the faults would never match and every run would open a new issue, so these
 | `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
 | `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
 | `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `semester-config` |
-| `dsl-course.yml / cohort registry has entries the sync cannot use` | both course files | course `.github` |
+| `assignments.yml has values that will not run as written` | `assignments.yml` (what is checked against the handed-out repos) | semester `semester-config` |
+| `dsl-course.yml / semester registry has entries the sync cannot use` (was `... / cohort registry ...`) | both course files | course `.github` |
 
 The body is rewritten every tick (GitHub does not email about that); a comment - which it
 does - is posted only on appearance, escalation and clearing. An empty fault list CLOSES the
@@ -746,7 +749,8 @@ dispatch is refused as `NOT_MIGRATED` (`faults.NOT_MIGRATED`: one code, one sent
 the new spelling and "run the migration"). A migration tool rewrites a live org from this
 table, which is its input - keep it complete when a spelling changes. The exceptions are the
 append-only recognition chains for things already open in a live org - the Submission
-receipts labels and marks (`course.py`) and the archive notice prefixes (`teardown.py`) -
+receipts labels and marks (`course.py`), the archive notice prefixes (`teardown.py`) and
+the digest titles (`config_digest.Digest.older_titles`) -
 and ds01's `all_cohorts` payload, read as a deprecated alias until ds01-infra switches at
 Promote.
 
@@ -824,6 +828,28 @@ semester on `main`, run the e2e there, then - on the user's go-ahead, outside te
 hours - migrate every live real org and Promote in the same window (with ds01's switch to
 `all_semesters`). `.project/build/migration-runbook.md` holds the order.
 
+**Hold (real orgs).** A Promote refreshes every org on `release`, so the tier moves once, while
+every real course is held:
+
+1. `python -m dsl_course.migrate --hold <course> --no-preview` for EVERY real course (the
+   course and each live semester, one record per org marked `hold`: quiet across all first,
+   then every record, then the switch; a semester migration in flight is taken over).
+2. One Promote, with the ds01-infra switch in the same window. Unmigrated orgs are refused
+   `NOT_MIGRATED` until their turn.
+3. Per course: `migrate <course> --no-preview`, then each live semester; `--status <course>`
+   must read `migrated` for every org.
+4. `--release <course>` - preview first: no "NOT migrated inside the hold" - then
+   `--no-preview` (semesters first, then one catch-up for every semester). Refused while an
+   org is not migrated; `--abandon` releases anyway, naming them.
+5. Check now per semester, one preview of the next automatic run, the catch-up runs green.
+
+One course at a time instead: pin its `central_ref` to the new ref rather than Promote.
+Under a hold a migration never pauses and never unpauses: its bracket steps only mark the
+org `migrated` in its record; a stop restores nothing. `--status` and `--release` also find
+a semester archived or unregistered during the hold (the course's record names every held
+semester). Avoid 05:20-06:45 UTC: the daily Refresh, Publish, Sync membership and Sync site
+fire then (the switch waits past each cron tick, but a run's jobs outlast it).
+
 **The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, with
 every move, delete and re-rendered file per step, nothing written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
 step: do, verify, stop on the first failure naming the rollback. A step already done says
@@ -836,22 +862,27 @@ and the COURSE's workflow repos (whose scheduler acts on it); for a course `.git
 every content repo and template with a release workflow. Before anything is switched, each
 repo's own setting (`enabled`, `allowed_actions`) is recorded in
 `<org>/.github/.system/migration-pause.json`; the unpause restores exactly that (a repo that
-was off stays off), reads it back and deletes the record. Verified by reading the setting
-back and by no run unfinished (queued, in progress, waiting, requested, pending),
-whenever it started - in those repos or as the central Deploy / Promote of the course's
-tier. A run dispatched with the pause that has since finished wrote nothing after it. An org with no workflow repo counts as
-paused. From the pause to
-the verified unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded
-repos and the record. A semester waits until its course's migration is complete (no course
-record left, its Actions on) - or resumes its own stopped run (its record is there) - so no
-run re-enables a course mid-migration and two semesters of one course never overlap.
+was off stays off), reads it back and deletes the record. The order is: wait until no run is
+unfinished (queued, in progress, waiting, requested, pending) in those repos or as a central
+Deploy / Promote - polled for up to 4 minutes, and never ending within 60 s of a tick (ds01
+on the quarter hour, and every rendered cron: `migrate.TICK_CRONS`): it waits past the
+tick - THEN record, THEN check the tick again right before the switch, THEN switch off; a run switched off mid-flight loses its unstarted jobs. The verify reads the setting
+back and waits the same way for a run that slipped in during the switch. A preview never
+waits. An org with no workflow repo counts as paused. From the pause to the verified
+unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded repos and the
+record; a semester's stop first puts the COURSE's repos back on (every semester shares
+them; its own stay off until the rerun). A semester waits until its course's migration is complete (no course
+record left, its Actions on) - or resumes its own stopped run (its record is there) - and
+while any OTHER semester of the course has an unfinished (non-hold) record: a stopped run
+puts the course back on, so only the record says it is unfinished. So no run re-enables a
+course mid-migration and two semesters of one course never overlap.
 
 Preflight names, by file, where the checkout differs from the ref the course pins (`git
 diff --name-only origin/<ref> -- dsl_course templates`, as of the last fetch): the
 re-render writes what the checkout says, and the org's next Refresh writes what its ref
 says.
 
-Semester steps: preflight (topic, not archived, course complete, no run queued or running),
+Semester steps: preflight (topic, not archived, course complete),
 pause, rename repos (each old name must redirect), layout (records into `.system/`, `people.yml` -> `instructors.yml`
 checked against the old file before anything is committed, the seeded skeleton replaced by
 the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
@@ -882,8 +913,9 @@ What the demo rehearsal (2026-09-25) changed, one line each:
 
 - **No lost tick.** GitHub drops what fires into a disabled repo, so after the unpause the
   tool dispatches one Scheduled release and one Sync membership into the course's `.github`
-  (a semester's: scoped to it, as its `semester-config` push sends them; a course's: every
-  semester, as the ds01 timers do) and prints where each run shows up, without waiting.
+  (a semester's: scoped to it, like its `semester-config` push; a course's: every
+  semester, as the ds01 timers do), each marked `driver: migrate` so the run history tells
+  a catch-up from a real push, and prints where each run shows up, without waiting.
 - **The pause verify** counts only unfinished runs, whenever they started (the separate
   "started after the pause" count, and the GitHub clock it read, are gone).
 - **A step's done is its verify.** The re-render's verify and its done read the same

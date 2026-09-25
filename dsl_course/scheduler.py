@@ -891,6 +891,15 @@ def _config_faults(
     # The grading sheets, on this tick and no other: they have no push fast path, because a
     # sheet is edited all day while somebody marks and a mail per save would be a mail
     # about a file still being typed into.
+    if schedule.drops_assignments(sched):
+        # The checks below walk only the assignments that survived the parse. With one
+        # dropped (or a NOT_MIGRATED file) they would find nothing about it and close its
+        # issues as fixed: that is "we could not look", so their issues stay as they are.
+        log(
+            f"  {semester_org}'s schedule.yml leaves out an assignment - the grading "
+            f"sheet and assignment digests are left as they are this tick"
+        )
+        return out
     collect(
         config_digest.GRADING_SHEETS,
         lambda found: semester_sheet_faults(course_org, semester_org, sched, found),
@@ -905,6 +914,13 @@ def _config_faults(
             course_org, semester_org, sched, found, listing
         ),
     )
+    # The same pass checks the semester's own run settings against the handed-out repos:
+    # those faults are about assignments.yml, and go in its issue.
+    if config_digest.GRADING_CONFIG in out:
+        (
+            out[config_digest.GRADING_CONFIG],
+            out[config_digest.ASSIGNMENTS],
+        ) = config_digest.split_assignments(out[config_digest.GRADING_CONFIG])
     return out
 
 
@@ -996,8 +1012,8 @@ def _preflight_configs(
     ).items():
         if faults:
             log_step(
-                f"{len(faults)} entr(y/ies) in {semester_org}/{spec.file} the toolkit "
-                f"cannot use"
+                f"{len(faults)} entr(y/ies) in {semester_org}'s {spec.cite_file()} the "
+                f"toolkit cannot use"
             )
         _sync_config_digest(spec, course_org, semester_org, faults, local, dry_run)
     return 0

@@ -442,7 +442,11 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
     # Every hand-edited file in this semester EXCEPT schedule.yml, whose faults are C8's.
     # The FILES, not a count of faults: a title names the file to go and fix, which is
     # what a reader does next, and the issue itself lists the rows.
-    broken = [d.file for d in config_digest.SEMESTER_DIGESTS if d.title in standing]
+    broken = [
+        d.file
+        for d in config_digest.SEMESTER_DIGESTS
+        if any(t in standing for t in d.titles)
+    ]
     data["C9"] = _fault_row(
         "Config faults (hand-edited files)",
         semester_org,

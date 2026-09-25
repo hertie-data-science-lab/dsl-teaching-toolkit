@@ -8,6 +8,9 @@ org's `central_ref` will run once it is migrated.
 
     python3 -m dsl_course.migrate <org>                 # preview: the plan, nothing written
     python3 -m dsl_course.migrate <org> --no-preview    # do it, step by step
+    python3 -m dsl_course.migrate --hold <course>       # pause every org of the course
+    python3 -m dsl_course.migrate --release <course>    # ... and restore them
+    python3 -m dsl_course.migrate --status <course>     # who is paused
 
 A course org is migrated before any of its semesters. The org's tier comes from its
 `.github` topic. Every step says what it will do, does it, verifies it, and stops on the
@@ -18,9 +21,11 @@ run that stopped part-way resumes where it stopped. An archived semester is neve
 The pause is GitHub's own switch: Actions are DISABLED on every repo of the org that runs
 workflows, for the window, and enabled again at the end. (An org variable cannot do this:
 on GitHub Free org variables do not reach private repos, and the workflows already live in
-an org carry no gate until they are re-rendered.) GitHub drops, rather than queues, what
-fires into a disabled repo, so the unpause dispatches one Scheduled release and one Sync
-membership in its place.
+an org carry no gate until they are re-rendered.) It waits for quiet before it switches
+anything. GitHub drops, rather than queues, what fires into a disabled repo, so the unpause
+dispatches one Scheduled release and one Sync membership in its place. For a real course
+the tier moves inside a HOLD of every org of the course (`--hold`, `--release`); a
+migration under a hold neither pauses nor unpauses.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
 status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
@@ -38,6 +43,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from time import sleep
+from time import time as clock
 
 import yaml
 
@@ -53,6 +60,7 @@ from .course import (
     JOIN_REPO,
     MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
+    MIGRATE_DRIVER,
     OLD_CONFIG_REPO,
     OLD_JOIN_REPO,
     OLD_PEOPLE_FILE,
@@ -60,6 +68,7 @@ from .course import (
     RETIRED_COURSE_KEYS,
     SEMESTER_TOPIC,
     SOLUTION_BRANCH,
+    SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
     pages_repo,
@@ -657,13 +666,17 @@ def fix_header(text: str, ref: str) -> str:
 
 # ------------------------------------------------------------------ seeded text
 # Repo names and paths that moved (decisions 0010 and 0012), inside text the toolkit
-# seeded: rewritten directly - a link to an old name is not a wording choice. Only the
+# seeded: rewritten directly - a link to an old name is not a wording choice (and
+# `semester-config/people.yml`, which never existed: an earlier pass renamed the repo
+# of a path it missed at a sentence's end). Only the
 # org's OWN repos: a link into another org (an archived semester, never migrated) still
 # resolves where it is. A bare name counts only as a whole name, never inside another
 # (`old-classroom-config`), and `welcome` only as a link to this org's repo (it is also a
 # word). Longest first, so a path is not caught by its repo's name alone.
 _WHOLE = r"(?<![\w./-])"
 _END = r"(?![\w-])"
+# A file name's end: a full stop that ends the sentence is not `people.yml.sample`.
+_FILE_END = r"(?!\w|\.\w)"
 
 
 def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, str]]:
@@ -674,7 +687,7 @@ def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, 
         (
             re.compile(
                 rf"({site}){OLD_CONFIG_REPO}(/blob/[^/\s]+/){re.escape(OLD_PEOPLE_FILE)}"
-                r"(?![\w.])"
+                rf"{_FILE_END}"
             ),
             rf"\g<1>{CONFIG_REPO}\g<2>{INSTRUCTORS_FILE}",
         ),
@@ -688,7 +701,8 @@ def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, 
         (re.compile(rf"({site}){OLD_JOIN_REPO}{_END}"), rf"\g<1>{JOIN_REPO}"),
         (
             re.compile(
-                rf"{_WHOLE}{OLD_CONFIG_REPO}/{re.escape(OLD_PEOPLE_FILE)}(?![\w.])"
+                rf"{_WHOLE}(?:{OLD_CONFIG_REPO}|{CONFIG_REPO})/"
+                rf"{re.escape(OLD_PEOPLE_FILE)}{_FILE_END}"
             ),
             f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
         ),
@@ -721,7 +735,27 @@ def seeded_wording(ref: str) -> dict[str, str]:
     the toolkit's wording, not the instructor's, so it takes the new one. The new side is
     held to the current templates by `tests/test_migrate.py`."""
     schedule_example = _worked_example(ref, schedule.SCHEDULE_PATH)
-    return {
+    submit_via = (
+        "assignment_repo (they push to their repo) | external (handed in elsewhere: "
+        "Moodle, Kaggle, in class - no repo is created) | shared_dropbox_repo (one "
+        "private repo for the whole {}, each student pushes into their own folder, "
+        "peers can read it)"
+    )
+    hand_marked = "hand-marked: a drop box is one repo for the whole {}"
+    # A template's grading_config.yml lines, as New assignment wrote them (`scaffold.
+    # _setting`: `key: value` padded to column 29, then the comment).
+    template_lines = {
+        f"{f'submit_via: {shape}':<29} # {submit_via.format('cohort')}": (
+            f"{f'submit_via: {shape}':<29} # {submit_via.format('semester')}"
+        )
+        for shape in SUBMIT_VIA
+    } | {
+        f"{f'{key}: false':<29} # {hand_marked.format('cohort')}": (
+            f"{f'{key}: false':<29} # {hand_marked.format('semester')}"
+        )
+        for key in ("autograde", "completion_check", "grader_pdf")
+    }
+    return template_lines | {
         # semester-config/schedule.yml
         "# This cohort's schedule + auto-release plan. Instructors edit it directly.": (
             "# This semester's schedule + auto-release plan. Instructors edit it directly."
@@ -799,6 +833,9 @@ def seeded_wording(ref: str) -> dict[str, str]:
             "schedule.yml."
         ),
         # the course's dsl-course.yml
+        "  # cohort's own teaching team (instructors & TAs) goes in that cohort's": (
+            "  # semester's own teaching team (instructors & TAs) goes in that semester's"
+        ),
         "#   # else.) Cohorts inherit this; setting it in a cohort's own file does "
         "nothing.": (
             "#   # else.) Semesters inherit this; setting it in a semester's own file "
@@ -837,12 +874,70 @@ def seeded_wording(ref: str) -> dict[str, str]:
     }
 
 
+# The course `dsl-course.yml`'s people header as the old template seeded it: a block,
+# because the new one is two lines longer. The last line in both spellings a live course
+# carries: as seeded, and as the first rehearsal's rename left it.
+OLD_PEOPLE_HEADER = """\
+# ---------------------------------------------------------------------------
+# People. Two DIFFERENT things live under the `people:` key below - don't
+# confuse them:
+#
+#   course_admins        GRANTS ACCESS. The single source of truth for course-wide
+#                        admin rights - the `course-admin` team here, mirrored into
+#                        every cohort org. A handle added any other way is reverted
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
+#
+#   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
+#                        the OPTIONAL public open-courseware course website (the
+#                        "Publish course website" action). They grant NO GitHub
+#                        access. TAs are NOT declared here - they change every
+#                        cohort, so a cohort's whole teaching team (instructors &
+#                        TAs, their GitHub access AND their cohort-site cards) is
+#                        declared PER COHORT in that cohort's classroom-config/people.yml.
+# ---------------------------------------------------------------------------
+"""
+
+
+def seeded_blocks() -> list[tuple[list[str], str]]:
+    """`[(the old block's lines, the new template's block)]`, each old spelling once."""
+    new = template("course/people-header.yml")
+    old = OLD_PEOPLE_HEADER.rstrip("\n")
+    return [
+        (variant.split("\n"), new)
+        for variant in (
+            old,
+            old.replace(
+                f"{OLD_CONFIG_REPO}/{OLD_PEOPLE_FILE}.",
+                f"{CONFIG_REPO}/{OLD_PEOPLE_FILE}.",
+            ),
+        )
+    ]
+
+
+def _replace_block(text: str, old: list[str], new: str) -> str:
+    """`text` with its first run of lines equal to `old` (line endings aside) replaced by
+    `new`, in the line ending of the run's first line."""
+    lines = text.split("\n")
+    bare = [line.rstrip("\r") for line in lines]
+    for i in range(len(bare) - len(old) + 1):
+        if bare[i : i + len(old)] == old:
+            eol = "\r" if lines[i].endswith("\r") else ""
+            lines[i : i + len(old)] = [
+                line + eol for line in new.rstrip("\n").split("\n")
+            ]
+            break
+    return "\n".join(lines)
+
+
 def seeded_yaml(text: str, ref: str, org: str, *, registry: bool = False) -> str:
-    """A seeded YAML file in `org` with every line still exactly as the old template
-    seeded it replaced by the new template's (`seeded_wording`, the line ending kept), and
-    the old repo names renamed in its comment lines (`renamed`). Values and the
-    instructor's own comments are otherwise theirs."""
+    """A seeded YAML file in `org` with every block (`seeded_blocks`) and every line
+    (`seeded_wording`) still exactly as the old template seeded it replaced by the new
+    template's (the line ending kept), and the old repo names renamed in its comment
+    lines (`renamed`). Values and the instructor's own comments are otherwise theirs."""
     wording = seeded_wording(ref)
+    for old, new in seeded_blocks():
+        text = _replace_block(text, old, new)
     out = []
     for line in text.split("\n"):
         if line.rstrip() in wording:
@@ -1051,10 +1146,12 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
     """Print the plan; then (not in preview) do, verify, stop at the first failure.
 
     From the moment the pause is reached until the unpause is verified, ANY way out - a
-    failed step, an error, a Ctrl-C - names the repos whose Actions are still off and
-    where their earlier settings are recorded. The names come from what the pause
-    recorded, not from a fresh read, so they are there even when GitHub is not."""
-    paused = False
+    failed step, an error, a Ctrl-C - puts back the course repos a semester's pause
+    switched off (every semester shares them; not on hold) and names the repos whose
+    Actions are still off and where their earlier settings are recorded. The names come
+    from what the pause recorded, not from a fresh read, so they are there even when
+    GitHub is not."""
+    paused = finished = False
     step = steps[0]
     try:
         work = [s for s in steps if not s.bracket]
@@ -1083,10 +1180,13 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
         if preview:
             log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
             return 0
+        held = pause.held()
         if pause.record() is not None:
-            # A run that stopped paused: Actions are off from here on, whatever is left.
+            # A run that stopped paused, or a hold: Actions are off from here on.
             paused = True
             pause.load()
+        if idle and not settle(pause.live_targets, before_switch=False):
+            return 1  # the pause step, which waits on its own, is skipped
         for step in steps:
             if step.bracket == "pause" and not idle:
                 paused = True
@@ -1106,16 +1206,21 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
             log_ok(f"{step.name}: done and verified")
             if step.bracket == "unpause":
                 paused = False
-                pause.catch_up()
+                if not held:
+                    pause.catch_up()
+        finished = True
     except Exception as exc:
         log_err(f"{step.name}: stopped by an error - {exc}")
         return 1
     finally:
         # `saved` is filled only once the settings are recorded, the moment before any
         # repo is switched off - so a stop before that says nothing it need not.
-        if paused and pause.saved:
-            log_err(pause.hint())
-    log_ok(f"{org} is migrated")
+        if paused and pause.saved and not finished:
+            log_err(pause.stopped())
+    if held:
+        log_ok(f"{org} is migrated - on hold: {pause.hold_note()}")
+    else:
+        log_ok(f"{org} is migrated")
     return 0
 
 
@@ -1125,14 +1230,13 @@ PAUSE_COMMIT = "migrate: record the Actions settings paused"
 
 
 MEMBERSHIP_WORKFLOW = "sync-membership.yml"
-# What a course migration's Scheduled release names as its driver (the run log prints it).
-MIGRATE_DRIVER = "migrate"
 
 
 @dataclass(frozen=True)
 class Tick:
     """One dispatch the pause dropped, sent again after the unpause: a `repository_dispatch`
-    into the course's `.github` with the payload its own driver sends."""
+    into the course's `.github` with the payload its own driver sends, marked as the
+    migration's (`MIGRATE_DRIVER`)."""
 
     event: str
     workflow: str
@@ -1141,22 +1245,23 @@ class Tick:
 
 
 def lost_ticks(semester_org: str | None) -> list[Tick]:
-    """The Scheduled release and the Sync membership a pause drops: for one semester, what
-    its `semester-config` push sends; for a course, what the ds01 timers send - every
+    """The Scheduled release and the Sync membership a pause drops: for one semester, scoped
+    to it as its `semester-config` push is; for a course, what the ds01 timers send - every
     semester."""
+    driver = ("-f", f"client_payload[driver]={MIGRATE_DRIVER}")
     if semester_org:
-        who = f"client_payload[semester_org]={semester_org}"
+        who = ("-f", f"client_payload[semester_org]={semester_org}")
         return [
             Tick(
                 "scheduled-release",
                 cadence.WORKFLOW_FILE,
-                ("-f", who, "-f", f"client_payload[driver]={CONFIG_REPO}"),
+                (*who, *driver),
                 f"Scheduled release for {semester_org}",
             ),
             Tick(
                 "sync-membership",
                 MEMBERSHIP_WORKFLOW,
-                ("-f", who),
+                (*who, *driver),
                 f"Sync membership for {semester_org}",
             ),
         ]
@@ -1164,13 +1269,13 @@ def lost_ticks(semester_org: str | None) -> list[Tick]:
         Tick(
             "scheduled-release",
             cadence.WORKFLOW_FILE,
-            ("-f", f"client_payload[driver]={MIGRATE_DRIVER}"),
+            driver,
             "Scheduled release for every semester",
         ),
         Tick(
             "sync-membership",
             MEMBERSHIP_WORKFLOW,
-            ("-F", "client_payload[all_semesters]=true"),
+            ("-F", "client_payload[all_semesters]=true", *driver),
             "Sync membership for every semester",
         ),
     ]
@@ -1184,11 +1289,99 @@ def _runs_url(course_org: str, workflow: str) -> str:
     )
 
 
+# The scheduled starts a switch must not land just before, as `minute hour` (UTC): the
+# ds01 timers on the quarter hour (ds01-infra, not rendered here) and every cron the
+# toolkit renders - the Scheduled release at 7 past, the daily Refresh, Publish, Sync
+# membership and Sync site, a site's monthly rebuild (taken as daily). Held to the
+# rendered crons by `tests/test_migrate.py`. A switch due within TICK_MARGIN seconds of
+# one waits past it, then for the runs it started.
+TICK_CRONS = (
+    "0,15,30,45 *",
+    "7,22,37,52 *",
+    "27 5",
+    "58 5",
+    "13 6",
+    "41 6",
+    "0 5",
+)
+TICK_MARGIN = 60
+
+
+def _cron_field(text: str, top: int) -> list[int]:
+    return list(range(top)) if text == "*" else [int(x) for x in text.split(",")]
+
+
+# Each tick as seconds into the UTC day.
+TICK_SECONDS = sorted(
+    {
+        hour * 3600 + minute * 60
+        for spec in TICK_CRONS
+        for minute in _cron_field(spec.split()[0], 60)
+        for hour in _cron_field(spec.split()[1], 24)
+    }
+)
+# How long a real run waits for the runs in flight to finish, and how often it looks.
+QUIET_WAIT = 4 * 60
+QUIET_POLL = 15
+
+
+def next_tick(at: float) -> float:
+    """Seconds from `at` (epoch seconds) to the next tick."""
+    into = at % 86400
+    return min((tick - into) % 86400 for tick in TICK_SECONDS)
+
+
+def clear_of_tick(targets: Callable[[], list[tuple[str, str]]]) -> bool:
+    """Asked IMMEDIATELY before a switch (the poll before it takes dozens of calls, and a
+    tick can fire meanwhile): within TICK_MARGIN of a tick, wait past it and settle again."""
+    while (left := next_tick(clock())) < TICK_MARGIN:
+        log(f"  a scheduled tick is due in {left:.0f} s - waiting past it")
+        sleep(left + QUIET_POLL)
+        if not settle(targets, before_switch=True):
+            return False
+    return True
+
+
+def settle(
+    targets: Callable[[], list[tuple[str, str]]], *, before_switch: bool
+) -> bool:
+    """Wait until no run is queued or going in `targets` (nor a central deploy), looking
+    every QUIET_POLL seconds for up to QUIET_WAIT; with `before_switch`, never ending
+    within TICK_MARGIN seconds before a tick (it waits past the tick instead). False, the
+    runs named, when they are still going at the end. Only a real run waits: a preview
+    writes nothing."""
+    deadline = clock() + QUIET_WAIT
+    while True:
+        left = next_tick(clock())
+        if before_switch and left < TICK_MARGIN:
+            log(f"  a scheduled tick is due in {left:.0f} s - waiting past it")
+            sleep(left + QUIET_POLL)
+            deadline = clock() + QUIET_WAIT
+            continue
+        alive = _alive(targets())
+        if not alive:
+            return True
+        if clock() >= deadline:
+            log_err(
+                f"a workflow run is queued or running in {', '.join(alive)} (waited "
+                f"{QUIET_WAIT // 60} minutes) - wait for it to finish, then re-run the "
+                f"migration"
+            )
+            return False
+        log(f"  waiting for the run(s) in {', '.join(alive)} to finish")
+        sleep(QUIET_POLL)
+
+
 class Pause:
     """The migration's pause of one org: every repo whose workflows act on it switched
     off, and - in `<org>/.github/.system/migration-pause.json`, written BEFORE anything is
     switched - what each was set to, so the unpause restores exactly that and a run that
-    stops (or is interrupted) can always be resumed or released by hand."""
+    stops (or is interrupted) can always be resumed or released by hand.
+
+    The record is `{"hold": bool, "repos": {"org/repo": setting}}`. A HOLD (`--hold`) is
+    one record per org of a course, each for the org's own repos, written for the window
+    in which the tier moves: a migration then never switches anything and never unpauses;
+    its bracket steps only mark the record (`migrated`), and `--release` restores."""
 
     def __init__(
         self,
@@ -1201,14 +1394,33 @@ class Pause:
         self.course_org, self.semester_org = course_org or org, semester_org
         self.saved: dict[str, dict] = {}  # "org/repo" -> its setting before the pause
 
-    def record(self) -> dict[str, dict] | None:
+    def data(self) -> dict | None:
         text = get_file_content(self.org, ".github", PAUSE_RECORD)
         return json.loads(text) if text else None
+
+    def record(self) -> dict[str, dict] | None:
+        data = self.data()
+        return None if data is None else dict(data.get("repos") or {})
+
+    def held(self) -> bool:
+        return bool((self.data() or {}).get("hold"))
+
+    def window_open(self) -> bool:
+        """A record that says this org's migration has not finished inside its window: a
+        run that stopped paused, or a hold its migration has not completed."""
+        data = self.data()
+        return data is not None and not (data.get("hold") and data.get("migrated"))
 
     def load(self) -> None:
         """Remember the recorded repos, so a stop can name them even if GitHub can't
         be read by then."""
         self.saved = self.record() or self.saved
+
+    def write(self, data: dict) -> bool:
+        body = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode()
+        return move_files(
+            self.org, ".github", {}, PAUSE_COMMIT, files={PAUSE_RECORD: body}
+        )
 
     @staticmethod
     def _live(key: str) -> tuple[str, str]:
@@ -1219,14 +1431,61 @@ class Pause:
             return org, new
         return org, repo
 
-    def hint(self) -> str:
-        repos = ", ".join(self.saved) or f"(see {self.org}/.github/{PAUSE_RECORD})"
+    def live_targets(self) -> list[tuple[str, str]]:
+        """The repos this run waits on: what it pauses, or what its record holds."""
+        saved = self.record()
+        return self.targets() if saved is None else [self._live(k) for k in saved]
+
+    def release_command(self) -> str:
+        return f"python -m dsl_course.migrate --release {self.course_org} --no-preview"
+
+    def hold_note(self) -> str:
         return (
-            f"Actions are still DISABLED in: {repos}. Their settings before the pause "
-            f"are in {self.org}/.github/{PAUSE_RECORD}. Re-run the migration with "
+            f"Actions stay off in every org of {self.course_org} until "
+            f"`{self.release_command()}`"
+        )
+
+    def hint(self, restored: list[str] | None = None) -> str:
+        restored = restored or []
+        off = [k for k in self.saved if k not in restored]
+        repos = ", ".join(off) or f"(see {self.org}/.github/{PAUSE_RECORD})"
+        back = (
+            f"Actions are back on in the course's repos, which every semester shares: "
+            f"{', '.join(restored)}. "
+            if restored
+            else ""
+        )
+        return (
+            f"{back}Actions are still DISABLED in: {repos}. Their settings before the "
+            f"pause are in {self.org}/.github/{PAUSE_RECORD}. Re-run the migration with "
             f"--no-preview to finish (or to restore them), or restore each by hand: "
             f"gh api -X PUT repos/<org>/<repo>/actions/permissions -F enabled=true"
         )
+
+    def stopped(self) -> str:
+        """What a stop inside the window says - after putting the course's repos back as
+        recorded when this is a semester's pause (they serve every semester of the
+        course; the semester's own stay off). Nothing is restored on hold."""
+        try:
+            if self.held():
+                return (
+                    f"{self.org} is on hold: {self.hold_note()}. Re-run the migration "
+                    f"with --no-preview to finish."
+                )
+            restored = self.restore_shared()
+        except Exception as exc:
+            return f"{self.hint()} (could not put the course's repos back: {exc})"
+        return self.hint(restored)
+
+    def restore_shared(self) -> list[str]:
+        """The course's recorded repos put back as they were, when this pauses a
+        semester (the course's own pause has none to share). Returns the ones put back."""
+        return [
+            key
+            for key, state in self.saved.items()
+            if key.split("/", 1)[0] == self.course_org != self.org
+            and _set_actions(*self._live(key), state)
+        ]
 
     # the pause step ---------------------------------------------------------
     def disabled(self) -> bool:
@@ -1237,40 +1496,50 @@ class Pause:
             _actions_enabled(*self._live(k)) for k in saved
         )
 
-    def quiet(self, keys: list[str]) -> bool:
-        alive = _alive([self._live(k) for k in keys])
-        if alive:
-            log_err(
-                f"a workflow run is queued or running in {', '.join(alive)} - wait "
-                f"for it to finish, then re-run the migration"
-            )
-        return not alive
-
     def pause(self) -> bool:
+        """Wait for quiet, THEN record, THEN switch off: a run switched off mid-flight
+        loses the jobs it has not started yet. On hold, Actions are already off: the run
+        waits for quiet and marks the window open."""
+        data = self.data()
+        if data is not None and data.get("hold"):
+            self.saved = dict(data.get("repos") or {})
+            return settle(self.live_targets, before_switch=False) and self.write(
+                {**data, "migrated": False}
+            )
+        if not settle(self.live_targets, before_switch=True):
+            return False
         saved = self.record()
         if saved is None:
             saved = {f"{o}/{r}": _actions_state(o, r) for o, r in self.targets()}
-            if not move_files(
-                self.org,
-                ".github",
-                {},
-                PAUSE_COMMIT,
-                files={PAUSE_RECORD: (json.dumps(saved, indent=2) + "\n").encode()},
-            ):
+            if not self.write({"hold": False, "repos": saved}):
                 return False
         self.saved = saved
-        return all(_set_actions(*self._live(k), OFF) for k in saved)
+        return clear_of_tick(self.live_targets) and self.switch_off()
+
+    def switch_off(self) -> bool:
+        return all(_set_actions(*self._live(k), OFF) for k in self.saved)
 
     def paused(self) -> bool:
+        """Every recorded repo off, and no run still going: one that slipped in during the
+        switch can start no new job, so it is waited for rather than failing the step."""
         if not self.disabled():
             log_err("Actions did not read back as disabled")
             return False
-        # Only a run still going counts, whenever it started: one dispatched in the same
-        # second as the pause that has since finished wrote nothing after it.
-        return self.quiet(list(self.saved))
+        return settle(self.live_targets, before_switch=False)
 
     # the unpause step --------------------------------------------------------
     def restore(self) -> bool:
+        """Restore the recorded settings; on hold, only mark this org migrated."""
+        data = self.data()
+        if data is None:
+            return True
+        if data.get("hold"):
+            self.saved = dict(data.get("repos") or {})
+            return bool(data.get("migrated")) or self.write({**data, "migrated": True})
+        return self.release()
+
+    def release(self) -> bool:
+        """Every recorded repo back as it was, then the record deleted."""
         saved = self.record()
         if saved is None:
             return True
@@ -1280,8 +1549,9 @@ class Pause:
         return move_files(self.org, ".github", {}, PAUSE_COMMIT, delete=[PAUSE_RECORD])
 
     def restored(self) -> bool:
-        if self.record() is not None:
-            return False
+        data = self.data()
+        if data is not None:
+            return bool(data.get("hold") and data.get("migrated"))
         for key, want in self.saved.items():
             got = _actions_state(*self._live(key))
             if got["enabled"] != want["enabled"] or (
@@ -1317,13 +1587,42 @@ class Pause:
 
     def steps(self) -> tuple[Step, Step]:
         names = lambda: ", ".join(f"{o}/{r}" for o, r in self.targets())
-        pause = Step(
-            "pause automation",
-            done=lambda: self.disabled() and self.quiet(list(self.record() or {})),
-            plan=lambda: [
+        on_hold = f"on hold: Actions are already off in every org of {self.course_org}"
+
+        def pause_plan() -> list[str]:
+            if self.held():
+                return [f"{on_hold}; wait for quiet, mark the window open"]
+            return [
+                (
+                    "wait until no run is queued or running (up to "
+                    f"{QUIET_WAIT // 60} minutes), and past a tick due within "
+                    f"{TICK_MARGIN} s"
+                ),
                 f"record the Actions settings in {self.org}/.github/{PAUSE_RECORD}",
                 f"disable Actions in {names()}",
-            ],
+            ]
+
+        def unpause_plan() -> list[str]:
+            if self.held():
+                return [
+                    (
+                        f"on hold: nothing is unpaused; mark {self.org} migrated in "
+                        f"the record. Then `{self.release_command()}`"
+                    )
+                ]
+            return [
+                f"restore the recorded Actions settings in {names()}",
+                *(
+                    f"dispatch {t.what} in {self.course_org}/.github (the tick the "
+                    f"pause dropped)"
+                    for t in lost_ticks(self.semester_org)
+                ),
+            ]
+
+        pause = Step(
+            "pause automation",
+            done=self.disabled,  # never asked: `run` decides the pause by `idle`
+            plan=pause_plan,
             do=self.pause,
             verify=self.paused,
             rollback="restore Actions in each repo named below",
@@ -1331,15 +1630,8 @@ class Pause:
         )
         unpause = Step(
             "unpause automation",
-            done=lambda: self.record() is None,
-            plan=lambda: [
-                f"restore the recorded Actions settings in {names()}",
-                *(
-                    f"dispatch {t.what} in {self.course_org}/.github (the tick the "
-                    f"pause dropped)"
-                    for t in lost_ticks(self.semester_org)
-                ),
-            ],
+            done=lambda: not self.window_open(),
+            plan=unpause_plan,
             do=self.restore,
             verify=self.restored,
             rollback="restore Actions in each repo by hand (see the line below)",
@@ -1419,10 +1711,11 @@ def _no_drift(drift: list[str], *, quiet: bool = False) -> bool:
 
 
 # A re-render also writes what no file shows (a repo secret, a label, a description), so
-# its verify cannot read all of it back. A pause record left by a stopped run means that
-# run may have stopped at the re-render: inside the window it is never "already
-# migrated", and it runs again - it is idempotent. Outside the window, done IS the verify.
-RERUN_NOTE = "run it again: a pause record says the last run stopped inside the window"
+# its verify cannot read all of it back. A pause record left by a stopped run (or a hold
+# this org's migration has not completed) means that run may have stopped at the
+# re-render: inside the window it is never "already migrated", and it runs again - it is
+# idempotent. Outside the window, done IS the verify.
+RERUN_NOTE = "run it again: the pause record says the migration has not finished inside the window"
 
 
 def _schedule_clean(
@@ -1489,10 +1782,14 @@ class Semester:
     def join(self) -> str:
         return JOIN_REPO if JOIN_REPO in _listing(self.org) else OLD_JOIN_REPO
 
+    def own_targets(self) -> list[tuple[str, str]]:
+        """The semester's own repos that carry a workflow."""
+        own = [self.config(), self.join(), pages_repo(self.org), ".github"]
+        return _with_workflows(self.org, own)
+
     def targets(self) -> list[tuple[str, str]]:
         """Every repo whose workflows act on this semester: its own, and the course's."""
-        own = [self.config(), self.join(), pages_repo(self.org), ".github"]
-        return _with_workflows(self.org, own) + Course(self.course).targets()
+        return self.own_targets() + Course(self.course).targets()
 
     # rename -------------------------------------------------------------------
     def renames_left(self) -> dict[str, str]:
@@ -1920,7 +2217,7 @@ class Semester:
         return self.ready_to_render() and _no_drift(self.drift(), quiet=quiet)
 
     def rerender_done(self) -> bool:
-        return self.pause.record() is None and self.rerendered(quiet=True)
+        return not self.pause.window_open() and self.rerendered(quiet=True)
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
@@ -1982,7 +2279,7 @@ class Semester:
                     [
                         "re-write every SYSTEM-OWNED file that differs:",
                         *(f"  {path}" for path in self.drift()),
-                        *([RERUN_NOTE] if self.pause.record() is not None else []),
+                        *([RERUN_NOTE] if self.pause.window_open() else []),
                     ]
                     if self.ready_to_render()
                     else [
@@ -2287,7 +2584,7 @@ class Course:
         return self.registry_done() and _no_drift(self.drift(), quiet=quiet)
 
     def rerender_done(self) -> bool:
-        return self.pause.record() is None and self.rerendered(quiet=True)
+        return not self.pause.window_open() and self.rerendered(quiet=True)
 
     def work_done(self) -> bool:
         """Every step of the course's migration done - what a semester waits for."""
@@ -2410,7 +2707,7 @@ class Course:
                     [
                         "Refresh actions from this checkout; these files differ now:",
                         *(f"  {path}" for path in self.drift()),
-                        *([RERUN_NOTE] if self.pause.record() is not None else []),
+                        *([RERUN_NOTE] if self.pause.window_open() else []),
                     ]
                     if self.registry_done()
                     else [
@@ -2462,12 +2759,7 @@ def preflight(org: str) -> Course | Semester | None:
         if target.lost_values():
             return None
     elif topics & {OLD_SEMESTER_TOPIC, SEMESTER_TOPIC}:
-        config = listing.get(CONFIG_REPO) or listing.get(OLD_CONFIG_REPO)
-        if (
-            config is None
-            or config.get("archived")
-            or all(r.get("archived") for r in listing.values())
-        ):
+        if _archived_semester(listing):
             log_err(
                 f"{org} is archived (or has no config repo) - archived semesters are "
                 f"never touched"
@@ -2480,21 +2772,47 @@ def preflight(org: str) -> Course | Semester | None:
         parent = Course(course)
         target = Semester(org, course)
         # The course is complete when every step of its own migration is done, its own
-        # pause is released (no record left), and its Actions are on - unless they are
-        # off because THIS semester's migration paused them and stopped (its record is
-        # there): then this run resumes it. Another semester's pause in flight shows as
-        # the course's Actions off with no record here, and is refused.
+        # pause is released (no record left, or a hold it has finished inside), and its
+        # Actions are on - unless they are off because THIS semester's migration paused
+        # them and stopped (its record is there): then this run resumes it; or because
+        # the course is on hold, which holds every live semester with it. Another
+        # semester's pause in flight shows as the course's Actions off with no record
+        # here, and is refused.
         resuming = target.pause.record() is not None
+        course_held = parent.pause.held()
         course_on = parent.pause.record() is None and all(
             _actions_enabled(o, r) for o, r in parent.targets()
         )
-        if not parent.work_done() or parent.pause.record() is not None:
+        if not parent.work_done() or parent.pause.window_open():
             log_err(
                 f"{course} is not fully migrated - finish that first: "
                 f"`python -m dsl_course.migrate {course} --no-preview`, then this semester"
             )
             return None
-        if not (course_on or resuming):
+        if course_held and not target.pause.held():
+            log_err(
+                f"{course} is on hold and {org} is not - run `python -m dsl_course."
+                f"migrate --hold {course} --no-preview` again (it holds the semesters it "
+                f"missed), then this semester"
+            )
+            return None
+        # A stopped semester run puts the course's repos back on (`Pause.stopped`), so the
+        # course's Actions alone cannot tell that one is unfinished: its record does.
+        others = [
+            other
+            for other in _registered(course)
+            if other != org
+            and (data := Pause(other, list).data()) is not None
+            and not data.get("hold")
+        ]
+        if others:
+            log_err(
+                f"another semester's migration under {course} has not finished "
+                f"({', '.join(others)}) - finish it (re-run it with --no-preview), then "
+                f"this semester"
+            )
+            return None
+        if not (course_on or resuming or course_held):
             log_err(
                 f"another semester's migration under {course} is in flight (the course's "
                 f"Actions are off, with no pause record of {org}'s) - let it finish, then "
@@ -2506,14 +2824,232 @@ def preflight(org: str) -> Course | Semester | None:
             f"{org}'s .github carries neither {COURSE_HUB_TOPIC} nor a semester topic"
         )
         return None
-    alive = _alive(target.targets())
-    if alive:
-        log_err(
-            f"a workflow run is queued or running in {', '.join(alive)} - wait for it "
-            f"to finish, then re-run the migration"
-        )
-        return None
+    # No quiet check here: a preview writes nothing, and a real run waits for quiet
+    # before its first write (`settle`).
     return target
+
+
+def _archived_semester(listing: dict[str, dict]) -> bool:
+    """Whether a semester org (its `listing`) is archived, or has no config repo."""
+    config = listing.get(CONFIG_REPO) or listing.get(OLD_CONFIG_REPO)
+    return (
+        config is None
+        or bool(config.get("archived"))
+        or all(r.get("archived") for r in listing.values())
+    )
+
+
+# ------------------------------------------------------------------ hold
+# The tier ref moves while EVERY org it serves is paused: the old engine faults on a
+# migrated org and the new one on an unmigrated one, and a Promote refreshes every org on
+# `release`. So: `--hold` every real course, Promote once, migrate each course and then
+# its semesters (they neither pause nor unpause on hold), then `--release` each.
+
+
+def _registered(course_org: str) -> list[str]:
+    """The semesters the course's registry names, under its old name or its new one."""
+    old, new = Course(course_org).registry()
+    try:
+        data = yaml.safe_load(new if new is not None else old or "")
+    except yaml.YAMLError as exc:
+        raise RuntimeError(
+            f"the semester registry of {course_org} is not YAML"
+        ) from exc
+    if isinstance(data, dict):
+        data = data.get("semesters") or data.get("cohorts") or []
+    return sorted(str(x) for x in data if x) if isinstance(data, list) else []
+
+
+def hold_pauses(course_org: str, *, recorded: bool = False) -> list[Pause]:
+    """One pause per org of the course, each for the org's own repos: the course first,
+    then every live (not archived) semester its registry names - and, with `recorded`,
+    every semester the course's hold record names (one archived, or taken out of the
+    registry, while the hold stood still holds a record)."""
+    course = Pause(course_org, Course(course_org).targets)
+    orgs = []
+    for org in _registered(course_org):
+        listing = _listing(org)
+        if ".github" in listing and not _archived_semester(listing):
+            orgs.append(org)
+    if recorded:
+        named = (course.data() or {}).get("semesters") or []
+        orgs += [org for org in named if org not in orgs]
+    return [course] + [
+        Pause(org, Semester(org, course_org).own_targets, course_org, org)
+        for org in orgs
+    ]
+
+
+def _course_keys(repos: dict, course_org: str) -> dict:
+    return {k: v for k, v in repos.items() if k.split("/", 1)[0] == course_org}
+
+
+def hold(course_org: str, preview: bool) -> int:
+    """Pause the course and every live semester of it, one record per org marked `hold`:
+    wait for quiet across all of them, record every org, THEN switch any off, then
+    verify. Idempotent: a rerun holds what is not held yet.
+
+    A semester migration in flight (its own, non-hold record) is taken over: the course
+    repos it switched off move into the COURSE's hold record with the settings it recorded
+    before its pause - read now, they would say "off", and the release would leave them
+    off for good. Two records that both hold the course's repos are refused."""
+    pauses = hold_pauses(course_org, recorded=True)
+    course, semesters = pauses[0], pauses[1:]
+    records_now = {p.org: p.data() for p in pauses}
+    in_flight = {
+        org: _course_keys(data.get("repos") or {}, course_org)
+        for org, data in records_now.items()
+        if org != course_org and data is not None and not data.get("hold")
+    }
+    carriers = [org for org, keys in in_flight.items() if keys]
+    if len(carriers) > 1 or (carriers and records_now[course_org] is not None):
+        both = carriers + ([course_org] if records_now[course_org] is not None else [])
+        log_err(
+            f"the pause records of {', '.join(both)} both hold {course_org}'s repos - "
+            f"finish those migrations (re-run each with --no-preview), then hold"
+        )
+        return 1
+    log_step(f"Hold plan for {course_org}")
+    for p in pauses:
+        data = records_now[p.org]
+        if data is not None and data.get("hold"):
+            log(f"  {p.org}: already on hold")
+        elif data is not None:
+            log(f"  {p.org}: take over the record of its migration in flight")
+        else:
+            names = (
+                ", ".join(f"{o}/{r}" for o, r in p.targets()) or "(no workflow repo)"
+            )
+            log(
+                f"  {p.org}: record the Actions settings, then disable Actions in {names}"
+            )
+    if preview:
+        log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
+        return 0
+    targets = lambda: [t for p in pauses for t in p.live_targets()]
+    if not settle(targets, before_switch=True):
+        return 1
+    held_orgs = sorted(p.org for p in semesters)
+    for p in pauses:
+        data = records_now[p.org]
+        if data is not None and data.get("hold"):
+            new = data
+            if p is course and set(held_orgs) - set(data.get("semesters") or []):
+                new = {**data, "semesters": sorted({*held_orgs, *data["semesters"]})}
+        else:
+            if data is not None:
+                repos = dict(data.get("repos") or {})
+            else:
+                repos = {f"{o}/{r}": _actions_state(o, r) for o, r in p.targets()}
+            if p is course:
+                for keys in in_flight.values():
+                    repos |= keys  # their settings before that semester's pause
+            else:
+                repos = {
+                    k: v for k, v in repos.items() if k not in in_flight.get(p.org, {})
+                }
+            new = {"hold": True, "migrated": False, "repos": repos}
+            if p is course:
+                new["semesters"] = held_orgs
+        if new is not data and not p.write(new):
+            log_err(f"could not record the hold of {p.org} - nothing more was switched")
+            return 1
+        p.saved = dict(new.get("repos") or {})
+    if not clear_of_tick(targets):
+        return 1
+    switched = [p.switch_off() for p in pauses]
+    if not all(switched) or not all(p.disabled() for p in pauses):
+        log_err(
+            "Actions did not read back as disabled everywhere - re-run the hold, or "
+            f"`python -m dsl_course.migrate --release {course_org} --no-preview`"
+        )
+        return 1
+    if not settle(targets, before_switch=False):
+        return 1
+    log_ok(
+        f"{course_org} is on hold ({len(pauses)} org(s)). Next: migrate the course, then "
+        f"each semester (`--status {course_org}` reads migrated for every org), then "
+        f"`python -m dsl_course.migrate --release {course_org} --no-preview`"
+    )
+    return 0
+
+
+def release(course_org: str, preview: bool, abandon: bool = False) -> int:
+    """End the hold: every held org's Actions back as recorded (the semesters first, the
+    course last), then one catch-up dispatch of each tick for every semester. Refused
+    while an org is not migrated inside the hold, unless `abandon` (which names them)."""
+    held = [p for p in hold_pauses(course_org, recorded=True) if p.held()]
+    course = [p for p in held if p.org == course_org]
+    held = [p for p in held if p.org != course_org] + course
+    log_step(f"Release plan for {course_org}")
+    if not held:
+        log_ok(f"{course_org} is not on hold - nothing to release")
+        return 0
+    unmigrated = []
+    for p in held:
+        data = p.data() or {}
+        if not data.get("migrated"):
+            unmigrated.append(p.org)
+        state = "migrated" if data.get("migrated") else "NOT migrated inside the hold"
+        repos = ", ".join(data.get("repos") or {}) or "(none)"
+        log(f"  {p.org} ({state}): restore Actions in {repos}")
+    log(f"  then dispatch the ticks the hold dropped in {course_org}/.github")
+    if unmigrated and not abandon:
+        log_err(
+            f"not migrated inside the hold: {', '.join(unmigrated)} - migrate each "
+            f"(`python -m dsl_course.migrate <org> --no-preview`) and release again, or "
+            f"give up the hold without them: `--release {course_org} --abandon "
+            f"--no-preview`"
+        )
+        return 1
+    if unmigrated:
+        log_err(f"abandoning the hold of {', '.join(unmigrated)} (not migrated)")
+    if preview:
+        log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
+        return 0
+    for p in held:
+        if not (p.release() and p.restored()):
+            log_err(
+                f"{p.org}: Actions did not come back as recorded - re-run the release"
+            )
+            return 1
+        log_ok(f"{p.org}: Actions restored")
+    Pause(course_org, Course(course_org).targets).catch_up()
+    log_ok(f"{course_org} is released")
+    return 0
+
+
+def hold_status(course_org: str) -> int:
+    """Who is paused under `course_org`, from each org's record and its repos. Reads only."""
+    log_step(f"Pause status of {course_org}")
+    for p in hold_pauses(course_org, recorded=True):
+        data = p.data()
+        if data is None:
+            log(f"  {p.org}: not paused")
+            continue
+        repos = data.get("repos") or {}
+        off = sum(not _actions_enabled(*p._live(k)) for k in repos)
+        if data.get("hold"):
+            kind = "on hold, " + (
+                "migrated" if data.get("migrated") else "not migrated yet"
+            )
+        else:
+            kind = "paused by a migration that has not finished"
+        log(
+            f"  {p.org}: {kind} - Actions off in {off} of {len(repos)} recorded repo(s)"
+        )
+    return 0
+
+
+def _is_course(org: str) -> bool:
+    listing = _listing(org)
+    if COURSE_HUB_TOPIC not in _topics(listing):
+        log_err(f"{org} is not a course org - --hold, --release and --status take one")
+        return False
+    if listing[".github"].get("archived"):
+        log_err(f"{org}/.github is archived - an archived course is never touched")
+        return False
+    return True
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -2552,10 +3088,52 @@ def _warn_drift(course: str, ref: str) -> None:
 
 def main() -> int:
     parser = CLIParser(description=__doc__)
-    parser.add_argument("org", help="The course org or semester org to migrate")
+    parser.add_argument(
+        "org",
+        help="The course org or semester org to migrate (the course org with --hold, "
+        "--release or --status)",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--hold",
+        action="store_true",
+        help="Pause the course and every live semester of it until --release",
+    )
+    mode.add_argument(
+        "--release",
+        action="store_true",
+        help="Restore every held org's Actions and dispatch the dropped ticks",
+    )
+    mode.add_argument(
+        "--status", action="store_true", help="Print which orgs are paused"
+    )
+    parser.add_argument(
+        "--abandon",
+        action="store_true",
+        help="With --release: release although an org is not migrated inside the hold",
+    )
     add_preview_flag(parser, "Print the plan and write nothing (default).")
     args = parser.parse_args()
     _forget()
+    if args.abandon and not args.release:
+        parser.error("--abandon goes with --release")
+    if args.hold or args.release or args.status:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            log_err(
+                "the migration runs from a maintainer's laptop, never from a workflow"
+            )
+            return 1
+        try:
+            if not _is_course(args.org):
+                return 1
+            if args.status:
+                return hold_status(args.org)
+            if args.hold:
+                return hold(args.org, args.preview)
+            return release(args.org, args.preview, args.abandon)
+        except RuntimeError as exc:
+            log_err(f"could not read {args.org}: {exc}")
+            return 1
     try:
         target = preflight(args.org)
         if target is None:

@@ -2105,7 +2105,8 @@ def test_the_core_requirements_carry_no_autograder():
 
 _SCOPED = (
     "(github.event_name == 'repository_dispatch' "
-    "&& github.event.client_payload.driver == 'semester-config' "
+    "&& (github.event.client_payload.driver == 'semester-config' "
+    "|| github.event.client_payload.driver == 'migrate') "
     "&& github.event.client_payload.semester_org || '')"
 )
 
