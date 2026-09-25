@@ -223,3 +223,29 @@ def test_untitled_readings_attach_to_the_next_shown_lecture():
         ("r2", None, []),
         ("r3", 3, []),
     ]
+
+
+def test_offplan_folders_are_the_kind_sections_no_copy_covers():
+    deploys = [
+        Deploy("cm", "lectures/01_intro"),  # the folder itself
+        Deploy("cm", "labs", "materials"),  # a whole section covers its folders
+        Deploy("code", "pkg", "materials", "lectures/02_x/code"),  # inside a folder
+    ]
+    trees = {
+        "materials": [
+            "lectures/01_intro/a.pdf",
+            "lectures/02_x/code/m.py",
+            "lectures/03_off/slides.html",
+            "labs/01_lab/nb.ipynb",
+            "readings/01_week/r.pdf",
+            "quiz/q.pdf",  # not a kind section: All Materials only
+            "lectures/root.pdf",  # a file of the section, no folder
+            "lectures/04_sol/solution/key.py",  # never material
+        ],
+        "labs": ["05_extra/nb.ipynb"],  # a repo that IS one section
+    }
+    assert schedule_plan.offplan_folders(deploys, trees) == [
+        ("labs", "05_extra", "lab"),
+        ("materials", "lectures/03_off", "lecture"),
+        ("materials", "readings/01_week", "readings"),
+    ]

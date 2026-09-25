@@ -9,6 +9,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote
 
 import pytest
 import yaml
@@ -117,6 +118,8 @@ class FakeGitHub:
         self.paused_at_commit: list[bool] = []
         self.puts: list[tuple[str, str, bool]] = []
         self.dispatches: list[tuple[str, dict]] = []  # (org/repo, the fields sent)
+        # (org, repo, folder) -> the date its first commit landed; absent: no commit
+        self.history: dict[tuple[str, str, str], str] = {}
         # the state a dispatched run is in when it shows up (its hooks may move it)
         self.dispatched_state = "completed"
         self.fail_dispatch = False
@@ -259,6 +262,10 @@ class FakeGitHub:
                 (_iso(self.clock.at), self.dispatched_state)
             )
             return 0, ""
+        if parts[3:] == ["commits"]:
+            params = dict(p.split("=", 1) for p in query.split("&"))
+            folder = unquote(params["path"])
+            return 0, self.history.get((org, name, folder), "")
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
                 on = fields["enabled"] is True
@@ -611,9 +618,9 @@ def test_a_second_run_finds_every_step_already_migrated(
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     out = capsys.readouterr().out
-    # Eight steps, each "already migrated" in the plan and again in the run: nothing is
+    # Nine steps, each "already migrated" in the plan and again in the run: nothing is
     # paused, nothing written, status.json not rewritten.
-    assert out.count("already migrated") == 16
+    assert out.count("already migrated") == 18
     assert fake.commits == commits and fake.puts == puts and semester == []
     assert len(fake.dispatches) == 2  # nothing paused, so nothing was dropped
 
@@ -2340,6 +2347,109 @@ def test_a_catch_up_still_running_at_the_bound_is_said_and_is_no_failure(
         "the next migration waits for them before it pauses"
     ) in out
     assert f"{SEM} is migrated" in out
+
+
+# ---------------------------------------------------------------- proposed releases
+
+LAYOUTS = Path(__file__).parent / "fixtures" / "layouts"
+
+
+def _nlp(fake):
+    """The nlp semester as it is on 25 Sep 2026: every folder released by hand, none in
+    its plan (paths and dates from the real repos, tests/fixtures/layouts/)."""
+    tree = {
+        p: b"x" for p in (LAYOUTS / "nlp-tree.txt").read_text().split() if p.strip()
+    }
+    fake.repos[(SEM, "materials")]["branches"]["main"] = dict(tree)
+    fake.tree(COURSE, "course-materials-f2026").update(tree)
+    config = fake.tree(SEM, OLD_CONFIG_REPO)
+    config["schedule.yml"] = (LAYOUTS / "nlp-schedule.yml").read_bytes()
+    for line in (LAYOUTS / "nlp-landed.txt").read_text().splitlines():
+        if line and not line.startswith("#"):
+            folder, when = line.split()
+            fake.history[(SEM, "materials", folder)] = when
+
+
+def test_a_preview_proposes_a_releases_plan_for_the_folders_outside_it(
+    fake, semester, monkeypatch, capsys
+):
+    _nlp(fake)
+    before = _state(fake)
+    assert _main(monkeypatch, SEM) == 0
+    out = capsys.readouterr().out
+    assert (
+        f"write {CONFIG_REPO}/{migrate.PROPOSED_RELEASES}: a releases plan for 14 "
+        "folder(s) released outside the plan"
+    ) in out
+    # The plan shows the block itself, as it will be written.
+    assert "-     lecture-01:\n    -       event_datetime: 2026-08-31T22:35\n" in out
+    assert "-           course_source_path: labs/04_session-4\n" in out
+    assert _state(fake) == before
+
+
+def test_the_proposal_is_written_beside_the_schedule_never_into_it(
+    fake, semester, monkeypatch
+):
+    _nlp(fake)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = fake.tree(SEM, CONFIG_REPO)
+    assert "releases" not in yaml.safe_load(tree["schedule.yml"])
+    text = tree[migrate.PROPOSED_RELEASES].decode()
+    assert text.startswith(migrate.PROPOSAL_HEADER)
+    # What faculty paste reads clean with this engine: one entry per folder, kind from
+    # its section, dated by its first commit in the semester's time zone.
+    sched = migrate.schedule.parse(yaml.safe_load(text))
+    assert sched.faults == [] and sched.dropped == []
+    by_label = {r.label: r for r in sched.releases}
+    assert sorted(by_label) == sorted(
+        [f"lecture-0{n}" for n in range(1, 5)]
+        + [f"lab-0{n}" for n in range(1, 5)]
+        + [f"readings-0{n}" for n in range(1, 7)]
+    )
+    lab = by_label["lab-01"]
+    assert (lab.kind, lab.title, lab.show_on_site) == ("lab", "Session 1", True)
+    assert lab.when.isoformat() == "2026-09-01T21:26:00+02:00"
+    assert [(d.course_source_repo, d.course_source_path, d.semester_dest_repo)
+            for d in lab.deploy] == [
+        ("course-materials-f2026", "labs/01_session-1", "materials")
+    ]  # fmt: skip
+    # A readings entry has no title: it attaches to the lecture that follows it.
+    assert by_label["readings-01"].title == ""
+    rows = migrate.offplan_folders(
+        [d for r in sched.releases for d in r.deploy],
+        {"materials": list(fake.tree(SEM, "materials"))},
+    )
+    assert rows == []  # accepted, the proposal leaves no folder outside the plan
+    # Once the file is there the step is done: a rerun proposes nothing new.
+    commits = list(fake.commits)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert fake.commits == commits
+
+
+def test_a_folder_no_one_course_repo_holds_names_no_source(fake, semester, monkeypatch):
+    _nlp(fake)
+    course = fake.tree(COURSE, "course-materials-f2026")
+    for path in [p for p in course if p.startswith("labs/02_session-2/")]:
+        del course[path]
+    # A label the schedule already uses is never proposed again.
+    fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] += (
+        b"releases:\n  lab-01:\n    event_datetime: 2026-09-01\n"
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    text = fake.tree(SEM, CONFIG_REPO)[migrate.PROPOSED_RELEASES].decode()
+    entries = yaml.safe_load(text)["releases"]
+    assert "lab-01" not in entries and "lab-01-2" in entries
+    assert entries["lab-02"]["deploy"][0]["course_source_repo"] == "CHANGE-ME"
+    assert entries["lab-03"]["deploy"][0]["course_source_repo"] == (
+        "course-materials-f2026"
+    )
+
+
+def test_a_semester_whose_folders_are_all_in_the_plan_proposes_nothing(
+    fake, semester, monkeypatch, capsys
+):
+    assert _main(monkeypatch, SEM) == 0
+    assert "proposed releases: already migrated" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- publish.yml

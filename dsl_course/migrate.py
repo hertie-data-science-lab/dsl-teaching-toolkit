@@ -28,9 +28,10 @@ for those runs, so the next org's migration finds the course quiet. For a real c
 the tier moves inside a HOLD of every org of the course (`--hold`, `--release`); a
 migration under a hold neither pauses nor unpauses.
 
-Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
-status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
-template keys, materials files, re-render, status, unpause.
+Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
+topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
+dsl-course.yml keys, template keys, seeded text, materials topic, materials files,
+publish.yml comment, re-render, status, unpause.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import sleep
 from time import time as clock
+from urllib.parse import quote
 
 import yaml
 
@@ -69,6 +71,7 @@ from .course import (
     PUBLISH_FILE,
     RETIRED_COURSE_KEYS,
     SEMESTER_TOPIC,
+    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
@@ -111,6 +114,7 @@ from .repos import (
     set_repo_topics,
 )
 from .scaffold import PUBLISH_HEADER, materials_system_files
+from .schedule_plan import label_number, offplan_folders
 from .setting_readers import RENAMED_SETTINGS, read_settings
 from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
 from .sync_faculty import retired_course_faults
@@ -1029,6 +1033,92 @@ def old_rule_lines(text: str) -> list[int]:
         for n, line in enumerate(text.split("\n"), 1)
         if _OLD_PUBLISH_RULE.search(line)
     ]
+
+
+# ------------------------------------------------------------------ proposed releases
+# Decision 0013 item 4: a semester whose materials repos hold folders no `releases:` entry
+# copies (released by hand) gets a releases plan PROPOSED, dated by the commit that
+# landed each folder. Faculty content: written beside the schedule, never into it.
+PROPOSED_RELEASES = records.path("proposed_releases")
+PROPOSAL_COMMIT = "migrate: propose releases"
+PROPOSAL_HEADER = f"""\
+# PROPOSED by the migration - read by nothing, and not part of schedule.yml.
+#
+# These folders of this semester were released outside the plan (no `releases:` entry
+# copies them): the site shows them unnumbered on their kind's tab, off the Schedule. To
+# put them in the plan, copy the entries you want under `releases:` in schedule.yml,
+# check each date and title, then delete this file. Each is dated by the commit that
+# first landed its folder in this semester. The dates have passed, so the next tick
+# copies each folder again from its course repo (nothing changes where the source has
+# not). `course_source_repo: {SETTING_PLACEHOLDER}`: no one course repo holds that
+# folder - name the one it came from.
+"""
+
+
+def first_landed(org: str, repo: str, folder: str) -> datetime | None:
+    """When the first commit touching `folder` landed in `org/repo` (its oldest commit
+    date), or None when no commit touches it. Raises when GitHub cannot say."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/commits?path={quote(folder)}&per_page=100",
+        "--jq",
+        ".[-1].commit.committer.date",
+    )
+    if code != 0:
+        raise RuntimeError(f"could not read the history of {org}/{repo}: {out[:200]}")
+    dates = [line.strip() for line in out.splitlines() if line.strip()]
+    return datetime.fromisoformat(dates[-1].replace("Z", "+00:00")) if dates else None
+
+
+def _folder_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "folder"
+
+
+def _folder_title(name: str) -> str:
+    """A folder's name as the site's off-plan row titles it (`01_session-1` -> `Session
+    1`), so the row reads the same once it is in the plan."""
+    name = re.sub(r"^0*\d+_", "", name)
+    return name.replace("-", " ").replace("_", " ").strip().capitalize()
+
+
+def proposed_entries(
+    folders: list[tuple[str, str, str, datetime | None, str]],
+    taken: set[str],
+    tz,
+) -> str:
+    """The `releases:` block for `folders` (`(semester repo, folder, kind, landed, course
+    repo)`), in date order (an undated one last, `tbc`), each label `<kind>-NN` from the
+    folder's number (else its name), never one `taken`. A readings entry has no title, so
+    it attaches to its lecture (decision 0013 item 3)."""
+    taken = set(taken)
+    rows = []
+    for repo, folder, kind, landed, source in sorted(
+        folders, key=lambda f: (f[3] is None, f[3] or datetime.min.replace(tzinfo=UTC))
+    ):
+        name = folder.rsplit("/", 1)[-1]
+        n = label_number(name)
+        base = f"{kind}-{n:02d}" if n is not None else _folder_slug(name)
+        label, i = base, 2
+        while label in taken:
+            label, i = f"{base}-{i}", i + 1
+        taken.add(label)
+        when = f"{landed.astimezone(tz):%Y-%m-%dT%H:%M}" if landed else "tbc"
+        rows += [f"  {label}:", f"    event_datetime: {when}"]
+        if kind != "readings":
+            rows.append(f"    title: {_scalar(_folder_title(name))}")
+        rows += [
+            f"    kind: {kind}",
+            "    show_on_site: true",
+            "    deploy:",
+            f"      - course_source_repo: {_scalar(source)}",
+            f"        course_source_path: {_scalar(folder)}",
+        ]
+        if repo != schedule.DEFAULT_DEST_REPO:
+            rows.append(f"        semester_dest_repo: {_scalar(repo)}")
+    return "\n".join(["releases:", *rows]) + "\n"
+
+
 # ------------------------------------------------------------------ GitHub, narrowly
 
 
@@ -2280,6 +2370,87 @@ class Semester:
             and _schedule_clean(text, instance)
         )
 
+    # proposed releases -------------------------------------------------------
+    def offplan(self) -> list[tuple[str, str, str]]:
+        """`(repo, folder, kind)` for each folder of the semester's release repos that no
+        entry of the schedule - as the keys step leaves it - copies."""
+        _, text = self.keys_text()
+        sched = schedule.parse(
+            load_yaml_lines(text or "") or {},
+            settings.parse_instance(self.instance_text()),
+        )
+        deploys = [d for r in sched.releases for d in r.deploy]
+        listing = _listing(self.org)
+        dests = {schedule.DEFAULT_DEST_REPO, *(d.semester_dest_repo for d in deploys)}
+        trees = {
+            repo: list(_files(self.org, repo))
+            for repo in sorted(dests)
+            if repo in listing and not listing[repo].get("archived")
+        }
+        return offplan_folders(deploys, trees)
+
+    def proposal(self) -> str | None:
+        """The proposed releases plan (header and `releases:` block), or None when every
+        released folder is in the plan. Read once per run: each folder costs a history
+        read."""
+        if not hasattr(self, "_proposal"):
+            self._proposal = self._propose()
+        return self._proposal
+
+    def _propose(self) -> str | None:
+        folders = self.offplan()
+        if not folders:
+            return None
+        _, text = self.keys_text()
+        meta = _yaml(text)
+        course = Course(self.course)
+        sources = {r: set(_files(self.course, r)) for r in course.materials_repos()}
+        rows = []
+        for repo, folder, kind in folders:
+            holders = [
+                r
+                for r, paths in sources.items()
+                if any(p.startswith(f"{folder}/") for p in paths)
+            ]
+            source = holders[0] if len(holders) == 1 else SETTING_PLACEHOLDER
+            rows.append(
+                (repo, folder, kind, first_landed(self.org, repo, folder), source)
+            )
+        releases = meta.get("releases")
+        taken = {str(k) for k in releases} if isinstance(releases, dict) else set()
+        tz = schedule._tz(meta.get("timezone"))
+        return PROPOSAL_HEADER + proposed_entries(rows, taken, tz)
+
+    def proposal_done(self) -> bool:
+        """Proposed already (the file is there), or nothing to propose."""
+        if PROPOSED_RELEASES in _files(self.org, self.config()):
+            return True
+        return self.proposal() is None
+
+    def proposal_plan(self) -> list[str]:
+        text = self.proposal() or ""
+        block = [line for line in text.split("\n") if line and not line.startswith("#")]
+        return [
+            (
+                f"write {CONFIG_REPO}/{PROPOSED_RELEASES}: a releases plan for "
+                f"{len(self.offplan())} folder(s) released outside the plan, for faculty "
+                f"to copy into {schedule.SCHEDULE_PATH} by hand (never merged by this tool)"
+            ),
+            *(f"  {line}" for line in block),
+        ]
+
+    def propose(self) -> bool:
+        text = self.proposal()
+        if text is None:
+            return True
+        return move_files(
+            self.org,
+            self.config(),
+            {},
+            PROPOSAL_COMMIT,
+            files={PROPOSED_RELEASES: text.encode()},
+        )
+
     # topic -------------------------------------------------------------------
     def topics(self) -> set[str]:
         return _topics(_listing(self.org))
@@ -2371,6 +2542,17 @@ class Semester:
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit in {repo} (it holds "
                     f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
+                ),
+            ),
+            Step(
+                "proposed releases",
+                done=self.proposal_done,
+                plan=self.proposal_plan,
+                do=self.propose,
+                verify=lambda: PROPOSED_RELEASES in _files(self.org, self.config()),
+                rollback=(
+                    f"git revert the '{PROPOSAL_COMMIT}' commit in {repo} (it holds "
+                    f"only {PROPOSED_RELEASES})"
                 ),
             ),
             Step(
