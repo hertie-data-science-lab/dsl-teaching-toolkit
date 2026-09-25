@@ -39,6 +39,7 @@ CONFIG_SCAFFOLDS = {
     "teams.csv": "semester-config/teams.csv",
     "schedule.yml": "semester-config/schedule.yml",
     "instructors.yml": "semester-config/instructors.yml",
+    "assignments.yml": "semester-config/assignments.yml",
 }
 
 

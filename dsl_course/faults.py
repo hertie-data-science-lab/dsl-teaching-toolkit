@@ -449,6 +449,12 @@ def not_migrated_text(old: str, new: str) -> str:
     return f"{NOT_MIGRATED}: `{old}` is the old name of `{new}` - run the migration"
 
 
+def moved_text(old: str, home: str) -> str:
+    """The sentence for a key that MOVED to another file, or went: `home` says where the
+    fact lives now."""
+    return f"{NOT_MIGRATED}: `{old}` is no longer read here - {home}; run the migration"
+
+
 def not_migrated_fault(
     old: str,
     new: str,
@@ -489,8 +495,8 @@ class NotMigrated(Unusable):
     every consumer stops for it exactly as for a file it cannot read, and an unattended
     run skips the file and stays green while the fault carries it."""
 
-    def __init__(self, old: str, new: str, where: str = "") -> None:
-        text = not_migrated_text(old, new)
+    def __init__(self, old: str, new: str, where: str = "", text: str = "") -> None:
+        text = text or not_migrated_text(old, new)
         super().__init__(f"{where}: {text}" if where else text)
         self.old, self.new, self.code = old, new, NOT_MIGRATED
 
