@@ -1195,6 +1195,7 @@ def semester_inputs(facts: SemesterFacts, course: CourseFacts) -> dict[str, str 
     paths = facts.config_paths
     return {
         schedule.SCHEDULE_PATH: paths.get(schedule.SCHEDULE_PATH),
+        ASSIGNMENTS_FILE: paths.get(ASSIGNMENTS_FILE),
         sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH),
         roster.ROSTER_PATH: paths.get(roster.ROSTER_PATH),
         teams.TEAMS_PATH: paths.get(teams.TEAMS_PATH),

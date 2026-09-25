@@ -70,6 +70,7 @@ CONTRACT_EXAMPLE = {
     "schema": "dsl.status/1",
     "inputs": {
         "schedule.yml": "<blob sha>",
+        "assignments.yml": "...",
         "instructors.yml": "...",
         "students.csv": "...",
         "teams.csv": "...",
@@ -245,6 +246,7 @@ def _semester(**over) -> status_json.SemesterFacts:
         listing=listing,
         config_paths={
             "schedule.yml": "5c4ed",
+            "assignments.yml": "a551g",
             "instructors.yml": "9e091",
             "students.csv": "57ude",
             "teams.csv": "7ea45",
@@ -610,6 +612,7 @@ def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
     doc = _render()
     assert doc["inputs"] == {
         "schedule.yml": "5c4ed",
+        "assignments.yml": "a551g",
         "instructors.yml": "9e091",
         "students.csv": "57ude",
         "teams.csv": "7ea45",
