@@ -75,7 +75,8 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "semester_end",
         "assignments",
         "handout_datetime",
-        "grading_datetime",
+        "solution_datetime",
+        "marks_return_datetime",
         "events",
         # The four display fields the schedule table's four columns read, which every
         # block now takes: a skeleton that teaches them on one block only is a skeleton
@@ -86,6 +87,9 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "tbc",
     ):
         assert key in schedule
+    # Timings only: nothing the seed offers is a key that left the file.
+    for key in ("grading_datetime", "default: the slug above", "README's `# ` heading"):
+        assert key not in schedule, key
 
 
 def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
