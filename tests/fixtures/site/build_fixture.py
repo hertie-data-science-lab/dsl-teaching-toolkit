@@ -117,7 +117,7 @@ TREE = (
 # nothing else - the shape a Quarto course takes. Session 1 therefore carries BOTH row
 # shapes, a published `slides.html` (whose `slides_files/` bundle follows it) beside an
 # unpublished `slides.pdf`, which is the pair the templates have to tell apart.
-PUBLISH_POLICY = {MATERIALS: (site.parse_patterns("lectures/**/*.html"),)}
+PUBLISH_POLICY = {MATERIALS: (materials.Feed(("lectures/**/*.html",), (("", ""),)),)}
 
 READINGS_MD = """# Session 1 readings
 
