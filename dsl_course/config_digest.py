@@ -58,7 +58,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from .central import CENTRAL, CENTRAL_REF
-from .course import COURSE_ADMIN_TEAM, COURSE_CONFIG
+from .course import ASSIGNMENTS_FILE, COURSE_ADMIN_TEAM, COURSE_CONFIG
 from .discovery import central_ref_for
 from .faults import (
     NOTIFY_FROM,
@@ -71,7 +71,13 @@ from .faults import (
     zone_name,
 )
 from .grades import GRADING_FILE, SHEETS_DIR
-from .issues import close_issues_titled, find_issues, issue_url, upsert_issue
+from .issues import (
+    Titled,
+    close_issues_titled,
+    find_issues,
+    issue_url,
+    upsert_issue,
+)
 from .log import log_err, log_ok, log_step
 from .roster import ROSTER_PATH
 from .schedule import CONFIG_REPO, SourceFault, worst_severity
@@ -87,6 +93,9 @@ class Digest:
     `title` is STABLE, because every lookup of the issue searches for this exact string -
     a title that varied with the faults would never match, and every run would open a new
     issue. The two schedule.yml digests keep the titles their issues already carry.
+    `older_titles` is the chain behind a reworded title: an issue still open under one of
+    them is found, kept and closed as this digest's own (`find_digest`), never left behind
+    beside a new one. Add a title, never drop one.
 
     The marker name every body carries its state under is `_MARKER_KEY`, one constant for
     all of them - see it for why it can never vary."""
@@ -94,6 +103,7 @@ class Digest:
     title: str
     file: str
     doc: str
+    older_titles: tuple[str, ...] = ()
     repo: str = CONFIG_REPO
     cc_team: str = "instructors"
     # How the file is NAMED where a reader is sent to it, when `<repo>/<file>` is not
@@ -111,6 +121,11 @@ class Digest:
 
     def cite_file(self) -> str:
         return f"`{self.cite or f'{self.repo}/{self.file}'}`"
+
+    @property
+    def titles(self) -> tuple[str, ...]:
+        """Every title this digest's issue may carry, the one it opens under first."""
+        return (self.title, *self.older_titles)
 
 
 # The digests that are not schedule.yml's (those two are declared in `source_digest`,
@@ -151,6 +166,14 @@ GRADING_CONFIG = Digest(
     doc="docs/03-add-assignment-to-course.md",
     cite=f"<assignment template>/{GRADING_FILE}",
 )
+# The semester's own run settings for its assignments. Its faults come from the same pass
+# as GRADING_CONFIG's (the resolved spec is what they are checked against), and are the
+# ones whose `file` is this one (`split_assignments`).
+ASSIGNMENTS = Digest(
+    title="assignments.yml has values that will not run as written",
+    file=ASSIGNMENTS_FILE,
+    doc="docs/09-release-assignment-to-cohort.md",
+)
 # The one digest that is not a semester's. It lives in the COURSE org's own public
 # `.github`, beside the two files it is about, and it is the exception to "one issue per
 # FILE": `dsl-course.yml` and the semester registry are one issue because they are one
@@ -159,7 +182,8 @@ GRADING_CONFIG = Digest(
 # names dsl-course.yml because that is what the subject line has to say; each fault still
 # cites the file it is actually in.
 COURSE = Digest(
-    title="dsl-course.yml / cohort registry has entries the sync cannot use",
+    title="dsl-course.yml / semester registry has entries the sync cannot use",
+    older_titles=("dsl-course.yml / cohort registry has entries the sync cannot use",),
     file=COURSE_CONFIG,
     doc="docs/01-new-course-org.md",
     repo=".github",
@@ -170,14 +194,40 @@ COURSE = Digest(
 # Every digest a SEMESTER has, in the order a reader meets the files. The pre-flight builds
 # its own map (each of these needs a different loader), so this exists for the surfaces
 # that only want to know WHICH issues a semester can have standing - `status`, and the docs
-# check. Listed once so a seventh digest cannot be added and then quietly go unreported.
+# check. Listed once so another digest cannot be added and then quietly go unreported.
 SEMESTER_DIGESTS: tuple[Digest, ...] = (
     PEOPLE,
     ROSTER,
     TEAMS,
     GRADING_SHEETS,
     GRADING_CONFIG,
+    ASSIGNMENTS,
 )
+
+
+def split_assignments(faults: list) -> tuple[list, list]:
+    """`(GRADING_CONFIG's faults, ASSIGNMENTS')` out of one assignment-definition pass."""
+    ours = [f for f in faults if f.file == ASSIGNMENTS_FILE]
+    return [f for f in faults if f not in ours], ours
+
+
+def find_digest(repo: str, digest: Digest) -> Titled:
+    """`digest`'s issue in `repo` under any title of its chain: the first title with an
+    open issue wins; with none open, the newest closed one under the first title that has
+    one. One search per title only while nothing open has been found."""
+    closed = None
+    for title in digest.titles:
+        found = find_issues(repo, title)
+        if found.open:
+            return found
+        closed = closed or found.last_closed
+    return Titled(None, closed)
+
+
+def close_digest(repo: str, digest: Digest, comment: str) -> int:
+    """Close `digest`'s issue under every title of its chain. Returns the error count."""
+    return sum(close_issues_titled(repo, title, comment) for title in digest.titles)
+
 
 # What closing one of these issues says, when its last fault has actually been fixed.
 CLEARED_COMMENT = (
@@ -217,7 +267,7 @@ _STATE = "state"  # {fault key: {rung: last reported, since: first seen}}
 _MENTION = "mention"  # the logins git named, reused by a tick with nothing to ask
 _CLOCK = "clock"  # {sent: how many age reminders have gone out for this issue}
 _ABSORBED = "absorbed"  # the title of an issue this one took over, once it is closed
-# The middle word of every marker, shared by all seven digests and FROZEN. The marker name
+# The middle word of every marker, shared by every digest and FROZEN. The marker name
 # is the key to what an OPEN issue has already reported: renaming it would read as
 # "nothing recorded" and re-announce - and re-mail - every standing fault in every live
 # semester. `source` because that is what the one digest predating this engine already
@@ -759,7 +809,7 @@ def hold(
         return 0
     repo = f"{semester_org}/{digest.repo}"
     try:
-        found = find_issues(repo, digest.title)
+        found = find_digest(repo, digest)
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
@@ -902,7 +952,7 @@ def sync(
     # adopting what it left behind the next tick reports every standing fault as newly
     # appeared and notifies the semester about all of it again.
     try:
-        found = find_issues(repo, digest.title)
+        found = find_digest(repo, digest)
     except RuntimeError as exc:
         log_err(str(exc))
         return DigestResult(errors=1, faults_by_key=by_key)
@@ -920,8 +970,8 @@ def sync(
             wrote = upsert_issue(
                 repo, digest.title, cleared_body(digest), existing=open_issue
             )
-            if wrote.errors or close_issues_titled(
-                repo, digest.title, CLEARED_COMMENT.format(file=digest.file)
+            if wrote.errors or close_digest(
+                repo, digest, CLEARED_COMMENT.format(file=digest.file)
             ):
                 return DigestResult(errors=1, issue_url=url)
             log_ok(f"{digest.file} digest cleared and closed in {repo}")

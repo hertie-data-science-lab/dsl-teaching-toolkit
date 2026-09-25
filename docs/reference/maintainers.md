@@ -513,8 +513,10 @@ Every file faculty edit by hand can be wrong in a way the toolkit detects and on
 can fix. One type carries all of them (`faults.ConfigFault`), one engine keeps their issues
 (`config_digest`), one notifier addresses them (`notify`).
 
-**Seven digest issues**, one per file, each found by its EXACT title - a title that varied
-with the faults would never match and every run would open a new issue, so these are frozen:
+**Eight digest issues**, one per file, each found by its EXACT title - a title that varied
+with the faults would never match and every run would open a new issue, so these are frozen.
+A reworded title is appended to the digest's chain (`Digest.older_titles`): an issue open
+under an older one is still found, updated and closed.
 
 | issue title | file | where it lives |
 | --- | --- | --- |
@@ -524,7 +526,8 @@ with the faults would never match and every run would open a new issue, so these
 | `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
 | `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
 | `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `semester-config` |
-| `dsl-course.yml / cohort registry has entries the sync cannot use` | both course files | course `.github` |
+| `assignments.yml has values that will not run as written` | `assignments.yml` (what is checked against the handed-out repos) | semester `semester-config` |
+| `dsl-course.yml / semester registry has entries the sync cannot use` (was `... / cohort registry ...`) | both course files | course `.github` |
 
 The body is rewritten every tick (GitHub does not email about that); a comment - which it
 does - is posted only on appearance, escalation and clearing. An empty fault list CLOSES the
@@ -746,7 +749,8 @@ dispatch is refused as `NOT_MIGRATED` (`faults.NOT_MIGRATED`: one code, one sent
 the new spelling and "run the migration"). A migration tool rewrites a live org from this
 table, which is its input - keep it complete when a spelling changes. The exceptions are the
 append-only recognition chains for things already open in a live org - the Submission
-receipts labels and marks (`course.py`) and the archive notice prefixes (`teardown.py`) -
+receipts labels and marks (`course.py`), the archive notice prefixes (`teardown.py`) and
+the digest titles (`config_digest.Digest.older_titles`) -
 and ds01's `all_cohorts` payload, read as a deprecated alias until ds01-infra switches at
 Promote.
 

@@ -3684,9 +3684,24 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
         "teams.csv",
         "grading_sheets/",
         "grading_config.yml",
+        "assignments.yml",
     }
     assert set(synced) == everything
     assert sorted(mailed) == sorted(everything)
+
+
+def test_an_assignments_yml_fault_from_the_definition_pass_goes_in_its_own_issue(
+    monkeypatch, capsys
+):
+    template = ConfigFault("assignments.a1", "bad", file="grading_config.yml")
+    run = ConfigFault("assignments.a1", "drift", file="assignments.yml")
+    _rc, synced, _mailed = _config_preflight(monkeypatch, spec_faults=[template, run])
+    assert synced["grading_config.yml"] == [template]
+    assert synced["assignments.yml"] == [run]
+    out = capsys.readouterr().out
+    # Where each file is: the template's is in the course org, not the semester's.
+    assert "in Semester-Org's `<assignment template>/grading_config.yml`" in out
+    assert "in Semester-Org's `semester-config/assignments.yml`" in out
 
 
 def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):

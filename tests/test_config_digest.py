@@ -412,3 +412,25 @@ def test_the_course_digest_survives_the_very_file_it_reports_on(gh, monkeypatch)
     fake = gh([])
     out = cd.sync(COURSE, "Course", "Course", [_course_fault()], NOW)
     assert out.errors == 0 and fake.did("issue", "create")
+
+
+def test_an_issue_open_under_an_older_title_is_kept_and_closed_as_this_one(gh):
+    # The course issue said "cohort registry" until the rename: that open issue is still
+    # the course's, updated in place and closed once fixed - never left beside a new one.
+    (old,) = COURSE.older_titles
+    body = cd.render_body(COURSE, [_course_fault()], NOW, COURSE_CTX)
+    fake = gh([issue_row(7, old, body)])
+    assert cd.sync(COURSE, "Course", "Course", [_course_fault()], NOW).errors == 0
+    assert not fake.did("issue", "create")
+    assert fake.did("issue", "edit", "7")
+    assert cd.sync(COURSE, "Course", "Course", [], NOW).errors == 0
+    assert fake.did("issue", "close", "7")
+    assert COURSE.titles == (COURSE.title, old) and "semester registry" in COURSE.title
+
+
+def test_assignments_yml_faults_have_their_own_issue():
+    template = ConfigFault("assignments.a1", "bad", file="grading_config.yml")
+    run = ConfigFault("assignments.a1", "drift", file="assignments.yml")
+    assert cd.split_assignments([template, run]) == ([template], [run])
+    assert cd.ASSIGNMENTS in cd.SEMESTER_DIGESTS
+    assert cd.ASSIGNMENTS.title != cd.GRADING_CONFIG.title

@@ -905,6 +905,13 @@ def _config_faults(
             course_org, semester_org, sched, found, listing
         ),
     )
+    # The same pass checks the semester's own run settings against the handed-out repos:
+    # those faults are about assignments.yml, and go in its issue.
+    if config_digest.GRADING_CONFIG in out:
+        (
+            out[config_digest.GRADING_CONFIG],
+            out[config_digest.ASSIGNMENTS],
+        ) = config_digest.split_assignments(out[config_digest.GRADING_CONFIG])
     return out
 
 
@@ -996,8 +1003,8 @@ def _preflight_configs(
     ).items():
         if faults:
             log_step(
-                f"{len(faults)} entr(y/ies) in {semester_org}/{spec.file} the toolkit "
-                f"cannot use"
+                f"{len(faults)} entr(y/ies) in {semester_org}'s {spec.cite_file()} the "
+                f"toolkit cannot use"
             )
         _sync_config_digest(spec, course_org, semester_org, faults, local, dry_run)
     return 0

@@ -342,8 +342,8 @@ def _close_notices(semester_org: str, dry_run: bool) -> int:
     issue write either, so this is the last moment. Closed with a comment, because closing
     them silently would read as "fixed".
 
-    EVERY title the toolkit can leave open in this repo, which is the six hand-edited-file
-    digests, the schedule's own source digest, the cadence alarm, Distribute's dry-run
+    EVERY title the toolkit can leave open in this repo, which is the hand-edited-file
+    digests (each under every title of its chain), the schedule's own source digest, the cadence alarm, Distribute's dry-run
     preview and the archive notice - those, and nothing else, are what write here. A title missed here stands open inside a frozen repo for ever, since
     the sweep that would have closed it never runs on a closed-out semester again.
 
@@ -353,7 +353,7 @@ def _close_notices(semester_org: str, dry_run: bool) -> int:
     closed, not just the one for today's date - the earlier one would otherwise be sealed
     in, open, contradicting the record."""
     repo = f"{semester_org}/{CONFIG_REPO}"
-    titles = [d.title for d in config_digest.SEMESTER_DIGESTS] + [
+    titles = [t for d in config_digest.SEMESTER_DIGESTS for t in d.titles] + [
         source_digest.TITLE,
         cadence.LATE_TITLE,
         PREVIEW_TITLE,

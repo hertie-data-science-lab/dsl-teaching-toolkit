@@ -72,9 +72,10 @@ itself; nothing here reds a run.
 | *teams.csv has rows the toolkit cannot use* | a project-team row that will not be acted on | [09](../09-release-assignment-to-cohort.md) |
 | *grading sheets have entries the grader cannot read* | a mark, key or unit in `grading_sheets/` that stops a return | [10](../10-grade-and-return-assignments.md#when-a-sheet-has-something-nobody-can-act-on) |
 | *assignment grading_config.yml has values that will not grade as written* | an assignment definition that will not grade the way it reads | [03](../03-add-assignment-to-course.md) |
-| *dsl-course.yml / cohort registry has entries the sync cannot use* | the course org's own two files, which decide whether the course is synced at all | [01](../01-new-course-org.md) |
+| *assignments.yml has values that will not run as written* | a semester run setting that no longer describes the repos it handed out | [09](../09-release-assignment-to-cohort.md) |
+| *dsl-course.yml / semester registry has entries the sync cannot use* (earlier: *... / cohort registry ...*) | the course org's own two files, which decide whether the course is synced at all | [01](../01-new-course-org.md) |
 
-The first six live in that semester's private `semester-config` and cc its `instructors`; the
+The first seven live in that semester's private `semester-config` and cc its `instructors`; the
 last lives in the course org's `.github` and cc's `course-admin`.
 
 **When it reaches you.** A fault tied to a *moment* - a source a release needs, a value used
