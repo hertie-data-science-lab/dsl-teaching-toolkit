@@ -431,10 +431,13 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     assert "    kind: lecture" in schedule and "    kind: exam" in schedule
     assert fake._repo(SEM, ".github")["topics"] == [SEMESTER_TOPIC]
     # The pause record is written first, while everything still runs; every commit after
-    # it landed with Actions off everywhere, until the restore (the record's removal and
-    # the status check come after it); and all are back on now.
+    # it - status.json included - landed with Actions off everywhere, until the restore
+    # (the record's removal comes after it); and all are back on now.
     assert fake.commits[0][3] == migrate.PAUSE_COMMIT
-    assert all(fake.paused_at_commit[1:-2]) and not any(fake.paused_at_commit[-2:])
+    assert fake.commits[-2][3] == "ci: refresh" and fake.commits[-1][3] == (
+        migrate.PAUSE_COMMIT
+    )
+    assert all(fake.paused_at_commit[1:-1]) and not fake.paused_at_commit[-1]
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
     assert semester == ["join", "config", "profile", "status"]
     layout = [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT]
@@ -741,7 +744,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         ".system/SYLLABUS.md.sample",
         "SYLLABUS.md",
     }
-    assert all(fake.paused_at_commit[1:-2]) and fake.enabled(COURSE, ".github")
+    assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
 
     commits, puts = list(fake.commits), list(fake.puts)

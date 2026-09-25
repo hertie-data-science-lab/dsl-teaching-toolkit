@@ -21,8 +21,8 @@ on GitHub Free org variables do not reach private repos, and the workflows alrea
 an org carry no gate until they are re-rendered.)
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
-unpause, status. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
-template keys, materials files, re-render, unpause, status.
+status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
+template keys, materials files, re-render, status, unpause.
 """
 
 from __future__ import annotations
@@ -1078,8 +1078,9 @@ class Semester:
                 verify=lambda: not self.drift(),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            self.pause.steps()[1],
+            # status.json before the unpause: re-enabled workflows never race it.
             _status_step(self.course, self.org),
+            self.pause.steps()[1],
         ]
 
 
@@ -1305,8 +1306,8 @@ class Course:
                 verify=lambda: not self.drift(),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            self.pause.steps()[1],
             _status_step(self.org, None),
+            self.pause.steps()[1],
         ]
 
 
