@@ -9,7 +9,9 @@ carry none of it, and every key at every level must be one the module names.
 from __future__ import annotations
 
 import dataclasses
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +22,10 @@ from dsl_course.schema_check import validate
 from dsl_course.status_json import CourseFacts, SemesterFacts
 from tests.conftest import repo_row
 
+# The console's student-model tests read this render (`console/test/studentStatus.test.tsx`).
+CONSOLE_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "console/test/fixtures/student-status.json"
+)
 COURSE = "hertie-dsl-demo-course-e1234"
 SEMESTER = "hertie-dsl-demo-f2026"
 NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
@@ -417,6 +423,13 @@ def test_gather_reads_briefs_only_for_what_is_out(monkeypatch):
     assert extra.overlays == {("materials", "readings/01_intro/READINGS.md"): "prose"}
     assert extra.syllabus == ("materials", "SYLLABUS.md")
     assert extra.caps == {"assignment-2-project": 3}
+
+
+def test_the_console_reads_a_fresh_render():
+    # Rewrite it with `student_status.dumps(_render())` when the shape changes on purpose.
+    assert json.loads(CONSOLE_FIXTURE.read_text()) == json.loads(
+        student_status.dumps(_render())
+    )
 
 
 @pytest.mark.parametrize("points,expected", [("10", 10), ("7.5", 7.5), ("", None)])

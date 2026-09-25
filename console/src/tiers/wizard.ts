@@ -83,7 +83,7 @@ export function newMaterials(terms: string[], repos: string[]): Tiers {
       reason: 'Materials are usually per semester. Seeds the repo name and the syllabus header.', options: terms.map((t) => opt(t, termLabel(t))),
     },
     open: {
-      tier: 'default', label: 'Host some of it on the student site', widget: 'checkbox', default: false, defaultLabel: 'default: off keeps everything private to enrolled students',
+      tier: 'default', label: 'Select some of it for the public website', widget: 'checkbox', default: false, defaultLabel: 'default: off keeps everything private to enrolled students',
       forced: (v) => (copying(v) ? { value: false, reason: 'Copying takes its publish settings too, so there is nothing to choose here.' } : null),
     },
     public_dirs: {

@@ -296,7 +296,7 @@ describe('the wizard screens', () => {
   it('New materials offers the term and a closed publish toggle', () => {
     const out = render(<NewMaterialsScreen {...cp()} />);
     expect(out).toContain('Will create <code>course-materials-f2026</code> in the course.');
-    expect(out).toContain('Host some of it on the student site');
+    expect(out).toContain('Select some of it for the public website');
     expect(out).not.toContain('Which folders');
   });
 

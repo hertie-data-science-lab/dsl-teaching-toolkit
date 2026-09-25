@@ -16,6 +16,8 @@ export interface Names {
   registry_file: string;
   /** Engine-written records, as paths inside the repo that holds them (`records.path` in the engine). */
   records: Record<string, string>;
+  /** The hidden first line that routes a Join issue opened through the API (its form's label is dropped). */
+  join_markers: { join_course: string; join_team: string };
 }
 
 export const NAMES: Names = names;
@@ -27,6 +29,9 @@ export const INSTRUCTORS_FILE = NAMES.instructors_file;
 export const ASSIGNMENTS_FILE = NAMES.assignments_file;
 export const REGISTRY_FILE = NAMES.registry_file;
 export const STATUS_PATH = NAMES.records.status;
+/** A semester's public facts for its students, in the semester org's `.github`. */
+export const STUDENT_STATUS_PATH = NAMES.records.student_status;
+export const JOIN_MARKERS = NAMES.join_markers;
 export const OUTCOMES_DIR = NAMES.records.outcomes;
 export const LEDGER_PATH = NAMES.records.distributed;
 /** The semester's pointer to its course, in its config repo. */

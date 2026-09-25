@@ -108,14 +108,14 @@ The visit time behind "new since your last visit" is stored only after that seme
 receipts were read. Signing out forgets every visit time and remembered folder of that
 login in this browser, the rendered markdown, the team list and the semester facts.
 
-The shared facts come through one interface, `StudentData` (`src/model/student.ts`). Today
-it is `SiteSource`: the public site repo's generated files, read through the API
-(`_lectures/`, `_events/`, `_assignments/` front matter, `kind` or the older `type`, and
-each assignment page's body as the brief; `_announcements/`; `index.md` with its Liquid
-filled from `_config.yml`; `_data/people.yml`, `late_policy.yml`, `materials.yml`). The
-site's team digests are never read. Once the engine writes a public-safe
-`.github/.system/student-status.json`, a source reading that one file replaces it (WP-D4) and
-no screen changes. In a Student view nothing of the student's own is read.
+The shared facts come through one interface, `StudentData` (`src/model/student.ts`), read by
+`StatusFileSource` from the engine's public `<semester>/.github/.system/student-status.json`
+(`dsl_course/student_status.py`, rewritten with every status refresh; its allow-list schema is
+`schemas/student-status.schema.json`). It carries the cutoff, the timezone and the policy's
+kinds, so the console derives none of them. A semester whose engine has not written the file
+yet is read from its site repo instead (`SiteSource`: the generated collections, `index.md`,
+`_data/*.yml`), which also serves site-hosted instructor pictures. In a Student view nothing
+of the student's own is read.
 
 An **archived semester** is history: the student's own repos (read-only) and their marks from
 the gradebook, from the same reads as a live one. No operation runs against it.
@@ -137,19 +137,18 @@ self-contained file. PDFs open in
 a new tab or download; anything else downloads. Files over 1 MB come from the blob API; the
 API serves nothing over 100 MB.
 
-**Join** fills the form in the console and opens GitHub's own issue form with the answers
-(text inputs by field id: `enrol_code`, `assignment`, `team`), so the issue and its body are
-exactly the seeded form's. The console cannot create the issue itself: GitHub drops labels
-on an issue created through the API by anyone without push, and the `join` workflows run
-only on the form's label. The Action dropdown is chosen on GitHub. The answer is polled from
-the student's issues every 15 s for up to 5 minutes while one still waits. `?join=<org>`
+**Join** opens the issue itself, as the student, through the API: the seeded form's body
+under a hidden first line (`names.json` `join_markers`). GitHub drops the form's label on an
+issue an account without push creates that way, so the `join` workflows route on that line
+as well as on the label. When the API refuses, the console offers GitHub's own form,
+prefilled (text inputs by field id). The answer is polled from the student's issues every
+15 s for up to 5 minutes while one still waits. `?join=<org>`
 (and Home's "Have an enrolment code?") opens Join course for a semester the person is not a
 member of yet.
 
 **Rate limit** (5,000 requests an hour per person; every read is ETag-cached, and an
-unchanged 304 costs nothing). Opening a semester reads its site once: 9 fixed reads (four
-collection listings, `people.yml`, `late_policy.yml`, `materials.yml`, `_config.yml`,
-`index.md`) plus one per generated file, 44 on the demo (1 once `student-status.json` exists).
+unchanged 304 costs nothing). Opening a semester reads its `student-status.json` once (a
+semester without one: its site, 9 fixed reads plus one per generated file).
 Then the repo list, the gradebook and its last commit, the auditors membership, and one call
 per team; `/user/teams` is read once per session, not per semester. This week and Assignments
 add two calls per private repo (receipts issue, comments). A brief or the home text is

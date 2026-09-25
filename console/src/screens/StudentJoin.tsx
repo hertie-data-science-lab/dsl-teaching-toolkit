@@ -1,13 +1,11 @@
 // Join: the Join course and Join team forms, filled in the console, and what the semester's
-// automation answered. The issues are the SAME issues the seeded forms open, with the same
-// body: the console fills a form and opens GitHub's own issue form with those answers, and
-// the student presses Create there. It cannot create the issue itself: GitHub drops labels
-// on an issue created through the API by anyone without push on the repo, and the
-// join repo's workflows run only on the form's label (`onboarding`, `team-formation`). GitHub
-// fills an issue form's text inputs from the link, not its dropdowns, so the Action (and an
-// assignment offered as a dropdown) is chosen once more on GitHub; the form says which.
-// The answer is read back by polling the student's own issues in the join repo (ETag'd, free
-// when nothing changed).
+// automation answered. The console opens the issue itself, through the API, with the body the
+// seeded form would write under a hidden first line (`JOIN_MARKERS`): GitHub drops the form's
+// routing label on an issue an account without push creates that way, so the join repo's
+// workflows run on that line as well as on the label. If the API refuses (a token that may not
+// open issues there), the console offers GitHub's own form, prefilled, instead. The answer is
+// read back by polling the student's own issues in the join repo (ETag'd, free when nothing
+// changed).
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -15,7 +13,7 @@ import type { GhComment, GhIssue } from '../github/client';
 import { invitationUrl } from '../model/discovery';
 import { fmtWhen } from '../model/format';
 import { readable, type Mine } from '../model/mine';
-import { JOIN_REPO } from '../model/names';
+import { JOIN_MARKERS, JOIN_REPO } from '../model/names';
 import type { SemesterFacts } from '../model/student';
 import { ORG_NAME_RE } from '../model/policy';
 import { Crumbs, Md } from '../ui/bits';
@@ -32,6 +30,19 @@ export const joinCourseUrl = (org: string, code: string) =>
 /** GitHub's Join team form, with the assignment and team filled in (text inputs only). */
 export const joinTeamUrl = (org: string, assignment: string, team: string) =>
   `https://github.com/${org}/${WELCOME}/issues/new?template=02-join-team.yml&assignment=${encodeURIComponent(assignment)}&team=${encodeURIComponent(team.trim())}`;
+
+/** The Join course issue's body: the seeded form's, under the marker that routes it. */
+export const joinCourseBody = (code: string) => `${JOIN_MARKERS.join_course}\n### Enrolment code\n\n${code.trim()}\n`;
+
+export const TEAM_ACTIONS = { join: 'Join an existing team', create: 'Create a new team' } as const;
+
+/** The Join team issue's body, field by field as the seeded form writes it. */
+export const joinTeamBody = (assignment: string, action: keyof typeof TEAM_ACTIONS, team: string) =>
+  `${JOIN_MARKERS.join_team}\n### Assignment\n\n${assignment}\n\n### Action\n\n${TEAM_ACTIONS[action]}\n\n### Team\n\n${team.trim()}\n`;
+
+/** Whether an issue is a Join request: the form's label, or the console's hidden first line. */
+export const isJoinRequest = (i: Pick<GhIssue, 'labels' | 'body'>) =>
+  i.labels.some((l) => ROUTES.includes(l.name)) || [JOIN_MARKERS.join_course, JOIN_MARKERS.join_team].some((m) => (i.body ?? '').startsWith(m));
 
 export type Tone = 'ok' | 'bad' | 'busy' | 'warn';
 
@@ -56,7 +67,7 @@ interface Asked {
 /** The person's Join course and Join team issues in the join repo, newest first, each with the automation's last reply. */
 async function readAsked(env: NonNullable<ReturnType<typeof useEnv>>, org: string): Promise<Asked[]> {
   const mine = (await env.client.listIssues(org, WELCOME, `creator=${encodeURIComponent(env.user.login)}&state=all`))
-    .filter((i) => i.labels.some((l) => ROUTES.includes(l.name)))
+    .filter((i) => !i.pull_request && isJoinRequest(i))
     .slice(0, 5);
   return Promise.all(mine.map(async (issue) => {
     const cs = issue.comments ? await env.client.listIssueComments(org, WELCOME, issue.number).catch(() => []) : [];
@@ -67,8 +78,8 @@ async function readAsked(env: NonNullable<ReturnType<typeof useEnv>>, org: strin
 const POLL_MS = 15000;
 const POLLS = 20;
 
-/** Your requests, read now and every 15 s (up to 5 min) while one still waits for the automation. */
-export function JoinRequests({ org }: { org: string }) {
+/** Your requests, read now and every 15 s (up to 5 min) while one still waits for the automation. `sent` changes when the console has just opened one. */
+export function JoinRequests({ org, sent = 0 }: { org: string; sent?: number }) {
   const env = useEnv();
   const [asked, setAsked] = useState<Asked[] | null>(null);
   const [pending, setPending] = useState(false);
@@ -90,7 +101,7 @@ export function JoinRequests({ org }: { org: string }) {
       live = false;
       clearTimeout(timer);
     };
-  }, [org, tick, !!env]);
+  }, [org, tick, sent, !!env]);
   return (
     <section class="panel section" aria-labelledby="h-asked">
       <div class="a-head"><h2 id="h-asked">Your requests</h2><button class="textlink" type="button" onClick={() => setTick(tick + 1)}>Check again</button></div>
@@ -102,7 +113,7 @@ export function JoinRequests({ org }: { org: string }) {
 /** `invitePending`: the person's membership of `org` is still an unaccepted invitation (only then is the accept link offered). */
 export function AskedList({ asked, org, invitePending = false }: { asked: Asked[] | null; org?: string; invitePending?: boolean }) {
   if (asked === null) return <p class="footnote">Reading…</p>;
-  if (!asked.length) return <p class="footnote">You have opened no Join course or Join team request here yet. After you press Create on GitHub, it shows here within a few seconds.</p>;
+  if (!asked.length) return <p class="footnote">You have opened no Join course or Join team request here yet. Once you send one, it shows here within a few seconds.</p>;
   return (
     <ul class="asked">
       {asked.map(({ issue, reply }) => {
@@ -118,7 +129,33 @@ export function AskedList({ asked, org, invitePending = false }: { asked: Asked[
   );
 }
 
-export function TeamForm({ org, assignments, mine }: { org: string; assignments: SemesterFacts['assignments']; mine: Mine | null }) {
+/** Sends one Join request through the API; on a refusal, offers GitHub's own form instead. */
+function SendRequest({ org, title, body, ready, fallback, label, onSent }: { org: string; title: string; body: string; ready: boolean; fallback: string; label: string; onSent?: () => void }) {
+  const env = useEnv();
+  const [state, setState] = useState<{ kind: 'idle' | 'busy' | 'sent' } | { kind: 'failed'; error: string }>({ kind: 'idle' });
+  const send = () => {
+    if (!env || !ready) return;
+    setState({ kind: 'busy' });
+    env.client.createIssue(org, WELCOME, title, body).then(
+      () => {
+        setState({ kind: 'sent' });
+        onSent?.();
+      },
+      (e: unknown) => setState({ kind: 'failed', error: e instanceof Error ? e.message : String(e) }),
+    );
+  };
+  return (
+    <>
+      <div class="actions">
+        <button class="btn" type="button" disabled={!ready || !env || state.kind === 'busy'} onClick={send}>{state.kind === 'busy' ? 'Sending…' : label}</button>
+      </div>
+      {state.kind === 'sent' ? <p class="footnote">Sent. The answer shows under Your requests.</p> : null}
+      {state.kind === 'failed' ? <p class="footnote">GitHub did not take the request ({state.error}). <a href={fallback} target="_blank" rel="noopener">Open the form on GitHub instead <Ext /></a>, then press Create there.</p> : null}
+    </>
+  );
+}
+
+export function TeamForm({ org, assignments, mine, onSent }: { org: string; assignments: SemesterFacts['assignments']; mine: Mine | null; onSent?: () => void }) {
   const open = assignments.filter((a) => a.teamFormation);
   const [slug, setSlug] = useState(open[0]?.slug ?? '');
   const [action, setAction] = useState<'join' | 'create'>('join');
@@ -156,10 +193,8 @@ export function TeamForm({ org, assignments, mine }: { org: string; assignments:
         <input type="text" id="j-team" value={team} spellcheck={false} autocomplete="off" aria-invalid={bad ? 'true' : undefined} onInput={(e) => setTeam((e.target as HTMLInputElement).value)} placeholder="e.g. team-x" />
         <p class="hint">{bad ? 'Letters, numbers and dashes only, starting with a letter or number.' : action === 'join' ? 'Spell it exactly as the team’s members do.' : 'A name nobody is using yet.'}</p>
       </div>
-      <div class="actions">
-        {ready ? <a class="btn" href={joinTeamUrl(org, a.slug, team)} target="_blank" rel="noopener">Open the Join team form on GitHub <Ext /></a> : <button class="btn" type="button" disabled>Open the Join team form on GitHub</button>}
-      </div>
-      <p class="footnote">GitHub opens the form with the team{' '}filled in. There, choose <b>{action === 'join' ? 'Join an existing team' : 'Create a new team'}</b> as the Action (and {a.slug} as the assignment if it asks), then press Create. The answer shows under Your requests.</p>
+      <SendRequest org={org} title="Join team" body={joinTeamBody(a.slug, action, team)} ready={ready} fallback={joinTeamUrl(org, a.slug, team)} label={action === 'join' ? 'Send: join this team' : 'Send: create this team'} onSent={onSent} />
+      <p class="footnote">The request is an issue in the semester’s public join repo, opened as you. The automation answers it under Your requests.</p>
     </form>
   );
 }
@@ -189,20 +224,21 @@ export function TeamList({ a, current, onPick, picked }: { a: SemesterFacts['ass
 }
 
 export function JoinScreen({ org, facts, mine, studentView }: { org: string; facts: SemesterFacts; mine: Mine | null; studentView: boolean }) {
+  const [sent, setSent] = useState(0);
   return (
     <div class="stack">
       <section class="panel section" aria-labelledby="h-team">
         <h2 id="h-team">Join or create a team</h2>
         {studentView ? <p class="footnote">A student forms teams here; the form opens the semester’s Join team issue.</p>
           : mine?.auditor ? <p class="footnote">As an auditor you do not join a team.</p>
-          : <TeamForm org={org} assignments={facts.assignments} mine={mine} />}
+          : <TeamForm org={org} assignments={facts.assignments} mine={mine} onSent={() => setSent(sent + 1)} />}
       </section>
-      {studentView ? null : <JoinRequests org={org} />}
+      {studentView ? null : <JoinRequests org={org} sent={sent} />}
     </div>
   );
 }
 
-export function JoinCourseForm({ org }: { org: string }) {
+export function JoinCourseForm({ org, onSent }: { org: string; onSent?: () => void }) {
   const [code, setCode] = useState('');
   const bad = code.trim() !== '' && !ENROL_CODE.test(code.trim());
   const ready = code.trim() !== '' && !bad;
@@ -213,23 +249,22 @@ export function JoinCourseForm({ org }: { org: string }) {
         <input type="text" id="j-code" value={code} spellcheck={false} autocomplete="off" aria-invalid={bad ? 'true' : undefined} onInput={(e) => setCode((e.target as HTMLInputElement).value)} placeholder="dsl-ab3k9m" />
         <p class="hint">{bad ? 'A code looks like dsl- and six letters or numbers.' : 'The code emailed to your school address.'}</p>
       </div>
-      <div class="actions">
-        {ready ? <a class="btn" href={joinCourseUrl(org, code)} target="_blank" rel="noopener">Open the Join course form on GitHub <Ext /></a> : <button class="btn" type="button" disabled>Open the Join course form on GitHub</button>}
-      </div>
-      <p class="footnote">GitHub opens the form with your code filled in; press Create there. The request is a public issue: the automation removes the code from it straight away. It then invites you to the semester by email: accept that invitation, and the semester appears in the console.</p>
+      <SendRequest org={org} title="Join course" body={joinCourseBody(code)} ready={ready} fallback={joinCourseUrl(org, code)} label="Send the Join request" onSent={onSent} />
+      <p class="footnote">The request is a public issue in the semester’s join repo, opened as you: the automation removes the code from it straight away. It then invites you to the semester by email: accept that invitation, and the semester appears in the console.</p>
     </form>
   );
 }
 
 /** `?join=<org>`: joining a semester you are not a member of yet (its join repo is public). */
 export function JoinCourseScreen({ org }: { org: string }) {
+  const [sent, setSent] = useState(0);
   return (
     <>
       <Crumbs items={[{ t: 'Your semesters', href: '#home' }, { t: `Join ${org}` }]} />
       <div class="page-head"><div><h1>Join a semester</h1><p class="lede">{org}</p></div></div>
       <div class="stack">
-        <section class="panel section"><JoinCourseForm org={org} /></section>
-        <JoinRequests org={org} />
+        <section class="panel section"><JoinCourseForm org={org} onSent={() => setSent(sent + 1)} /></section>
+        <JoinRequests org={org} sent={sent} />
       </div>
     </>
   );
