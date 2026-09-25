@@ -28,8 +28,9 @@ def test_the_four_new_assignment_boxes_can_be_set_course_wide():
 
 
 def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
+    # Refused, so the course states nothing and the institution's value applies.
     got = settings.parse_assignment_defaults({"visibility": "everyone"})
-    assert got == {"visibility": "private"}
+    assert got == {}
     assert "visibility" in capsys.readouterr().err
 
 

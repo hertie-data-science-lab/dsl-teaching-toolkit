@@ -213,3 +213,41 @@ def test_the_digest_checks_the_spec_the_handout_resolves(monkeypatch):
     texts = [f.what for f in faults]
     assert not any("does not describe the repos" in t for t in texts)
     assert any("`solution_datetime:`" in t for t in texts)
+
+
+@pytest.mark.parametrize(
+    ("key", "typo", "course_value"),
+    [("visibility", "publik", "public"), ("team_formation", "asigned", "assigned")],
+)
+def test_a_closed_vocabulary_typo_leaves_the_next_layer_to_answer(
+    monkeypatch, key, typo, course_value
+):
+    monkeypatch.setattr(
+        settings, "org_meta", lambda org: {"assignment_defaults": {key: course_value}}
+    )
+    monkeypatch.setattr(
+        settings, "_assignments_text", lambda org: f"defaults:\n  {key}: {typo}\n"
+    )
+    assert settings.effective("Sem", "a1", key, course_org="C") == (
+        course_value,
+        "course",
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "typo"), [("visibility", "publik"), ("team_formation", "x")]
+)
+def test_a_template_typo_leaves_the_cascade_to_answer(monkeypatch, key, typo):
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: (
+            f"defaults:\n  {key}: {'public' if key == 'visibility' else 'assigned'}\n"
+        ),
+    )
+    monkeypatch.setattr(
+        grades, "_grading_text", lambda org, template: f"type: group\n{key}: {typo}\n"
+    )
+    spec = grades.load_grading_spec("C", "t", semester_org="Sem", slug="a1")
+    assert dict(spec.sources)[key] == "semester"
+    assert any(d.field == key for d in spec.dropped)

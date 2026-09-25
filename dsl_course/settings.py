@@ -147,20 +147,25 @@ def _one_of(
     value: object,
     allowed: tuple[str, ...],
     field: str,
-    default: str,
+    default: str | None,
     where: str,
     dropped: list[str],
-) -> str:
-    """A closed vocabulary, or the default with a warning. Never the raw value: an
-    unrecognised `submit_via` would silently turn late arithmetic off for a semester."""
+) -> str | None:
+    """A closed vocabulary, or `default` with a warning. Never the raw value: an
+    unrecognised `submit_via` would silently turn late arithmetic off for a semester.
+
+    A RUN setting passes `default=None`: a refused value states nothing, and the next
+    layer of the cascade answers - a typo in one layer must not override the layer below
+    under the typing layer's name."""
     text = str(value or "").strip().lower()
     if text in allowed:
         return text
+    using = f"using `{default}`" if default is not None else "ignored"
     dropped.append(
         Dropped(
             where,
             field,
-            f"`{field}: {value}` is not one of {'/'.join(allowed)} - using `{default}`",
+            f"`{field}: {value}` is not one of {'/'.join(allowed)} - {using}",
             allowed,
         )
     )
@@ -349,7 +354,7 @@ _READERS = {
     "title": lambda v, w, d: str(v or "").strip(),
     "type": lambda v, w, d: _one_of(v, ASSIGNMENT_TYPES, "type", "individual", w, d),
     "team_formation": lambda v, w, d: _one_of(
-        v, TEAM_FORMATIONS, "team_formation", policy.defaults()["team_formation"], w, d
+        v, TEAM_FORMATIONS, "team_formation", None, w, d
     ),
     "max_team_size": _team_cap,
     # `canonical_submit_via` first, so the legacy `github` spelling reads as
@@ -358,9 +363,7 @@ _READERS = {
     "submit_via": lambda v, w, d: _one_of(
         canonical_submit_via(v), SUBMIT_VIA, "submit_via", "assignment_repo", w, d
     ),
-    "visibility": lambda v, w, d: _one_of(
-        v, VISIBILITIES, "visibility", policy.defaults()["visibility"], w, d
-    ),
+    "visibility": lambda v, w, d: _one_of(v, VISIBILITIES, "visibility", None, w, d),
     "submit_url": _submit_url,
     "formats": _formats,
     "questions": _questions,
@@ -458,7 +461,8 @@ def parse_assignment_defaults(raw: object) -> dict:
             )
     for line in dropped:
         log_err(line)
-    return values
+    # A refused value states nothing: the institution's answers.
+    return {key: value for key, value in values.items() if value is not None}
 
 
 # ------------------------------------------------------------------ the cascade
@@ -560,9 +564,9 @@ def layers(
 
 
 def _usable(block: Mapping) -> dict:
-    """A defaults block without the values its readers refused (None): a default nobody
-    can use states nothing, and the next layer answers. (A TEMPLATE's refused late key
-    still states the pair - that file wrote a rule of its own; see `_late_pair`.)"""
+    """A block without the values its readers refused (None, for every run key): a value
+    nobody can use states nothing, and the next layer answers. (A TEMPLATE's refused late
+    key still states the pair - that file wrote a rule of its own; see `_late_pair`.)"""
     return {key: value for key, value in block.items() if value is not None}
 
 

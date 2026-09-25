@@ -111,6 +111,7 @@ from .repos import (
     set_repo_topics,
 )
 from .settings import (
+    LATE_PAIR,
     SPEC_KEYS,
     Dropped,
     as_decimal,
@@ -1142,6 +1143,9 @@ def parse_grading_spec(text: str) -> GradingSpec:
     dropped: list[str] = []
     data = refuse_renamed(data, GRADING_FILE, dropped)
     values = read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
+    # A refused value states nothing (the field's default stands, and the cascade answers
+    # the run keys) - except a late key, which still states the pair (`_late_pair`).
+    values = {k: v for k, v in values.items() if v is not None or k in LATE_PAIR}
     _late_pair(values)
     declared = frozenset(values)
     _cross_check(values, dropped)
