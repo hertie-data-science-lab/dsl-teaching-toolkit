@@ -9,13 +9,10 @@ layout: page
 {% include open_in.html %}
 
 {% comment %}
-Labs are their own entries in the _lectures collection (`type: lab`), each carrying its
+Labs are their own entries in the _lectures collection (`kind: lab`), each carrying its
 links whose `section` is "lab". Same block as Lectures and Readings.
 {% endcomment %}
-{% comment %}`kind`, with `type` as the fallback until the theme's next release (slice C3): a site
-synced before `kind` existed carries only `type`.{% endcomment %}
 {% assign entries = site.lectures | where: "kind", "lab" %}
-{% if entries.size == 0 %}{% assign entries = site.lectures | where: "type", "lab" %}{% endif %}
 {% assign entries = entries | sort: 'date' %}
 {% for entry in entries %}
 <section class="session">
