@@ -754,11 +754,6 @@ def seeded_wording(ref: str) -> dict[str, str]:
         ),
         "#         cohort_dest_repo:": "#         semester_dest_repo:",
         "#         cohort_dest_path:": "#         semester_dest_path:",
-        "#     cohort_dest_repo:             # OPTIONAL - default: the slug above (here "
-        "assignment-1)": (
-            "#     semester_dest_repo:             # OPTIONAL - default: the slug above "
-            "(here assignment-1)"
-        ),
         "  title: Cohort archived      # optional - the row's Title column": (
             "  title: Semester archived      # optional - the row's Title column"
         ),
