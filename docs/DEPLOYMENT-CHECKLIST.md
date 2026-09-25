@@ -84,9 +84,9 @@ set in its own `schedule.yml` (default: the institution's, Europe/Berlin and 60 
 `course_name` / `course_code` / `course_description` are the fields that reach every
 semester website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
 
-`site_link_extensions` narrows what each session row **links** on the **semester** sites,
-never what it ships. Unset (the default), a row lists the files at its session folder's root
-plus one link per subfolder, so a rendered Quarto/Rmd deck links the deck rather than its
+`site_link_extensions` narrows what each row **links** on the **semester** sites,
+never what it ships. Unset (the default), a row lists the files at the root of each folder it
+released plus one link per subfolder, so a rendered Quarto/Rmd deck links the deck rather than its
 hundreds of assets; set, only these file types are listed, plus a link to the folder itself.
 
 It does **not** apply to the public open-courseware site, which serves its files itself and
@@ -274,8 +274,8 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
 and it is the default fire time), `title` and `details` (optional - the session's name,
-shown beside its ordinal, and a sentence about it in the schedule's Details column and on
-the Lectures tab), `kind` (optional - which row it belongs to), and the `deploy`
+shown beside the row's name, and a sentence about it in the schedule's Details column and on
+its kind's tab), `kind` (optional - the row's kind; inferred from where the first copy lands), and the `deploy`
 actions. A deploy item may carry its own `deploy_datetime` to ship earlier or later than
 the calendar event.
 An assignment's dates (handout_datetime/due_datetime/solution_datetime/marks_return_datetime)
@@ -439,15 +439,14 @@ type, and the type is never a field you set - it follows from where the row came
 
 | Row type | Comes from |
 |---|---|
-| lecture | a released session folder under `lectures/` |
-| lab | a released session folder under `labs/` |
+| lecture, lab, readings, drop-in, ... | a `releases:` entry, of its `kind` (declared, or inferred from the folder its first copy lands in) |
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
 | exam | an `events:` entry with `kind: exam` |
 | special_event | an `events:` entry with no `kind` (clinic, guest lecture, revision session), and the `archive` block's date - the "Semester archived" row |
 | term_date | the `semester_start` / `semester_end` scalars |
 
-So lecture vs lab is decided by the deployed section folder, not by the entry label, and a
-week with both a lecture and a lab renders two rows.
+Labels, colours and tabs come from the institution policy's `kinds:`; a week with a lecture
+and a lab entry renders two rows.
 
 **A malformed entry is dropped - and every drop is reported.** The parser never raises, so
 the rest of the semester still runs, but nothing is silent: each drop is named in the run log,

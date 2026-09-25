@@ -508,8 +508,14 @@
             "type": "string"
           },
           "kind": {
+            "type": "string"
+          },
+          "kind_inferred": {
+            "type": "boolean"
+          },
+          "number": {
             "type": [
-              "string",
+              "integer",
               "null"
             ]
           },

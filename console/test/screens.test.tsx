@@ -191,7 +191,7 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('<i>random forests</i>');
     expect(out).toContain('st-chip skip');
     expect(out).toContain('<b>Exam</b>: Midterm');
-    expect(out).toContain('<b>Session 5</b>: Trees and ensembles');
+    expect(out).toContain('<b>Lecture 5</b>: Trees and ensembles');
     expect(out).toContain('<b>Assignment 2</b>: Regression');
     expect(out).toContain('today-line');
   });
@@ -208,7 +208,7 @@ describe('S6 schedule and S11 release', () => {
   });
   it('renders a release with its source, destination and problem', () => {
     const t = text(<ReleaseScreen {...props({ entry: 's5' })} />);
-    expect(t).toContain('Session 5 : Trees and ensembles');
+    expect(t).toContain('Lecture 5 : Trees and ensembles');
     expect(t).toContain('will be skipped');
     expect(t).toContain(`${COURSE_ORG}/course-materials-f2026/lectures/05_trees`);
     expect(t).toContain(`${COHORT_ORG}/materials/lectures/05_trees`);
@@ -220,7 +220,7 @@ describe('S6 schedule and S11 release', () => {
   };
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
-    expect(out).toContain('<b>Session 12</b>: Review');
+    expect(out).toContain('<b>Lecture 12</b>: Review');
     expect(out).toMatch(/<li class="trow term" data-entry="lecture-12"><span class="k">release<\/span>/);
     expect(out).toContain('Nothing to release yet: this entry has no deploy block');
     expect(out).toContain('href="#schedule-lecture-12"');

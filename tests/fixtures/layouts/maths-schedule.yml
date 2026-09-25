@@ -1,0 +1,339 @@
+# The maths semester's release plan (paths and dates only), for the row tests.
+semester_start: 2026-08-01
+semester_end: 2027-01-31
+releases:
+  lab_environment:
+    event_datetime: 2026-09-08T12:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/pyproject.toml
+      semester_dest_path: pyproject.toml
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/README.md
+      semester_dest_path: README.md
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/m4ds
+      semester_dest_path: m4ds
+  01_lab:
+    event_datetime: 2026-09-02T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/01_lab
+      semester_dest_path: labs/01_lab
+      deploy_datetime: 2026-09-02T07:00
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/01_lab
+      semester_dest_path: labs/01_lab/solutions
+      deploy_datetime: 2026-09-04T07:00
+  02_lab:
+    event_datetime: 2026-09-09T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/02_lab
+      semester_dest_path: labs/02_lab
+      deploy_datetime: 2026-09-09T07:00
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/02_lab
+      semester_dest_path: labs/02_lab/solutions
+      deploy_datetime: 2026-09-11T07:00
+  03_lab:
+    event_datetime: 2026-09-16T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/03_lab
+      semester_dest_path: labs/03_lab
+      deploy_datetime: 2026-09-16T07:00
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/03_lab
+      semester_dest_path: labs/03_lab/solutions
+      deploy_datetime: 2026-09-18T07:00
+  04_lab:
+    event_datetime: 2026-09-23T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/04_lab
+      semester_dest_path: labs/04_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/04_lab
+      semester_dest_path: labs/04_lab/solutions
+      deploy_datetime: 2026-09-25T07:00
+  05_lab:
+    event_datetime: 2026-09-30T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/05_lab
+      semester_dest_path: labs/05_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/05_lab
+      semester_dest_path: labs/05_lab/solutions
+      deploy_datetime: 2026-10-02T07:00
+  06_lab:
+    event_datetime: 2026-10-07T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/06_lab
+      semester_dest_path: labs/06_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/06_lab
+      semester_dest_path: labs/06_lab/solutions
+      deploy_datetime: 2026-10-09T07:00
+  07_lab:
+    event_datetime: 2026-10-14T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/07_lab
+      semester_dest_path: labs/07_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/07_lab
+      semester_dest_path: labs/07_lab/solutions
+      deploy_datetime: 2026-10-16T07:00
+  08_lab:
+    event_datetime: 2026-10-28T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/08_lab
+      semester_dest_path: labs/08_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/08_lab
+      semester_dest_path: labs/08_lab/solutions
+      deploy_datetime: 2026-10-30T07:00
+  09_lab:
+    event_datetime: 2026-11-04T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/09_lab
+      semester_dest_path: labs/09_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/09_lab
+      semester_dest_path: labs/09_lab/solutions
+      deploy_datetime: 2026-11-06T07:00
+  10_lab:
+    event_datetime: 2026-11-11T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/10_lab
+      semester_dest_path: labs/10_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/10_lab
+      semester_dest_path: labs/10_lab/solutions
+      deploy_datetime: 2026-11-13T07:00
+  11_lab:
+    event_datetime: 2026-11-18T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/11_lab
+      semester_dest_path: labs/11_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/11_lab
+      semester_dest_path: labs/11_lab/solutions
+      deploy_datetime: 2026-11-20T07:00
+  12_lab:
+    event_datetime: 2026-11-25T09:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/labs/12_lab
+      semester_dest_path: labs/12_lab
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/labs/12_lab
+      semester_dest_path: labs/12_lab/solutions
+      deploy_datetime: 2026-11-27T07:00
+  lecture_01:
+    event_datetime: 2026-09-01T08:00
+    title: Probability Theory
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/01_lecture
+      semester_dest_path: lectures/01_lecture
+      deploy_datetime: 2026-09-02T08:00
+  lecture_02:
+    event_datetime: 2026-09-08T08:00
+    title: Random Variables and Their Distributions
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/02_lecture
+      semester_dest_path: lectures/02_lecture
+      deploy_datetime: 2026-09-09T08:00
+  lecture_03:
+    event_datetime: 2026-09-15T08:00
+    title: Expectation and Joint Distributions
+    details: in-class quiz 1
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/03_lecture
+      semester_dest_path: lectures/03_lecture
+      deploy_datetime: 2026-09-15T06:00
+  lecture_04:
+    event_datetime: 2026-09-22T08:00
+    title: Calculus for Data Science
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/04_lecture
+      semester_dest_path: lectures/04_lecture
+      deploy_datetime: 2026-09-22T06:00
+  lecture_05:
+    event_datetime: 2026-09-29T08:00
+    title: Continuous Random Variables and Limit Theorems
+    details: in-class quiz 2
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/05_lecture
+      semester_dest_path: lectures/05_lecture
+      deploy_datetime: 2026-09-29T06:00
+  lecture_06:
+    event_datetime: 2026-10-06T08:00
+    title: Maximum Likelihood Estimation
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/06_lecture
+      semester_dest_path: lectures/06_lecture
+      deploy_datetime: 2026-10-06T06:00
+  lecture_07:
+    event_datetime: 2026-10-13T08:00
+    details: in-class quiz 3
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/07_lecture
+      semester_dest_path: lectures/07_lecture
+      deploy_datetime: 2026-10-13T06:00
+  lecture_08:
+    event_datetime: 2026-10-27T08:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/08_lecture
+      semester_dest_path: lectures/08_lecture
+      deploy_datetime: 2026-10-27T06:00
+  lecture_09:
+    event_datetime: 2026-11-03T08:00
+    details: in-class quiz 4
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/09_lecture
+      semester_dest_path: lectures/09_lecture
+      deploy_datetime: 2026-11-03T06:00
+  lecture_10:
+    event_datetime: 2026-11-10T08:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/10_lecture
+      semester_dest_path: lectures/10_lecture
+      deploy_datetime: 2026-11-10T06:00
+  lecture_11:
+    event_datetime: 2026-11-17T08:00
+    details: in-class quiz 5
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/11_lecture
+      semester_dest_path: lectures/11_lecture
+      deploy_datetime: 2026-11-17T06:00
+  lecture_12:
+    event_datetime: 2026-11-24T08:00
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: students/lectures/12_lecture
+      semester_dest_path: lectures/12_lecture
+      deploy_datetime: 2026-11-24T06:00
+  readings_01:
+    event_datetime: 2026-09-01T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/01_week-1
+      semester_dest_path: readings/01_week-1
+      deploy_datetime: 2026-08-31T08:00
+  readings_02:
+    event_datetime: 2026-09-08T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/02_week-2
+      semester_dest_path: readings/02_week-2
+      deploy_datetime: 2026-09-01T08:00
+  readings_03:
+    event_datetime: 2026-09-15T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/03_week-3
+      semester_dest_path: readings/03_week-3
+      deploy_datetime: 2026-09-01T08:00
+  readings_04:
+    event_datetime: 2026-09-22T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/04_week-4
+      semester_dest_path: readings/04_week-4
+      deploy_datetime: 2026-09-01T08:00
+  readings_05:
+    event_datetime: 2026-09-29T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/05_week-5
+      semester_dest_path: readings/05_week-5
+      deploy_datetime: 2026-09-01T08:00
+  readings_06:
+    event_datetime: 2026-10-06T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/06_week-6
+      semester_dest_path: readings/06_week-6
+      deploy_datetime: 2026-09-29
+  readings_07:
+    event_datetime: 2026-10-13T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/07_week-7
+      semester_dest_path: readings/07_week-7
+      deploy_datetime: 2026-10-06T08:00
+  readings_08:
+    event_datetime: 2026-10-27T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/08_week-8
+      semester_dest_path: readings/08_week-8
+      deploy_datetime: 2026-10-13T08:00
+  readings_09:
+    event_datetime: 2026-11-03T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/09_week-9
+      semester_dest_path: readings/09_week-9
+      deploy_datetime: 2026-10-27T08:00
+  readings_10:
+    event_datetime: 2026-11-10T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/10_week-10
+      semester_dest_path: readings/10_week-10
+      deploy_datetime: 2026-11-03T08:00
+  readings_11:
+    event_datetime: 2026-11-17T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/11_week-11
+      semester_dest_path: readings/11_week-11
+      deploy_datetime: 2026-11-10T08:00
+  readings_12:
+    event_datetime: 2026-11-24T08:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: readings/12_week-12
+      semester_dest_path: readings/12_week-12
+      deploy_datetime: 2026-11-17T08:00
+  quiz_01:
+    event_datetime: 2026-09-21T21:00
+    show_on_site: false
+    deploy:
+    - course_source_repo: course-materials-f2026
+      course_source_path: solutions/multiple_choice/02_mc/mc02_solutions.pdf
+      semester_dest_path: quiz/quiz_01.pdf
+      deploy_datetime: 2026-09-21T21:00

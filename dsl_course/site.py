@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import stat
 import sys
@@ -38,7 +39,7 @@ from urllib.parse import quote
 import yaml
 from pathspec import GitIgnoreSpec
 
-from . import schedule, status, teams
+from . import policy, schedule, status, teams
 from .course import (
     CONFIG_REPO,
     CUTOFF_SENTENCE,
@@ -73,6 +74,8 @@ from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .grades import load_grading_spec, spoken_day, team_cap, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
+from .materials import DEFAULT_SYLLABUS, alias_kind
+from .materials import read as read_materials
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
 from .releaseignore import parse as parse_patterns
@@ -82,24 +85,25 @@ from .repos import (
     has_never_material_component,
 )
 from .schedule_plan import (
-    READINGS_SECTION,
     PlannedRow,
-    declared_dest_kinds,
-    dest_row_kind,
-    planned_sessions,
+    deploy_dest,
+    deploy_section,
+    planned_rows,
+    site_rows,
 )
 from .site_repo import (
     PUBLISH_CONFIG,
-    ROW_NOUN,
     Link,
     SitePlan,
     block,
     iso_when,
+    kinds_yaml,
     links_block,
     liquid_raw,
     nav_yaml,
     people_yaml,
     q,
+    retired_kind_pages,
     row_file,
     site_readme,
     site_templates,
@@ -147,22 +151,6 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     stripped."""
     branch = default_branch(org, repo, fallback="main")
     return branch, repo_tree(org, repo, branch, "blob")
-
-
-def _source_prefix(subpath: str, folder: str) -> str:
-    """Where a discovered session folder sits in its repo - `subpath/folder`, or the bare
-    folder when the release landed at the repo root. Stated once: three callers need it,
-    and a fourth copy of the rule is how they come to disagree (same argument
-    `deploy_dest` makes for the deploy side)."""
-    return f"{subpath}/{folder}" if subpath else folder
-
-
-def _source_section(repo: str, subpath: str) -> str:
-    """The section a DISCOVERED release source belongs to - its subpath, or the repo itself
-    when the folder sits at the root. The read-side twin of `deploy_section`, which names
-    this rule in its own docstring; both must answer alike or a row's kind, its reading
-    list and its index heading disagree about the same folder."""
-    return subpath or repo
 
 
 def _ext(name: str) -> str:
@@ -283,8 +271,8 @@ def _public_selection(
     """Which paths of `repo` the site can host, out of its released tree.
 
     Everything a policy matches - last match wins WITHIN one policy, which is what makes
-    `!lectures/09_*/**` carve a session back out - plus the `<stem>_files/` bundle beside
-    each matched deck: a rendered deck without its bundle loads with no figures and no
+    `!lectures/09_*/**` carve a session back out - plus the asset folders beside each
+    matched deck (`_bundle_prefixes`): a rendered deck without its bundle loads with no figures and no
     styles, and no faculty member should have to write a pattern for a directory their
     renderer invented. The denylist gates every candidate, bundles included, and cannot be
     written around.
@@ -305,8 +293,8 @@ def _public_selection(
     }
     for path in list(matched):
         if _ext(path) in _DECK_EXTENSIONS:
-            prefix = _bundle_prefix(path)
-            matched |= {a for a in paths if a.startswith(prefix) and _publishable(a)}
+            prefixes = _bundle_prefixes(path)
+            matched |= {a for a in paths if a.startswith(prefixes) and _publishable(a)}
     keep = set()
     for path in matched:
         try:
@@ -325,9 +313,19 @@ def _public_selection(
     return frozenset(keep)
 
 
-def _bundle_prefix(path: str) -> str:
-    """The `<stem>_files/` directory a rendered deck keeps its assets in, beside it."""
-    return f"{path.rsplit('.', 1)[0]}_files/"
+# Asset folders a rendered deck may keep beside it besides `<stem>_files/` (Quarto,
+# reveal.js and hand-made decks). They travel with every hosted deck in their folder.
+_BUNDLE_DIRS = ("media", "libs", "images")
+
+
+def _bundle_prefixes(path: str) -> tuple[str, ...]:
+    """The directories a rendered deck's assets sit in, beside it: `<stem>_files/`, plus
+    `media/`, `libs/` and `images/` in the deck's own folder."""
+    folder = f"{path.rsplit('/', 1)[0]}/" if "/" in path else ""
+    return (
+        f"{path.rsplit('.', 1)[0]}_files/",
+        *(f"{folder}{name}/" for name in _BUNDLE_DIRS),
+    )
 
 
 def _mirror_public(
@@ -407,30 +405,6 @@ def _file_link(
     return Link(name, _gh_url(semester_org, repo, branch, "blob", path), view)
 
 
-def _session_files(
-    org: str, repo: str, subpath: str, folder: str, hosted: Hosted
-) -> list[Link]:
-    """A `Link` for every file at ANY depth under `folder` (already confirmed by
-    discovery.discover_release_sources to match a session's ordinal prefix), at `subpath`
-    in a repo (or the repo root when `subpath` is empty - a release destination left
-    at its default).
-
-    Recursive, because a release copies a session folder wholesale (deploy's
-    copytree), so `03_week-3/handouts/notes.pdf` is just as released as a file sitting
-    directly in `03_week-3/` - a non-recursive listing would silently drop it from the
-    site. Filters the repo's one memoised recursive tree (`_repo_tree`) client-side, so
-    no API call per session or per subfolder; names are the path relative to the session
-    folder, so nested files stay distinguishable, and the ordering is by path for a
-    stable diff."""
-    prefix = _source_prefix(subpath, folder)
-    branch, paths = _repo_tree(org, repo)
-    return [
-        _file_link(org, repo, branch, path, path[len(prefix) + 1 :], hosted)
-        for path in paths
-        if path.startswith(f"{prefix}/")
-    ]
-
-
 # The link name for the escape hatch out of an allowlist: whatever the list does not
 # name is still one click away, rather than invisible.
 _BROWSE_ALL = "browse the folder"
@@ -452,10 +426,9 @@ def _link_extensions(meta: dict) -> frozenset[str]:
 def _shape_links(
     blobs: list[Link], tree_base: str, allow: frozenset[str]
 ) -> list[Link]:
-    """The links a session row actually SHOWS, out of every file it released.
+    """The links a row actually SHOWS, out of every file one of its folders released.
 
-    Release is recursive (see `_session_files`) because a release copies a session folder
-    wholesale, and it must stay that way. DISPLAY must not be: a rendered Quarto/Rmd deck is
+    Release is recursive because a release copies a folder wholesale, and it must stay that way. DISPLAY must not be: a rendered Quarto/Rmd deck is
     one deliverable plus hundreds of assets (`libs/`, `pics/`, `<name>_files/`), and linking
     each of them put 1,641 links across 27 rows on a live semester site - burying the three
     files a student actually opens. Nothing here changes what ships, only what is listed.
@@ -484,8 +457,8 @@ def _shape_links(
     committed straight into a semester's own content repo never meets the release filter, so
     a release-only rule leaves it listed for the rest of the term.
 
-    `blobs` is `_session_files`' output, named by path relative to the session folder;
-    `tree_base` is the session folder's own GitHub tree URL. Order follows `blobs` (path
+    `blobs` is every file under the folder, named by path relative to it (`_landed`);
+    `tree_base` is the folder's own GitHub tree URL. Order follows `blobs` (path
     sorted), files before folders, for a stable diff. A FOLDER link never carries a hosted
     copy: what it opens is a GitHub listing, and this site hosts files, not directories."""
     blobs = [b for b in blobs if not has_never_material_component(b.name)]
@@ -506,72 +479,101 @@ def _shape_links(
     return files + folders
 
 
-def _session_links(
-    org: str,
-    repo: str,
-    subpath: str,
-    folder: str,
+@dataclass
+class _Landed:
+    """What one copy of a row has landed in the semester, found in its repo's tree: the
+    links the row shows, and (on a readings row) the reading-list overlays it inlines."""
+
+    repo: str
+    section: str
+    links: list[Link]
+    overlays: list[str] = field(default_factory=list)
+    # A single file at the repo's root - a course document (the syllabus, a README),
+    # which is what the home page and All Materials show rather than a row.
+    root_file: bool = False
+
+
+def _landed(
+    semester_org: str,
+    deploy: schedule.Deploy,
     allow: frozenset[str],
     hosted: Hosted,
-) -> list[Link]:
-    """`_session_files` shaped for display (`_shape_links`), with the session folder's own
-    GitHub tree URL for the folder links. The branch comes from the memoised `_repo_tree`,
-    so naming the folder costs no extra API call."""
-    branch, _paths = _repo_tree(org, repo)
-    tree = _gh_url(org, repo, branch, "tree", _source_prefix(subpath, folder))
-    return _shape_links(_session_files(org, repo, subpath, folder, hosted), tree, allow)
+    readings: bool,
+) -> _Landed | None:
+    """What `deploy` has landed, or None while nothing has: a file is one link, a folder
+    is its files as GitHub shows it (`_shape_links`), the repo root the whole repo.
+
+    Read off the destination repo's memoised tree (`_repo_tree`), so a released folder
+    whose name carries no ordinal is as linked as one that does. `readings` takes the
+    reading-list overlay (`READINGS.md`) out of the links: the row inlines its text."""
+    repo, path = deploy.semester_dest_repo, deploy_dest(deploy)
+    branch, blobs = _repo_tree(semester_org, repo)
+    section = deploy_section(deploy)
+    if path and path in blobs:
+        name = path.rsplit("/", 1)[-1]
+        if readings and is_reading_overlay(name):
+            return _Landed(repo, section, [], [path])
+        link = _file_link(semester_org, repo, branch, path, name, hosted)
+        return _Landed(repo, section, [link], root_file="/" not in path)
+    prefix = f"{path}/" if path else ""
+    inside = [b for b in blobs if b.startswith(prefix)]
+    if not inside:
+        return None
+    overlays = [b for b in inside if readings and is_reading_overlay(b)]
+    files = [
+        _file_link(semester_org, repo, branch, b, b[len(prefix) :], hosted)
+        for b in inside
+        if b not in overlays
+    ]
+    tree = (
+        _gh_url(semester_org, repo, branch, "tree", path)
+        if path
+        else f"https://github.com/{semester_org}/{repo}/tree/{branch}"
+    )
+    return _Landed(repo, section, _shape_links(files, tree, allow), overlays)
 
 
-def _row_links(
-    org: str,
-    repo: str,
-    subpath: str,
-    folder: str,
+def _row_landed(
+    semester_org: str,
+    deploys: tuple[schedule.Deploy, ...],
     allow: frozenset[str],
     hosted: Hosted,
-) -> list[Link]:
-    """One released section folder's display links - `_session_links`, minus the OVERLAY,
-    whose content the row already inlines (see `_released_reading_list`). That file is the
-    prose reading list; listing it again as a download says the same thing twice.
+    live_repos: frozenset[str],
+    readings: bool,
+) -> list[_Landed]:
+    """Everything these copies have landed, in plan order. A copy into a repo the semester
+    does not have yet has landed nothing, and a copy that lands INSIDE another copy of the
+    same row (a lab's `solutions/`) is already listed by that one."""
+    dests = [(d.semester_dest_repo, deploy_dest(d)) for d in deploys]
 
-    Only the overlay is subtracted, not every text file. Subtracting by extension took an
-    uploaded `notes.md` or `refs.bib` - a reading in its own right - out of the downloads as
-    well, so a student could not get it."""
-    links = _session_links(org, repo, subpath, folder, allow, hosted)
-    if _source_section(repo, subpath) != READINGS_SECTION:
-        return links
-    return [link for link in links if not is_reading_overlay(link.name)]
+    def inside(repo: str, path: str) -> bool:
+        return any(
+            r == repo and p != path and (not p or path.startswith(f"{p}/"))
+            for r, p in dests
+        )
 
-
-def _released_reading_list(
-    semester_org: str, sources: list[tuple[str, str, str]]
-) -> str:
-    """The prose a session row inlines: the text of the OVERLAY released into its `readings`
-    section (`READINGS.md`), verbatim.
-
-    Prose ONLY here, unlike the public site and the syllabus (`readings_block`), which name
-    the other files because they have nowhere else to put them. This row does: every
-    non-overlay file is already a real download beside it, via `_row_links`. Naming them here
-    as well would print each reading twice on the same row.
-
-    So the shared rule still holds - overlay is prose, everything else is a file - and only
-    the CHANNEL differs: a link where the row can link, a name where it cannot.
-
-    Reads the released SEMESTER copy, so a reading list appears on the same gate as every
-    other material. `get_file_content` raises on anything but a 404 - a rate-limited read
-    must not republish the row with the reading list silently emptied."""
-    parts = []
-    for repo, subpath, folder in sources:
-        if _source_section(repo, subpath) != READINGS_SECTION:
+    out = []
+    for deploy, (repo, path) in zip(deploys, dests, strict=True):
+        if repo not in live_repos or inside(repo, path):
             continue
-        prefix = _source_prefix(subpath, folder)
-        # Names only, so nothing here needs to know what the site hosts.
-        for link in _session_files(semester_org, repo, subpath, folder, {}):
-            if not is_reading_overlay(link.name):
-                continue
-            text = (
-                get_file_content(semester_org, repo, f"{prefix}/{link.name}") or ""
-            ).strip()
+        landed = _landed(semester_org, deploy, allow, hosted, readings)
+        if landed is not None:
+            out.append(landed)
+    return out
+
+
+def _reading_list(semester_org: str, landed: list[_Landed]) -> str:
+    """The prose a readings row inlines: the text of every overlay its copies landed,
+    headings demoted to nest under the row's.
+
+    Prose ONLY: every other file is already a download beside it. Reads the released
+    SEMESTER copy, so a reading list appears on the same gate as every other material.
+    `get_file_content` raises on anything but a 404 - a rate-limited read must not
+    republish the row with the reading list silently emptied."""
+    parts = []
+    for item in landed:
+        for path in item.overlays:
+            text = (get_file_content(semester_org, item.repo, path) or "").strip()
             if text:
                 parts.append(demote_headings(text))
     return "\n\n".join(parts)
@@ -706,47 +708,6 @@ def _indexable_repos(
     not the folder shape inside it."""
     planned = {d.semester_dest_repo for r in sched.releases for d in r.deploy}
     return planned | {repo for repo, _sub, _folder, _n in release_sources}
-
-
-def _released_syllabus(
-    semester_org: str, content_repos: list[str], hosted: Hosted
-) -> Link | None:
-    """The syllabus released to this semester, or None when there isn't one - the home page
-    then shows no line at all rather than an empty one.
-
-    Found by name, under whatever name and format the course uses (`SYLLABUS.md`,
-    `SYLLABUS.pdf`, `syllabus-2026.docx`). Faculty name it; we only have to find it - and a
-    release can come from the manual workflow with a typed path, so there is no declaration to
-    read instead.
-
-    Two rules that matter more than they look:
-
-    - ROOT files only. One live semester has `lectures/01_introduction/pics/
-      ids-syllabus-2024.png`, and pinning a screenshot on the landing page as the syllabus
-      would be worse than pinning nothing.
-    - An exact `syllabus.*` stem wins over a longer name. Plain sorting put
-      `SYLLABUS-draft.pdf` ahead of `SYLLABUS.pdf` ('-' sorts before '.'), so a semester that
-      shipped a draft alongside the real thing got the draft on its front page.
-
-    Reads the trees the caller already discovered, so this costs no API call. Order is
-    deterministic without re-sorting: `content_repos` arrives sorted and `_repo_tree` returns
-    sorted paths.
-
-    A syllabus the course publishes is pinned as the HOSTED copy - the home page shows one
-    link, so unlike a file row there is nowhere to put a second one, and a rendered
-    `SYLLABUS.html` shown as source is exactly the failure publishing exists to fix. An
-    unpublished one, which is nearly all of them, is the GitHub blob it has always been."""
-    fallback = None
-    for repo in content_repos:
-        branch, paths = _repo_tree(semester_org, repo)
-        for path in paths:
-            if "/" in path or "syllab" not in path.lower():
-                continue
-            link = _file_link(semester_org, repo, branch, path, path, hosted)
-            if path.rsplit(".", 1)[0].lower() == "syllabus":
-                return link
-            fallback = fallback or link
-    return fallback
 
 
 def _materials_index(
@@ -889,117 +850,308 @@ def _details(text: str) -> str:
     return f'details: "{q(text)}"\n'
 
 
-def _lecture_entry(
-    semester_org: str,
-    session: str,
-    row: PlannedRow,
-    sources: list[tuple[str, str, str]],
-    kind: str = "lecture",
-    allow: frozenset[str] = frozenset(),
-    live_repos: frozenset[str] = frozenset(),
-    *,
-    hosted: Hosted,
+def _kind_label(kind: str) -> str:
+    """The policy's label for a kind ("Lecture", "Drop-in"); the key when unknown."""
+    return next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
+
+
+# The section label an attached readings entry's links are filed under, so the Readings
+# tab can pick them off a lecture's row whatever the folder is called.
+READINGS_LINKS = "readings"
+
+
+@dataclass
+class _Row:
+    """Everything one `_lectures` file says, gathered before it is written."""
+
+    kind: str
+    subtitle: str = ""
+    details: str = ""
+    when: date | datetime | None = None  # None: an off-plan folder, on its tab only
+    number: int | None = None
+    tbc: bool = False
+    off_schedule: bool = False
+    landed: list[_Landed] = field(default_factory=list)
+    readings: list[_Landed] = field(default_factory=list)
+    readings_pending: bool = False
+    dests: list[str] = field(default_factory=list)
+    order: str = ""  # an off-plan row's place on its tab
+
+
+def _row_entry(
+    semester_org: str, row: _Row, live_repos: frozenset[str] = frozenset()
 ) -> str:
-    """One row of a teaching week: the lecture (`kind='lecture'`) or the lab
-    (`kind='lab'`), which the theme renders as separate schedule lines out of the same
-    `_lectures` collection.
+    """One `_lectures` row, of any kind.
 
-    `sources` is (repo, subpath, folder) triples already confirmed (by
-    discovery.discover_release_sources) to hold this exact session - callers pass only the
-    sources known to match, so every call here is a real hit, not a probe.
+    `title` is the kind's label and the row's number ("Lecture 3", "Lab 9"; the label
+    alone when unnumbered); `subtitle` and `details` are the entry's `title:` and
+    `details:`, omitted when empty. `kind` names it and `type` repeats it for templates
+    that have not moved to `kind` yet. `tabs` are the kind tabs that list it: a lecture
+    carrying its week's readings is on the Readings tab too, under the same name.
 
-    `row` is what the PLAN says about this session (`PlannedRow`): when the class happens,
-    where its deploys will land, and the name and blurb its entry declared. A row discovery
-    found but the plan never named gets a synthesised one, so there is no second shape to
-    handle here. Taking the row whole rather than six of its fields is what stops this
-    signature growing once per plan field.
-
-    `title` stays the ordinal (`Session 3`) - what the theme has always assumed it is.
-    `subtitle` and `details` are the plan's `title:` / `details:`: the session's name, and
-    a sentence about it. Both are omitted when empty rather than written blank, so the
-    theme can test for them. `details` is the one key of the four that is shared with
-    every other row type, and it fills the same column on all of them: on this row it
-    renders ABOVE the materials links (or the not-released-yet sentence), and again under
-    the session's heading on the Lectures/Labs/Readings tabs.
-
-    EMPTY `sources` is the not-yet-released row: the session is in the plan but its
-    materials have not shipped, so the row carries no links, flags itself `unreleased:
-    true` for the theme, and names the destinations the copy is going to land in. The whole term is on the schedule from the day it is written, exactly as an
-    assignment's row appears from the day its template repo exists rather than the day it
-    hands out.
-
-    Only the links, the reading list and the body differ between the two - the front matter
-    is one template, so a field added to the row (the way the event rows grew `tbc:`)
-    cannot land on one kind of row and miss the other."""
-    title = f"{ROW_NOUN[kind]} {session}"
-    # `_row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
-    # "Lab 1 / Lab 1" - the same trim an assignment's README heading gets, because faculty
-    # repeat the identifier just as readily in the plan as in a README.
+    Nothing landed (its own copies or its readings) is the not-yet-released row:
+    `unreleased: true` and a line naming where the copies will land. `readings_pending`:
+    readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
+    row, left off the schedule and the Updates box. `undated`: an off-plan folder."""
+    label = _kind_label(row.kind)
+    title = f"{label} {row.number}" if row.number is not None else label
+    # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
+    # "Lab 1 / Lab 1" - faculty repeat the identifier as readily in the plan as in a README.
     subtitle, details = row_name(row.subtitle, title), row.details
-    reading_list = ""
-    if sources:
-        flags = ""
-        links = links_block(
-            [
-                (
-                    _source_section(repo, subpath),
-                    _row_links(semester_org, repo, subpath, folder, allow, hosted),
-                )
-                for repo, subpath, folder in sources
-            ]
-        )
-        reading_list = _released_reading_list(semester_org, sources)
-        # No body. It used to read "Materials for session 1. Open the links above (you must
-        # be an enrolled member of ...)" on every released row of every course - the links
-        # are right there, and each page already states who can open them.
-        body = ""
-    else:
-        # A flag as well as the prose: the theme can badge or grey an unreleased row off
-        # this (as it already does for the `tbc:` written below), and until it does the
-        # sentence below carries the meaning on its own. Without it a placeholder is
-        # indistinguishable from a released folder that happens to hold no files.
+    own = row.landed if row.kind == "readings" else []
+    reading_list = _reading_list(semester_org, [*own, *row.readings])
+    links = links_block(
+        [(item.section, item.links) for item in row.landed]
+        + [(READINGS_LINKS, item.links) for item in row.readings]
+    )
+    tabs = [row.kind]
+    if row.kind != "readings" and (row.readings or row.readings_pending):
+        tabs.append("readings")
+    flags, body = "", ""
+    if not row.landed and not row.readings:
         flags = "unreleased: true\n"
-        links = links_block([])
         where = ", ".join(_dest_link(semester_org, d, live_repos) for d in row.dests)
-        # Italic, with the lead in bold: this is the one line on an unreleased row, and
-        # it sat in the same weight as the session description above it - so a reader
-        # scanning the Lectures tab read a paragraph before learning there was nothing to
-        # open. `.session-note` sets the gap above it (dsl-jekyll-theme's _layout.scss).
+        # Italic, with the lead in bold: this is the one line on an unreleased row.
+        # `.session-note` sets the gap above it (dsl-jekyll-theme's _layout.scss).
         body = (
             f"_**Materials for {title.lower()} are not yet released**"
             + (f" - they will appear in {where} when they are" if where else "")
             + "._"
         )
-        # `subtitle` and `details` are deliberately KEPT here. They describe what the
-        # session is about, which is known the day the plan is written; the body next to
-        # them describes whether its files have shipped. So the whole term reads as a
-        # syllabus from day one, rather than as a list of empty rows that fills in weekly.
-    # The plan's own `tbc:`, written on both kinds of row and outside the released /
-    # unreleased branch above - the same display-only marker an assignment, an event and
-    # the archive row carry, saying the DATE is provisional. It reaches nothing but the
-    # cell: every deploy on this row still fires exactly when its entry says.
+    # The plan's own `tbc:` - the DATE is provisional. Display-only: every copy on this
+    # row still fires exactly when its entry says.
     if row.tbc:
         flags += "tbc: true\n"
-    # The plan ships readings for this row but no readings section has landed, so the
-    # Readings tab says so rather than leaving the session off the page entirely. Decided
-    # here, beside the reading list it is about, rather than by the caller.
-    released = {_source_section(repo, subpath) for repo, subpath, _folder in sources}
-    if row.readings_planned and READINGS_SECTION not in released:
+    if row.off_schedule:
+        flags += "off_schedule: true\n"
+    if row.readings_pending:
         flags += "readings_pending: true\n"
+    if row.when is None:
+        flags += f'undated: true\norder: "{q(row.order)}"\n'
     return (
         f"---\n"
-        f"kind: {kind}\n"
-        f"type: {kind}\n"  # the pinned theme's key, until its next release
-        f"date: {iso_when(row.when)}\n"
-        f'title: "{q(title)}"\n'
+        f"kind: {row.kind}\n"
+        f"type: {row.kind}\n"  # the key the pinned theme reads, until its next release
+        + (f"number: {row.number}\n" if row.number is not None else "")
+        + (f"date: {iso_when(row.when)}\n" if row.when is not None else "")
+        + f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
         + _details(details)
+        + f"tabs: [{', '.join(tabs)}]\n"
         + flags
         + (block("reading_list", reading_list) if reading_list else "")
         + f"{links}\n"
         f"---\n"
         f"{body}\n"
     )
+
+
+def _row_filename(row: _Row, key: str, taken: dict[str, str]) -> str:
+    """The row's file: `row_file` when numbered (`session-03.md`, `lab-09.md`), else
+    named for its entry or folder; a number two entries share gets the second's key."""
+    prefix = row_file(1, row.kind).rsplit("-", 1)[0]
+    name = (
+        row_file(row.number, row.kind)
+        if row.number is not None
+        else f"{prefix}-{slug(key)}.md"
+    )
+    if name in taken:
+        name = f"{name[:-3]}-{slug(key)}.md"
+    return name
+
+
+def _offplan_folders(
+    semester_org: str, rows: list[PlannedRow], live_repos: frozenset[str]
+) -> list[tuple[str, str, str]]:
+    """`(repo, folder path, kind)` for every released folder of a kind-named section
+    (`lectures/`, `labs/`, `readings/`, ..., or a repo so named) that no entry copies:
+    material released outside the plan (the manual workflow, a semester with no
+    `releases:`). Decision 0013: it keeps a row, on its kind's tab."""
+    copies = [(d.semester_dest_repo, deploy_dest(d)) for r in rows for d in r.deploys]
+
+    def covered(repo: str, folder: str) -> bool:
+        return any(
+            r == repo
+            and (
+                not p
+                or p == folder
+                or folder.startswith(f"{p}/")
+                or p.startswith(f"{folder}/")
+            )
+            for r, p in copies
+        )
+
+    found: dict[tuple[str, str], str] = {}
+    for repo in sorted(live_repos):
+        _branch, blobs = _repo_tree(semester_org, repo)
+        for path in blobs:
+            parts = path.split("/")
+            if len(parts) >= 3 and (kind := alias_kind(parts[0])):
+                folder = "/".join(parts[:2])
+            elif len(parts) >= 2 and (kind := alias_kind(repo)):
+                folder = parts[0]
+            else:
+                continue
+            if not _publishable(path) or covered(repo, folder):
+                continue
+            found.setdefault((repo, folder), kind)
+    return [(repo, folder, kind) for (repo, folder), kind in found.items()]
+
+
+def _offplan_rows(
+    semester_org: str,
+    rows: list[PlannedRow],
+    allow: frozenset[str],
+    hosted: Hosted,
+    live_repos: frozenset[str],
+) -> list[tuple[str, _Row]]:
+    """`(key, row)` for each off-plan folder: unnumbered, undated, named for its folder. A
+    readings folder joins the lecture folder of the same `NN_` ordinal, as such folders
+    always did; the rest are rows of their own."""
+
+    def land(repo: str, folder: str, readings: bool) -> list[_Landed]:
+        deploy = schedule.Deploy("", folder, repo)
+        return _row_landed(semester_org, (deploy,), allow, hosted, live_repos, readings)
+
+    folders = _offplan_folders(semester_org, rows, live_repos)
+    lectures = {
+        session_number(f.rsplit("/", 1)[-1]): (repo, f)
+        for repo, f, kind in folders
+        if kind == "lecture" and session_number(f.rsplit("/", 1)[-1]) is not None
+    }
+    joined: dict[tuple[str, str], list[_Landed]] = {}
+    out = []
+    for repo, folder, kind in folders:
+        n = session_number(folder.rsplit("/", 1)[-1])
+        if kind == "readings" and n in lectures:
+            joined.setdefault(lectures[n], []).extend(land(repo, folder, True))
+            continue
+        name = re.sub(r"^0*\d+_", "", folder.rsplit("/", 1)[-1])
+        row = _Row(
+            kind,
+            subtitle=name.replace("-", " ").replace("_", " ").strip().capitalize(),
+            landed=land(repo, folder, kind == "readings"),
+            order=f"{repo}/{folder}",
+        )
+        out.append(((repo, folder), row))
+    for key, row in out:
+        row.readings = joined.get(key, [])
+    return [(folder.rsplit("/", 1)[-1], row) for (_repo, folder), row in out]
+
+
+def _site_rows(
+    semester_org: str,
+    rows: list[PlannedRow],
+    allow: frozenset[str],
+    hosted: Hosted,
+    live_repos: frozenset[str],
+) -> tuple[dict[str, str], list[str]]:
+    """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`),
+    plus the off-plan folders' rows - and the kind tabs it needs.
+
+    Every row the schedule shows is written, released or not, so the whole term reads as
+    a syllabus from the day it is written. A silent readings row is written only once
+    something has landed, and never when all it landed is root files."""
+    built: list[tuple[str, _Row]] = []
+    for sr in site_rows(rows):
+        r = sr.row
+        landed = _row_landed(
+            semester_org, r.deploys, allow, hosted, live_repos, r.kind == "readings"
+        )
+        if not r.shown and all(item.root_file for item in landed):
+            continue
+        readings = []
+        pending = False
+        for attached in sr.readings:
+            got = _row_landed(
+                semester_org, attached.deploys, allow, hosted, live_repos, True
+            )
+            readings += got
+            pending = pending or not got
+        row = _Row(
+            r.kind,
+            subtitle=r.subtitle,
+            details=r.details,
+            when=r.when,
+            number=sr.number,
+            tbc=r.tbc,
+            off_schedule=not r.shown,
+            landed=landed,
+            readings=readings,
+            readings_pending=pending,
+            dests=r.dests,
+        )
+        built.append((r.key, row))
+    built += _offplan_rows(semester_org, rows, allow, hosted, live_repos)
+    out: dict[str, str] = {}
+    tabs: dict[str, None] = {}
+    for key, row in built:
+        out[_row_filename(row, key, out)] = _row_entry(semester_org, row, live_repos)
+        tabs[row.kind] = None
+        if row.kind != "readings" and (row.readings or row.readings_pending):
+            tabs["readings"] = None
+    return out, list(tabs)
+
+
+def _declared_syllabus(
+    course_org: str,
+    semester_org: str,
+    sched: schedule.Schedule,
+    live_repos: frozenset[str],
+    hosted: Hosted,
+) -> Link | None:
+    """The syllabus released to this semester, or None - the home page then shows no line.
+
+    Decision 0013 item 5, in order:
+    1. each source repo's declared syllabus (`materials.yml` `syllabus:`, default
+       `SYLLABUS.md`), followed through the copy that ships it (that file, a folder
+       holding it, the whole repo) to where it landed;
+    2. the same file at its own path in a released repo (a copy made off the plan);
+    3. when no repo declares one: a root file whose name contains `syllab`, an exact
+       `syllabus.*` stem first.
+    Pinned as its hosted copy when the course publishes it, else the GitHub blob."""
+
+    def link(repo: str, path: str) -> Link:
+        branch, _blobs = _repo_tree(semester_org, repo)
+        return _file_link(
+            semester_org, repo, branch, path, path.rsplit("/", 1)[-1], hosted
+        )
+
+    declared: dict[str, None] = {}
+    any_declared = False
+    for release in sched.releases:
+        for d in release.deploy:
+            decl = read_materials(course_org, d.course_source_repo)
+            declared[decl.syllabus] = None
+            any_declared = any_declared or decl.declared
+            if d.semester_dest_repo not in live_repos:
+                continue
+            src, dest = d.course_source_path.strip("/"), deploy_dest(d)
+            if src == decl.syllabus:
+                path = dest
+            elif not src or decl.syllabus.startswith(f"{src}/"):
+                path = f"{dest}/{decl.syllabus[len(src) :].lstrip('/')}".strip("/")
+            else:
+                continue
+            if path in _repo_tree(semester_org, d.semester_dest_repo)[1]:
+                return link(d.semester_dest_repo, path)
+    declared.setdefault(DEFAULT_SYLLABUS, None)
+    for repo in sorted(live_repos):
+        blobs = _repo_tree(semester_org, repo)[1]
+        for path in declared:
+            if path in blobs:
+                return link(repo, path)
+    if any_declared:
+        return None
+    fallback = None
+    for repo in sorted(live_repos):
+        for path in _repo_tree(semester_org, repo)[1]:
+            if "/" in path or "syllab" not in path.lower():
+                continue
+            if path.rsplit(".", 1)[0].lower() == "syllabus":
+                return link(repo, path)
+            fallback = fallback or link(repo, path)
+    return fallback
 
 
 def member_digest(semester_org: str, handle: str) -> str:
@@ -1078,7 +1230,7 @@ def _assignment_entry(
     An assignment NOT YET HANDED OUT is a PLACEHOLDER, flagged `handout_pending: true`:
     both schedule rows, and an entry the Assignments tab renders unlinked, saying it is
     not out yet. What is withheld is the assignment's CONTENT, which is the same line
-    `_lecture_entry` draws for an unreleased session - the plan is public from the day it
+    `_row_entry` draws for an unreleased session - the plan is public from the day it
     is written, the payload arrives on release.
 
     The distinction matters here more than anywhere else on the site. The rows are driven
@@ -1141,7 +1293,7 @@ def _assignment_entry(
     # that must not change at hand-out. It used to be overwritten by the README heading, so
     # a row published as "Assignment 2" became "Assignment 1 - linear regression from
     # scratch (individual)" the moment it shipped - the same row apparently becoming a
-    # different thing. Exactly `_lecture_entry`'s split: `title` identifies, `subtitle`
+    # different thing. Exactly `_row_entry`'s split: `title` identifies, `subtitle`
     # names (and the theme renders the pair identically for both).
     title = identifier(slug)
     # The template's `title:` (its one home, decision 0009) wins, and is the only name
@@ -1352,7 +1504,7 @@ def _assignment_entry(
         # inferring the state from an empty body.
         # No `repo_url`: there is nothing at the other end of it yet.
         flags = "handout_pending: true\n"
-        # Word for word the shape of an unreleased session's line (`_lecture_entry`):
+        # Word for word the shape of an unreleased session's line (`_row_entry`):
         # "**<what> is not yet released** - <where it will be> when <it is>", bold lead
         # inside italics. They render in the same table column and on adjacent tabs, so
         # they read as one status vocabulary or as two.
@@ -1498,7 +1650,7 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
     """The archive row: when this semester is frozen read-only.
 
     Takes the parsed block whole (`schedule.ArchiveRow`) rather than five of its fields,
-    for the same reason `_lecture_entry` takes its `PlannedRow`: the block's keys are the
+    for the same reason `_row_entry` takes its `PlannedRow`: the block's keys are the
     row's keys, and re-declaring them here is a second place for the next one to be
     added - and a second place for a default to be written. `archive.when` is a date by
     the time this is called; the caller does not render a block nothing can date.
@@ -1613,12 +1765,6 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
         # a written offset into the semester timezone), so the renderers below just print it.
         start = sched.semester_start or _semester_start(semester_org)
-        # Every session row the plan declares, dated and with its destinations. A row that
-        # discovery already found takes its date from here (else a synthesised weekly date
-        # below); a planned row discovery has NOT found yet becomes a not-yet-released row,
-        # so the whole term is on the schedule the day it is written rather than filling in
-        # release by release. Discovery still leads: a folder released outside the plan
-        # (the manual workflow, an off-plan extra) keeps its row whether or not it is here.
         # Every assignment this semester has a page for, numbered as every link to one
         # numbers it (`schedule.assignment_pages`: this term's templates plus the plan's
         # entries, hidden ones included so that a hidden page keeps its ordinal unspent).
@@ -1638,40 +1784,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
             nowhere to say otherwise, so it shows."""
             return hit is None or hit[1].show_on_site
 
-        # One row per (ordinal, kind): a week's lecture materials and its lab are separate
-        # rows on the schedule, so a lab released into `labs/` never folds into the
-        # lecture's row (and never shows up twice, on the schedule and the labs page).
-        #
-        # Through `dest_row_kind`, the same rule the plan places its own rows with, so a
-        # folder the plan declared `type: lab` for is a lab row on both sides. Placed here
-        # by path alone, it became a lecture row the day its files shipped - next to the
-        # plan's lab row, which then said "not yet released" for the rest of term.
-        declared = declared_dest_kinds(sched)
-        sources_by_row: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
-        for repo, subpath, folder, n in release_sources:
-            key = (
-                str(n),
-                dest_row_kind(
-                    f"{repo}/{_source_prefix(subpath, folder)}",
-                    _source_section(repo, subpath),
-                    declared,
-                ),
-            )
-            sources_by_row.setdefault(key, []).append((repo, subpath, folder))
-
-        planned = planned_sessions(sched)
-        rows = sorted(
-            set(sources_by_row) | set(planned), key=lambda k: (int(k[0]), k[1])
-        )
-        # Every key of sources_by_row is in rows by construction, so this is arithmetic
-        # rather than a scan.
-        log_step(
-            f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} session row(s) "
-            f"({len(rows) - len(sources_by_row)} not released yet), "
-            f"{sum(1 for page in pages if shown(page.hit))} assignment(s)"
-        )
-
-        # What a session row LINKS, out of everything it released - the default
+        # What a row LINKS, out of everything it released - the default
         # folder-shaped listing unless this course declared an extension allowlist.
         allow = _link_extensions(meta)
         # The repos this semester actually releases into - the only ones the index and
@@ -1685,25 +1798,21 @@ def sync_site(course_org: str, semester_org: str) -> int:
         policies = _publish_policies(course_org, sched, content_repos)
         hosted = _mirror_public(site_wd, semester_org, policies)
 
-        def session_row(s: str, kind: str) -> str:
-            """One row, from the plan where it has one and a synthesised weekly date where
-            it does not. A row discovery found but the plan never named (the manual workflow,
-            an off-plan extra) gets a stand-in row: the weekly fallback date and no declared
-            name. It still appears, which is the point - and resolving the absence HERE is
-            what keeps the renderer to one shape rather than a field-by-field fallback."""
-            row = planned.get((s, kind)) or PlannedRow(
-                when=start + timedelta(days=int(s) * 7)
-            )
-            return _lecture_entry(
-                semester_org,
-                s,
-                row,
-                sources_by_row.get((s, kind), []),
-                kind,
-                allow,
-                live_repos=frozenset(content_repos),
-                hosted=hosted,
-            )
+        # The rows: one per `releases:` entry, in date order, kind declared or inferred
+        # once from where its first copy lands (the source repo's `materials.yml` aliases,
+        # else the built-in ones).
+        planned = planned_rows(
+            sched, lambda repo: read_materials(course_org, repo).kinds
+        )
+        # The repos the release plan names or a released session was found in: never a
+        # student's repo, whose folder names would reach this public site.
+        live = frozenset(indexable)
+        rows, present = _site_rows(semester_org, planned, allow, hosted, live)
+        log_step(
+            f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
+            f"({sum('unreleased: true' in text for text in rows.values())} not released "
+            f"yet), {sum(1 for page in pages if shown(page.hit))} assignment(s)"
+        )
 
         config = {}
         if meta.get("course_name"):
@@ -1790,7 +1899,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
                     edit_at=f"{semester_org}/semester-config/{instructors_path}",
                     semester=True,
                 ),
-                "_data/nav.yml": nav_yaml(semester=True),
+                "_data/nav.yml": nav_yaml(semester=True, kinds=present),
+                "_data/kinds.yml": kinds_yaml(),
                 # The catch-all index behind the All Materials tab: every released file,
                 # including what no session ordinal covers - across the repos faculty
                 # actually release into, never everything discovery failed to exclude.
@@ -1800,9 +1910,11 @@ def sync_site(course_org: str, semester_org: str) -> int:
                     hosted,
                     # Absent when the semester has no syllabus, so the home page shows no
                     # line rather than an empty one.
-                    syllabus=_released_syllabus(semester_org, indexable, hosted),
+                    syllabus=_declared_syllabus(
+                        course_org, semester_org, sched, live, hosted
+                    ),
                 ),
-                **theme_pages(semester=True),
+                **theme_pages(semester=True, kinds=present),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to
                 # how a session renders is tested against the generator that
@@ -1812,9 +1924,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
             collections={
-                "_lectures": {
-                    row_file(s, kind): session_row(s, kind) for s, kind in rows
-                },
+                "_lectures": rows,
                 # Named by the semester-side name, ordinal from the position in the full
                 # list, so every assignment keeps its URL for the whole term. A pending one
                 # is a placeholder rather than an absence - see `_assignment_entry`.
@@ -1838,6 +1948,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 },
                 "_events": event_entries,
             },
+            # The tab of a kind this semester has no rows of goes.
+            retire=retired_kind_pages(present, site_wd),
             commit="site: sync from org structure",
             title="Student site",
         )

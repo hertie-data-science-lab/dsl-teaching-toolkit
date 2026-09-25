@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import policy, records
+from . import materials, policy, records
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
@@ -302,7 +302,9 @@ def status_schema() -> dict:
         {
             "id": _str(),
             "when": nullable,
-            "kind": nullable,
+            "kind": _str(),
+            "kind_inferred": {"type": "boolean"},
+            "number": {"type": ["integer", "null"]},
             "title": _str(),
             "state": _enum(RELEASE_STATES),
             "source": place,
@@ -414,6 +416,7 @@ def schedule_schema() -> dict:
             KNOWN_RELEASE,
             {
                 "kind": _enum(KNOWN_ROW_KINDS),
+                "number": {"type": "integer"},
                 "deploy": {"type": "array", "items": deploy},
                 "event_datetime": _str(),
             },
@@ -565,6 +568,20 @@ def dsl_course_schema() -> dict:
     return _doc(".github/dsl-course.yml", _obj(top))
 
 
+def materials_schema() -> dict:
+    """A materials repo's optional `materials.yml`: the syllabus file and folder -> kind
+    aliases (`materials.parse`)."""
+    body = dict(materials.SCHEMA)
+    body["properties"] = {
+        "syllabus": _str(),
+        "kinds": {
+            "type": "object",
+            "additionalProperties": _enum(policy.content_kinds()),
+        },
+    }
+    return _doc(materials.MATERIALS_FILE, body)
+
+
 def names_json() -> dict:
     """The repo names and paths the console must spell exactly as the engine does, so it
     holds no literal of its own: the config and join repos, the `.system/` folder and every
@@ -605,6 +622,7 @@ def all_schemas() -> dict[str, dict]:
         "grading_config.schema.json": grading_config_schema(),
         "assignments.schema.json": assignments_schema(),
         "dsl_course.schema.json": dsl_course_schema(),
+        "materials.schema.json": materials_schema(),
     }
 
 

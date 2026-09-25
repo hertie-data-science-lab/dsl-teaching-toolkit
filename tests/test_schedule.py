@@ -2855,8 +2855,8 @@ def test_a_release_can_declare_which_row_it_belongs_to():
     assert sched.dropped == []
 
 
-def test_an_unknown_release_type_is_flagged_and_falls_back_to_inference():
-    # Never dropped: the cost of a typo here is a row in the wrong column, and taking a
+def test_an_unknown_release_kind_is_flagged_and_shown_as_other():
+    # Never dropped: the cost of a typo here is a row under the wrong tab, and taking a
     # whole session off the schedule instead would be far the worse of the two.
     sched = parse(
         {
@@ -2865,19 +2865,22 @@ def test_an_unknown_release_type_is_flagged_and_falls_back_to_inference():
             }
         }
     )
-    assert sched.releases[0].kind == ""
+    assert sched.releases[0].kind == "other"
     (drop,) = sched.dropped
     assert drop.startswith("releases.lecture-1.kind: unusable value")
-    assert "as if no kind were declared" in drop
+    assert "shown as `other`" in drop
 
 
-def test_display_text_on_a_readings_entry_is_reported_rather_than_swallowed():
-    # `type: readings` claims no row of its own, so schedule_plan routes the entry to the
-    # silent pass, which merges its destinations and nothing else: `title:`/`details:`
-    # written here reach nothing at all. Kept-but-ignored, like an unknown key - not a
-    # dropped entry, because everything the entry DEPLOYS still ships exactly as written.
-    # docs/07 offers both fields on any `releases:` entry, so writing them is a reasonable
-    # mistake, and silence about it is indistinguishable from a rendering bug.
+def test_every_content_kind_of_the_policy_is_a_release_kind():
+    for kind in ("lecture", "lab", "readings", "drop-in", "exam", "other"):
+        sched = parse(
+            {"releases": {"x": {"event_datetime": "2026-09-01T10:00", "kind": kind}}}
+        )
+        assert (sched.releases[0].kind, sched.dropped) == (kind, [])
+
+
+def test_display_text_on_a_readings_entry_is_its_rows_name():
+    # A readings entry is a row of its own now, so its title and details show.
     display = {"title": "Week 4 readings", "details": "Two papers on attention."}
     sched = parse(
         {
@@ -2890,19 +2893,9 @@ def test_display_text_on_a_readings_entry_is_reported_rather_than_swallowed():
             }
         }
     )
-    assert {drop.split(":")[0] for drop in sched.dropped} == {
-        "releases.readings-4.title",
-        "releases.readings-4.details",
-    }
-    assert all("claims no row of its own" in drop for drop in sched.dropped)
-    # The entry itself survives, type and all - only the display text goes nowhere.
-    assert [(r.label, r.kind) for r in sched.releases] == [("readings-4", "readings")]
-    # And the same two fields on an entry that DOES raise a row are silent, as they must
-    # be: this reports where the text has nowhere to go, not that it was written.
-    same = parse(
-        {"releases": {"lecture-4": {"event_datetime": "2026-09-15T09:00", **display}}}
-    )
-    assert same.dropped == []
+    assert sched.dropped == []
+    (release,) = sched.releases
+    assert (release.title, release.details) == (display["title"], display["details"])
 
 
 def test_the_retired_spelling_on_a_readings_entry_is_reported_once_not_twice():

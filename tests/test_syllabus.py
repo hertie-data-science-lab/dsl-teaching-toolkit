@@ -1,9 +1,8 @@
-"""The syllabus sessions generator: schedule.yml + readings -> a paste-ready block.
+"""The syllabus sessions generator: schedule.yml + readings entries -> a paste-ready block.
 
 Deliberately paste-ready rather than an in-place edit of SYLLABUS.md - see the module
 docstring in dsl_course/syllabus.py. These pin the mapping (which entry names a session, and
-what its readings are) and the heading nesting, which is the thing that looked wrong on the
-site before it was fixed there too.
+which readings entries sit under it) and the heading nesting.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dsl_course import deploy, syllabus
+from dsl_course.materials import Declared
 from dsl_course.schedule import Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -37,6 +37,13 @@ TREE = (
 def wired(monkeypatch):
     sched = Schedule(
         releases=[
+            # A week ahead of its lecture, silent, as the demo ships them.
+            Release(
+                "readings-1",
+                datetime(2026, 8, 25, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "readings/01_week-1", "materials", None)],
+                show_on_site=False,
+            ),
             Release(
                 "lecture-2",
                 datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
@@ -54,6 +61,7 @@ def wired(monkeypatch):
         ]
     )
     monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(syllabus, "read_materials", lambda org, repo: Declared())
     monkeypatch.setattr(syllabus, "default_branch", lambda o, r: "main")
     monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: TREE)
     monkeypatch.setattr(
@@ -61,7 +69,7 @@ def wired(monkeypatch):
         "get_file_content",
         lambda o, r, p: READING if p.endswith("READINGS.md") else "",
     )
-    return lambda: syllabus.build("Course", "Semester-f2026", "cm")[0]
+    return lambda: syllabus.build("Course", "Semester-f2026")[0]
 
 
 def test_sessions_come_out_in_order_with_their_declared_names(wired):
@@ -69,7 +77,7 @@ def test_sessions_come_out_in_order_with_their_declared_names(wired):
     assert out.index("### Session 1: Probability Theory") < out.index(
         "### Session 2: Random Variables"
     )
-    # Ordered by session number, not by the order the plan happens to be written in.
+    # Ordered by date, not by the order the plan happens to be written in.
     assert out.startswith("## Course sessions and readings")
 
 
@@ -88,7 +96,7 @@ def test_readings_nest_under_their_session_heading(wired):
 
 
 def test_a_session_without_readings_still_appears(wired):
-    # Session 2 has no readings folder in TREE; it must not vanish from the syllabus.
+    # No readings entry falls before session 2; it must not vanish from the syllabus.
     out = wired()
     assert "### Session 2: Random Variables" in out
     assert out.count("Required Readings") == 1
@@ -196,20 +204,59 @@ def test_a_failed_write_still_shows_the_block(monkeypatch, wired):
 
 
 def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkeypatch):
-    # Re-deriving the naming rule here took the title from the EARLIEST deploy touching a
-    # session whether or not that entry declared one - so a readings-only or "Course opens"
-    # entry silently blanked a session the website names. Reading `schedule_plan.planned_sessions`
-    # is what makes the two agree.
+    # A "Course opens" entry dated before every lecture is no session of its own.
     sched = syllabus.schedule.load("Semester-f2026")
     sched.releases.append(
         Release(
-            "readings-push",
-            datetime(2026, 8, 30, 9, 0, tzinfo=BERLIN),  # earliest of all
-            deploy=[Deploy("cm", "readings/01_week-1", "materials", None)],
+            "course-intro",
+            datetime(2026, 8, 20, 9, 0, tzinfo=BERLIN),
+            deploy=[Deploy("cm", "SYLLABUS.md", "materials", None)],
+            show_on_site=False,
         )
     )
     monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
-    assert "### Session 1: Probability Theory" in wired()
+    out = wired()
+    assert "### Session 1: Probability Theory" in out
+    assert out.count("\n### Session") == 2
+
+
+def _with(monkeypatch, *releases, tree=TREE):
+    sched = syllabus.schedule.load("Semester-f2026")
+    sched.releases.extend(releases)
+    monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: tree)
+
+
+def test_readings_come_from_any_repo_and_any_folder_of_the_readings_kind(
+    monkeypatch, wired
+):
+    _with(
+        monkeypatch,
+        Release(
+            "papers-2",
+            datetime(2026, 9, 5, 9, 0, tzinfo=BERLIN),
+            deploy=[Deploy("nlp-literature", "week-2/vaswani.pdf", "readings", None)],
+            kind="readings",
+        ),
+        tree=(*TREE, "week-2/vaswani.pdf"),
+    )
+    out = wired()
+    # Between lecture 1 (1 Sep) and lecture 2 (8 Sep): listed under session 2.
+    assert out.index("### Session 2") < out.index("- vaswani.pdf")
+
+
+def test_readings_after_the_last_lecture_close_the_list(monkeypatch, wired):
+    _with(
+        monkeypatch,
+        Release(
+            "further",
+            datetime(2026, 12, 1, 9, 0, tzinfo=BERLIN),
+            deploy=[Deploy("cm", "literature/week-12", "materials", None)],
+        ),
+        tree=(*TREE, "literature/week-12/extra.pdf"),
+    )
+    out = wired()
+    assert out.index("### Further readings") < out.index("- extra.pdf")
 
 
 def test_a_schedule_with_no_sessions_is_an_error_not_an_empty_file(monkeypatch, capsys):

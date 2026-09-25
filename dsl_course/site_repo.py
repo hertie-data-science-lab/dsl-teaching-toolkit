@@ -13,13 +13,13 @@ import re
 import shutil
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 
-from . import issues, notify, scaffold, welcome
+from . import issues, notify, policy, scaffold, welcome
 from .course import INSTRUCTORS_TEAM, active_today, pages_repo, people_by_role
 from .discovery import course_org_for_semester, list_org_repos
 from .gh_contents import load_yaml_config
@@ -297,19 +297,20 @@ class _ThemePage:
     icon: str
     gated_note: str
     open_note: str = ""
-    # Pages only a SEMESTER site has. A public course site has no semester repos to index, so
-    # it keeps `/materials/` as the readings page it has always been.
-    semester_only: bool = False
+    # The row kind a kind tab lists (`_layouts/kind.html` selects on it); "" elsewhere.
+    kind: str = ""
 
 
-_THEME_PAGES = (
+# The open-courseware site's row pages. A semester site gets a tab per kind instead
+# (`kind_pages`); the open site keeps its own layout until its design (`openware`) lands.
+_PUBLIC_ROW_PAGES = (
     _ThemePage(
         "lectures.md",
         "lectures",
         "Lectures",
         "/lectures/",
         "fas fa-book-reader",
-        "Lecture slides are only accessible to enrolled students & auditors.",
+        "",
         "Lecture slides by session.",
     ),
     _ThemePage(
@@ -318,30 +319,25 @@ _THEME_PAGES = (
         "Labs",
         "/labs/",
         "fas fa-flask",
-        "Lab materials are only accessible to enrolled students & auditors.",
+        "",
         "Lab materials by session.",
     ),
-    _ThemePage(
-        "readings.md",
-        "readings",
-        "Readings",
-        "/readings/",
-        "fas fa-book",
-        "Hosted files are only accessible to enrolled students & auditors.",
-        "Readings by session.",
-        semester_only=True,
-    ),
-    _ThemePage(
-        "assignments.md",
-        "assignments",
-        "Assignments",
-        "/assignments/",
-        "fas fa-user-graduate",
-        # The layout says "No assignments released yet." when the collection is empty, so
-        # this line is only ever shown beside an actual list.
-        "Assignments repos are only accessible to enrolled students.",
-        "Assignments by hand-out date.",
-    ),
+)
+
+_ASSIGNMENTS_PAGE = _ThemePage(
+    "assignments.md",
+    "assignments",
+    "Assignments",
+    "/assignments/",
+    "fas fa-user-graduate",
+    # The layout says "No assignments released yet." when the collection is empty, so
+    # this line is only ever shown beside an actual list.
+    "Assignments repos are only accessible to enrolled students.",
+    "Assignments by hand-out date.",
+)
+
+# Pages only a SEMESTER site has, after its kind tabs and Assignments.
+_SEMESTER_PAGES = (
     _ThemePage(
         "materials.md",
         "materials",
@@ -352,7 +348,6 @@ _THEME_PAGES = (
         # private submission repo, which this must never list. See `_indexable_repos`.
         "All released course material so far; only accessible to enrolled "
         "students/auditors.",
-        semester_only=True,
     ),
     _ThemePage(
         "profile.md",
@@ -364,7 +359,6 @@ _THEME_PAGES = (
         # own: it is the only page that holds anything of the reader's, and it holds it
         # where nobody else - faculty included - can reach it.
         "Saved in your local browser only.",
-        semester_only=True,
     ),
 )
 
@@ -387,35 +381,100 @@ _STATIC_NAV = (
     ("Schedule", "/schedule/", "fas fa-calendar-alt"),
 )
 
+_KIND_ICONS = {
+    "lecture": "fas fa-book-reader",
+    "lab": "fas fa-flask",
+    "readings": "fas fa-book",
+}
+_KIND_ICON = "fas fa-folder"
 
-def _site_pages(semester: bool) -> tuple[_ThemePage, ...]:
-    """The pages this kind of site gets, in nav order. A public course site drops the two
-    semester-only pages and keeps `/materials/` as its readings page."""
-    if semester:
-        return _THEME_PAGES
-    return tuple(pg for pg in _THEME_PAGES if not pg.semester_only) + (
-        _PUBLIC_MATERIALS_PAGE,
+
+def tab_word(word: str) -> str:
+    """A kind's key or label as a tab name: `lab` -> `labs`, `readings` stays. No
+    inflection library: one trailing `s`."""
+    return word if word.endswith("s") else f"{word}s"
+
+
+def kind_tab(kind: dict) -> _ThemePage:
+    """The tab page listing one kind's rows: `lecture` -> Lectures at `/lectures/`, the
+    permalinks every existing site already has."""
+    # `other` is where an unknown kind lands: its tab says so, whatever the row label.
+    other = kind["key"] == policy.FALLBACK_KIND
+    slug_ = "other" if other else tab_word(kind["key"])
+    title = "Other" if other else tab_word(kind["label"])
+    return _ThemePage(
+        f"{slug_}.md",
+        "kind",
+        title,
+        f"/{slug_}/",
+        _KIND_ICONS.get(kind["key"], _KIND_ICON),
+        f"{title} are only accessible to enrolled students & auditors.",
+        kind=kind["key"],
     )
 
 
-def theme_pages(semester: bool) -> dict[str, str]:
-    """The `{path: content}` for the pages whose rendering lives in the theme."""
+def kind_pages(present: Iterable[str]) -> tuple[_ThemePage, ...]:
+    """A tab per content kind this semester has rows of, in the policy's order."""
+    wanted = set(present)
+    return tuple(kind_tab(k) for k in policy.kinds() if k["key"] in wanted)
+
+
+# The shape of a tab page this sync (or an earlier one) wrote: its own front matter,
+# in its own order. A page someone made by hand does not start like this.
+_WRITTEN_TAB = re.compile(
+    r"\A---\nlayout: (kind|lectures|labs|readings)\ntitle: .*\npermalink: /"
+)
+
+
+def retired_kind_pages(present: Iterable[str], site_wd: Path) -> tuple[str, ...]:
+    """The tab files of every content kind this semester has NO rows of, for
+    `SitePlan.retire`: a tab that lists nothing goes - but only a page the sync wrote,
+    never one made by hand under the same name."""
+    wanted = set(present)
+    out = []
+    for k in policy.kinds():
+        if k["system"] or k["key"] in wanted:
+            continue
+        page = site_wd / kind_tab(k).file
+        try:
+            text = page.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _WRITTEN_TAB.match(text):
+            out.append(page.name)
+    return tuple(out)
+
+
+def _site_pages(semester: bool, kinds: Iterable[str] = ()) -> tuple[_ThemePage, ...]:
+    """The pages this kind of site gets, in nav order: a semester site's kind tabs,
+    Assignments, All Materials and Your Profile; the public site's fixed row pages,
+    Assignments and its `/materials/` readings page."""
+    if semester:
+        return (*kind_pages(kinds), _ASSIGNMENTS_PAGE, *_SEMESTER_PAGES)
+    return (*_PUBLIC_ROW_PAGES, _ASSIGNMENTS_PAGE, _PUBLIC_MATERIALS_PAGE)
+
+
+def theme_pages(semester: bool, kinds: Iterable[str] = ()) -> dict[str, str]:
+    """The `{path: content}` for the pages whose rendering lives in the theme. `kinds` are
+    the content kinds a semester site has rows of."""
     return {
         pg.file: (
             f"---\nlayout: {pg.layout}\ntitle: {pg.title}\n"
-            f"permalink: {pg.permalink}\n---\n\n"
+            f"permalink: {pg.permalink}\n"
+            + (f"kind: {pg.kind}\n" if pg.kind else "")
+            + "---\n\n"
             + ((pg.gated_note if semester else pg.open_note) or pg.open_note)
             + "\n"
         )
-        for pg in _site_pages(semester)
+        for pg in _site_pages(semester, kinds)
     }
 
 
-def nav_yaml(semester: bool) -> str:
+def nav_yaml(semester: bool, kinds: Iterable[str] = ()) -> str:
     """`_data/nav.yml` - the site's tab bar (the theme's `_includes/nav.html` reads it),
     built from the same page table, so a tab can never point at a page this site lacks."""
     rows = list(_STATIC_NAV) + [
-        (pg.title, pg.permalink, pg.icon) for pg in _site_pages(semester)
+        (pg.title, pg.permalink, pg.icon) for pg in _site_pages(semester, kinds)
     ]
     body = "\n\n".join(
         f"- url: {url}\n  name: {name}\n  icon_class: {icon}"
@@ -425,6 +484,27 @@ def nav_yaml(semester: bool) -> str:
         "# Generated by `python3 -m dsl_course.site sync`. Rewritten on every sync - add a\n"
         "# page of your own as a file in the repo and link it from `index.md` instead.\n"
         "items:\n" + body + "\n"
+    )
+
+
+def kinds_yaml() -> str:
+    """`_data/kinds.yml` - every row kind of the policy with its label, tab name, tab
+    permalink and colours, in display order, for the templates to label and colour rows."""
+    rows = []
+    for k in policy.kinds():
+        tab = kind_tab(k)
+        rows.append(
+            f"- key: {k['key']}\n"
+            f'  label: "{q(k["label"])}"\n'
+            f'  plural: "{q(tab.title)}"\n'
+            f'  colour: "{k["colour"]}"\n'
+            f'  background: "{k["background"]}"\n'
+            f"  system: {'true' if k['system'] else 'false'}\n"
+            f'  tab: "{"" if k["system"] else tab.permalink}"'
+        )
+    return (
+        "# Generated by `python3 -m dsl_course.site sync` from the institution policy's\n"
+        "# `kinds:`. Rewritten on every sync.\n" + "\n".join(rows) + "\n"
     )
 
 
@@ -703,13 +783,14 @@ def people_yaml(
     )
 
 
+# The open-courseware site's row nouns; a semester site names rows by the kind's label.
 ROW_NOUN = {"lecture": "Session", "lab": "Lab"}
 
 
-def row_file(session: str, kind: str) -> str:
-    """The collection filename for one session row - lecture and lab rows of the same
-    week are distinct files (`session-02.md`, `lab-02.md`) in the same collection."""
-    return f"{'lab' if kind == 'lab' else 'session'}-{int(session):02d}.md"
+def row_file(number: str | int, kind: str) -> str:
+    """The collection filename for one row, numbered within its kind - `session-02.md`
+    for a lecture (the name every site already has), `lab-02.md`, `readings-02.md`."""
+    return f"{'session' if kind == 'lecture' else kind}-{int(number):02d}.md"
 
 
 def _singular(label: str) -> str:

@@ -83,8 +83,16 @@ jobs:
             "further-notes.pdf" "Handed in outside GitHub" \
             "table-row-lecture" "table-row-lab" "table-row-assignment" \
             "table-row-due" "table-row-exam" "table-row-special_event" \
-            "table-row-term_date"; do
+            "table-row-term_date" "table-row-drop-in"; do
             grep -rq -- "$needle" . || { echo "::error::$needle is nowhere in the build"; missing=1; }
+          done
+          # A tab per kind the fixture has rows of, each listing its own: lecture 1 is on
+          # the Readings tab too (its readings attach to it), the exam events on Exams, and
+          # the lab folder released outside the plan on Labs.
+          for tab in lectures:"Lecture 1" labs:"Lab 1" labs:"Week 2" readings:"Lecture 1" \
+            readings:"Attention, further" drop-ins:"Drop-in 1" exams:"MidTerm Exam"; do
+            grep -qF -- "${tab#*:}" "${tab%%:*}/index.html" || {
+              echo "::error::${tab%%:*}/ does not list ${tab#*:}"; missing=1; }
           done
           exit $missing
 
@@ -178,19 +186,20 @@ jobs:
         # The home page's box is sorted newest-first over the WHOLE term, so an unfiltered
         # one announces the last week of term as "New Lab is up" before week one has
         # happened - which is what two live semester sites showed all term. The fixture holds
-        # a released session 2 beside an unreleased session 3, and a handed-out assignment
-        # 1 beside a pending assignment 2, so the box is checked in both directions.
+        # a released lecture 2 beside an unreleased lecture 3, a silent readings row, an
+        # undated off-plan lab, and a handed-out assignment 1 beside a pending assignment
+        # 2, so the box is checked in both directions.
         run: |
           box=$(sed -n '/<h2>Updates<\/h2>/,/<\/ul>/p' "$RUNNER_TEMP/build/index.html")
           printf '%s\n' "$box"
           missing=0
-          for needle in "Session 1" "Session 2" "Lab 1" "Assignment 1"; do
+          for needle in "Lecture 1" "Lecture 2" "Lab 1" "Assignment 1"; do
             if ! printf '%s' "$box" | grep -qF -- "$needle"; then
               echo "::error::the Updates box does not announce $needle, which released"
               missing=1
             fi
           done
-          for needle in "Session 3" "Assignment 2"; do
+          for needle in "Lecture 3" "Attention, further" "Lab_Session_2" "Assignment 2"; do
             if printf '%s' "$box" | grep -qF -- "$needle"; then
               echo "::error::the Updates box announces $needle, which has not released"
               missing=1

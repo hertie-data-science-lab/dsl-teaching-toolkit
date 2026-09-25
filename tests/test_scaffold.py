@@ -83,7 +83,13 @@ def fake(monkeypatch):
     monkeypatch.setattr(scaffold, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "grant_tagged_team_access", lambda *a, **k: None)
-    monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
+    f.topics = {}
+
+    def set_topics(_org, repo, topics, **_):
+        f.topics[repo] = topics
+        return True
+
+    monkeypatch.setattr(scaffold, "set_repo_topics", set_topics)
     monkeypatch.setattr(scaffold, "discover_semesters", lambda org: [])
     monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
     monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 0)
@@ -91,6 +97,11 @@ def fake(monkeypatch):
 
 
 # --------------------------------------------------------------- materials scaffold
+
+
+def test_a_new_materials_repo_carries_the_materials_topic(fake):
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert fake.topics["course-materials-f2026"] == ["dsl-materials"]
 
 
 def test_fresh_materials_repo_gets_the_full_skeleton(fake):

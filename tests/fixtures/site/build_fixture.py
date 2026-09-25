@@ -13,7 +13,8 @@ rest of the seed-once half from `templates/site-seed/`. Only the THEME's stand-i
 not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
-session, an unreleased one, a lab, a session whose readings are still to come, a
+lecture, an unreleased one, a lab, a silent readings row with its reading list inlined, a
+drop-in whose one copy is a single file, a silent syllabus copy that raises no row, a
 handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
@@ -39,7 +40,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import grades, schedule, schedule_plan, site, site_repo
+from dsl_course import grades, materials, schedule, schedule_plan, site, site_repo
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
@@ -105,6 +106,11 @@ TREE = (
     "lectures/02_week-2/slides.pdf",
     "readings/01_week-1/READINGS.md",
     "readings/01_week-1/schmidhuber-1997.pdf",
+    "readings/extra/attention.pdf",
+    "clinic/notes.pdf",
+    "exams/mock.pdf",
+    # Released outside the plan (no entry copies it): an undated row on the Labs tab.
+    "labs/02_week-2/Lab_Session_2.ipynb",
 )
 
 # What this course's `publish.yml` declares, through the real parser: rendered decks and
@@ -214,65 +220,104 @@ def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
     return None
 
 
-def _lectures(hosted: dict) -> dict[str, str]:
-    """The `_lectures` collection: the four session states that render differently."""
-    released = schedule_plan.PlannedRow(
-        when=datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
-        subtitle="What a neural network is",
-        details="Perceptrons, activation functions and the chain rule.",
-        readings_planned=True,
+def _copy(path: str) -> schedule.Deploy:
+    return schedule.Deploy(
+        course_source_repo=MATERIALS,
+        course_source_path=path,
+        semester_dest_repo=MATERIALS,
     )
-    pending_readings = schedule_plan.PlannedRow(
-        when=datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
-        subtitle="Backpropagation",
-        readings_planned=True,
-    )
-    unreleased = schedule_plan.PlannedRow(
-        when=datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
-        dests={f"{MATERIALS}/lectures/03_week-3": None},
-        subtitle="Convolutions",
-        details="Why weight sharing works.\n\nAnd where it does not.",
-        readings_planned=True,
-    )
-    lab = schedule_plan.PlannedRow(when=datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN))
-    return {
-        # Released, with a reading list inlined off the released READINGS.md overlay.
-        "session-01.md": site._lecture_entry(
-            SEMESTER_ORG,
-            "1",
-            released,
-            [
-                (MATERIALS, "lectures", "01_week-1"),
-                (MATERIALS, "readings", "01_week-1"),
-            ],
-            hosted=hosted,
+
+
+def _release(label: str, when: datetime, *paths: str, **kw) -> schedule.Release:
+    return schedule.Release(label, when, [_copy(p) for p in paths], **kw)
+
+
+# The release plan the rows come from, one entry per row state.
+SCHEDULE = schedule.Schedule(
+    semester_start=date(2026, 9, 7),
+    releases=[
+        # Silent, and all it lands is a root file: a course document, not a row.
+        _release(
+            "course-intro",
+            datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
+            "SYLLABUS.md",
+            show_on_site=False,
         ),
-        # Released, but the plan's readings have not landed -> readings_pending.
-        "session-02.md": site._lecture_entry(
-            SEMESTER_ORG,
-            "2",
-            pending_readings,
-            [(MATERIALS, "lectures", "02_week-2")],
-            hosted=hosted,
+        # Silent untitled readings, a week ahead: attached to lecture 1 (its list inlined,
+        # and lecture 1 listed on the Readings tab).
+        _release(
+            "readings-1",
+            datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
+            "readings/01_week-1",
+            show_on_site=False,
+        ),
+        # A titled silent readings entry: its own unnumbered row, on the Readings tab only.
+        _release(
+            "extra-reading",
+            datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
+            "readings/extra",
+            show_on_site=False,
+            title="Attention, further",
+        ),
+        # A drop-in whose one copy is a single file outside any session folder.
+        _release(
+            "clinic",
+            datetime(2026, 9, 4, 16, 0, tzinfo=BERLIN),
+            "clinic/notes.pdf",
+            kind="drop-in",
+            title="Project clinic",
+        ),
+        # Released, with a published deck beside an unpublished pdf.
+        _release(
+            "lecture-1",
+            datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
+            "lectures/01_week-1",
+            title="What a neural network is",
+            details="Perceptrons, activation functions and the chain rule.",
+        ),
+        _release("lab-1", datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN), "labs/01_week-1"),
+        # Its readings are still to come: readings_pending on lecture 2.
+        _release(
+            "readings-2",
+            datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
+            "readings/02_week-2",
+            show_on_site=False,
+        ),
+        _release(
+            "lecture-2",
+            datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
+            "lectures/02_week-2",
+            title="Backpropagation",
+        ),
+        # An exam kind: the Exams tab, which also lists the `events:` exams. Dated early,
+        # so it stays out of the Updates box the CI job checks (the seven newest).
+        _release(
+            "mock-exam",
+            datetime(2026, 8, 25, 10, 0, tzinfo=BERLIN),
+            "exams/mock.pdf",
+            kind="exam",
         ),
         # Nothing shipped -> unreleased, and the row names where it will land.
-        "session-03.md": site._lecture_entry(
-            SEMESTER_ORG,
-            "3",
-            unreleased,
-            [],
-            live_repos=frozenset({MATERIALS}),
-            hosted=hosted,
+        _release(
+            "lecture-3",
+            datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
+            "lectures/03_week-3",
+            title="Convolutions",
+            details="Why weight sharing works.\n\nAnd where it does not.",
         ),
-        "lab-01.md": site._lecture_entry(
-            SEMESTER_ORG,
-            "1",
-            lab,
-            [(MATERIALS, "labs", "01_week-1")],
-            kind="lab",
-            hosted=hosted,
-        ),
-    }
+    ],
+)
+
+
+def _lectures(hosted: dict) -> tuple[dict[str, str], list[str]]:
+    """The `_lectures` collection, through the sync's own row code, and the kinds it has."""
+    return site._site_rows(
+        SEMESTER_ORG,
+        schedule_plan.planned_rows(SCHEDULE),
+        frozenset(),
+        hosted,
+        frozenset({MATERIALS}),
+    )
 
 
 def _assignments() -> dict[str, str]:
@@ -418,7 +463,7 @@ def collections(hosted: dict) -> dict[str, dict[str, str]]:
     """The generated collections, front-matter stamp and all - exactly what
     `_sync_site_repo` writes into the site repo."""
     return {
-        "_lectures": _lectures(hosted),
+        "_lectures": _lectures(hosted)[0],
         "_assignments": _assignments(),
         "_events": _events(),
     }
@@ -426,13 +471,15 @@ def collections(hosted: dict) -> dict[str, dict[str, str]]:
 
 def data_files(hosted: dict) -> dict[str, str]:
     """The generated `_data/*.yml`, keyed by repo-relative path."""
+    kinds = _lectures(hosted)[1]
     return {
+        "_data/kinds.yml": site_repo.kinds_yaml(),
         "_data/people.yml": site_repo.people_yaml(
             SEMESTER_ORG,
             PEOPLE,
             edit_at=f"{SEMESTER_ORG}/semester-config/instructors.yml",
         ),
-        "_data/nav.yml": site_repo.nav_yaml(semester=True),
+        "_data/nav.yml": site_repo.nav_yaml(semester=True, kinds=kinds),
         "_data/materials.yml": site._materials_index(
             SEMESTER_ORG,
             [MATERIALS],
@@ -461,10 +508,11 @@ def generated(
     claim a copy nothing ever made."""
     real_tree, real_content = site._repo_tree, site.get_file_content
     real_spec, real_clone = site.load_grading_spec, site.clone
-    real_teams = site._formed_teams
+    real_teams, real_materials = site._formed_teams, site.read_materials
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
     site.load_grading_spec, site.clone = _grading_spec, _clone
     site._formed_teams = _formed_teams
+    site.read_materials = lambda _org, _repo: materials.Declared()
     try:
         with tempfile.TemporaryDirectory() as work:
             hosted = site._mirror_public(
@@ -472,12 +520,15 @@ def generated(
             )
         return {
             "collections": collections(hosted),
-            "files": {**data_files(hosted), **site_repo.theme_pages(semester=True)},
+            "files": {
+                **data_files(hosted),
+                **site_repo.theme_pages(semester=True, kinds=_lectures(hosted)[1]),
+            },
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
         site.load_grading_spec, site.clone = real_spec, real_clone
-        site._formed_teams = real_teams
+        site._formed_teams, site.read_materials = real_teams, real_materials
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary

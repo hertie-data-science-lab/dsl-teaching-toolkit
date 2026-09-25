@@ -2,7 +2,7 @@
 
 A Hertie syllabus lists, session by session, a title, its learning objectives and its
 readings. The semester's `semester-config/schedule.yml` already holds the first two
-(`title:` / `details:`) and each session's `readings/NN_.../` folder holds the third, so
+(`title:` / `details:` of each lecture entry) and its readings entries name the third, so
 that section can be written for the course team instead of by them.
 
 DELIBERATELY paste-ready output, not an edit of their document. The syllabus is a faculty
@@ -12,8 +12,15 @@ the day before a deadline, and could not help the PDF authors at all. This print
 and writes it to `.system/SYLLABUS.sessions.md` (never released to students);
 the course team pastes what they want.
 
-Readings are read from the COURSE org's staging repo, not from what has been released: a
-syllabus is written before the term starts, when nothing has shipped yet.
+Readings are read from the COURSE org's source repos, not from what has been released: a
+syllabus is written before the term starts, when nothing has shipped yet. Sessions, their
+numbers and the readings under each are the website's own rows
+(`schedule_plan.site_rows`): an untitled readings entry, from any repo, sits under the
+first lecture on or after its date; any other readings entry closes the list under
+"Further readings".
+
+`--course-source-repo` names the materials repo the block is written into
+(`.system/SYLLABUS.sessions.md`); it no longer limits where readings are read from.
 
 Usage:
     python3 -m dsl_course.syllabus --course-org COURSE --semester-org SEMESTER \\
@@ -25,7 +32,7 @@ from __future__ import annotations
 import sys
 
 from . import schedule
-from .course import SYLLABUS_SESSIONS_FILE, session_dirs
+from .course import SYLLABUS_SESSIONS_FILE
 from .gh_contents import get_file_content, put_file, repo_tree
 from .log import (
     CLIParser,
@@ -37,84 +44,81 @@ from .log import (
     log_step,
     plural,
 )
+from .materials import read as read_materials
 from .readings import demote_headings, readings_block
 from .repos import default_branch
-from .schedule_plan import READINGS_SECTION, planned_sessions
+from .schedule_plan import PlannedRow, planned_rows, site_rows
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.
 _READINGS_SHIFT = 3
 
 
-def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) -> str:
-    """Session `n`'s reading list from its `readings/NN_.../` folder, or "" when it has none.
-    The folder is matched on its ordinal prefix, since faculty choose the rest.
+def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
+    """A readings entry's reading list, from what its copies take out of the COURSE org:
+    a file, a folder, or a whole repo, each through `readings_block`, the rule the site
+    uses too."""
+    parts = []
+    for d in row.deploys:
+        repo, src = d.course_source_repo, d.course_source_path.strip("/")
+        if repo not in trees:
+            trees[repo] = repo_tree(
+                course_org, repo, default_branch(course_org, repo), "blob"
+            )
+        if src in trees[repo]:  # one file
+            base, _, name = src.rpartition("/")
+            names = [name]
+        else:  # a folder, or the whole repo
+            base, prefix = src, f"{src}/" if src else ""
+            names = [p[len(prefix) :] for p in trees[repo] if p.startswith(prefix)]
+        text = readings_block(
+            names,
+            lambda name, repo=repo, base=base: get_file_content(
+                course_org, repo, f"{base}/{name}" if base else name
+            ),
+        )
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts)
 
-    `readings_block`'s rule, so the syllabus says what the two websites say. It used to keep
-    only citation-extension files, which made a session whose readings are PDFs come out as a
-    bare heading with nothing under it - the one destination where uploading a reading and
-    writing no prose left NOTHING at all."""
-    # `paths` are FILES; the session folders they sit in are their first two components.
-    # Fed through `course.session_dirs` rather than re-spelling the ordinal-prefix rule
-    # here, so the syllabus recognises the same folders the two websites do.
-    folders = sorted({"/".join(p.split("/")[:2]) for p in paths if p.count("/") >= 2})
-    prefix = next(
-        (
-            f"{section}/{folder}"
-            for section, folder, num in session_dirs(folders)
-            if section == READINGS_SECTION and num == n
-        ),
-        None,
-    )
-    if prefix is None:
-        return ""
-    return readings_block(
-        [p[len(prefix) + 1 :] for p in paths if p.startswith(f"{prefix}/")],
-        lambda name: get_file_content(course_org, repo, f"{prefix}/{name}"),
-    )
 
-
-def build(course_org: str, semester_org: str, source_repo: str) -> tuple[str, int]:
+def build(course_org: str, semester_org: str) -> tuple[str, int]:
     """The syllabus's sessions section as markdown, plus how many sessions it holds.
 
-    The count is returned rather than scraped back out of the text. It was counted by
-    searching the finished markdown for a marker that the formatter had since changed, so it
-    was always zero and the CLI always reported "no dated sessions" - state the builder
-    already had, thrown away and re-derived wrongly.
-
-    Sessions come from `schedule_plan.planned_sessions`, the same function the website
-    reads, so the two cannot disagree about what session 3 is called. Re-deriving it here
-    did: it took the title from the earliest deploy touching a session whether or not that
-    entry declared one, so a readings-only or "Course opens" entry silently blanked a
-    session the site names."""
+    Sessions are the shown lecture rows of `schedule_plan.site_rows`, numbered as the
+    website numbers them, so the two cannot disagree about what session 3 is called."""
     sched = schedule.load(semester_org)
-    branch = default_branch(course_org, source_repo)
-    paths = repo_tree(course_org, source_repo, branch, "blob")
+    rows = planned_rows(sched, lambda repo: read_materials(course_org, repo).kinds)
+    shown = site_rows(rows)
+    lectures = [sr for sr in shown if sr.row.shown and sr.row.kind == "lecture"]
+    further = [sr.row for sr in shown if sr.row.kind == "readings"]
+    trees: dict[str, tuple[str, ...]] = {}
 
-    # Lecture rows only: a week's lab is its own row on the website, but a syllabus lists
-    # the session once.
-    rows = {
-        int(ordinal): row
-        for (ordinal, kind), row in planned_sessions(sched).items()
-        if kind == "lecture"
-    }
+    def readings(entries: list[PlannedRow]) -> list[str]:
+        out = []
+        for r in entries:
+            text = _readings_for(course_org, r, trees)
+            if text:
+                # The teaching team's own headings and ordering kept verbatim - a
+                # syllabus's `Required Readings` / `Optional Readings` split is theirs to
+                # make - but pushed below the session heading above them.
+                out += [demote_headings(text, _READINGS_SHIFT), ""]
+        return out
 
     out = ["## Course sessions and readings", ""]
-    for n in sorted(rows):
-        row = rows[n]
-        out.append(f"### Session {n}{f': {row.subtitle}' if row.subtitle else ''}")
-        out.append("")
+    for sr in lectures:
+        row = sr.row
+        out += [
+            f"### Session {sr.number}{f': {row.subtitle}' if row.subtitle else ''}",
+            "",
+        ]
         if row.details:
-            out.append(f"*Learning objectives.* {' '.join(row.details.split())}")
-            out.append("")
-        readings = _readings_for(course_org, source_repo, paths, n)
-        if readings:
-            # The teaching team's own headings and ordering kept verbatim - a syllabus's
-            # `Required Readings` / `Optional Readings` split is theirs to make - but pushed
-            # below the session heading above them.
-            out.append(demote_headings(readings, _READINGS_SHIFT))
-            out.append("")
-    return "\n".join(out).rstrip() + "\n", len(rows)
+            out += [f"*Learning objectives.* {' '.join(row.details.split())}", ""]
+        out += readings(sr.readings)
+    tail = readings(further)
+    if tail:
+        out += ["### Further readings", "", *tail]
+    return "\n".join(out).rstrip() + "\n", len(lectures)
 
 
 def main() -> int:
@@ -130,7 +134,7 @@ def main() -> int:
     log_step(
         f"Building the syllabus sessions block from {a.semester_org}'s schedule.yml"
     )
-    body, sessions = build(a.course_org, a.semester_org, a.course_source_repo)
+    body, sessions = build(a.course_org, a.semester_org)
     if not sessions:
         log_err(
             f"{a.semester_org}'s schedule.yml names no dated sessions, so there is nothing "
@@ -152,7 +156,7 @@ def main() -> int:
         )
     header = (
         "<!-- Generated by `python3 -m dsl_course.syllabus` from this semester's\n"
-        "     semester-config/schedule.yml and this repo's readings/ folders. Paste what\n"
+        "     semester-config/schedule.yml and its readings entries. Paste what\n"
         "     you want into SYLLABUS.md; edits here are overwritten. Never released to\n"
         "     students. -->\n\n"
     )

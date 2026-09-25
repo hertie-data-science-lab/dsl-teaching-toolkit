@@ -150,11 +150,17 @@
           },
           "kind": {
             "enum": [
+              "drop-in",
+              "exam",
               "lab",
               "lecture",
+              "other",
               "readings"
             ],
             "type": "string"
+          },
+          "number": {
+            "type": "integer"
           },
           "show_on_site": {
             "type": "boolean"

@@ -350,7 +350,7 @@ def _migrated_course(fake, monkeypatch):
         {"semesters.yml": b"semesters:\n- Sem-f2026\n", **COURSE_WORKFLOWS},
         topics=["dsl-course-hub"],
     )
-    fake.add(COURSE, "course-materials-f2026", WORKFLOW)
+    fake.add(COURSE, "course-materials-f2026", WORKFLOW, topics=["dsl-materials"])
     _course_renders(fake, monkeypatch)
     _render_course(fake, COURSE)
     fake.commits.clear()
@@ -1129,6 +1129,7 @@ def test_a_course_preview_writes_nothing(fake, course, monkeypatch, capsys):
     assert "assignment-1-f2026@solution/grading_config.yml: format: -> formats:" in out
     assert f"-   .github/.last-refresh -> {records.path('heartbeat')}" in out
     assert "-   MAINTAINING.md -> .system/MAINTAINING.md" in out
+    assert "course-materials-f2026: add the topic dsl-materials" in out
     assert "(the files are listed once the registry step has run)" in out
     assert f"disable Actions in {COURSE}/.github, {COURSE}/assignment-1-f2026" in out
     assert _state(fake) == before and fake.puts == [] and course == []
@@ -1158,6 +1159,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         "SYLLABUS.md",
         *migrate.RELEASE_WORKFLOWS,
     }
+    assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
     template = fake.tree(COURSE, "assignment-1-f2026")
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
     assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
@@ -1177,7 +1179,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 20
+    assert capsys.readouterr().out.count("already migrated") == 22
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 

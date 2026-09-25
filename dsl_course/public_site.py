@@ -40,7 +40,6 @@ from .repos import (
     is_never_material,
     repo_exists,
 )
-from .schedule_plan import READINGS_SECTION, row_kind
 from .site_repo import (
     PUBLISH_CONFIG,
     ROW_NOUN,
@@ -48,6 +47,7 @@ from .site_repo import (
     SitePlan,
     block,
     iso_when,
+    kinds_yaml,
     links_block,
     nav_yaml,
     people_yaml,
@@ -61,6 +61,17 @@ from .site_repo import (
 
 # Public course site: served folder for the hosted section files.
 PUBLIC_MATERIALS_DIR = "public-materials"
+
+# The open site is still built from one repo's folders (its own design, `openware`, is
+# not written yet): `readings` is the section `--readings-mode` governs, and `labs` is the
+# one section that makes a lab row. The semester site reads kinds from the schedule.
+READINGS_SECTION = "readings"
+LAB_SECTION = "labs"
+
+
+def row_kind(section: str) -> str:
+    """The open site's row for a section: 'lab' for `labs`, else 'lecture'."""
+    return "lab" if section == LAB_SECTION else "lecture"
 
 
 def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
@@ -343,6 +354,7 @@ def sync_public_site(
                 "README.md": site_readme(course_org, semester=False),
                 # No semester repos to index, so `/materials/` stays the readings page.
                 "_data/nav.yml": nav_yaml(semester=False),
+                "_data/kinds.yml": kinds_yaml(),
                 **theme_pages(semester=False),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to

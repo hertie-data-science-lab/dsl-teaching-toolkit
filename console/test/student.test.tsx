@@ -31,6 +31,24 @@ async function demoFacts(): Promise<SemesterFacts> {
 }
 
 describe('the site source behind StudentData', () => {
+  it('leaves a row the site keeps off its schedule off the student schedule too', async () => {
+    const fake = new FakeGitHub();
+    const files = {
+      ...FILES,
+      '_lectures/readings-extra.md': '---\nkind: readings\ntype: readings\ndate: 2026-09-02T09:00:00\ntitle: "Readings"\noff_schedule: true\nlinks: []\n---\n',
+      '_lectures/lab-week-2.md': '---\nkind: lab\ntype: lab\ntitle: "Lab"\nundated: true\nlinks: []\n---\n',
+    };
+    for (const dir of ['_lectures', '_events', '_assignments', '_announcements']) {
+      const names = Object.keys(files).filter((f) => f.startsWith(`${dir}/`));
+      fake.on('GET', `/repos/${ORG}/${SITE}/contents/${dir}`, names.map((p) => ({ name: p.split('/')[1], path: p, sha: `sha-${p}`, type: 'file' })));
+    }
+    for (const [p, t] of Object.entries(files)) fake.on('GET', `/repos/${ORG}/${SITE}/contents/${p}`, fileBody(p, t));
+    const f = (await new SiteSource(client(fake)).facts(ORG))!;
+    expect(f.rows.map((r) => r.id)).not.toContain('readings-extra');
+    expect(f.rows.map((r) => r.id)).not.toContain('lab-week-2');
+    expect(f.rows.map((r) => r.id)).toContain('session-01');
+  });
+
   it('reads the rows by kind, the assignments, the cards and the archive date from the public site repo', async () => {
     const f = await demoFacts();
     const kinds = f.rows.map((r) => `${r.id}:${r.kind}`).sort();

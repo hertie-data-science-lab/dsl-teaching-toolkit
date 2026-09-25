@@ -2,6 +2,7 @@
 // will_be_skipped, release.now) never reach the screen except through these maps.
 
 import type { Assignment, AssignmentState, Release, ReleaseState, StageState } from './types';
+import policy from '../../schemas/policy.json';
 
 /** `v` as text, blank for null and undefined. */
 export function str(v: unknown): string {
@@ -176,12 +177,21 @@ export function assignmentTitle(a: Pick<Assignment, 'slug' | 'title'>): string {
   return a.title ? `${id}: ${a.title}` : id;
 }
 
-/** The identifier the site derives for a release: "Session 3", "Lab 2", "Readings". */
+const KIND_LABEL: Record<string, string> = Object.fromEntries(
+  (policy.kinds as { key: string; label: string }[]).map((k) => [k.key, k.label]),
+);
+
+/**
+ * The name the site gives a release's row: the kind's label and its number ("Lecture 3",
+ * "Lab 9"). The number is the engine's (`status.json` `releases[].number`, decision 0013);
+ * null is a row the site does not number (`show_on_site: false`, or readings on a lecture). Without it
+ * (an older status): the label's own number, else the position among its kind.
+ */
 export function releaseIdent(r: Release, all: Release[]): string {
-  if (r.kind === 'readings') return 'Readings';
-  const word = r.kind === 'lab' ? 'Lab' : 'Session';
-  const num = /(\d+)$/.exec(r.id); // `lecture-5`, `lab-3`: the label says its own ordinal
-  if (num) return `${word} ${Number(num[1])}`;
+  const word = KIND_LABEL[r.kind ?? 'lecture'] ?? r.kind ?? 'Lecture';
+  if (r.number !== undefined) return r.number === null ? word : `${word} ${r.number}`;
+  const num = /0*(\d+)$|^0*(\d+)[-_ ]/.exec(r.id); // `lecture_03`, `lab-9`, `01_lab`
+  if (num) return `${word} ${Number(num[1] ?? num[2])}`;
   const same = all.filter((x) => x.kind === r.kind).sort((a, b) => a.when.localeCompare(b.when));
   const n = same.findIndex((x) => x.id === r.id) + 1;
   return `${word} ${n || same.length + 1}`;
