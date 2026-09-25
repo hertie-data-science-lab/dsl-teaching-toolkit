@@ -35,8 +35,6 @@ from ..course import (
     SOLUTION_WARNING,
     STARTER_FORMATS,
     SUBMIT_VIA,
-    TEAM_FORMATIONS,
-    VISIBILITIES,
 )
 
 REQUEST_SCHEMA = "dsl.request/1"
@@ -182,9 +180,6 @@ def _args(properties: dict | None = None, required: tuple[str, ...] = ()) -> dic
 
 
 _TEMPLATE = _string(REPO_PATTERN, "The course-org assignment template repo")
-_SLUG = _string(
-    KEY_PATTERN, "The schedule.yml assignment key, when two share a template"
-)
 _DEPLOY_FIELDS = {
     "course_source_repo": _string(REPO_PATTERN, "Course-org repo to release from"),
     "course_source_path": _string(PATH_PATTERN, "Path(s), comma-separated"),
@@ -250,18 +245,13 @@ def _handout(request: Request) -> list[str]:
 
 def _patch(request: Request) -> list[str]:
     argv = [*_assign_base(request), "--patch-path", _a(request, "path")]
-    if _a(request, "slug"):
-        argv += ["--slug", _a(request, "slug")]
     if _a(request, "overwrite"):
         argv.append("--overwrite")
     return argv
 
 
 def _collect(request: Request) -> list[str]:
-    argv = [*_assign_base(request), "--refresh-only"]
-    if _a(request, "slug"):
-        argv += ["--slug", _a(request, "slug")]
-    return argv
+    return [*_assign_base(request), "--refresh-only"]
 
 
 def _grades(request: Request) -> list[str]:
@@ -272,6 +262,8 @@ def _grades(request: Request) -> list[str]:
         argv.append("--receipt-note")
     if _a(request, "include_feedback"):
         argv.append("--include-feedback")
+    if _a(request, "assignment"):
+        argv += ["--assignment", _a(request, "assignment")]
     return argv
 
 
@@ -362,12 +354,8 @@ def _new_assignment(request: Request) -> list[str]:
         _a(request, "formats", COURSE_DEFAULT_CHOICE),
         "--type",
         _a(request, "type", "individual"),
-        "--team-formation",
-        _a(request, "team_formation", COURSE_DEFAULT_CHOICE),
         "--submit-via",
         _a(request, "submit_via", COURSE_DEFAULT_CHOICE),
-        "--visibility",
-        _a(request, "visibility", COURSE_DEFAULT_CHOICE),
         "--autograde",
         "true" if _a(request, "autograde") else "false",
     ]
@@ -512,7 +500,6 @@ _OPS = (
             {
                 "course_source_repo": _TEMPLATE,
                 "path": _string(PATH_PATTERN, "File or folder on the template's main"),
-                "slug": _SLUG,
                 "overwrite": _boolean("Replace a file the student has changed"),
             },
             required=("course_source_repo", "path"),
@@ -531,7 +518,7 @@ _OPS = (
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
-            {"course_source_repo": _TEMPLATE, "slug": _SLUG},
+            {"course_source_repo": _TEMPLATE},
             required=("course_source_repo",),
         ),
         help="Bring the marking sheet up to date with the latest submissions.",
@@ -541,7 +528,7 @@ _OPS = (
         preview_flag="--preview",
         real_flag="--no-preview",
         via=f"{VIA_WORKFLOW}collect-submissions.yml",
-        inputs=("semester_org", "course_source_repo", "slug", "preview"),
+        inputs=("semester_org", "course_source_repo", "preview"),
     ),
     Operation(
         name="grades.return",
@@ -555,6 +542,9 @@ _OPS = (
                     "Post a note on each Submission receipts issue"
                 ),
                 "include_feedback": _boolean("Put the feedback text in the email"),
+                "assignment": _string(
+                    REPO_PATTERN, "Only this assignment (its repo name); empty = all"
+                ),
             }
         ),
         help="Return marks and feedback to students.",
@@ -733,9 +723,7 @@ _OPS = (
                     "Starter file(s), comma-separated; the first is the runnable one",
                 ),
                 "type": _enum(ASSIGNMENT_TYPES),
-                "team_formation": _enum(TEAM_FORMATIONS),
                 "submit_via": _enum(SUBMIT_VIA),
-                "visibility": _enum(VISIBILITIES),
                 "autograde": _boolean("Seed tests and run them at the late cutoff"),
             },
             required=("number", "semester"),

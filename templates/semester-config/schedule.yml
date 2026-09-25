@@ -12,7 +12,7 @@
 #
 # Each block encodes BEHAVIOUR:
 #   releases:     entries that DEPLOY materials (course org -> this semester org)
-#   assignments:  each assignment's handout / due / grading lifecycle
+#   assignments:  each assignment's hand out / due / solution / marks dates
 #   events:       display-only calendar rows - nothing deploys
 #
 # Every block takes the same four display fields, and each one fills one column of the
@@ -90,23 +90,21 @@
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #                                   
 # assignments:                      
-#   assignment-1:
-#     title:                        # OPTIONAL - default: the template README's `# ` heading. The assignment's name, beside the slug on the deployed site (students SEE the slug, so keep it short and put the name here)
+#   assignment-1:                   # the key names this semester's repos (assignment-1-<handle>); its name on the site is the template's `title:`
 #     details:                      # OPTIONAL - a sentence about it, in the Details column of BOTH its schedule rows (out and due), above the links they already carry
 #     show_on_site: true            # OPTIONAL - default: true. false = it hands out, grades and returns exactly as written, and the site says nothing about it at all
 #     tbc: false                    # OPTIONAL - default: false. true = site marks both rows "(TBC)". DISPLAY ONLY: the deadline, the late window and the grading snapshot still fire on the dates below
 #     course_source_repo:           # REQUIRED - the course-org repo it hands out from
-#     semester_dest_repo:             # OPTIONAL - default: the slug above (here assignment-1)
 #     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
-#     due_datetime:                 # REQUIRED - a bare date without time -> end of that day (23:59:59)
-#     grading_datetime:             # OPTIONAL - default: due_datetime plus the template's `late_window_days`, i.e. the end of the late window (with no window, the due date). Snapshot freezes + autograder fires. Not shown to students. Autograding is off unless the template's grading_config.yml says `autograde: true`
-#     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with solution_datetime: now). Pushes the `solution/` folder (from the template's `solution` branch) into every student/team repo. Must be AFTER handout_datetime, and needs it set
+#     due_datetime:                 # REQUIRED - a bare date without time -> end of that day (23:59:59). The late cutoff is this plus `late_window_days` (assignments.yml): the snapshot freezes and the autograder fires then
+#     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with solution_datetime: now). Pushes the model answer and rubric (the template's `solution/` folder) into every student/team repo: not the same as returning marks, and it cannot be undone for reuse. Must be AFTER handout_datetime, and needs it set
+#     marks_return_datetime:        # OPTIONAL - marks go back automatically at this moment once every unit is marked (until then, a problem says how many are not). Internal: shown on the site only with `show_on_site: true` written above
 #
-#   This file is TIMING ONLY. What an assignment IS - `type: individual | group`,
-#   `team_formation`, `max_team_size`, `submit_via`, `submit_url`, `formats`, `questions`,
-#   `late_window_days`, `late_penalty_per_day`, `autograde` - lives in that assignment's own
-#   `grading_config.yml`, on the course template's `solution` branch. `type:` and
-#   `max_team_size:` written HERE are flagged by "Validate schedule" and ignored.
+#   This file is TIMING ONLY. How this semester runs each assignment - late window and
+#   penalty, team formation, max team size, visibility, an external submit link, the name
+#   of its repos - is `assignments.yml` beside this file. What an assignment IS - its
+#   `title`, `type`, `submit_via`, `formats`, `questions`, `autograde` - is that
+#   assignment's own `grading_config.yml`, on the course template's `solution` branch.
 
 # events:                           # DISPLAY-ONLY calendar rows - nothing deploys
 #   midterm-exam:

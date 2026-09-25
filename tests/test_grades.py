@@ -579,6 +579,20 @@ teams:
           Your section repeats the Q4 error.
         notes_not_shared_with_students: privately noted
 """
+
+
+def _split_grading(text: str | None) -> tuple[str | None, str | None]:
+    """A test's old-style grading config split where the keys live now: the template's
+    `grading_config.yml`, and the run settings as the semester's `assignments.yml`
+    `defaults:` (decision 0009)."""
+    if text is None:
+        return None, None
+    data = yaml.safe_load(text) or {}
+    run = {k: data.pop(k) for k in settings.RUN_KEYS if k in data}
+    template = yaml.safe_dump(data) if data else ""
+    return template, (yaml.safe_dump({"defaults": run}) if run else None)
+
+
 _GRADING_YML = (
     "title: Neural networks\nlate_window_days: 7\nlate_penalty_per_day: 10%\n"
 )
@@ -608,7 +622,10 @@ def _schedule_with(*slugs: str, due: datetime = _DUE_PASSED) -> Schedule:
                 due_datetime=due,
             )
             for slug in slugs
-        }
+        },
+        # `schedule.load` records the semester, which is what its assignments' run
+        # settings (assignments.yml) resolve against.
+        org="SEMESTER",
     )
 
 
@@ -687,6 +704,7 @@ def _distribute(
     due: datetime = _DUE_PASSED,
     exported: str | None = None,
     preview_issues: list[dict] | None = None,
+    assignment: str | None = None,
 ) -> dict:
     """`distribute` over a local semester-config clone, writing to nothing.
 
@@ -749,7 +767,9 @@ def _distribute(
     # strength of (`grades.receipts_thread_policy`).
     monkeypatch.setattr(grades, "listing_by_name", lambda org: listed)
     monkeypatch.setattr(grades, "course_org_for_semester", lambda org: "COURSE")
-    monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: grading)
+    template_text, semester_text = _split_grading(grading)
+    monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: template_text)
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: semester_text)
     monkeypatch.setattr(
         grades.schedule,
         "load",
@@ -798,7 +818,9 @@ def _distribute(
             [m[0] for m in msgs[:sent]],
         )[1],
     )
-    effects["rc"] = grades.distribute("SEMESTER", notify=notify, dry_run=dry_run)
+    effects["rc"] = grades.distribute(
+        "SEMESTER", notify=notify, dry_run=dry_run, assignment=assignment
+    )
     return effects
 
 
@@ -822,6 +844,94 @@ def test_a_real_run_reaches_every_channel_and_posts_no_comment(tmp_path, monkeyp
     assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[grades.SEMESTER_CSV_NAME]
     # and the email
     assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_a_scoped_return_sends_that_assignment_beside_those_already_returned(
+    tmp_path, monkeypatch
+):
+    # a1 comes due and is complete; a2 is marked in part and not returned; a0 went out
+    # last week (the registrar export has its column). The run returns a1 only, and every
+    # gradebook still shows a0: nothing already given is taken away.
+    half = _SHEET.replace("score_individual: 43", "score_individual: 20")
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-0": _SHEET, "assignment-1": _SHEET, "assignment-2": half},
+        exported=(
+            "hertie_email,name,github_handle,assignment-0\nada@uni.edu,Ada,ada-l,43\n"
+        ),
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 0
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert (
+        "assignment-0" in files["grades.yml"] and "assignment-1" in files["grades.yml"]
+    )
+    assert "assignment-2" not in files["grades.yml"]
+    ((_cfg, cfg_files, _d2),) = out["config"]
+    header = cfg_files[grades.SEMESTER_CSV_NAME].splitlines()[0]
+    assert header.endswith("assignment-0,assignment-1")
+    # distribute never writes a sheet, scoped or not.
+    assert not [p for p in cfg_files if p.startswith(grades.SHEETS_DIR)]
+
+
+_UNMARKED = _SHEET.replace("score_individual: 43", "score_individual:").replace(
+    "feedback_individual: |\n      Clean derivation.\n", "feedback_individual:\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("exported", "distributed"),
+    [
+        # re-saved from Excel, `;`-delimited: present and unreadable
+        (
+            "hertie_email;name;github_handle;assignment-0\nada@uni.edu;Ada;ada-l;43\n",
+            None,
+        ),
+        # gone while gradebooks were already written
+        (
+            None,
+            grades.dump_distributed(
+                {("ada-l", "", grades.CHANNEL_GRADEBOOK): ("x", "2026-10-01", "")}
+            ),
+        ),
+    ],
+)
+def test_a_scoped_return_that_cannot_tell_what_went_out_sends_nothing(
+    tmp_path, monkeypatch, exported, distributed
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-0": _SHEET, "assignment-1": _SHEET},
+        exported=exported,
+        distributed=distributed,
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 1
+    assert out["gradebooks"] == [] and out["config"] == [] and out["outbox"] == []
+
+
+def test_a_column_of_submission_facts_alone_is_not_returned(tmp_path, monkeypatch):
+    # a2's sheet has only submission facts: its export column is empty, so a scoped
+    # return of a1 must not send a2 along.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _SHEET, "assignment-2": _SHEET.replace("43", "20")},
+        exported="hertie_email,name,github_handle,assignment-2\nada@uni.edu,Ada,ada-l,\n",
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 0
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert "assignment-2" not in files["grades.yml"]
+
+
+def test_a_scoped_return_of_an_assignment_with_no_sheet_sends_nothing(
+    tmp_path, monkeypatch
+):
+    out = _distribute(monkeypatch, tmp_path, assignment="nope")
+    assert out["rc"] == 1 and out["gradebooks"] == [] and out["outbox"] == []
 
 
 def test_the_done_line_is_the_spec_counts_in_the_spec_order(
@@ -2203,6 +2313,8 @@ def test_a_dry_run_reds_on_a_header_only_roster_too(tmp_path, monkeypatch):
 
 
 _DUE = datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc)
+# The late cutoff the window closes at: the due date plus the institution's 10 days.
+_CUTOFF = _DUE + timedelta(days=10)
 _HANDOUT = datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc)
 
 
@@ -2231,8 +2343,24 @@ def _lock(
 ) -> str:
     """Render the lock file for `sched`, with each template's `grading_config.yml` given
     as text (None = the template has none) and the course's own defaults block as YAML."""
+    # Each template's run settings are its schedule key's block in the semester's
+    # assignments.yml now (decision 0009); the rest stays the template's.
+    split = {t: _split_grading(text) for t, text in configs.items()}
+    blocks = {
+        key: yaml.safe_load(split[e.course_source_repo][1])["defaults"]
+        for key, e in sched.assignments.items()
+        if (split.get(e.course_source_repo) or (None, None))[1]
+    }
+    sched.org = sched.org or "SEMESTER"
     monkeypatch.setattr(
-        grades, "_grading_text", lambda org, template: configs.get(template)
+        grades,
+        "_grading_text",
+        lambda org, template: (split.get(template) or (None,))[0],
+    )
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: yaml.safe_dump({"assignments": blocks}) if blocks else None,
     )
     monkeypatch.setattr(
         settings, "org_meta", lambda org: yaml.safe_load(defaults or "{}") or {}
@@ -2269,7 +2397,7 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 "max_team_size": 3,
                 # No handout_datetime on `_sched`, so the window never opens.
                 "team_formation_window": "closed",
-                "team_formation_closes": _DUE.date(),
+                "team_formation_closes": _CUTOFF.date(),
                 # No `pages` handed in, so none to link - the key is still written.
                 "team_formation_page": None,
             },
@@ -2322,7 +2450,7 @@ def test_a_self_select_window_is_pending_then_open_then_closed(
     monkeypatch,
 ):
     # The three answers off one schedule, so the boundaries are read from the same dates a
-    # semester really carries: handout 20 Sep, due (and so the pin) 4 Oct.
+    # semester really carries: handout 20 Sep, due 4 Oct, late cutoff 14 Oct.
     def window(now: datetime) -> str:
         text = _lock(
             monkeypatch,
@@ -2337,8 +2465,8 @@ def test_a_self_select_window_is_pending_then_open_then_closed(
     # would tell a September student the door closed in October.
     assert window(_HANDOUT - timedelta(seconds=1)) == "pending"
     assert window(_HANDOUT) == "open"  # the handout instant itself is inside
-    assert window(_DUE - timedelta(seconds=1)) == "open"
-    assert window(_DUE) == "closed"  # the pin is not: the snapshot has frozen
+    assert window(_CUTOFF - timedelta(seconds=1)) == "open"
+    assert window(_CUTOFF) == "closed"  # the cutoff is not: the snapshot has frozen
 
 
 def test_a_self_select_assignment_nobody_has_dated_never_opens(monkeypatch):
@@ -2380,8 +2508,8 @@ def test_an_assignment_the_form_refuses_anyway_has_no_window(monkeypatch):
 def test_the_close_date_is_the_pins_day_and_the_line_is_there_even_when_it_is_empty(
     monkeypatch,
 ):
-    # The only reader is a refusal a student reads ("closed on 4 Oct"), so the scalar is
-    # the pin's DAY, not its moment. The line is written whatever the value: the form and
+    # The only reader is a refusal a student reads ("closed on 14 Oct"), so the scalar is
+    # the cutoff's DAY, not its moment. The line is written whatever the value: the form and
     # `welcome.open_formation_slugs` both line-scan this file, and a key that appears only
     # sometimes is a second shape for them to get right.
     text = _lock(
@@ -2397,10 +2525,10 @@ def test_the_close_date_is_the_pins_day_and_the_line_is_there_even_when_it_is_em
         },
         now=_HANDOUT,
     )
-    assert "    team_formation_closes: 2026-10-04\n" in text
+    assert "    team_formation_closes: 2026-10-14\n" in text
     assert "    team_formation_closes:\n" in text  # the individual one, empty
     entries = yaml.safe_load(text)["assignments"]
-    assert entries["project"]["team_formation_closes"] == _DUE.date()
+    assert entries["project"]["team_formation_closes"] == _CUTOFF.date()
     assert entries["a1"]["team_formation_closes"] is None
 
 
@@ -2456,7 +2584,7 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "team_formation": "self_select",
         "max_team_size": 5,
         "team_formation_window": "closed",
-        "team_formation_closes": _DUE.date(),
+        "team_formation_closes": _CUTOFF.date(),
         # The assignment's page on the semester site, which lists the teams - numbered and
         # named exactly as the site names it, so the refusal that links it cannot drift.
         "team_formation_page": "https://semester.github.io/assignments/01-project.html",
@@ -2561,9 +2689,16 @@ def test_a_file_that_says_nothing_about_late_work_gets_the_hertie_rule():
     )
 
 
-def test_an_explicit_zero_window_still_means_nothing_after_the_deadline():
+def _semester_spec(monkeypatch, block: str) -> grades.GradingSpec:
+    """An assignment whose semester's assignments.yml gives it `block` (YAML lines)."""
+    text = "assignments:\n  a1:\n" + "".join(f"    {ln}\n" for ln in block.splitlines())
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: text)
+    return grades.with_run_settings(grades.parse_grading_spec(""), "C", "SEM", "a1")
+
+
+def test_an_explicit_zero_window_still_means_nothing_after_the_deadline(monkeypatch):
     # The one way to say it, and it must survive a default that now fills the silence.
-    spec = grades.parse_grading_spec("late_window_days: 0\nlate_penalty_per_day: 10%\n")
+    spec = _semester_spec(monkeypatch, "late_window_days: 0\nlate_penalty_per_day: 10%")
     assert spec.late_window_days == 0
     assert (
         course.late_rule(spec.late_window_days, spec.late_penalty_per_day)
@@ -2571,26 +2706,37 @@ def test_an_explicit_zero_window_still_means_nothing_after_the_deadline():
     )
 
 
-def test_an_explicit_late_rule_wins():
-    spec = grades.parse_grading_spec("late_window_days: 3\nlate_penalty_per_day: 25%\n")
+def test_an_explicit_late_rule_wins(monkeypatch):
+    spec = _semester_spec(monkeypatch, "late_window_days: 3\nlate_penalty_per_day: 25%")
     assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "25%")
 
 
 @pytest.mark.parametrize(
     ("config", "window", "penalty"),
     [
-        ("late_window_days: 3\n", 3, None),
-        ("late_penalty_per_day: 25%\n", None, "25%"),
-        ("late_window_days: 0\n", 0, None),
+        ("late_window_days: 3", 3, None),
+        ("late_penalty_per_day: 25%", None, "25%"),
+        ("late_window_days: 0", 0, None),
     ],
     ids=["window-alone", "penalty-alone", "zero-alone"],
 )
-def test_half_a_late_rule_is_never_completed_from_the_default(config, window, penalty):
-    # A course that names one of the two has stated its own rule - three days late
+def test_half_a_late_rule_is_never_completed_from_the_default(
+    monkeypatch, config, window, penalty
+):
+    # A semester that names one of the two has stated its own rule - three days late
     # accepted free, or a rate with nothing collected to spend it on - and finishing the
     # sentence out of the syllabus would grade a semester by words nobody wrote.
-    spec = grades.parse_grading_spec(config)
+    spec = _semester_spec(monkeypatch, config)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
+
+
+@pytest.mark.parametrize("key", ["late_window_days", "visibility", "max_team_size"])
+def test_a_run_setting_in_the_template_is_not_migrated(key):
+    # Refused WHOLE: read without it, the assignment would run on the semester's defaults
+    # instead of the rule the file wrote, and say nothing (decision 0009).
+    with pytest.raises(grades.NotMigrated) as raised:
+        grades.parse_grading_spec(f"title: A1\n{key}: 3\n")
+    assert raised.value.old == key and "assignments.yml" in str(raised.value)
 
 
 @pytest.mark.parametrize(
@@ -2613,3 +2759,21 @@ def test_a_day_is_spoken_with_its_ordinal(day, spoken):
     # ONE spelling for the mail, the site and the form's JavaScript copy -
     # and 11th-13th are the three a `day % 10` rule alone gets wrong.
     assert grades.spoken_day(datetime(2026, 10, day)) == f"{spoken} Oct"
+
+
+def test_a_scoped_real_return_records_that_assignment_as_returned(
+    tmp_path, monkeypatch
+):
+    out = _distribute(monkeypatch, tmp_path, assignment="assignment-1")
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
+
+
+def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
+    # The payload is written by whoever holds a bot token: nothing in it is trusted.
+    monkeypatch.setattr(grades, "discover_semesters", lambda org: ["Sem"])
+    monkeypatch.setattr(grades.schedule, "load", lambda org: _schedule_with("a1", "a2"))
+    monkeypatch.setattr(grades, "marks_due", lambda c, s, sched, now: ([], ["a1"]))
+    assert grades.dispatch_refusal("C", "sem", "a1") == ""
+    assert "not due" in grades.dispatch_refusal("C", "Sem", "a2")
+    assert "not a semester" in grades.dispatch_refusal("C", "Other", "a1")

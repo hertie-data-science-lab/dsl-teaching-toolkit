@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import cadence, course, issues
+from dsl_course import cadence, course, issues, settings
 from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -203,6 +203,16 @@ def test_a_malformed_row_does_not_take_the_check_out():
 # ---------------------------------------------------------------------------- late items
 
 
+@pytest.fixture(autouse=True)
+def _no_late_window(monkeypatch):
+    """The plans below take no late work: the late cutoff (the snapshot moment) is the due
+    date itself. The window is a run setting (`settings`), so it is set there."""
+    ours = settings.institution_defaults()
+    monkeypatch.setattr(
+        settings, "institution_defaults", lambda: {**ours, "late_window_days": 0}
+    )
+
+
 def _plan() -> tuple[list[Release], Schedule]:
     """A semester plan whose moments straddle the gap: one deploy at 09:00 Berlin (= 07:00
     UTC, five hours before NOW), a handout, a grading pin and a solution."""
@@ -249,7 +259,7 @@ def test_late_items_only_reports_moments_that_fell_in_this_gap():
     assert labels == [
         "releases.lecture_02 -> deploy[1]",  # 09:00 Berlin, the earliest
         "assignments.assignment-1 handout",  # 09:30
-        "assignments.assignment-1 snapshot",  # 10:00 (due_datetime, no grading pin)
+        "assignments.assignment-1 snapshot",  # 10:00 (due_datetime, no late window)
         "assignments.assignment-1 solution",  # 10:30
         "releases.lecture_02 -> deploy[0]",  # 11:00, the entry's own event_datetime
     ]

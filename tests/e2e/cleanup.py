@@ -144,6 +144,17 @@ def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
             if not dry_run and not schedule_edit.put_schedule(org, without, sha):
                 log_err(f"could not rewrite {org}/{config}/{schedule.SCHEDULE_PATH}")
                 failures += 1
+    read = gh_contents.get_file_with_sha(org, config, schedule_edit.ASSIGNMENTS_PATH)
+    if read is not None:
+        text, sha = read
+        without = schedule_edit.remove_block(text, run_id)
+        if without != text:
+            log(f"  {org}: removing the fenced assignments.yml block")
+            if not dry_run and not schedule_edit.put_instance(org, without, sha):
+                log_err(
+                    f"could not rewrite {org}/{config}/{schedule_edit.ASSIGNMENTS_PATH}"
+                )
+                failures += 1
     branch = repos.default_branch(org, config, fallback="main")
     live = gh_contents.repo_blob_shas(org, config, branch)
     mine = sorted(p for p in live if _is_artefact(p, run_id))

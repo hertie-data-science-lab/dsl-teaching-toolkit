@@ -29,6 +29,7 @@ on:
       - teams.csv
       - instructors.yml
       - schedule.yml
+      - assignments.yml
 
 # Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and
 # dispatching to the course org - neither of which the ambient token can do), so the

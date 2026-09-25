@@ -29,20 +29,23 @@ template keys, materials files, re-render, status, unpause.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 import yaml
 
-from . import cadence, policy, records, schedule, seed, status
+from . import cadence, policy, records, schedule, seed, settings, status
 from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
 from .course import (
+    ASSIGNMENTS_FILE,
     CONFIG_REPO,
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
@@ -96,8 +99,8 @@ from .repos import (
     set_repo_topics,
 )
 from .scaffold import materials_system_files
-from .setting_readers import RENAMED_SETTINGS
-from .settings import ASSIGNMENT_DEFAULTS_KEY
+from .setting_readers import RENAMED_SETTINGS, read_settings
+from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
 from .sync_faculty import retired_course_faults
 from .welcome import (
     RETIRED_JOIN_FORMS,
@@ -146,6 +149,11 @@ MATERIALS_MOVES = {
 }
 # The semester's pointer to its course org, before it moved into semester-config.
 OLD_POINTER_REPO = ".github"
+# The course's `.github`: the run settings the template-keys step took out of each
+# template, `{template: {key: value}}` - what its semesters' keys steps write into their
+# `assignments.yml`, since the course is migrated first. Public, like the repo: run
+# settings name no person.
+RUN_KEYS_RECORD = records.path("migration_run_keys")
 REPO_RENAMES = {OLD_CONFIG_REPO: CONFIG_REPO, OLD_JOIN_REPO: JOIN_REPO}
 # The console op ids that said `cohort` (decision 0012). A semester's outcome record is
 # named by its op id and carries it in `op`, which status.json's `operations` repeats.
@@ -337,6 +345,185 @@ def lost_semester_values(meta: dict, defaults: dict) -> list[str]:
             if value is not None and str(value).strip() != str(want)
         ]
     return out
+
+
+# Keys schedule.yml no longer takes (decision 0009): `assignments.<key>.` title,
+# grading_datetime and semester_dest_repo (its old spelling included), a release's
+# `assignment:` and the top-level `enrolment:` block.
+RETIRED_ASSIGNMENT_KEYS = ("title", "grading_datetime", "semester_dest_repo")
+_RETIRED_IN = {
+    "assignments": RETIRED_ASSIGNMENT_KEYS,
+    "releases": ("assignment",),
+}
+RETIRED_TOP = ("enrolment",)
+
+
+def schedule_timing(text: str) -> str:
+    """`schedule.yml` without the keys that left it (`RETIRED_ASSIGNMENT_KEYS` on an
+    assignment entry, `assignment:` on a release, the `enrolment:` block), each with the
+    lines of its value. Run after `schedule_keys`, so `cohort_dest_repo` is spelt
+    `semester_dest_repo` by then."""
+    out, section = [], ""
+    scalar: int | None = None  # the column of the key whose block scalar this is in
+    cut: int | None = None  # the column of the key being removed, with its value
+    for line in text.split("\n"):
+        if cut is not None:
+            if line.strip() and _indent(line) > cut:
+                continue
+            cut = None
+        if scalar is not None and (not line.strip() or _indent(line) > scalar):
+            out.append(line)
+            continue
+        scalar = None
+        if top := _TOP_KEY.match(line):
+            section = top.group(1)
+            if section in RETIRED_TOP:
+                cut = 0
+                continue
+        keys = _RETIRED_IN.get(section, ())
+        found = re.match(r"^(\s+)([A-Za-z_][\w-]*):", line)
+        if found and found.group(2) in keys and _indent(line) >= 4:
+            cut = len(found.group(1))
+            continue
+        if block := _BLOCK_SCALAR.match(line):
+            scalar = len(block.group(1))
+        out.append(line)
+    return "\n".join(out)
+
+
+def strip_run_keys(text: str) -> str:
+    """A template's `grading_config.yml` without its run settings (`settings.RUN_KEYS`),
+    live or commented out, each with the indented comment lines that continue it: they
+    are set per semester in `assignments.yml` now."""
+    keys = "|".join(RUN_KEYS)
+    out, cut = [], False
+    for line in text.split("\n"):
+        if cut and re.match(r"^\s+#", line):
+            continue
+        cut = bool(re.match(rf"^#?\s*({keys}):", line))
+        if cut and out and not out[-1].strip():
+            out.append("")  # a blank line kept only once where a block went
+        if not cut:
+            out.append(line)
+    return re.sub(r"\n\n\n+", "\n\n", "\n".join(out))
+
+
+def template_run_keys(text: str | None) -> dict:
+    """The run settings a template's `grading_config.yml` states, as written."""
+    data = _yaml(text)
+    return {key: data[key] for key in RUN_KEYS if key in data}
+
+
+def _read_run_keys(raw: dict) -> dict:
+    """`raw` through the settings readers, refused values dropped (the migration keeps
+    what the engine could use, and nothing it would refuse)."""
+    values = read_settings(raw, RUN_KEYS, "migrate", [])
+    return {k: v for k, v in values.items() if v is not None or k in settings.LATE_PAIR}
+
+
+def instance_additions(
+    meta: dict,
+    templates: dict[str, dict],
+    lower: list,
+    existing: settings.Instance,
+) -> tuple[dict[str, dict], list[str]]:
+    """What the semester's `assignments.yml` must say so this engine runs each assignment
+    of `meta` (the OLD `schedule.yml`, parsed) as the old one did: `{key: {setting:
+    value}}`, and a note for each late cutoff that moves by more than an hour.
+
+    - the template's run settings (`templates`, `{template repo: raw run keys}`) that the
+      layers below (`lower`: the semester's defaults, the course, the institution) would
+      not give;
+    - `late_window_days` (with the penalty beside it) where `grading_datetime` was not the
+      due date plus the window: the cutoff is computed now, rounded to whole days;
+    - `semester_dest_repo`, moved out of the schedule.
+    A setting the file already states is left as written."""
+    tz = schedule._tz(meta.get("timezone"))
+    out: dict[str, dict] = {}
+    notes: list[str] = []
+    entries = meta.get("assignments")
+    for slug, entry in entries.items() if isinstance(entries, dict) else ():
+        if not isinstance(entry, dict):
+            continue
+        slug = str(slug)
+        own = _read_run_keys(templates.get(str(entry.get("course_source_repo")), {}))
+        stack = [("template", own), *lower]
+        want: dict = {}
+        for key in settings.RUN_KEYS:
+            if key in settings.LATE_PAIR:
+                continue
+            value, _ = settings.resolve(key, stack)
+            if value != settings.resolve(key, lower)[0]:
+                want[key] = value
+        pair = {k: settings.resolve(k, stack)[0] for k in settings.LATE_PAIR}
+        due = schedule._coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
+        pin = schedule._coerce_datetime(
+            entry.get("grading_datetime"), tz, end_of_day=True
+        )
+        if due is not None and pin is not None:
+            days = max(0, round((pin - due).total_seconds() / 86400))
+            moved = due + timedelta(days=days) - pin
+            if abs(moved.total_seconds()) > 3600:
+                notes.append(
+                    f"assignments.{slug}: the late cutoff moves from {pin:%Y-%m-%d %H:%M} "
+                    f"to {due + timedelta(days=days):%Y-%m-%d %H:%M} (whole days after "
+                    f"the due date)"
+                )
+            pair["late_window_days"] = days
+        if pair != {k: settings.resolve(k, lower)[0] for k in settings.LATE_PAIR}:
+            want |= {k: v for k, v in pair.items() if v is not None}
+        dest = str(
+            entry.get("semester_dest_repo") or entry.get("cohort_dest_repo") or ""
+        ).strip()
+        if dest:
+            want["semester_dest_repo"] = dest
+        stated = existing.blocks.get(slug, {}).keys() | (
+            {"semester_dest_repo"} if slug in existing.dests else set()
+        )
+        if settings.LATE_PAIR[0] in stated or settings.LATE_PAIR[1] in stated:
+            stated |= set(settings.LATE_PAIR)
+        want = {k: v for k, v in want.items() if k not in stated}
+        if want:
+            out[slug] = want
+    return out, notes
+
+
+def _scalar(value: object) -> str:
+    return (
+        yaml.safe_dump(value, default_flow_style=True).removesuffix("\n...\n").strip()
+    )
+
+
+def with_instance_keys(text: str, additions: dict[str, dict]) -> str:
+    """`assignments.yml` (`text`) with `additions` written into its `assignments:` block,
+    each key under its slug's block (created when absent) - comments and layout kept.
+    Assumes the two-space layout the skeleton uses; the caller re-reads the result."""
+    lines = text.split("\n")
+    at = next((i for i, ln in enumerate(lines) if re.match(r"^assignments:", ln)), None)
+    if at is None:
+        body = "\n".join(
+            [f"{settings.ASSIGNMENTS_BLOCKS}:"]
+            + [
+                row
+                for slug, keys in additions.items()
+                for row in (
+                    f"  {slug}:",
+                    *(f"    {k}: {_scalar(v)}" for k, v in keys.items()),
+                )
+            ]
+        )
+        return text.rstrip("\n") + "\n\n" + body + "\n"
+    for slug, keys in additions.items():
+        rows = [f"    {k}: {_scalar(v)}" for k, v in keys.items()]
+        block = next(
+            (i for i, ln in enumerate(lines) if i > at and ln.startswith(f"  {slug}:")),
+            None,
+        )
+        if block is None:
+            lines[at + 1 : at + 1] = [f"  {slug}:", *rows]
+        else:
+            lines[block + 1 : block + 1] = rows
+    return "\n".join(lines)
 
 
 def registry_keys(text: str) -> str:
@@ -567,11 +754,6 @@ def seeded_wording(ref: str) -> dict[str, str]:
         ),
         "#         cohort_dest_repo:": "#         semester_dest_repo:",
         "#         cohort_dest_path:": "#         semester_dest_path:",
-        "#     cohort_dest_repo:             # OPTIONAL - default: the slug above (here "
-        "assignment-1)": (
-            "#     semester_dest_repo:             # OPTIONAL - default: the slug above "
-            "(here assignment-1)"
-        ),
         "  title: Cohort archived      # optional - the row's Title column": (
             "  title: Semester archived      # optional - the row's Title column"
         ),
@@ -1242,12 +1424,17 @@ def _no_drift(drift: list[str], *, quiet: bool = False) -> bool:
 RERUN_NOTE = "run it again: a pause record says the last run stopped inside the window"
 
 
-def _schedule_clean(text: str | None, *, quiet: bool = False) -> bool:
-    """`schedule.yml` read by this engine with no NOT_MIGRATED fault; each one found is
-    named (unless `quiet`), for a person to fix by hand."""
+def _schedule_clean(
+    text: str | None, instance: str | None = None, *, quiet: bool = False
+) -> bool:
+    """`schedule.yml` (beside its `assignments.yml`, `instance`) read by this engine with
+    no NOT_MIGRATED fault; each one found is named (unless `quiet`), for a person to fix
+    by hand."""
     if text is None:
         return True
-    sched = schedule.parse(load_yaml_lines(text) or {})
+    sched = schedule.parse(
+        load_yaml_lines(text) or {}, settings.parse_instance(instance)
+    )
     bad = [f for f in sched.faults if f.code == NOT_MIGRATED]
     bad += [d for d in sched.dropped if NOT_MIGRATED in d]
     for fault in [] if quiet else bad:
@@ -1255,6 +1442,22 @@ def _schedule_clean(text: str | None, *, quiet: bool = False) -> bool:
             f"{schedule.SCHEDULE_PATH}: {getattr(fault, 'what', fault)} - fix by hand"
         )
     return not bad
+
+
+def _instance_clean(text: str) -> bool:
+    """An `assignments.yml` this engine reads whole: YAML, and no line it refuses."""
+    faults = settings.parse_instance(text).faults
+    for fault in faults:
+        log_err(f"{ASSIGNMENTS_FILE} {fault.label}: {fault.what} - fix by hand")
+    return not faults
+
+
+def _diff(name: str, old: str, new: str) -> list[str]:
+    """The changed lines of `name`, as the plan shows them."""
+    lines = difflib.unified_diff(
+        old.splitlines(), new.splitlines(), f"a/{name}", f"b/{name}", n=0, lineterm=""
+    )
+    return [f"  {line}" for line in lines if not line.startswith(("---", "+++"))]
 
 
 def _grading_clean(text: str | None) -> bool:
@@ -1554,32 +1757,121 @@ class Semester:
     # keys -------------------------------------------------------------------
     def keys_text(self) -> tuple[str | None, str | None]:
         text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
-        return text, (schedule_keys(text) if text is not None else None)
+        if text is None:
+            return None, None
+        return text, schedule_timing(schedule_keys(text))
+
+    def instance_text(self) -> str | None:
+        return get_file_content(self.org, self.config(), ASSIGNMENTS_FILE)
+
+    def templates_run_keys(self, meta: dict) -> dict[str, dict]:
+        """`{template: its run keys}` for each template the schedule names: the course's
+        record of what its template-keys step took out, else the template itself."""
+        record = json.loads(
+            get_file_content(self.course, ".github", RUN_KEYS_RECORD) or "{}"
+        )
+        entries = meta.get("assignments")
+        out = {}
+        for entry in entries.values() if isinstance(entries, dict) else ():
+            repo = str((entry or {}).get("course_source_repo") or "")
+            if repo and repo not in out:
+                out[repo] = record.get(repo) or template_run_keys(
+                    get_file_content(
+                        self.course, repo, GRADING_FILE, ref=SOLUTION_BRANCH
+                    )
+                )
+        return out
+
+    def instance_work(self) -> tuple[str | None, list[str]]:
+        """The `assignments.yml` this semester needs (None: nothing to write), and the
+        plan's notes. Absent, it is seeded from the skeleton; either way it gains what
+        `instance_additions` finds in the OLD schedule and its templates."""
+        text, _ = self.keys_text()
+        current = self.instance_text()
+        if current is not None and (text is None or text == self.keys_text()[1]):
+            return None, []
+        meta = _yaml(text)
+        existing = settings.parse_instance(current)
+        lower = [
+            ("semester", existing.defaults),
+            ("course", settings.course_defaults(self.course)),
+            ("institution", settings.institution_defaults()),
+        ]
+        additions, notes = instance_additions(
+            meta, self.templates_run_keys(meta), lower, existing
+        )
+        base = current
+        if base is None:
+            ref = central_ref_for(self.course)
+            base = semester_scaffold(self.org, ASSIGNMENTS_FILE, ref)
+        new = with_instance_keys(base, additions) if additions else base
+        return (None if new == current else new), notes
 
     def keys_done(self) -> bool:
-        """Nothing left for the rewrite, and the new engine reads the file clean. A key
-        the line rewrite cannot reach (inside a flow mapping, say) keeps this undone: the
-        step then stops, naming the entry to fix by hand."""
+        """The schedule holds only this engine's keys and reads clean, and the semester
+        has its `assignments.yml`. A key the line rewrite cannot reach (inside a flow
+        mapping, say) keeps this undone: the step then stops, naming the entry to fix by
+        hand."""
         if not self.renamed():
             return False
         text, new = self.keys_text()
-        return text == new and _schedule_clean(text, quiet=True)
+        return (
+            text == new
+            and self.instance_text() is not None
+            and _schedule_clean(text, self.instance_text(), quiet=True)
+        )
+
+    def keys_plan(self) -> list[str]:
+        text, new = self.keys_text()
+        instance, notes = self.instance_work()
+        out = [
+            (
+                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: cohort_dest_* -> "
+                f"semester_dest_*, type -> kind on releases and events; the keys that "
+                f"left it removed (assignment title, grading_datetime, "
+                f"semester_dest_repo; a release's assignment; enrolment)"
+            ),
+            *_diff(schedule.SCHEDULE_PATH, text or "", new or ""),
+        ]
+        if instance is not None:
+            current = self.instance_text()
+            seeded = current is None
+            if seeded:
+                ref = central_ref_for(self.course)
+                current = semester_scaffold(self.org, ASSIGNMENTS_FILE, ref)
+            out.append(
+                f"{CONFIG_REPO}/{ASSIGNMENTS_FILE}: "
+                + ("seed the skeleton, and " if seeded else "")
+                + "write what the old files said"
+            )
+            out += _diff(ASSIGNMENTS_FILE, current, instance)
+        return out + notes
 
     def keys(self) -> bool:
         text, new = self.keys_text()
-        if text == new:
+        instance, _ = self.instance_work()
+        files = {}
+        if text != new:
+            files[schedule.SCHEDULE_PATH] = new.encode()
+        if instance is not None:
+            if not _instance_clean(instance):
+                return False
+            files[ASSIGNMENTS_FILE] = instance.encode()
+        if not files:
             return True
-        return move_files(
-            self.org,
-            self.config(),
-            {},
-            KEYS_COMMIT,
-            files={schedule.SCHEDULE_PATH: new.encode()},
-        )
+        # One commit: the schedule loses `grading_datetime` and `semester_dest_repo` in
+        # the same write that puts them into assignments.yml.
+        return move_files(self.org, self.config(), {}, KEYS_COMMIT, files=files)
 
     def keys_verified(self) -> bool:
         text, new = self.keys_text()
-        return text == new and _schedule_clean(text)
+        instance = self.instance_text()
+        return (
+            text == new
+            and instance is not None
+            and _instance_clean(instance)
+            and _schedule_clean(text, instance)
+        )
 
     # topic -------------------------------------------------------------------
     def topics(self) -> set[str]:
@@ -1664,15 +1956,13 @@ class Semester:
             Step(
                 "keys",
                 done=self.keys_done,
-                plan=lambda: [
-                    (
-                        f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: cohort_dest_* -> "
-                        f"semester_dest_*, type -> kind on releases and events"
-                    )
-                ],
+                plan=self.keys_plan,
                 do=self.keys,
                 verify=self.keys_verified,
-                rollback=f"git revert the '{KEYS_COMMIT}' commit in {repo}",
+                rollback=(
+                    f"git revert the '{KEYS_COMMIT}' commit in {repo} (it holds "
+                    f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
+                ),
             ),
             Step(
                 "topic",
@@ -1813,15 +2103,45 @@ class Course:
         return get_file_content(self.org, repo, GRADING_FILE, ref=SOLUTION_BRANCH)
 
     def templates_left(self) -> dict[str, str]:
-        """`{template: its rewritten grading_config.yml}` for each that needs it."""
+        """`{template: its rewritten grading_config.yml}` for each that needs it: the
+        `format:` spelling, and the run settings out (they are each semester's now)."""
         out = {}
         for repo in self.templates():
             text = self.grading_text(repo)
-            if text is not None and grading_config_keys(text) != text:
-                out[repo] = grading_config_keys(text)
+            new = (
+                strip_run_keys(grading_config_keys(text)) if text is not None else None
+            )
+            if new is not None and new != text:
+                out[repo] = new
         return out
 
+    def run_keys_record(self) -> dict[str, dict]:
+        """The record of the run settings taken out so far, and those about to be."""
+        record = json.loads(
+            get_file_content(self.org, ".github", RUN_KEYS_RECORD) or "{}"
+        )
+        for repo in self.templates_left():
+            found = template_run_keys(self.grading_text(repo))
+            if found:
+                record[repo] = found
+        return record
+
     def rewrite_templates(self) -> bool:
+        # The record FIRST: once a template has lost its run settings, the record is the
+        # only place its semesters' keys steps can read them from.
+        record = self.run_keys_record()
+        if record and not move_files(
+            self.org,
+            ".github",
+            {},
+            KEYS_COMMIT,
+            files={
+                RUN_KEYS_RECORD: (
+                    json.dumps(record, indent=2, sort_keys=True) + "\n"
+                ).encode()
+            },
+        ):
+            return False
         return all(
             move_files(
                 self.org,
@@ -2001,8 +2321,16 @@ class Course:
                 "template keys",
                 done=lambda: not self.templates_left(),
                 plan=lambda: [
-                    f"{r}@{SOLUTION_BRANCH}/{GRADING_FILE}: format: -> formats:"
-                    for r in self.templates_left()
+                    line
+                    for r, new in self.templates_left().items()
+                    for line in (
+                        (
+                            f"{r}@{SOLUTION_BRANCH}/{GRADING_FILE}: format: -> formats:, "
+                            f"run settings out (recorded in .github/{RUN_KEYS_RECORD} "
+                            f"for the semesters' {ASSIGNMENTS_FILE})"
+                        ),
+                        *_diff(GRADING_FILE, self.grading_text(r) or "", new),
+                    )
                 ],
                 do=self.rewrite_templates,
                 verify=self.templates_verified,

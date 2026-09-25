@@ -42,8 +42,8 @@ Assignment handouts are declared with the rest of the assignment's lifecycle -
 solution rides on that same release once `assignments.<slug>.solution_datetime` has
 passed - Release assignment's `solution_datetime: now`, on a clock.
 
-Every tick also drives each assignment's grading deadline (`grading_datetime`, else
-`due_datetime`), whether or not the semester uses `releases` at all:
+Every tick also drives each assignment's late cutoff (`schedule.grading_cutoff_datetime`:
+due + `late_window_days`), whether or not the semester uses `releases` at all:
 
 1. FREEZE (release phase). For every assignment whose grading deadline has gone by and that
    has no snapshot yet, record the commit each submission repo is graded at into
@@ -115,6 +115,7 @@ from .ghcli import gh
 from .grades import (
     grading_config_faults,
     load_grading_spec,
+    marks_due,
     semester_sheet_faults,
     sheet_path,
     sync_team_lock,
@@ -169,14 +170,9 @@ def due_snapshots(
     the assignments whose submissions are ready to be frozen and then graded.
     Deadline-ordered, so the run log is deterministic.
 
-    The cutoff is `schedule.grading_cutoff_datetime`: an explicit `grading_datetime`, else the due date plus
-    the template's `late_window_days`. Reading the template is what puts the freeze at the
-    END of the late window rather than at the deadline the window is measured from - the
-    sheet's header and every receipt promise work is accepted until then, and a snapshot
-    taken at the due date silently refused all of it.
-
-    Not pure, therefore: it reads each template's `grading_config.yml`. That read is
-    memoised per process (`grades._grading_text`), and both passes below share this answer.
+    The cutoff is `schedule.grading_cutoff_datetime`: the due date plus the effective
+    `late_window_days`, so the freeze is at the END of the late window - the sheet's
+    header and every receipt promise work is accepted until then.
     Whether each assignment has already been snapshotted or graded is still a separate
     question (see `_snapshot_passed_deadlines` / `_autograde_passed_deadlines`), and so is
     whether there is anything to collect from it at all: this answers "the cutoff has
@@ -184,11 +180,8 @@ def due_snapshots(
     handed in off GitHub has a cutoff like any other. The COLLECTION gate belongs to the
     two passes that collect, and is applied there."""
     passed = []
-    for slug, entry in sched.assignments.items():
-        gspec = load_grading_spec(
-            course_org, entry.course_source_repo, semester_org=sched.org, slug=slug
-        )
-        at = grading_cutoff_datetime(sched, slug, gspec.late_window_days)
+    for slug in sched.assignments:
+        at = grading_cutoff_datetime(sched, slug)
         if at is not None and at <= now:
             passed.append((slug, at))
     return [(slug, at.isoformat()) for slug, at in sorted(passed, key=lambda p: p[1])]
@@ -656,7 +649,7 @@ def _handout_releases(
     course_org: str, semester_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[Release]:
     """Synthetic releases for `assignments.<slug>.handout_datetime` - the whole assignment
-    lifecycle (handout_datetime/due_datetime/grading_datetime) is declared in ONE block,
+    lifecycle (handout_datetime/due_datetime/solution_datetime) is declared in ONE block,
     and the handout still fires through the exact machinery a `releases` entry would:
     due at its datetime, re-checked every tick
     (idempotent - a late onboarder gets their repo on the next one), per-team when the
@@ -1405,7 +1398,7 @@ def _reprivatise_student_repos(
         )
         if not gspec.visibility_is_students:
             continue
-        at = grading_cutoff_datetime(sched, slug, gspec.late_window_days)
+        at = grading_cutoff_datetime(sched, slug)
         if at is None or at <= now:
             continue
         # Sorting the org's repos into the assignments they came out of is not free, and
@@ -1603,6 +1596,10 @@ def _release_phase(
     # teams` and returns green, which is right for the tick and tells the teaching team
     # nothing, while the semester may not know it has anything to do.
     windows = team_formation.open_windows(course_org, semester_org, sched, now)
+    # Marks whose `marks_return_datetime` has come: the complete sheets go back after the
+    # releases below, and each incomplete one is a fault in the same digest.
+    marks_faults, marks_ready = marks_due(course_org, semester_org, sched, now)
+    window_faults = team_formation.window_faults(sched, windows)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
@@ -1615,7 +1612,7 @@ def _release_phase(
         sched,
         now,
         dry_run,
-        team_formation.window_faults(sched, windows),
+        None if window_faults is None else [*window_faults, *marks_faults],
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
     # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not
@@ -1637,6 +1634,10 @@ def _release_phase(
         for release in due:
             for line in describe(release, now):
                 log(f"    PREVIEW  [{release.label}] {line}")
+        for key in marks_ready:
+            log(
+                f"    PREVIEW  [{key}] return {key}'s marks (marks_return_datetime reached)"
+            )
         decisions = dry_run_decisions(
             course_org, semester_org, sched, due, now, listing
         )
@@ -1659,6 +1660,7 @@ def _release_phase(
             course_org, semester_org, due, now, listing
         )
         errors += release_errors
+    errors += _return_marks(course_org, semester_org, sched, marks_ready)
 
     # THE one website sync of the tick, and the only place it is decided: a release that
     # provisioned something, or a team-formation window that moved, and nothing else. Both
@@ -1690,6 +1692,38 @@ def _release_phase(
         except Exception as exc:
             log_err(f"site sync failed after scheduled release: {exc}")
             errors += 1
+    return errors
+
+
+def _return_marks(
+    course_org: str, semester_org: str, sched: schedule.Schedule, ready: list[str]
+) -> int:
+    """Ask the course org's Distribute grades to return each assignment whose
+    `marks_return_datetime` has come with every unit marked (a `return-marks` dispatch,
+    scoped to the one assignment). It runs in THAT workflow, so an automatic return and a
+    button press share one concurrency group and never overlap; the run writes the
+    fire-once marker when it succeeds, and until then each tick asks again (the group
+    holds one pending run). Returns the error count."""
+    errors = 0
+    for key in ready:
+        name = schedule.semester_name(key, sched.assignments[key])
+        code, out = gh(
+            "api",
+            "--method",
+            "POST",
+            f"repos/{course_org}/.github/dispatches",
+            "-f",
+            "event_type=return-marks",
+            "-f",
+            f"client_payload[semester_org]={semester_org}",
+            "-f",
+            f"client_payload[assignment]={name}",
+        )
+        if code != 0:
+            log_err(f"could not ask Distribute grades to return {key}: {out[:200]}")
+            errors += 1
+        else:
+            log_ok(f"asked Distribute grades to return {key} (marks_return_datetime)")
     return errors
 
 
@@ -1741,6 +1775,17 @@ def run(
     errors = 0
     # The release pass's preview, on a preview: what the console shows of it.
     preview: Summary | None = None
+    if sched.instance_unparseable:
+        # Every run setting is unknown, so nothing here may act on a default the semester
+        # did not choose. The tick stays green and the fault goes out on the schedule.yml
+        # digest, like an unreadable schedule.yml.
+        log_err(
+            f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.ASSIGNMENTS_FILE} is not "
+            f"valid YAML - nothing is released, handed out or graded until it is fixed"
+        )
+        if release:
+            _preflight_sources(course_org, semester_org, sched, now, dry_run, [])
+        return 0
     if release:
         # ONE listing of the semester for the whole tick, taken here at the start of it and
         # handed to every pass that asks a question of the org: the freeze's `pushed_at`,

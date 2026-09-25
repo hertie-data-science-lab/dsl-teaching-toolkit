@@ -520,6 +520,11 @@ def _scaffold_text(
         year_next=year + 1,
         timezone=ours["timezone"],
         grace_days=ours["archive"]["grace_days"],
+        late_window_days=ours["late_window_days"],
+        late_penalty_per_day=ours["late_penalty_per_day"],
+        max_team_size=ours["max_team_size"],
+        team_formation=ours["team_formation"],
+        visibility=ours["visibility"],
     )
     return text.encode()
 

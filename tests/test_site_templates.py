@@ -1556,7 +1556,8 @@ def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
     assert page["team_join_cap"] == "4"
     # Already spoken (`grades.spoken_day`), so it is printed as it stands - the same
     # spelling the mail and the Join-team form's refusal use for the same day.
-    assert page["team_join_closes"] == "26th Nov"
+    # The late cutoff: the due date (24 Nov) plus the institution's 10-day window.
+    assert page["team_join_closes"] == "4th Dec"
     # The layout renders the whole block off the key's presence - no second flag, and
     # nothing to render for an assignment that has no window open.
     layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])

@@ -55,6 +55,7 @@ from . import (
     teams,
 )
 from .course import (
+    ASSIGNMENTS_FILE,
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
     INSTRUCTORS_TEAM,
@@ -192,6 +193,9 @@ class SemesterFacts:
         default_factory=dict
     )  # by schedule key
     sheets: dict[str, dict] = field(default_factory=dict)  # by semester-side name
+    # `{schedule key: its name}`: the template's title, else its README heading
+    # (`grades.assignment_title`).
+    titles: dict[str, str] = field(default_factory=dict)
     # `{handle, casefolded: when its gradebook was last written}`, off distributed.csv.
     # A gradebook holds every assignment, so its record names none.
     returned_at: dict[str, datetime] = field(default_factory=dict)
@@ -294,6 +298,10 @@ _FILES = {
     schedule.SCHEDULE_PATH: _Where(
         "schedule", "semester", "K4", "schedule", "SCHEDULE"
     ),
+    # How the semester runs each assignment: the schedule's partner, and the same stage.
+    ASSIGNMENTS_FILE: _Where(
+        "assignments", "semester", "K4", "assignment", "ASSIGNMENTS"
+    ),
     # The old file's name too, so a NOT_MIGRATED fault about it files under K3.
     **dict.fromkeys(
         (sync_faculty.SEMESTER_PEOPLE_PATH, sync_faculty.OLD_PEOPLE_FILE),
@@ -322,6 +330,13 @@ HANDED_OUT = "open"
 _SEMESTER_TEMPLATE = _Where(
     "template", "semester", HANDED_OUT, "template", "GRADING_CONFIG"
 )
+# A run setting that no longer describes what was handed out (visibility drift): the
+# phase after hand out, fixed in assignments.yml.
+_HANDED_OUT_SETTING = _Where(
+    "assignments", "semester", HANDED_OUT, "assignment", "ASSIGNMENTS"
+)
+# Marks whose `marks_return_datetime` has come with units unmarked: the marking phase.
+_MARKS_DUE = _Where("schedule", "semester", MARKING, "marks", "MARKS_DUE")
 # The semester org's own member privileges: part of setting the semester up, fixed on a
 # GitHub settings page rather than in a file.
 _ORG = _Where("org", "semester", "K2", "", "ORG_SETTINGS")
@@ -430,7 +445,14 @@ def plain_text(fault: ConfigFault, filed: _Where, entry: str) -> str:
 def _where_filed(fault: ConfigFault) -> _Where:
     if fault.where == grades.ORG_SETTINGS:
         return _ORG
-    if fault.per_semester:
+    if fault.field == "marks_return_datetime" and fault.file == schedule.SCHEDULE_PATH:
+        return _MARKS_DUE
+    if fault.per_semester and fault.file == ASSIGNMENTS_FILE:
+        return _HANDED_OUT_SETTING
+    if fault.per_semester and fault.file in (
+        grades.GRADING_FILE,
+        grades.LEGACY_GRADING_FILE,
+    ):
         return _SEMESTER_TEMPLATE
     if fault.file.startswith(f"{grades.SHEETS_DIR}/"):
         return _SHEET
@@ -504,7 +526,9 @@ def problem_from_fault(fault: ConfigFault, org: str, now: datetime) -> dict:
         "path": fault.file,
         "line": fault.lineno,
         "screen": filed.screen or None,
-        "entry": entry if filed.kind in ("schedule", "template", "sheet") else None,
+        "entry": entry
+        if filed.kind in ("schedule", "assignments", "template", "sheet")
+        else None,
     }
     if filed is _ORG:
         # A settings page, not a file: `url` is where the console sends the fix.
@@ -872,9 +896,7 @@ def render_assignments(
     for slug, entry in facts.sched.assignments.items():
         spec = facts.specs.get(slug, grades.GradingSpec())
         name = schedule.semester_name(slug, entry)
-        cutoff = schedule.grading_cutoff_datetime(
-            facts.sched, slug, spec.late_window_days
-        )
+        cutoff = schedule.grading_cutoff_datetime(facts.sched, slug)
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
         sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
         filled, on_sheet, submitted = sheet_counts(sheet, sspec)
@@ -893,7 +915,7 @@ def render_assignments(
         rows.append(
             {
                 "slug": slug,
-                "title": entry.title or spec.title or slug,
+                "title": facts.titles.get(slug) or spec.title or slug,
                 "template": entry.course_source_repo,
                 "state": assignment_state(now, entry, cutoff, spec, units, returned),
                 "handout": _iso(entry.handout_datetime),
@@ -1329,14 +1351,21 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     branch = default_branch(semester_org, schedule.CONFIG_REPO, fallback="main")
     facts.config_paths = repo_path_shas(semester_org, schedule.CONFIG_REPO, branch)
     sched = facts.sched = schedule.load(semester_org)
-    # The schedule.yml digest's own three sources (`scheduler._preflight_sources`): the
-    # sources the plan cites, the entries the parser dropped, and the team-formation
-    # windows somebody is still waiting on (None = the roster could not be read).
+    if sched.instance_unparseable:
+        # Every run setting is unknown, so nothing about an assignment can be computed
+        # (its cutoff, its window, its marks): the status lists the ASSIGNMENTS problem,
+        # which is in `sched.faults`, and no assignment until the file parses.
+        sched.assignments = {}
+    # The schedule.yml digest's own sources (`scheduler._preflight_sources`): the sources
+    # the plan cites, the entries the parser dropped (assignments.yml's with them), the
+    # team-formation windows somebody is still waiting on (None = the roster could not be
+    # read), and the marks due but not all written.
     windows = team_formation.open_windows(course_org, semester_org, sched, now)
     facts.schedule_faults = [
         *schedule.source_faults(sched, course_org),
         *sched.faults,
         *(team_formation.window_faults(sched, windows) or []),
+        *grades.marks_due(course_org, semester_org, sched, now)[0],
     ]
     facts.people = sync_faculty.read_semester_people(semester_org, facts.people_faults)
     try:
@@ -1365,6 +1394,9 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     for slug, entry in sched.assignments.items():
         facts.specs[slug] = grades.load_grading_spec(
             course_org, entry.course_source_repo, semester_org=semester_org, slug=slug
+        )
+        facts.titles[slug] = grades.assignment_title(
+            course_org, entry.course_source_repo, facts.specs[slug], slug
         )
         name = schedule.semester_name(slug, entry)
         text = sheet_texts[name]

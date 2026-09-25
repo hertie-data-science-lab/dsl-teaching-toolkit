@@ -33,6 +33,7 @@ from .course import (
     VISIBILITIES,
 )
 from .discovery import SEMESTERS_PATH
+from .grades import TEMPLATE_KEYS
 from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (
@@ -55,10 +56,12 @@ from .schedule import (
     KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
 )
-from .setting_readers import SPEC_KEYS
 from .settings import (
     ASSIGNMENT_DEFAULTS_KEY,
+    ASSIGNMENTS_BLOCKS,
+    ASSIGNMENTS_DEFAULTS,
     COURSE_DEFAULT_KEYS,
+    INSTANCE_KEYS,
     RUN_KEYS,
     SOURCES,
 )
@@ -412,7 +415,14 @@ def schedule_schema() -> dict:
             },
         )
     )
-    assignment = _obj(_keys(KNOWN_ASSIGNMENT), ("due_datetime", "course_source_repo"))
+    marks_row = _obj({"event_datetime": _str(), "show_on_site": {"type": "boolean"}})
+    assignment = _obj(
+        _keys(
+            KNOWN_ASSIGNMENT,
+            {"marks_return_datetime": {"oneOf": [_str(), marks_row]}},
+        ),
+        ("due_datetime", "course_source_repo"),
+    )
     event = _obj(_keys(KNOWN_EVENT, {"kind": _enum(_EVENT_KINDS)}))
     archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
     top = _keys(
@@ -422,7 +432,6 @@ def schedule_schema() -> dict:
             "assignments": {"type": "object", "additionalProperties": assignment},
             "events": {"type": "object", "additionalProperties": event},
             "archive": archive,
-            "enrolment": {"description": "Deprecated and ignored."},
         },
     )
     return _doc(f"{CONFIG_REPO}/schedule.yml", _obj(top))
@@ -492,7 +501,23 @@ _SPEC_TYPES = {
 
 
 def grading_config_schema() -> dict:
-    return _doc("grading_config.yml", _obj(_keys(SPEC_KEYS, _SPEC_TYPES)))
+    return _doc("grading_config.yml", _obj(_keys(TEMPLATE_KEYS, _SPEC_TYPES)))
+
+
+def assignments_schema() -> dict:
+    """`semester-config/assignments.yml`: this semester's `defaults:` and one block per
+    schedule key (`settings.parse_instance`)."""
+    defaults = _obj(_keys(RUN_KEYS, _SPEC_TYPES))
+    block = _obj(_keys(INSTANCE_KEYS, _SPEC_TYPES))
+    return _doc(
+        f"{CONFIG_REPO}/{ASSIGNMENTS_FILE}",
+        _obj(
+            {
+                ASSIGNMENTS_DEFAULTS: defaults,
+                ASSIGNMENTS_BLOCKS: {"type": "object", "additionalProperties": block},
+            }
+        ),
+    )
 
 
 def dsl_course_schema() -> dict:
@@ -554,6 +579,7 @@ def all_schemas() -> dict[str, dict]:
         "students.schema.json": students_schema(),
         "teams.schema.json": teams_schema(),
         "grading_config.schema.json": grading_config_schema(),
+        "assignments.schema.json": assignments_schema(),
         "dsl_course.schema.json": dsl_course_schema(),
     }
 

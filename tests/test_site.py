@@ -5,6 +5,7 @@ silently mis-dates the whole schedule page, or hides a lab inside a lecture row.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime, timedelta
 from functools import cache
 from zoneinfo import ZoneInfo
@@ -19,6 +20,7 @@ from dsl_course import (
     ghcli,
     grades,
     schedule_plan,
+    settings,
     site,
     site_repo,
 )
@@ -31,10 +33,24 @@ from dsl_course.schedule import (
     Release,
     Schedule,
 )
+from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
 from tests.conftest import BareOrigins, entry_links
 
 UTC = ZoneInfo("UTC")
+
+
+def _spec(config: str) -> grades.GradingSpec:
+    """`config` as the site is handed it: the template's keys parsed from the template, and
+    any run setting in it read as the semester's assignments.yml gives it (decision 0009)."""
+    data = yaml.safe_load(config) or {}
+    run = {k: data.pop(k) for k in settings.RUN_KEYS if k in data}
+    values = read_settings(run, settings.RUN_KEYS, "assignments.yml", [])
+    if any(k in values for k in settings.LATE_PAIR):
+        values = {k: values.get(k) for k in settings.LATE_PAIR} | values
+    spec = grades.parse_grading_spec(yaml.safe_dump(data) if data else "")
+    return dataclasses.replace(spec, **values)
+
 
 BERLIN = ZoneInfo("Europe/Berlin")
 END_OF_TERM = date(2026, 12, 18)
@@ -46,9 +62,7 @@ def _individual_by_default(monkeypatch):
     from the template's `grading_config.yml` - a course-org read the guard in conftest
     refuses. Individual is what an unanswered read gives anyway; the one test about the
     group shape sets its own."""
-    monkeypatch.setattr(
-        site, "load_grading_spec", lambda *a, **k: grades.parse_grading_spec("")
-    )
+    monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(""))
 
 
 @pytest.fixture(autouse=True)
@@ -469,18 +483,20 @@ def test_a_released_assignment_links_the_semester_repo_not_the_course_org(monkey
     assert "Course" not in out.split("---")[1]  # the course org names no student repo
 
 
-def test_the_plans_title_is_the_assignments_name_and_beats_the_readme(monkeypatch):
-    # Declared in schedule.yml, so it can appear BEFORE hand-out - the README it otherwise
-    # comes from is embargoed until then.
+def test_the_templates_title_is_the_assignments_name_and_beats_the_readme(monkeypatch):
+    # The template's `title:` is its one home (decision 0009), so it can appear BEFORE
+    # hand-out - the README it otherwise comes from is embargoed until then.
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Assignment 1 - something else"
+    )
+    monkeypatch.setattr(
+        site, "load_grading_spec", lambda *a, **k: _spec("title: Fraud detection\n")
     )
     sched = Schedule(
         assignments={
             "assignment-1": AssignmentEntry(
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-                title="Fraud detection",
             )
         }
     )
@@ -532,7 +548,7 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("type: group\n"),
+        lambda *a, **k: _spec("type: group\n"),
     )
     sched = Schedule(
         assignments={
@@ -572,9 +588,7 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
-    monkeypatch.setattr(
-        site, "load_grading_spec", lambda *a, **k: grades.parse_grading_spec(config)
-    )
+    monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(config))
     monkeypatch.setattr(
         site.teams,
         "_teams_text",
@@ -586,9 +600,15 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
                 course_source_repo="assignment-3-f2026",
                 handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-                grading_datetime=datetime(2026, 10, 20, 9, 0, tzinfo=BERLIN),
             )
-        }
+        },
+        org="Semester-f2026",
+    )
+    # The window shuts at the late cutoff: the due date plus this semester's 7 days.
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: "assignments:\n  assignment-3:\n    late_window_days: 7\n",
     )
     entry = sched.assignments["assignment-3"]
     return site._assignment_entry(
@@ -745,9 +765,7 @@ def _entry_for(monkeypatch, config: str, **kw) -> str:
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Moodle essay\nThe brief."
     )
-    monkeypatch.setattr(
-        site, "load_grading_spec", lambda *a, **k: grades.parse_grading_spec(config)
-    )
+    monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(config))
     return site._assignment_entry(
         "Course",
         "Semester-f2026",
@@ -805,7 +823,7 @@ def test_a_public_assignment_says_so_at_both_levels(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("visibility: public\n"),
+        lambda *a, **k: _spec("visibility: public\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -826,7 +844,7 @@ def test_a_pending_public_assignment_names_the_repo_it_will_make(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("visibility: public\n"),
+        lambda *a, **k: _spec("visibility: public\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -848,7 +866,7 @@ def test_a_student_choice_assignment_says_so_at_both_levels(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("visibility: student_choice\n"),
+        lambda *a, **k: _spec("visibility: student_choice\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -869,7 +887,7 @@ def test_a_pending_student_choice_assignment_promises_a_private_repo(monkeypatch
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("visibility: student_choice\n"),
+        lambda *a, **k: _spec("visibility: student_choice\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -1033,7 +1051,7 @@ def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("submit_via: github\n"),
+        lambda *a, **k: _spec("submit_via: github\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -1627,6 +1645,31 @@ def test_a_semester_can_keep_its_archive_date_off_the_site(monkeypatch, tmp_path
 def test_a_semester_with_no_archive_date_gets_no_row(monkeypatch, tmp_path):
     plan = _plan(monkeypatch, tmp_path, Schedule(semester_start=date(2026, 9, 7)))
     assert "semester-archived.md" not in plan.collections["_events"]
+
+
+def test_marks_expected_shows_only_where_the_entry_says_show_on_site(
+    monkeypatch, tmp_path
+):
+    # `marks_return_datetime` is internal by default (decision 0009): the row appears
+    # only when the key itself says `show_on_site: true`, whatever the entry's own says.
+    def plan_for(extra: dict):
+        sched = schedule_mod.parse(
+            {
+                "assignments": {
+                    "assignment-1": {
+                        "course_source_repo": "assignment-1-f2026",
+                        "due_datetime": "2026-10-13",
+                        "marks_return_datetime": extra or "2026-10-27",
+                    }
+                }
+            }
+        )
+        return _plan(monkeypatch, tmp_path, sched).collections["_events"]
+
+    shown = plan_for({"event_datetime": "2026-10-27", "show_on_site": True})
+    assert 'title: "Marks expected: Assignment 1"' in shown["marks-assignment-1.md"]
+    assert "date: 2026-10-27" in shown["marks-assignment-1.md"]
+    assert "marks-assignment-1.md" not in plan_for({})
 
 
 def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_path):
@@ -2554,7 +2597,7 @@ def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
+        lambda *a, **k: _spec("submit_via: shared_dropbox_repo\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -2580,9 +2623,7 @@ def test_a_shared_group_assignment_names_the_team_s_folder(monkeypatch):
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec(
-            "submit_via: shared_dropbox_repo\ntype: group\n"
-        ),
+        lambda *a, **k: _spec("submit_via: shared_dropbox_repo\ntype: group\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -2603,7 +2644,7 @@ def test_a_pending_shared_assignment_promises_a_drop_box_and_not_a_repo(monkeypa
     monkeypatch.setattr(
         site,
         "load_grading_spec",
-        lambda *a, **k: grades.parse_grading_spec("submit_via: shared_dropbox_repo\n"),
+        lambda *a, **k: _spec("submit_via: shared_dropbox_repo\n"),
     )
     out = site._assignment_entry(
         "Course",
@@ -2741,7 +2782,6 @@ def test_a_tbc_assignment_marks_both_rows_and_moves_neither_date(monkeypatch):
         entry = AssignmentEntry(
             due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
             course_source_repo="assignment-1-f2026",
-            grading_datetime=datetime(2026, 10, 15, 23, 59, 59, tzinfo=BERLIN),
             tbc=tbc,
         )
         out = site._assignment_entry(

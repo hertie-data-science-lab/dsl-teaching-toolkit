@@ -59,9 +59,9 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
    1. Students open a **Join team** issue in `join`, 
    2. instructors edit `semester-config/teams.csv`(`assignment, team, github_handle`)
 - The issue flow only accepts an assignment **declared under `assignments:` in
-  `semester-config/schedule.yml`**, **whose template says `team_formation: self_select`**,
+  `semester-config/schedule.yml`**, **whose `team_formation` is `self_select`** (the semester's `assignments.yml`),
   and **whose team-formation window is open**. It enforces that assignment's
-  `max_team_size` (default: the course's `assignment_defaults`, else 5). Every answer
+  `max_team_size` (the semester's `assignments.yml`, else the course's `assignment_defaults`, else 5). Every answer
   reaches the form through the generated mirror `semester-config/.system/assignments.lock.yml`.
   Three outcomes, by label:
   - `team-recorded` (closed): the row is in `teams.csv`. The comment points to step 2 on

@@ -120,7 +120,6 @@ from .course import (
     CONFIG_REPO,
     SANDBOX_USER,
     SOLUTION_BRANCH,
-    resolve_is_group,
     shared_repo,
     submission_repo,
 )
@@ -580,7 +579,7 @@ def submission_targets(
     up by the name then found none, so a group assignment silently had no targets at all.
     Defaults to `slug` for the (usual) case where they are the same.
 
-    `is_group` is decided upstream by `resolve_is_group` (force -> grading_config.yml)
+    `is_group` is decided upstream, off the template's grading_config.yml `type:`
     and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
     "Join team" issue can add a row against an individual assignment), so trusting its rows to
     decide the assignment's KIND would let a student turn an individual assignment into a group
@@ -1196,7 +1195,7 @@ def snapshot_assignment(
 
     `is_group` is REQUIRED (keyword-only): it decides which repos are frozen, so a silent
     default would let a forgetful future caller pin individual repos for a group assignment.
-    The caller resolves it once, upstream, via `resolve_is_group` - it is never guessed here
+    The caller resolves it once, upstream, off the template's `type:` - it is never guessed here
     from student-writable teams.csv.
 
     `listing` is the semester's repos keyed by name, off the ONE listing the caller's tick
@@ -1775,7 +1774,7 @@ def sync_sheet(
         slug,
         old_text,
         now,
-        schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days),
+        schedule.grading_cutoff_datetime(sched, key),
     )
     try:
         on_disk = grades.parse_sheet(old_text) if old_text else {}
@@ -1843,10 +1842,7 @@ def sync_sheet(
             semester_org,
             listing or {},
             targets,
-            (
-                schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days)
-                or now
-            ).isoformat(),
+            (schedule.grading_cutoff_datetime(sched, key) or now).isoformat(),
             previous,
             due,
         )
@@ -3150,7 +3146,6 @@ def refresh_assignment_sheet(
     template: str,
     semester_org: str,
     *,
-    group: bool = False,
     dry_run: bool = False,
     slug: str = "",
 ) -> int:
@@ -3174,7 +3169,7 @@ def refresh_assignment_sheet(
         return 1
     key, slug = target
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
-    is_group = resolve_is_group(force=group, template_type=gspec.type)
+    is_group = gspec.is_group
     ok = sync_sheet(
         course_org,
         semester_org,
@@ -3202,7 +3197,6 @@ def collect(
     template: str,
     semester_org: str,
     deadline: str | None = None,
-    group: bool = False,
     dry_run: bool = False,
     scheduled: bool = False,
     slug: str = "",
@@ -3242,15 +3236,15 @@ def collect(
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if gspec.not_migrated:
         log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (`format:` is now "
-            f"`formats:`) - run the migration; nothing is graded"
+            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
+            f"setting that moved to assignments.yml) - run the migration; nothing is "
+            f"graded"
         )
         return 1
-    # SSOT: default the grading pin to the assignment's CUTOFF - an explicit
-    # `grading_datetime`, else the due date plus the template's late window. An explicit
-    # `deadline` (CLI override) wins; fall back to today - in the semester's own timezone,
-    # like every other date here - only if unscheduled.
-    at = schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days)
+    # SSOT: the grading pin is the assignment's late CUTOFF (due + `late_window_days`);
+    # fall back to today - in the semester's own timezone, like every other date here -
+    # only if unscheduled.
+    at = schedule.grading_cutoff_datetime(sched, key)
     deadline = (
         deadline or (at.isoformat() if at else None) or _today_in_semester_tz(sched)
     )
@@ -3271,9 +3265,8 @@ def collect(
         )
         return 1
 
-    # group-vs-individual via the single `resolve_is_group` precedence (force -> the
-    # template's grading_config.yml `type:` -> individual).
-    is_group = resolve_is_group(force=group, template_type=gspec.type)
+    # group-vs-individual: the template's grading_config.yml `type:`, else individual.
+    is_group = gspec.is_group
     cutoff = local_deadline(deadline, sched.timezone)
 
     # The grader's reading copy, when the assignment asks for one - BEFORE every autograde
@@ -3672,42 +3665,18 @@ def main() -> int:
         help="Semester org (submissions)",
     )
     parser.add_argument(
-        "--deadline",
-        default=None,
-        help="ISO date override; default = the assignment's late cutoff, else today",
-    )
-    parser.add_argument(
-        "--group", action="store_true", help="Group assignment (one repo per team)"
-    )
-    parser.add_argument(
         "--refresh-only",
         action="store_true",
         help="Refresh the grading sheet now and stop - no snapshot, no grading, no freeze",
-    )
-    parser.add_argument(
-        "--slug",
-        default="",
-        help="Which assignment in the semester's schedule.yml this is, when two of them hand out from the same template (each with its own semester_dest_repo). Leave empty otherwise.",
     )
     add_preview_flag(parser, "Report what would be collected; write nothing (default).")
     args = parser.parse_args()
     if args.refresh_only:
         return refresh_assignment_sheet(
-            args.course_org,
-            args.template,
-            args.semester_org,
-            group=args.group,
-            dry_run=args.preview,
-            slug=args.slug,
+            args.course_org, args.template, args.semester_org, dry_run=args.preview
         )
     return collect(
-        args.course_org,
-        args.template,
-        args.semester_org,
-        args.deadline,
-        group=args.group,
-        dry_run=args.preview,
-        slug=args.slug,
+        args.course_org, args.template, args.semester_org, dry_run=args.preview
     )
 
 

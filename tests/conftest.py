@@ -134,13 +134,14 @@ def _no_semester_is_closed_out(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_course_or_semester_defaults(monkeypatch):
-    """Answer the cascade's two live reads (`settings`) with "nothing declared" by default:
-    the course's `dsl-course.yml` and the semester's `assignments.yml`. Every spec read now
-    resolves its run settings through them, and the institution's policy is the
-    uninteresting answer for every test but the ones about a layer, which set their own
-    after this fixture and win."""
+    """Answer the cascade's live reads (`settings`) with "nothing declared" by default:
+    the course's `dsl-course.yml`, the semester's `assignments.yml` and the semester's
+    pointer to its course. Every spec read and every late cutoff resolves through them,
+    and the institution's policy is the uninteresting answer for every test but the ones
+    about a layer, which set their own after this fixture and win."""
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
 
 
 @pytest.fixture(autouse=True)
@@ -175,6 +176,7 @@ def _clear_process_memos():
     schedule._schedule_text.cache_clear()
     schedule._repo_paths.cache_clear()
     grades._grading_text.cache_clear()
+    grades.readme_heading.cache_clear()
     settings.course_defaults.cache_clear()
     settings._assignments_text.cache_clear()
     settings.semester_blocks.cache_clear()

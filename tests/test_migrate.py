@@ -1560,3 +1560,196 @@ def test_the_course_config_rewrite_strips_the_retired_keys_and_keeps_the_rest():
     )
     assert migrate.course_config_keys(got) == got
     assert migrate.retired_course_faults(yaml.safe_load(got)) == []
+
+
+# ------------------------------------ assignments.yml: the run settings move (WP-B2)
+
+B1_SCHEDULE = """timezone: Europe/Berlin
+assignments:
+  a1:
+    title: Regression
+    details: >-
+      title: this is prose and stays
+    course_source_repo: assignment-1-f2026
+    due_datetime: 2026-10-13
+    grading_datetime: 2026-10-15
+  a2:
+    course_source_repo: assignment-2-f2026
+    semester_dest_repo: homework-2
+    due_datetime: 2026-10-20T23:59
+    grading_datetime: 2026-10-20T23:59
+releases:
+  s1:
+    event_datetime: 2026-10-01T09:00
+    assignment: assignment-1-f2026
+enrolment:
+  send_codes_datetime: 2026-08-24T08:00
+  show_on_site: true
+events:
+  exam:
+    kind: exam
+    event_datetime: 2026-12-01T09:00
+"""
+A1_RUN_KEYS = {"max_team_size": 3, "late_window_days": 10, "late_penalty_per_day": "5%"}
+INSTITUTION = [
+    ("semester", {}),
+    ("course", {}),
+    ("institution", migrate.settings.institution_defaults()),
+]
+
+
+def test_the_schedule_loses_the_keys_that_left_it_and_nothing_else():
+    new = migrate.schedule_timing(B1_SCHEDULE)
+    meta = yaml.safe_load(new)
+    assert set(meta["assignments"]["a1"]) == {
+        "details",
+        "course_source_repo",
+        "due_datetime",
+    }
+    assert meta["assignments"]["a1"]["details"] == "title: this is prose and stays"
+    assert "semester_dest_repo" not in meta["assignments"]["a2"]
+    assert set(meta["releases"]["s1"]) == {"event_datetime"}
+    assert "enrolment" not in meta and meta["events"]["exam"]["kind"] == "exam"
+    assert migrate.schedule_timing(new) == new
+
+
+def test_the_old_files_say_what_assignments_yml_must_hold():
+    meta = yaml.safe_load(B1_SCHEDULE)
+    want, notes = migrate.instance_additions(
+        meta,
+        {"assignment-1-f2026": A1_RUN_KEYS},
+        INSTITUTION,
+        migrate.settings.Instance(),
+    )
+    # a1: the template's team cap and penalty (the institution's differ); its window is
+    # what the old grading_datetime said - two days after the due date.
+    assert want["a1"] == {
+        "max_team_size": 3,
+        "late_window_days": 2,
+        "late_penalty_per_day": "5%",
+    }
+    # a2: grading_datetime WAS the due date: no late work; and its repo name moved.
+    assert want["a2"] == {"late_window_days": 0, "late_penalty_per_day": "10%",
+                          "semester_dest_repo": "homework-2"}  # fmt: skip
+    assert notes == []
+
+
+def test_a_setting_assignments_yml_already_states_is_left_as_written():
+    meta = yaml.safe_load(B1_SCHEDULE)
+    existing = migrate.settings.parse_instance(
+        "assignments:\n  a1:\n    late_window_days: 7\n    max_team_size: 4\n"
+    )
+    want, _ = migrate.instance_additions(
+        meta, {"assignment-1-f2026": A1_RUN_KEYS}, INSTITUTION, existing
+    )
+    assert "a1" not in want
+
+
+def test_a_cutoff_that_is_not_whole_days_after_the_due_date_is_named():
+    meta = yaml.safe_load(
+        "assignments:\n  a1:\n    course_source_repo: t\n"
+        "    due_datetime: 2026-10-13T12:00\n    grading_datetime: 2026-10-15T20:00\n"
+    )
+    want, notes = migrate.instance_additions(
+        meta, {}, INSTITUTION, migrate.settings.Instance()
+    )
+    assert want["a1"]["late_window_days"] == 2
+    (note,) = notes
+    assert "2026-10-15 20:00" in note and "2026-10-15 12:00" in note
+
+
+def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
+    skeleton = migrate.semester_scaffold(SEM, "assignments.yml", "main")
+    text = migrate.with_instance_keys(
+        skeleton,
+        {"a1": {"late_window_days": 2, "late_penalty_per_day": "5%"},
+         "a2": {"semester_dest_repo": "homework-2"}},
+    )  # fmt: skip
+    got = migrate.settings.parse_instance(text)
+    assert got.faults == ()
+    assert got.blocks["a1"] == {"late_window_days": 2, "late_penalty_per_day": "5%"}
+    assert got.dests == {"a2": "homework-2"}
+    assert text.startswith(skeleton.rstrip("\n"))  # the skeleton's comments kept
+    # Into a file with a block of its own: the slug's block gains the key.
+    again = migrate.with_instance_keys(text, {"a1": {"max_team_size": 3}})
+    assert migrate.settings.parse_instance(again).blocks["a1"]["max_team_size"] == 3
+
+
+def test_a_template_loses_its_run_settings_live_or_commented():
+    old = (
+        "title: T\n"
+        "team_formation: self_select   # group only\n"
+        "submit_url: https://moodle.example.org/x\n"
+        "                              # external only\n"
+        "# visibility: private         # institution default\n"
+        "formats: [py]\n"
+        "\n"
+        "late_window_days: 10\n"
+        "late_penalty_per_day: 10%\n"
+        "\n"
+        "autograde: false\n"
+    )
+    new = migrate.strip_run_keys(old)
+    assert new == "title: T\nformats: [py]\n\nautograde: false\n"
+    assert migrate.template_run_keys(old) == {
+        "team_formation": "self_select",
+        "submit_url": "https://moodle.example.org/x",
+        "late_window_days": 10,
+        "late_penalty_per_day": "10%",
+    }
+    assert migrate._grading_clean(new) and not migrate._grading_clean(old)
+
+
+def test_the_course_records_each_templates_run_settings_before_stripping_them(
+    fake, course, monkeypatch
+):
+    fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"] = (
+        b"formats: [ipynb]\nmax_team_size: 3\nlate_window_days: 4\n"
+    )
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
+    assert grading == b"formats: [ipynb]\n"
+    record = json.loads(fake.tree(COURSE, ".github")[migrate.RUN_KEYS_RECORD])
+    assert record == {"assignment-1-f2026": {"max_team_size": 3, "late_window_days": 4}}
+
+
+def test_a_semester_migrated_before_b2_completes_on_the_next_run(
+    fake, semester, monkeypatch, capsys
+):
+    # The first run, by the tool as it was: everything but assignments.yml.
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = fake.tree(SEM, CONFIG_REPO)
+    tree["schedule.yml"] = B1_SCHEDULE.encode()
+    del tree["assignments.yml"]
+    # The course step has already taken a1's template's run settings out, into its record.
+    fake.tree(COURSE, ".github")[migrate.RUN_KEYS_RECORD] = json.dumps(
+        {"assignment-1-f2026": A1_RUN_KEYS}
+    ).encode()
+    fake.commits.clear()
+    capsys.readouterr()
+
+    assert _main(monkeypatch, SEM) == 0  # the preview shows the diff
+    out = capsys.readouterr().out
+    assert "  keys:\n" in out and "-    grading_datetime: 2026-10-15" in out
+    assert "seed the skeleton, and write what the old files said" in out
+    assert "+    late_window_days: 2" in out and "+# INSTRUCTOR-OWNED" not in out
+    assert fake.commits == []
+
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = fake.tree(SEM, CONFIG_REPO)
+    got = migrate.settings.parse_instance(tree["assignments.yml"].decode())
+    assert got.blocks["a1"] == {
+        "max_team_size": 3,
+        "late_window_days": 2,
+        "late_penalty_per_day": "5%",
+    }
+    assert got.dests == {"a2": "homework-2"}
+    assert migrate._schedule_clean(tree["schedule.yml"].decode(),
+                                   tree["assignments.yml"].decode())  # fmt: skip
+    keys = [c for c in fake.commits if c[3] == migrate.KEYS_COMMIT]
+    assert keys == [(SEM, CONFIG_REPO, "main", migrate.KEYS_COMMIT)]  # both files, once
+    commits = list(fake.commits)
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert "  keys: already migrated" in capsys.readouterr().out
+    assert fake.commits == commits

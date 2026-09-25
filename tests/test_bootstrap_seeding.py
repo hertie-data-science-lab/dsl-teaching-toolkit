@@ -212,6 +212,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         "teams.csv": "assignment,team,github_handle\na1,team-1,ahandle\n",
         "schedule.yml": "timezone: Europe/Berlin\nassignments:\n  - id: a1\n",
         "instructors.yml": "people:\n  instructors:\n    - github_handle: profx\n",
+        "assignments.yml": "defaults:\n  max_team_size: 3\n",
         "README.md": "# stale contract from an older engine\n",
         ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
     }

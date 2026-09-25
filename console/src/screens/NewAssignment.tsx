@@ -11,7 +11,7 @@ import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { createAssignment } from '../ops/defs';
-import { FORMATS, VISIBILITY, formatsList, toConfig } from '../tiers/grading';
+import { FORMATS, formatsList, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
 import { Crumbs, Help, editUrl } from '../ui/bits';
@@ -36,10 +36,10 @@ const STEPS = [
 ];
 
 export const S1 = ['name', 'number', 'term', 'copy_from'];
-export const S2 = ['type', 'team_formation', 'max_team_size', 'submit_via', 'submit_url', 'visibility'];
-export const S3 = ['formats', 'autograde', 'tests', 'completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'];
+export const S2 = ['type', 'submit_via'];
+export const S3 = ['formats', 'autograde', 'tests', 'completion_check', 'grader_pdf'];
 /** grading_config.yml keys the create request cannot carry. */
-export const EXTRA_KEYS = ['max_team_size', 'submit_url', 'tests', 'completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'];
+export const EXTRA_KEYS = ['tests', 'completion_check', 'grader_pdf'];
 
 export interface NaDraft {
   v: Values;
@@ -52,7 +52,7 @@ export function initialValues(meta: Record<string, unknown> | null, term: string
   const ad = ((meta?.assignment_defaults ?? {}) as Record<string, unknown>);
   const s = (k: string, d: string) => (typeof ad[k] === 'string' && ad[k] ? String(ad[k]) : d);
   return {
-    term, type: 'individual', team_formation: s('team_formation', 'self_select'), submit_via: s('submit_via', 'assignment_repo'), visibility: s('visibility', 'private'),
+    term, type: 'individual', submit_via: s('submit_via', 'assignment_repo'),
     formats: [formatsList(ad.formats)[0] ?? 'ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false,
   };
 }
@@ -211,7 +211,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     heading = created ? 'Created' : 'Check and create';
     const w = effective(tiers3, effective(tiers2, vv));
     const fmts = ((w.formats as string[]) ?? []).map((f) => FORMATS.find((x) => x[0] === f)?.[1] ?? f).join(' + ');
-    const submit = { assignment_repo: `Their own repo, ${(VISIBILITY[String(w.visibility)] ?? 'Private').toLowerCase()}`, shared_dropbox_repo: 'A shared drop box, private', external: `Elsewhere: ${String(w.submit_url ?? 'no link')}, private` }[String(w.submit_via)] ?? '';
+    const submit = { assignment_repo: 'Their own repo', shared_dropbox_repo: 'A shared drop box, private', external: 'Elsewhere' }[String(w.submit_via)] ?? '';
     const def = createAssignment(courseScope(p), repo, title, assignmentArgs(vv));
     const extrasPending = created && !copying && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
     const ready = created && allOk(tplNow?.checks) && !extrasPending;
@@ -219,7 +219,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       <>
         <dl class="summary-dl">
           <dt>Name</dt><dd>{title}</dd><dd><a href="#new-assignment-1">Change</a></dd>
-          <dt>Students</dt><dd>{copying ? 'As copied' : w.type === 'group' ? `In teams, ${w.team_formation === 'assigned' ? 'you assign' : 'students choose'}, up to ${String(w.max_team_size ?? defaults.teamSize)}` : 'Alone'}</dd><dd>{copying ? null : <a href="#new-assignment-2">Change</a>}</dd>
+          <dt>Students</dt><dd>{copying ? 'As copied' : w.type === 'group' ? 'In teams' : 'Alone'}</dd><dd>{copying ? null : <a href="#new-assignment-2">Change</a>}</dd>
           <dt>Submit</dt><dd>{copying ? 'As copied' : submit}</dd><dd>{copying ? null : <a href="#new-assignment-2">Change</a>}</dd>
           <dt>Marking</dt><dd>{copying ? 'As copied' : `${fmts}; tests ${w.autograde === 'true' ? `on (${String(w.tests ?? 'tests')})` : 'off'}`}</dd><dd>{copying ? null : <a href="#new-assignment-3">Change</a>}</dd>
         </dl>

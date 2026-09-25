@@ -27,6 +27,7 @@ GitHub.
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import sys
 import tempfile
@@ -82,11 +83,10 @@ FORMING_SCHEDULE = schedule.Schedule(
     assignments={
         FORMING_KEY: schedule.AssignmentEntry(
             course_source_repo=GROUP_FORMING,
-            # Open at NOW: handed out a month ago, and the grading pin that shuts the
-            # window is still two months off.
+            # Open at NOW: handed out a month ago, and the late cutoff that shuts the
+            # window (due + the institution's 10 days) is still two months off.
             handout_datetime=datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
             due_datetime=datetime(2026, 11, 24, 23, 59, tzinfo=BERLIN),
-            grading_datetime=datetime(2026, 11, 26, 9, 0, tzinfo=BERLIN),
         )
     }
 )
@@ -182,25 +182,28 @@ def _grading_spec(_org: str, repo: str, **_):
     and the named shapes declare none, so the fixture holds a page with the line and pages
     without it."""
     if repo in (EXTERNAL, EXTERNAL_PENDING):
-        return grades.parse_grading_spec(
-            f"submit_via: external\nsubmit_url: {EXTERNAL_URL}\n"
-        )
+        return _spec("submit_via: external\n", submit_url=EXTERNAL_URL)
     if repo == PUBLIC:
-        return grades.parse_grading_spec("visibility: public\n")
+        return _spec("", visibility="public")
     if repo == STUDENT_CHOICE:
-        return grades.parse_grading_spec("visibility: student_choice\n")
+        return _spec("", visibility="student_choice")
     if repo == SHARED:
-        return grades.parse_grading_spec("submit_via: shared_dropbox_repo\n")
+        return _spec("submit_via: shared_dropbox_repo\n")
     if repo == GROUP_FORMING:
-        # The cap is declared, which is what `New assignment` stamps into every file it
-        # writes - so the page prints it without the course-org read `grades.team_cap`
-        # falls back to.
-        return grades.parse_grading_spec(
-            "type: group\nteam_formation: self_select\nmax_team_size: 4\n"
-        )
-    return grades.parse_grading_spec(
-        "late_window_days: 7\nlate_penalty_per_day: 10%\nquestions:\n  Q1: 15\n  Q2: 10\n"
+        # The cap is the semester's (assignments.yml), so the page prints it without the
+        # course-org read `grades.team_cap` falls back to.
+        return _spec("type: group\n", team_formation="self_select", max_team_size=4)
+    return _spec(
+        "questions:\n  Q1: 15\n  Q2: 10\n",
+        late_window_days=7,
+        late_penalty_per_day="10%",
     )
+
+
+def _spec(text: str, **run) -> grades.GradingSpec:
+    """The template's definition with the run settings its semester's assignments.yml
+    gives it - what `load_grading_spec` hands the site."""
+    return dataclasses.replace(grades.parse_grading_spec(text), **run)
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:

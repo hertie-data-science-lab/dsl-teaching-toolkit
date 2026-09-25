@@ -32,18 +32,6 @@
     "grader_pdf": {
       "type": "boolean"
     },
-    "late_penalty_per_day": {
-      "type": [
-        "string",
-        "number"
-      ]
-    },
-    "late_window_days": {
-      "type": "integer"
-    },
-    "max_team_size": {
-      "type": "integer"
-    },
     "questions": {
       "additionalProperties": {
         "type": [
@@ -53,21 +41,11 @@
       },
       "type": "object"
     },
-    "submit_url": {
-      "type": "string"
-    },
     "submit_via": {
       "enum": [
         "assignment_repo",
         "shared_dropbox_repo",
         "external"
-      ],
-      "type": "string"
-    },
-    "team_formation": {
-      "enum": [
-        "self_select",
-        "assigned"
       ],
       "type": "string"
     },
@@ -81,14 +59,6 @@
       "enum": [
         "individual",
         "group"
-      ],
-      "type": "string"
-    },
-    "visibility": {
-      "enum": [
-        "private",
-        "public",
-        "student_choice"
       ],
       "type": "string"
     }

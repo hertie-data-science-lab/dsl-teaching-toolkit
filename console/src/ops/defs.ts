@@ -112,7 +112,7 @@ export function updateCopies(s: Scope, a: AsgRef, files: string[]): OpDef {
     ...base(s, 'assignment.update_copies', a.slug), name: 'Update every copy', title: a.title, where: `${a.units} student repos`,
     intro: 'Pushes an assignment template file to every student copy and posts a note on each Submission receipts issue.',
     verb: `Update ${a.units} copies`, running: 'Updating every copy', cancel: 'Stop; copies already updated stay updated',
-    args: { course_source_repo: a.template, slug: a.slug }, options: copiesTiers(files),
+    args: { course_source_repo: a.template }, options: copiesTiers(files),
   };
 }
 
@@ -121,7 +121,7 @@ export function collect(s: Scope, a: AsgRef): OpDef {
     ...base(s, 'assignment.collect_now', a.slug), name: 'Collect now', title: a.title, where: a.when,
     intro: 'Pulls the latest work from every repo into the mark sheet now.',
     verb: 'Collect now', running: 'Collecting submissions', cancel: 'Stop; the mark sheet keeps what it has',
-    args: { course_source_repo: a.template, slug: a.slug },
+    args: { course_source_repo: a.template },
   };
 }
 

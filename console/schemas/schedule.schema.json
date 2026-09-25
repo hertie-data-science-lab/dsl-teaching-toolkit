@@ -39,14 +39,27 @@
           "due_datetime": {
             "type": "string"
           },
-          "grading_datetime": {
-            "type": "string"
-          },
           "handout_datetime": {
             "type": "string"
           },
-          "semester_dest_repo": {
-            "type": "string"
+          "marks_return_datetime": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "event_datetime": {
+                    "type": "string"
+                  },
+                  "show_on_site": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            ]
           },
           "show_on_site": {
             "type": "boolean"
@@ -56,9 +69,6 @@
           },
           "tbc": {
             "type": "boolean"
-          },
-          "title": {
-            "type": "string"
           }
         },
         "required": [
@@ -68,9 +78,6 @@
         "type": "object"
       },
       "type": "object"
-    },
-    "enrolment": {
-      "description": "Deprecated and ignored."
     },
     "events": {
       "additionalProperties": {
@@ -107,9 +114,6 @@
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
-          "assignment": {
-            "type": "string"
-          },
           "deploy": {
             "items": {
               "additionalProperties": false,

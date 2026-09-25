@@ -50,8 +50,18 @@ def _entry(**kw) -> AssignmentEntry:
         course_source_repo="a2-f2026",
         due_datetime=SHUTS,
         handout_datetime=OPENS,
-        lines={"due_datetime": 12, "grading_datetime": 14},
+        lines={"due_datetime": 12},
         **kw,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_late_window(monkeypatch):
+    """The window closes at the late cutoff; these assignments take no late work, so that
+    is the due date, SHUTS. The window is a run setting (`settings`)."""
+    ours = settings.institution_defaults()
+    monkeypatch.setattr(
+        settings, "institution_defaults", lambda: {**ours, "late_window_days": 0}
     )
 
 
@@ -356,8 +366,8 @@ def test_nothing_in_the_fault_names_a_student(semester):
 
 
 def test_the_fault_points_at_the_line_that_decides_when_the_window_shuts(semester):
-    # The deep link has to land on the line a reader would EDIT to give the semester longer,
-    # and that is whichever key closed the window.
+    # The deep link has to land on the line a reader would EDIT to give the semester longer:
+    # the window shuts at the late cutoff, due + the window, and schedule.yml holds the due.
     semester()
     plain = _sched()
     (fault,) = team_formation.window_faults(
@@ -370,14 +380,6 @@ def test_the_fault_points_at_the_line_that_decides_when_the_window_shuts(semeste
     )
     assert fault.at == "schedule.yml:12"
     assert fault.in_repo == "semester-config"
-
-    pinned = _sched(
-        **{"assignment-2": _entry(grading_datetime=SHUTS - timedelta(days=1))}
-    )
-    (fault,) = team_formation.window_faults(
-        pinned, team_formation.open_windows(COURSE, SEMESTER, pinned, INSIDE)
-    )
-    assert (fault.field, fault.lineno) == ("grading_datetime", 14)
 
 
 def test_the_fault_carries_its_own_consequence_and_fix(semester):

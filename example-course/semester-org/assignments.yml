@@ -1,0 +1,20 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# How THIS semester runs each assignment (worked example). The dates live in schedule.yml;
+# what each assignment IS lives in its template's grading_config.yml. Nearest wins: an
+# assignment's block, then `defaults:`, then the course's `assignment_defaults:`, then the
+# institution's policy.yml.
+
+defaults:
+  late_window_days: 10          # 0 = nothing after the due date is accepted
+  late_penalty_per_day: 10%     # of the earned mark, per day started
+
+assignments:
+  assignment-1:
+    late_window_days: 2         # late cutoff: two days after the due date
+    late_penalty_per_day: 10%
+    submit_url: https://moodle.hertie-school.org/mod/assign/view.php?id=EXAMPLE   # handed in on Moodle
+  assignment-2:
+    semester_dest_repo: homework-2   # this semester's repos are homework-2-<handle>
+  assignment-4-project:
+    max_team_size: 4

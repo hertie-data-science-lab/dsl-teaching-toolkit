@@ -53,25 +53,20 @@ export function fromConfig(cfg: Record<string, unknown>): Values {
   };
 }
 
-/** The form's values -> the keys of grading_config.yml, undefined for "leave it out". */
+/** The form's values -> the keys of grading_config.yml, undefined for "leave it out".
+ * Never a run setting (team formation, max team size, the late rule, visibility, the
+ * submit link): those are each semester's assignments.yml (decision 0009). */
 export function toConfig(v: Values): Record<string, unknown> {
-  const group = v.type === 'group';
   const auto = v.autograde === 'true' ? true : v.autograde === 'false' ? false : v.autograde;
   return {
     title: v.title || undefined,
     type: v.type === 'group' ? 'group' : v.type === 'individual' ? 'individual' : undefined,
-    team_formation: group ? v.team_formation || undefined : undefined,
-    max_team_size: group ? v.max_team_size ?? undefined : undefined,
     submit_via: v.submit_via,
-    submit_url: v.submit_via === 'external' ? v.submit_url || undefined : undefined,
-    visibility: v.visibility,
     formats: v.formats ? [String(v.formats), ...((v.formats_more as string[] | undefined) ?? []).filter((f) => f !== v.formats)] : undefined,
     autograde: isDrop(v) ? undefined : auto,
     tests: auto === true && v.tests && v.tests !== 'tests' ? v.tests : undefined,
     completion_check: isDrop(v) ? undefined : v.completion_check === 'on' ? true : v.completion_check === 'off' ? false : undefined,
     grader_pdf: isDrop(v) ? undefined : v.grader_pdf ? true : undefined,
-    late_window_days: v.late_window_days ?? undefined,
-    late_penalty_per_day: v.late_penalty_per_day || undefined,
   };
 }
 

@@ -65,7 +65,7 @@ like any other, and a student who onboards later is granted push on the next tic
 
 ### An assignment whose repos are public
 
-`visibility: public` in the template's `grading_config.yml` hands out the same repos
+`visibility: public` in the semester's `assignments.yml` hands out the same repos
 world-readable - portfolio work such as a hackathon. There is then **no Submission receipts issue**
 (a hand-in time is a fact about a student, and it does not go where the internet can read
 it; the marks were never going here anyway), and the
@@ -84,7 +84,7 @@ credential rather than bypass the block.
 
 ### An assignment the students may publish themselves
 
-`visibility: student_choice` in the template's `grading_config.yml` hands out the same
+`visibility: student_choice` in the semester's `assignments.yml` hands out the same
 **private** repos, but makes the student - or every member of a team - **admin** of their
 own, which is the only permission that carries GitHub's visibility switch. There is no
 Submission receipts issue (the repo may be public tomorrow).
@@ -126,14 +126,14 @@ Live example: [`example-course/semester-org/teams.csv`](../example-course/semest
 
 Teams are formed in one of two ways - both end up in `semester-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a GitHub team on push. A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
 
-Which of the two an assignment uses is its own declaration - `team_formation` in the `grading_config.yml` on the template's `solution` branch:
+Which of the two an assignment uses is the semester's - `team_formation` in `semester-config/assignments.yml`:
 
 - **`assigned`** - you edit `teams.csv` directly, one row per member. The **Join team** form refuses every request for this assignment and says so.
-- **`self_select`** - students open a **Join team** issue in the semester's `join` repo. Team size is capped by that assignment's `max_team_size` (default: the course's `assignment_defaults`, else 5).
+- **`self_select`** - students open a **Join team** issue in the semester's `join` repo. Team size is capped by that assignment's `max_team_size` (the semester's `assignments.yml`, else the course's `assignment_defaults`, else 5).
 
-**The form** asks three things: which assignment, whether they are **joining an existing team** or **creating a new one**, and the team's name. A student already in a team who joins or creates another is moved, while the window is open. The choice is explicit because it used to be implied by the name - a name that existed joined, a name that did not created - so one typo opened a second, half-empty team that nobody noticed until the release provisioned it. Creating onto a name that is taken is refused; joining a name that does not exist is refused with the nearest real team named. A refusal the student can fix is closed (`team-refused`) with what to do next; only what you must act on stays open as `needs-review` - see [06](06-enrol-students-to-cohort.md). Its header links each open assignment's page on the semester site, which lists the teams. It reads all of this out of `semester-config/.system/assignments.lock.yml`, which the toolkit generates from each assignment's `grading_config.yml` and the semester's schedule, and nobody edits - change either and the mirror catches up on the next quarter-hourly **Scheduled release** tick, which is also what opens and shuts the window below on time.
+**The form** asks three things: which assignment, whether they are **joining an existing team** or **creating a new one**, and the team's name. A student already in a team who joins or creates another is moved, while the window is open. The choice is explicit because it used to be implied by the name - a name that existed joined, a name that did not created - so one typo opened a second, half-empty team that nobody noticed until the release provisioned it. Creating onto a name that is taken is refused; joining a name that does not exist is refused with the nearest real team named. A refusal the student can fix is closed (`team-refused`) with what to do next; only what you must act on stays open as `needs-review` - see [06](06-enrol-students-to-cohort.md). Its header links each open assignment's page on the semester site, which lists the teams. It reads all of this out of `semester-config/.system/assignments.lock.yml`, which the toolkit generates from each assignment's `grading_config.yml`, the semester's `assignments.yml` and its schedule, and nobody edits - change either and the mirror catches up on the next quarter-hourly **Scheduled release** tick, which is also what opens and shuts the window below on time.
 
-**The window** runs from the assignment's `handout_datetime` to its grading pin: `grading_datetime` if the schedule sets one, else the due date - *not* the end of the late window, because a team minted after the snapshot has nothing left to hand in. Before the hand-out the form says formation is not open yet and when it will run; after the pin it says the day it closed. Move either date and the window moves. An assignment with no `handout_datetime` on record has no window at all - but **Release assignment** writes that moment into `schedule.yml` itself, so a hand-fired hand-out opens one too. While it is open, the form's Assignment field is a drop-down of exactly the assignments a student may act on - and it moves with the window: the same tick that opens or shuts one rewrites the form, as does a push to `schedule.yml`.
+**The window** runs from the assignment's `handout_datetime` to its late cutoff (the due date plus `late_window_days`): a team minted after the snapshot has nothing left to hand in. Before the hand-out the form says formation is not open yet and when it will run; after the cutoff it says the day it closed. Move either date and the window moves. An assignment with no `handout_datetime` on record has no window at all - but **Release assignment** writes that moment into `schedule.yml` itself, so a hand-fired hand-out opens one too. While it is open, the form's Assignment field is a drop-down of exactly the assignments a student may act on - and it moves with the window: the same tick that opens or shuts one rewrites the form, as does a push to `schedule.yml`.
 
 **The team list is the assignment's page on the semester site.** `teams.csv` is private, so a student cannot see what to join. While the window is open, that page carries a **Form your team** callout - the cap, the closing day, a link to the form, and a table of the teams that exist with the places each has left (**names and counts only**, because the site is public) - and its schedule row carries the same prompt in one line. The mail, the form's header and the form's refusals all link that page. A push to `teams.csv` fires a site sync, so the table follows each join within minutes. The submission address stays beside it rather than in its place: a team that formed on day one owns its repo already. All of it goes when the window shuts.
 
@@ -155,18 +155,17 @@ assignments:
   assignment-1: # this is the name students will see
     course_source_repo: assignment-1-f2026  # required: the course-org repo it hands out from
     due_datetime: 2026-10-13          # the due date students see
-    grading_datetime: 2026-10-15      # OPTIONAL, grading-only - the cutoff
 ```
 
 - **The date students see** (semester site + the brief's "due" event) is `assignments[slug].due_datetime`
   (23:59 that day). Edit → commit to `main` - **Sync site** fires automatically on the push.
-- **The late window** is the template `grading_config.yml`'s `late_window_days` (with
+- **The late window** is the assignment's `late_window_days` in the semester's `assignments.yml` (with
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
-  Where neither the assignment nor the course states them, the Hertie standard applies:
+  Where neither the semester nor the course states them, the Hertie standard applies:
   10% per day started, collected for up to 10 days. `late_window_days: 0` accepts nothing
   after the deadline.
-- **The cutoff** is `grading_datetime` if set, else the due date plus that late window.
+- **The late cutoff** is the due date plus that late window, computed; it is never written.
   - At that moment [the scheduler](07-schedule-releases.md#what-drives-the-scheduler) freezes the snapshot and the grading sheet, and autogrades it where the template asks for it (`autograde: true`, off by default).
 - **The commit that is considered submitted for grading** is frozen right after the grading deadline passes, into
 `semester-config/.system/snapshots/<slug>.csv`. It is **write-once** - later pushes can't move the
@@ -183,8 +182,8 @@ is what distributes the fix.
    would. This button only distributes what is already there.
 2. Course org → `.github` → **Actions** → **Patch released assignment**. Inputs:
    `semester_org`, `course_source_repo` (the template), `path` (a file, or a folder to push
-   whole), `slug` (only when two schedule entries hand out from this one template),
-   `overwrite` (default **off**) and `preview` (default **on**).
+   whole), `overwrite` (default **off**) and `preview` (default **on**). A template two
+   schedule entries hand out from is refused, naming both.
 3. Preview first: it counts the repos it would touch and writes nothing.
 
 What a real run does:

@@ -145,9 +145,7 @@ export function assignmentArgs(v: Values): Record<string, unknown> {
   return {
     ...base,
     type: group ? 'group' : 'individual',
-    team_formation: group ? v.team_formation ?? 'self_select' : undefined,
     submit_via: submit,
-    visibility: submit === 'assignment_repo' ? v.visibility ?? 'private' : 'private',
     formats: ((v.formats as string[] | undefined) ?? ['ipynb']).join(','),
     autograde: !autogradeBlock(v) && v.autograde === 'true',
   };

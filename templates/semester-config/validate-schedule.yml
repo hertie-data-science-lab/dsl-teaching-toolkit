@@ -55,9 +55,11 @@ on:
     branches: [main]
     paths:
       - schedule.yml
+      - assignments.yml
   pull_request:
     paths:
       - schedule.yml
+      - assignments.yml
   workflow_dispatch:
 
 # contents: write covers both things this job does to the repo it runs in: checking it
@@ -134,6 +136,10 @@ jobs:
           # which is scoped to this repo. Absent, --check-sources is simply not passed.
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           COURSE_ORG: ${{ steps.course.outputs.org }}
+          # What the push (or the pull request) changed schedule.yml FROM, so the run can
+          # say which entries have just gained a `solution_datetime:`. None on a manual
+          # run or a new branch: then nothing is said.
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
           set +e
           # The PARSE runs first and unconditionally. It is the verdict about the file
@@ -144,6 +150,11 @@ jobs:
           # a failed step above them means they never run, and a push that dropped an
           # entry went unreported because an unrelated API call came back empty.
           args=(--file ../semester/schedule.yml --validate)
+          if [ -n "$BEFORE" ] && [ "${BEFORE//0/}" != "" ] \
+            && git -C ../semester fetch -q --depth=1 origin "$BEFORE" 2>/dev/null \
+            && git -C ../semester show "$BEFORE:schedule.yml" > previous-schedule.yml 2>/dev/null; then
+            args+=(--previous previous-schedule.yml)
+          fi
           if [ -n "$COURSE_ORG" ]; then
             args+=(--check-sources "$COURSE_ORG" --annotate --comment-file comment.txt)
           fi

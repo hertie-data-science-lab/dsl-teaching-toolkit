@@ -20,14 +20,14 @@ lifecycle, `events` are display-only calendar rows.
             semester_dest_repo: materials                  # semester_dest_repo, semester_dest_path
             semester_dest_path: lectures/02_intro          # and deploy_datetime are optional.
             deploy_datetime: 2026-09-15T09:00
-    assignments:                     # each assignment's whole lifecycle. The slug is a
-      assignment-1:                  # label; course_source_repo names the COURSE-org repo
+    assignments:                     # each assignment's TIMINGS. The key is a label;
+      assignment-1:                  # course_source_repo names the COURSE-org repo
         course_source_repo: assignment-1-f2026   # it hands out from, and is REQUIRED.
-        title: Linear regression     # the assignment's name, beside the slug on the site
         details: Fit it by hand      # the DETAILS column, on its hand-out and due rows
         handout_datetime: 2026-09-22T09:00  # A bare due_datetime is END of day (23:59:59)
-        due_datetime: 2026-10-13     # - "due on the 13th" closes at day's end.
-        grading_datetime: 2026-10-15 # Snapshot freezes + autograder fires (default: due).
+        due_datetime: 2026-10-13     # - "due on the 13th" closes at day's end. The late
+                                     # cutoff is due + `late_window_days` (assignments.yml).
+        marks_return_datetime: 2026-10-27  # optional: marks go back then, once all marked
     events:                          # display-only rows - nothing deploys, the site just
       mid-term:                      # shows them. `type` is `exam` or `special_event`
         type: exam                   # (the default when omitted). `event_datetime` is a
@@ -92,9 +92,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from . import policy
+from . import policy, settings
 from .course import (
+    ASSIGNMENTS_FILE,
     CONFIG_REPO,
+    SOLUTION_WARNING,
     assignment_slug,
     coerce_date,
     is_repo_root,
@@ -112,6 +114,7 @@ from .faults import (
     FaultKind,
     Severity,
     hours,
+    moved_text,
     not_migrated_text,
 )
 from .gh_contents import (
@@ -125,7 +128,7 @@ from .gh_contents import (
     take_lines,
     yaml_mark_line,
 )
-from .log import CLIParser, log, log_err, log_step
+from .log import CLIParser, log, log_err
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
@@ -357,9 +360,9 @@ class Release:
 @dataclass
 class AssignmentEntry:
     """One assignment's TIMING, and nothing else: `handout_datetime` (when student/team
-    repos are provisioned), `due_datetime` (what students see), `grading_datetime` (when
-    the snapshot freezes and the autograder fires), `solution_datetime` (when the model
-    solution goes out).
+    repos are provisioned), `due_datetime` (what students see), `solution_datetime` (when
+    the model solution goes out), `marks_return_datetime` (when marks go back). The late
+    cutoff is never written: it is `grading_cutoff_datetime`, due + `late_window_days`.
 
     What the assignment IS - its shape, its team cap, how it is handed in, how it is
     marked - lives in the assignment's own `grading_config.yml`, on the course template's
@@ -375,25 +378,15 @@ class AssignmentEntry:
     course_source_repo: str
     # What the SEMESTER-side artefacts are called - the frozen semester template repo, the
     # `<name>-<handle>` student repos, the teams.csv key, the snapshot and grades files.
-    # None = the entry's slug, which is almost always right. Mirrors a deploy's
-    # `semester_dest_repo`: source names the course side, dest names the semester side.
+    # None = the entry's slug, which is almost always right. Declared in `assignments.yml`
+    # (`assignments.<key>.semester_dest_repo`), a run fact rather than a timing; `parse`
+    # is handed it.
     semester_dest_repo: str | None = None
-    # An explicit freeze. Left unset the cutoff is the due date plus the template's
-    # `late_window_days` - resolved by `grading_cutoff_datetime`, given the spec this file
-    # cannot read, and NOT here: answering it in the parser would shut the door on the due
-    # date and refuse every late push the receipts had just promised to accept.
-    grading_datetime: datetime | None = None
     # When to provision one repo per student (or per team - see `type`) from the
     # `<slug>-<tag>` template. The scheduler synthesises a release from this, so it fires
     # exactly like a `releases` entry. None = hand out manually (the workflow
     # then records the release moment here).
     handout_datetime: datetime | None = None
-    # Display-only: the assignment's NAME, shown beside the slug on the site exactly as a
-    # `releases:` entry's `title` sits beside its session ordinal. Declared here rather
-    # than left to the template README's `# ` heading, which is the fallback: the README is
-    # embargoed until hand-out, so a name that lives only there cannot appear on the
-    # schedule that publishes the assignment's dates. "" = fall back to the heading.
-    title: str = ""
     # Display-only: a sentence about the assignment, filling the Details column of both
     # its schedule rows (out and due) exactly as a `releases:` entry's does on a session
     # row. It is written ABOVE what those cells already generate (the link to the brief,
@@ -416,6 +409,12 @@ class AssignmentEntry:
     # gift to anyone who pushes late, so faculty name the moment or it never fires.
     # None = release the solution by hand, or not at all.
     solution_datetime: datetime | None = None
+    # When automation returns the marks (`scheduler`): only once every unit is marked, and
+    # until then a problem that says how many are not. None = marks go back by hand.
+    marks_return_datetime: datetime | None = None
+    # Whether the site shows a "marks expected" row for it: only when the key is written
+    # `{event_datetime: ..., show_on_site: true}` - the date is internal by default.
+    marks_return_on_site: bool = False
     # The line each of this entry's keys is written on - see `Deploy.lines`.
     lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
 
@@ -517,6 +516,10 @@ class Schedule:
     # snapshotted or graded for the semester, and the digest issue and the mail beside it are
     # how the person who has to fix it hears about that.
     unparseable: bool = False
+    # Set by `load` when `assignments.yml` is not YAML: its run settings are unknown, so
+    # nothing that reads one (a cutoff, a hand out) can act for this semester until it is
+    # fixed. The fault is in `faults` like any other.
+    instance_unparseable: bool = False
 
 
 @dataclass
@@ -628,19 +631,17 @@ KNOWN_TOP_LEVEL = frozenset(
         "assignments",
         "events",
         "archive",
-        # DEPRECATED and ignored: enrolment codes are mailed on a push to students.csv,
-        # not on a window. Still RECOGNISED, because live semesters carry the block until it
-        # is swept out of their schedule.yml by hand, and flagging it as an unknown key
-        # would red every one of their validate-schedule runs in the gap. `parse` says so
-        # out loud instead.
-        "enrolment",
     }
 )
+# Keys that went (decision 0009): never read, each a NOT_MIGRATED fault saying where the
+# fact lives now. The migration deletes them.
+RETIRED_TOP_KEYS = {
+    "enrolment": "enrolment codes are mailed on a push to students.csv",
+}
 KNOWN_RELEASE = frozenset(
     {
         "event_datetime",
         "deploy",
-        "assignment",
         "kind",
         "title",
         "details",
@@ -651,6 +652,11 @@ KNOWN_RELEASE = frozenset(
 # The row kind's old key (decision 0012), on a release or an event: never read, noted as
 # NOT_MIGRATED - the row is placed as if it declared no kind.
 RENAMED_ROW_KEYS = {"type": "kind"}
+# A release that handed out an assignment: an undocumented second route to what
+# `assignments.<key>.handout_datetime` does. Noted and ignored; the entry still deploys.
+RETIRED_RELEASE_KEYS = {
+    "assignment": "an assignment hands out at its `assignments.<key>.handout_datetime`",
+}
 # What `releases.<label>.kind` may say. 'readings' is here and is not a row: it declares
 # that the entry belongs to no session row of its own, exactly as a `readings-N` label
 # does (`schedule_plan._LABEL_ROW_KINDS`, which is the one table both routes read).
@@ -668,16 +674,39 @@ KNOWN_ASSIGNMENT = frozenset(
     {
         "due_datetime",
         "course_source_repo",
-        "semester_dest_repo",
-        "grading_datetime",
         "handout_datetime",
         "solution_datetime",
-        "title",
+        "marks_return_datetime",
         "details",
         "tbc",
         "show_on_site",
     }
 )
+# Keys an assignment entry no longer takes (decision 0009: schedule.yml is timings only).
+# The ENTRY is dropped, as for a renamed key: read without them it would grade to another
+# cutoff or hand out into repos of another name, and say nothing.
+RETIRED_ASSIGNMENT_KEYS = {
+    "grading_datetime": (
+        f"the late cutoff is the due date plus `late_window_days` ({ASSIGNMENTS_FILE})"
+    ),
+    "semester_dest_repo": (
+        f"it is `assignments.<key>.semester_dest_repo` in {ASSIGNMENTS_FILE}"
+    ),
+    "cohort_dest_repo": (
+        f"it is `assignments.<key>.semester_dest_repo` in {ASSIGNMENTS_FILE}"
+    ),
+}
+RETIRED_COST = "entry dropped: no hand out, freeze or grading until fixed"
+# Display-only, so the entry is KEPT and the key faulted: nothing it runs depends on it.
+RETIRED_DISPLAY_KEYS = {
+    "title": "the assignment's name is `title:` in its template's grading_config.yml",
+}
+
+
+def _retired(old: str, home: str) -> str:
+    return f"{moved_text(old, home)} - {RETIRED_COST}"
+
+
 # Settings that USED to live in an `assignments:` entry and now live in the assignment's
 # own `grading_config.yml`, on the course template's solution branch. Flagged BY NAME
 # rather than as generic unknown keys: a semester still carrying `type: group` is not making
@@ -711,16 +740,16 @@ def not_migrated_keys(
     where: str,
     renames: dict[str, str],
     lines: dict[str, int] | None = None,
+    say=not_migrated_text,
 ) -> bool:
-    """Whether `entry` spells any old key, each noted as NOT_MIGRATED. Called before
+    """Whether `entry` spells any old key, each noted as NOT_MIGRATED (`say(old, value)`
+    words it: a rename by default, `moved_text` for a key that went). Called before
     `take_lines` (or handed its `lines`), so the note can cite the old key's line."""
     if lines is None:
         lines = entry.get(LINES) if isinstance(entry.get(LINES), dict) else {}
     found = [old for old in renames if old in entry]
     for old in found:
-        drops.note(
-            where, old, not_migrated_text(old, renames[old]), lines, NOT_MIGRATED
-        )
+        drops.note(where, old, say(old, renames[old]), lines, NOT_MIGRATED)
     return bool(found)
 
 
@@ -760,7 +789,7 @@ def _flag_bad_value(
     Like `_flag_unknown_keys` (and unlike `_drop`), the entry itself is KEPT: the parser
     falls back exactly as it always has. The fallback is the problem - it is invisible.
     `handout_datetime: 2026-13-01` reads as a scheduled handout and provisions nothing;
-    `grading_datetime: nxt week` silently grades at the due date. Both leave a green run
+    `solution_datetime: nxt week` silently never ships. Both leave a green run
     and a plan that is not the one faculty wrote, so both belong in `dropped`."""
     drops.note(where, str(key), f"unusable value {value!r} - ignored, so {cost}", lines)
 
@@ -982,10 +1011,15 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
             )
             continue
         not_migrated_keys(drops, entry, where, RENAMED_ROW_KEYS, lines)
+        not_migrated_keys(
+            drops, entry, where, RETIRED_RELEASE_KEYS, lines, say=moved_text
+        )
         _flag_unknown_keys(
             drops,
             entry,
-            KNOWN_RELEASE | frozenset(RENAMED_ROW_KEYS),
+            KNOWN_RELEASE
+            | frozenset(RENAMED_ROW_KEYS)
+            | frozenset(RETIRED_RELEASE_KEYS),
             where,
             "that setting is ignored",
             lines,
@@ -1009,7 +1043,6 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 "in, or delete the key to say that is what you meant",
                 lines,
             )
-        assignment = entry.get("assignment")
         kind = str(entry.get("kind") or "").strip().lower()
         if kind and kind not in KNOWN_ROW_KINDS:
             # Flagged, not dropped, and not obeyed: the entry keeps its row, placed by
@@ -1050,7 +1083,6 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 label=str(label),
                 when=when,
                 deploy=_parse_deploy(entry.get("deploy"), tz, drops, str(label)),
-                assignment=str(assignment) if assignment else None,
                 kind=kind,
                 title=str(entry.get("title") or ""),
                 details=_flagged_details(entry, drops, where, lines) or "",
@@ -1072,7 +1104,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
     return out
 
 
-def _shared_sources(mapping: dict) -> set[str]:
+def _shared_sources(mapping: dict, dests: dict[str, str]) -> set[str]:
     """The `course_source_repo`s more than one assignment may legitimately hand out from.
 
     Two entries on one template is normally a copy-paste, and nothing downstream can tell
@@ -1083,24 +1115,23 @@ def _shared_sources(mapping: dict) -> set[str]:
     it to default is enough to make the pair ambiguous again, so the permission is
     all-or-nothing across the citing entries."""
     citing: dict[str, list[str]] = {}
-    for entry in mapping.values():
+    for slug, entry in mapping.items():
         if not isinstance(entry, dict):
             continue
         source = str(entry.get("course_source_repo") or "").strip()
         if source:
-            citing.setdefault(source, []).append(
-                str(entry.get("semester_dest_repo") or "").strip()
-            )
+            citing.setdefault(source, []).append(dests.get(str(slug), ""))
     return {src for src, dests in citing.items() if len(dests) > 1 and all(dests)}
 
 
 def _parse_assignments(
-    raw: object, tz: ZoneInfo, drops: Drops
+    raw: object, tz: ZoneInfo, drops: Drops, dests: dict[str, str]
 ) -> dict[str, AssignmentEntry]:
     # Only the nested {due_datetime, ...} form is accepted - matching the one schema
     # documented everywhere - rather than also silently accepting a bare due-date scalar.
-    # A malformed `grading_datetime`/`handout_datetime`/`solution_datetime` keeps the
-    # entry on its documented fallback, and is flagged (see `_flag_bad_value`).
+    # A malformed `handout_datetime`/`solution_datetime`/`marks_return_datetime` keeps the
+    # entry on its documented fallback, and is flagged (see `_flag_bad_value`). `dests` is
+    # each key's `semester_dest_repo`, from assignments.yml.
     out: dict[str, AssignmentEntry] = {}
     cost = "no deadline for students, no submission snapshot and no autograding"
     mapping = _require_mapping(
@@ -1120,11 +1151,17 @@ def _parse_assignments(
         if not (
             isinstance(entry, dict)
             and not_migrated_keys(
-                drops, entry, f"assignments.{slug}", RENAMED_DEST_KEYS
+                drops,
+                entry,
+                f"assignments.{slug}",
+                RETIRED_ASSIGNMENT_KEYS,
+                say=_retired,
             )
         )
     }
-    shared = _shared_sources(mapping)  # sources every citing entry names a dest for
+    shared = _shared_sources(
+        mapping, dests
+    )  # sources every citing entry names a dest for
     for slug, entry in mapping.items():
         where = f"assignments.{slug}"
         if not isinstance(entry, dict):
@@ -1159,13 +1196,13 @@ def _parse_assignments(
                 f"`course_source_repo: {source_repo}` is already used by "
                 f"assignments.{sources[source_repo]} - two assignments may only hand out "
                 f"the same repo when EVERY one of them sets its own `semester_dest_repo` "
-                f"(a copy-paste?)",
+                f"in {ASSIGNMENTS_FILE} (a copy-paste?)",
                 cost,
                 lines,
                 "course_source_repo",
             )
             continue
-        dest = str(entry.get("semester_dest_repo") or "").strip()
+        dest = dests.get(str(slug), "")
         # `semester_name` - `semester_dest_repo`, else the slug - is what EVERY semester-side
         # artefact keys on: the generated repos, the teams.csv rows, the snapshot, the
         # autograde marker, the grading sheet. Two entries resolving to one name share all
@@ -1181,10 +1218,10 @@ def _parse_assignments(
                 f"`{name}` is the semester-side name of assignments.{names[name]} too - "
                 f"two assignments cannot share one (the student repos, teams.csv rows, "
                 f"snapshot and grading sheet all key on it; set a distinct "
-                f"`semester_dest_repo`)",
+                f"`semester_dest_repo` in {ASSIGNMENTS_FILE})",
                 cost,
                 lines,
-                "semester_dest_repo",
+                "course_source_repo",
             )
             continue
         sources[source_repo] = str(slug)
@@ -1198,10 +1235,15 @@ def _parse_assignments(
                     f"{moved_cost}",
                     lines,
                 )
+        not_migrated_keys(
+            drops, entry, where, RETIRED_DISPLAY_KEYS, lines, say=moved_text
+        )
         _flag_unknown_keys(
             drops,
             entry,
-            KNOWN_ASSIGNMENT | frozenset(MOVED_ASSIGNMENT_KEYS),
+            KNOWN_ASSIGNMENT
+            | frozenset(MOVED_ASSIGNMENT_KEYS)
+            | frozenset(RETIRED_DISPLAY_KEYS),
             where,
             "that setting is ignored",
             lines,
@@ -1258,15 +1300,53 @@ def _parse_assignments(
                 lines,
             )
             solution = None
+        # A date, or `{event_datetime, show_on_site}` when the site is to show it: the
+        # row is internal by default and has its own switch (decision 0009).
+        raw_marks = entry.get("marks_return_datetime")
+        marks_row = isinstance(raw_marks, dict)
+        marks_on_site = False
+        if marks_row:
+            marks_on_site = _flagged_flag(
+                raw_marks,
+                "show_on_site",
+                False,
+                drops,
+                f"{where}.marks_return_datetime",
+                "the marks row stays off the site",
+                lines,
+            )
+        marks = _flagged_datetime(
+            {"marks_return_datetime": raw_marks.get("event_datetime")}
+            if marks_row
+            else entry,
+            "marks_return_datetime",
+            tz,
+            drops,
+            where,
+            "marks are not returned automatically - they go back when somebody runs "
+            "Return marks",
+            lines,
+            end_of_day=True,
+        )
+        if marks is not None and marks <= due:
+            _flag_bad_value(
+                drops,
+                where,
+                "marks_return_datetime",
+                entry.get("marks_return_datetime"),
+                "it is not AFTER due_datetime, so marks would go back before the work "
+                "is in - refused, so marks go back when somebody runs Return marks",
+                lines,
+            )
+            marks = None
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,
             semester_dest_repo=dest or None,
-            title=str(entry.get("title") or "").strip(),
             details=_flagged_details(entry, drops, where, lines) or "",
             # Display-only, and deliberately read nowhere near the dates above: an
             # assignment marked provisional still freezes, closes and grades on exactly
-            # the moments `due_datetime` and `grading_datetime` name.
+            # the moments `due_datetime` and the late cutoff name.
             tbc=_flagged_flag(entry, "tbc", False, drops, where, TBC_COST, lines),
             show_on_site=_flagged_flag(
                 entry,
@@ -1277,21 +1357,10 @@ def _parse_assignments(
                 "this assignment's schedule rows are shown on the site anyway",
                 lines,
             ),
-            grading_datetime=_flagged_datetime(
-                entry,
-                "grading_datetime",
-                tz,
-                drops,
-                where,
-                "grading falls back to the end of the late window - the due date plus "
-                "the template's `late_window_days`, and the due date itself when it "
-                "declares none. The submission snapshot freezes and the autograder fires "
-                "then, not when this says",
-                lines,
-                end_of_day=True,
-            ),
             handout_datetime=handout,
             solution_datetime=solution,
+            marks_return_datetime=marks,
+            marks_return_on_site=marks_on_site,
             lines=lines,
         )
     return out
@@ -1499,22 +1568,28 @@ def _parse_archive(
     )
 
 
-def parse(meta: dict) -> Schedule:
+def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
     """Parse a loaded schedule.yml dict into a Schedule. Tolerant of missing/blank fields
     (a semester with no schedule.yml behaves exactly as before). Anything it has to throw
     away is recorded in `Schedule.dropped` rather than vanishing - parsing stays total,
     but never silent.
 
-    Pure but for one line: a deprecated `enrolment:` block is announced to the log rather
-    than recorded as a drop, because a drop reds `--validate` and every live semester still
-    carries the block (see KNOWN_TOP_LEVEL)."""
+    `instance` is the semester's `assignments.yml`, read (`settings.Instance`): each
+    entry's `semester_dest_repo` comes from it, its own faults are carried here beside the
+    plan's, and a block for a key the plan does not name is one more. None = no file."""
     meta = meta if isinstance(meta, dict) else {}
+    instance = instance or settings.Instance()
     drops = Drops(top=take_lines(meta))
     # A whole plan under an unknown top-level key (`materials_releases:` instead of
     # `releases:`) otherwise validates as "OK: nothing dropped" with zero releases - the
     # worst kind of silent failure, since the file looks full. Flag it here.
+    not_migrated_keys(drops, meta, "", RETIRED_TOP_KEYS, drops.top, say=moved_text)
     _flag_unknown_keys(
-        drops, meta, KNOWN_TOP_LEVEL, "", "nothing it contains is scheduled or shown"
+        drops,
+        meta,
+        KNOWN_TOP_LEVEL | frozenset(RETIRED_TOP_KEYS),
+        "",
+        "nothing it contains is scheduled or shown",
     )
     tz_name = meta.get("timezone")
     tz = _tz(tz_name)
@@ -1524,11 +1599,6 @@ def parse(meta: dict) -> Schedule:
             "timezone",
             f"`{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, so every "
             f"naive time below is read in {DEFAULT_TZ}",
-        )
-    if meta.get("enrolment") is not None:
-        log_step(
-            "enrolment: in schedule.yml is DEPRECATED and does nothing - enrolment codes "
-            "are mailed on a push to students.csv now. Delete the block."
         )
     term_cost = "the site synthesises semester dates, shifting every session row"
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
@@ -1541,12 +1611,40 @@ def parse(meta: dict) -> Schedule:
         # shifts every weekly session row. Flag it.
         semester_start=semester_start,
         semester_end=semester_end,
-        assignments=_parse_assignments(meta.get("assignments"), tz, drops),
+        assignments=(
+            assignments := _parse_assignments(
+                meta.get("assignments"), tz, drops, instance.dests
+            )
+        ),
         events=_parse_events(meta.get("events"), tz, drops),
         archive=_parse_archive(meta, semester_end, drops),
-        dropped=drops.report,
+        dropped=drops.report + _instance_report(instance, meta, assignments, drops),
         faults=drops.faults,
     )
+
+
+def _instance_report(
+    instance: settings.Instance, meta: dict, kept: dict, drops: Drops
+) -> list[str]:
+    """`assignments.yml`'s faults, and one for each block keyed on nothing this plan
+    names, as report lines (their faults join `drops.faults`). A schedule key without a
+    block is no fault: its settings are the defaults."""
+    named = meta.get("assignments")
+    named = set(map(str, named)) if isinstance(named, dict) else set()
+    faults = list(instance.faults) + [
+        ConfigFault(
+            f"assignments.{slug}",
+            f"no assignment `{slug}` in {SCHEDULE_PATH} - this block is not read",
+            file=ASSIGNMENTS_FILE,
+            lineno=instance.lines.get(slug),
+            fix_text=f"rename the block to a key under `assignments:` in {SCHEDULE_PATH}, "
+            "or delete it",
+        )
+        for slug in sorted(instance.blocks)
+        if slug not in named
+    ]
+    drops.faults.extend(faults)
+    return [f"{ASSIGNMENTS_FILE} {f.label}: {f.what}" for f in faults]
 
 
 def semester_name(slug: str, entry: AssignmentEntry) -> str:
@@ -1671,7 +1769,9 @@ def resolve_target(
     sched: Schedule,
     repo: str,
     slug: str = "",
-    remedy: str = "say which with `slug`",
+    remedy: str = (
+        "the scheduler acts on each on its own clock; nothing acts on one of them by hand"
+    ),
 ) -> tuple[str, str] | str:
     """`(schedule key, semester-side name)` for the assignment `repo` hands out, or an ERROR
     MESSAGE (a `str`) when the plan names more than one of them and `slug` does not say
@@ -1691,8 +1791,8 @@ def resolve_target(
     about which of them they are acting on.
 
     `remedy` is what that refusal tells the reader to do about it, because the answer is
-    the CALLER's: Collect and Patch carry a `slug` box and are told to fill it in, while
-    the handout button has none and is sent to the schedule instead. The predicate lives
+    the CALLER's: no button asks which entry (the schedule knows), so a manual run on a
+    shared template refuses, naming them. The predicate lives
     here either way - one owner, so a caller cannot quietly stop refusing.
 
     A `str` rather than a raise, deliberately: the hourly scheduler calls straight into
@@ -1719,29 +1819,21 @@ def resolve_target(
     return found[0][0], semester_name(*found[0])
 
 
-def grading_cutoff_datetime(
-    sched: Schedule, slug: str, late_window_days: int = 0
-) -> datetime | None:
-    """THE late cutoff: when this assignment stops accepting work. An explicit
-    `grading_datetime`, else the due date plus `late_window_days`, else the due date. None
-    if unscheduled.
+def grading_cutoff_datetime(sched: Schedule, slug: str) -> datetime | None:
+    """THE late cutoff: when this assignment stops accepting work - the due date plus the
+    effective `late_window_days` (`settings`: assignments.yml, then the course, then the
+    institution). `late_window_days: 0`, or a late rule that names no window, is the due
+    date itself: no late work. None if unscheduled.
 
-    The one resolver of that instant (decision 0012). Everything that has to agree about
-    when the door shuts reads it - the sheet's header and its late-policy line, the receipts
-    that quote that policy to a student, the snapshot that freezes and the autograder that
-    fires off it, status.json. The window lives in the template's `grading_config.yml`,
-    which this module cannot read, so a caller that holds the spec passes its
-    `late_window_days`; a caller that does not (the team-formation door, the cadence
-    check) gets the window-less instant, which errs EARLY - the safe direction for a door
-    that should be shut by the time anything is graded."""
+    Computed, never an input (decisions 0009, 0012), and computed HERE only. Everything
+    that has to agree about when the door shuts reads it - the snapshot that freezes and
+    the autograder that fires off it, the sheet's header, the receipts that quote the
+    policy to a student, the team-formation window, the cadence check, status.json."""
     entry = sched.assignments.get(slug)
     if entry is None:
         return None
-    if entry.grading_datetime is not None:
-        return entry.grading_datetime
-    if late_window_days:
-        return entry.due_datetime + timedelta(days=late_window_days)
-    return entry.due_datetime
+    days, _ = settings.effective(sched.org, slug, "late_window_days")
+    return entry.due_datetime + timedelta(days=int(days or 0))
 
 
 def formation_window(
@@ -1759,11 +1851,8 @@ def formation_window(
     after it has nothing left to hand in, and would be provisioned a repo against work
     already collected.
 
-    Deliberately no spec read and no I/O - this answers off the parsed schedule alone, so
-    `grades` (which imports this module) can ask without the import turning back on
-    itself. The cost is `grading_cutoff_datetime`'s window-less instant, which ignores the template's
-    late window; erring EARLY is the safe direction for a door that should be shut by the
-    time anything is graded."""
+    No spec read: the window closes at the late cutoff (`grading_cutoff_datetime`), which
+    reads the run settings and nothing of the template's."""
     entry = sched.assignments.get(slug)
     if entry is None:
         return (None, None)
@@ -1885,8 +1974,10 @@ def load(semester_org: str) -> Schedule:
                 f"ignored: nothing releases, hands out, snapshots or grades"
             )
         )
-    sched = parse(meta if isinstance(meta, dict) else {})
+    instance = settings.instance(semester_org)
+    sched = parse(meta if isinstance(meta, dict) else {}, instance)
     sched.org = semester_org
+    sched.instance_unparseable = instance.unparseable
     sched.unparseable = bool(unparseable)
     sched.faults.extend(unparseable)
     if sched.dropped:
@@ -1924,7 +2015,9 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
         return None, f"{path} is not valid YAML:\n{exc}"
     if not isinstance(meta, dict):
         return None, f"{path} is valid YAML but not a mapping - it needs top-level keys"
-    return parse(meta), None
+    beside = p.with_name(ASSIGNMENTS_FILE)
+    instance = settings.parse_instance(beside.read_text() if beside.is_file() else None)
+    return parse(meta, instance), None
 
 
 @cache
@@ -2221,6 +2314,34 @@ def worst_severity(faults: list[SourceFault], now: datetime) -> Severity | None:
     return max((f.severity(now) for f in faults), default=None)
 
 
+def solution_notices(before: dict, after: Schedule) -> list[ConfigFault]:
+    """One informational fault for each assignment that has just GAINED a
+    `solution_datetime:` - absent from `before`, the file as it was, read as plain YAML so
+    an entry the parser would have dropped there still counts as what it said. Never a
+    verdict: the push is fine; the person who made it is told, once, what the date will
+    do."""
+    raw = before.get("assignments") if isinstance(before, dict) else None
+    was = {
+        str(slug): entry
+        for slug, entry in (raw.items() if isinstance(raw, dict) else ())
+        if isinstance(entry, dict)
+    }
+    return [
+        ConfigFault(
+            f"assignments.{slug}",
+            f"`solution_datetime: {entry.solution_datetime:%Y-%m-%d %H:%M}` - "
+            f"{SOLUTION_WARNING}",
+            field="solution_datetime",
+            lineno=line_of(entry.lines, "solution_datetime"),
+            file=SCHEDULE_PATH,
+            ceiling=Severity.ADVISORY,
+        )
+        for slug, entry in after.assignments.items()
+        if entry.solution_datetime is not None
+        and (slug not in was or was[slug].get("solution_datetime") is None)
+    ]
+
+
 def _validate_report(sched: Schedule, source: str) -> str:
     """What the parser UNDERSTOOD, followed by anything it threw away.
 
@@ -2501,6 +2622,13 @@ def main() -> int:
         "the rung a human is told about - for the steps that follow",
     )
     parser.add_argument(
+        "--previous",
+        metavar="PATH",
+        help="the file as it was before this change: each assignment that has just "
+        "gained a `solution_datetime:` gets a ::notice:: saying what it does. A file "
+        "that does not parse gives no notices. Never changes the exit code",
+    )
+    parser.add_argument(
         "--comment-file",
         metavar="PATH",
         help="write the comment to leave on the push (the faults a human is told about, "
@@ -2536,6 +2664,16 @@ def main() -> int:
     # Report what was UNDERSTOOD as well as what was dropped: validation cannot catch a
     # well-formed entry with the wrong date, but a count that is one short is visible.
     print(_validate_report(sched, source_name))
+    if args.previous is not None:
+        try:
+            before = yaml.safe_load(Path(args.previous).read_text())
+        except (OSError, yaml.YAMLError):
+            before = None
+        # A previous file nobody can read says nothing about what is new: no notices.
+        notes = solution_notices(before, sched) if isinstance(before, dict) else []
+        for note in notes:
+            at = f",line={note.lineno}" if note.lineno else ""
+            print(f"::notice file={SCHEDULE_PATH}{at}::{note.line()}", file=sys.stderr)
     if sched.unparseable:
         # The same verdict the --file form gives, in the same words: `load` returns an
         # empty Schedule for a file that does not parse (so the hourly cron cannot be

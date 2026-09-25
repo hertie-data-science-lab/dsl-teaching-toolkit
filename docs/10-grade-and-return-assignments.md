@@ -132,9 +132,9 @@ repo's, so it would accuse the entire semester of one student's late push), and
    freezes anything.
 4. **Type the marks.** Anything you write is kept forever - including keys you invent, and
    rows for students who have left. Delete a key and it stays deleted.
-5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
+5. **The late cutoff** (the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
-6. **Distribute grades** (button), `preview` first. The preview writes no grades and sends
+6. **Distribute grades** (button), `preview` first. Leave `assignment` empty to return every sheet, or name one to return only its marks; each gradebook still shows everything already returned, rendered from those sheets as they stand now, so a mark changed on an already-returned assignment goes out with it. A scoped run refuses when it cannot tell what was returned (the registrar export missing or unreadable); an unscoped run rewrites it. The preview writes no grades and sends
    no mail. It prints the counts, and posts who gets what - each changed grade, who is
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
    grades preview* issue in `semester-config`. Each preview rewrites that issue; the real

@@ -107,25 +107,14 @@ describe('which step a wizard opens at', () => {
 });
 
 describe('conditional fields', () => {
-  it('shows the team fields only under "In teams" and the link only under "Elsewhere"', () => {
+  it('asks only what the template is: no run setting, which is each semester\'s', () => {
     const t = assignmentWork(D);
-    const solo = layout(t, initialValues(null, 'f2026'));
-    expect(solo.main.map((i) => i.key)).toEqual(['type', 'submit_via']);
-    expect(solo.main[0].under).toEqual([]);
     const team = layout(t, { ...initialValues(null, 'f2026'), type: 'group', submit_via: 'external' });
-    expect(team.main[0].under.map((i) => i.key)).toEqual(['team_formation', 'max_team_size']);
-    expect(team.main[1].under.map((i) => i.key)).toEqual(['submit_url']);
-  });
-
-  it('keeps visibility under Advanced, labelled irreversible, and forces private away from their own repo', () => {
-    const t = assignmentWork(D);
-    const v = { ...initialValues(null, 'f2026'), visibility: 'public' };
-    const own = layout(t, v);
-    expect(own.advanced.map((i) => i.key)).toEqual(['visibility']);
-    expect(own.changed).toBe(1);
-    expect(t.visibility.irreversible).toBe(true);
-    expect(t.visibility.forced?.({ ...v, submit_via: 'shared_dropbox_repo' })).toEqual({ value: 'private', reason: 'Private: a shared drop box is always private.' });
-    expect(layout(t, { ...v, submit_via: 'external' }).changed).toBe(0);
+    expect(team.main.map((i) => i.key)).toEqual(['type', 'submit_via']);
+    expect(team.main.flatMap((i) => i.under)).toEqual([]);
+    expect(team.advanced).toEqual([]);
+    for (const k of ['team_formation', 'max_team_size', 'submit_url', 'visibility']) expect(t).not.toHaveProperty(k);
+    expect(assignmentMarking(D)).not.toHaveProperty('late_window_days');
   });
 
   it('refuses tests for a drop box and a written report, and shows the tests folder only when tests run', () => {
@@ -182,10 +171,13 @@ describe('what the wizards send', () => {
   it('builds assignment.create args the registry accepts, for alone, teams and a copy', () => {
     const v = { ...initialValues(null, 'f2026'), name: 'Trees', number: 4 };
     const solo = assignmentArgs(v);
-    expect(solo).toEqual({ name: 'Trees', number: '4', semester: 'f2026', type: 'individual', team_formation: undefined, submit_via: 'assignment_repo', visibility: 'private', formats: 'ipynb', autograde: false });
+    expect(solo).toEqual({ name: 'Trees', number: '4', semester: 'f2026', type: 'individual', submit_via: 'assignment_repo', formats: 'ipynb', autograde: false });
     expect(validateArgs('assignment.create', JSON.parse(JSON.stringify(solo)))).toEqual([]);
     const team = assignmentArgs({ ...v, type: 'group', team_formation: 'assigned', submit_via: 'shared_dropbox_repo', visibility: 'public', autograde: 'true', formats: ['py', 'rmd'] });
-    expect(team).toMatchObject({ type: 'group', team_formation: 'assigned', visibility: 'private', autograde: false, formats: 'py,rmd' });
+    expect(team).toMatchObject({ type: 'group', autograde: false, formats: 'py,rmd' });
+    // How a semester runs it is its assignments.yml: never sent (decision 0009).
+    expect(team).not.toHaveProperty('team_formation');
+    expect(team).not.toHaveProperty('visibility');
     expect(validateArgs('assignment.create', JSON.parse(JSON.stringify(team)))).toEqual([]);
     const copy = assignmentArgs({ ...v, copy_from: 'assignment-2-f2026' });
     expect(copy).toEqual({ name: 'Trees', number: '4', semester: 'f2026', copy_from: 'assignment-2-f2026' });
@@ -200,16 +192,12 @@ describe('what the wizards send', () => {
     expect(materialsArgs({ term: 'f2026', open: true, copy_from: 'course-materials-s2026' })).toEqual({ semester: 'f2026', copy_from: 'course-materials-s2026' });
   });
 
-  it('writes only the marking values the request cannot carry into grading_config.yml', () => {
+  it('writes no run setting into grading_config.yml: those are each semester\'s', () => {
     const v = { ...initialValues(null, 'f2026'), type: 'group', max_team_size: 3, submit_via: 'external', submit_url: 'https://moodle.example.org/a4', late_window_days: 3, late_penalty_per_day: '5%' };
-    const extras = extrasOf(v);
-    expect(extras).toEqual({ max_team_size: 3, submit_url: 'https://moodle.example.org/a4', late_window_days: 3, late_penalty_per_day: '5%' });
-    const text = '# INSTRUCTOR-OWNED\ntitle: Trees\nmax_team_size: 5   # course default\nsubmit_via: external\n';
-    const out = withExtras(text, extras)!;
-    expect(out).toContain('max_team_size: 3   # course default');
-    expect(out).toContain('submit_url: https://moodle.example.org/a4');
-    expect(withExtras(out, extras)).toBeNull();
-    expect(extrasOf(initialValues(null, 'f2026'))).toEqual({});
+    expect(extrasOf(v)).toEqual({});
+    const text = '# INSTRUCTOR-OWNED\ntitle: Trees\nsubmit_via: external\n';
+    expect(withExtras(text, {})).toBeNull();
+    expect(withExtras(text, { title: 'Forests' })).toContain('title: Forests');
   });
 
   it('sends the central set-up its hidden inputs and refuses a bad handle before dispatching', () => {

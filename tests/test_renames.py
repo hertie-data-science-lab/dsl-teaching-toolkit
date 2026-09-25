@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -142,17 +142,14 @@ def test_an_assignment_naming_the_old_dest_key_is_dropped_as_not_migrated():
                     "due_datetime": "2026-10-13",
                     "cohort_dest_repo": "homework-1",
                 },
-                "ok": {
-                    "course_source_repo": "b-f2026",
-                    "due_datetime": "2026-10-13",
-                    "semester_dest_repo": "homework-2",
-                },
+                "ok": {"course_source_repo": "b-f2026", "due_datetime": "2026-10-13"},
             }
         }
     )
     assert list(sched.assignments) == ["ok"]
-    assert sched.assignments["ok"].semester_dest_repo == "homework-2"
     assert [f.code for f in sched.faults if f.code] == [NOT_MIGRATED]
+    # It names where the fact lives now, not a second name for it in schedule.yml.
+    assert "assignments.yml" in sched.faults[0].what
 
 
 def test_a_deploy_naming_the_old_dest_keys_ships_nothing():
@@ -393,9 +390,9 @@ def _one_assignment(**extra) -> schedule.Schedule:
 def test_the_one_cutoff_resolver_adds_the_late_window_to_the_due_date():
     sched = _one_assignment()
     due = sched.assignments["a1"].due_datetime
-    assert schedule.grading_cutoff_datetime(sched, "a1") == due
-    assert schedule.grading_cutoff_datetime(sched, "a1", 3) == due + timedelta(days=3)
-    assert schedule.grading_cutoff_datetime(sched, "nope", 3) is None
+    # The effective window: the institution's 10 days when nothing nearer says.
+    assert schedule.grading_cutoff_datetime(sched, "a1") == due + timedelta(days=10)
+    assert schedule.grading_cutoff_datetime(sched, "nope") is None
 
 
 def test_the_old_resolvers_are_gone():
@@ -412,14 +409,27 @@ def test_status_json_names_the_cutoff_grading_cutoff_datetime():
 # ------------------------------------------- solution_datetime (include_solution, --solution)
 
 
-def _hand_out(monkeypatch, *flags: str) -> list[bool]:
+def _hand_out(monkeypatch, *flags: str, store: dict | None = None, rc: int = 0):
+    """`assign.main` for a hand out, over a semester-config held in `store`."""
     seen: list[bool] = []
+    store = {} if store is None else store
     monkeypatch.setattr(
         assign,
         "provision_all",
         lambda *a, solution=False, **k: seen.append(solution) or (0, 0),
     )
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(
+        assign, "get_file_content", lambda org, repo, path, ref="": store.get(path)
+    )
+    monkeypatch.setattr(
+        assign,
+        "put_file",
+        lambda org, repo, path, body, msg, **k: (
+            store.__setitem__(path, body.decode()) or True
+        ),
+    )
+    monkeypatch.setenv("GITHUB_ACTOR", "Prof")
     base = [
         "assign",
         "--course-org",
@@ -430,7 +440,7 @@ def _hand_out(monkeypatch, *flags: str) -> list[bool]:
         "S",
     ]
     monkeypatch.setattr(sys, "argv", [*base, *flags])
-    assert assign.main() == 0
+    assert assign.main() == rc
     return seen
 
 
@@ -441,6 +451,35 @@ def test_the_manual_hand_out_includes_the_solution_only_when_asked(
     monkeypatch, flags, pushed
 ):
     assert _hand_out(monkeypatch, *flags) == [pushed]
+
+
+def test_a_hand_out_with_the_solution_runs_only_straight_after_its_preview(
+    monkeypatch, capsys
+):
+    now = ("--solution-datetime", "now")
+    store: dict = {}
+    # Unpreviewed: refused before anything is created, naming why.
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store, rc=1) == []
+    assert "preview this hand out first" in capsys.readouterr().err
+    # Previewed by the same person, of the same template: it goes ahead, once.
+    assert _hand_out(monkeypatch, *now, store=store) == [True]
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store) == [True]
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store, rc=1) == []
+    # Another person's preview does not count.
+    _hand_out(monkeypatch, *now, store=store)
+    monkeypatch.setenv("GITHUB_ACTOR", "somebody-else")
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        assign,
+        "provision_all",
+        lambda *a, solution=False, **k: seen.append(solution) or (0, 0),
+    )
+    monkeypatch.setattr(sys, "argv", [*sys.argv, "--no-preview"])
+    assert assign.main() == 1 and seen == []
+
+
+def test_a_hand_out_without_the_solution_needs_no_preview(monkeypatch):
+    assert _hand_out(monkeypatch, "--no-preview") == [False]
 
 
 @pytest.mark.parametrize(
@@ -897,3 +936,65 @@ def test_semester_cards_never_come_from_the_old_people_shape(monkeypatch):
         "Course", {"people": {"instructors": [{"name": "Prof"}]}}, edit_at="x"
     )
     assert "Prof" in course_page  # a COURSE file's `people:` block is its own shape
+
+
+@pytest.mark.parametrize(
+    ("op", "arg"),
+    [
+        ("assignment.collect_now", "slug"),
+        ("assignment.create", "team_formation"),
+        ("assignment.create", "visibility"),
+    ],
+)
+def test_an_arg_that_went_is_refused_with_where_it_lives_now(op, arg):
+    # An older console build still sending one gets a sentence, not a schema error.
+    with pytest.raises(RequestError) as caught:
+        parse_request(
+            _request(
+                op=op, semester_org="S", args={"course_source_repo": "a1", arg: "x"}
+            )
+        )
+    assert caught.value.code == NOT_MIGRATED and "no longer read" in caught.value.text
+
+
+def _gate_store(monkeypatch, *, put_ok=True) -> dict:
+    store: dict = {}
+    monkeypatch.setattr(
+        assign, "get_file_content", lambda org, repo, path, ref="": store.get(path)
+    )
+
+    def put(org, repo, path, body, msg, **k):
+        if put_ok:
+            store[path] = body.decode()
+        return put_ok
+
+    monkeypatch.setattr(assign, "put_file", put)
+    monkeypatch.setenv("GITHUB_ACTOR", "Prof")
+    return store
+
+
+def test_a_preview_of_one_template_does_not_license_another(monkeypatch):
+    _gate_store(monkeypatch)
+    assert assign.preview_first("S", "assignment-1-f2026", preview=True) is None
+    refused = assign.preview_first("S", "assignment-2-f2026", preview=False)
+    assert refused is not None and refused.reasons[0]["code"] == assign.PREVIEW_FIRST
+
+
+def test_a_preview_older_than_a_day_no_longer_counts(monkeypatch):
+    _gate_store(monkeypatch)
+    then = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
+    assert assign.preview_first("S", "t", preview=True, now=then) is None
+    late = then + assign.PREVIEW_VALID + timedelta(minutes=1)
+    assert assign.preview_first("S", "t", preview=False, now=late) is not None
+
+
+def test_a_spend_that_fails_refuses_and_a_failed_preview_says_so(monkeypatch):
+    store = _gate_store(monkeypatch)
+    assert assign.preview_first("S", "t", preview=True) is None
+    # The spend fails: nothing may be handed out on a preview still good for another run.
+    monkeypatch.setattr(assign, "put_file", lambda *a, **k: False)
+    refused = assign.preview_first("S", "t", preview=False)
+    assert refused is not None and "could not be marked as used" in refused.text
+    assert store  # the record was not spent
+    refused = assign.preview_first("S", "t", preview=True)
+    assert refused is not None and "could not be recorded" in refused.text

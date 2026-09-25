@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import grades, policy, settings
+from dsl_course import faults, grades, policy, schedule, settings
 
 PACKAGE = Path(settings.__file__).parent
 # The real read, before conftest's autouse fixture answers it with "no file".
@@ -146,11 +146,14 @@ def test_a_value_the_reader_refuses_leaves_the_next_layer_to_answer(monkeypatch)
     )
 
 
-def test_the_template_s_own_run_keys_sit_below_the_assignments_yml_block(semester):
-    template = {"max_team_size": 3, "team_formation": "assigned"}
-    got = settings.effective_all("Sem", "a2", course_org="C", template=template)
-    assert got["max_team_size"] == (2, "assignment")
-    assert got["team_formation"] == ("assigned", "assignment")
+@pytest.mark.parametrize("key", settings.RUN_KEYS)
+def test_a_run_key_in_a_template_is_not_migrated(monkeypatch, key):
+    # A template states what the assignment IS; how a semester runs it is assignments.yml.
+    with pytest.raises(faults.NotMigrated) as caught:
+        grades.parse_grading_spec(f"type: group\n{key}: 3\n")
+    assert caught.value.old == key and settings.ASSIGNMENTS_FILE in str(caught.value)
+    monkeypatch.setattr(grades, "_grading_text", lambda org, template: f"{key}: 3\n")
+    assert grades.load_grading_spec("C", "t").not_migrated
 
 
 def test_load_grading_spec_carries_effective_values_and_their_sources(
@@ -281,17 +284,92 @@ def test_a_closed_vocabulary_typo_leaves_the_next_layer_to_answer(
 @pytest.mark.parametrize(
     ("key", "typo"), [("visibility", "publik"), ("team_formation", "x")]
 )
-def test_a_template_typo_leaves_the_cascade_to_answer(monkeypatch, key, typo):
+def test_an_assignment_block_typo_leaves_the_semester_default_to_answer(
+    monkeypatch, key, typo
+):
+    good = "public" if key == "visibility" else "assigned"
+    text = f"defaults:\n  {key}: {good}\nassignments:\n  a1:\n    {key}: {typo}\n"
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: text)
+    monkeypatch.setattr(grades, "_grading_text", lambda org, template: "type: group\n")
+    spec = grades.load_grading_spec("C", "t", semester_org="Sem", slug="a1")
+    assert getattr(spec, key) == good and dict(spec.sources)[key] == "semester"
+    # ...and the refused line is a fault on assignments.yml, at its line.
+    (fault,) = settings.parse_instance(text).faults
+    assert (fault.file, fault.where, fault.field, fault.lineno) == (
+        settings.ASSIGNMENTS_FILE,
+        "assignments.a1",
+        key,
+        5,
+    )
+
+
+# ------------------------------------------------------------ assignments.yml, read
+
+
+def test_assignments_yml_reads_each_block_and_its_repo_name():
+    got = settings.parse_instance(
+        "defaults:\n  max_team_size: 4\n"
+        "assignments:\n  a2:\n    late_window_days: 0\n"
+        "    semester_dest_repo: homework-2\n"
+    )
+    assert got.defaults == {"max_team_size": 4}
+    assert got.blocks == {"a2": {"late_window_days": 0}}
+    assert got.dests == {"a2": "homework-2"}
+    assert got.faults == ()
+
+
+@pytest.mark.parametrize(
+    ("text", "field"),
+    [
+        ("defaults:\n  semester_dest_repo: x\n", "semester_dest_repo"),
+        (
+            "assignments:\n  a1:\n    semester_dest_repo: 'not a name'\n",
+            "semester_dest_repo",
+        ),
+        ("assignments:\n  a1:\n    type: group\n", "type"),
+        ("extra:\n  a: 1\n", "extra"),
+        ("assignments:\n  a1: 5\n", ""),
+    ],
+)
+def test_every_line_assignments_yml_cannot_use_is_a_fault(text, field):
+    (fault,) = settings.parse_instance(text).faults
+    assert fault.file == settings.ASSIGNMENTS_FILE and fault.field == field
+
+
+def test_an_assignments_yml_that_is_not_yaml_stops_the_cascade(monkeypatch):
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: "defaults: [\n")
+    read = settings.instance("Sem")
+    assert read.unparseable and read.faults[0].file == settings.ASSIGNMENTS_FILE
+    # Fail closed: nothing hands out or grades on defaults the semester did not choose.
+    with pytest.raises(faults.Unusable):
+        settings.semester_blocks("Sem")
+
+
+def test_the_schedule_carries_assignments_yml_s_faults_and_its_orphan_blocks(
+    monkeypatch,
+):
+    # Cross-file: a schedule key with no block runs on the defaults (no fault); a block
+    # for a key the schedule does not name is one.
     monkeypatch.setattr(
         settings,
         "_assignments_text",
         lambda org: (
-            f"defaults:\n  {key}: {'public' if key == 'visibility' else 'assigned'}\n"
+            "assignments:\n  a1:\n    max_team_size: 0\n  ghost:\n"
+            "    max_team_size: 3\n"
         ),
     )
     monkeypatch.setattr(
-        grades, "_grading_text", lambda org, template: f"type: group\n{key}: {typo}\n"
+        schedule,
+        "_schedule_text",
+        lambda org: (
+            "assignments:\n  a1:\n    course_source_repo: t1\n"
+            "    due_datetime: 2026-10-13\n  a2:\n    course_source_repo: t2\n"
+            "    due_datetime: 2026-10-20\n"
+        ),
     )
-    spec = grades.load_grading_spec("C", "t", semester_org="Sem", slug="a1")
-    assert dict(spec.sources)[key] == "semester"
-    assert any(d.field == key for d in spec.dropped)
+    sched = schedule.load("Sem")
+    assert set(sched.assignments) == {"a1", "a2"}
+    got = sorted((f.where, f.field) for f in sched.faults)
+    assert got == [("assignments.a1", "max_team_size"), ("assignments.ghost", "")]
+    assert all(f.file == settings.ASSIGNMENTS_FILE for f in sched.faults)
+    assert len(sched.dropped) == 2

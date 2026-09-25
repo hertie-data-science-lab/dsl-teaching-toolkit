@@ -1144,9 +1144,10 @@ def _assignment_entry(
     # different thing. Exactly `_lecture_entry`'s split: `title` identifies, `subtitle`
     # names (and the theme renders the pair identically for both).
     title = identifier(slug)
-    # The plan's own declaration wins, and is the only one that can appear BEFORE hand-out:
-    # the README it otherwise comes from is embargoed until then.
-    subtitle = found[1].title if found else ""
+    # The template's `title:` (its one home, decision 0009) wins, and is the only name
+    # that can appear BEFORE hand-out: the README it otherwise comes from is embargoed
+    # until then.
+    subtitle = spec.title
     # The plan's `details:`, filling the Details column of BOTH rows above what they
     # already generate - the link to the brief on one, the submit address on the other.
     # There is no README fallback for it: the brief is the page's body, and a sentence
@@ -1752,6 +1753,19 @@ def sync_site(course_org: str, semester_org: str) -> int:
             event_entries["semester-archived.md"] = _archive_entry(
                 sched.archive, date.today()
             )
+        # "Marks expected": an assignment's `marks_return_datetime`, shown only where its
+        # entry says `show_on_site: true` in so many words - the date is internal by
+        # default (decision 0009).
+        for key, entry in sched.assignments.items():
+            if entry.marks_return_datetime is not None and entry.marks_return_on_site:
+                event_entries[f"marks-{slug(key)}.md"] = _event_row(
+                    "special_event",
+                    f"Marks expected: {identifier(schedule.semester_name(key, entry))}",
+                    entry.marks_return_datetime,
+                    entry.tbc,
+                    False,
+                    "",
+                )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
             event_entries["term-start.md"] = _term_date_entry(

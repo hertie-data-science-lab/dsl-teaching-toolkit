@@ -52,10 +52,11 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -106,6 +107,7 @@ from .gh_contents import (
     repo_blob_shas,
     repo_tree,
 )
+from .gh_teams import acting_login
 from .ghcli import GIT_ENV, bot_login, clone, gh, git
 from .log import (
     CLIParser,
@@ -1250,11 +1252,6 @@ def main() -> int:
         f"assignment's schedule.yml entry, as `solution_datetime:`.",
     )
 
-    parser.add_argument(
-        "--slug",
-        default="",
-        help="Which assignment in the semester's schedule.yml this is, when two of them hand out from the same template (each with its own semester_dest_repo). Leave empty otherwise.",
-    )
     # The PATCH mode: `--patch-path` switches this CLI from handing an assignment out to
     # correcting one that is already out. A flag rather than a subcommand, because
     # `python3 -m dsl_course.assign --course-org ...` is a frozen public contract - every
@@ -1294,10 +1291,13 @@ def main() -> int:
                 args.template,
                 args.semester_org,
                 args.patch_path,
-                slug=args.slug,
                 overwrite=args.overwrite,
                 dry_run=args.preview,
             )
+        if when == SOLUTION_NOW and not args.preview:
+            refused = preview_first(args.semester_org, args.template, preview=False)
+            if refused is not None:
+                return refused
         rc, _changed = provision_all(
             args.course_org,
             args.template,
@@ -1305,16 +1305,93 @@ def main() -> int:
             roster_path=args.roster,
             solution=when == SOLUTION_NOW,
             dry_run=args.preview,
-            slug=args.slug,
             # ONE listing of the semester for this press, taken here because there is no
             # tick above to have taken it: every repo question below is answered off it,
             # and None (it could not be read) falls back to a probe per repo.
             listing=listing_by_name(args.semester_org),
         )
+        if when == SOLUTION_NOW and args.preview and rc == 0:
+            refused = preview_first(args.semester_org, args.template, preview=True)
+            if refused is not None:
+                return refused
         return rc
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
+
+
+SOLUTION_PREVIEW = records.path("solution_preview")
+PREVIEW_FIRST = "PREVIEW_FIRST"
+
+
+def _actor() -> str:
+    """Who asked: the person who started the workflow, else the login `gh` runs as."""
+    return os.environ.get("GITHUB_ACTOR") or acting_login() or ""
+
+
+# How long a preview counts for: the real run is meant to follow it, not a week later.
+PREVIEW_VALID = timedelta(hours=24)
+
+
+def _refusal(text: str) -> Summary:
+    log_err(text)
+    return Summary(text, reasons=[{"code": PREVIEW_FIRST, "text": text}], code=1)
+
+
+def preview_first(
+    semester_org: str, template: str, preview: bool, now: datetime | None = None
+) -> Summary | None:
+    """The one gate on a hand out WITH the solution (`--solution-datetime now`): it pushes
+    the model answer and rubric into every student's repo, and cannot be undone. A preview
+    records who previewed which template, and when (`SOLUTION_PREVIEW`, private); the real
+    run goes ahead only when the last record is that person's preview of that template
+    from the last `PREVIEW_VALID`, and then spends it. None = go ahead; a refusal
+    otherwise. Fail closed: a record that cannot be read or spent refuses."""
+    now = now or datetime.now(timezone.utc)
+    actor = _actor()
+    want = {"actor": actor.casefold(), "template": template, "solution": SOLUTION_NOW}
+    if preview:
+        body = json.dumps({**want, "at": now.isoformat()}, indent=2, sort_keys=True)
+        if not put_file(
+            semester_org,
+            CONFIG_REPO,
+            SOLUTION_PREVIEW,
+            (body + "\n").encode(),
+            "Record a preview of a hand out with the solution",
+        ):
+            return _refusal(
+                "The preview could not be recorded, so the hand out with the solution "
+                "that follows it will be refused: run the preview again."
+            )
+        return None
+    try:
+        last = json.loads(
+            get_file_content(semester_org, CONFIG_REPO, SOLUTION_PREVIEW) or "{}"
+        )
+        at = datetime.fromisoformat(str(last.pop("at", "")))
+    except (RuntimeError, ValueError, AttributeError):
+        last, at = {}, None
+    fresh = at is not None and at.tzinfo is not None and now - at <= PREVIEW_VALID
+    if actor and last == want and fresh:
+        # Spent BEFORE anything is handed out: a spend that fails must not leave the
+        # preview good for another run.
+        if put_file(
+            semester_org,
+            CONFIG_REPO,
+            SOLUTION_PREVIEW,
+            b"{}\n",
+            "Spend the preview of a hand out with the solution",
+        ):
+            return None
+        return _refusal(
+            "The preview could not be marked as used, so nothing was handed out: run "
+            "the preview again, then the hand out."
+        )
+    return _refusal(
+        "Handing out with the solution pushes the model answer and rubric into every "
+        "student's repo, and cannot be undone: preview this hand out first (within "
+        "24 hours), then run it."
+    )
 
 
 def solution_record_path(slug: str) -> str:
@@ -1626,8 +1703,9 @@ def provision_all(
     gspec = load_grading_spec(course_org, template)
     if gspec.not_migrated:
         log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (`format:` is now "
-            f"`formats:`) - run the migration; nothing is handed out"
+            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
+            f"setting that moved to assignments.yml) - run the migration; nothing is "
+            f"handed out"
         )
         return 1, False
     # The assignment's own grading_config.yml is the only declaration there is.

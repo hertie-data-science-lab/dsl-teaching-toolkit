@@ -188,27 +188,17 @@ SEEDED = {
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(
         title="Neural networks from scratch",
         kind="group",
-        team_formation="assigned",
         submit_via="assignment_repo",
-        visibility="public",
         formats=["ipynb"],
         autograde=True,
-        defaults={
-            "max_team_size": 3,
-            "late_window_days": 7,
-            "late_penalty_per_day": "10%",
-        },
     ),
-    "grading_config.yml (scaffolded, individual, no course defaults)": (
+    "grading_config.yml (scaffolded, individual, external)": (
         lambda: _grading_config(
             title="Introduce Yourself",
             kind="individual",
-            team_formation="self_select",
             submit_via="external",
-            visibility="private",
             formats=[],
             autograde=False,
-            defaults={},
         )
     ),
 }

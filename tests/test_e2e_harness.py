@@ -9,6 +9,7 @@ it was found. Those are pure functions, and they are tested here, in the ordinar
 from __future__ import annotations
 
 import base64
+import dataclasses
 import importlib
 import os
 from datetime import datetime
@@ -17,7 +18,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, ghcli, grades, repos, roster, scaffold, schedule
+from dsl_course import (
+    course,
+    ghcli,
+    grades,
+    repos,
+    roster,
+    scaffold,
+    schedule,
+    settings,
+)
 from tests.e2e import (
     allowlist,
     cleanup,
@@ -781,15 +791,23 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     module = _pipeline_module(monkeypatch)
     when = datetime(2026, 9, 4, 14, 0)
     later = datetime(2026, 9, 4, 15, 0)
-    block = module._schedule_block("assignment-90-e2eab12cd", when, when, later)
+    block = module._schedule_block("assignment-90-e2eab12cd", when, when)
     doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block))
     assert set(doc) == {"timezone", "assignments", "events"}
     entry = doc["assignments"]["assignment-90-e2eab12cd"]
     assert entry["course_source_repo"] == "assignment-90-e2eab12cd"
-    assert set(entry) <= schedule.KNOWN_ASSIGNMENT | {"title"}
+    assert set(entry) <= schedule.KNOWN_ASSIGNMENT
     # The due date and the cutoff are separate instants: collapsing them would skip the
     # refresh pass entirely, which is most of what the live run is there to exercise.
-    assert entry["due_datetime"] != entry["grading_datetime"]
+    shape = shapes.BY_NAME["private"]
+    run = module._instance_block("assignment-90-e2eab12cd", shape, when, later)
+    instance = settings.parse_instance(
+        schedule_edit.insert_block(
+            schedule_edit.with_assignments_key(""), "e2eab12cd", run
+        )
+    )
+    assert not instance.faults
+    assert instance.blocks["assignment-90-e2eab12cd"]["late_window_days"] == 1
 
 
 def test_the_privacy_scan_keeps_every_line_the_toolkit_printed(monkeypatch):
@@ -911,12 +929,9 @@ def _seeded(shape: shapes.Shape) -> str:
     return scaffold._grading_config(
         title="E2E",
         kind="individual",
-        team_formation="self_select",
         submit_via=shape.submit_via,
-        visibility=shape.visibility or "private",
         formats=["py"],
         autograde=shape.autograde,
-        defaults={},
     )
 
 
@@ -979,9 +994,14 @@ def test_the_drop_box_is_one_repo_and_the_work_is_a_folder_in_it():
 
 @pytest.mark.parametrize("shape", shapes.SHAPES, ids=lambda s: s.name)
 def test_the_config_the_harness_writes_parses_to_the_shape_it_meant(shape):
-    # The whole run rests on this file: it is the only place a shape is declared, and a
-    # value the parser drops hands out the DEFAULT shape under another name.
-    spec = grades.parse_grading_spec(shapes.configure(_seeded(shape), shape))
+    # The whole run rests on these two files: the template's `submit_via` and the
+    # semester's run settings, and a value the parser drops hands out the DEFAULT shape
+    # under another name.
+    template = grades.parse_grading_spec(shapes.configure(_seeded(shape), shape))
+    block = yaml.safe_dump({"assignments": {"a": shapes.run_settings(shape)}})
+    (fault,) = settings.parse_instance(block).faults or (None,)
+    assert fault is None
+    spec = dataclasses.replace(template, **settings.parse_instance(block).blocks["a"])
     assert spec.submit_via == shape.submit_via
     assert spec.submit_shape == shape.key
     assert spec.submit_url == shape.submit_url
@@ -997,27 +1017,14 @@ def test_declaring_the_same_shape_twice_changes_nothing(shape):
     assert shapes.configure(once, shape) == once
 
 
-def test_a_commented_setting_is_uncommented_and_keeps_its_explanation():
-    # `submit_url` is seeded commented out, with the sentence that says what it is for.
-    # An instructor uncommenting it keeps that sentence; so does this.
-    external = shapes.BY_NAME["external"]
-    line = next(
-        ln
-        for ln in shapes.configure(_seeded(external), external).splitlines()
-        if ln.startswith("submit_url:")
-    )
-    assert shapes.SUBMIT_URL in line
-    assert "external only" in line
-
-
 def test_the_scaffolds_placeholder_never_reaches_a_live_setting():
-    # `grades._submit_url` refuses a line still carrying `CHANGE-ME`, so a `configure`
-    # that merely uncommented the seeded line would ship a semester a button pointing at a
-    # page that does not exist - and the reader would drop the value on the way.
+    # `grades._submit_url` refuses a line still carrying `CHANGE-ME`, so the address the
+    # run writes must be a real one.
     for shape in shapes.SHAPES:
         for line in shapes.configure(_seeded(shape), shape).splitlines():
             if not line.startswith("#"):
                 assert course.SETTING_PLACEHOLDER not in line
+        assert course.SETTING_PLACEHOLDER not in str(shapes.run_settings(shape))
 
 
 def test_a_setting_the_scaffold_never_writes_is_refused():
@@ -1170,7 +1177,7 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     when = datetime(2026, 9, 4, 14, 0)
     due = datetime(2026, 9, 4, 15, 0)
     cutoff = datetime(2026, 9, 4, 16, 0)
-    blocks = module._schedule_blocks("e2eab12cd", when, due, cutoff)
+    blocks = module._schedule_blocks("e2eab12cd", when, due)
     doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks))
     assert set(doc) == {"timezone", "assignments", "events"}
     mine = set(doc["assignments"]) - {"assignment-1"}
@@ -1178,11 +1185,18 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     for slug in mine:
         entry = doc["assignments"][slug]
         assert entry["course_source_repo"] == slug
-        assert set(entry) <= schedule.KNOWN_ASSIGNMENT | {"title"}
-        # The due date and the cutoff are separate instants: collapsing them would skip
-        # the refresh pass entirely, which is most of what the live run is there to
-        # exercise.
-        assert entry["due_datetime"] != entry["grading_datetime"]
+        assert set(entry) <= schedule.KNOWN_ASSIGNMENT
+    # The run settings of all five, in one fence of the semester's assignments.yml, each
+    # with a late window so the due date and the cutoff stay separate instants.
+    instance = settings.parse_instance(
+        schedule_edit.insert_block(
+            schedule_edit.with_assignments_key(""),
+            "e2eab12cd",
+            module._instance_blocks("e2eab12cd", due, cutoff),
+        )
+    )
+    assert not instance.faults and set(instance.blocks) == mine
+    assert all(b["late_window_days"] >= 1 for b in instance.blocks.values())
     # And removing the one fence takes all five out again.
     fenced = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks)
     assert schedule_edit.remove_block(fenced, "e2eab12cd") == SCHEDULE
@@ -1297,6 +1311,7 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     )
     monkeypatch.setattr(module.gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(module.schedule_edit, "put_schedule", lambda *a, **k: True)
+    monkeypatch.setattr(module.schedule_edit, "put_instance", lambda *a, **k: True)
     monkeypatch.setattr(module.discovery, "list_org_repos", lambda org: [])
     monkeypatch.setattr(module.grades, "find_receipts_issue", lambda org, repo: None)
     monkeypatch.setattr(
@@ -1318,12 +1333,9 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     seeded = scaffold._grading_config(
         title="E2E",
         kind="individual",
-        team_formation="self_select",
         submit_via="assignment_repo",
-        visibility="private",
         formats=["py"],
         autograde=True,
-        defaults={},
     )
     monkeypatch.setattr(
         module.shapes, "read_config", lambda org, slug: (seeded, "sha1")
@@ -1399,7 +1411,7 @@ def test_the_walk_presses_new_assignment_once_per_shape_with_its_own_answers(
     for shape, inputs in zip(shapes.SHAPES, presses, strict=True):
         assert inputs["semester"] == f"{RUN}-{shape.name}"
         assert inputs["submit_via"] == shape.submit_via
-        assert inputs["visibility"] == (shape.visibility or "private")
+        assert "visibility" not in inputs  # the semester's, in assignments.yml
         assert inputs["autograde"] is shape.autograde
         assert inputs["assignment_number"] == cleanup.ASSIGNMENT_NUMBER
 
