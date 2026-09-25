@@ -2,7 +2,15 @@ import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { YamlText } from '../src/edit/yamlText';
 
-import SEEDED from '../../templates/semester-config/schedule.yml?raw';
+import TEMPLATE from '../../templates/semester-config/schedule.yml?raw';
+import POLICY from '../schemas/policy.json';
+
+// The template with the institution values its comments name filled in, as Bootstrap
+// semester fills them (policy.yml).
+const SEEDED = TEMPLATE.replaceAll('{timezone}', POLICY.defaults.timezone).replaceAll(
+  '{grace_days}',
+  String(POLICY.defaults.archive.grace_days),
+);
 import SHEET from '../../example-course/semester-org/grading_sheets/assignment-4-project.yml?raw';
 
 const comments = (t: string): string[] => t.split('\n').filter((l) => l.trim().startsWith('#'));
