@@ -421,22 +421,48 @@ def _set_actions(org: str, repo: str, state: dict) -> bool:
     return code == 0
 
 
-def _run_count(org: str, repo: str, query: str) -> int:
+def _run_count(org: str, repo: str, query: str, workflow: str = "") -> int:
+    """How many runs of `org/repo` (of its `workflow` file only, when named) match
+    `query`. Raises when GitHub cannot say."""
+    scope = f"workflows/{workflow}/" if workflow else ""
     code, out = gh(
-        "api", f"repos/{org}/{repo}/actions/runs?{query}", "--jq", ".total_count"
+        "api",
+        f"repos/{org}/{repo}/actions/{scope}runs?{query}",
+        "--jq",
+        ".total_count",
     )
     if code != 0 or not out.strip().isdigit():
         raise RuntimeError(f"could not list the runs of {org}/{repo}: {out[:200]}")
     return int(out.strip())
 
 
-def _alive(targets: list[tuple[str, str]]) -> list[str]:
-    """The target repos with a run queued or in progress."""
-    return [
+# Every state a run is in before it has finished.
+LIVE_RUN_STATES = ("queued", "in_progress", "waiting", "requested", "pending")
+# The central toolkit's workflows that re-render every org on a tier, by tier: one of them
+# running while the migration writes is the 422 race (two writers on one branch).
+CENTRAL_REFRESHERS = {
+    "main": "deploy-main.yml",
+    "preview": "deploy-preview.yml",
+    "release": "promote.yml",
+}
+
+
+def _alive(targets: list[tuple[str, str]], ref: str) -> list[str]:
+    """The target repos with a run not yet finished, and the central toolkit's deploy of
+    tier `ref` (the course's `central_ref`) when one of those is not finished either."""
+    out = [
         f"{org}/{repo}"
         for org, repo in targets
-        if any(_run_count(org, repo, f"status={s}") for s in ("in_progress", "queued"))
+        if any(_run_count(org, repo, f"status={s}") for s in LIVE_RUN_STATES)
     ]
+    workflow = CENTRAL_REFRESHERS.get(ref)
+    central_org, central_repo = CENTRAL.split("/", 1)
+    if workflow and any(
+        _run_count(central_org, central_repo, f"status={s}", workflow)
+        for s in LIVE_RUN_STATES
+    ):
+        out.append(f"{CENTRAL} ({workflow})")
+    return out
 
 
 def _rename(org: str, old: str, new: str) -> bool:
@@ -570,8 +596,10 @@ class Pause:
     switched - what each was set to, so the unpause restores exactly that and a run that
     stops (or is interrupted) can always be resumed or released by hand."""
 
-    def __init__(self, org: str, targets: Callable[[], list[tuple[str, str]]]) -> None:
-        self.org, self.targets = org, targets
+    def __init__(
+        self, org: str, targets: Callable[[], list[tuple[str, str]]], course: str
+    ) -> None:
+        self.org, self.targets, self.course = org, targets, course
         self.saved: dict[str, dict] = {}  # "org/repo" -> its setting before the pause
         self.started = ""
 
@@ -612,7 +640,7 @@ class Pause:
         )
 
     def quiet(self, keys: list[str]) -> bool:
-        alive = _alive([self._live(k) for k in keys])
+        alive = _alive([self._live(k) for k in keys], central_ref_for(self.course))
         if alive:
             log_err(
                 f"a workflow run is queued or running in {', '.join(alive)} - wait "
@@ -778,7 +806,7 @@ class Semester:
     def __init__(self, org: str, course_org: str) -> None:
         self.org, self.course = org, course_org
         self.people = ""
-        self.pause = Pause(org, self.targets)
+        self.pause = Pause(org, self.targets, course_org)
 
     def config(self) -> str:
         """The config repo under whichever name it has right now."""
@@ -1061,7 +1089,7 @@ class Semester:
 class Course:
     def __init__(self, org: str) -> None:
         self.org = org
-        self.pause = Pause(org, self.targets)
+        self.pause = Pause(org, self.targets, org)
 
     def targets(self) -> list[tuple[str, str]]:
         """`.github` and every content repo and template that carries a workflow."""
@@ -1350,7 +1378,8 @@ def preflight(org: str) -> Course | Semester | None:
             f"{org}'s .github carries neither {COURSE_HUB_TOPIC} nor a semester topic"
         )
         return None
-    alive = _alive(target.targets())
+    course = target.course if isinstance(target, Semester) else org
+    alive = _alive(target.targets(), central_ref_for(course))
     if alive:
         log_err(
             f"a workflow run is queued or running in {', '.join(alive)} - wait for it "

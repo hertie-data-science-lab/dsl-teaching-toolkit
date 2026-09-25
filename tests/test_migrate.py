@@ -89,6 +89,9 @@ class FakeGitHub:
         self.fail_rename = False
         self.run_after_pause: tuple[str, str] | None = None
         self.clock = "Thu, 24 Sep 2026 10:00:00 GMT"  # GitHub's, in its Date header
+        self.central_runs: dict[
+            str, list[str]
+        ] = {}  # the toolkit's: workflow -> states
 
     def add(self, org, name, files=None, *, topics=(), archived=False, template=False,
             branches=None):  # fmt: skip
@@ -191,6 +194,12 @@ class FakeGitHub:
         if parts[0] != "repos":
             raise AssertionError(f"unexpected gh call {args}")
         org, name = parts[1], parts[2]
+        if f"{org}/{name}" == migrate.CENTRAL and parts[3:5] == [
+            "actions",
+            "workflows",
+        ]:
+            state = query.split("=", 1)[1]
+            return 0, str(self.central_runs.get(parts[5], []).count(state))
         if self._repo(org, name) is None:
             return 1, "gh: Not Found (HTTP 404)"
         key = (org, self._name(org, name))
@@ -519,10 +528,26 @@ def test_an_unreadable_github_clock_stops_the_pause(
     assert fake.commits == [] and fake.puts == []
 
 
-def test_a_run_in_progress_refuses_the_migration(fake, semester, monkeypatch, capsys):
-    fake.runs[(SEM, OLD_JOIN_REPO)] = [("2026-09-24T09:00:00Z", "in_progress")]
+@pytest.mark.parametrize("state", migrate.LIVE_RUN_STATES)
+def test_a_run_not_yet_finished_refuses_the_migration(
+    fake, semester, monkeypatch, capsys, state
+):
+    fake.runs[(SEM, OLD_JOIN_REPO)] = [("2026-09-24T09:00:00Z", state)]
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     assert f"queued or running in {SEM}/{OLD_JOIN_REPO}" in capsys.readouterr().err
+    assert fake.commits == [] and fake.puts == []
+
+
+def test_a_central_deploy_of_the_courses_tier_refuses_the_migration(
+    fake, semester, monkeypatch, capsys
+):
+    # The course runs `main` (the fixture's central_ref_for): a Deploy preview in flight
+    # does not act on it, a Deploy main does.
+    fake.central_runs["deploy-preview.yml"] = ["in_progress"]
+    assert _main(monkeypatch, SEM) == 0
+    fake.central_runs["deploy-main.yml"] = ["waiting"]
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert f"{migrate.CENTRAL} (deploy-main.yml)" in capsys.readouterr().err
     assert fake.commits == [] and fake.puts == []
 
 
