@@ -4,11 +4,13 @@ return of marks (decision 0009 rule 10)."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import yaml
 
 from dsl_course import collect, derive, grades, scaffold
 from tests.test_collect import _QUESTION_NB, _capture_archive, _checkout
-from tests.test_grades import ROSTER_ADA, _distribute
+from tests.test_grades import ROSTER_ADA, _distribute, _schedule_with
 from tests.test_scaffold import _solution_files, fake  # noqa: F401 - the fixture
 
 QUESTIONS = "questions:\n  Q1: 10\n  Q2: {points: 5, file: starter.tex}\n"
@@ -35,27 +37,34 @@ def test_a_two_format_template_is_scaffolded_derived_collected_and_returned(
     assert gspec.runs_completion_check
     assert gspec.question_files == {"Q2": "starter.tex"}
 
-    # collect: the grader copies carry the notebook's questions and the write-up
+    # collect: at the cutoff the grader copies carry the notebook's questions and the
+    # write-up. Hand-marked here, so no hidden tests and no completion check run.
+    gspec = grades.parse_grading_spec(
+        written["grading_config.yml"]
+        .replace("grader_pdf: false", "grader_pdf: true")
+        .replace("completion_check: true", "completion_check: false")
+        + QUESTIONS
+    )
+    sched = _schedule_with("assignment-1")
+    monkeypatch.setattr(collect.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(collect, "load_grading_spec", lambda *a, **k: gspec)
+    monkeypatch.setattr(collect, "sandbox_unusable", lambda: "")
+    monkeypatch.setattr(
+        collect, "sync_sheet", lambda *a, **k: SimpleNamespace(written=True)
+    )
     _checkout(monkeypatch, {"starter.ipynb": _QUESTION_NB, "starter.tex": "\\A"})
     archived = _capture_archive(monkeypatch)
     monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
     monkeypatch.setattr(collect, "_pdf_engine_present", lambda: False)
-    collect.export_grader_documents(
-        "Semester", "a1", "a1", False, "2026-10-13", False, files=("starter.tex",)
-    )
-    assert set(archived) == {
-        ".system/autograde/a1/alice.ipynb",
-        ".system/autograde/a1/alice.starter.tex",
-    }
+    assert collect.collect("Org", "assignment-1-f2026", "Semester") == 0
+    assert {
+        ".system/autograde/assignment-1/alice.ipynb",
+        ".system/autograde/assignment-1/alice.starter.tex",
+    } <= set(archived)
 
     # the sheet: one total, a feedback cell per question, the file named beside Q2
-    spec = grades.SheetSpec(
-        slug="assignment-1",
-        title="Two formats",
-        is_group=False,
-        questions=gspec.questions,
-        question_files=gspec.question_files,
-    )
+    spec = grades.sheet_spec(sched, "assignment-1", "assignment-1", gspec, False)
+    assert spec.question_files == {"Q2": "starter.tex"}
     sheet = grades.new_sheet(spec, [("ada-l", ["ada-l"])])
     block = sheet["submissions"]["ada-l"]
     assert block[grades.QUESTION_FEEDBACK_KEY] == {"Q1": None, "Q2": None}

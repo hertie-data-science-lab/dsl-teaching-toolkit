@@ -2925,26 +2925,30 @@ def _export_document(source: Path, env: dict) -> tuple[str, bytes] | None:
     return None if own_source is None else (GRADER_SOURCE, own_source)
 
 
-def tagged_copy(folder: Path, name: str) -> tuple[str, bytes] | None:
-    """The reading copy of a file a question is marked from (`questions: Q3: {file: ...}`):
-    `(the file name it is archived under, its bytes)`, or None when the submission has no
-    such regular file. A `.tex` (or any source) with its compiled `.pdf` committed beside it
-    is read as the PDF. Never rendered here: nothing a student wrote is executed for it.
+def tagged_copies(folder: Path, name: str) -> list[tuple[str, bytes]]:
+    """The reading copies of a file a question is marked from (`questions: Q3: {file:
+    ...}`): `[(the file name it is archived under, its bytes)]`, empty when the submission
+    has no such regular file. A `.tex` also brings its compiled `.pdf` when one is
+    committed beside it - the PDF to read, the source to check it against. Never rendered
+    here: nothing a student wrote is executed for it. A file past the archive cap is
+    named in the log and not archived.
 
     `name` is the template's, but every directory on the way is the student's, so a path
     that resolves outside the checkout is refused like a symlink."""
     candidates = [name]
-    if PurePosixPath(name).suffix.lower() != ".pdf":
+    if PurePosixPath(name).suffix.lower() == ".tex":
         candidates.insert(0, str(PurePosixPath(name).with_suffix(".pdf")))
     root = folder.resolve()
+    out: list[tuple[str, bytes]] = []
     for candidate in candidates:
         path = folder / candidate
         if not path.parent.resolve().is_relative_to(root):
             log_err("  ! a question's file is outside the submission - not read")
-            return None
-        if (data := _result_bytes(f"the question file {candidate}", path)) is not None:
-            return candidate.replace("/", "_"), data
-    return None
+            return []
+        data = _result_bytes(f"the question file {candidate}", path, ARCHIVE_MAX_BYTES)
+        if data is not None:
+            out.append((candidate.replace("/", "_"), data))
+    return out
 
 
 def _archive_tagged(
@@ -2953,17 +2957,15 @@ def _archive_tagged(
     """Archive the file each tagged question is marked from, beside the grader copy, as
     `<unit>.<file>`. Missing files are simply not archived: the grader opens the repo."""
     for name in files:
-        copy = tagged_copy(folder, name)
-        if copy is None or len(copy[1]) > ARCHIVE_MAX_BYTES:
-            continue
-        put_file(
-            semester_org,
-            CONFIG_REPO,
-            f"{autograde_path(slug)}/{target_key}.{copy[0]}",
-            copy[1],
-            f"autograde: {slug}/{target_key} question file",
-            person=True,
-        )
+        for archived, content in tagged_copies(folder, name):
+            put_file(
+                semester_org,
+                CONFIG_REPO,
+                f"{autograde_path(slug)}/{target_key}.{archived}",
+                content,
+                f"autograde: {slug}/{target_key} question file",
+                person=True,
+            )
 
 
 def _grader_document_for(
@@ -2980,7 +2982,7 @@ def _grader_document_for(
     """Archive one submission's grader copy. Returns one of the GRADER_* verdicts.
 
     `files` are the submission files the tagged questions are marked from; each is
-    archived as it was submitted (`tagged_copy`), beside the copy of the runnable one.
+    archived as it was submitted (`tagged_copies`), beside the copy of the runnable one.
 
     `path` is the unit's own folder inside `repo` (`Target.path`), and only a shared drop
     box has one: the repo is the whole semester's, so a picker let loose on the checkout

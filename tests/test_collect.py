@@ -6853,17 +6853,32 @@ def test_a_shared_assignment_posts_no_receipts(monkeypatch):
 # ------------------------------------------------ the file a tagged question is marked from
 
 
-def test_a_tagged_questions_file_is_read_as_its_compiled_pdf_when_there_is_one(
-    tmp_path,
-):
+def test_a_tagged_tex_is_archived_with_its_compiled_pdf_when_there_is_one(tmp_path):
     (tmp_path / "starter.tex").write_text("\\documentclass{article}")
-    assert collect.tagged_copy(tmp_path, "starter.tex") == (
-        "starter.tex",
-        b"\\documentclass{article}",
-    )
+    assert collect.tagged_copies(tmp_path, "starter.tex") == [
+        ("starter.tex", b"\\documentclass{article}")
+    ]
     (tmp_path / "starter.pdf").write_bytes(b"%PDF-1.7")
-    assert collect.tagged_copy(tmp_path, "starter.tex") == ("starter.pdf", b"%PDF-1.7")
-    assert collect.tagged_copy(tmp_path, "missing.tex") is None
+    assert collect.tagged_copies(tmp_path, "starter.tex") == [
+        ("starter.pdf", b"%PDF-1.7"),
+        ("starter.tex", b"\\documentclass{article}"),
+    ]
+    assert collect.tagged_copies(tmp_path, "missing.tex") == []
+
+
+def test_only_a_tex_brings_its_sibling_pdf(tmp_path):
+    (tmp_path / "notes.md").write_text("# Notes")
+    (tmp_path / "notes.pdf").write_bytes(b"%PDF-1.7")
+    assert collect.tagged_copies(tmp_path, "notes.md") == [("notes.md", b"# Notes")]
+
+
+def test_a_tagged_file_past_the_archive_cap_is_named_not_archived(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(collect, "ARCHIVE_MAX_BYTES", 4)
+    (tmp_path / "report.tex").write_text("too long")
+    assert collect.tagged_copies(tmp_path, "report.tex") == []
+    assert "the question file report.tex is past" in capsys.readouterr().err
 
 
 def test_a_tagged_file_behind_a_symlinked_folder_is_not_read(tmp_path):
@@ -6873,7 +6888,7 @@ def test_a_tagged_file_behind_a_symlinked_folder_is_not_read(tmp_path):
     sub = tmp_path / "sub"
     sub.mkdir()
     (sub / "docs").symlink_to(outside)
-    assert collect.tagged_copy(sub, "docs/report.tex") is None
+    assert collect.tagged_copies(sub, "docs/report.tex") == []
 
 
 def test_the_grader_copies_include_each_tagged_questions_file(monkeypatch):
