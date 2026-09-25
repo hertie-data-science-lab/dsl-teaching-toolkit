@@ -91,12 +91,18 @@ from .grades import (
 )
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .profile_readme import profile_files, update_profile_readme
-from .repos import default_branch, repo_missing, set_repo_topics
+from .repos import (
+    current_description,
+    default_branch,
+    repo_missing,
+    set_repo_topics,
+)
 from .scaffold import materials_system_files
 from .setting_readers import RENAMED_SETTINGS
 from .settings import ASSIGNMENT_DEFAULTS_KEY
 from .sync_faculty import retired_course_faults
 from .welcome import (
+    RETIRED_JOIN_FORMS,
     config_system_files,
     join_files,
     refresh_config_system_files,
@@ -543,10 +549,13 @@ def _alive(targets: list[tuple[str, str]]) -> list[str]:
     return out
 
 
-def _rename(org: str, old: str, new: str) -> bool:
-    code, out = gh(
-        "api", "--method", "PATCH", f"repos/{org}/{old}", "-f", f"name={new}"
-    )
+def _rename(org: str, old: str, new: str, description: str | None = None) -> bool:
+    """Rename `org/old` to `new`, and - in the same PATCH - bring its description to the
+    current wording when it still carries a superseded one."""
+    fields = ["-f", f"name={new}"]
+    if description:
+        fields += ["-f", f"description={description}"]
+    code, out = gh("api", "--method", "PATCH", f"repos/{org}/{old}", *fields)
     if code != 0:
         log_err(f"could not rename {org}/{old} to {new}: {out[:200]}")
     return code == 0
@@ -987,6 +996,13 @@ def _drift(org: str, wanted: dict[str, dict[str, bytes]]) -> list[str]:
     return out
 
 
+def _retired(org: str, repo: str, paths: tuple[str, ...]) -> list[str]:
+    """`repo/path (retired: deleted)` for each of `paths` still in `org/repo`: what the
+    re-render deletes, listed in the plan beside what it writes."""
+    live = _files(org, repo)
+    return [f"{repo}/{p} (retired: deleted)" for p in paths if p in live]
+
+
 def _no_drift(drift: list[str], *, quiet: bool = False) -> bool:
     """The re-render's verify: nothing left differing, else each file named (unless
     `quiet`)."""
@@ -1057,13 +1073,26 @@ class Semester:
         names = set(_listing(self.org))
         return {old: new for old, new in REPO_RENAMES.items() if old in names}
 
+    def description(self, repo: str) -> str | None:
+        """The current wording for `repo`'s description, when it still says an old one."""
+        row = _listing(self.org).get(repo) or {}
+        return current_description(row.get("description") or "", "semester")
+
+    def rename_plan(self) -> list[str]:
+        out = []
+        for old, new in self.renames_left().items():
+            out.append(f"rename {old} -> {new}")
+            if want := self.description(old):
+                out.append(f"  description -> {want}")
+        return out
+
     def rename(self) -> bool:
         names = set(_listing(self.org))
         for old, new in self.renames_left().items():
             if new in names:
                 log_err(f"{self.org} has both {old} and {new} - resolve by hand")
                 return False
-            if not _rename(self.org, old, new):
+            if not _rename(self.org, old, new, self.description(old)):
                 return False
             self.renamed_now[old] = new
         return True
@@ -1074,7 +1103,8 @@ class Semester:
         return not self.renames_left()
 
     def rename_verified(self) -> bool:
-        """Renamed, and each old name this run renamed redirects to its new one."""
+        """Renamed, each old name this run renamed redirecting to its new one, and each
+        description in the current wording."""
         if not self.renamed():
             return False
         stale = [
@@ -1085,7 +1115,10 @@ class Semester:
                 f"{self.org}/{old} does not redirect to {self.renamed_now[old]} - old "
                 f"links to it are broken"
             )
-        return not stale
+        worded = [n for n in self.renamed_now.values() if self.description(n)]
+        for new in worded:
+            log_err(f"{self.org}/{new}: the description still has its old wording")
+        return not stale and not worded
 
     # layout -------------------------------------------------------------------
     def instructors_text(self, old: str) -> str | None:
@@ -1257,7 +1290,9 @@ class Semester:
             JOIN_REPO: join_files(self.org),
             ".github": profile_files(self.org, central_ref=ref),
         }
-        return _drift(self.org, wanted)
+        return _drift(self.org, wanted) + _retired(
+            self.org, JOIN_REPO, RETIRED_JOIN_FORMS
+        )
 
     def ready_to_render(self) -> bool:
         """Every step before the re-render done: only then does this engine's render of
@@ -1292,9 +1327,7 @@ class Semester:
             Step(
                 "rename repos",
                 done=self.renamed,
-                plan=lambda: [
-                    f"rename {o} -> {n}" for o, n in self.renames_left().items()
-                ],
+                plan=self.rename_plan,
                 do=self.rename,
                 verify=self.rename_verified,
                 rollback="rename each repo back in its Settings (the old name is free)",
@@ -1532,11 +1565,10 @@ class Course:
             if not row.get("archived"):
                 wanted[row["name"]] = hosted(row["name"], TEMPLATE_WORKFLOWS)
         retired = [
-            f"{repo}/{p} (retired)"
+            line
             for repo in wanted
             if repo != ".github"
-            for p in RETIRED_WORKFLOWS
-            if p in _files(self.org, repo)
+            for line in _retired(self.org, repo, RETIRED_WORKFLOWS)
         ]
         return _drift(self.org, wanted) + retired
 

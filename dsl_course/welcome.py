@@ -280,6 +280,14 @@ def refresh_join_team_form(org: str) -> int:
     return 1
 
 
+# The forms were renamed to control the issue-chooser ordering (01-/02- prefix); the old
+# filenames are deleted on live semesters or the chooser shows both generations.
+RETIRED_JOIN_FORMS = (
+    ".github/ISSUE_TEMPLATE/join.yml",
+    ".github/ISSUE_TEMPLATE/join-team.yml",
+)
+
+
 def join_files(org: str) -> dict[str, bytes]:
     """The join repo's SYSTEM-owned files for one semester, exactly as
     `refresh_join_workflows` writes them - so "is this semester current?" can be asked
@@ -327,12 +335,7 @@ def refresh_join_workflows(org: str) -> int:
         JOIN_REPO,
         join_files(org),
         "ci: refresh onboarding workflows + Join forms",
-        # The forms were renamed to control the issue-chooser ordering (01-/02- prefix);
-        # retire the old filenames on live semesters or the chooser shows both generations.
-        delete=(
-            ".github/ISSUE_TEMPLATE/join.yml",
-            ".github/ISSUE_TEMPLATE/join-team.yml",
-        ),
+        delete=RETIRED_JOIN_FORMS,
     ):
         log_err(f"join-repo files not written in {org}")
         failures = 1

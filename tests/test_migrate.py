@@ -100,8 +100,9 @@ class FakeGitHub:
         ] = {}  # the toolkit's: workflow -> states
 
     def add(self, org, name, files=None, *, topics=(), archived=False, template=False,
-            branches=None):  # fmt: skip
+            branches=None, description=""):  # fmt: skip
         self.repos[(org, name)] = {
+            "description": description,
             "archived": archived,
             "topics": list(topics),
             "isTemplate": template,
@@ -136,6 +137,7 @@ class FakeGitHub:
         return [
             {
                 "name": n,
+                "description": r["description"],
                 "archived": r["archived"],
                 "topics": r["topics"],
                 "isTemplate": r["isTemplate"],
@@ -252,6 +254,8 @@ class FakeGitHub:
                 return 1, "HTTP 403: Forbidden"
             new = (org, fields["name"])
             self.repos[new] = self.repos.pop(key)
+            if "description" in fields:
+                self.repos[new]["description"] = fields["description"]
             if self.redirect_renames:
                 self.redirects[key] = fields["name"]
             if key in self.actions:  # a repo keeps its settings across a rename
@@ -588,6 +592,34 @@ def test_a_dispatch_that_fails_is_named_and_the_org_is_still_migrated(
     assert f"could not dispatch Scheduled release for {SEM}" in err
     assert "the next tick catches up" in err
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
+
+
+def test_the_rename_brings_an_old_description_to_the_current_wording(
+    fake, semester, monkeypatch, capsys
+):
+    old = (
+        "[visible to instructors only]: Everything you configure for this cohort is here "
+        "- student roster, teams, term schedule, and marking. Students never see it, and "
+        "no PII leaves this repo."
+    )
+    want = repos.current_description(old, "semester")
+    assert want and "semester" in want
+    fake._repo(SEM, OLD_CONFIG_REPO)["description"] = old
+    assert _main(monkeypatch, SEM) == 0
+    assert f"-   description -> {want}" in capsys.readouterr().out
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert fake._repo(SEM, CONFIG_REPO)["description"] == want
+
+
+def test_the_re_render_plan_lists_what_it_deletes(fake, semester, monkeypatch, capsys):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    fake.tree(SEM, JOIN_REPO)[migrate.RETIRED_JOIN_FORMS[0]] = b"old form"
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM) == 0
+    assert (
+        f"-   {JOIN_REPO}/{migrate.RETIRED_JOIN_FORMS[0]} (retired: deleted)"
+        in capsys.readouterr().out
+    )
 
 
 def test_a_rename_whose_old_name_does_not_redirect_stops(
@@ -1026,7 +1058,9 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     assert f"course-materials-f2026/{migrate.RELEASE_WORKFLOWS[0]}" in err
     assert "course-materials-f2026/.system/MAINTAINING.md" in err
     assert f"assignment-1-f2026/{migrate.TEMPLATE_WORKFLOWS[0]}" in err
-    assert f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired)" in err
+    assert (
+        f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired: deleted)" in err
+    )
 
 
 def test_a_course_stopped_at_the_re_render_finishes_on_the_next_run(
