@@ -409,14 +409,27 @@ def test_status_json_names_the_cutoff_grading_cutoff_datetime():
 # ------------------------------------------- solution_datetime (include_solution, --solution)
 
 
-def _hand_out(monkeypatch, *flags: str) -> list[bool]:
+def _hand_out(monkeypatch, *flags: str, store: dict | None = None, rc: int = 0):
+    """`assign.main` for a hand out, over a semester-config held in `store`."""
     seen: list[bool] = []
+    store = {} if store is None else store
     monkeypatch.setattr(
         assign,
         "provision_all",
         lambda *a, solution=False, **k: seen.append(solution) or (0, 0),
     )
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(
+        assign, "get_file_content", lambda org, repo, path, ref="": store.get(path)
+    )
+    monkeypatch.setattr(
+        assign,
+        "put_file",
+        lambda org, repo, path, body, msg, **k: (
+            store.__setitem__(path, body.decode()) or True
+        ),
+    )
+    monkeypatch.setenv("GITHUB_ACTOR", "Prof")
     base = [
         "assign",
         "--course-org",
@@ -427,7 +440,7 @@ def _hand_out(monkeypatch, *flags: str) -> list[bool]:
         "S",
     ]
     monkeypatch.setattr(sys, "argv", [*base, *flags])
-    assert assign.main() == 0
+    assert assign.main() == rc
     return seen
 
 
@@ -438,6 +451,35 @@ def test_the_manual_hand_out_includes_the_solution_only_when_asked(
     monkeypatch, flags, pushed
 ):
     assert _hand_out(monkeypatch, *flags) == [pushed]
+
+
+def test_a_hand_out_with_the_solution_runs_only_straight_after_its_preview(
+    monkeypatch, capsys
+):
+    now = ("--solution-datetime", "now")
+    store: dict = {}
+    # Unpreviewed: refused before anything is created, naming why.
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store, rc=1) == []
+    assert "preview this hand out first" in capsys.readouterr().err
+    # Previewed by the same person, of the same template: it goes ahead, once.
+    assert _hand_out(monkeypatch, *now, store=store) == [True]
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store) == [True]
+    assert _hand_out(monkeypatch, *now, "--no-preview", store=store, rc=1) == []
+    # Another person's preview does not count.
+    _hand_out(monkeypatch, *now, store=store)
+    monkeypatch.setenv("GITHUB_ACTOR", "somebody-else")
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        assign,
+        "provision_all",
+        lambda *a, solution=False, **k: seen.append(solution) or (0, 0),
+    )
+    monkeypatch.setattr(sys, "argv", [*sys.argv, "--no-preview"])
+    assert assign.main() == 1 and seen == []
+
+
+def test_a_hand_out_without_the_solution_needs_no_preview(monkeypatch):
+    assert _hand_out(monkeypatch, "--no-preview") == [False]
 
 
 @pytest.mark.parametrize(

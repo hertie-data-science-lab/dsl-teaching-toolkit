@@ -11,7 +11,7 @@ import json
 
 from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM
 from ..discovery import discover_semesters
-from ..faults import NOT_MIGRATED, not_migrated_text
+from ..faults import NOT_MIGRATED, moved_text, not_migrated_text
 from ..gh_teams import get_team_members, list_teams
 from ..schema_check import validate
 from .registry import (
@@ -53,14 +53,21 @@ RENAMED_REQUEST_ARGS = {
     "format": "formats",
     "include_solution": "solution_datetime",
 }
+# Args that went (decision 0009), with where the fact lives now: an older console build
+# sending one gets a sentence, not a schema error.
+MOVED_REQUEST_ARGS = {
+    "slug": "the schedule names the entry; a template two entries share is refused",
+    "team_formation": "it is set per semester in semester-config/assignments.yml",
+    "visibility": "it is set per semester in semester-config/assignments.yml",
+}
 
 
-def _refuse_old_spellings(fields: object, renames: dict[str, str], where: str) -> None:
+def _refuse_old_spellings(
+    fields: object, renames: dict[str, str], where: str, say=not_migrated_text
+) -> None:
     for old, new in renames.items():
         if isinstance(fields, dict) and old in fields:
-            raise RequestError(
-                NOT_MIGRATED, f"{where}.{old}: {not_migrated_text(old, new)}."
-            )
+            raise RequestError(NOT_MIGRATED, f"{where}.{old}: {say(old, new)}.")
 
 
 class RequestError(ValueError):
@@ -84,6 +91,12 @@ def parse_request(text: str) -> Request:
         raw.get("args") if isinstance(raw, dict) else None,
         RENAMED_REQUEST_ARGS,
         "$.args",
+    )
+    _refuse_old_spellings(
+        raw.get("args") if isinstance(raw, dict) else None,
+        MOVED_REQUEST_ARGS,
+        "$.args",
+        moved_text,
     )
     problems = validate(raw, REQUEST_JSON_SCHEMA)
     if problems:

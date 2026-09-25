@@ -52,6 +52,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import time
@@ -106,6 +107,7 @@ from .gh_contents import (
     repo_blob_shas,
     repo_tree,
 )
+from .gh_teams import acting_login
 from .ghcli import GIT_ENV, bot_login, clone, gh, git
 from .log import (
     CLIParser,
@@ -1292,6 +1294,10 @@ def main() -> int:
                 overwrite=args.overwrite,
                 dry_run=args.preview,
             )
+        if when == SOLUTION_NOW and not args.preview:
+            refused = preview_first(args.semester_org, args.template, preview=False)
+            if refused is not None:
+                return refused
         rc, _changed = provision_all(
             args.course_org,
             args.template,
@@ -1304,10 +1310,63 @@ def main() -> int:
             # and None (it could not be read) falls back to a probe per repo.
             listing=listing_by_name(args.semester_org),
         )
+        if when == SOLUTION_NOW and args.preview and rc == 0:
+            preview_first(args.semester_org, args.template, preview=True)
         return rc
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
+
+
+SOLUTION_PREVIEW = records.path("solution_preview")
+PREVIEW_FIRST = "PREVIEW_FIRST"
+
+
+def _actor() -> str:
+    """Who asked: the person who started the workflow, else the login `gh` runs as."""
+    return os.environ.get("GITHUB_ACTOR") or acting_login() or ""
+
+
+def preview_first(semester_org: str, template: str, preview: bool) -> Summary | None:
+    """The one gate on a hand out WITH the solution (`--solution-datetime now`): it pushes
+    the model answer and rubric into every student's repo, and cannot be undone. A preview
+    records who previewed which template (`SOLUTION_PREVIEW`, private); the real run goes
+    ahead only when the last record is that person's preview of that template, and then
+    spends it. None = go ahead; a refusal otherwise. Fail closed: an unreadable record
+    refuses."""
+    actor = _actor()
+    want = {"actor": actor.casefold(), "template": template, "solution": SOLUTION_NOW}
+    if preview:
+        body = (json.dumps(want, indent=2, sort_keys=True) + "\n").encode()
+        put_file(
+            semester_org,
+            CONFIG_REPO,
+            SOLUTION_PREVIEW,
+            body,
+            "Record a preview of a hand out with the solution",
+        )
+        return None
+    try:
+        last = json.loads(
+            get_file_content(semester_org, CONFIG_REPO, SOLUTION_PREVIEW) or "{}"
+        )
+    except (RuntimeError, json.JSONDecodeError):
+        last = {}
+    if actor and last == want:
+        put_file(
+            semester_org,
+            CONFIG_REPO,
+            SOLUTION_PREVIEW,
+            b"{}\n",
+            "Spend the preview of a hand out with the solution",
+        )
+        return None
+    text = (
+        "Handing out with the solution pushes the model answer and rubric into every "
+        "student's repo, and cannot be undone: preview this hand out first, then run it."
+    )
+    log_err(text)
+    return Summary(text, reasons=[{"code": PREVIEW_FIRST, "text": text}], code=1)
 
 
 def solution_record_path(slug: str) -> str:
