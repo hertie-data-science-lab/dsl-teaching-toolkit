@@ -915,6 +915,7 @@ def _stub_refresh(
         seed, "discover_semesters", lambda org: ["Semester-f2026", "Semester-s2027"]
     )
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(seed, "discover_materials_repos", lambda org: [])
     monkeypatch.setattr(seed, "discover_assignment_repos", lambda org: [])
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
@@ -960,6 +961,9 @@ def test_refresh_gives_every_assignment_template_the_hand_out_button(monkeypatch
         seed, "discover_content_repos", lambda org: ["course-materials-f2026"]
     )
     monkeypatch.setattr(
+        seed, "discover_materials_repos", lambda org: ["course-materials-f2026"]
+    )
+    monkeypatch.setattr(
         seed, "discover_assignment_repos", lambda org: [{"name": "assignment-1-f2026"}]
     )
     monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
@@ -984,6 +988,25 @@ def test_refresh_gives_every_assignment_template_the_hand_out_button(monkeypatch
         ("assignment-1-f2026", workflows_place.TEMPLATE_WORKFLOWS),
     ]
     assert secreted == [["course-materials-f2026", "assignment-1-f2026"]]
+
+
+def test_refresh_writes_system_files_only_into_materials_repos(monkeypatch):
+    # The sweep visits the code and dataset repos too; the topic, not the name, says
+    # which of them is a materials repo.
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(
+        seed, "discover_content_repos", lambda org: ["course-materials-f2026", "slides"]
+    )
+    monkeypatch.setattr(seed, "discover_materials_repos", lambda org: ["slides"])
+    monkeypatch.setattr(seed, "push_content_workflows", lambda *a, **k: 0)
+    written: list[str] = []
+    monkeypatch.setattr(
+        seed.scaffold,
+        "refresh_materials_system_files",
+        lambda org, repo: written.append(repo) or 0,
+    )
+    assert seed.refresh("Course-Org") == 0
+    assert written == ["slides"]
 
 
 def test_refresh_leaves_an_archived_assignment_template_alone(monkeypatch):
@@ -1129,6 +1152,7 @@ def test_the_course_migrations_refresh_leaves_every_semester_alone(monkeypatch, 
         ),
     )
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["cm-f2026"])
+    monkeypatch.setattr(seed, "discover_materials_repos", lambda org: ["cm-f2026"])
     monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
     dropdowns: list[list[str]] = []
     monkeypatch.setattr(
@@ -1158,6 +1182,7 @@ def test_a_refresh_with_no_bot_token_reds_only_outside_the_course_migration(
     propagate = seed._propagate_repo_secret  # the real one, over the stubbed `gh`
     _stub_refresh(monkeypatch)
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["cm-f2026"])
+    monkeypatch.setattr(seed, "discover_materials_repos", lambda org: ["cm-f2026"])
     monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
     monkeypatch.setattr(seed, "push_content_workflows", lambda *a, **k: 0)
     monkeypatch.setattr(seed, "_propagate_repo_secret", propagate)
@@ -1181,6 +1206,7 @@ def test_the_course_migrations_refresh_sets_the_secret_when_it_holds_the_token(
 ):
     _stub_refresh(monkeypatch)
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["cm-f2026"])
+    monkeypatch.setattr(seed, "discover_materials_repos", lambda org: ["cm-f2026"])
     monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
     monkeypatch.setattr(seed, "push_content_workflows", lambda *a, **k: 0)
     secreted: list[list[str]] = []

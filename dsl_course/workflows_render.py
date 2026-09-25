@@ -31,7 +31,6 @@ from .course import (
     ASSIGNMENT_TYPES,
     CONFIG_REPO,
     COURSE_DEFAULT_CHOICE,
-    MATERIALS_REPO_PREFIX,
     MIGRATE_DRIVER,
     NO_STARTER,
     NOTHING_PUBLIC,
@@ -712,14 +711,14 @@ def _newest(options: list[str]) -> str | None:
     return max(dated)[1] if dated else None
 
 
-def _newest_materials(options: list[str]) -> str | None:
-    """The `course-materials-*` option carrying the latest term tag, or None when the
-    dropdown holds none. Spring precedes autumn within a year, so the tag is ordered as
-    (year, autumn?) rather than alphabetically."""
+def _newest_materials(options: list[str], materials: list[str] | None) -> str | None:
+    """The materials-repo option (`dsl-materials` topic) carrying the latest term tag, or
+    None when the dropdown holds none. Spring precedes autumn within a year, so the tag is
+    ordered as (year, autumn?) rather than alphabetically."""
     dated = [
         (tag[1:], tag[0] == "f", o)
         for o in options
-        if o.startswith(MATERIALS_REPO_PREFIX) and (tag := semester_of(o))
+        if o in (materials or ()) and (tag := semester_of(o))
     ]
     return max(dated)[2] if dated else None
 
@@ -870,12 +869,20 @@ def render_release(semester_orgs: list[str], repo: str) -> str:
     )
 
 
-def render_central_release(source_repos: list[str], semester_orgs: list[str]) -> str:
+def render_central_release(
+    source_repos: list[str],
+    semester_orgs: list[str],
+    materials: list[str] | None = None,
+) -> str:
     """Central copy that lives in .github: `course_source_repo` is a dropdown of the course
     org's content repos (discovery.discover_content_repos), since this workflow lives
-    outside any one of them. Otherwise identical to the run-from-repo workflow."""
+    outside any one of them, pre-selected on the newest materials repo. Otherwise
+    identical to the run-from-repo workflow."""
     source_repo_input = _choice_input(
-        "course_source_repo", _COURSE_SOURCE_REPO_DESC, source_repos
+        "course_source_repo",
+        _COURSE_SOURCE_REPO_DESC,
+        source_repos,
+        _newest_materials(source_repos, materials),
     )
     return _render_release(
         header=(
@@ -1775,7 +1782,11 @@ on:
 {_CRON_NOTICE}"""
 
 
-def render_generate_syllabus(source_repos: list[str], semester_orgs: list[str]) -> str:
+def render_generate_syllabus(
+    source_repos: list[str],
+    semester_orgs: list[str],
+    materials: list[str] | None = None,
+) -> str:
     """Build the syllabus's session-by-session section from a semester's schedule.yml.
 
     A workflow rather than a CLI habit, because the people who write syllabi are the people
@@ -1794,7 +1805,7 @@ def render_generate_syllabus(source_repos: list[str], semester_orgs: list[str]) 
 on:
   workflow_dispatch:
     inputs:
-{_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos)}
+{_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos, _newest_materials(source_repos, materials))}
 {_choice_input("semester_org", "Semester whose schedule.yml supplies the sessions", semester_orgs)}
       preview:
         description: "Preview - print the block, commit nothing to .system/SYLLABUS.sessions.md"
@@ -1817,18 +1828,18 @@ on:
 """
 
 
-def render_new_materials(source_repos: list[str] | None = None) -> str:
+def render_new_materials(materials: list[str] | None = None) -> str:
     """Scaffold a correctly-structured course-materials-<tag> repo, then refresh.
 
-    `source_repos` is the course org's content repos; only the `course-materials-*` ones
-    can be copied forward into another materials repo, so the dropdown is the prefix's
-    share of that list. It is repopulated by the nightly refresh, like every other one.
+    `materials` is the course's materials repos (the `dsl-materials` topic): only those
+    can be copied forward into another materials repo. The dropdown is repopulated by the
+    nightly refresh, like every other one.
 
     The two publishing dropdowns seed `publish.yml` and nothing else - the file is the
     definition afterwards, and no workflow rewrites it. They default to publishing nothing,
     because the one answer that cannot be taken back is the one that puts bytes on a public
     site: a course that never touches them is exactly today's course."""
-    materials = [r for r in source_repos or [] if r.startswith(MATERIALS_REPO_PREFIX)]
+    materials = list(materials or [])
     return f"""name: New materials repo
 
 # `copy_from` starts the new repo as an existing one - every branch, every file, the whole
@@ -2124,7 +2135,9 @@ on:
 {_CRON_NOTICE}"""
 
 
-def render_publish_site(source_repos: list[str]) -> str:
+def render_publish_site(
+    source_repos: list[str], materials: list[str] | None = None
+) -> str:
     """Build/refresh the PUBLIC course site <course-org>.github.io (open courseware).
 
     Opt-in: the first (manual) run scaffolds the site and persists its settings into the
@@ -2135,10 +2148,10 @@ def render_publish_site(source_repos: list[str]) -> str:
     never publish. Separate from the per-semester student-gated sites; releases never touch
     it."""
     # A run REPLACES what the site serves, so the default must be the repo the site was
-    # published from - the latest `course-materials-*`. `_newest` alone picked the
+    # published from - the latest materials repo. `_newest` alone picked the
     # alphabetically last option of the newest year (`lecture-code-f2026`), and a faculty
     # member clicking Run with the defaults wiped a live site's materials.
-    default = _newest_materials(source_repos) or (
+    default = _newest_materials(source_repos, materials) or (
         source_repos[0] if source_repos else None
     )
     return f"""name: Publish course website
@@ -2156,7 +2169,7 @@ on:
     - cron: "58 5 * * *"
   workflow_dispatch:
     inputs:
-{_choice_input("source_repo", "Materials repo to publish - the site is REBUILT from it; defaults to the latest course-materials-* repo", source_repos, default)}
+{_choice_input("source_repo", "Materials repo to publish - the site is REBUILT from it; defaults to the latest materials repo", source_repos, default)}
       readings_mode:
         description: "Readings: reading-list (citations) / actual-readings (files) / none"
         required: true

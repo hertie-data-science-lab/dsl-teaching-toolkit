@@ -879,18 +879,12 @@ def refresh_materials_system_files(org: str, repo: str) -> int:
     nothing, and both files land in one commit because they always change together.
 
     Unlike the stubs this CREATES as well as updates - back-filling a file added after the
-    repo was made is the point - so it is gated on the repo NAME, and the gate lives here
-    rather than at the call site because no caller may skip it: `discover_content_repos`
-    hands the nightly sweep the code and dataset repos too, and a materials-repo
-    maintainer guide in `lecture-code-f2026` is the nonsense the scaffold's own gate
-    `create=False` exists to avoid. Every materials repo is named `course-materials-<tag>`
-    by `scaffold_materials`, from a workflow that takes only the tag, so the prefix is a
-    toolkit guarantee rather than a convention.
+    repo was made is the point - so the nightly sweep calls it only for the repos carrying
+    the `dsl-materials` topic (`discovery.discover_materials_repos`): the sweep also visits
+    the code and dataset repos, and a maintainer guide in `lecture-code-f2026` is nonsense.
 
     Returns 1 if the commit didn't land, so callers go red rather than report a converged
     repo - this runs unattended on a cron, where a silent skip is invisible for weeks."""
-    if not repo.startswith(MATERIALS_REPO_PREFIX):
-        return 0
     if not put_files(
         org,
         repo,

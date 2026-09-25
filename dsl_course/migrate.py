@@ -2503,12 +2503,21 @@ class Course:
         )
 
     # materials ---------------------------------------------------------------
+    def materials_repos(self) -> list[str]:
+        """The live materials repos: those with the topic, and the ones the topic step
+        gives it (so a preview, where that step has not run, plans the same moves)."""
+        topicked = [
+            repo
+            for repo, row in _listing(self.org).items()
+            if is_materials_repo(row) and not row.get("archived")
+        ]
+        return sorted({*topicked, *self.untopicked_materials()})
+
     def materials_moves(self) -> dict[str, dict[str, str]]:
         return {
             repo: moves
-            for repo in sorted(_listing(self.org))
+            for repo in self.materials_repos()
             if (moves := fold(set(_files(self.org, repo)), MATERIALS_MOVES))
-            and repo.startswith(MATERIALS_REPO_PREFIX)
         }
 
     def move_materials(self) -> bool:
@@ -2564,9 +2573,10 @@ class Course:
             )
 
         wanted = {".github": seed.github_workflow_files(self.org, ref)}
+        materials = self.materials_repos()
         for repo in discover_content_repos(self.org):
             wanted[repo] = hosted(repo, RELEASE_WORKFLOWS)
-            if repo.startswith(MATERIALS_REPO_PREFIX):
+            if repo in materials:
                 wanted[repo] |= materials_system_files(self.org, repo)
         for row in templates:
             if not row.get("archived"):

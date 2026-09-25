@@ -1594,19 +1594,16 @@ def test_refresh_backfills_the_system_files_into_a_materials_repo(monkeypatch):
     # The gap this closes: both files are SYSTEM-owned - meant to be rewritten whenever the
     # toolkit changes them - but were only ever written by the scaffold, which made that
     # true of new repos and nothing else. This CREATES, because back-filling a file added
-    # after the repo was made is the point; hence the name gate, since the nightly sweep
-    # also hands us the code and dataset repos.
+    # after the repo was made is the point.
     f = FakeRepo()
     monkeypatch.setattr(scaffold, "put_files", f.put_files)
 
     assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 0
-    assert scaffold.refresh_materials_system_files("Org", "lecture-code-f2026") == 0
 
     assert f.written("course-materials-f2026") == {
         ".system/MAINTAINING.md",
         ".system/SYLLABUS.md.sample",
     }
-    assert f.written("lecture-code-f2026") == set()
 
 
 def test_refresh_rewrites_a_stale_system_file(monkeypatch):
