@@ -845,8 +845,10 @@ hand into every live semester's `schedule.yml`), pause, registry (also a `semest
 still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, template keys
 (`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
 re-read with `parse_grading_spec` - course-owned, so here rather than per semester),
-materials files, re-render (Refresh actions from the checkout; drift checked in `.github`,
-every content repo and every live template), status, unpause. The `dsl-course.yml` keys
+materials files, re-render (Refresh actions from the checkout, the course's own repos only -
+no semester; with no `DSL_BOT_TOKEN` on the laptop the repo secret is left, with a note, to
+the org's next Refresh actions; drift checked in `.github`, every content repo and every
+live template), status, unpause. The `dsl-course.yml` keys
 step strips `org`, `org_name`, `cohort_defaults` and `semester_defaults` (each with its
 block) and rewrites `assignment_defaults` `format:`; its verify re-reads the file with the
 engine's own rules (`sync_faculty.retired_course_faults`) and expects no `NOT_MIGRATED`.
