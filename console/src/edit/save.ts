@@ -124,6 +124,39 @@ function statusProblems(env: Env, sr: [string, string], t: Target): Problem[] {
   return l.kind === 'ready' ? problemsIn(l.status.problems, t) : [];
 }
 
+export interface Step {
+  target: Target;
+  text: string;
+  sha: string | null;
+  opts: SaveOptions;
+}
+
+/**
+ * Commit one file, then a second that depends on it (the schedule, then assignments.yml).
+ * `afterFirst` runs as soon as the first commit lands, whatever happens next, so a retry
+ * never writes it twice. A second commit that fails is reported as `partial: <why>`: the
+ * first file is saved and the message says so.
+ */
+export async function saveSteps(env: Env | null, report: (s: SaveState) => void, first: Step | null, second: Step | null, partial: string, afterFirst: () => void): Promise<boolean> {
+  if (!env) {
+    report({ kind: 'bad', text: 'Sign in to save.' });
+    return false;
+  }
+  if (first) {
+    if (!(await saveText(env, first.target, first.text, first.sha, first.opts, report))) return false;
+    afterFirst();
+  }
+  if (!second) return true;
+  const seen: SaveState[] = [];
+  const ok = await saveText(env, second.target, second.text, second.sha, second.opts, (s) => {
+    seen.push(s);
+    if (!first || s.kind !== 'bad') report(s);
+  });
+  const last = seen[seen.length - 1];
+  if (first && last?.kind === 'bad') report(ok ? last : { kind: 'bad', text: `${partial}: ${last.text.replace(/^Not saved: /, '')}`, conflict: last.conflict });
+  return ok;
+}
+
 /** A Save button's state, and the function that saves. */
 export function useSave(env: Env | null): [SaveState, (t: Target, text: string | null, sha: string | null, opts: SaveOptions) => Promise<boolean>, (s: SaveState) => void] {
   const [state, setState] = useState<SaveState>({ kind: 'idle' });

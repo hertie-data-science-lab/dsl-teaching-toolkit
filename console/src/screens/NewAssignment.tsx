@@ -11,19 +11,20 @@ import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { createAssignment } from '../ops/defs';
-import { FORMATS, formatsList, toConfig } from '../tiers/grading';
+import { FormatPicker } from '../forms/FormatPicker';
+import { labelOf } from '../model/labels';
+import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
+import { formatWord, formatsList, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
 import { Crumbs, Help, editUrl } from '../ui/bits';
 import { SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { useDraft } from '../wizards/drafts';
-import {
-  assignmentArgs, autogradeBlock, contentTerms, formatBlock, formatError, nextFreeNumber, openAt, signature, templateRepo, termLabel, toggleFormat,
-} from '../wizards/model';
+import { assignmentArgs, contentTerms, formatError, nextFreeNumber, openAt, signature, templateRepo, termLabel } from '../wizards/model';
 import { allOk, checkFree, checkRepoExists, checkTemplate, useLive, type Check } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
-import { courseDefaults, courseView } from './Course';
+import { courseView } from './Course';
 import { courseScope } from './CourseEdit';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
@@ -47,13 +48,14 @@ export interface NaDraft {
   extrasSaved?: string;
 }
 
-/** Fresh answers: the course's defaults where it has them, else the toolkit's. */
+/** Fresh answers: the course's defaults where it has them, else the institution's. */
 export function initialValues(meta: Record<string, unknown> | null, term: string): Values {
   const ad = ((meta?.assignment_defaults ?? {}) as Record<string, unknown>);
   const s = (k: string, d: string) => (typeof ad[k] === 'string' && ad[k] ? String(ad[k]) : d);
+  const course = formatsList(ad.formats);
   return {
-    term, type: 'individual', submit_via: s('submit_via', 'assignment_repo'),
-    formats: [formatsList(ad.formats)[0] ?? 'ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false,
+    term, type: 'individual', submit_via: s('submit_via', SUBMIT_VIA_DEFAULT),
+    formats: course.length ? course : [...DEFAULT_FORMATS], autograde: 'false', completion_check: 'auto', grader_pdf: false,
   };
 }
 
@@ -88,32 +90,6 @@ export function withExtras(text: string, extras: Record<string, unknown>): strin
   return changed ? y.text : null;
 }
 
-export function FormatPicker({ v, set }: { v: Values; set: (v: Values) => void }) {
-  const formats = (v.formats as string[] | undefined) ?? [];
-  const auto = v.autograde === 'true' && !autogradeBlock(v);
-  const offs = FORMATS.map(([f]) => formatBlock(formats, f, auto)).filter((x): x is string => !!x);
-  const err = formatError(v);
-  return (
-    <div class="field">
-      <span class="label">What students hand in <span class="default">default: Jupyter notebook</span></span>
-      <div class="fmt-grid">
-        {FORMATS.map(([f, label]) => {
-          const why = formatBlock(formats, f, auto);
-          return (
-            <label class={`check${why ? ' off' : ''}`} title={why ?? undefined}>
-              <input type="checkbox" id={`na-fmt-${f}`} checked={formats.includes(f)} disabled={!!why} onChange={() => set({ ...v, formats: toggleFormat(formats, f) })} />
-              <span>{label}</span>
-            </label>
-          );
-        })}
-      </div>
-      {offs.length ? <p class="off-why">{[...new Set(offs)].join(' ')}</p> : null}
-      {err ? <span class="invalid-msg"><span>{err}</span></span> : null}
-      <p class="why">Seeds the starter files and decides how markers see submissions.</p>
-    </div>
-  );
-}
-
 export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const { course, now, step: asked } = p;
   const env = useEnv();
@@ -131,8 +107,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const vv: Values = { ...v, number };
   const repo = templateRepo(number, term);
   const title = `Assignment ${number}${v.name ? `: ${String(v.name)}` : ''}`;
+  const courseFormats = formatsList(((course.meta?.assignment_defaults ?? {}) as Record<string, unknown>).formats);
   const copying = !!v.copy_from;
-  const defaults = courseDefaults(course.meta);
   const runs = env?.ops.runs.value.length ?? 0;
   const tpl = useLive(env ? async () => ({ repo, r: await checkTemplate(env.client, course.org, repo) }) : null, [repo, runs, asked]);
   const tplNow = tpl.value?.repo === repo ? tpl.value.r : null;
@@ -147,8 +123,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     if (typeof location !== 'undefined') location.hash = `#new-assignment-${k}`;
   };
   const tiers1 = assignmentWhat(terms, next, known);
-  const tiers2 = assignmentWork(defaults);
-  const tiers3 = assignmentMarking(defaults);
+  const tiers2 = assignmentWork();
+  const tiers3 = assignmentMarking();
   const errsOf = (t: Tiers) => fieldErrors(null, t, vv);
   const cohort = course.cohorts.find((c) => c.term === term);
 
@@ -197,7 +173,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     ) : (
       <>
         {createdNote}
-        {step === 3 ? <FormatPicker v={vv} set={setV} /> : null}
+        {step === 3 ? <FormatPicker v={vv} set={setV} fallback={courseFormats.length ? { formats: courseFormats, source: 'course' } : undefined} /> : null}
         <SchemaForm id={`na${step}`} schema={null} tiers={tiers} values={vv} onChange={setV} />
       </>
     );
@@ -210,8 +186,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   } else {
     heading = created ? 'Created' : 'Check and create';
     const w = effective(tiers3, effective(tiers2, vv));
-    const fmts = ((w.formats as string[]) ?? []).map((f) => FORMATS.find((x) => x[0] === f)?.[1] ?? f).join(' + ');
-    const submit = { assignment_repo: 'Their own repo', shared_dropbox_repo: 'A shared drop box, private', external: 'Elsewhere' }[String(w.submit_via)] ?? '';
+    const fmts = ((w.formats as string[]) ?? []).map(formatWord).join(' + ');
+    const submit = w.submit_via ? labelOf('submit_via', String(w.submit_via)) : '';
     const def = createAssignment(courseScope(p), repo, title, assignmentArgs(vv));
     const extrasPending = created && !copying && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
     const ready = created && allOk(tplNow?.checks) && !extrasPending;

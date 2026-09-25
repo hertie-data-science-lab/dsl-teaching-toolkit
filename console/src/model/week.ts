@@ -5,8 +5,9 @@
 // since their last visit. One line each; Home merges the lines of every semester shown, each
 // line in its own semester's timezone. An auditor gets no marks or team lines.
 
+import { DEFAULT_TIMEZONE } from './policy';
 import { isMarked, type Mine } from './mine';
-import { DEFAULT_TZ, instant, startOfDay, type SemesterFacts } from './student';
+import { instant, startOfDay, type SemesterFacts } from './student';
 
 export type WeekKind = 'due' | 'hand_out' | 'release' | 'exam' | 'event' | 'marks' | 'teams' | 'news' | 'patch';
 
@@ -42,7 +43,7 @@ const name = (title: string, subtitle: string) => (subtitle ? `${title}: ${subti
  * start of the previous visit), or from the last seven days when there was none.
  */
 export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, patches: PatchLine[] = [], lastVisit: number | null = null): WeekItem[] {
-  const tz = facts.timezone || DEFAULT_TZ;
+  const tz = facts.timezone || DEFAULT_TIMEZONE;
   const start = startOfDay(now, tz);
   const end = start + 7 * DAY;
   const recent = start - 7 * DAY;

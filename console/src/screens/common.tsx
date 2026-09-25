@@ -5,6 +5,7 @@ import { useEnv } from '../env';
 import { cohortName } from '../model/discovery';
 import { dayKey, zoned } from '../model/format';
 import { CONFIG_REPO } from '../model/names';
+import { DEFAULT_TIMEZONE } from '../model/policy';
 import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -17,7 +18,7 @@ export { cohortName };
 
 export const CHECK_NOW_SOON = 'Sign in to check now.';
 
-export const tzOf = (s: Status) => s.semester?.timezone ?? 'Europe/Berlin';
+export const tzOf = (s: Status) => s.semester?.timezone ?? DEFAULT_TIMEZONE;
 export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
 export const todayOf = (now: number, tz: string) => dayKey(new Date(now).toISOString(), tz);
 

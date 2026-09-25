@@ -4,16 +4,17 @@
 // (and says it cannot be changed later), and tests are refused for the formats that have
 // nothing to run.
 
-import { settingsTiers, type CourseDefaults } from './grading';
+import { settingsTiers } from './grading';
 import { opt, type FieldTier, type Tiers } from './types';
-import { ORG_RE, autogradeBlock, termLabel } from '../wizards/model';
+import { ORG_NAME_RE } from '../model/policy';
+import { autogradeBlock, termLabel } from '../wizards/model';
 
 const pick = (t: Tiers, keys: string[]): Tiers => Object.fromEntries(keys.map((k) => [k, t[k]]));
 
 export function orgField(why: string): FieldTier {
   return {
     tier: 'default', label: 'Org name', defaultLabel: 'derived; you can edit it', reason: why,
-    check: (x) => (!x ? 'Needed.' : ORG_RE.test(String(x)) ? null : 'Letters, digits and dashes, up to 39.'),
+    check: (x) => (!x ? 'Needed.' : ORG_NAME_RE.test(String(x)) ? null : 'Letters, digits and dashes, up to 39.'),
   };
 }
 
@@ -51,13 +52,13 @@ export function assignmentWhat(terms: string[], next: number, templates: string[
 
 /** How students work on it: the template's own keys. How each semester runs it (teams,
  * max team size, visibility, the submit link, the late rule) is that semester's
- * assignments.yml, edited in the next console release (decision 0009). */
-export function assignmentWork(d: CourseDefaults): Tiers {
-  return pick(settingsTiers(d), ['type', 'submit_via']);
+ * assignments.yml, asked when the assignment is added to a semester's schedule (decision 0009). */
+export function assignmentWork(): Tiers {
+  return pick(settingsTiers(), ['type', 'submit_via']);
 }
 
-export function assignmentMarking(d: CourseDefaults): Tiers {
-  const s = settingsTiers(d);
+export function assignmentMarking(): Tiers {
+  const s = settingsTiers();
   return {
     autograde: {
       ...s.autograde,

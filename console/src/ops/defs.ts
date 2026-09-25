@@ -112,7 +112,8 @@ export function updateCopies(s: Scope, a: AsgRef, files: string[]): OpDef {
     ...base(s, 'assignment.update_copies', a.slug), name: 'Update every copy', title: a.title, where: `${a.units} student repos`,
     intro: 'Pushes an assignment template file to every student copy and posts a note on each Submission receipts issue.',
     verb: `Update ${a.units} copies`, running: 'Updating every copy', cancel: 'Stop; copies already updated stay updated',
-    args: { course_source_repo: a.template }, options: copiesTiers(files),
+    // The schedule key: which entry, when two hand out from one template.
+    args: { course_source_repo: a.template, assignment: a.slug }, options: copiesTiers(files),
   };
 }
 
@@ -121,16 +122,17 @@ export function collect(s: Scope, a: AsgRef): OpDef {
     ...base(s, 'assignment.collect_now', a.slug), name: 'Collect now', title: a.title, where: a.when,
     intro: 'Pulls the latest work from every repo into the mark sheet now.',
     verb: 'Collect now', running: 'Collecting submissions', cancel: 'Stop; the mark sheet keeps what it has',
-    args: { course_source_repo: a.template },
+    args: { course_source_repo: a.template, assignment: a.slug },
   };
 }
 
-export function returnMarks(s: Scope, a: AsgRef, marked: number): OpDef {
+/** `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by. */
+export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string): OpDef {
   return {
     ...base(s, 'grades.return', a.slug), name: 'Return marks', title: a.title, where: 'Marking',
-    intro: 'Sends each student their marks and feedback. Your private notes stay private.',
+    intro: 'Sends each student their marks and feedback for this assignment, beside the ones already returned. Your private notes stay private.',
     verb: `Return marks to ${marked} ${a.group ? 'teams' : 'students'}`, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
-    args: {}, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
+    args: { assignment: name }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
   };
 }
 

@@ -1,18 +1,17 @@
 // Course-side editors: S3 Course details (dsl-course.yml), S20 Public website, S19
 // Materials repo settings (publish.yml, .releaseignore).
 
-import type { ErrorObject } from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
 import courseSchema from '../../schemas/dsl_course.schema.json';
 import { useEnv, type Env } from '../env';
 import { badgeFiles } from '../edit/badges';
 import { invalidText, useSave } from '../edit/save';
-import { YamlText, deepEqual, obj } from '../edit/yamlText';
+import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { ABOUT, ASSIGNMENT_DEFAULTS } from '../tiers/course';
+import { ABOUT, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
@@ -36,7 +35,6 @@ export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {
   return k ? { courseOrg: p.course.org, cohortOrg: k.org, where: k.termLabel } : null;
 }
 
-const clean = (v: Values): Values => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x === '' || x === null ? undefined : x]));
 
 // --------------------------------------------------------------------------- details
 
@@ -56,8 +54,8 @@ export function detailsOf(meta: Record<string, unknown>) {
   });
   const links = Array.isArray(meta.site_link_extensions) ? meta.site_link_extensions.map(String).join(', ') : typeof meta.site_link_extensions === 'string' ? meta.site_link_extensions : '';
   return {
-    about: clean({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description }),
-    defaults: clean({ ...ad, formats: formatsList(ad.formats)[0] }),
+    about: compact({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description }),
+    defaults: compact({ ...ad, formats: formatsList(ad.formats)[0] }),
     admins,
     links,
   };
@@ -95,30 +93,11 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
   emptyMap('assignment_defaults');
 }
 
-/**
- * What the console's dsl_course schema refuses but the engine accepts (research 07 section 5),
- * so a save goes ahead with a note: `start`/`end` on a course instructor card
- * (`site_repo._people_from_meta` honours them) and a course-level `teaching_assistants`
- * list (the engine ignores it: no site shows course-level assistants).
- */
-function tolerated(e: ErrorObject): string | null {
-  if (e.keyword !== 'additionalProperties') return null;
-  const key = (e.params as { additionalProperty: string }).additionalProperty;
-  if (/^\/people\/instructors\/\d+$/.test(e.instancePath) && (key === 'start' || key === 'end'))
-    return 'a course instructor card has start or end dates; the student site honours them';
-  if (e.instancePath === '/people' && key === 'teaching_assistants') return 'it lists course-level teaching assistants; the engine ignores them, since assistants are set per semester under Instructors';
-  return null;
-}
-
-/** dsl-course.yml after `after`, or why it would not be valid; `warning` names what the engine reads but the check does not know. */
-export function courseFileAfter(text: string, before: Details, after: Details, meta: Record<string, unknown>): { text: string; warning?: string } | { error: string } {
+/** dsl-course.yml after `after`, or why it would not be valid against the exported schema. */
+export function courseFileAfter(text: string, before: Details, after: Details, meta: Record<string, unknown>): { text: string } | { error: string } {
   const out = new YamlText(text);
   writeDetails(out, before, after, meta);
-  if (validCourse(out.toJS())) return { text: out.text };
-  const errors = validCourse.errors ?? [];
-  const known = errors.map(tolerated);
-  if (known.some((k) => k === null)) return { error: invalidText('dsl-course.yml', { errors: errors.filter((_, i) => known[i] === null) }) };
-  return { text: out.text, warning: `Saved without the console’s check, which does not know these yet: ${[...new Set(known)].sort().join('. Also, ')}.` };
+  return validCourse(out.toJS()) ? { text: out.text } : { error: invalidText('dsl-course.yml', validCourse) };
 }
 
 /** The first new admin handle with no GitHub account, or null (a failed lookup counts as there). */
@@ -168,7 +147,6 @@ export function DetailsScreen(p: CourseProps) {
   const file = p.files.file(course.org, COURSE_REPO, 'dsl-course.yml');
   const [draft, setDraft] = useState<Details | null>(null);
   const [save, runSave, setSave] = useSave(env);
-  const [warning, setWarning] = useState('');
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
   const meta = y && !y.errors.length ? obj(y.toJS()) : {};
   const before = detailsOf(meta);
@@ -178,9 +156,8 @@ export function DetailsScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, ASSIGNMENT_DEFAULTS, d.defaults) };
+  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, courseDefaultTiers(), d.defaults) };
   const doSave = async () => {
-    setWarning('');
     if (!y || file.kind !== 'ready') return;
     if (p.migrated === false) return setSave({ kind: 'bad', text: 'Not saved: the console has not yet confirmed this course uses the current names.' });
     if (Object.keys(errs).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
@@ -189,10 +166,8 @@ export function DetailsScreen(p: CourseProps) {
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     const missing = await missingAdmin(env, before.admins, after.admins);
     if (missing) return setSave({ kind: 'bad', text: `There is no GitHub account called ${missing}.` });
-    // The note describes a file that was written, so it shows only once the save went through.
     if (await runSave({ owner: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: 'course: edit the course details, from the Instructor Console', statusRepo: [course.org, COURSE_REPO] })) {
       setDraft(null);
-      setWarning(out.warning ?? '');
     }
   };
   return (
@@ -204,7 +179,7 @@ export function DetailsScreen(p: CourseProps) {
       </div>
       <Help title="Course admins and defaults" doc="01-setup-course-org.md">
         <p>Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
-        <p>These are the course’s defaults. Every one can be overridden per assignment or per semester.</p>
+        <p>These are the course’s defaults. Left empty, the institution’s value in grey applies. Each semester can set its own, and each assignment its own.</p>
       </Help>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -223,8 +198,8 @@ export function DetailsScreen(p: CourseProps) {
               <AdminRows admins={d.admins} id="cda" onChange={(admins) => set({ admins })} />
             </div>
             <div class="form-section">
-              <h3>Assignment defaults</h3>
-              <SchemaForm id="cdx" schema={null} tiers={ASSIGNMENT_DEFAULTS} values={d.defaults} onChange={(v) => set({ defaults: v })} />
+              <h3>Defaults for this course’s assignments</h3>
+              <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers()} values={d.defaults} onChange={(v) => set({ defaults: v })} />
             </div>
             <div class="form-section">
               <h3>Site links</h3>
@@ -235,7 +210,6 @@ export function DetailsScreen(p: CourseProps) {
               </div>
             </div>
             <div class="form-section">
-              {warning ? <CheckLine cls="warn">{warning}</CheckLine> : null}
               <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before) || p.migrated === false} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml' }} />
               <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
             </div>

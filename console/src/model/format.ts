@@ -1,6 +1,7 @@
 // Words and dates, in the vocabulary of design/vocabulary.md. Engine identifiers (K4,
 // will_be_skipped, release.now) never reach the screen except through these maps.
 
+import { DEFAULT_TIMEZONE } from './policy';
 import type { Assignment, AssignmentState, Release, ReleaseState, StageState } from './types';
 import policy from '../../schemas/policy.json';
 
@@ -28,7 +29,7 @@ export interface Zoned {
 }
 
 /** Calendar parts of `iso` in `tz`. A date-only value ("2026-10-07") is taken as that day. */
-export function zoned(iso: string, tz = 'Europe/Berlin'): Zoned {
+export function zoned(iso: string, tz = DEFAULT_TIMEZONE): Zoned {
   const naive = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(:\d{2})?$/.exec(iso);
   if (naive) {
     // A schedule.yml time with no offset is already wall-clock time in the semester's timezone.

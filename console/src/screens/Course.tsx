@@ -5,18 +5,21 @@ import gradingSchema from '../../schemas/grading_config.schema.json';
 import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
-import { SchemaForm, effective, fieldErrors } from '../forms/Form';
+import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { assignmentIdent } from '../model/format';
-import { questionPoints, questionsFromRows } from '../model/marks';
 import { checkNow, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { fromConfig, settingsTiers, toConfig, type CourseDefaults } from '../tiers/grading';
+import { FormatPicker } from '../forms/FormatPicker';
+import { courseBlock, effectiveWord, institutionLayer, lateWord, resolve, type Layers } from '../model/cascade';
+import { DEFAULT_FORMATS } from '../model/policy';
+import { formatsList, fromConfig, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
 import type { CourseStatus, Problem } from '../model/types';
 import { validator } from '../model/validate';
 import { CheckLine, Crumbs, Help, Legend, Lives, Loading, ProblemCards, Probs, Rail, Soon, ghUrl } from '../ui/bits';
 import { Check, Ext } from '../ui/icons';
+import { formatError } from '../wizards/model';
 import { courseScope, newestScope } from './CourseEdit';
 import type { CourseProps } from './types';
 import { COURSE_REPO } from '../model/names';
@@ -52,14 +55,9 @@ export function CourseHeaderActions({ course, ready }: { course: CourseProps['co
   );
 }
 
-export function dflt(meta: Record<string, unknown> | null, key: string): string {
-  const d = (meta?.assignment_defaults ?? {}) as Record<string, unknown>;
-  return d[key] == null ? '' : String(d[key]);
-}
-
-/** The course's late policy and team size, as the template forms show them. */
-export function courseDefaults(meta: Record<string, unknown> | null): CourseDefaults {
-  return { lateDays: dflt(meta, 'late_window_days') || '10', latePct: dflt(meta, 'late_penalty_per_day') || '10%', teamSize: dflt(meta, 'max_team_size') || '5' };
+/** The course layer over the institution's: what an assignment gets when its semester says nothing. */
+export function courseLayers(p: Pick<CourseProps, 'course' | 'files'>): Layers {
+  return { assignment: {}, semester: {}, course: courseBlock(p.files, p.course.org, p.course.meta), institution: institutionLayer() };
 }
 
 export function CourseScreen(p: CourseProps) {
@@ -67,9 +65,9 @@ export function CourseScreen(p: CourseProps) {
   const { course } = p;
   const v = courseView(p);
   const ready = v.course ? v.course.ready : false;
-  const late = dflt(course.meta, 'late_penalty_per_day') || '10%';
-  const lateDays = dflt(course.meta, 'late_window_days') || '10';
-  const team = dflt(course.meta, 'max_team_size') || '5';
+  const layers = courseLayers(p);
+  const lateDays = resolve('late_window_days', layers), latePen = resolve('late_penalty_per_day', layers);
+  const team = resolve('max_team_size', layers);
   const pub = v.course?.stages?.C6 === 'done';
   return (
     <>
@@ -158,8 +156,8 @@ export function CourseScreen(p: CourseProps) {
               <dt>Name</dt><dd>{course.name}</dd>
               <dt>Code</dt><dd>{course.code || 'not set'}</dd>
               <dt>Admins</dt><dd>{course.admins.join(', ') || 'none'}</dd>
-              <dt>Late work</dt><dd>{late} per day, up to {lateDays} days</dd>
-              <dt>Team size</dt><dd>Up to {team}</dd>
+              <dt>Late work</dt><dd>{lateWord(lateDays.value, latePen.value)} <span class="footnote">{lateDays.source === 'course' ? 'this course’s default' : 'institution default'}</span></dd>
+              <dt>Max team size</dt><dd>{effectiveWord('max_team_size', team)}</dd>
             </dl>
             <Lives org={course.org} repo={COURSE_REPO} path="dsl-course.yml" />
           </section>
@@ -180,28 +178,34 @@ export function CourseScreen(p: CourseProps) {
 
 const gradingValid = validator(gradingSchema);
 
-function Questions({ rows, set }: { rows: [string, string][]; set: (r: [string, string][]) => void }) {
-  const total = rows.reduce((s, [, n]) => s + (Number(n) || 0), 0);
+function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: QuestionRow[]) => void; files: string[] }) {
+  const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
+  const edit = (i: number, patch: Partial<QuestionRow>) => set(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <div class="field">
       <span class="label">Points per question</span>
       {rows.length ? (
         <table class="qtable">
-          <thead><tr><th>Question</th><th>Points</th><th /></tr></thead>
+          <thead><tr><th>Question</th><th>Points</th><th>Marked from <span class="default">optional</span></th><th /></tr></thead>
           <tbody>
-            {rows.map(([q, n], i) => (
+            {rows.map((r, i) => (
               <tr>
-                <td><input type="text" value={q} aria-label={`Question ${i + 1} name`} onInput={(e) => set(rows.map((r, j) => (j === i ? [(e.target as HTMLInputElement).value, r[1]] : r)))} /></td>
-                <td><input type="number" min="0" value={n} aria-label={`Question ${i + 1} points`} style="max-width:90px" onInput={(e) => set(rows.map((r, j) => (j === i ? [r[0], (e.target as HTMLInputElement).value] : r)))} /></td>
+                <td><input type="text" value={r.name} aria-label={`Question ${i + 1} name`} onInput={(e) => edit(i, { name: (e.target as HTMLInputElement).value })} /></td>
+                <td><input type="number" min="0" value={r.points} aria-label={`Question ${i + 1} points`} style="max-width:90px" onInput={(e) => edit(i, { points: (e.target as HTMLInputElement).value })} /></td>
+                <td>
+                  <input type="text" list="q-files" value={r.file} placeholder="the runnable file" aria-label={`Question ${i + 1} file`} aria-invalid={questionFileError(r.file) ? 'true' : undefined} onInput={(e) => edit(i, { file: (e.target as HTMLInputElement).value })} />
+                  {questionFileError(r.file) ? <Invalid>{questionFileError(r.file)}</Invalid> : null}
+                </td>
                 <td><button class="x" type="button" aria-label={`Remove question ${i + 1}`} onClick={() => set(rows.filter((_, j) => j !== i))}>&times;</button></td>
               </tr>
             ))}
           </tbody>
-          <tfoot><tr><td>Total</td><td>{total}</td><td /></tr></tfoot>
+          <tfoot><tr><td>Total</td><td>{total}</td><td /><td /></tr></tfoot>
         </table>
       ) : <div class="readonly">Not set: the mark sheet takes one flat score.</div>}
-      <div><button class="btn small quiet" type="button" onClick={() => set([...rows, [`Q${rows.length + 1}`, '']])}>Add a question</button></div>
-      <p class="why">The mark sheet gets one column per question.</p>
+      <datalist id="q-files">{files.map((f) => <option value={f} />)}</datalist>
+      <div><button class="btn small quiet" type="button" onClick={() => set([...rows, { name: `Q${rows.length + 1}`, points: '', file: '' }])}>Add a question</button></div>
+      <p class="why">The mark sheet gets one column per question. A question marked from another file (a LaTeX write-up, say) names it; the mark sheet shows it beside the maximum.</p>
     </div>
   );
 }
@@ -217,9 +221,10 @@ export function TemplateScreen(p: CourseProps) {
     .find((a) => a.slug === slug)?.template;
   const repo = fromCourse ?? fromCohort ?? slug;
   const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
+  const tree = p.files.tree(course.org, repo);
   const problems = v.problems.filter((x) => x.fix?.entry === slug);
   const [values, setValues] = useState<Values | null>(null);
-  const [qdraft, setQdraft] = useState<[string, string][] | null>(null);
+  const [qdraft, setQdraft] = useState<QuestionRow[] | null>(null);
   const [save, runSave, setSave] = useSave(env);
   let cfg: Record<string, unknown> = {};
   let parseError = '';
@@ -228,26 +233,29 @@ export function TemplateScreen(p: CourseProps) {
     if (y.errors.length) parseError = y.errors[0];
     else cfg = (y.toJS() ?? {}) as Record<string, unknown>;
   }
-  const defaults = courseDefaults(course.meta);
-  const newest = course.cohorts[0];
-  const tiers = settingsTiers(defaults, newest ? `?cohort=${newest.org}#assignment-${slug}/teams` : undefined);
-  const base = fromConfig(cfg);
+  const tiers = settingsTiers();
+  // A template that lists no formats runs on the course's, else the institution's: shown ticked, written only when changed.
+  const read = fromConfig(cfg);
+  const fallbackFormats = formatsList(courseBlock(p.files, course.org, course.meta).formats);
+  const base: Values = { ...read, formats: (read.formats as string[]).length ? read.formats : fallbackFormats.length ? fallbackFormats : [...DEFAULT_FORMATS] };
   const cur = values ?? base;
-  const baseQ: [string, string][] = cfg.questions && typeof cfg.questions === 'object' ? Object.entries(cfg.questions as Record<string, unknown>).map(([q, n]) => [q, String(questionPoints(n) ?? '')]) : [];
+  const baseQ = questionRows(cfg.questions);
   const q = qdraft ?? baseQ;
-  const errors = fieldErrors(null, tiers, cur);
+  const fileErr = q.map((r) => questionFileError(r.file)).find(Boolean);
+  const errors = { ...fieldErrors(null, tiers, cur), ...(formatError(cur) ? { formats: formatError(cur)! } : {}), ...(fileErr ? { questions: fileErr } : {}) };
   const dirty = (values !== null && !deepEqual(effective(tiers, values), effective(tiers, base))) || (qdraft !== null && !deepEqual(qdraft, baseQ));
   const title = String(cfg.title ?? '');
   const scope = courseScope(p);
+  const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.')).map((x) => x.path) : [];
+  const newest = course.cohorts[0];
+  const change = (nv: Values) => { setValues({ ...cur, ...nv }); setSave({ kind: 'idle' }); };
   const doSave = async () => {
     if (file.kind !== 'ready') return;
     if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const y = new YamlText(file.text);
     const was = toConfig(effective(tiers, base)), now = toConfig(effective(tiers, cur));
     for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
-    if (qdraft !== null && !deepEqual(qdraft, baseQ)) {
-      y.assign(['questions'], questionsFromRows(qdraft, cfg.questions));
-    }
+    if (qdraft !== null && !deepEqual(qdraft, baseQ)) y.assign(['questions'], questionsValue(qdraft, cfg.questions));
     if (!gradingValid(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', gradingValid) });
     if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the Instructor Console`, statusRepo: [course.org, COURSE_REPO] })) {
       setValues(null);
@@ -263,6 +271,7 @@ export function TemplateScreen(p: CourseProps) {
       </div>
       <Help title="What these settings do" doc="03-add-assignment-to-course.md">
         <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch. These settings apply to every semester that uses the template; after hand out they reach students only through Update every copy.</p>
+        <p>How a semester runs it (teams, late work, who sees each repo, the submit link) is set on that semester’s assignment page.</p>
       </Help>
       {problems.length ? <div style="margin-bottom:18px"><ProblemCards list={problems} /></div> : null}
       {file.kind === 'loading' ? <Loading what="Reading grading_config.yml" /> : null}
@@ -273,18 +282,23 @@ export function TemplateScreen(p: CourseProps) {
           <div class="form">
             <div class="form-section">
               <h3>What it is</h3>
-              <SchemaForm id="g1" schema={null} tiers={{ title: tiers.title }} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
+              <SchemaForm id="g1" schema={null} tiers={pick(tiers, ['title'])} values={cur} onChange={change} />
               <Lives org={course.org} repo={repo} path="README.md" />
             </div>
             <div class="form-section">
               <h3>How students work on it</h3>
-              <SchemaForm id="g2" schema={null} tiers={pick(tiers, ['type', 'team_formation', 'max_team_size', 'submit_via', 'submit_url', 'visibility'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
+              <SchemaForm id="g2" schema={null} tiers={pick(tiers, ['type', 'submit_via'])} values={cur} onChange={change} />
+              <p class="footnote">
+                How teams form, the max team size, late work, who can see each repo and the submit link are each semester’s.{' '}
+                {newest ? <a class="textlink" href={`?cohort=${newest.org}#assignment-${slug}/overview`}>Set them for {newest.termLabel}</a> : null}
+              </p>
             </div>
             <div class="form-section">
               <h3>How it is marked</h3>
-              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['formats', 'autograde', 'tests'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} />
-              <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} />
-              <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day'])} values={cur} onChange={(nv) => setValues({ ...cur, ...nv })} advancedOpen={!!errors.late_window_days || !!errors.late_penalty_per_day} />
+              <FormatPicker id="g-fmt" v={cur} set={change} fallback={fallbackFormats.length ? { formats: fallbackFormats, source: 'course' } : undefined} />
+              <SchemaForm id="g3" schema={null} tiers={pick(tiers, ['autograde', 'tests'])} values={cur} onChange={change} />
+              <Questions rows={q} set={(r) => { setQdraft(r); setSave({ kind: 'idle' }); }} files={files} />
+              <SchemaForm id="g4" schema={null} tiers={pick(tiers, ['completion_check', 'grader_pdf'])} values={cur} onChange={change} />
               <p class="lives"><a href={ghUrl(course.org, repo, 'grading_config.yml', 'solution')} target="_blank" rel="noopener">Lives in {`${course.org}/${repo}/grading_config.yml`}</a> on the solution branch.</p>
             </div>
             <div class="form-section">

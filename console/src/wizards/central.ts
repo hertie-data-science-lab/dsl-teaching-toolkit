@@ -5,12 +5,10 @@
 // the run's conclusion is the verdict and the org's live state is the proof.
 
 import { wait, type GitHubClient } from '../github/client';
-import { ORG_RE } from './model';
+import { HANDLE_RE, ORG_NAME_RE } from '../model/policy';
 
 export const CENTRAL = { owner: 'hertie-data-science-lab', repo: 'dsl-teaching-toolkit', workflow: 'bootstrap-org.yml', ref: 'main' } as const;
 export const CENTRAL_ACTIONS = `https://github.com/${CENTRAL.owner}/${CENTRAL.repo}/actions/workflows/${CENTRAL.workflow}`;
-
-const HANDLE_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
 export interface BootstrapCourse {
   org: string;
@@ -25,7 +23,7 @@ export interface BootstrapCourse {
  */
 export function bootstrapInputs(b: BootstrapCourse): Record<string, string> {
   const errors: string[] = [];
-  if (!ORG_RE.test(b.org)) errors.push('the org name');
+  if (!ORG_NAME_RE.test(b.org)) errors.push('the org name');
   if (!b.courseName.trim() || /[\x00-\x1f]/.test(b.courseName)) errors.push('the course name');
   if (!b.code.trim() || /[\x00-\x1f]/.test(b.code)) errors.push('the course code');
   const admins = b.admins.map((a) => a.trim()).filter(Boolean);

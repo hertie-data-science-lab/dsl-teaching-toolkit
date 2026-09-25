@@ -4,13 +4,13 @@ import { useMemo, useState } from 'preact/hooks';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { compileAll, matchRules } from '../edit/glob';
-import { invalidText, useSave } from '../edit/save';
+import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
 import { parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  ARCHIVE_GRACE_DAYS, blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
+  blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
   type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
@@ -26,7 +26,12 @@ import { NOTHING_TO_RELEASE, releaseRef } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import { CONFIG_REPO } from '../model/names';
+import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
+import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, type Layers } from '../model/cascade';
+import { parse } from 'yaml';
+import { RunRows, applicableKeys, assignmentsAfterSchedule, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import type { Values } from '../tiers/types';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 const validSchedule = validator(scheduleSchema);
@@ -130,7 +135,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
         <span class="label">What to release</span>
         {d.deploys.map((dp, i) => {
           const tree = dp.repo ? p.files.tree(p.course.org, dp.repo) : null;
-          const adv = [dp.dest && dp.dest !== 'materials', !!dp.path, dp.diff].filter(Boolean).length;
+          const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, dp.diff].filter(Boolean).length;
           return (
             <div class="deploy">
               <div class="deploy-head">Deploy {i + 1}{d.deploys.length > 1 ? <button class="x" type="button" aria-label={`Remove deploy ${i + 1}`} onClick={() => set({ deploys: d.deploys.filter((_, j) => j !== i) })}>&times;</button> : null}</div>
@@ -154,7 +159,7 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
                 <summary>Advanced <span class={`cnt${adv ? ' changed' : ''}`}>({adv ? `${adv} changed` : 'none changed'})</span></summary>
                 <div class="fold-body">
                   <div class="row-2">
-                    <div class="field"><label for={`e-d${i}-dest`}>To repo <span class="default">default: materials</span></label><input type="text" id={`e-d${i}-dest`} placeholder="materials" value={dp.dest} onInput={(e) => setDeploy(i, { dest: (e.target as HTMLInputElement).value })} /><p class="why">In the cohort. Blank means materials.</p></div>
+                    <div class="field"><label for={`e-d${i}-dest`}>To repo <span class="default">default: {DEFAULT_DEST_REPO}</span></label><input type="text" id={`e-d${i}-dest`} placeholder={DEFAULT_DEST_REPO} value={dp.dest} onInput={(e) => setDeploy(i, { dest: (e.target as HTMLInputElement).value })} /><p class="why">In the semester. Blank means {DEFAULT_DEST_REPO}.</p></div>
                     <div class="field"><label for={`e-d${i}-path`}>To path <span class="default">default: same as the folder</span></label><input type="text" id={`e-d${i}-path`} placeholder={dp.folder} value={dp.path} onInput={(e) => setDeploy(i, { path: (e.target as HTMLInputElement).value })} /></div>
                   </div>
                   <label class="check"><input type="checkbox" checked={dp.diff} onChange={(e) => setDeploy(i, { diff: (e.target as HTMLInputElement).checked })} /><span>Release at a different time than the session</span></label>
@@ -178,13 +183,23 @@ function ReleaseForm({ p, d, set, errors, repos }: { p: ReadyProps; d: ReleaseDr
   );
 }
 
-function templateVisibility(p: ReadyProps, template: string): string {
-  return template ? String(gradingConfig(p, template).visibility ?? 'private') : 'private';
+/** A new entry's run settings, asked with the cascade's defaults and written to assignments.yml after the entry. */
+export interface NewRun {
+  values: Values;
+  set: (v: Values) => void;
+  errors: Record<string, string>;
 }
 
-function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; lateDays: string }) {
+function AssignmentForm({ p, d, set, errors, templates, isNew, run }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; slug: string; state: string }[]; isNew: boolean; run: NewRun }) {
   const tpl = templates.find((t) => t.repo === d.template);
-  const vis = templateVisibility(p, d.template);
+  const key = d.id || slugOfTemplate(d.template);
+  const af = assignmentsFile(p.files, p.cohort.org);
+  const doc = af && af !== 'loading' ? af.doc : {};
+  const layers = semesterLayers(p, doc, isNew ? '' : key);
+  const mine: Layers = isNew ? { ...layers, assignment: usableBlock(run.values) } : layers;
+  const cfg = d.template ? gradingConfig(p, d.template) : {};
+  const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
+  const late = resolve('late_window_days', mine);
   const opts = [...templates.map((t) => ({ value: t.repo, label: `${t.slug.replace(/^assignment-(\d+).*/, 'Assignment $1')} (${t.repo})` }))];
   if (d.template && !tpl) opts.push({ value: d.template, label: d.template });
   return (
@@ -217,7 +232,17 @@ function AssignmentForm({ p, d, set, errors, templates, lateDays }: { p: ReadyPr
         <F id="e-due" k="dueDate" d={d} set={set} error={errors.due} t={{ tier: 'ask', label: 'Due', widget: 'date' }} />
         <F id="e-duet" k="dueTime" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
-      <div class="field"><span class="label">Late work</span><div class="readonly">Until the due date plus {lateDays} days unless this semester sets otherwise. The title is the assignment template’s; the late rule and the repo name are set in assignments.yml, coming with the next console release.</div></div>
+      <div class="field">
+        <span class="label">Late cutoff <span class="default">computed</span></span>
+        <div class="readonly">{typeof late.value === 'number' && late.value > 0 ? `Due + ${lateWord(late.value, resolve('late_penalty_per_day', mine).value)}` : 'No late work: the cutoff is the due date'}, {SOURCE_WORD[late.source]}. The title is the assignment template’s.</div>
+      </div>
+      {isNew ? (
+        <div class="field">
+          <span class="label">How this semester runs it</span>
+          <p class="why">Each has the default shown; change one only for this assignment. Written to {ASSIGNMENTS_FILE} with the entry.</p>
+          <RunRows id="e-run" keys={applicableKeys(cfg, cfg.type === 'group')} layers={layers} draft={run.values} setDraft={run.set} errors={run.errors} defaultsHref="#assignments" forced={forcedVisibility(cfg)} />
+        </div>
+      ) : d.id ? <p class="footnote">Teams, late work, who sees each repo and the repo name: <a class="textlink" href={`#assignment-${d.id}/overview`}>on the assignment’s page</a>.</p> : null}
       {vis !== 'private' ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">Not available: student repos are not private, so the solution cannot be pushed automatically.</div></div>
       ) : d.manual ? (
@@ -264,10 +289,10 @@ function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Setter<Semest
         <F id="e-ts" k="start" d={d} set={set} t={{ tier: 'default', label: 'Semester starts', widget: 'date', defaultLabel: 'inferred from the semester', reason: 'Everything on the site’s calendar hangs off these.' }} />
         <F id="e-te" k="end" d={d} set={set} error={errors.end} t={{ tier: 'default', label: 'Semester ends', widget: 'date', defaultLabel: 'default: +15 weeks' }} />
       </div>
-      <details class="fold" open={!!d.tz && d.tz !== 'Europe/Berlin'}>
-        <summary>Advanced <span class={`cnt${d.tz && d.tz !== 'Europe/Berlin' ? ' changed' : ''}`}>({d.tz && d.tz !== 'Europe/Berlin' ? '1 changed' : 'none changed'})</span></summary>
+      <details class="fold" open={!!d.tz && d.tz !== DEFAULT_TIMEZONE}>
+        <summary>Advanced <span class={`cnt${d.tz && d.tz !== DEFAULT_TIMEZONE ? ' changed' : ''}`}>({d.tz && d.tz !== DEFAULT_TIMEZONE ? '1 changed' : 'none changed'})</span></summary>
         <div class="fold-body">
-          <F id="e-tz" k="tz" d={d} set={set} t={{ tier: 'advanced', label: 'Timezone', widget: 'select', defaultLabel: 'default: Europe/Berlin', reason: 'Every date in this schedule is in this timezone.', options: [{ value: '', label: 'Europe/Berlin (default)' }, ...[...new Set([...TIMEZONES, d.tz].filter(Boolean))].map((t) => ({ value: t, label: t }))] }} />
+          <F id="e-tz" k="tz" d={d} set={set} t={{ tier: 'advanced', label: 'Timezone', widget: 'select', defaultLabel: `institution default: ${DEFAULT_TIMEZONE}`, reason: 'Every date in this schedule is in this timezone.', options: [{ value: '', label: `${DEFAULT_TIMEZONE} (default)` }, ...[...new Set([...TIMEZONES, d.tz].filter(Boolean))].map((t) => ({ value: t, label: t }))] }} />
         </div>
       </details>
     </>
@@ -316,7 +341,7 @@ function View(p: ReadyProps) {
     p.prefill && p.entry === 'new' ? { new: { ...(blankDraft('handout', { repo: '' }) as AssignmentDraft), template: p.prefill } } : {},
   );
   const [removed, setRemoved] = useState<Record<string, Block>>({});
-  const [save, runSave, setSave] = useSave(env);
+  const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
   const doc = sf?.doc ?? {};
@@ -326,7 +351,7 @@ function View(p: ReadyProps) {
   const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
   const repos = (status.course?.materials ?? []).map((m) => m.repo);
   const templates = status.course?.templates ?? [];
-  const lateDays = String(((p.course.meta?.assignment_defaults ?? {}) as Record<string, unknown>).late_window_days ?? 10);
+  const [newRun, setNewRun] = useState<Values>({});
 
   const baseOf = (k: string): Draft | null => (k === 'new' ? null : readDraft(doc, k));
   const draftOf = (k: string): Draft | null => drafts[k] ?? baseOf(k);
@@ -343,7 +368,20 @@ function View(p: ReadyProps) {
     return Object.values(all).filter((t) => t === tpl).length;
   };
   const errorsOf = (d: Draft) => draftErrors(d, { templateUsers });
-  const allErrors = dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length);
+  // A new entry's run settings, only those its template has (teams only for a team assignment).
+  const newRunFor = (d: Draft | undefined): Values => {
+    if (!d || d.kind !== 'assignments') return {};
+    const cfg = d.template ? gradingConfig(p, d.template) : {};
+    const keys: string[] = applicableKeys(cfg, cfg.type === 'group');
+    return Object.fromEntries(Object.entries(newRun).filter(([k]) => keys.includes(k)));
+  };
+  const newRunErrors = (d: Draft): Record<string, string> => {
+    if (d.kind !== 'assignments') return {};
+    const cfg = d.template ? gradingConfig(p, d.template) : {};
+    const af = assignmentsFile(p.files, p.cohort.org);
+    return runErrors(applicableKeys(cfg, cfg.type === 'group'), semesterLayers(p, af && af !== 'loading' ? af.doc : {}), newRunFor(d));
+  };
+  const allErrors = dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length || (k === 'new' && Object.keys(newRunErrors(drafts[k])).length));
 
   const doSave = async () => {
     if (!sf || sf.error) return;
@@ -362,18 +400,36 @@ function View(p: ReadyProps) {
       } else writeDraft(y, d, doc);
     }
     for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
-    const out = y.toJS();
-    if (!validSchedule(out)) {
+    if (!validSchedule(y.toJS())) {
       setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
       return;
     }
+    // assignments.yml follows the schedule (the new entry's run settings; no block left for a
+    // removed one). It is built and checked BEFORE the schedule is written, so a refusal
+    // writes nothing.
+    const newAsg = newId && drafts.new?.kind === 'assignments' ? newId : null;
+    const run = newRunFor(drafts.new);
+    const gone = Object.entries(removed).filter(([, b]) => b === 'assignments').map(([id]) => id);
+    let second: Step | null = null;
+    if ((newAsg && Object.keys(run).length) || gone.length) {
+      const af = assignmentsFile(p.files, p.cohort.org);
+      if (!af || af === 'loading' || af.error) return setSave({ kind: 'bad', text: `Not saved: ${ASSIGNMENTS_FILE} could not be read, so nothing was written.` });
+      const text = assignmentsAfterSchedule(af, newAsg ? { key: newAsg, run } : null, gone);
+      if (text !== null) {
+        if (!validAssignments(parse(text) ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
+        second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, sha: af.sha, opts: { message: `assignments: ${newAsg ? `add ${newAsg}` : `remove ${gone.join(', ')}`}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+      }
+    }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
-    if (ok) {
+    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+    // Once the schedule is written its drafts are gone, whatever happens to assignments.yml:
+    // a retry must not add the entry a second time.
+    await saveSteps(env, setSave, first, second, newAsg ? 'Entry saved without its run settings' : 'Entry removed, but its block is still in assignments.yml', () => {
       setDrafts({});
       setRemoved({});
+      setNewRun({});
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
-    }
+    });
   };
 
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
@@ -420,6 +476,7 @@ function View(p: ReadyProps) {
           <div class="entry-body">
             <div class="type-pick">{NEW_TYPES.map(([t, label, cls]) => <button type="button" class={`trow ${cls}`} style="display:block;min-height:44px" onClick={() => setDraft('new', blankDraft(t, { repo: repos[0] ?? '' }))}>{label}</button>)}</div>
             <p class="footnote">A hand out is an assignment entry: assignment template, hand out, due and late work together.</p>
+            <SaveLine state={save} />
           </div>
         </div>
       );
@@ -454,7 +511,7 @@ function View(p: ReadyProps) {
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
               {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} />
-                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} lateDays={lateDays} />
+                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
                 : <ArchiveForm d={d} set={set} errors={errors} />}
@@ -573,7 +630,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   }
   const problems = (status.problems ?? []).filter((x) => x.fix?.entry === rel.id);
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
-  const dest = rel.dest?.repo || 'materials', destPath = rel.dest?.path || ref.source.path;
+  const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
   return (
     <>
       <Crumbs items={cohortCrumbs(p, ident, [{ t: 'Schedule', href: '#schedule' }])} />

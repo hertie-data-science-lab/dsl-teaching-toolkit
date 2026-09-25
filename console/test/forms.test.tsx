@@ -8,61 +8,47 @@ import { RETURN_MARKS, releaseAdhoc } from '../src/tiers/ops';
 import { matches } from '../src/edit/glob';
 import { diffRoster, readTable, writeTable } from '../src/edit/csv';
 
-const D = { lateDays: '10', latePct: '10%', teamSize: '5' };
-
 describe('the tiered form', () => {
-  const tiers = settingsTiers(D);
+  const tiers = settingsTiers();
 
   it('puts Ask and Default in the body, Conditional under its trigger, Advanced behind the reveal', () => {
     const solo = layout(tiers, fromConfig({ type: 'individual' }));
-    expect(solo.main.map((i) => i.key)).toEqual(['title', 'type', 'submit_via', 'visibility', 'formats', 'autograde']);
-    expect(solo.advanced.map((i) => i.key)).toEqual(['completion_check', 'grader_pdf', 'late_window_days', 'late_penalty_per_day']);
+    expect(solo.main.map((i) => i.key)).toEqual(['title', 'type', 'submit_via', 'autograde']);
+    expect(solo.advanced.map((i) => i.key)).toEqual(['completion_check', 'grader_pdf']);
     const team = layout(tiers, fromConfig({ type: 'group', submit_via: 'external', autograde: true }));
-    const type = team.main.find((i) => i.key === 'type')!;
-    expect(type.under.map((i) => i.key)).toEqual(['team_formation', 'max_team_size']);
-    expect(team.main.find((i) => i.key === 'submit_via')!.under.map((i) => i.key)).toEqual(['submit_url']);
+    expect(team.main.find((i) => i.key === 'type')!.under).toEqual([]);
     expect(team.main.find((i) => i.key === 'autograde')!.under.map((i) => i.key)).toEqual(['tests']);
+  });
+
+  it('holds what the task is, never how a semester runs it', () => {
+    for (const k of ['team_formation', 'max_team_size', 'submit_url', 'visibility', 'late_window_days', 'late_penalty_per_day']) expect(tiers).not.toHaveProperty(k);
+    const cfg = { type: 'group', team_formation: 'assigned', max_team_size: 3, visibility: 'public', late_window_days: 3 };
+    expect(Object.keys(toConfig(fromConfig(cfg))).filter((k) => toConfig(fromConfig(cfg))[k] !== undefined).sort()).toEqual(['submit_via', 'type']);
   });
 
   it('counts only non-default Advanced fields', () => {
     expect(layout(tiers, fromConfig({})).changed).toBe(0);
-    expect(layout(tiers, fromConfig({ grader_pdf: true, late_window_days: 3, late_penalty_per_day: '5%' })).changed).toBe(3);
+    expect(layout(tiers, fromConfig({ grader_pdf: true, completion_check: false })).changed).toBe(2);
     const out = render(<SchemaForm id="t" schema={null} tiers={tiers} values={fromConfig({ grader_pdf: true })} onChange={() => {}} />);
     expect(out).toContain('Advanced <span class="cnt changed">(1 changed)</span>');
   });
 
   it('forces what another field decides, read-only with the reason', () => {
-    const v = fromConfig({ submit_via: 'shared_dropbox_repo', autograde: true, visibility: 'public' });
+    const v = fromConfig({ submit_via: 'shared_dropbox_repo', autograde: true });
     const out = render(<SchemaForm id="t" schema={null} tiers={tiers} values={v} onChange={() => {}} />);
-    expect(out).toContain('Private: a shared drop box is always private.');
     expect(out).toContain('so tests cannot run per student');
-    expect(effective(tiers, v).visibility).toBe('private');
     expect(toConfig(effective(tiers, v)).autograde).toBeUndefined();
   });
 
-  it('lets visibility change for their own repo and saves it, with the note on existing copies', () => {
-    const v = { ...fromConfig({ submit_via: 'assignment_repo', visibility: 'private' }), visibility: 'public' };
-    expect(tiers.visibility.forced?.(v)).toBeNull();
-    expect(tiers.visibility.options?.map((o) => o.value)).toEqual(['private', 'public', 'student_choice']);
-    const out = render(<SchemaForm id="t" schema={null} tiers={tiers} values={v} onChange={() => {}} />);
-    expect(out).toContain('Applies to copies handed out after this change; existing copies keep theirs.');
-    expect(out).not.toContain('cannot be changed');
-    // A run setting: shown, but saved per semester in assignments.yml, never here (B4).
-    expect(toConfig(effective(tiers, v)).visibility).toBeUndefined();
-  });
-
-  it('validates inline: the bad value in the file, https only, both or neither', () => {
+  it('validates inline: the bad value in the file', () => {
     expect(fieldErrors(null, tiers, fromConfig({ autograde: 'sometimes' })).autograde).toContain('“sometimes”');
-    expect(fieldErrors(null, tiers, fromConfig({ submit_via: 'external', submit_url: 'http://x' })).submit_url).toContain('https://');
-    expect(fieldErrors(null, tiers, fromConfig({ late_window_days: 3 })).late_window_days).toContain('both or neither');
-    expect(fieldErrors(null, tiers, fromConfig({ late_window_days: 3, late_penalty_per_day: '10' })).late_penalty_per_day).toContain('percentage');
   });
 
-  it('round-trips grading_config.yml and the schema accepts the result', async () => {
-    // The template's own keys only: its run settings are each semester's assignments.yml.
-    const cfg = { title: 'Group project', type: 'group', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: true, completion_check: false };
+  it('round-trips grading_config.yml with several formats, the runnable one first, and the schema accepts the result', async () => {
+    const cfg = { title: 'Group project', type: 'group', submit_via: 'assignment_repo', formats: ['ipynb', 'latex'], autograde: true, completion_check: false };
     const back = Object.fromEntries(Object.entries(toConfig(effective(tiers, fromConfig(cfg)))).filter(([, x]) => x !== undefined));
     expect(back).toEqual(cfg);
+    expect(fromConfig({ formats: 'py, latex' }).formats).toEqual(['py', 'latex']);
     const { default: Ajv } = await import('ajv/dist/2020');
     expect(new Ajv({ strict: false }).validate(gradingSchema, back)).toBe(true);
   });

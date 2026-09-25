@@ -1,25 +1,22 @@
 // A template's `grading_config.yml` (on its `solution` branch) as the Settings form reads
 // and writes it: design/inputs.md "Assignment Settings", revision brief v3 section 3. The
-// form works on a flat model of strings and booleans; `toConfig` turns it back into the
-// file's shape.
+// template holds what the task IS (decision 0009 rule 2): how each semester runs it (teams,
+// visibility, the late rule, the submit link) is that semester's assignments.yml. The form
+// works on a flat model; `toConfig` turns it back into the file's shape.
 
+import { questionFile, questionPoints, questionsFromRows } from '../model/marks';
+import { helpOf, labelOf } from '../model/labels';
+import { FORMAT_KEYS, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/policy';
 import { opt, type Tiers, type Values } from './types';
 
-export const FORMATS: [string, string][] = [
-  ['ipynb', 'Jupyter notebook'], ['py', 'Python files'], ['rmd', 'R Markdown'], ['qmd', 'Quarto'], ['latex', 'LaTeX'], ['none', 'No starter file'],
-];
-export const SUBMIT: [string, string, string][] = [
-  ['assignment_repo', 'Their own repo', 'Private to the student and instructors.'],
-  ['shared_dropbox_repo', 'A shared drop box', 'One repo for the class; each student has a folder.'],
-  ['external', 'Elsewhere', 'Moodle, Kaggle or in class. The repo carries the brief only.'],
-];
-export const VISIBILITY: Record<string, string> = { private: 'Private', public: 'Public', student_choice: 'Student’s choice' };
+export { VISIBILITY } from '../model/cascade';
 
-export interface CourseDefaults {
-  lateDays: string;
-  latePct: string;
-  teamSize: string;
-}
+/** Every format a template may list (the schema's), with the engine's label. */
+export const FORMATS: [string, string][] = FORMAT_KEYS.map((k) => [k, labelOf('formats', k)]);
+export const formatWord = (f: string) => labelOf('formats', f);
+
+/** Every place students may submit: value, label and help, from the engine's labels. */
+export const SUBMIT: [string, string, string][] = SUBMIT_VIA_KEYS.map((k) => [k, labelOf('submit_via', k), helpOf('submit_via', k)]);
 
 /** A `formats:` value as a list: the file may spell a list or one comma-separated string. */
 export function formatsList(v: unknown): string[] {
@@ -36,33 +33,24 @@ export function fromConfig(cfg: Record<string, unknown>): Values {
   return {
     title: s('title'),
     type: s('type') ?? 'individual',
-    team_formation: s('team_formation'),
-    max_team_size: cfg.max_team_size ?? undefined,
-    submit_via: s('submit_via') === 'github' ? 'assignment_repo' : (s('submit_via') ?? 'assignment_repo'),
-    submit_url: s('submit_url'),
-    visibility: s('visibility') ?? 'private',
-    // The form asks for the runnable one, the first; the rest ride along untouched.
-    formats: formatsList(cfg.formats)[0],
-    formats_more: formatsList(cfg.formats).slice(1),
+    submit_via: s('submit_via') === 'github' ? SUBMIT_VIA_DEFAULT : (s('submit_via') ?? SUBMIT_VIA_DEFAULT),
+    formats: formatsList(cfg.formats),
     autograde: bool(cfg.autograde),
     tests: s('tests'),
     completion_check: cfg.completion_check === true ? 'on' : cfg.completion_check === false ? 'off' : 'auto',
     grader_pdf: cfg.grader_pdf === true,
-    late_window_days: cfg.late_window_days ?? undefined,
-    late_penalty_per_day: s('late_penalty_per_day'),
   };
 }
 
-/** The form's values -> the keys of grading_config.yml, undefined for "leave it out".
- * Never a run setting (team formation, max team size, the late rule, visibility, the
- * submit link): those are each semester's assignments.yml (decision 0009). */
+/** The form's values -> the keys of grading_config.yml, undefined for "leave it out". */
 export function toConfig(v: Values): Record<string, unknown> {
   const auto = v.autograde === 'true' ? true : v.autograde === 'false' ? false : v.autograde;
+  const formats = (v.formats as string[] | undefined) ?? [];
   return {
     title: v.title || undefined,
     type: v.type === 'group' ? 'group' : v.type === 'individual' ? 'individual' : undefined,
     submit_via: v.submit_via,
-    formats: v.formats ? [String(v.formats), ...((v.formats_more as string[] | undefined) ?? []).filter((f) => f !== v.formats)] : undefined,
+    formats: formats.length ? formats : undefined,
     autograde: isDrop(v) ? undefined : auto,
     tests: auto === true && v.tests && v.tests !== 'tests' ? v.tests : undefined,
     completion_check: isDrop(v) ? undefined : v.completion_check === 'on' ? true : v.completion_check === 'off' ? false : undefined,
@@ -70,49 +58,17 @@ export function toConfig(v: Values): Record<string, unknown> {
   };
 }
 
-const PENALTY = /^(\d+(\.\d+)?%|0?\.\d+|0|1(\.0+)?)$/;
-
-/** `teamsHref`: where "You assign them" links to, the newest semester's Teams page when there is one. */
-export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
+/** The template's own fields; `formats` is the format picker beside them, not a tier. */
+export function settingsTiers(): Tiers {
   return {
     title: { tier: 'default', label: 'Title', reason: 'Shown to students on the site and in their repo.' },
     type: {
       tier: 'ask', label: 'Alone or in teams', widget: 'radio', defaultLabel: 'default: alone', reason: 'This choice changes downstream options.',
       options: [opt('individual', 'Alone', 'One repo per student. The default.'), opt('group', 'In teams', 'One repo per team; teams form before hand out.')],
     },
-    team_formation: {
-      tier: 'conditional', under: 'type', when: (v) => v.type === 'group', label: 'How teams form', widget: 'radio', default: 'self_select', defaultLabel: 'default: students choose',
-      options: [
-        opt('self_select', 'Students form their own', 'On the student site. The default.'),
-        { ...opt('assigned', 'You assign them', 'You assign them on the semester’s Teams page once hand out is scheduled.'), href: teamsHref },
-      ],
-    },
-    max_team_size: {
-      tier: 'conditional', under: 'type', when: (v) => v.type === 'group', label: 'Max team size', widget: 'number', defaultLabel: `course default: ${d.teamSize}`,
-      placeholder: d.teamSize, reason: 'Students cannot join a team that is full.',
-      check: (x) => (x !== undefined && (!Number.isInteger(x) || (x as number) < 1) ? 'A whole number, 1 or more.' : null),
-    },
     submit_via: {
-      tier: 'default', label: 'Where students submit', widget: 'radio', default: 'assignment_repo', defaultLabel: 'default: their own repo', reason: 'Decides what marking reads.',
-      options: SUBMIT.map(([v, l, s]) => opt(v, l, v === 'assignment_repo' ? `${s} The default.` : s)),
-    },
-    submit_url: {
-      tier: 'conditional', under: 'submit_via', when: (v) => v.submit_via === 'external', label: 'Link to where they submit', widget: 'url', placeholder: 'https://',
-      reason: 'Shown on the student site beside the due date.',
-      check: (x) => (!x ? 'Needed when students submit elsewhere.' : /^https:\/\/\S+$/.test(String(x)) ? null : 'The link must start with https://.'),
-    },
-    visibility: {
-      tier: 'default', label: 'Who can see each student’s repo', widget: 'radio', default: 'private', defaultLabel: 'default: private',
-      reason: 'Applies to copies handed out after this change; existing copies keep theirs.',
-      options: Object.entries(VISIBILITY).map(([v, l]) => opt(v, l, v === 'private' ? 'The default.' : undefined)),
-      forced: (v) =>
-        v.submit_via === 'shared_dropbox_repo' ? { value: 'private', reason: 'Private: a shared drop box is always private.' }
-        : v.submit_via === 'external' ? { value: 'private', reason: 'Private: the repo holds the brief only.' }
-        : null,
-    },
-    formats: {
-      tier: 'default', label: 'What students hand in', widget: 'radio', default: 'ipynb', defaultLabel: 'default: Jupyter notebook', reason: 'Seeds the starter files and decides how markers see submissions.',
-      options: FORMATS.map(([v, l]) => opt(v, l, v === 'ipynb' ? 'The default.' : undefined)),
+      tier: 'default', label: 'Where students submit', widget: 'radio', default: SUBMIT_VIA_DEFAULT, defaultLabel: `default: ${labelOf('submit_via', SUBMIT_VIA_DEFAULT).toLowerCase()}`, reason: 'Decides what marking reads.',
+      options: SUBMIT.map(([v, l, s]) => opt(v, l, v === SUBMIT_VIA_DEFAULT ? `${s} The default.` : s)),
     },
     autograde: {
       tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off',
@@ -126,7 +82,7 @@ export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
     },
     completion_check: {
       tier: 'advanced', label: 'Completion check', widget: 'radio', default: 'auto',
-      defaultLabel: 'default: auto (on for a notebook, off otherwise)', reason: 'Flags submissions with unanswered questions in the mark sheet.',
+      defaultLabel: 'default: auto (on for a notebook, off otherwise)', reason: 'Flags submissions with unanswered questions in the mark sheet. Reads the runnable format.',
       options: [opt('auto', 'Auto', 'The default.'), opt('on', 'On'), opt('off', 'Off')],
       forced: (v) => (isDrop(v) ? { value: 'auto', reason: 'Off: not available for a shared drop box.' } : null),
     },
@@ -134,16 +90,33 @@ export function settingsTiers(d: CourseDefaults, teamsHref?: string): Tiers {
       tier: 'advanced', label: 'Marker PDF', widget: 'checkbox', default: false, defaultLabel: 'a PDF of each submission for markers; default off',
       forced: (v) => (isDrop(v) ? { value: false, reason: 'Off: not available for a shared drop box.' } : null),
     },
-    late_window_days: {
-      tier: 'advanced', label: 'Late work for this assignment, days', widget: 'number', placeholder: d.lateDays,
-      defaultLabel: `course default: ${d.latePct} per day, up to ${d.lateDays} days`, reason: 'Empty means the course default.',
-      check: (x, v) => (x !== undefined && !v.late_penalty_per_day ? 'Set both or neither; one alone is ignored and the course default applies.' : null),
-    },
-    late_penalty_per_day: {
-      tier: 'advanced', label: 'Late penalty per day', placeholder: d.latePct, defaultLabel: `course default: ${d.latePct}`, reason: 'Write 10% or 0.1.',
-      check: (x, v) =>
-        x !== undefined && !PENALTY.test(String(x)) ? 'Write a percentage (10%) or a fraction (0.1).'
-        : x !== undefined && v.late_window_days === undefined ? 'Set both or neither; one alone is ignored and the course default applies.' : null,
-    },
   };
+}
+
+// ------------------------------------------------------------------ questions
+
+export interface QuestionRow {
+  name: string;
+  points: string;
+  file: string;
+}
+
+/** `questions:` as the table's rows. */
+export function questionRows(q: unknown): QuestionRow[] {
+  if (!q || typeof q !== 'object') return [];
+  return Object.entries(q as Record<string, unknown>).map(([name, v]) => ({ name, points: questionPoints(v) == null ? '' : String(questionPoints(v)), file: questionFile(v) ?? '' }));
+}
+
+/** Why a question's file is refused, as `setting_readers._inside_submission` refuses it: a path that
+ *  leaves the submission (`..`, a leading `/`, a backslash). Null when it is fine or blank. */
+export function questionFileError(file: string): string | null {
+  const t = file.trim();
+  if (!t) return null;
+  const parts = t.split('/').filter((x) => x && x !== '.');
+  return !parts.length || t.startsWith('/') || parts.includes('..') || t.includes('\\') ? `${t} is not a file inside the submission.` : null;
+}
+
+/** The table's rows as `questions:` (model/marks `questionsFromRows`, with the file column). */
+export function questionsValue(rows: QuestionRow[], was: unknown): Record<string, unknown> | undefined {
+  return questionsFromRows(rows.map((r) => [r.name, r.points, r.file]), was);
 }

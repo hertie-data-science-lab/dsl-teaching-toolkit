@@ -9,6 +9,7 @@
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
 // of a semester the person is not a member of yet.
 
+import { ORG_NAME_RE } from './model/policy';
 import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 
 export interface Route {
@@ -91,7 +92,7 @@ export function parseSearch(search: string): Selection {
     cohort: q.get('cohort') ?? undefined,
     course: q.get('course') ?? undefined,
     semester: q.get('semester') ?? undefined,
-    join: ORG_RE.test(q.get('join') ?? '') ? q.get('join')! : undefined,
+    join: ORG_NAME_RE.test(q.get('join') ?? '') ? q.get('join')! : undefined,
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
     template: q.get('template') ?? undefined,
   };
@@ -108,7 +109,6 @@ export const COURSE_SCREENS: Record<string, string> = {
 };
 
 /** A GitHub organisation name, as `?join=` must spell one. */
-export const ORG_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
 const WIZARD_RE = /^new-(course|semester|assignment)-[1-4]$/;
 

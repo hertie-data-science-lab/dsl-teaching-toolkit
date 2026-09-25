@@ -3,6 +3,7 @@
 // readings of each session. Nothing is published anywhere; see model/materials.ts for how
 // each kind is shown.
 
+import { DEFAULT_TIMEZONE } from '../model/policy';
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { TreeEntry } from '../github/client';
@@ -10,7 +11,7 @@ import { buildTree, type TreeNode } from '../edit/badges';
 import { openDeck } from '../model/deckTab';
 import { fmtDay } from '../model/format';
 import { showFile, type Shown } from '../model/materials';
-import { DEFAULT_TZ, sortedRows, type SemesterFacts } from '../model/student';
+import { sortedRows, type SemesterFacts } from '../model/student';
 import { studentHref } from '../router';
 import { CheckLine, Loading, Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
@@ -143,7 +144,7 @@ export function ShownView({ shown, name }: { shown: Shown; name: string }) {
 
 /** The readings of every session: its reading files (opened here), its reading list, or "to come" while they are planned but not out. */
 export function ReadingsView({ org, facts, now }: { org: string; facts: SemesterFacts; now: number }) {
-  const tz = facts.timezone || DEFAULT_TZ;
+  const tz = facts.timezone || DEFAULT_TIMEZONE;
   const rows = sortedRows(facts.rows, tz).filter((r) => r.readings.length || r.readingList || r.readingsPending);
   if (!rows.length) return null;
   const year = new Date(now).getFullYear();

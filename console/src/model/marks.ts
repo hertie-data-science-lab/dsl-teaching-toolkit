@@ -7,6 +7,8 @@ import { readTable } from '../edit/csv';
 import { obj, type Path } from '../edit/yamlText';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
+/** Feedback on each question: the student's on a solo sheet, the team's on a group sheet (grades.QUESTION_FEEDBACK_KEY). */
+export const QUESTION_FEEDBACK_KEY = 'feedback_per_question';
 
 export interface Person {
   handle: string;
@@ -23,6 +25,9 @@ export interface Unit {
   scorePath: Path;
   feedback: unknown; // the team's shared feedback (teams only)
   feedbackPath: Path | null;
+  /** Feedback per question, keyed by question; its cells live under `questionFeedbackPath`. */
+  questionFeedback: Record<string, unknown>;
+  questionFeedbackPath: Path;
   people: Person[];
 }
 
@@ -43,6 +48,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
     if (group)
       return {
         key, info, score: u.score_group ?? null, scorePath: [container, key, 'score_group'], feedback: u.feedback_group ?? null, feedbackPath: [container, key, 'feedback_group'],
+        questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
         people: Object.entries(obj(u.members)).map(([handle, m]) => {
           const mm = obj(m);
           return { handle, adjustment: mm.adjustment_individual ?? null, feedback: mm.feedback_individual ?? null, notes: mm[NOTES_KEY] ?? null, base: [container, key, 'members', handle] };
@@ -50,6 +56,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
       };
     return {
       key, info, score: u.score_individual ?? null, scorePath: [container, key, 'score_individual'], feedback: null, feedbackPath: null,
+      questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
       people: [{ handle: key, adjustment: u.adjustment_individual ?? null, feedback: u.feedback_individual ?? null, notes: u[NOTES_KEY] ?? null, base: [container, key] }],
     };
   });
@@ -80,16 +87,23 @@ export function questionFile(entry: unknown): string | null {
 }
 
 /** The `questions:` value the template form writes from its rows: each name with its points,
- *  and a question that was a mapping (`{points, file}`) stays one, so `file:` survives a save. */
-export function questionsFromRows(rows: [string, string][], was: unknown): Record<string, unknown> | undefined {
+ *  and a question that was a mapping (`{points, file}`) stays one, so `file:` survives a save.
+ *  A row's third cell, when given, is the file it is marked from: named, the question becomes
+ *  `{points, file}`; emptied, `file:` goes and a bare maximum is written. */
+export function questionsFromRows(rows: ([string, string] | [string, string, string])[], was: unknown): Record<string, unknown> | undefined {
   const old = isMap(was) ? was : {};
   const kept = rows.filter(([name]) => name.trim());
   if (!kept.length) return undefined;
   return Object.fromEntries(
-    kept.map(([name, n]) => {
+    kept.map(([name, n, file]) => {
       const points = n === '' ? null : Number.isFinite(Number(n)) ? Number(n) : n;
       const before = old[name.trim()];
-      return [name.trim(), isMap(before) ? { ...before, points } : points];
+      const rest = isMap(before) ? { ...before } : {};
+      if (file !== undefined) {
+        delete rest.file;
+        if (file.trim()) rest.file = file.trim();
+      }
+      return [name.trim(), Object.keys(rest).some((k) => k !== 'points') ? { ...rest, points } : points];
     }),
   );
 }
@@ -107,18 +121,6 @@ export function scoreTotal(score: unknown, questions?: Record<string, unknown> |
     marked = true;
   }
   return marked ? total : null;
-}
-
-/** `late_penalty_per_day` as a fraction (`10%` and `0.1` both 0.1); null for a value the engine refuses. */
-export function penaltyRate(text: unknown): number | null {
-  if (blank(text)) return null;
-  const raw = String(text).trim();
-  const pct = raw.endsWith('%');
-  let rate = num(pct ? raw.slice(0, -1) : raw);
-  if (rate === null) return null;
-  if (pct) rate /= 100;
-  else if (rate >= 1) return null;
-  return rate < 0 || rate > 1 ? null : rate;
 }
 
 export function finalGrade(total: number | null, rate: number | null, daysLate: unknown, adjustment: unknown): number | null {

@@ -13,6 +13,7 @@
 import { parse } from 'yaml';
 import type { DirEntry, GitHubClient } from '../github/client';
 import { addDays, str } from './format';
+import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './policy';
 
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant. */
 export interface ScheduleRow {
@@ -67,7 +68,7 @@ export interface SemesterAssignment {
   due: string | null;
   /** The late cutoff: due + the late window; null when the source does not say. */
   lateCutoff: string | null;
-  /** "10% per day, up to 10 days" */
+  /** "<penalty> per day, up to <n> days" */
   lateRule: string;
   /** "What is on main at the grading cutoff is what is marked." */
   cutoffSentence: string;
@@ -168,14 +169,13 @@ function bytesToBase64(b: Uint8Array): string {
   return btoa(bin);
 }
 
-export const DEFAULT_TZ = 'Europe/Berlin';
 /** How long a semester's facts are reused before they are read again (ETag'd: an unchanged file costs no rate limit). */
 export const FRESH_MS = 10 * 60 * 1000;
 
 // --------------------------------------------------------------------------- time
 
 /** `iso` as an epoch millisecond. A time with no offset is wall-clock time in `tz`; a date alone is its midnight. */
-export function instant(iso: string, tz = DEFAULT_TZ): number {
+export function instant(iso: string, tz = DEFAULT_TIMEZONE): number {
   if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)) return Date.parse(iso);
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(iso.trim());
   if (!m) return Date.parse(iso);
@@ -195,12 +195,12 @@ function offsetAt(t: number, tz: string): number {
 }
 
 /** Midnight at the start of the day `now` falls on, in `tz`. */
-export function startOfDay(now: number, tz = DEFAULT_TZ): number {
+export function startOfDay(now: number, tz = DEFAULT_TIMEZONE): number {
   const d = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
   return instant(d, tz);
 }
 
-/** The late cutoff from the late rule's window ("up to 10 days"; "not accepted after the deadline" is the deadline). */
+/** The late cutoff from the late rule's window ("up to <n> days"; "not accepted after the deadline" is the deadline). */
 export function cutoffFrom(due: string | null, lateRule: string): string | null {
   if (!due) return null;
   if (/not accepted/i.test(lateRule)) return due;
@@ -219,7 +219,7 @@ export const MY_STATE_WORD: Record<MyState, string> = {
   not_handed_out: 'not handed out', open: 'open', late_window: 'late window', marking: 'marking', returned: 'marks returned',
 };
 
-export function myState(a: SemesterAssignment, marked: boolean, now: number, tz = DEFAULT_TZ): MyState {
+export function myState(a: SemesterAssignment, marked: boolean, now: number, tz = DEFAULT_TIMEZONE): MyState {
   if (marked) return 'returned';
   if (!a.handedOut && (!a.handout || now < instant(a.handout, tz))) return 'not_handed_out';
   if (!a.due || now < instant(a.due, tz)) return 'open';
@@ -439,7 +439,7 @@ export class SiteSource implements StudentData {
     announcements.sort((a, b) => instant(b.when) - instant(a.when));
     return {
       courseName: str(cfg.course_name),
-      timezone: str(cfg.timezone) || DEFAULT_TZ,
+      timezone: str(cfg.timezone) || DEFAULT_TIMEZONE,
       rows,
       assignments,
       instructors: [...cardsOf(ppl.instructors, 'instructor', org), ...cardsOf(ppl.teaching_assistants, 'teaching_assistant', org)],
@@ -478,17 +478,17 @@ function yamlOf(text: string | undefined): Record<string, unknown> {
   }
 }
 
-/** The repos `_data/materials.yml` links into; `materials` when it names none. */
+/** The repos `_data/materials.yml` links into; the institution's release repo when it names none. */
 export function materialsReposOf(text: string, org: string): string[] {
   const repos = new Set<string>();
   for (const m of text.matchAll(/https:\/\/github\.com\/[^\s"']+/g)) {
     const rp = repoPath(m[0], org);
     if (rp) repos.add(rp.repo);
   }
-  return repos.size ? [...repos] : ['materials'];
+  return repos.size ? [...repos] : [DEFAULT_DEST_REPO];
 }
 
 /** The rows sorted by when they happen. */
-export function sortedRows(rows: ScheduleRow[], tz = DEFAULT_TZ): ScheduleRow[] {
+export function sortedRows(rows: ScheduleRow[], tz = DEFAULT_TIMEZONE): ScheduleRow[] {
   return [...rows].sort((a, b) => instant(a.when, tz) - instant(b.when, tz) || a.id.localeCompare(b.id));
 }

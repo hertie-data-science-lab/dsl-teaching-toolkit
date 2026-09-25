@@ -8,7 +8,7 @@ import { useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
-import { ABOUT, ASSIGNMENT_DEFAULTS } from '../tiers/course';
+import { ABOUT, courseDefaultTiers } from '../tiers/course';
 import type { Values } from '../tiers/types';
 import { COURSE_ORG } from '../tiers/wizard';
 import { CheckLine, Crumbs, Help } from '../ui/bits';
@@ -167,11 +167,11 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     title = 'Defaults';
     const defaults = d.defaults ?? before?.defaults ?? {};
     const links = d.links ?? before?.links ?? '';
-    const errs = fieldErrors(null, ASSIGNMENT_DEFAULTS, defaults);
+    const errs = fieldErrors(null, courseDefaultTiers(), defaults);
     body = (
       <>
-        <p>These are the course’s defaults. Every one can be overridden per assignment or per semester.</p>
-        <div class="form-section"><h3>Assignment defaults</h3><SchemaForm id="ncx" schema={null} tiers={ASSIGNMENT_DEFAULTS} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
+        <p>These are the course’s defaults. Left empty, the institution’s value in grey applies. Each semester can set its own, and each assignment its own.</p>
+        <div class="form-section"><h3>Defaults for this course’s assignments</h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers()} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
         <div class="form-section">
           <h3>Site links</h3>
           <div class="field">
