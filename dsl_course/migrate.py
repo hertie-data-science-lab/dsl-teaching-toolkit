@@ -65,6 +65,9 @@ from .discovery import (
     OLD_SEMESTERS_PATH,
     SEMESTERS_PATH,
     central_ref_for,
+    discover_assignment_repos,
+    discover_content_repos,
+    discover_semesters,
     list_org_repos,
 )
 from .faults import NOT_MIGRATED, NotMigrated
@@ -86,6 +89,7 @@ from .grades import (
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .profile_readme import profile_files, update_profile_readme
 from .repos import default_branch, repo_missing, set_repo_topics
+from .scaffold import materials_system_files
 from .setting_readers import RENAMED_SETTINGS
 from .settings import ASSIGNMENT_DEFAULTS_KEY
 from .sync_faculty import retired_course_faults
@@ -96,6 +100,12 @@ from .welcome import (
     refresh_join_workflows,
     refresh_semester_pointer,
     template,
+)
+from .workflows_place import (
+    RELEASE_WORKFLOWS,
+    RETIRED_WORKFLOWS,
+    TEMPLATE_WORKFLOWS,
+    content_workflow_files,
 )
 
 # ------------------------------------------------------------------ the old layout
@@ -784,6 +794,27 @@ def _status_step(course_org: str, semester_org: str | None) -> Step:
     )
 
 
+def _drift(org: str, wanted: dict[str, dict[str, bytes]]) -> list[str]:
+    """`repo/path` for every file of `wanted` (`{repo: {path: bytes}}`) that `org` does
+    not hold byte for byte."""
+    out = []
+    for repo, want in wanted.items():
+        live = _files(org, repo)
+        out += [
+            f"{repo}/{p}" for p, body in want.items() if live.get(p) != blob_sha(body)
+        ]
+    return out
+
+
+def _no_drift(drift: list[str]) -> bool:
+    """The re-render's verify: nothing left differing, else each file named."""
+    if drift:
+        log_err(
+            f"{len(drift)} file(s) still differ from this checkout: {', '.join(drift)}"
+        )
+    return not drift
+
+
 def _schedule_clean(text: str | None, *, quiet: bool = False) -> bool:
     """`schedule.yml` read by this engine with no NOT_MIGRATED fault; each one found is
     named (unless `quiet`), for a person to fix by hand."""
@@ -1030,15 +1061,7 @@ class Semester:
             JOIN_REPO: join_files(self.org),
             ".github": profile_files(self.org, central_ref=ref),
         }
-        out = []
-        for repo, want in wanted.items():
-            live = _files(self.org, repo)
-            out += [
-                f"{repo}/{p}"
-                for p, body in want.items()
-                if live.get(p) != blob_sha(body)
-            ]
-        return out
+        return _drift(self.org, wanted)
 
     def rerender_done(self) -> bool:
         return self.renamed() and self.layout_done() and not self.drift()
@@ -1102,7 +1125,7 @@ class Semester:
                 done=self.rerender_done,
                 plan=lambda: ["re-write every SYSTEM-OWNED file that differs"],
                 do=self.rerender,
-                verify=lambda: not self.drift(),
+                verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             # status.json before the unpause: re-enabled workflows never race it.
@@ -1242,9 +1265,36 @@ class Course:
 
     # re-render ---------------------------------------------------------------
     def drift(self) -> list[str]:
-        want = seed.github_workflow_files(self.org, central_ref_for(self.org))
-        live = _files(self.org, ".github")
-        return [p for p, body in want.items() if live.get(p) != blob_sha(body)]
+        """Every file the course re-render (`seed.refresh`) writes that is not what this
+        checkout renders: the `.github` workflows, each content repo's release workflows
+        (and a materials repo's system files), each live template's hand-out workflow -
+        and a retired workflow still lying in a content repo or template."""
+        ref = central_ref_for(self.org)
+        semesters = discover_semesters(self.org)
+        templates = discover_assignment_repos(self.org)
+        assignments = [r["name"] for r in templates]
+
+        def hosted(repo: str, workflows: tuple[str, ...]) -> dict[str, bytes]:
+            return content_workflow_files(
+                semesters, assignments, repo, ref, workflows=workflows
+            )
+
+        wanted = {".github": seed.github_workflow_files(self.org, ref)}
+        for repo in discover_content_repos(self.org):
+            wanted[repo] = hosted(repo, RELEASE_WORKFLOWS)
+            if repo.startswith(MATERIALS_REPO_PREFIX):
+                wanted[repo] |= materials_system_files(self.org, repo)
+        for row in templates:
+            if not row.get("archived"):
+                wanted[row["name"]] = hosted(row["name"], TEMPLATE_WORKFLOWS)
+        retired = [
+            f"{repo}/{p} (retired)"
+            for repo in wanted
+            if repo != ".github"
+            for p in RETIRED_WORKFLOWS
+            if p in _files(self.org, repo)
+        ]
+        return _drift(self.org, wanted) + retired
 
     def rerender_done(self) -> bool:
         return self.registry_done() and not self.drift()
@@ -1330,7 +1380,7 @@ class Course:
                 done=self.rerender_done,
                 plan=lambda: ["Refresh actions from this checkout"],
                 do=lambda: seed.refresh(self.org) == 0,
-                verify=lambda: not self.drift(),
+                verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             _status_step(self.org, None),

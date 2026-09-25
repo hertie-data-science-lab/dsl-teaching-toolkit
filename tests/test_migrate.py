@@ -272,6 +272,56 @@ def _render(f, org, repo, files):
     return 0
 
 
+MATERIALS_SYSTEM = {".system/MAINTAINING.md": b"g", ".system/SYLLABUS.md.sample": b"s"}
+
+
+def _hosted(repo, workflows):
+    return {path: f"{repo} {path}".encode() for path in workflows}
+
+
+def _course_renders(fake, monkeypatch):
+    """What the course re-render writes, read off the fake org, for `Course.drift` (the
+    names migrate imports) and for the stubbed `seed.refresh` (`_render_course`)."""
+    monkeypatch.setattr(
+        migrate.seed, "github_workflow_files", lambda org, ref: COURSE_WORKFLOWS
+    )
+    monkeypatch.setattr(migrate, "discover_semesters", lambda org: [SEM])
+    monkeypatch.setattr(
+        migrate,
+        "discover_content_repos",
+        lambda org: sorted(
+            r["name"]
+            for r in fake.list_org_repos(org)
+            if r["name"].startswith("course-materials-")
+        ),
+    )
+    monkeypatch.setattr(
+        migrate,
+        "discover_assignment_repos",
+        lambda org: [r for r in fake.list_org_repos(org) if r["isTemplate"]],
+    )
+    monkeypatch.setattr(
+        migrate,
+        "content_workflow_files",
+        lambda sems, names, repo, ref, *, workflows: _hosted(repo, workflows),
+    )
+    monkeypatch.setattr(
+        migrate, "materials_system_files", lambda org, repo: MATERIALS_SYSTEM
+    )
+
+
+def _render_course(fake, org):
+    _render(fake, org, ".github", COURSE_WORKFLOWS)
+    for row in fake.list_org_repos(org):
+        name = row["name"]
+        if name.startswith("course-materials-"):
+            files = {**_hosted(name, migrate.RELEASE_WORKFLOWS), **MATERIALS_SYSTEM}
+            _render(fake, org, name, files)
+        elif row["isTemplate"] and not row["archived"]:
+            _render(fake, org, name, _hosted(name, migrate.TEMPLATE_WORKFLOWS))
+    return 0
+
+
 def _migrated_course(fake, monkeypatch):
     fake.add(
         COURSE,
@@ -279,12 +329,11 @@ def _migrated_course(fake, monkeypatch):
         {"semesters.yml": b"semesters:\n- Sem-f2026\n", **COURSE_WORKFLOWS},
         topics=["dsl-course-hub"],
     )
-    fake.add(
-        COURSE, "course-materials-f2026", {".system/MAINTAINING.md": b"g", **WORKFLOW}
-    )
-    monkeypatch.setattr(
-        migrate.seed, "github_workflow_files", lambda org, ref: COURSE_WORKFLOWS
-    )
+    fake.add(COURSE, "course-materials-f2026", WORKFLOW)
+    _course_renders(fake, monkeypatch)
+    _render_course(fake, COURSE)
+    fake.commits.clear()
+    fake.paused_at_commit.clear()
 
 
 @pytest.fixture
@@ -690,18 +739,19 @@ def course(fake, monkeypatch):
     fake.add(
         COURSE,
         "course-materials-f2026",
-        {"MAINTAINING.md": b"guide", "SYLLABUS.md.sample": b"s", "SYLLABUS.md": b"x"},
+        {
+            "MAINTAINING.md": b"guide",
+            "SYLLABUS.md.sample": b"s",
+            "SYLLABUS.md": b"x",
+            migrate.RELEASE_WORKFLOWS[0]: b"old",
+        },
     )
-    monkeypatch.setattr(
-        migrate.seed, "github_workflow_files", lambda org, ref: COURSE_WORKFLOWS
-    )
+    _course_renders(fake, monkeypatch)
     calls: list[str] = []
     monkeypatch.setattr(
         migrate.seed,
         "refresh",
-        lambda org: (
-            calls.append("refresh") or _render(fake, org, ".github", COURSE_WORKFLOWS)
-        ),
+        lambda org: calls.append("refresh") or _render_course(fake, org),
     )
     monkeypatch.setattr(
         migrate.status,
@@ -755,7 +805,10 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         ".system/MAINTAINING.md",
         ".system/SYLLABUS.md.sample",
         "SYLLABUS.md",
+        *migrate.RELEASE_WORKFLOWS,
     }
+    template = fake.tree(COURSE, "assignment-1-f2026")
+    assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
     assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
 
@@ -777,6 +830,26 @@ def test_a_course_with_no_workflow_repo_passes_the_pause(
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
     assert course == ["refresh", "status"]
+
+
+def test_the_course_re_render_is_checked_in_every_repo_it_writes(
+    fake, course, monkeypatch, capsys
+):
+    # A refresh that re-renders `.github` only: the content repo and the template still
+    # differ, and a retired workflow is still in the template - the verify names each.
+    fake.tree(COURSE, "assignment-1-f2026")[migrate.RETIRED_WORKFLOWS[0]] = b"old"
+    monkeypatch.setattr(
+        migrate.seed,
+        "refresh",
+        lambda org: _render(fake, org, ".github", COURSE_WORKFLOWS),
+    )
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert "re-render did not verify" in err
+    assert f"course-materials-f2026/{migrate.RELEASE_WORKFLOWS[0]}" in err
+    assert "course-materials-f2026/.system/MAINTAINING.md" in err
+    assert f"assignment-1-f2026/{migrate.TEMPLATE_WORKFLOWS[0]}" in err
+    assert f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired)" in err
 
 
 def test_a_registry_already_renamed_but_keyed_the_old_way_is_rewritten(
