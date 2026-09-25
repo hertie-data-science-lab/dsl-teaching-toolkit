@@ -27,12 +27,13 @@ export function publicPatterns(text: string): string[] {
 /**
  * The course org's repos that are none of infra, materials or templates, but that a schedule
  * can still release from: not archived, not `.github` or the org's `.github.io`, not
- * `course-materials-*`, not `assignment-*` and not a repo the course status already lists.
+ * `assignment-*` and not a repo the course status already lists (its materials repos, by
+ * topic, and any `course-materials-*` not migrated yet).
  */
 export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRepo[] {
   const skip = new Set([COURSE_REPO, `${org}.github.io`.toLowerCase(), ...known.map((k) => k.toLowerCase())]);
   return repos
-    .filter((r) => !r.archived && !skip.has(r.name.toLowerCase()) && !/^course-materials-/i.test(r.name) && !/^assignment-/i.test(r.name))
+    .filter((r) => !r.archived && !skip.has(r.name.toLowerCase()) && !/^assignment-/i.test(r.name))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

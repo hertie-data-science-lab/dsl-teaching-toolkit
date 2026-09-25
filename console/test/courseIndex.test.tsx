@@ -88,9 +88,12 @@ describe('file badges', () => {
 });
 
 describe('other repos', () => {
-  it('drops infra, materials, templates and archived repos', () => {
+  it('drops infra, the listed materials repos, templates and archived repos', () => {
+    // Materials repos are the ones the course status lists (by topic, decision 0013), not
+    // a name prefix: an unlisted `course-materials-*` is just another repo.
     const r = [{ name: '.github' }, { name: 'course-materials-x' }, { name: 'assignment-1-f2026' }, { name: 'org.github.io' }, { name: 'lecture-code' }, { name: 'x', archived: true }, { name: 'listed' }] as GhRepo[];
-    expect(otherRepos('org', r, ['listed']).map((x) => x.name)).toEqual(['lecture-code']);
+    expect(otherRepos('org', r, ['listed']).map((x) => x.name)).toEqual(['course-materials-x', 'lecture-code']);
+    expect(otherRepos('org', r, ['listed', 'course-materials-x']).map((x) => x.name)).toEqual(['lecture-code']);
   });
   it('reads the public patterns of publish.yml', () => {
     expect(publicPatterns('public:\n  - a\n  - b\n')).toEqual(['a', 'b']);

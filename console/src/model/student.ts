@@ -324,7 +324,9 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     if (due?.date) out.push({ ...base, id: `${id}:due`, kind: 'due', when: str(due.date), assignment: slug, details: str(due.details), tbc: due.tbc === true || base.tbc });
     return out;
   }
-  if (!fm.date) return [];
+  // A row with `show_on_site: false` is on its kind's tab only, and an undated one (a
+  // folder released outside the plan) has no place on a schedule.
+  if (!fm.date || fm.off_schedule === true) return [];
   const raw = Array.isArray(fm.links) ? (fm.links as Record<string, unknown>[]) : [];
   const links = raw.map((l) => {
     const url = str(l.url);

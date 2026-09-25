@@ -58,7 +58,9 @@ export interface WeekItem {
 export interface Release {
   id: string;
   when: string;
-  kind: string | null; // lecture | lab | readings; null when the entry has no deploy block
+  kind: string | null; // a policy kind (lecture, lab, readings, ...); the engine infers one when undeclared
+  kind_inferred?: boolean;
+  number?: number | null; // the site row's number; null when the site does not number it
   title: string;
   state: ReleaseState;
   source: { repo: string; path: string } | null;
