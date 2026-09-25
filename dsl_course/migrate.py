@@ -33,7 +33,8 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import yaml
@@ -452,8 +453,26 @@ def _yaml(text: str | None) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _github_now(org: str) -> str:
+    """GitHub's clock, from the `Date` header of a read: the moment the runs' own
+    `created` times are compared with, whatever the laptop's clock says. Raises when
+    there is no header to read."""
+    code, out = gh("api", "--include", f"repos/{org}/.github")
+    stamp = next(
+        (
+            line.split(":", 1)[1].strip()
+            for line in out.splitlines()
+            if line.lower().startswith("date:")
+        ),
+        "",
+    )
+    try:
+        when = parsedate_to_datetime(stamp) if code == 0 else None
+    except (TypeError, ValueError):
+        when = None
+    if when is None:
+        raise RuntimeError(f"could not read GitHub's clock from {org}/.github")
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _with_workflows(org: str, candidates: list[str]) -> list[tuple[str, str]]:
@@ -585,8 +604,12 @@ class Pause:
 
     # the pause step ---------------------------------------------------------
     def disabled(self) -> bool:
+        """Recorded, and every recorded repo off. An org with no workflow repo records
+        `{}`: nothing to switch off is paused."""
         saved = self.record()
-        return bool(saved) and not any(_actions_enabled(*self._live(k)) for k in saved)
+        return saved is not None and not any(
+            _actions_enabled(*self._live(k)) for k in saved
+        )
 
     def quiet(self, keys: list[str]) -> bool:
         alive = _alive([self._live(k) for k in keys])
@@ -598,6 +621,9 @@ class Pause:
         return not alive
 
     def pause(self) -> bool:
+        # Read first: a clock that cannot be read stops the pause before anything is
+        # written or switched.
+        self.started = _github_now(self.org)
         saved = self.record()
         if saved is None:
             saved = {f"{o}/{r}": _actions_state(o, r) for o, r in self.targets()}
@@ -610,7 +636,6 @@ class Pause:
             ):
                 return False
         self.saved = saved
-        self.started = _now()
         return all(_set_actions(*self._live(k), OFF) for k in saved)
 
     def paused(self) -> bool:

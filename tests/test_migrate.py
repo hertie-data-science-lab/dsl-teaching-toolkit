@@ -88,6 +88,7 @@ class FakeGitHub:
         self.puts: list[tuple[str, str, bool]] = []
         self.fail_rename = False
         self.run_after_pause: tuple[str, str] | None = None
+        self.clock = "Thu, 24 Sep 2026 10:00:00 GMT"  # GitHub's, in its Date header
 
     def add(self, org, name, files=None, *, topics=(), archived=False, template=False,
             branches=None):  # fmt: skip
@@ -193,6 +194,8 @@ class FakeGitHub:
         if self._repo(org, name) is None:
             return 1, "gh: Not Found (HTTP 404)"
         key = (org, self._name(org, name))
+        if "--include" in args:
+            return 0, f"HTTP/2.0 200 OK\nDate: {self.clock}\n\n{{}}"
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
                 on = fields["enabled"] == "true"
@@ -494,6 +497,28 @@ def test_a_run_that_starts_after_the_pause_stops_it(
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT]
 
 
+def test_the_pause_starts_at_githubs_clock_not_the_laptops(
+    fake, semester, monkeypatch, capsys
+):
+    # A run created seconds after GitHub's pause moment: a laptop clock a day ahead would
+    # have counted it as before the pause.
+    fake.runs[(COURSE, ".github")] = [("2026-09-24T10:00:05Z", "completed")]
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert (
+        f"a run started after the pause in {COURSE}/.github" in capsys.readouterr().err
+    )
+
+
+def test_an_unreadable_github_clock_stops_the_pause(
+    fake, semester, monkeypatch, capsys
+):
+    fake.clock = "not a date"
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert "could not read GitHub's clock" in err
+    assert fake.commits == [] and fake.puts == []
+
+
 def test_a_run_in_progress_refuses_the_migration(fake, semester, monkeypatch, capsys):
     fake.runs[(SEM, OLD_JOIN_REPO)] = [("2026-09-24T09:00:00Z", "in_progress")]
     assert _main(monkeypatch, SEM, "--no-preview") == 1
@@ -700,6 +725,18 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     assert capsys.readouterr().out.count("already migrated") == 18
     assert course == [] and fake.commits == commits and fake.puts == puts
+
+
+def test_a_course_with_no_workflow_repo_passes_the_pause(
+    fake, course, monkeypatch, capsys
+):
+    for repo in (".github", "assignment-1-f2026"):
+        tree = fake.tree(COURSE, repo)
+        for path in [p for p in tree if p.startswith(".github/workflows/")]:
+            del tree[path]
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
+    assert course == ["refresh", "status"]
 
 
 def test_a_registry_already_renamed_but_keyed_the_old_way_is_rewritten(
