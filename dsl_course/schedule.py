@@ -11,6 +11,8 @@ lifecycle, `events` are display-only calendar rows.
         event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
         title: Linear regression           # the session's name - the site's TITLE column
         details: Least squares by hand     # its DETAILS column, and the session's own page
+        number: 2                          # optional: the row's number (default:
+                                           # the label's, else its position).
         kind: lecture                      # optional: a policy kind (lecture, lab,
                                            # readings, ...). Omitted, inferred from
                                            # the folder the first copy lands in.
@@ -323,6 +325,9 @@ class Release:
     # The row's kind, one of the policy's content kinds, or "" to infer it once from the
     # section its first copy lands in (`schedule_plan.entry_kind`).
     kind: str = ""
+    # The row's number ("Lecture 3"), when the entry writes one; else the label's own
+    # number, else its position (`schedule_plan.site_rows`).
+    number: int | None = None
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
     tbc: bool = False
@@ -637,6 +642,7 @@ KNOWN_RELEASE = frozenset(
         "event_datetime",
         "deploy",
         "kind",
+        "number",
         "title",
         "details",
         "tbc",
@@ -1048,12 +1054,25 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
                 lines,
             )
             kind = policy.FALLBACK_KIND
+        number = None
+        if "number" in entry:
+            number = _whole_days(entry["number"]) or None
+            if number is None:
+                _flag_bad_value(
+                    drops,
+                    where,
+                    "number",
+                    entry["number"],
+                    "the row is numbered from its label or its position instead",
+                    lines,
+                )
         out.append(
             Release(
                 label=str(label),
                 when=when,
                 deploy=_parse_deploy(entry.get("deploy"), tz, drops, str(label)),
                 kind=kind,
+                number=number,
                 title=str(entry.get("title") or ""),
                 details=_flagged_details(entry, drops, where, lines) or "",
                 tbc=tbc,

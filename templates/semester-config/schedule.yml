@@ -48,6 +48,7 @@
 #
 #   lecture-1:                      
 #     event_datetime:               # REQUIRED - what the site's schedule shows (no valid date = the whole entry is dropped)
+#     number:                       # OPTIONAL - the row's number ("Lecture 3"). Default: the number in the label (lecture_03, lab-9), else its position among its kind
 #     kind:                         # OPTIONAL - the row's kind: lecture | lab | readings | exam | drop-in | other. Default: from the folder the first deploy lands in (labs/ -> lab, readings/ -> readings, anything else -> lecture). Each kind gets its own tab
 #     title:                        # OPTIONAL - the session's name, shown beside the row's name ("Lecture 1 / Probability Theory") on the Schedule and its kind's tab. NO default: without it the row reads just "Lecture 1"
 #     details:                      # OPTIONAL - a sentence about it. Shows in the Details column of the Schedule tab AND under the session heading on the Lectures tab

@@ -159,6 +159,9 @@
             ],
             "type": "string"
           },
+          "number": {
+            "type": "integer"
+          },
           "show_on_site": {
             "type": "boolean"
           },
