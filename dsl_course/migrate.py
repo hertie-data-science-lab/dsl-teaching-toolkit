@@ -158,6 +158,21 @@ def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def move_lines(moves: dict[str, str], table: dict[str, str]) -> list[str]:
+    """The plan's lines for `moves` (from `fold(..., table)`): one per entry of `table` it
+    uses - a file as `old -> new`, a folder as `old -> new (N file(s))`. Never the files
+    inside a folder: a record's name can carry a person's handle."""
+    out = []
+    for old, new in table.items():
+        if old.endswith("/"):
+            count = sum(path.startswith(old) for path in moves)
+            if count:
+                out.append(f"  {old} -> {new} ({count} file(s))")
+        elif old in moves:
+            out.append(f"  {old} -> {new}")
+    return out
+
+
 # ------------------------------------------------------------------ key rewrites
 # Line rewrites, not YAML round trips: these are instructor files, and their comments and
 # layout are theirs. Each returns the text unchanged when there is nothing to rewrite.
@@ -587,9 +602,13 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
         def done(s: Step) -> bool:
             return idle if s.bracket == "pause" else s.done()
 
+        def planned(s: Step) -> bool:
+            # A run that pauses unpauses too, whatever the repos say before it starts.
+            return idle and s.done() if s.bracket == "unpause" else done(s)
+
         log_step(f"Migration plan for {org}")
         for step in steps:
-            if done(step):
+            if planned(step):
                 log(f"  {step.name}: already migrated")
                 continue
             log(f"  {step.name}:")
@@ -970,8 +989,13 @@ class Semester:
 
     def layout_plan(self) -> list[str]:
         moves, files, deletes, old_pointer = self.layout_work()
+        repo = self.config()
         out = [
-            f"move {len(moves)} record file(s) under {records.SYSTEM_DIR}/ (one commit)"
+            (
+                f"move {len(moves)} record file(s) under {records.SYSTEM_DIR}/ in "
+                f"{repo} (one commit)"
+            ),
+            *move_lines(moves, SEMESTER_MOVES),
         ]
         if OLD_PEOPLE_FILE in deletes:
             out.append(
@@ -982,6 +1006,7 @@ class Semester:
         samples = [p for p in deletes if p.endswith(SAMPLE_SUFFIX)]
         if samples:
             out.append(f"delete {len(samples)} *{SAMPLE_SUFFIX} file(s)")
+            out += [f"  {p}" for p in samples]
         if old_pointer:
             out.append(f"delete {OLD_POINTER_REPO}/{COURSE_CONFIG} (the old pointer)")
         return out
@@ -1126,8 +1151,8 @@ class Semester:
                 done=self.keys_done,
                 plan=lambda: [
                     (
-                        f"{schedule.SCHEDULE_PATH}: cohort_dest_* -> semester_dest_*, "
-                        f"type -> kind on releases and events"
+                        f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: cohort_dest_* -> "
+                        f"semester_dest_*, type -> kind on releases and events"
                     )
                 ],
                 do=self.keys,
@@ -1147,7 +1172,13 @@ class Semester:
             Step(
                 "re-render",
                 done=self.rerender_done,
-                plan=lambda: ["re-write every SYSTEM-OWNED file that differs"],
+                plan=lambda: [
+                    (
+                        "re-write every SYSTEM-OWNED file that differs "
+                        "(as they read now, before the steps above):"
+                    ),
+                    *(f"  {path}" for path in self.drift()),
+                ],
                 do=self.rerender,
                 verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
@@ -1353,7 +1384,8 @@ class Course:
                     (
                         f"move {len(self.dotgithub_moves())} file(s) under "
                         f"{records.SYSTEM_DIR}/"
-                    )
+                    ),
+                    *move_lines(self.dotgithub_moves(), COURSE_MOVES),
                 ],
                 do=lambda: move_files(
                     self.org, ".github", self.dotgithub_moves(), LAYOUT_COMMIT
@@ -1392,8 +1424,15 @@ class Course:
                 "materials files",
                 done=lambda: not self.materials_moves(),
                 plan=lambda: [
-                    f"{repo}: move {len(m)} system file(s) under {records.SYSTEM_DIR}/"
+                    line
                     for repo, m in self.materials_moves().items()
+                    for line in (
+                        (
+                            f"{repo}: move {len(m)} system file(s) under "
+                            f"{records.SYSTEM_DIR}/"
+                        ),
+                        *move_lines(m, MATERIALS_MOVES),
+                    )
                 ],
                 do=self.move_materials,
                 verify=lambda: not self.materials_moves(),
@@ -1402,7 +1441,10 @@ class Course:
             Step(
                 "re-render",
                 done=self.rerender_done,
-                plan=lambda: ["Refresh actions from this checkout"],
+                plan=lambda: [
+                    "Refresh actions from this checkout; these files differ now:",
+                    *(f"  {path}" for path in self.drift()),
+                ],
                 do=lambda: seed.refresh(self.org) == 0,
                 verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
@@ -1471,8 +1513,8 @@ def preflight(org: str) -> Course | Semester | None:
         if not parent.work_done() or not (course_on or resuming):
             log_err(
                 f"{course} is not fully migrated, or another migration under it is "
-                f"in flight - finish that first (run the migration on {course}), then "
-                f"this semester"
+                f"in flight - finish that first: `python -m dsl_course.migrate {course} "
+                f"--no-preview`, then this semester"
             )
             return None
     else:

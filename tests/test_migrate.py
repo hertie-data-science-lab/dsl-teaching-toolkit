@@ -438,7 +438,15 @@ def test_a_preview_prints_the_plan_and_writes_nothing(
     out = capsys.readouterr().out
     assert f"rename {OLD_CONFIG_REPO} -> {CONFIG_REPO}" in out
     assert f"rename {OLD_JOIN_REPO} -> {JOIN_REPO}" in out
-    assert "move 10 record file(s) under .system/" in out
+    assert f"move 10 record file(s) under .system/ in {OLD_CONFIG_REPO}" in out
+    # Per step, the writes it would make: each move, each delete, each re-rendered file -
+    # a record folder by its file count, never by the names inside it.
+    assert "-   assignments.lock.yml -> .system/assignments.lock.yml" in out
+    assert "-   autograde/ -> .system/autograde/ (2 file(s))" in out
+    assert "someone" not in out
+    assert "-   grading_sheets/a1.yml.sample" in out
+    assert f"-   {JOIN_REPO}/.github/workflows/onboard.yml" in out
+    assert "unpause automation:\n    - restore the recorded Actions settings" in out
     # The pause names every repo whose workflows act on the semester, the course's too.
     assert f"disable Actions in {SEM}/{OLD_CONFIG_REPO}, {SEM}/{OLD_JOIN_REPO}" in out
     assert f"{SEM}/sem-f2026.github.io, {COURSE}/.github" in out
@@ -634,7 +642,9 @@ def test_a_semester_waits_for_its_whole_course(
         # Off with no record of this semester's: another run holds the course.
         fake.actions[(COURSE, ".github")] = {"enabled": False, "allowed_actions": None}
     assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert f"{COURSE} is not fully migrated" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"{COURSE} is not fully migrated" in err
+    assert f"`python -m dsl_course.migrate {COURSE} --no-preview`" in err
     assert fake.puts == [] and fake.enabled(COURSE, "course-materials-f2026")
 
 
@@ -782,6 +792,9 @@ def test_a_course_preview_writes_nothing(fake, course, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "cohort-courses-pages.yml -> semesters.yml" in out
     assert "assignment-1-f2026@solution/grading_config.yml: format: -> formats:" in out
+    assert f"-   .github/.last-refresh -> {records.path('heartbeat')}" in out
+    assert "-   MAINTAINING.md -> .system/MAINTAINING.md" in out
+    assert f"-   course-materials-f2026/{migrate.RELEASE_WORKFLOWS[1]}" in out
     assert f"disable Actions in {COURSE}/.github, {COURSE}/assignment-1-f2026" in out
     assert _state(fake) == before and fake.puts == [] and course == []
 
