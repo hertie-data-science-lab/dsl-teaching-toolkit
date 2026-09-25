@@ -89,7 +89,9 @@ PEOPLE_ENTRY_KEYS = (
 )
 PEOPLE_REQUIRED = ("github_handle", "role", "email")
 COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
-COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url")
+# Course cards, instructors and TAs alike: what `site_repo._people_from_meta` reads, the
+# optional start/end bounding when a card shows.
+COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url", "start", "end")
 # dsl-course.yml keys beyond `people` and `assignment_defaults`.
 COURSE_TOP_KEYS = (
     "course_name",
@@ -539,6 +541,7 @@ def dsl_course_schema() -> dict:
         {
             "course_admins": {"type": "array", "items": admin},
             "instructors": {"type": "array", "items": card},
+            "teaching_assistants": {"type": "array", "items": card},
         }
     )
     defaults = _obj(_keys((*COURSE_DEFAULT_KEYS, *ASKED_DEFAULT_KEYS), _SPEC_TYPES))

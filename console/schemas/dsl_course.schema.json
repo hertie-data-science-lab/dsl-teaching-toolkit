@@ -108,6 +108,9 @@
           "items": {
             "additionalProperties": false,
             "properties": {
+              "end": {
+                "type": "string"
+              },
               "github_handle": {
                 "type": "string"
               },
@@ -115,6 +118,39 @@
                 "type": "string"
               },
               "photo": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "teaching_assistants": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "end": {
+                "type": "string"
+              },
+              "github_handle": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photo": {
+                "type": "string"
+              },
+              "start": {
                 "type": "string"
               },
               "title": {
