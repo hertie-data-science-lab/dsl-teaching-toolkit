@@ -1408,7 +1408,8 @@ class Pause:
             f"`{self.release_command()}`"
         )
 
-    def hint(self, restored: list[str] = ()) -> str:
+    def hint(self, restored: list[str] | None = None) -> str:
+        restored = restored or []
         off = [k for k in self.saved if k not in restored]
         repos = ", ".join(off) or f"(see {self.org}/.github/{PAUSE_RECORD})"
         back = (
@@ -1440,17 +1441,13 @@ class Pause:
         return self.hint(restored)
 
     def restore_shared(self) -> list[str]:
-        if not self.semester_org:
-            return []
-        shared = {
-            key: state
-            for key, state in self.saved.items()
-            if key.split("/", 1)[0] == self.course_org != self.org
-        }
+        """The course's recorded repos put back as they were, when this pauses a
+        semester (the course's own pause has none to share). Returns the ones put back."""
         return [
             key
-            for key, state in shared.items()
-            if _set_actions(*self._live(key), state)
+            for key, state in self.saved.items()
+            if key.split("/", 1)[0] == self.course_org != self.org
+            and _set_actions(*self._live(key), state)
         ]
 
     # the pause step ---------------------------------------------------------
