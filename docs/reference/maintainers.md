@@ -828,6 +828,16 @@ semester on `main`, run the e2e there, then - on the user's go-ahead, outside te
 hours - migrate every live real org and Promote in the same window (with ds01's switch to
 `all_semesters`). `.project/build/migration-runbook.md` holds the order.
 
+**Hold (real orgs).** The tier must move while every org of the course is paused, so:
+`python -m dsl_course.migrate --hold <course> --no-preview` (the course and each live
+semester, one record per org marked `hold`: quiet across all first, then every record,
+then the switch) -> Promote / move the tier -> `migrate <course>` -> `migrate <semester>`
+for each -> `--release <course> --no-preview` (every held org back as recorded, semesters
+first, then one catch-up for every semester). Under a hold a migration never pauses and
+never unpauses: its bracket steps only mark the org `migrated` in its record; a stop
+restores nothing. `--status <course>` prints who is paused; previews work throughout.
+`--release` also abandons a hold, naming each org not migrated inside it.
+
 **The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, with
 every move, delete and re-rendered file per step, nothing written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
 step: do, verify, stop on the first failure naming the rollback. A step already done says
@@ -840,13 +850,16 @@ and the COURSE's workflow repos (whose scheduler acts on it); for a course `.git
 every content repo and template with a release workflow. Before anything is switched, each
 repo's own setting (`enabled`, `allowed_actions`) is recorded in
 `<org>/.github/.system/migration-pause.json`; the unpause restores exactly that (a repo that
-was off stays off), reads it back and deletes the record. Verified by reading the setting
-back and by no run unfinished (queued, in progress, waiting, requested, pending),
-whenever it started - in those repos or as the central Deploy / Promote of the course's
-tier. A run dispatched with the pause that has since finished wrote nothing after it. An org with no workflow repo counts as
-paused. From the pause to
-the verified unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded
-repos and the record. A semester waits until its course's migration is complete (no course
+was off stays off), reads it back and deletes the record. The order is: wait until no run is
+unfinished (queued, in progress, waiting, requested, pending) in those repos or as a central
+Deploy / Promote - polled for up to 4 minutes, and never ending within 60 s of a tick (ds01
+on the quarter hour, the cron at 7 past): it waits past the tick - THEN record, THEN switch
+off; a run switched off mid-flight loses its unstarted jobs. The verify reads the setting
+back and waits the same way for a run that slipped in during the switch. A preview never
+waits. An org with no workflow repo counts as paused. From the pause to the verified
+unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded repos and the
+record; a semester's stop first puts the COURSE's repos back on (every semester shares
+them; its own stay off until the rerun). A semester waits until its course's migration is complete (no course
 record left, its Actions on) - or resumes its own stopped run (its record is there) - so no
 run re-enables a course mid-migration and two semesters of one course never overlap.
 
@@ -855,7 +868,7 @@ diff --name-only origin/<ref> -- dsl_course templates`, as of the last fetch): t
 re-render writes what the checkout says, and the org's next Refresh writes what its ref
 says.
 
-Semester steps: preflight (topic, not archived, course complete, no run queued or running),
+Semester steps: preflight (topic, not archived, course complete),
 pause, rename repos (each old name must redirect), layout (records into `.system/`, `people.yml` -> `instructors.yml`
 checked against the old file before anything is committed, the seeded skeleton replaced by
 the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
@@ -886,8 +899,9 @@ What the demo rehearsal (2026-09-25) changed, one line each:
 
 - **No lost tick.** GitHub drops what fires into a disabled repo, so after the unpause the
   tool dispatches one Scheduled release and one Sync membership into the course's `.github`
-  (a semester's: scoped to it, as its `semester-config` push sends them; a course's: every
-  semester, as the ds01 timers do) and prints where each run shows up, without waiting.
+  (a semester's: scoped to it, like its `semester-config` push; a course's: every
+  semester, as the ds01 timers do), each marked `driver: migrate` so the run history tells
+  a catch-up from a real push, and prints where each run shows up, without waiting.
 - **The pause verify** counts only unfinished runs, whenever they started (the separate
   "started after the pause" count, and the GitHub clock it read, are gone).
 - **A step's done is its verify.** The re-render's verify and its done read the same

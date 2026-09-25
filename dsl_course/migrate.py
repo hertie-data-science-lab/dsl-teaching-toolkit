@@ -8,6 +8,9 @@ org's `central_ref` will run once it is migrated.
 
     python3 -m dsl_course.migrate <org>                 # preview: the plan, nothing written
     python3 -m dsl_course.migrate <org> --no-preview    # do it, step by step
+    python3 -m dsl_course.migrate --hold <course>       # pause every org of the course
+    python3 -m dsl_course.migrate --release <course>    # ... and restore them
+    python3 -m dsl_course.migrate --status <course>     # who is paused
 
 A course org is migrated before any of its semesters. The org's tier comes from its
 `.github` topic. Every step says what it will do, does it, verifies it, and stops on the
@@ -18,9 +21,11 @@ run that stopped part-way resumes where it stopped. An archived semester is neve
 The pause is GitHub's own switch: Actions are DISABLED on every repo of the org that runs
 workflows, for the window, and enabled again at the end. (An org variable cannot do this:
 on GitHub Free org variables do not reach private repos, and the workflows already live in
-an org carry no gate until they are re-rendered.) GitHub drops, rather than queues, what
-fires into a disabled repo, so the unpause dispatches one Scheduled release and one Sync
-membership in its place.
+an org carry no gate until they are re-rendered.) It waits for quiet before it switches
+anything. GitHub drops, rather than queues, what fires into a disabled repo, so the unpause
+dispatches one Scheduled release and one Sync membership in its place. For a real course
+the tier moves inside a HOLD of every org of the course (`--hold`, `--release`); a
+migration under a hold neither pauses nor unpauses.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
 status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
