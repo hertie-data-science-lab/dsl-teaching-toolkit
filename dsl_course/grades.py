@@ -1225,9 +1225,11 @@ def load_grading_spec(
     """The assignment's definition from the course template's `solution` branch, with its
     run settings resolved for `slug` (the schedule key) of `semester_org`.
 
-    NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
-    definition file, or one that does not parse must leave the rest of the tick running on
-    the defaults rather than take the semester down with it."""
+    A template with no solution branch, no definition file, or one that does not parse
+    leaves the rest of the tick running on the defaults rather than taking the semester
+    down with it. A failed read of a CASCADE layer (the course's `dsl-course.yml`, the
+    semester's `assignments.yml`) does raise (`settings.course_defaults`): those decide
+    what the defaults are."""
     spec = declared_grading_spec(
         course_org, template, semester_org=semester_org, slug=slug
     )

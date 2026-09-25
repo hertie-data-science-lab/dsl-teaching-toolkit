@@ -485,37 +485,32 @@ Layer = tuple[str, Mapping]
 def course_defaults(course_org: str) -> dict:
     """A course's `assignment_defaults:` block, validated, read ONCE per course per process.
 
-    NEVER raises: a malformed identity file must cost the defaults, not the run.
-    tests/conftest.py clears it."""
+    An absent `dsl-course.yml` (a 404) declares nothing. Any OTHER failure to read it - no
+    permission, rate limit, malformed YAML - RAISES and is not cached: a run that cannot
+    see the course's defaults must stop rather than hand out and grade on the
+    institution's. tests/conftest.py clears it."""
     if not course_org:
         return {}
-    try:
-        meta = org_meta(course_org)
-    except RuntimeError as exc:
-        log_err(f"  ! could not read {course_org}/.github/{COURSE_CONFIG}: {exc}")
-        return {}
-    return parse_assignment_defaults(meta.get(ASSIGNMENT_DEFAULTS_KEY))
+    return parse_assignment_defaults(org_meta(course_org).get(ASSIGNMENT_DEFAULTS_KEY))
 
 
 @cache
 def _assignments_text(semester_org: str) -> str | None:
-    """`semester-config/assignments.yml`, or None when the semester has none."""
+    """`semester-config/assignments.yml`, or None when the semester has none (a 404).
+    Any other read failure raises (`get_file_content`)."""
     return get_file_content(semester_org, CONFIG_REPO, ASSIGNMENTS_FILE)
 
 
 @cache
 def semester_blocks(semester_org: str) -> tuple[dict, dict[str, dict]]:
     """`(defaults, {slug: block})` out of the semester's `assignments.yml`, each value
-    through its reader; `({}, {})` when the file is absent or unreadable. NEVER raises.
-    tests/conftest.py clears it."""
+    through its reader; `({}, {})` when the file is absent (a 404). A read that fails for
+    any other reason, or a file that is not YAML, RAISES and is not cached - the same
+    fail-closed rule as `course_defaults`. tests/conftest.py clears it."""
     if not semester_org:
         return {}, {}
-    try:
-        text = _assignments_text(semester_org)
-        data = yaml.safe_load(text) if text else None
-    except (RuntimeError, yaml.YAMLError) as exc:
-        log_err(f"  ! {ASSIGNMENTS_FILE} in {semester_org} could not be read: {exc}")
-        return {}, {}
+    text = _assignments_text(semester_org)
+    data = yaml.safe_load(text) if text else None
     if not isinstance(data, dict):
         return {}, {}
     dropped: list[str] = []

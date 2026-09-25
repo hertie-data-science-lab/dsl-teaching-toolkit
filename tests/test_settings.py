@@ -11,6 +11,8 @@ import pytest
 from dsl_course import grades, policy, settings
 
 PACKAGE = Path(settings.__file__).parent
+# The real read, before conftest's autouse fixture answers it with "no file".
+_READ_ASSIGNMENTS = settings._assignments_text
 
 ASSIGNMENTS_YML = """\
 defaults:
@@ -90,6 +92,46 @@ def test_no_assignments_yml_means_both_of_its_layers_are_empty(course):
     assert settings.effective("Sem", "a2", "max_team_size", course_org="C")[1] == (
         "institution"
     )
+
+
+def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
+    monkeypatch.setattr(settings, "_assignments_text", _READ_ASSIGNMENTS)
+    answers = [RuntimeError("could not read Sem/semester-config/assignments.yml: 403")]
+
+    def read(org, repo, path, ref=""):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(settings, "get_file_content", read)
+    with pytest.raises(RuntimeError):
+        settings.semester_blocks("Sem")
+    # A later read that succeeds is read, not the failure remembered as "nothing".
+    answers.append("defaults:\n  max_team_size: 4\n")
+    assert settings.semester_blocks("Sem") == ({"max_team_size": 4}, {})
+
+
+def test_an_absent_assignments_yml_is_the_empty_layer(monkeypatch):
+    monkeypatch.setattr(settings, "_assignments_text", _READ_ASSIGNMENTS)
+    monkeypatch.setattr(settings, "get_file_content", lambda *a, **k: None)
+    assert settings.semester_blocks("Sem") == ({}, {})
+
+
+def test_a_course_read_that_fails_raises_and_is_not_cached(monkeypatch):
+    answers: list = [RuntimeError("could not read C/.github/dsl-course.yml: 502")]
+
+    def meta(org):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(settings, "org_meta", meta)
+    with pytest.raises(RuntimeError):
+        settings.course_defaults("C")
+    answers.append({"assignment_defaults": {"max_team_size": 3}})
+    assert settings.course_defaults("C") == {"max_team_size": 3}
 
 
 def test_a_value_the_reader_refuses_leaves_the_next_layer_to_answer(monkeypatch):
