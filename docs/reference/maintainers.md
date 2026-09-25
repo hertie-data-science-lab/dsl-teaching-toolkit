@@ -839,7 +839,9 @@ the new one, the pointer moved in, samples deleted - one `migrate: layout` commi
 (`schedule.yml`, re-read with this engine: zero `NOT_MIGRATED`), topic, re-render (drift
 checked over the dispatchers, README, pointer, lock, join files and org READMEs), status,
 unpause (status.json first, so re-enabled workflows never race it). A move never overwrites:
-a target holding other bytes refuses the whole commit, naming both paths. Course steps: preflight (not archived), pause, registry (also a `semesters.yml`
+a target holding other bytes refuses the whole commit, naming both paths. Course steps: preflight (not archived; no `cohort_defaults` / `semester_defaults`
+`timezone` or `archive.grace_days` other than the policy's - each is named, to carry by
+hand into every live semester's `schedule.yml`), pause, registry (also a `semesters.yml`
 still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, template keys
 (`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
 re-read with `parse_grading_spec` - course-owned, so here rather than per semester),
