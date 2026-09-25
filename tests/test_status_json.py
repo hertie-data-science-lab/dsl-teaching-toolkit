@@ -1172,3 +1172,36 @@ def test_check_setup_still_reports_a_write_that_did_not_land(monkeypatch):
         ["status", "--course-org", COURSE, "--semester-org", SEMESTER, "--no-preview"],
     )
     assert status.main() == 1
+
+
+def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatch):
+    # Every run setting is unknown: no cutoff, no window, no marks can be computed, so
+    # the status lists the ASSIGNMENTS problem and no assignment - and is still written.
+    monkeypatch.setattr(status_json.settings, "_assignments_text", lambda org: "a: [\n")
+    monkeypatch.setattr(
+        status_json.schedule,
+        "_schedule_text",
+        lambda org: (
+            "assignments:\n  a1:\n    course_source_repo: t\n"
+            "    due_datetime: 2026-10-13\n"
+        ),
+    )
+    monkeypatch.setattr(status_json, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(status_json, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(status_json, "repo_path_shas", lambda *a, **k: {})
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "_last_commit_at", lambda *a, **k: None)
+    monkeypatch.setattr(status_json, "_returned_at", lambda org: {})
+    monkeypatch.setattr(
+        status_json.sync_faculty, "read_semester_people", lambda org, found: []
+    )
+    monkeypatch.setattr(status_json.roster, "load", lambda org, found: [])
+    monkeypatch.setattr(status_json.teams, "load", lambda org, found, known: {})
+    monkeypatch.setattr(status_json, "get_team_members", lambda org, team: None)
+    monkeypatch.setattr(status_json, "_outcomes", lambda org, paths: [])
+    facts = status_json.gather_semester(COURSE, SEMESTER, NOW)
+    assert facts.sched.assignments == {}
+    problems = [
+        status_json.problem_from_fault(f, SEMESTER, NOW) for f in facts.schedule_faults
+    ]
+    assert [p["id"] for p in problems] == ["assignments:file:ASSIGNMENTS"]

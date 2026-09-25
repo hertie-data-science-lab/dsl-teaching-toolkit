@@ -1651,7 +1651,7 @@ def test_marks_expected_shows_only_where_the_entry_says_show_on_site(
     monkeypatch, tmp_path
 ):
     # `marks_return_datetime` is internal by default (decision 0009): the row appears
-    # only when the entry writes `show_on_site: true` in so many words.
+    # only when the key itself says `show_on_site: true`, whatever the entry's own says.
     def plan_for(extra: dict):
         sched = schedule_mod.parse(
             {
@@ -1659,15 +1659,14 @@ def test_marks_expected_shows_only_where_the_entry_says_show_on_site(
                     "assignment-1": {
                         "course_source_repo": "assignment-1-f2026",
                         "due_datetime": "2026-10-13",
-                        "marks_return_datetime": "2026-10-27",
-                        **extra,
+                        "marks_return_datetime": extra or "2026-10-27",
                     }
                 }
             }
         )
         return _plan(monkeypatch, tmp_path, sched).collections["_events"]
 
-    shown = plan_for({"show_on_site": True})
+    shown = plan_for({"event_datetime": "2026-10-27", "show_on_site": True})
     assert 'title: "Marks expected: Assignment 1"' in shown["marks-assignment-1.md"]
     assert "date: 2026-10-27" in shown["marks-assignment-1.md"]
     assert "marks-assignment-1.md" not in plan_for({})

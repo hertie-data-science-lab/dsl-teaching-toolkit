@@ -193,6 +193,9 @@ class SemesterFacts:
         default_factory=dict
     )  # by schedule key
     sheets: dict[str, dict] = field(default_factory=dict)  # by semester-side name
+    # `{schedule key: its name}`: the template's title, else its README heading
+    # (`grades.assignment_title`).
+    titles: dict[str, str] = field(default_factory=dict)
     # `{handle, casefolded: when its gradebook was last written}`, off distributed.csv.
     # A gradebook holds every assignment, so its record names none.
     returned_at: dict[str, datetime] = field(default_factory=dict)
@@ -912,7 +915,7 @@ def render_assignments(
         rows.append(
             {
                 "slug": slug,
-                "title": spec.title or slug,
+                "title": facts.titles.get(slug) or spec.title or slug,
                 "template": entry.course_source_repo,
                 "state": assignment_state(now, entry, cutoff, spec, units, returned),
                 "handout": _iso(entry.handout_datetime),
@@ -1348,6 +1351,11 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     branch = default_branch(semester_org, schedule.CONFIG_REPO, fallback="main")
     facts.config_paths = repo_path_shas(semester_org, schedule.CONFIG_REPO, branch)
     sched = facts.sched = schedule.load(semester_org)
+    if sched.instance_unparseable:
+        # Every run setting is unknown, so nothing about an assignment can be computed
+        # (its cutoff, its window, its marks): the status lists the ASSIGNMENTS problem,
+        # which is in `sched.faults`, and no assignment until the file parses.
+        sched.assignments = {}
     # The schedule.yml digest's own sources (`scheduler._preflight_sources`): the sources
     # the plan cites, the entries the parser dropped (assignments.yml's with them), the
     # team-formation windows somebody is still waiting on (None = the roster could not be
@@ -1386,6 +1394,9 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     for slug, entry in sched.assignments.items():
         facts.specs[slug] = grades.load_grading_spec(
             course_org, entry.course_source_repo, semester_org=semester_org, slug=slug
+        )
+        facts.titles[slug] = grades.assignment_title(
+            course_org, entry.course_source_repo, facts.specs[slug], slug
         )
         name = schedule.semester_name(slug, entry)
         text = sheet_texts[name]

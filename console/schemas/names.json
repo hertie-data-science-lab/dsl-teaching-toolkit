@@ -19,6 +19,7 @@
     "pointer": ".system/dsl-course.yml",
     "semester_gradebook": ".system/semester-gradebook.csv",
     "snapshots": ".system/snapshots",
+    "solution_preview": ".system/solution-preview.json",
     "solutions": ".system/solutions",
     "status": ".system/status.json",
     "syllabus_sample": ".system/SYLLABUS.md.sample",

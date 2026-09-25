@@ -43,7 +43,23 @@
             "type": "string"
           },
           "marks_return_datetime": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "event_datetime": {
+                    "type": "string"
+                  },
+                  "show_on_site": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            ]
           },
           "show_on_site": {
             "type": "boolean"

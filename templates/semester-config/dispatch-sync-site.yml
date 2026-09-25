@@ -30,6 +30,7 @@ on:
     branches: [main]
     paths:
       - schedule.yml
+      - assignments.yml
       - instructors.yml
       - teams.csv
 

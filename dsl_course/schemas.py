@@ -189,7 +189,6 @@ def outcome_schema() -> dict:
                 "people": {"type": "array", "items": person},
                 "started": _str(),
                 "finished": _str(),
-                "args": {"type": "object"},
             },
             ("schema", "op", "actor", "preview", "conclusion", "summary"),
         ),
@@ -416,7 +415,14 @@ def schedule_schema() -> dict:
             },
         )
     )
-    assignment = _obj(_keys(KNOWN_ASSIGNMENT), ("due_datetime", "course_source_repo"))
+    marks_row = _obj({"event_datetime": _str(), "show_on_site": {"type": "boolean"}})
+    assignment = _obj(
+        _keys(
+            KNOWN_ASSIGNMENT,
+            {"marks_return_datetime": {"oneOf": [_str(), marks_row]}},
+        ),
+        ("due_datetime", "course_source_repo"),
+    )
     event = _obj(_keys(KNOWN_EVENT, {"kind": _enum(_EVENT_KINDS)}))
     archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
     top = _keys(

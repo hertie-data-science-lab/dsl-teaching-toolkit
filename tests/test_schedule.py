@@ -723,7 +723,24 @@ def test_a_leftover_enrolment_block_is_not_migrated():
     assert sched.semester_start == date(2026, 9, 7)  # the rest of the file is read
 
 
-@pytest.mark.parametrize("key", ["title", "grading_datetime", "semester_dest_repo"])
+def test_a_leftover_assignment_title_is_faulted_and_the_entry_kept():
+    sched = parse(
+        {
+            "assignments": {
+                "a1": {
+                    "course_source_repo": "a",
+                    "due_datetime": "2026-10-13",
+                    "title": "Regression",
+                }
+            }
+        }
+    )
+    assert set(sched.assignments) == {"a1"}  # display-only: nothing depends on it
+    (fault,) = sched.faults
+    assert fault.code == faults_module.NOT_MIGRATED and fault.field == "title"
+
+
+@pytest.mark.parametrize("key", ["grading_datetime", "semester_dest_repo"])
 def test_an_assignment_carrying_a_key_that_left_is_not_migrated(key):
     sched = parse(
         {
@@ -741,6 +758,7 @@ def test_an_assignment_carrying_a_key_that_left_is_not_migrated(key):
     assert sched.assignments == {}
     (fault,) = sched.faults
     assert fault.code == faults_module.NOT_MIGRATED and fault.field == key
+    assert "entry dropped: no hand out, freeze or grading until fixed" in fault.what
 
 
 def test_a_release_that_hands_out_is_not_migrated_and_still_deploys():
@@ -1320,7 +1338,15 @@ def test_an_unparseable_marks_return_datetime_is_flagged():
                 "a2": {
                     "course_source_repo": "b-f2026",
                     "due_datetime": "2026-10-13",
-                    "marks_return_datetime": "2026-10-01",
+                    "marks_return_datetime": {
+                        "event_datetime": "2026-10-01",
+                        "show_on_site": True,
+                    },
+                },
+                "a3": {
+                    "course_source_repo": "c-f2026",
+                    "due_datetime": "2026-10-13",
+                    "marks_return_datetime": {"event_datetime": "2026-10-27"},
                     "show_on_site": True,
                 },
             }
@@ -1330,6 +1356,9 @@ def test_an_unparseable_marks_return_datetime_is_flagged():
     assert sched.assignments["a2"].marks_return_datetime is None  # before it was due
     assert not sched.assignments["a1"].marks_return_on_site
     assert sched.assignments["a2"].marks_return_on_site
+    # Its own switch: the entry's `show_on_site` does not show the marks row.
+    assert sched.assignments["a3"].marks_return_datetime is not None
+    assert not sched.assignments["a3"].marks_return_on_site
     assert [d.split(":")[0] for d in sched.dropped] == [
         "assignments.a1.marks_return_datetime",
         "assignments.a2.marks_return_datetime",
@@ -2965,3 +2994,61 @@ def test_pages_by_key_that_could_not_be_listed_are_none_rather_than_wrong(monkey
         }
     )
     assert schedule.assignment_pages_by_key("Course", "Semester-f2026", sched) == {}
+
+
+# ------------------------------------------------ the solution notice (--previous)
+
+_WITH_SOLUTION = """\
+assignments:
+  a1:
+    course_source_repo: t1
+    handout_datetime: 2026-09-22T09:00
+    due_datetime: 2026-10-13
+    solution_datetime: 2026-10-16T09:00
+  a2:
+    course_source_repo: t2
+    handout_datetime: 2026-09-22T09:00
+    due_datetime: 2026-10-20
+    solution_datetime: 2026-10-23T09:00
+"""
+
+
+def test_only_an_entry_that_has_just_gained_a_solution_date_is_noticed():
+    after = parse(yaml.safe_load(_WITH_SOLUTION))
+    before = parse(
+        yaml.safe_load(
+            _WITH_SOLUTION.replace("    solution_datetime: 2026-10-16T09:00\n", "")
+        )
+    )
+    (note,) = schedule.solution_notices(before, after)
+    assert note.where == "assignments.a1" and note.field == "solution_datetime"
+    assert course.SOLUTION_WARNING in note.what
+    assert schedule.solution_notices(after, after) == []
+
+
+def _validate(monkeypatch, tmp_path, capsys, previous: str | None) -> str:
+    now = tmp_path / "schedule.yml"
+    now.write_text(_WITH_SOLUTION)
+    argv = ["schedule", "--file", str(now), "--validate"]
+    if previous is not None:
+        (tmp_path / "before.yml").write_text(previous)
+        argv += ["--previous", str(tmp_path / "before.yml")]
+    monkeypatch.setattr("sys.argv", argv)
+    assert schedule.main() == 0  # a notice never changes the verdict
+    return capsys.readouterr().err
+
+
+def test_validate_notices_each_new_solution_date_on_its_line(
+    monkeypatch, tmp_path, capsys
+):
+    err = _validate(monkeypatch, tmp_path, capsys, "assignments: {}\n")
+    notices = [ln for ln in err.splitlines() if ln.startswith("::notice")]
+    assert len(notices) == 2
+    assert notices[0].startswith("::notice file=schedule.yml,line=6::")
+
+
+@pytest.mark.parametrize("previous", [None, "assignments: [\n"])
+def test_no_previous_file_or_an_unreadable_one_gives_no_notice(
+    monkeypatch, tmp_path, capsys, previous
+):
+    assert "::notice" not in _validate(monkeypatch, tmp_path, capsys, previous)

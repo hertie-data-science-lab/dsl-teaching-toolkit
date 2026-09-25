@@ -412,8 +412,8 @@ class AssignmentEntry:
     # When automation returns the marks (`scheduler`): only once every unit is marked, and
     # until then a problem that says how many are not. None = marks go back by hand.
     marks_return_datetime: datetime | None = None
-    # Whether the site shows a "marks expected" row for it: only when the entry says
-    # `show_on_site: true` in so many words - the date is internal by default.
+    # Whether the site shows a "marks expected" row for it: only when the key is written
+    # `{event_datetime: ..., show_on_site: true}` - the date is internal by default.
     marks_return_on_site: bool = False
     # The line each of this entry's keys is written on - see `Deploy.lines`.
     lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
@@ -686,7 +686,6 @@ KNOWN_ASSIGNMENT = frozenset(
 # The ENTRY is dropped, as for a renamed key: read without them it would grade to another
 # cutoff or hand out into repos of another name, and say nothing.
 RETIRED_ASSIGNMENT_KEYS = {
-    "title": "the assignment's name is `title:` in its template's grading_config.yml",
     "grading_datetime": (
         f"the late cutoff is the due date plus `late_window_days` ({ASSIGNMENTS_FILE})"
     ),
@@ -697,6 +696,17 @@ RETIRED_ASSIGNMENT_KEYS = {
         f"it is `assignments.<key>.semester_dest_repo` in {ASSIGNMENTS_FILE}"
     ),
 }
+RETIRED_COST = "entry dropped: no hand out, freeze or grading until fixed"
+# Display-only, so the entry is KEPT and the key faulted: nothing it runs depends on it.
+RETIRED_DISPLAY_KEYS = {
+    "title": "the assignment's name is `title:` in its template's grading_config.yml",
+}
+
+
+def _retired(old: str, home: str) -> str:
+    return f"{moved_text(old, home)} - {RETIRED_COST}"
+
+
 # Settings that USED to live in an `assignments:` entry and now live in the assignment's
 # own `grading_config.yml`, on the course template's solution branch. Flagged BY NAME
 # rather than as generic unknown keys: a semester still carrying `type: group` is not making
@@ -1145,7 +1155,7 @@ def _parse_assignments(
                 entry,
                 f"assignments.{slug}",
                 RETIRED_ASSIGNMENT_KEYS,
-                say=moved_text,
+                say=_retired,
             )
         )
     }
@@ -1225,10 +1235,15 @@ def _parse_assignments(
                     f"{moved_cost}",
                     lines,
                 )
+        not_migrated_keys(
+            drops, entry, where, RETIRED_DISPLAY_KEYS, lines, say=moved_text
+        )
         _flag_unknown_keys(
             drops,
             entry,
-            KNOWN_ASSIGNMENT | frozenset(MOVED_ASSIGNMENT_KEYS),
+            KNOWN_ASSIGNMENT
+            | frozenset(MOVED_ASSIGNMENT_KEYS)
+            | frozenset(RETIRED_DISPLAY_KEYS),
             where,
             "that setting is ignored",
             lines,
@@ -1285,8 +1300,25 @@ def _parse_assignments(
                 lines,
             )
             solution = None
+        # A date, or `{event_datetime, show_on_site}` when the site is to show it: the
+        # row is internal by default and has its own switch (decision 0009).
+        raw_marks = entry.get("marks_return_datetime")
+        marks_row = isinstance(raw_marks, dict)
+        marks_on_site = False
+        if marks_row:
+            marks_on_site = _flagged_flag(
+                raw_marks,
+                "show_on_site",
+                False,
+                drops,
+                f"{where}.marks_return_datetime",
+                "the marks row stays off the site",
+                lines,
+            )
         marks = _flagged_datetime(
-            entry,
+            {"marks_return_datetime": raw_marks.get("event_datetime")}
+            if marks_row
+            else entry,
             "marks_return_datetime",
             tz,
             drops,
@@ -1328,7 +1360,7 @@ def _parse_assignments(
             handout_datetime=handout,
             solution_datetime=solution,
             marks_return_datetime=marks,
-            marks_return_on_site=entry.get("show_on_site") is True,
+            marks_return_on_site=marks_on_site,
             lines=lines,
         )
     return out
@@ -2585,9 +2617,9 @@ def main() -> int:
     parser.add_argument(
         "--previous",
         metavar="PATH",
-        help="the file as it was before this change (empty: none): each assignment "
-        "that has just gained a `solution_datetime:` gets a ::notice:: saying what it "
-        "does. Never changes the exit code",
+        help="the file as it was before this change: each assignment that has just "
+        "gained a `solution_datetime:` gets a ::notice:: saying what it does. A file "
+        "that does not parse gives no notices. Never changes the exit code",
     )
     parser.add_argument(
         "--comment-file",
@@ -2627,7 +2659,8 @@ def main() -> int:
     print(_validate_report(sched, source_name))
     if args.previous is not None:
         before, _ = load_file(args.previous)
-        for note in solution_notices(before, sched):
+        # A previous file nobody can read says nothing about what is new: no notices.
+        for note in solution_notices(before, sched) if before is not None else []:
             at = f",line={note.lineno}" if note.lineno else ""
             print(f"::notice file={SCHEDULE_PATH}{at}::{note.line()}", file=sys.stderr)
     if sched.unparseable:

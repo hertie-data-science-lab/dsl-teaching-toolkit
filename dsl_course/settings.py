@@ -157,7 +157,7 @@ def parse_instance(text: str | None) -> Instance:
         return Instance(
             faults=(
                 _fault(
-                    ASSIGNMENTS_FILE,
+                    "",
                     "this file is not valid YAML, so none of it is read and nothing is "
                     "handed out or marked from it until it parses",
                     yaml_mark_line(exc),
@@ -173,7 +173,7 @@ def parse_instance(text: str | None) -> Instance:
         return Instance(
             faults=(
                 _fault(
-                    ASSIGNMENTS_FILE,
+                    "",
                     f"this file parses as {type(data).__name__}, not a mapping of "
                     f"`{ASSIGNMENTS_DEFAULTS}:` / `{ASSIGNMENTS_BLOCKS}:`, so none of it "
                     f"is read",

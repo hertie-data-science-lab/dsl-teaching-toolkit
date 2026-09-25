@@ -850,6 +850,7 @@ def test_semester_config_membership_dispatcher_fires_on_a_schedule_change():
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
+        "assignments.yml",
         "instructors.yml",
         "schedule.yml",
         "students.csv",
@@ -870,6 +871,7 @@ def test_semester_config_site_dispatcher_fires_on_schedule_people_or_teams_chang
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == [
+        "assignments.yml",
         "instructors.yml",
         "schedule.yml",
         "teams.csv",
@@ -891,6 +893,7 @@ def test_semester_config_scheduler_dispatcher_fires_on_a_schedule_change():
     assert set(trigger) == {"push"}
     assert trigger["push"]["paths"] == [
         "schedule.yml",
+        "assignments.yml",
         "instructors.yml",
         "students.csv",
         "teams.csv",

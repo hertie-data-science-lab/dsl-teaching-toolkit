@@ -78,12 +78,9 @@ jobs:
     steps:
       # Pinned to full commit SHAs: these steps share a job with DSL_BOT_TOKEN, and a
       # mutable tag is whatever the tag currently points at. Comment = the version.
-      # Two commits deep: the one before is what the push changed schedule.yml FROM, so
-      # the run can say which entries have just gained a `solution_datetime:`.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           path: semester
-          fetch-depth: 2
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           repository: __CENTRAL__
@@ -139,6 +136,10 @@ jobs:
           # which is scoped to this repo. Absent, --check-sources is simply not passed.
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           COURSE_ORG: ${{ steps.course.outputs.org }}
+          # What the push (or the pull request) changed schedule.yml FROM, so the run can
+          # say which entries have just gained a `solution_datetime:`. None on a manual
+          # run or a new branch: then nothing is said.
+          BEFORE: ${{ github.event.before || github.event.pull_request.base.sha }}
         run: |
           set +e
           # The PARSE runs first and unconditionally. It is the verdict about the file
@@ -148,9 +149,12 @@ jobs:
           # org skipped all of it: those steps have no status function in their `if:`, so
           # a failed step above them means they never run, and a push that dropped an
           # entry went unreported because an unrelated API call came back empty.
-          # Empty on the repo's first commit: every solution date is then new.
-          git -C ../semester show HEAD~1:schedule.yml > previous-schedule.yml 2>/dev/null || : > previous-schedule.yml
-          args=(--file ../semester/schedule.yml --validate --previous previous-schedule.yml)
+          args=(--file ../semester/schedule.yml --validate)
+          if [ -n "$BEFORE" ] && [ "${BEFORE//0/}" != "" ] \
+            && git -C ../semester fetch -q --depth=1 origin "$BEFORE" 2>/dev/null \
+            && git -C ../semester show "$BEFORE:schedule.yml" > previous-schedule.yml 2>/dev/null; then
+            args+=(--previous previous-schedule.yml)
+          fi
           if [ -n "$COURSE_ORG" ]; then
             args+=(--check-sources "$COURSE_ORG" --annotate --comment-file comment.txt)
           fi
