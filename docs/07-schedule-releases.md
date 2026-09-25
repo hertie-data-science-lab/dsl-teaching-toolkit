@@ -175,7 +175,7 @@ Each assignment's **dates**, keyed by a key you choose. `course_source_repo` nam
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. *Omit it to hand out by hand |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `solution_datetime` | no | - | when the model answer and rubric (the template's `solution/`) are pushed into every repo. Not the same as returning marks, and it cannot be undone for reuse. **No default**. Must be **after** `handout_datetime`, and needs it set |
-| `marks_return_datetime` | no | - | when marks go back, automatically, once every unit is marked; until then a problem says how many are not. Internal: on the site only with `show_on_site: true` |
+| `marks_return_datetime` | no | - | when this assignment's marks go back, automatically, once every unit is marked; until then a problem says how many are not. Internal: to show a "Marks expected" row, write it as `{event_datetime: 2026-10-27, show_on_site: true}` |
 | `details` | no | - | a sentence in the Details column of **both** its rows (out and due) |
 | `show_on_site` | no | `true` | `false` and the site says nothing about this assignment. It still hands out, snapshots and grades |
 | `tbc` | no | `false` | both rows marked **(TBC)**. **Display only** |
@@ -211,7 +211,8 @@ defaults:
   late_penalty_per_day: 10%
 assignments:
   assignment-1:
-    late_window_days: 2
+    late_window_days: 2         # both halves: a block naming one sets the other to none
+    late_penalty_per_day: 10%
   assignment-2:
     semester_dest_repo: homework-2
 ```
@@ -425,7 +426,7 @@ Each assignment's **late cutoff** is `due_datetime` plus its `late_window_days`.
 
 ### Releasing the model solution
 
-`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing. The push that first adds a `solution_datetime:` gets a notice on its commit saying so; the console hands out with `now` only straight after a preview of the same hand out.
+`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing. The push that first adds a `solution_datetime:` gets a notice on its commit saying so; a hand out with `now` (button or console) runs only straight after a preview of it by the same person.
 
 It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
 

@@ -65,7 +65,7 @@ like any other, and a student who onboards later is granted push on the next tic
 
 ### An assignment whose repos are public
 
-`visibility: public` in the template's `grading_config.yml` hands out the same repos
+`visibility: public` in the semester's `assignments.yml` hands out the same repos
 world-readable - portfolio work such as a hackathon. There is then **no Submission receipts issue**
 (a hand-in time is a fact about a student, and it does not go where the internet can read
 it; the marks were never going here anyway), and the
@@ -84,7 +84,7 @@ credential rather than bypass the block.
 
 ### An assignment the students may publish themselves
 
-`visibility: student_choice` in the template's `grading_config.yml` hands out the same
+`visibility: student_choice` in the semester's `assignments.yml` hands out the same
 **private** repos, but makes the student - or every member of a team - **admin** of their
 own, which is the only permission that carries GitHub's visibility switch. There is no
 Submission receipts issue (the repo may be public tomorrow).
@@ -126,7 +126,7 @@ Live example: [`example-course/semester-org/teams.csv`](../example-course/semest
 
 Teams are formed in one of two ways - both end up in `semester-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a GitHub team on push. A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
 
-Which of the two an assignment uses is its own declaration - `team_formation` in the `grading_config.yml` on the template's `solution` branch:
+Which of the two an assignment uses is the semester's - `team_formation` in `semester-config/assignments.yml`:
 
 - **`assigned`** - you edit `teams.csv` directly, one row per member. The **Join team** form refuses every request for this assignment and says so.
 - **`self_select`** - students open a **Join team** issue in the semester's `join` repo. Team size is capped by that assignment's `max_team_size` (the semester's `assignments.yml`, else the course's `assignment_defaults`, else 5).
@@ -182,8 +182,8 @@ is what distributes the fix.
    would. This button only distributes what is already there.
 2. Course org → `.github` → **Actions** → **Patch released assignment**. Inputs:
    `semester_org`, `course_source_repo` (the template), `path` (a file, or a folder to push
-   whole), `slug` (only when two schedule entries hand out from this one template),
-   `overwrite` (default **off**) and `preview` (default **on**).
+   whole), `overwrite` (default **off**) and `preview` (default **on**). A template two
+   schedule entries hand out from is refused, naming both.
 3. Preview first: it counts the repos it would touch and writes nothing.
 
 What a real run does:
