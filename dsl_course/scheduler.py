@@ -1758,6 +1758,17 @@ def run(
     errors = 0
     # The release pass's preview, on a preview: what the console shows of it.
     preview: Summary | None = None
+    if sched.instance_unparseable:
+        # Every run setting is unknown, so nothing here may act on a default the semester
+        # did not choose. The tick stays green and the fault goes out on the schedule.yml
+        # digest, like an unreadable schedule.yml.
+        log_err(
+            f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.ASSIGNMENTS_FILE} is not "
+            f"valid YAML - nothing is released, handed out or graded until it is fixed"
+        )
+        if release:
+            _preflight_sources(course_org, semester_org, sched, now, dry_run, [])
+        return 0
     if release:
         # ONE listing of the semester for the whole tick, taken here at the start of it and
         # handed to every pass that asks a question of the org: the freeze's `pushed_at`,

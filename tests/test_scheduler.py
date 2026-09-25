@@ -4739,3 +4739,32 @@ def test_the_tick_sends_nothing_for_an_unfinished_sheet_and_files_the_fault(
     assert scheduler.run("Course-Org", "Semester-f2026", _AFTER_MARKS) == 0
     (fault,) = [f for f in filed if f.field == "marks_return_datetime"]
     assert "1 of 2 unit(s) unmarked" in fault.what
+
+
+def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
+    # Every run setting is unknown: nothing acts, the tick stays green, and the fault goes
+    # out on the schedule.yml digest.
+    monkeypatch.setattr(
+        scheduler.schedule.settings, "_assignments_text", lambda org: "a: [\n"
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "_schedule_text",
+        lambda org: (
+            "assignments:\n  a1:\n    course_source_repo: t\n"
+            "    due_datetime: 2026-10-13\n"
+        ),
+    )
+    synced: list = []
+    monkeypatch.setattr(
+        scheduler,
+        "_preflight_sources",
+        lambda c, s, sched, now, dry, extra: synced.append(sched.faults) or 0,
+    )
+    monkeypatch.setattr(
+        scheduler, "_release_phase", lambda *a, **k: pytest.fail("nothing may run")
+    )
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course", "Semester-f2026", now) == 0
+    ((fault,),) = synced
+    assert fault.file == "assignments.yml"

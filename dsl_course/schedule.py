@@ -516,6 +516,10 @@ class Schedule:
     # snapshotted or graded for the semester, and the digest issue and the mail beside it are
     # how the person who has to fix it hears about that.
     unparseable: bool = False
+    # Set by `load` when `assignments.yml` is not YAML: its run settings are unknown, so
+    # nothing that reads one (a cutoff, a hand out) can act for this semester until it is
+    # fixed. The fault is in `faults` like any other.
+    instance_unparseable: bool = False
 
 
 @dataclass
@@ -1938,10 +1942,10 @@ def load(semester_org: str) -> Schedule:
                 f"ignored: nothing releases, hands out, snapshots or grades"
             )
         )
-    sched = parse(
-        meta if isinstance(meta, dict) else {}, settings.instance(semester_org)
-    )
+    instance = settings.instance(semester_org)
+    sched = parse(meta if isinstance(meta, dict) else {}, instance)
     sched.org = semester_org
+    sched.instance_unparseable = instance.unparseable
     sched.unparseable = bool(unparseable)
     sched.faults.extend(unparseable)
     if sched.dropped:
