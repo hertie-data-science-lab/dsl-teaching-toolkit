@@ -713,7 +713,7 @@ PUBLISH_EXAMPLES = (
 # Every pattern is QUOTED, including the ones faculty are shown. `**/*.html` opens with
 # `*`, which YAML reads as an alias and refuses, and `"!readings/**"` opens with `!`, a
 # tag - so an unquoted list is a file the site cannot read at all.
-_PUBLISH_STUB = f"""\
+PUBLISH_HEADER = f"""\
 # INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
 # rewritten by the toolkit, so anything you put here stays.
 #
@@ -725,9 +725,8 @@ _PUBLISH_STUB = f"""\
 # ("!labs/sub/") excludes its whole subtree. solution/, tests/, grading files and .env are
 # never published whatever is written here. Applies to every semester of this course.
 # Full rules: https://github.com/{CENTRAL}/blob/main/docs/02-add-materials-to-course.md
-public:
-{{patterns}}
 """
+_PUBLISH_STUB = PUBLISH_HEADER + "public:\n{patterns}\n"
 
 
 def publish_patterns(dirs: str, types: str, folders: Iterable[str]) -> list[str]:

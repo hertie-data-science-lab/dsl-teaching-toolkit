@@ -1266,7 +1266,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 22
+    assert capsys.readouterr().out.count("already migrated") == 24
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -2340,3 +2340,55 @@ def test_a_catch_up_still_running_at_the_bound_is_said_and_is_no_failure(
         "the next migration waits for them before it pauses"
     ) in out
     assert f"{SEM} is migrated" in out
+
+
+# ---------------------------------------------------------------- publish.yml
+
+
+def _publish(header: str, patterns: str = '  - "lectures/**/*.html"\n') -> bytes:
+    return (header + "public:\n" + patterns).encode()
+
+
+def test_the_old_seeded_publish_comment_takes_the_current_one(
+    fake, course, monkeypatch, capsys
+):
+    cohort, renamed = ("\n".join(h) + "\n" for h in migrate.old_publish_headers())
+    edited = renamed.replace("Edit,\n", "Edit (we do),\n")
+    fake.tree(COURSE, "course-materials-f2026")["publish.yml"] = _publish(cohort)
+    for name, header in (("f2025", renamed), ("f2024", edited)):
+        fake.add(
+            COURSE,
+            f"course-materials-{name}",
+            {"publish.yml": _publish(header)},
+            topics=["dsl-materials"],
+        )
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "- course-materials-f2026/publish.yml: the seeded comment" in out
+    assert "- course-materials-f2025/publish.yml: the seeded comment" in out
+    # Not as seeded: listed by line (the old rule's two lines), never rewritten.
+    assert "-   course-materials-f2024/publish.yml: line(s) 6, 7" in out
+    assert "course-materials-f2024/publish.yml: the seeded" not in out
+
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    for name in ("f2026", "f2025"):
+        body = fake.tree(COURSE, f"course-materials-{name}")["publish.yml"]
+        assert body == _publish(scaffold.PUBLISH_HEADER), name
+    assert fake.tree(COURSE, "course-materials-f2024")["publish.yml"] == _publish(
+        edited
+    )
+    capsys.readouterr()
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    # Done, and the hand-edited one is still listed for a person.
+    assert "publish.yml comment: already migrated" in out
+    assert "-   course-materials-f2024/publish.yml: line(s) 6, 7" in out
+
+
+def test_the_publish_header_is_the_one_the_scaffold_seeds():
+    stub = scaffold._publish_stub(scaffold.PUBLIC_LECTURES, scaffold.PUBLIC_HTML, [])
+    assert stub.startswith(scaffold.PUBLISH_HEADER + "public:\n")
+    old = migrate.OLD_PUBLISH_HEADER + "public:\n"
+    assert migrate.publish_header(old.replace("\n", "\r\n")) == (
+        scaffold.PUBLISH_HEADER + "public:\n"
+    ).replace("\n", "\r\n")
