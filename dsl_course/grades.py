@@ -73,6 +73,7 @@ from .discovery import (
     assignment_rows,
     course_name_for_semester,
     course_org_for_semester,
+    discover_semesters,
     exists_in,
     listing_by_name,
     listing_row,
@@ -3471,6 +3472,27 @@ def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
     return told, set(reader.fieldnames or ())
 
 
+def _already_returned(wd: Path) -> set[str] | None:
+    """The assignments students have already been told a mark for: each with at least one
+    non-empty cell in the registrar export the last real run wrote. None when that cannot
+    be told - the export is there and cannot be read, or it is missing while gradebooks
+    have already been written (`distributed.csv` has rows)."""
+    path = wd / SEMESTER_CSV_NAME
+    if not path.is_file():
+        distributed, _ = _read_distributed(wd)
+        return None if distributed else set()
+    try:
+        rows = list(read_csv(path.read_text(), ("github_handle",), SEMESTER_CSV_NAME))
+    except RuntimeError:
+        return None
+    return {
+        slug
+        for row in rows
+        for slug, value in row.items()
+        if slug and slug not in _REGISTRAR_FIELDS and (value or "").strip()
+    }
+
+
 def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
     """A minimal spec for a sheet whose assignment the schedule no longer declares - a
     term whose entry has been deleted, or a hand-written sheet. Its shape is read off the
@@ -3586,22 +3608,20 @@ def marks_due(
     return faults, ready
 
 
-def record_marks_returned(
-    semester_org: str, sched, keys: list[str], now: datetime
-) -> bool:
-    """Write the fire-once marker of each assignment in `keys`."""
-    ok = True
-    for key in keys:
-        name = schedule.semester_name(key, sched.assignments[key])
-        body = json.dumps({"returned": now.isoformat()}, indent=2) + "\n"
-        ok &= put_file(
-            semester_org,
-            CONFIG_REPO,
-            marks_return_record(name),
-            body.encode(),
-            f"Marks returned for {key} at its marks_return_datetime",
-        )
-    return ok
+def dispatch_refusal(course_org: str, semester_org: str, assignment: str) -> str:
+    """Why a `return-marks` dispatch may not send, or "". Its payload is written by
+    whoever holds a bot token, so nothing in it is trusted: the semester must be one the
+    course registers, and the assignment one whose `marks_return_datetime` has come with
+    every unit marked and nothing returned yet."""
+    registered = {o.casefold() for o in discover_semesters(course_org)}
+    if semester_org.casefold() not in registered:
+        return f"{semester_org} is not a semester of {course_org} - nothing sent"
+    sched = schedule.load(semester_org)
+    _faults, ready = marks_due(course_org, semester_org, sched, datetime.now(UTC))
+    names = {schedule.semester_name(k, sched.assignments[k]) for k in ready}
+    if not assignment or assignment not in names:
+        return f"{assignment or 'no assignment'} is not due for return - nothing sent"
+    return ""
 
 
 def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:
@@ -4020,7 +4040,16 @@ def distribute(
             if assignment not in sheets:
                 log_err(f"{assignment} has no grading sheet in {SHEETS_DIR}/")
                 return 1
-            _told, returned = _told_grades(wd)
+            returned = _already_returned(wd)
+            if returned is None:
+                # Not knowing what went out would take it away again: every gradebook
+                # rendered without an assignment already returned loses it.
+                log_err(
+                    f"{SEMESTER_CSV_NAME} is missing or cannot be read, so which "
+                    f"assignments were already returned is not known - nothing sent. "
+                    f"Return every assignment once (no `assignment`), which rewrites it"
+                )
+                return 1
             sheets = {
                 name: sheet
                 for name, sheet in sheets.items()
@@ -4225,6 +4254,12 @@ def distribute(
         )
     else:
         writes[SEMESTER_CSV_NAME] = render_registrar_csv(students, books).encode()
+    if assignment and not counts["failed"] and not failed_mail:
+        # Returned, in the same commit as the record of it: the automatic return at
+        # `marks_return_datetime` does not ask again.
+        writes[marks_return_record(assignment)] = (
+            json.dumps({"returned": now}, indent=2) + "\n"
+        ).encode()
     recorded = _commit_record(
         semester_org,
         writes,
@@ -4711,6 +4746,13 @@ def main() -> int:
         help="Return this assignment only (its semester-side name), beside the ones "
         "already returned. Default: every sheet.",
     )
+    p.add_argument(
+        "--dispatched-by",
+        default="",
+        help="The course org whose Scheduled release asked for this automatic return "
+        "(a `return-marks` dispatch): the semester must be in its registry, and the "
+        "assignment must be due and fully marked, or nothing is sent.",
+    )
     # Default ON: the rendered workflow passes --preview / --no-preview explicitly, so a
     # bare local invocation cannot send by accident.
     add_preview_flag(
@@ -4722,6 +4764,13 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
+        if args.dispatched_by:
+            refusal = dispatch_refusal(
+                args.dispatched_by, args.semester_org, args.assignment
+            )
+            if refusal:
+                log_err(refusal)
+                return 1
         return distribute(
             args.semester_org,
             notify=not args.no_notify,

@@ -875,6 +875,58 @@ def test_a_scoped_return_sends_that_assignment_beside_those_already_returned(
     assert not [p for p in cfg_files if p.startswith(grades.SHEETS_DIR)]
 
 
+_UNMARKED = _SHEET.replace("score_individual: 43", "score_individual:").replace(
+    "feedback_individual: |\n      Clean derivation.\n", "feedback_individual:\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("exported", "distributed"),
+    [
+        # re-saved from Excel, `;`-delimited: present and unreadable
+        (
+            "hertie_email;name;github_handle;assignment-0\nada@uni.edu;Ada;ada-l;43\n",
+            None,
+        ),
+        # gone while gradebooks were already written
+        (
+            None,
+            grades.dump_distributed(
+                {("ada-l", "", grades.CHANNEL_GRADEBOOK): ("x", "2026-10-01", "")}
+            ),
+        ),
+    ],
+)
+def test_a_scoped_return_that_cannot_tell_what_went_out_sends_nothing(
+    tmp_path, monkeypatch, exported, distributed
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-0": _SHEET, "assignment-1": _SHEET},
+        exported=exported,
+        distributed=distributed,
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 1
+    assert out["gradebooks"] == [] and out["config"] == [] and out["outbox"] == []
+
+
+def test_a_column_of_submission_facts_alone_is_not_returned(tmp_path, monkeypatch):
+    # a2's sheet has only submission facts: its export column is empty, so a scoped
+    # return of a1 must not send a2 along.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _SHEET, "assignment-2": _SHEET.replace("43", "20")},
+        exported="hertie_email,name,github_handle,assignment-2\nada@uni.edu,Ada,ada-l,\n",
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 0
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert "assignment-2" not in files["grades.yml"]
+
+
 def test_a_scoped_return_of_an_assignment_with_no_sheet_sends_nothing(
     tmp_path, monkeypatch
 ):
@@ -2707,3 +2759,21 @@ def test_a_day_is_spoken_with_its_ordinal(day, spoken):
     # ONE spelling for the mail, the site and the form's JavaScript copy -
     # and 11th-13th are the three a `day % 10` rule alone gets wrong.
     assert grades.spoken_day(datetime(2026, 10, day)) == f"{spoken} Oct"
+
+
+def test_a_scoped_real_return_records_that_assignment_as_returned(
+    tmp_path, monkeypatch
+):
+    out = _distribute(monkeypatch, tmp_path, assignment="assignment-1")
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
+
+
+def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
+    # The payload is written by whoever holds a bot token: nothing in it is trusted.
+    monkeypatch.setattr(grades, "discover_semesters", lambda org: ["Sem"])
+    monkeypatch.setattr(grades.schedule, "load", lambda org: _schedule_with("a1", "a2"))
+    monkeypatch.setattr(grades, "marks_due", lambda c, s, sched, now: ([], ["a1"]))
+    assert grades.dispatch_refusal("C", "sem", "a1") == ""
+    assert "not due" in grades.dispatch_refusal("C", "Sem", "a2")
+    assert "not a semester" in grades.dispatch_refusal("C", "Other", "a1")
