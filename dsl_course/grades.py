@@ -3958,29 +3958,94 @@ def _commit_record(
 INTENT_MESSAGE = "grades: record the emails about to be sent"
 
 
+def _reachable(handles: list[str], students: list[roster.Student] | None) -> list[str]:
+    """The handles the roster gives an email address - the ones a notification can go to."""
+    emails = {
+        s.github_handle.casefold()
+        for s in students or []
+        if s.github_handle and s.hertie_email
+    }
+    return [h for h in handles if h.casefold() in emails]
+
+
 def _record_before_mail(
     semester_org: str,
     record: Distributed,
     pending: list[str],
     live: dict[str, str],
     now: str,
-    migrating: bool,
+    registrar: bytes | None,
 ) -> bool:
     """Commit `distributed.csv` with every pending address marked told BEFORE the mail
-    goes. A record commit that fails after the send can then never mail anybody twice:
+    goes, so a record commit that fails after the send can never mail anybody twice:
     without this the next run, and the scheduler's automatic return every quarter-hour,
-    re-mailed everyone. The final commit restores the row of an address whose mail
-    failed, so only a failed send AND a failed final commit together lose a notification
-    (the gradebook still holds the marks)."""
+    re-mailed everyone. The final commit (`_final_record`) resets the row of an address
+    whose mail failed or raised, so only a runner killed between the two commits loses a
+    notification (the gradebook still holds the marks).
+
+    The registrar export goes in the same commit: the gradebooks are written by now, and
+    a scoped return refuses while `distributed.csv` has rows and the export is missing
+    (`_already_returned`), so a run that died after this commit would otherwise wedge
+    every later one."""
     intent = dict(record)
     for handle in pending:
         intent[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
+    writes = {DISTRIBUTED_PATH: dump_distributed(intent).encode()}
+    if registrar is not None:
+        writes[SEMESTER_CSV_NAME] = registrar
     return _commit_record(
         semester_org,
-        {DISTRIBUTED_PATH: dump_distributed(intent).encode()},
+        writes,
         f"{INTENT_MESSAGE} ({len(pending)} notification(s))",
-        [NOTIFIED_PATH] if migrating else [],
+        [],
     )
+
+
+def _final_record(
+    semester_org: str,
+    record: Distributed,
+    registrar: bytes | None,
+    *,
+    marker: str | None,
+    now: str,
+    counts: dict[str, int],
+    delete: list[str],
+) -> bool:
+    """The registrar's export and the record of what went out, in ONE commit - together
+    with the retired files this semester is migrating off, so the old and the new can
+    never both be present for a reader to choose between - and, for a scoped return,
+    `marker`'s returned record."""
+    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
+    if registrar is None:
+        # `roster.load` answers None for a roster it could not READ and [] for one with no
+        # rows, and the export is one row per ENROLLED student - so regenerating it from
+        # either would commit a header line over the file a registrar transcribes grades
+        # from. Leaving it is the only safe answer; the run goes red and the next one
+        # rebuilds it.
+        log_err(
+            f"the roster is empty or could not be read - {SEMESTER_CSV_NAME} left as it is"
+        )
+    else:
+        writes[SEMESTER_CSV_NAME] = registrar
+    if marker:
+        # Returned, in the same commit as the record of it: the automatic return at
+        # `marks_return_datetime` does not ask again.
+        writes[marks_return_record(marker)] = (
+            json.dumps({"returned": now}, indent=2) + "\n"
+        ).encode()
+    recorded = _commit_record(
+        semester_org,
+        writes,
+        f"grades: distribute ({counts['gradebooks']} gradebook(s), "
+        f"{counts['emails']} email(s))",
+        delete,
+    )
+    if not recorded:
+        log_err(
+            f"grades were sent but {DISTRIBUTED_PATH} could not be written - the "
+            f"emails were recorded before they went, so the next run re-sends none"
+        )
+    return recorded
 
 
 def _returned_units(
@@ -4314,76 +4379,72 @@ def distribute(
             return 1
         return return_summary(counts, len(pending) if notify else 0, dry_run=True)
 
-    delete = [*([NOTIFIED_PATH] if migrating else []), *retired]
-    if (
-        notify
-        and pending
-        and not _record_before_mail(semester_org, record, pending, live, now, migrating)
+    # Only a student the roster can reach is recorded before the mail: a withdrawn one
+    # (no roster email) is never mailed, and a row for them would be a commit about nobody.
+    reachable = _reachable(pending, students) if notify else []
+    # What the final commit writes, whatever happens between here and there.
+    registrar = render_registrar_csv(students, books).encode() if students else None
+    if reachable and not _record_before_mail(
+        semester_org, record, reachable, live, now, registrar
     ):
         log_err(
             f"{DISTRIBUTED_PATH} could not be written before the emails went, so none "
             f"was sent - the next run sends them"
         )
         return return_summary(counts, 0, dry_run=False, code=1)
-    failed_mail, told = (
-        _email_updates(
+
+    def finish(failed_mail: int, told: list[str], raised: bool = False) -> bool:
+        """The final record: `told` as told, and every other address back as it was, so
+        an email that did not go is retried by the next Return marks run. A run that
+        `raised` never marks the assignment returned."""
+        for handle in told:
+            record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
+        counts["emails"] = len(told)
+        return _final_record(
             semester_org,
-            pending,
-            dry_run=False,
-            feedback=(
-                {h: feedback_text(books[h], titles) for h in pending}
-                if include_feedback
+            record,
+            registrar,
+            # Held back when not one email went (a token fault, no mail configured):
+            # the automatic return then asks again, and the reset rows mean it cannot
+            # mail anybody twice. One refused address in a class that was mailed does
+            # not hold it back, or it would re-fire every quarter-hour.
+            marker=(
+                assignment
+                if assignment
+                and not raised
+                and not counts["failed"]
+                and not (failed_mail and not told)
                 else None
             ),
+            now=now,
+            counts=counts,
+            delete=[*([NOTIFIED_PATH] if migrating else []), *retired],
         )
-        if notify and pending
-        else (0, [])
-    )
-    counts["emails"] = len(told)
-    if receipt_note:
-        counts["receipt_notes"] = _post_returned_notes(
-            semester_org, _returned_units(specs, sheets, books, live), listed
-        )
-    for handle in told:
-        record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
 
-    # 3. The registrar's export and the record of what went out, in ONE commit - together
-    #    with the retired files this semester is migrating off, so the old and the new can
-    #    never both be present for a reader to choose between.
-    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
-    if not students:
-        # `roster.load` answers None for a roster it could not READ and [] for one with no
-        # rows, and the export is one row per ENROLLED student - so regenerating it from
-        # either would commit a header line over the file a registrar transcribes grades
-        # from. Leaving it is the only safe answer; the run goes red and the next one
-        # rebuilds it.
-        log_err(
-            f"roster in {semester_org} is empty or could not be read - "
-            f"{SEMESTER_CSV_NAME} left as it is"
-        )
-    else:
-        writes[SEMESTER_CSV_NAME] = render_registrar_csv(students, books).encode()
-    if assignment and not counts["failed"]:
-        # Returned, in the same commit as the record of it: the automatic return at
-        # `marks_return_datetime` does not ask again. A notification that failed does
-        # not hold it back - every gradebook holds the marks, the run goes red for the
-        # mail, and the next Return marks run retries that address - since a refused
-        # address would otherwise be retried, and the run redden, every quarter-hour.
-        writes[marks_return_record(assignment)] = (
-            json.dumps({"returned": now}, indent=2) + "\n"
-        ).encode()
-    recorded = _commit_record(
-        semester_org,
-        writes,
-        f"grades: distribute ({counts['gradebooks']} gradebook(s), "
-        f"{counts['emails']} email(s))",
-        delete,
-    )
-    if not recorded:
-        log_err(
-            f"grades were sent but {DISTRIBUTED_PATH} could not be written - the "
-            f"emails were recorded before they went, so the next run re-sends none"
-        )
+    failed_mail, told = 0, []
+    try:
+        if notify and pending:
+            failed_mail, told = _email_updates(
+                semester_org,
+                pending,
+                dry_run=False,
+                feedback=(
+                    {h: feedback_text(books[h], titles) for h in pending}
+                    if include_feedback
+                    else None
+                ),
+            )
+        if receipt_note:
+            counts["receipt_notes"] = _post_returned_notes(
+                semester_org, _returned_units(specs, sheets, books, live), listed
+            )
+    except BaseException:
+        # The send raised (a Graph token fault) or something after it did: whatever was
+        # not confirmed sent counts as not sent, and the record is still made, so the
+        # rows written before the mail are reset rather than left claiming it went.
+        finish(len(reachable) - len(told), told, raised=True)
+        raise
+    recorded = finish(failed_mail, told)
     # The dry run's preview is out of date once anything has gone out. Not a reason to red
     # the run: a preview left open is closed by the next real one.
     close_issues_titled(f"{semester_org}/{CONFIG_REPO}", PREVIEW_TITLE, PREVIEW_SENT)

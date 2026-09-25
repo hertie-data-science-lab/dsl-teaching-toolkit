@@ -707,6 +707,7 @@ def _distribute(
     assignment: str | None = None,
     include_feedback: bool = False,
     intent_ok: bool = True,
+    send_error: Exception | None = None,
 ) -> dict:
     """`distribute` over a local semester-config clone, writing to nothing.
 
@@ -817,21 +818,26 @@ def _distribute(
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_semester", course_name)
-    monkeypatch.setattr(
-        grades.mailer,
-        "send_bulk",
-        lambda msgs, dry_run=False, sample=None: (
-            effects["outbox"].append(msgs),
-            [m[0] for m in msgs[:sent]],
-        )[1],
-    )
-    effects["rc"] = grades.distribute(
-        "SEMESTER",
-        notify=notify,
-        dry_run=dry_run,
-        assignment=assignment,
-        include_feedback=include_feedback,
-    )
+
+    def fake_send_bulk(msgs, dry_run=False, sample=None):
+        if send_error is not None:
+            raise send_error
+        effects["outbox"].append(msgs)
+        return [m[0] for m in msgs[:sent]]
+
+    monkeypatch.setattr(grades.mailer, "send_bulk", fake_send_bulk)
+    try:
+        effects["rc"] = grades.distribute(
+            "SEMESTER",
+            notify=notify,
+            dry_run=dry_run,
+            assignment=assignment,
+            include_feedback=include_feedback,
+        )
+    except Exception as exc:
+        if send_error is None:
+            raise
+        effects["raised"] = exc
     return effects
 
 
@@ -2826,14 +2832,113 @@ def test_no_email_goes_when_the_record_before_it_cannot_be_written(
     assert out["outbox"] == [] and out["config"] == []
 
 
-def test_a_failed_email_does_not_hold_back_the_returned_record(tmp_path, monkeypatch):
-    # A refused address would otherwise keep the automatic return asking, and failing,
-    # every quarter-hour; the row stays untold, so the next Return marks run retries it.
-    out = _distribute(monkeypatch, tmp_path, assignment="assignment-1", sent=0)
+_TWO_SHEET = (
+    _SHEET
+    + """\
+  ben-k:
+    score_individual: 40
+    adjustment_individual:
+    feedback_individual:
+    notes_not_shared_with_students:
+"""
+)
+_TWO_ROSTER = ROSTER_ADA + "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-abd\n"
+
+
+def test_one_refused_address_does_not_hold_back_the_returned_record(
+    tmp_path, monkeypatch
+):
+    # A refused address in a class that was mailed would otherwise keep the automatic
+    # return asking, and failing, every quarter-hour; its row stays untold, so the next
+    # Return marks run retries it.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+        assignment="assignment-1",
+        sent=1,
+    )
     assert out["rc"] == 1
     ((_cfg, cfg_files, _d),) = out["config"]
     assert grades.marks_return_record("assignment-1") in cfg_files
+    record = cfg_files[grades.DISTRIBUTED_PATH]
+    assert "ada-l,,email," in record and "ben-k,,email," not in record
+
+
+def test_no_email_sent_at_all_leaves_the_assignment_to_be_returned_again(
+    tmp_path, monkeypatch
+):
+    # Every send failed (no mail configured, a token fault): the automatic return asks
+    # again, and the rows are reset, so it cannot mail anybody twice.
+    out = _distribute(monkeypatch, tmp_path, assignment="assignment-1", sent=0)
+    assert out["rc"] == 1
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert grades.marks_return_record("assignment-1") not in cfg_files
     assert ",email," not in cfg_files[grades.DISTRIBUTED_PATH]
+
+
+def test_a_send_that_raises_resets_the_recorded_rows(tmp_path, monkeypatch):
+    # `_send_via_graph` raises on a token failure. Before, the rows recorded before the
+    # mail stayed "told": the next run said "No new marks to return" and nobody was
+    # ever mailed.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        assignment="assignment-1",
+        send_error=RuntimeError("Graph token refused"),
+    )
+    assert "raised" in first
+    ((intent),) = first["intent"]
+    assert ",email," in intent[grades.DISTRIBUTED_PATH]
+    ((_cfg, cfg_files, _d),) = first["config"]
+    assert ",email," not in cfg_files[grades.DISTRIBUTED_PATH]
+    assert grades.marks_return_record("assignment-1") not in cfg_files
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        assignment="assignment-1",
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_a_scoped_return_that_died_after_the_first_record_is_not_wedged(
+    tmp_path, monkeypatch
+):
+    # The first record carries the registrar export: a scoped run refuses while
+    # `distributed.csv` has rows and the export is missing.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        assignment="assignment-1",
+        put_files_ok=lambda files: grades.DISTRIBUTED_PATH not in files,
+    )
+    ((intent),) = first["intent"]
+    assert grades.SEMESTER_CSV_NAME in intent
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=intent[grades.DISTRIBUTED_PATH],
+        exported=intent[grades.SEMESTER_CSV_NAME],
+        assignment="assignment-1",
+    )
+    assert again["rc"] == 0
+    ((_cfg, cfg_files, _d),) = again["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
+
+
+def test_a_student_with_no_roster_email_is_not_recorded_before_the_mail(
+    tmp_path, monkeypatch
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        roster_rows="\n,Ada,enrolled,ada-l,42,dsl-abc\n",
+    )
+    assert out["gradebooks"]  # marked and written ...
+    assert out["intent"] == [] and out["outbox"] == []  # ... and nobody to tell
 
 
 # ------------------------------------------------------------- per-question feedback
