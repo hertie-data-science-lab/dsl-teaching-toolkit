@@ -285,3 +285,19 @@ def test_names_json_is_the_engines_own_names():
     for kind in ("outcomes", "pointer", "snapshots", "autograde", "solutions",
                  "team_formation", "archive", "semester_gradebook"):  # fmt: skip
         assert names["records"][kind].startswith(names["system_dir"] + "/"), kind
+
+
+def test_labels_json_names_every_engine_value_once():
+    # The console carries no label of its own: a value added to the engine without words
+    # fails here, and so does a label for a value the engine no longer has.
+    labels = schemas.labels_json()
+    assert labels["solution_warning"] == course.SOLUTION_WARNING
+    for key, values in {
+        "formats": course.FORMATS,
+        "submit_via": course.SUBMIT_VIA,
+        "visibility": course.VISIBILITIES,
+        "team_formation": course.TEAM_FORMATIONS,
+    }.items():
+        assert list(labels[key]) == list(values), key
+        for value, words in labels[key].items():
+            assert set(words) == {"label", "help"} and words["label"], (key, value)

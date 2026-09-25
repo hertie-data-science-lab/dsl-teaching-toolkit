@@ -1,8 +1,8 @@
 """Export the console's contracts as JSON Schema: `python -m dsl_course.schemas --out DIR`.
 
 Three wire shapes (`dsl.request/1`, `dsl.outcome/1`, `dsl.status/1`), the operations
-registry (`ops.json`), the engine's names (`names.json`) and institution policy
-(`policy.json`), and one schema per instructor-owned file the console edits. Every
+registry (`ops.json`), the engine's names (`names.json`), the words for its values
+(`labels.json`) and institution policy (`policy.json`), and one schema per instructor-owned file the console edits. Every
 enum and every key set is READ off the constant the engine itself parses with, so a value
 added to the engine reaches the console's forms with no second edit; the committed copies
 under `console/schemas/` are held to a fresh export by `tests/test_schemas.py`.
@@ -28,6 +28,8 @@ from .course import (
     INSTRUCTOR_ROLES,
     INSTRUCTORS_FILE,
     JOIN_REPO,
+    LABELS,
+    SOLUTION_WARNING,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -578,6 +580,12 @@ def names_json() -> dict:
     }
 
 
+def labels_json() -> dict:
+    """The words the console shows for the engine's values (`course.LABELS`) and the
+    solution warning every surface offering `solution_datetime: now` carries."""
+    return {"solution_warning": SOLUTION_WARNING, **LABELS}
+
+
 def all_schemas() -> dict[str, dict]:
     """Every exported file, by its name under the output directory."""
     return {
@@ -586,6 +594,7 @@ def all_schemas() -> dict[str, dict]:
         "status.schema.json": status_schema(),
         "ops.json": ops_json(),
         "names.json": names_json(),
+        "labels.json": labels_json(),
         # The institution policy the engine runs on (`policy.load`): the defaults, kinds,
         # site block, contact and licences, so the console holds no literal of its own.
         "policy.json": policy.load(),

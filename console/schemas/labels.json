@@ -1,0 +1,67 @@
+{
+  "formats": {
+    "ipynb": {
+      "help": "",
+      "label": "Jupyter notebook"
+    },
+    "latex": {
+      "help": "",
+      "label": "LaTeX"
+    },
+    "none": {
+      "help": "",
+      "label": "No starter file"
+    },
+    "py": {
+      "help": "",
+      "label": "Python files"
+    },
+    "qmd": {
+      "help": "",
+      "label": "Quarto"
+    },
+    "rmd": {
+      "help": "",
+      "label": "R Markdown"
+    }
+  },
+  "solution_warning": "Pushes the model answer and rubric into every student's repo. This is not returning marks, and cannot be undone for reuse.",
+  "submit_via": {
+    "assignment_repo": {
+      "help": "Private to the student and instructors.",
+      "label": "Their own repo"
+    },
+    "external": {
+      "help": "Moodle, Kaggle or in class. The repo carries the brief only.",
+      "label": "Elsewhere"
+    },
+    "shared_dropbox_repo": {
+      "help": "One repo for the class; each student has a folder.",
+      "label": "A shared drop box"
+    }
+  },
+  "team_formation": {
+    "assigned": {
+      "help": "You assign them on the semester's Teams page once hand out is scheduled.",
+      "label": "You assign them"
+    },
+    "self_select": {
+      "help": "On the student site.",
+      "label": "Students form their own"
+    }
+  },
+  "visibility": {
+    "private": {
+      "help": "",
+      "label": "Private"
+    },
+    "public": {
+      "help": "",
+      "label": "Public"
+    },
+    "student_choice": {
+      "help": "",
+      "label": "Student's choice"
+    }
+  }
+}

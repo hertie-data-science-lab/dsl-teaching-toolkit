@@ -178,6 +178,49 @@ COURSE_DEFAULT_CHOICE = "(course default)"
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.
 STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)
 
+# What the console shows for each value above (exported as `labels.json`), so it holds no
+# copy of its own. One entry per value, in the constant's order; `help` may be empty.
+LABELS = {
+    "formats": {
+        "ipynb": {"label": "Jupyter notebook", "help": ""},
+        "py": {"label": "Python files", "help": ""},
+        "rmd": {"label": "R Markdown", "help": ""},
+        "qmd": {"label": "Quarto", "help": ""},
+        "latex": {"label": "LaTeX", "help": ""},
+        NO_STARTER: {"label": "No starter file", "help": ""},
+    },
+    "submit_via": {
+        "assignment_repo": {
+            "label": "Their own repo",
+            "help": "Private to the student and instructors.",
+        },
+        "shared_dropbox_repo": {
+            "label": "A shared drop box",
+            "help": "One repo for the class; each student has a folder.",
+        },
+        "external": {
+            "label": "Elsewhere",
+            "help": "Moodle, Kaggle or in class. The repo carries the brief only.",
+        },
+    },
+    "visibility": {
+        "private": {"label": "Private", "help": ""},
+        "public": {"label": "Public", "help": ""},
+        "student_choice": {"label": "Student's choice", "help": ""},
+    },
+    "team_formation": {
+        SELF_SELECT: {
+            "label": "Students form their own",
+            "help": "On the student site.",
+        },
+        ASSIGNED: {
+            "label": "You assign them",
+            "help": "You assign them on the semester's Teams page once hand out is "
+            "scheduled.",
+        },
+    },
+}
+
 
 def visibility_is_students(visibility: str) -> bool:
     """Whether the toolkit does NOT own this repo's visibility - the student does.
