@@ -886,13 +886,21 @@ def _drift(org: str, wanted: dict[str, dict[str, bytes]]) -> list[str]:
     return out
 
 
-def _no_drift(drift: list[str]) -> bool:
-    """The re-render's verify: nothing left differing, else each file named."""
-    if drift:
+def _no_drift(drift: list[str], *, quiet: bool = False) -> bool:
+    """The re-render's verify: nothing left differing, else each file named (unless
+    `quiet`)."""
+    if drift and not quiet:
         log_err(
             f"{len(drift)} file(s) still differ from this checkout: {', '.join(drift)}"
         )
     return not drift
+
+
+# A re-render also writes what no file shows (a repo secret, a label, a description), so
+# its verify cannot read all of it back. A pause record left by a stopped run means that
+# run may have stopped at the re-render: inside the window it is never "already
+# migrated", and it runs again - it is idempotent. Outside the window, done IS the verify.
+RERUN_NOTE = "run it again: a pause record says the last run stopped inside the window"
 
 
 def _schedule_clean(text: str | None, *, quiet: bool = False) -> bool:
@@ -1160,8 +1168,12 @@ class Semester:
             and self.topic_done()
         )
 
+    def rerendered(self, *, quiet: bool = False) -> bool:
+        """The re-render's verify: every step before it done, and no drift."""
+        return self.ready_to_render() and _no_drift(self.drift(), quiet=quiet)
+
     def rerender_done(self) -> bool:
-        return self.ready_to_render() and not self.drift()
+        return self.pause.record() is None and self.rerendered(quiet=True)
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
@@ -1224,6 +1236,7 @@ class Semester:
                     [
                         "re-write every SYSTEM-OWNED file that differs:",
                         *(f"  {path}" for path in self.drift()),
+                        *([RERUN_NOTE] if self.pause.record() is not None else []),
                     ]
                     if self.ready_to_render()
                     else [
@@ -1234,7 +1247,7 @@ class Semester:
                     ]
                 ),
                 do=self.rerender,
-                verify=lambda: _no_drift(self.drift()),
+                verify=self.rerendered,
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             # status.json before the unpause: re-enabled workflows never race it.
@@ -1426,8 +1439,12 @@ class Course:
         ]
         return _drift(self.org, wanted) + retired
 
+    def rerendered(self, *, quiet: bool = False) -> bool:
+        """The re-render's verify: the registry migrated, and no drift."""
+        return self.registry_done() and _no_drift(self.drift(), quiet=quiet)
+
     def rerender_done(self) -> bool:
-        return self.registry_done() and not self.drift()
+        return self.pause.record() is None and self.rerendered(quiet=True)
 
     def work_done(self) -> bool:
         """Every step of the course's migration done - what a semester waits for."""
@@ -1520,6 +1537,7 @@ class Course:
                     [
                         "Refresh actions from this checkout; these files differ now:",
                         *(f"  {path}" for path in self.drift()),
+                        *([RERUN_NOTE] if self.pause.record() is not None else []),
                     ]
                     if self.registry_done()
                     else [
@@ -1530,7 +1548,7 @@ class Course:
                     ]
                 ),
                 do=lambda: seed.refresh(self.org, course_only=True) == 0,
-                verify=lambda: _no_drift(self.drift()),
+                verify=self.rerendered,
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             _status_step(self.org, None),

@@ -671,6 +671,25 @@ def test_a_status_that_fails_twice_says_both_times_the_org_is_paused(
     assert not fake.enabled(SEM, CONFIG_REPO)
 
 
+def test_a_semester_re_render_that_failed_off_the_files_is_run_again(
+    fake, semester, monkeypatch, capsys
+):
+    # Every file written, the team lock sync failed: done reads as the verify only once
+    # the window is closed, so the rerun re-renders rather than skipping.
+    synced = migrate.sync_team_lock
+    monkeypatch.setattr(
+        migrate,
+        "sync_team_lock",
+        lambda c, s: synced(c, s) and SimpleNamespace(ok=False),
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert "re-render did not verify - stopped here" in capsys.readouterr().err
+    semester.clear()
+    monkeypatch.setattr(migrate, "sync_team_lock", synced)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert semester == ["join", "config", "profile", "status"]
+
+
 def test_an_archived_semester_is_never_touched(fake, semester, monkeypatch, capsys):
     fake._repo(SEM, OLD_CONFIG_REPO)["archived"] = True
     assert _main(monkeypatch, SEM, "--no-preview") == 1
@@ -985,6 +1004,29 @@ def test_a_course_stopped_at_the_re_render_finishes_on_the_next_run(
     assert course == ["refresh", "status"]
     assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
+
+
+def test_a_course_re_render_that_failed_off_the_files_is_run_again(
+    fake, course, monkeypatch, capsys
+):
+    # The rehearsal: every file written, but the refresh failed at something no file
+    # shows (the repo secrets). The rerun must not read the re-render as done.
+    rendered = migrate.seed.refresh
+    monkeypatch.setattr(
+        migrate.seed, "refresh", lambda org, **k: rendered(org, **k) or 1
+    )
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    assert "re-render did not verify - stopped here" in capsys.readouterr().err
+    assert course == ["refresh"]
+
+    monkeypatch.setattr(migrate.seed, "refresh", rendered)
+    assert _main(monkeypatch, COURSE) == 0
+    assert migrate.RERUN_NOTE in capsys.readouterr().out
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    out = capsys.readouterr().out
+    assert "[skip] re-render" not in out
+    assert course == ["refresh", "refresh", "status"]
+    assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
 
 
 @pytest.mark.parametrize(
