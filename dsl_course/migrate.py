@@ -35,8 +35,6 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timezone
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import yaml
@@ -471,28 +469,60 @@ def fix_header(text: str, ref: str) -> str:
 
 # ------------------------------------------------------------------ seeded text
 # Repo names and paths that moved (decisions 0010 and 0012), inside text the toolkit
-# seeded: rewritten directly - a link to an old name is not a wording choice. Longest
-# first, so `classroom-config/people.yml` is not caught by `classroom-config` alone.
-TEXT_RENAMES = (
-    (
-        re.compile(rf"\b{OLD_CONFIG_REPO}/{re.escape(OLD_PEOPLE_FILE)}(?![\w.])"),
-        f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
-    ),
-    (re.compile(rf"\b{re.escape(OLD_SEMESTERS_PATH)}"), SEMESTERS_PATH),
-    (re.compile(rf"\b{OLD_CONFIG_REPO}(?![\w-])"), CONFIG_REPO),
-    (
-        re.compile(rf"(github\.com/[\w.-]+/){OLD_JOIN_REPO}(?![\w-])"),
-        rf"\g<1>{JOIN_REPO}",
-    ),
-    (re.compile(rf"`{OLD_JOIN_REPO}`"), f"`{JOIN_REPO}`"),
-)
+# seeded: rewritten directly - a link to an old name is not a wording choice. Only the
+# org's OWN repos: a link into another org (an archived semester, never migrated) still
+# resolves where it is. A bare name counts only as a whole name, never inside another
+# (`old-classroom-config`), and `welcome` only as a link to this org's repo (it is also a
+# word). Longest first, so a path is not caught by its repo's name alone.
+_WHOLE = r"(?<![\w./-])"
+_END = r"(?![\w-])"
+
+
+def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, str]]:
+    """The rewrites for text in `org`; `registry` adds the course registry's old file
+    name, which only the course's own `dsl-course.yml` names."""
+    site = rf"github\.com/{re.escape(org)}/"
+    out = [
+        (
+            re.compile(
+                rf"({site}){OLD_CONFIG_REPO}(/blob/[^/\s]+/){re.escape(OLD_PEOPLE_FILE)}"
+                r"(?![\w.])"
+            ),
+            rf"\g<1>{CONFIG_REPO}\g<2>{INSTRUCTORS_FILE}",
+        ),
+        (re.compile(rf"({site}){OLD_CONFIG_REPO}{_END}"), rf"\g<1>{CONFIG_REPO}"),
+        (
+            re.compile(
+                rf"\[`{OLD_JOIN_REPO}`\]\((https?://{site}){OLD_JOIN_REPO}{_END}"
+            ),
+            rf"[`{JOIN_REPO}`](\g<1>{JOIN_REPO}",
+        ),
+        (re.compile(rf"({site}){OLD_JOIN_REPO}{_END}"), rf"\g<1>{JOIN_REPO}"),
+        (
+            re.compile(
+                rf"{_WHOLE}{OLD_CONFIG_REPO}/{re.escape(OLD_PEOPLE_FILE)}(?![\w.])"
+            ),
+            f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
+        ),
+        (re.compile(rf"{_WHOLE}{OLD_CONFIG_REPO}{_END}"), CONFIG_REPO),
+    ]
+    if registry:
+        out.append(
+            (
+                re.compile(rf"(?<![\w-]){re.escape(OLD_SEMESTERS_PATH)}"),
+                SEMESTERS_PATH,
+            )
+        )
+    return out
+
+
 # Words a person may have written: listed for review, never rewritten.
 _OLD_WORD = re.compile(r"(?i)\bcohorts?\b")
 
 
-def renamed(text: str) -> str:
-    """`text` with every old repo name and path in `TEXT_RENAMES` rewritten."""
-    for old, new in TEXT_RENAMES:
+def renamed(text: str, org: str, *, registry: bool = False) -> str:
+    """`text` in `org` with every old repo name and path of `text_renames` rewritten."""
+    for old, new in text_renames(org, registry=registry):
         text = old.sub(new, text)
     return text
 
@@ -574,6 +604,11 @@ def seeded_wording(ref: str) -> dict[str, str]:
             "go here. Private: not shown on the semester site unless the entry adds "
             "`show_email: true`"
         ),
+        '#       photo: "/_images/pp/jane.jpg" # optional. Either (1) a relative path to '
+        "an image committed under `_images/pp/` in this cohort's site repo,": (
+            '#     photo: "/_images/pp/jane.jpg"   # optional. Either (1) a relative path '
+            "to an image committed under `_images/pp/` in this semester's site repo,"
+        ),
         # a template's grading_config.yml (its first line)
         "# INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's "
         "schedule.yml.": (
@@ -619,17 +654,18 @@ def seeded_wording(ref: str) -> dict[str, str]:
     }
 
 
-def seeded_yaml(text: str, ref: str) -> str:
-    """A seeded YAML file with every line still exactly as the old template seeded it
-    replaced by the new template's (`seeded_wording`), and the old repo names renamed in
-    its comment lines. Values and the instructor's own comments are otherwise theirs."""
+def seeded_yaml(text: str, ref: str, org: str, *, registry: bool = False) -> str:
+    """A seeded YAML file in `org` with every line still exactly as the old template
+    seeded it replaced by the new template's (`seeded_wording`, the line ending kept), and
+    the old repo names renamed in its comment lines (`renamed`). Values and the
+    instructor's own comments are otherwise theirs."""
     wording = seeded_wording(ref)
     out = []
     for line in text.split("\n"):
         if line.rstrip() in wording:
-            line = wording[line.rstrip()]
+            line = wording[line.rstrip()] + ("\r" if line.endswith("\r") else "")
         elif line.lstrip().startswith("#"):
-            line = renamed(line)
+            line = renamed(line, org, registry=registry)
         out.append(line)
     return "\n".join(out)
 
@@ -797,28 +833,6 @@ def _yaml(text: str | None) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _github_now(org: str) -> str:
-    """GitHub's clock, from the `Date` header of a read: the moment the runs' own
-    `created` times are compared with, whatever the laptop's clock says. Raises when
-    there is no header to read."""
-    code, out = gh("api", "--include", f"repos/{org}/.github")
-    stamp = next(
-        (
-            line.split(":", 1)[1].strip()
-            for line in out.splitlines()
-            if line.lower().startswith("date:")
-        ),
-        "",
-    )
-    try:
-        when = parsedate_to_datetime(stamp) if code == 0 else None
-    except (TypeError, ValueError):
-        when = None
-    if when is None:
-        raise RuntimeError(f"could not read GitHub's clock from {org}/.github")
-    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _with_workflows(org: str, candidates: list[str]) -> list[tuple[str, str]]:
     """`(org, repo)` for each live candidate repo that carries a workflow."""
     listing = _listing(org)
@@ -845,6 +859,9 @@ class Step:
     # "pause" / "unpause" bracket the work. With no work left the pause is skipped; the
     # unpause always asks the repos, so a run that stopped paused is always released.
     bracket: str = ""
+    # Runs whenever a step before it has work (the re-render: see RERUN_NOTE), so the
+    # plan never calls it "already migrated" then.
+    after_work: bool = False
 
 
 def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
@@ -868,11 +885,16 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
             return idle and s.done() if s.bracket == "unpause" else done(s)
 
         log_step(f"Migration plan for {org}")
+        pending = False  # a work step above has work
         for step in steps:
-            if planned(step):
+            if step.after_work and pending:
+                log(f"  {step.name}: runs after the steps above")
+            elif planned(step):
                 log(f"  {step.name}: already migrated")
                 continue
-            log(f"  {step.name}:")
+            else:
+                log(f"  {step.name}:")
+            pending = pending or not step.bracket
             for line in step.plan():
                 log(f"    - {line}")
         if preview:
@@ -995,7 +1017,6 @@ class Pause:
         self.org, self.targets = org, targets
         self.course_org, self.semester_org = course_org or org, semester_org
         self.saved: dict[str, dict] = {}  # "org/repo" -> its setting before the pause
-        self.started = ""
 
     def record(self) -> dict[str, dict] | None:
         text = get_file_content(self.org, ".github", PAUSE_RECORD)
@@ -1043,9 +1064,6 @@ class Pause:
         return not alive
 
     def pause(self) -> bool:
-        # Read first: a clock that cannot be read stops the pause before anything is
-        # written or switched.
-        self.started = _github_now(self.org)
         saved = self.record()
         if saved is None:
             saved = {f"{o}/{r}": _actions_state(o, r) for o, r in self.targets()}
@@ -1064,24 +1082,8 @@ class Pause:
         if not self.disabled():
             log_err("Actions did not read back as disabled")
             return False
-        # Only a run still going counts: one dispatched in the same second as the pause
-        # that has since finished wrote nothing after this run's first write.
-        since = f"created=%3E%3D{self.started}"
-        late = [
-            "/".join(self._live(k))
-            for k in self.saved
-            if self.started
-            and any(
-                _run_count(*self._live(k), f"{since}&status={s}")
-                for s in LIVE_RUN_STATES
-            )
-        ]
-        if late:
-            log_err(
-                f"a run started after the pause in {', '.join(late)} is not finished - "
-                f"wait for it to finish, then re-run the migration"
-            )
-            return False
+        # Only a run still going counts, whenever it started: one dispatched in the same
+        # second as the pause that has since finished wrote nothing after it.
         return self.quiet(list(self.saved))
 
     # the unpause step --------------------------------------------------------
@@ -1355,7 +1357,7 @@ class Semester:
         new = people_to_instructors(old)
         if new is None:
             return None
-        new = seeded_yaml(fix_header(new, ref), ref)
+        new = seeded_yaml(fix_header(new, ref), ref, self.org)
         try:
             return new if same_people(old, new) else None
         except yaml.YAMLError:
@@ -1380,7 +1382,9 @@ class Semester:
             if text is not None:
                 out[repo, path] = (
                     text,
-                    seeded_yaml(text, ref) if is_yaml else renamed(text),
+                    seeded_yaml(text, ref, self.org)
+                    if is_yaml
+                    else renamed(text, self.org),
                 )
         return out
 
@@ -1652,7 +1656,10 @@ class Semester:
                 plan=self.layout_plan,
                 do=self.layout,
                 verify=self.layout_verified,
-                rollback=f"git revert the '{LAYOUT_COMMIT}' commit(s) in {repo} and .github",
+                rollback=(
+                    f"git revert the '{LAYOUT_COMMIT}' commit(s) in {repo}, "
+                    f"{self.org}/.github and {self.org}/{JOIN_REPO}"
+                ),
             ),
             Step(
                 "keys",
@@ -1696,6 +1703,7 @@ class Semester:
                 ),
                 do=self.rerender,
                 verify=self.rerendered,
+                after_work=True,
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             # status.json before the unpause: re-enabled workflows never race it.
@@ -1843,7 +1851,12 @@ class Course:
         for repo, branch, path in where:
             text = get_file_content(self.org, repo, path, ref=branch)
             if text is not None:
-                out[repo, branch, path] = (text, seeded_yaml(text, ref))
+                # The registry's old name is the course's own, named in its own file.
+                registry = path == COURSE_CONFIG
+                out[repo, branch, path] = (
+                    text,
+                    seeded_yaml(text, ref, self.org, registry=registry),
+                )
         return out
 
     def text_work(self) -> dict[tuple[str, str], dict[str, bytes]]:
@@ -2046,6 +2059,7 @@ class Course:
                 ),
                 do=lambda: seed.refresh(self.org, course_only=True) == 0,
                 verify=self.rerendered,
+                after_work=True,
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             _status_step(self.org, None),

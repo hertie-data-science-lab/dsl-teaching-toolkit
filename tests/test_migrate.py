@@ -95,7 +95,6 @@ class FakeGitHub:
         self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
         self.run_after_pause: tuple[str, str] | None = None
         self.run_after_pause_state = "in_progress"
-        self.clock = "Thu, 24 Sep 2026 10:00:00 GMT"  # GitHub's, in its Date header
         self.central_runs: dict[
             str, list[str]
         ] = {}  # the toolkit's: workflow -> states
@@ -198,7 +197,9 @@ class FakeGitHub:
         for i, a in enumerate(args):
             if a in ("-f", "-F"):
                 key, value = args[i + 1].split("=", 1)
-                fields[key] = value
+                # gh's own rule: -f sends a string, -F a typed value (true is a boolean).
+                typed = {"true": True, "false": False}.get(value, value)
+                fields[key] = typed if a == "-F" else value
         route, _, query = path.partition("?")
         parts = route.split("/")
         if parts[0] != "repos":
@@ -213,8 +214,6 @@ class FakeGitHub:
         if self._repo(org, name) is None:
             return 1, "gh: Not Found (HTTP 404)"
         key = (org, self._name(org, name))
-        if "--include" in args:
-            return 0, f"HTTP/2.0 200 OK\nDate: {self.clock}\n\n{{}}"
         if parts[3:] == ["dispatches"] and method == "POST":
             if self.fail_dispatch:
                 return 1, "HTTP 422: Unprocessable"
@@ -222,7 +221,7 @@ class FakeGitHub:
             return 0, ""
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
-                on = fields["enabled"] == "true"
+                on = fields["enabled"] is True
                 was = self.setting(*key)
                 allowed = fields.get("allowed_actions", was["allowed_actions"])
                 self.actions[key] = {
@@ -660,7 +659,7 @@ def test_a_run_that_starts_after_the_pause_stops_it(
     fake.run_after_pause = (COURSE, ".github")
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     err = capsys.readouterr().err
-    assert f"a run started after the pause in {COURSE}/.github" in err
+    assert f"a workflow run is queued or running in {COURSE}/.github" in err
     assert "wait for it to finish, then re-run the migration" in err
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT]
 
@@ -673,30 +672,7 @@ def test_a_run_dispatched_with_the_pause_that_has_finished_passes_it(
     fake.run_after_pause = (COURSE, ".github")
     fake.run_after_pause_state = "completed"
     assert _main(monkeypatch, SEM, "--no-preview") == 0
-    assert "a run started after the pause" not in capsys.readouterr().err
-
-
-def test_the_pause_starts_at_githubs_clock_not_the_laptops(
-    fake, semester, monkeypatch, capsys
-):
-    # A run created seconds after GitHub's pause moment and still going: a laptop clock
-    # a day ahead would have counted it as before the pause.
-    fake.runs[(COURSE, ".github")] = [("2026-09-24T10:00:05Z", "in_progress")]
-    monkeypatch.setattr(migrate, "_alive", lambda targets: [])
-    assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert (
-        f"a run started after the pause in {COURSE}/.github" in capsys.readouterr().err
-    )
-
-
-def test_an_unreadable_github_clock_stops_the_pause(
-    fake, semester, monkeypatch, capsys
-):
-    fake.clock = "not a date"
-    assert _main(monkeypatch, SEM, "--no-preview") == 1
-    err = capsys.readouterr().err
-    assert "could not read GitHub's clock" in err
-    assert fake.commits == [] and fake.puts == []
+    assert "queued or running" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("state", migrate.LIVE_RUN_STATES)
@@ -994,15 +970,71 @@ def test_every_new_seeded_line_is_the_current_templates():
 
 
 def test_the_renames_are_mechanical_and_leave_other_words():
+    org = "Sem-f2026"
     text = (
-        "https://github.com/o/welcome/issues and https://github.com/o/welcome-x and "
-        "classroom-config/people.yml and classroom-config-2 and cohort-courses-pages.yml"
+        f"https://github.com/{org}/welcome/issues and "
+        f"[`welcome`](https://github.com/{org}/welcome/issues/new/choose) and "
+        f"https://github.com/{org}/classroom-config/blob/main/people.yml and "
+        f"https://github.com/{org}/welcome-x and "
+        "`classroom-config/people.yml` and classroom-config-2 and "
+        "https://github.com/hertie-dl-f2025/welcome/issues and "
+        "https://github.com/some-other-org/welcome and "
+        "https://github.com/some-other-org/classroom-config and "
+        "old-classroom-config and old-cohort-courses-pages.yml and "
+        "the `welcome` lecture and .github/cohort-courses-pages.yml"
     )
-    assert migrate.renamed(text) == (
-        "https://github.com/o/join/issues and https://github.com/o/welcome-x and "
-        "semester-config/instructors.yml and classroom-config-2 and semesters.yml"
+    want = (
+        f"https://github.com/{org}/join/issues and "
+        f"[`join`](https://github.com/{org}/join/issues/new/choose) and "
+        f"https://github.com/{org}/semester-config/blob/main/instructors.yml and "
+        f"https://github.com/{org}/welcome-x and "
+        "`semester-config/instructors.yml` and classroom-config-2 and "
+        # Another org's links resolve where they are (an archived org is never
+        # migrated); a name inside another, or a plain word, is not a repo name.
+        "https://github.com/hertie-dl-f2025/welcome/issues and "
+        "https://github.com/some-other-org/welcome and "
+        "https://github.com/some-other-org/classroom-config and "
+        "old-classroom-config and old-cohort-courses-pages.yml and "
+        "the `welcome` lecture and .github/cohort-courses-pages.yml"
     )
-    assert migrate.renamed(migrate.renamed(text)) == migrate.renamed(text)
+    assert migrate.renamed(text, org) == want
+    assert migrate.renamed(want, org) == want
+    # The registry's old name, only where the course's own dsl-course.yml says it.
+    registry = migrate.renamed(text, org, registry=True)
+    assert registry.endswith("old-cohort-courses-pages.yml and the `welcome` lecture "
+                             "and .github/semesters.yml")  # fmt: skip
+
+
+def test_a_filled_in_instructors_yml_keeps_no_seeded_cohort_line():
+    # The seeded example block stays in a filled-in file; its photo line is the
+    # toolkit's wording, not the instructor's.
+    old = (
+        '#       photo: "/_images/pp/jane.jpg" # optional. Either (1) a relative path to '
+        "an image committed under `_images/pp/` in this cohort's site repo,\n"
+    )
+    assert migrate.review_lines(migrate.seeded_yaml(old, "main", SEM)) == []
+
+
+def test_the_re_render_is_planned_to_run_while_work_is_left_above(
+    fake, course, monkeypatch, capsys
+):
+    # Every file already current, one step above with work: the re-render still runs,
+    # because the pause record will exist by the time it is reached.
+    tree = fake.tree(COURSE, ".github")
+    del tree["cohort-courses-pages.yml"]
+    tree["semesters.yml"] = b"semesters:\n- Sem-f2026\n"
+    _render_course(fake, COURSE)
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "re-render: runs after the steps above" in out
+    assert "re-render: already migrated" not in out
+
+
+def test_a_replaced_seeded_line_keeps_its_line_ending():
+    old = "# This cohort's own instructors/TAs\r\nplain: 1\r\n"
+    new = migrate.seeded_yaml(old, "main", SEM)
+    assert new.startswith("# This semester's own instructors:")
+    assert new.split("\n")[0].endswith("one list.\r")
 
 
 def test_the_seeded_skeleton_becomes_the_new_skeleton(fake, semester, monkeypatch):
@@ -1137,7 +1169,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         ),
         (
             f"{COURSE}/.github",
-            {"event_type": "sync-membership", "client_payload[all_semesters]": "true"},
+            {"event_type": "sync-membership", "client_payload[all_semesters]": True},
         ),
     ]
 
