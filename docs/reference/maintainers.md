@@ -817,9 +817,9 @@ every content repo and template with a release workflow. Before anything is swit
 repo's own setting (`enabled`, `allowed_actions`) is recorded in
 `<org>/.github/.system/migration-pause.json`; the unpause restores exactly that (a repo that
 was off stays off), reads it back and deletes the record. Verified by reading the setting
-back and by no run started since the pause (by GitHub's clock, the `Date` header) still
-going - one that has finished wrote nothing after the pause - nor any run unfinished (queued, in progress, waiting, requested, pending) - in those repos or
-as the central Deploy / Promote of the course's tier. An org with no workflow repo counts as
+back and by no run unfinished (queued, in progress, waiting, requested, pending),
+whenever it started - in those repos or as the central Deploy / Promote of the course's
+tier. A run dispatched with the pause that has since finished wrote nothing after it. An org with no workflow repo counts as
 paused. From the pause to
 the verified unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded
 repos and the record. A semester waits until its course's migration is complete (no course
@@ -860,13 +860,15 @@ What the demo rehearsal (2026-09-25) changed, one line each:
   tool dispatches one Scheduled release and one Sync membership into the course's `.github`
   (a semester's: scoped to it, as its `semester-config` push sends them; a course's: every
   semester, as the ds01 timers do) and prints where each run shows up, without waiting.
-- **The pause verify** counts only runs started after the pause that are still going.
+- **The pause verify** counts only unfinished runs, whenever they started (the separate
+  "started after the pause" count, and the GitHub clock it read, are gone).
 - **A step's done is its verify.** The re-render's verify and its done read the same
   things; and while a pause record says a run stopped inside the window, the re-render is
-  never "already migrated" (it also writes what no file shows, such as repo secrets).
-- **Seeded text.** The semester layout step rewrites the old repo names and paths in
-  `join/README.md`, `.github/profile/README.md`, `schedule.yml` and `instructors.yml`
-  (`migrate.TEXT_RENAMES`), and replaces each line still exactly as the old template
+  never "already migrated" (it also writes what no file shows, such as repo secrets);
+  the plan says "runs after the steps above" whenever a step above has work.
+- **Seeded text.** The semester layout step rewrites the old repo names and paths - the
+  org's own repos only, as whole names (`migrate.text_renames`) - in `join/README.md`,
+  `.github/profile/README.md`, `schedule.yml` and `instructors.yml`, and replaces each line still exactly as the old template
   seeded it with the new template's (`migrate.seeded_wording`); a course's own "seeded
   text" step does the same for `dsl-course.yml` and each template's `grading_config.yml`.
   Any other line that says "cohort" is the instructor's: listed by line number in the plan
