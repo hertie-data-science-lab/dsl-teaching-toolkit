@@ -160,13 +160,30 @@ def _is_deck(path: str) -> bool:
     return "." in name and name.rsplit(".", 1)[-1].lower() in DECK_EXTENSIONS
 
 
+def publish_lines(public: Iterable[str]) -> list[str]:
+    """`public:` patterns with one rule git lacks: a negated FOLDER (`!labs/sub/`) excludes
+    its whole subtree, whatever matched before - what faculty mean by it, and the safe
+    direction (git's `!dir/` cannot un-match the files of a `dir/**` above it)."""
+    out = []
+    for line in public:
+        body = line.strip()
+        if body.startswith("!") and body.endswith("/") and body.strip("!/"):
+            folder = body[1:].rstrip("/")
+            anchored = "/" in folder.lstrip("/")
+            out.append(f"!{folder}/**" if anchored else f"!**/{folder}/**")
+        else:
+            out.append(line)
+    return out
+
+
 def hosted_paths(paths: Iterable[str], public: Iterable[str]) -> frozenset[str]:
     """Which of a materials repo's paths its `publish.yml` `public:` patterns host: every
-    publishable path a pattern matches (gitignore syntax, the last match wins), plus the
-    asset folders beside each matched deck. Pure: the console's Files badges run the same
-    rule (`console/schemas/publish.json` holds cases both sides are tested against)."""
+    publishable path a pattern matches (gitignore syntax, the last match wins, a negated
+    folder excludes its subtree: `publish_lines`), plus the asset folders beside each
+    matched deck. Pure: the console's Files badges run the same rule
+    (`console/schemas/materials.json` holds cases both sides are tested against)."""
     paths = tuple(paths)
-    spec = parse_patterns("\n".join(public))
+    spec = parse_patterns("\n".join(publish_lines(public)))
     matched = {p for p in paths if publishable(p) and spec.check_file(p).include}
     for deck in [p for p in matched if _is_deck(p)]:
         prefixes = bundle_prefixes(deck)

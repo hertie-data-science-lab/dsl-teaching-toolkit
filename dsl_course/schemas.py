@@ -621,6 +621,7 @@ _TREE = (
     "readings/01_intro/paper.pdf",
     "grading_config.yml",
     ".env.local",
+    "a[b]/notes.pdf",
 )
 PUBLISH_CASES = (
     ("nothing declared", ()),
@@ -634,6 +635,9 @@ PUBLISH_CASES = (
     ("anchored at the root", ("/SYLLABUS.md", "/lab.pdf")),
     ("one character and a class", ("labs/0?_intro/*.pdf", "lectures/0[12]_*/*.pdf")),
     ("comments and blanks", ("# a note", "", "readings/**/*.md")),
+    ("a folder excluded with a trailing slash", ("labs/**", "!labs/01_intro/data/")),
+    ("an unanchored folder excluded", ("**", "!data/")),
+    ("an escaped bracket", ("a\\[b]/*",)),
 )
 
 

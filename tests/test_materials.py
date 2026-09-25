@@ -142,3 +142,12 @@ def test_a_copy_into_another_copys_folder_owns_it():
     )
     paths = ("lectures/05/slides.pdf", "lectures/05/code/serving.py")
     assert materials.hosted_copy(paths, feeds) == {"lectures/05/slides.pdf"}
+
+
+def test_a_negated_folder_excludes_its_subtree_whatever_matched_before():
+    paths = ("labs/a.pdf", "labs/sub/lab.pdf", "x/data/a.csv", "data/b.csv")
+    assert materials.hosted_paths(paths, ["labs/**", "!labs/sub/"]) == {"labs/a.pdf"}
+    assert materials.hosted_paths(paths, ["**", "!data/"]) == {
+        "labs/a.pdf",
+        "labs/sub/lab.pdf",
+    }

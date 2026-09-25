@@ -721,8 +721,9 @@ _PUBLISH_STUB = f"""\
 # showing as source on GitHub. Same syntax as .gitignore, relative to this repo, also
 # where a release renames a path with semester_dest_path. Anything unmatched stays
 # exactly as it is today: enrolled students open it on GitHub. A deck's
-# <name>_files/, media/, libs/ and images/ folders follow it. solution/, tests/, grading files and .env are
-# never copied whatever is written here. Applies to every semester of this course. Edit,
+# <name>_files/, media/, libs/ and images/ folders follow it. Unlike .gitignore, a negated
+# folder ("!labs/sub/") excludes its whole subtree. solution/, tests/, grading files and
+# .env are never copied whatever is written here. Applies to every semester of this course. Edit,
 # then press Sync site (or wait for the next release / daily sync) - a file that does not
 # parse stops the sync and is reported, rather than quietly publishing nothing. Full rules:
 # https://github.com/{CENTRAL}/blob/main/docs/11-configure-cohort-site.md
