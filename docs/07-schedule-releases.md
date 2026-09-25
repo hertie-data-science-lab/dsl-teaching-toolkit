@@ -175,7 +175,7 @@ Each assignment's **dates**, keyed by a key you choose. `course_source_repo` nam
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. *Omit it to hand out by hand |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `solution_datetime` | no | - | when the model answer and rubric (the template's `solution/`) are pushed into every repo. Not the same as returning marks, and it cannot be undone for reuse. **No default**. Must be **after** `handout_datetime`, and needs it set |
-| `marks_return_datetime` | no | - | when this assignment's marks go back, automatically, once every unit is marked; until then a problem says how many are not. Internal: to show a "Marks expected" row, write it as `{event_datetime: 2026-10-27, show_on_site: true}` |
+| `marks_return_datetime` | no | - | when this assignment's marks go back, automatically (a scoped **Distribute grades** run), once every unit is marked; until then a problem says how many are not. Internal: to show a "Marks expected" row, write it as `{event_datetime: 2026-10-27, show_on_site: true}` |
 | `details` | no | - | a sentence in the Details column of **both** its rows (out and due) |
 | `show_on_site` | no | `true` | `false` and the site says nothing about this assignment. It still hands out, snapshots and grades |
 | `tbc` | no | `false` | both rows marked **(TBC)**. **Display only** |
@@ -324,7 +324,7 @@ Everything else is **cumulative**: material deploys, assignment handouts, the si
 
 ## Verifying your schedule
 
-**It checks itself.** Every commit touching `schedule.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
+**It checks itself.** Every commit touching `schedule.yml` or `assignments.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
 
 > The run happens *after* the push: Actions cannot gate a commit, so the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
 
