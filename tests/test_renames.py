@@ -142,17 +142,14 @@ def test_an_assignment_naming_the_old_dest_key_is_dropped_as_not_migrated():
                     "due_datetime": "2026-10-13",
                     "cohort_dest_repo": "homework-1",
                 },
-                "ok": {
-                    "course_source_repo": "b-f2026",
-                    "due_datetime": "2026-10-13",
-                    "semester_dest_repo": "homework-2",
-                },
+                "ok": {"course_source_repo": "b-f2026", "due_datetime": "2026-10-13"},
             }
         }
     )
     assert list(sched.assignments) == ["ok"]
-    assert sched.assignments["ok"].semester_dest_repo == "homework-2"
     assert [f.code for f in sched.faults if f.code] == [NOT_MIGRATED]
+    # It names where the fact lives now, not a second name for it in schedule.yml.
+    assert "assignments.yml" in sched.faults[0].what
 
 
 def test_a_deploy_naming_the_old_dest_keys_ships_nothing():
@@ -393,9 +390,9 @@ def _one_assignment(**extra) -> schedule.Schedule:
 def test_the_one_cutoff_resolver_adds_the_late_window_to_the_due_date():
     sched = _one_assignment()
     due = sched.assignments["a1"].due_datetime
-    assert schedule.grading_cutoff_datetime(sched, "a1") == due
-    assert schedule.grading_cutoff_datetime(sched, "a1", 3) == due + timedelta(days=3)
-    assert schedule.grading_cutoff_datetime(sched, "nope", 3) is None
+    # The effective window: the institution's 10 days when nothing nearer says.
+    assert schedule.grading_cutoff_datetime(sched, "a1") == due + timedelta(days=10)
+    assert schedule.grading_cutoff_datetime(sched, "nope") is None
 
 
 def test_the_old_resolvers_are_gone():

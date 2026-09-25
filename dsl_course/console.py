@@ -26,10 +26,11 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from . import schedule, status
+from .course import SOLUTION_NOW
 from .gh_teams import acting_login
 from .ghcli import gh
 from .log import CLIParser, Summary, log, log_err
-from .ops.outcome import Outcome, annotation, write_private
+from .ops.outcome import Outcome, annotation, read_private, write_private
 from .ops.registry import (
     REGISTRY,
     Operation,
@@ -221,6 +222,35 @@ def identity_refusal(request: Request, login: str) -> str | None:
     return None
 
 
+# The one hand out that cannot be taken back: with the solution, the model answer and the
+# rubric land in every student's repo. It runs only straight after its own preview.
+_HANDOUT_OP = "assignment.handout_now"
+
+
+def preview_refusal(request: Request) -> str | None:
+    """None, unless this is a real hand out with `solution_datetime: now` that does not
+    follow a preview of the same request by the same person: fail closed, so a record
+    that cannot be read, or says anything else, refuses."""
+    if (
+        request.op != _HANDOUT_OP
+        or request.preview
+        or request.args.get("solution_datetime") != SOLUTION_NOW
+    ):
+        return None
+    last = read_private(request.op, request.semester_org or "")
+    if (
+        last.get("preview") is True
+        and last.get("conclusion") == "previewed"
+        and str(last.get("actor", "")).casefold() == request.actor.casefold()
+        and last.get("args") == request.args
+    ):
+        return None
+    return (
+        "Handing out with the solution pushes the model answer and rubric into every "
+        "student's repo, and cannot be undone: preview this hand out first, then run it."
+    )
+
+
 def _refuse(code: str, text: str, raw: dict, started: str) -> Outcome:
     return Outcome(
         op=str(raw.get("op", "")),
@@ -286,6 +316,7 @@ def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bo
             run_id=_run_id(),
             started=started,
             finished=_now(),
+            args=request.args,
         ), False
     requests = entry_requests(request)
     crashed = False
@@ -313,6 +344,7 @@ def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bo
         block=block,
         started=started,
         finished=_now(),
+        args=request.args,
     ), crashed
 
 
@@ -339,6 +371,11 @@ def run(text: str) -> int:
         # Not recorded privately either: the refusal may be that the semester is not this
         # course's, and a refused caller must not be able to write into any org.
         _finish(_refuse("NOT_ALLOWED", refusal, raw, started), None)
+        return 0
+    refusal = preview_refusal(request)
+    if refusal:
+        # Not recorded privately: the preview it asks for must stay the last record.
+        _finish(_refuse("PREVIEW_FIRST", refusal, raw, started), None)
         return 0
     try:
         outcome, crashed = _outcome(REGISTRY[request.op], request, started)

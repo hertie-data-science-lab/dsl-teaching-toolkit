@@ -5,6 +5,9 @@
     "actor": {
       "type": "string"
     },
+    "args": {
+      "type": "object"
+    },
     "block": {
       "type": "string"
     },

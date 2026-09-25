@@ -22,6 +22,7 @@ from dsl_course import (
     mailer,
     profile_readme,
     seed,
+    settings,
     welcome,
     workflows_place,
     workflows_render,
@@ -373,25 +374,21 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
         ["Semester-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org", "course_source_repo", "slug", "preview"}
+    assert set(inp) == {"semester_org", "course_source_repo", "preview"}
     assert inp["preview"]["default"] is True
     assert "dsl_course.collect" in rendered and "--refresh-only" in rendered
     assert "--deadline" not in rendered
 
 
-def test_a_read_only_button_can_name_which_schedule_entry():
-    # Two schedule entries may hand out from one template when each names its own
-    # `semester_dest_repo`, and Collect submissions starts from the TEMPLATE - so it needs a
-    # way to say which of the two sheets to refresh. It may say it because refreshing the
-    # wrong sheet costs a re-run; the HANDOUT may not, and has no such box.
-    rendered = workflows_render.render_collect_submissions(
-        ["Semester-f2026"], ["assignment-1-f2026"]
-    )
-    inp = workflow_inputs(rendered)
-    assert inp["slug"]["required"] is False and inp["slug"]["default"] == ""
-    assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
-    assert "SLUG: ${{ inputs.slug }}" in rendered
-    assert '[ -n "$SLUG" ] && args+=(--slug "$SLUG")' in rendered
+def test_no_button_asks_which_of_two_schedule_entries():
+    # The schedule knows which entry is which (decision 0009): Collect and Patch take the
+    # template, and a template two entries share is refused by the run, naming them.
+    for rendered in (
+        workflows_render.render_collect_submissions(["Semester-f2026"], ["a-f2026"]),
+        workflows_render.render_patch_assignment(["Semester-f2026"], ["a-f2026"]),
+    ):
+        assert "slug" not in workflow_inputs(rendered)
+        assert "--slug" not in rendered
 
 
 def test_the_hand_out_button_never_picks_between_two_schedule_entries():
@@ -972,10 +969,8 @@ NEW_ASSIGNMENT_INPUTS = [
     "copy_from",
     "formats",
     "type",
-    "team_formation",
     "submit_via",
     "autograde",
-    "visibility",
 ]
 
 
@@ -1009,7 +1004,7 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     # box 4 and says so: it voids boxes 5-10, and a form is filled in top to bottom.
     for n, name in enumerate(NEW_ASSIGNMENT_INPUTS, start=1):
         assert inputs[name]["description"].startswith(f"{n}. ")
-    assert "Boxes 5-10 are then ignored" in inputs["copy_from"]["description"]
+    assert "Boxes 5-8 are then ignored" in inputs["copy_from"]["description"]
     # Box 5 takes a LIST, so it is free text rather than a dropdown - and every format the
     # scaffold accepts has to be named in the description, because that is the only place
     # a faculty member can read the vocabulary off. Asserted as the WHOLE joined list
@@ -1022,20 +1017,13 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert ", ".join(course.STARTER_FORMATS) in inputs["formats"]["description"]
     assert course.NO_STARTER in inputs["formats"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
-    assert inputs["team_formation"]["options"] == [sentinel, *course.TEAM_FORMATIONS]
     assert inputs["submit_via"]["options"] == [sentinel, *course.SUBMIT_VIA]
     assert inputs["submit_via"]["default"] == sentinel
     # The legacy `github` spelling is read for ever, but this form is a fresh choice, so
     # it is never among the words the dropdown offers or defaults to.
     assert "github" not in inputs["submit_via"]["options"]
-    # The vocabulary itself: a word enters it when the handout can CREATE it, so the
-    # dropdown and the reader can never disagree about what is on offer.
-    assert inputs["visibility"]["options"] == [sentinel, *course.VISIBILITIES]
-    assert inputs["visibility"]["default"] == sentinel
-    # And the box says what each of them does: the form is the only place an instructor
-    # meets this vocabulary before they have a `grading_config.yml` to read.
-    for word in course.VISIBILITIES:
-        assert word in inputs["visibility"]["description"]
+    # Nothing a semester decides (decision 0009): those are its assignments.yml.
+    assert not set(inputs) & set(settings.RUN_KEYS)
     # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
     assert inputs["autograde"]["type"] == "boolean"
     assert inputs["autograde"]["default"] is False
@@ -1048,9 +1036,7 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
         ("COPY_FROM", "copy_from"),
         ("FORMATS", "formats"),
         ("TYPE", "type"),
-        ("TEAM_FORMATION", "team_formation"),
         ("SUBMIT_VIA", "submit_via"),
-        ("VISIBILITY", "visibility"),
         ("AUTOGRADE", "autograde"),
     ):
         assert step["env"][env_name] == f"${{{{ inputs.{field} }}}}"
@@ -1128,7 +1114,7 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     trigger = doc.get("on", doc.get(True))
 
     # fires where the file is edited, and on demand
-    assert trigger["push"]["paths"] == ["schedule.yml"]
+    assert trigger["push"]["paths"] == ["schedule.yml", "assignments.yml"]
     assert trigger["push"]["branches"] == ["main"]
     assert "workflow_dispatch" in trigger
 

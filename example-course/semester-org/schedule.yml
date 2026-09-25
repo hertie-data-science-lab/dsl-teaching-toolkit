@@ -128,28 +128,25 @@ releases:
 
 assignments:                    
   assignment-1:
-    title: Linear regression              # NB optional: the name, beside the slug on the site
     details: Closed form first, then by gradient descent.   # NB optional: the Details column of both its rows
     course_source_repo: assignment-1-f2026
     handout_datetime: 2026-09-15T14:00  
     due_datetime: 2026-10-13
-    grading_datetime: 2026-10-15
     solution_datetime: 2026-10-16T09:00
   assignment-2:
     course_source_repo: assignment-2-f2026
     details: Classification on a dataset you have not seen, scored on held-out data.
-    semester_dest_repo: homework-2
     handout_datetime: 2026-09-29T14:00
     due_datetime: 2026-10-27T23:59
   assignment-4-project:
-    title: Group project                  # NB if empty, the template README's heading is used
     details: Four weeks, one question of your own choosing, one write-up between you.
     course_source_repo: assignment-4-project-f2026
     handout_datetime: 2026-10-13T14:00
     due_datetime: 2026-11-15T23:59
-    # NB no `type: group` and no `max_team_size: 4` here - this file is timing only. Both
-    # live in this assignment's own grading_config.yml, on the course template's solution
-    # branch (../course-org/assignment-4-project-f2026/solution/grading_config.yml)
+    # NB this file is timing only. What the assignment IS (`type: group`, its title) is
+    # its template's grading_config.yml; how this semester runs it (a max team size of 4,
+    # the late rule) is assignments.yml beside this file. The late cutoff is the due date
+    # plus `late_window_days`, never written here.
 
 events:
   mid-term:

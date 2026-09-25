@@ -319,41 +319,78 @@ def _preflight(run_id: str) -> None:
 # ----------------------------------------------------------------------- the stages
 
 
-def _schedule_block(
-    slug: str, handout: datetime, due: datetime, cutoff: datetime
+def _schedule_block(slug: str, handout: datetime, due: datetime) -> str:
+    """One assignment's timings, as `assignments:` wants them - the template repo in the
+    course org, and a semester-side name that defaults to the key, so every repo this makes
+    falls inside the run's namespace. The late cutoff is not written here: it is the due
+    date plus `late_window_days` (`_instance_block`)."""
+    return "\n".join(
+        [
+            f"  {slug}:",
+            f"    course_source_repo: {slug}",
+            f"    handout_datetime: {handout:%Y-%m-%dT%H:%M}",
+            f"    due_datetime: {due:%Y-%m-%dT%H:%M}",
+        ]
+    )
+
+
+def late_days(due: datetime, cutoff: datetime) -> int:
+    """The whole days `late_window_days` must say for the cutoff to fall at or after
+    `cutoff`. The window is whole days (decision 0009), so a cutoff minutes after the due
+    date is a cutoff a day after it."""
+    return max(0, -(-(cutoff - due) // timedelta(days=1)))
+
+
+def _instance_block(
+    slug: str, shape: shapes.Shape, due: datetime, cutoff: datetime
 ) -> str:
-    """One assignment, as `assignments:` wants it - the template repo in the course org,
-    and a `semester_dest_repo` that defaults to the key, so every repo this makes falls
-    inside the run's namespace.
+    """One assignment's run settings, as the semester's `assignments.yml` wants them.
 
     `cutoff` is separate from `due` because the two drive different passes: from the due
     date the cron REFRESHES the sheet and posts receipts, and only at the cutoff does it
     freeze. Collapsing them would skip the refresh entirely, which is most of what there
     is to test here."""
-    return "\n".join(
-        [
-            f"  {slug}:",
-            f"    title: e2e {slug}",
-            f"    course_source_repo: {slug}",
-            f"    handout_datetime: {handout:%Y-%m-%dT%H:%M}",
-            f"    due_datetime: {due:%Y-%m-%dT%H:%M}",
-            f"    grading_datetime: {cutoff:%Y-%m-%dT%H:%M}",
-        ]
-    )
+    settings = {
+        "late_window_days": late_days(due, cutoff),
+        **shapes.run_settings(shape),
+    }
+    return "\n".join([f"  {slug}:", *(f"    {k}: {v}" for k, v in settings.items())])
 
 
-def _schedule_blocks(
-    run_id: str, handout: datetime, due: datetime, cutoff: datetime
-) -> str:
-    """All five of this run's assignments, one entry per shape, on the same three dates.
+def _schedule_blocks(run_id: str, handout: datetime, due: datetime) -> str:
+    """All five of this run's assignments, one entry per shape, on the same dates.
 
     The same dates deliberately: the shapes differ in what a deadline MEANS to them (an
     external assignment freezes nothing, a drop box freezes a folder), and giving them one
     clock is what lets a single tick exercise every arm of the same pass."""
     return "\n".join(
-        _schedule_block(shapes.slug(run_id, shape), handout, due, cutoff)
+        _schedule_block(shapes.slug(run_id, shape), handout, due)
         for shape in shapes.SHAPES
     )
+
+
+def _instance_blocks(run_id: str, due: datetime, cutoff: datetime) -> str:
+    """All five of this run's assignments' run settings, for `assignments.yml`."""
+    return "\n".join(
+        _instance_block(shapes.slug(run_id, shape), shape, due, cutoff)
+        for shape in shapes.SHAPES
+    )
+
+
+def _write_instance(run_id: str, due: datetime, cutoff: datetime) -> str:
+    """Put (or move) this run's fenced block into the semester's `assignments.yml`, the
+    file created (with an `assignments:` key) where the semester has none yet."""
+    read = gh_contents.get_file_with_sha(
+        SEMESTER_ORG, course.CONFIG_REPO, schedule_edit.ASSIGNMENTS_PATH
+    )
+    text, sha = read if read is not None and read[0] else ("", "")
+    edited = schedule_edit.insert_block(
+        schedule_edit.with_assignments_key(text),
+        run_id,
+        _instance_blocks(run_id, due, cutoff),
+    )
+    assert schedule_edit.put_instance(SEMESTER_ORG, edited, sha)
+    return edited
 
 
 def _write_schedule(
@@ -369,20 +406,29 @@ def _write_schedule(
     fires the course org's Scheduled release from every schedule.yml push, so the edit
     starts a real tick. It is waited out here rather than raced, so the pass dispatched
     next is the one whose log and artefacts the stage after it reads."""
+    # The run settings first: the schedule push below is what drives the tick, and that
+    # tick must read the cutoff this stage means.
+    instance = _write_instance(run_id, due, cutoff)
     read = gh_contents.get_file_with_sha(
         SEMESTER_ORG, course.CONFIG_REPO, "schedule.yml"
     )
     assert read is not None, f"{SEMESTER_ORG} has no schedule.yml"
     text, sha = read
     edited = schedule_edit.insert_block(
-        text, run_id, _schedule_blocks(run_id, handout, due, cutoff)
+        text, run_id, _schedule_blocks(run_id, handout, due)
     )
     before = drive.run_ids(CONTROL_REPO, SCHEDULED_RELEASE)
     assert schedule_edit.put_schedule(SEMESTER_ORG, edited, sha)
     driven = drive.wait_for_push_driven_tick(CONTROL_REPO, SCHEDULED_RELEASE, before)
     return Stage(
         "schedule",
-        detail={"due": due, "cutoff": cutoff, "text": edited, "driven": driven},
+        detail={
+            "due": due,
+            "cutoff": due + timedelta(days=late_days(due, cutoff)),
+            "text": edited,
+            "instance": instance,
+            "driven": driven,
+        },
     )
 
 
@@ -422,9 +468,7 @@ def _scaffold(run_id: str) -> Stage:
                 "semester": f"{run_id}-{shape.name}",
                 "formats": "py",
                 "type": "individual",
-                "team_formation": "self_select",
                 "submit_via": shape.submit_via,
-                "visibility": shape.visibility or "private",
                 "autograde": shape.autograde,
             },
         )
@@ -433,13 +477,10 @@ def _scaffold(run_id: str) -> Stage:
 
 
 def _configure(run_id: str) -> Stage:
-    """Write each template's shape into its own `grading_config.yml`, as an instructor
-    would: on the solution branch, over what the form seeded.
-
-    The form's boxes say most of it, but not all - `submit_url` is a commented line the
-    instructor uncomments once they have the address - and this file is the only thing the
-    engine reads. So the run states the whole shape here and asserts the file afterwards,
-    rather than trusting the dropdown it clicked."""
+    """Write each template's `submit_via` into its own `grading_config.yml`, as an
+    instructor would: on the solution branch, over what the form seeded - rather than
+    trusting the dropdown it clicked. The rest of the shape is the semester's
+    `assignments.yml` (`_write_instance`)."""
     written: dict[str, str] = {}
     for shape in shapes.SHAPES:
         slug = shapes.slug(run_id, shape)

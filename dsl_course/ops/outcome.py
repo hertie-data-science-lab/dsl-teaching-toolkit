@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 
 from .. import records
 from ..course import CONFIG_REPO, GRADEBOOK_PREFIX
-from ..gh_contents import put_file
+from ..gh_contents import get_file_content, put_file
 from .registry import OUTCOME_SCHEMA
 
 CONCLUSIONS = ("done", "nothing_to_do", "skipped", "previewed", "failed")
@@ -55,6 +55,9 @@ class Outcome:
     people: list[dict] = field(default_factory=list)
     started: str = ""
     finished: str = ""
+    # The request's `args`, in the private record only: what a later request compares
+    # itself with (the preview-first gate, `console.preview_refusal`).
+    args: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {"schema": OUTCOME_SCHEMA, **asdict(self)}
@@ -90,6 +93,7 @@ def public_dict(outcome: Outcome) -> dict:
     handles = {p["handle"] for p in outcome.people if p.get("handle")}
     data = outcome.to_dict()
     data.pop("people")
+    data.pop("args")
     actor = data.pop("actor")
     return {"actor": actor, **_redacted(data, handles)}
 
@@ -134,6 +138,17 @@ def annotation(outcome: Outcome) -> str:
 
 def private_path(op: str) -> str:
     return f"{OUTCOMES_DIR}/{op}.json"
+
+
+def read_private(op: str, semester_org: str) -> dict:
+    """The last private record of `op` in `semester_org`; `{}` when there is none or it
+    does not parse. A read that fails otherwise raises."""
+    text = get_file_content(semester_org, CONFIG_REPO, private_path(op))
+    try:
+        data = json.loads(text) if text else {}
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def write_private(outcome: Outcome, semester_org: str | None, course_org: str) -> bool:

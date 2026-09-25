@@ -42,6 +42,7 @@ import yaml
 from . import gh_teams, mailer, policy, records, roster, schedule, settings
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import (
+    ASSIGNMENTS_FILE,
     CONFIG_REPO,
     GRADEBOOK_PREFIX,
     MARKS_RETURNED_NOTE,
@@ -63,7 +64,6 @@ from .course import (
     marks_returned_marker,
     receipt_body,
     receipts_issue_body,
-    resolve_is_group,
     row_name,
     submission_repo,
     submit_shape,
@@ -77,7 +77,7 @@ from .discovery import (
     listing_by_name,
     listing_row,
 )
-from .faults import NOT_MIGRATED, ConfigFault, NotMigrated
+from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, Severity, moved_text
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -118,7 +118,6 @@ from .setting_readers import (
     read_settings,
     refuse_renamed,
 )
-from .settings import LATE_PAIR
 
 GRADEBOOK_DIR = records.path(
     "gradebook"
@@ -970,8 +969,7 @@ class GradingSpec(_Shape):
     questions: dict[str, str] | None = None
     # The institution's late rule unless a nearer layer says otherwise, so an assignment
     # nobody has written a late policy for is still graded by the one the syllabi state.
-    # A layer that declares ONE of the two leaves the other empty rather than taking half
-    # a default it never asked for - see `_late_pair`.
+    # A layer that declares ONE of the two leaves the other empty (`settings.resolve`).
     late_window_days: int | None = _INSTITUTION["late_window_days"]
     late_penalty_per_day: str | None = _INSTITUTION["late_penalty_per_day"]
     # OFF unless the assignment asks for it. Most assignments are hand-marked, and a
@@ -987,13 +985,10 @@ class GradingSpec(_Shape):
     # the autograde detail. Off unless the assignment asks for it: it clones the whole
     # semester a second time at the cutoff, and most assignments are read in the browser.
     grader_pdf: bool = False
-    # The file still names its starters as `format:` (decision 0012): refused whole, and
-    # nothing hands out or grades from it until it is migrated.
+    # The file still carries an old key (decisions 0009, 0012): refused whole, and nothing
+    # hands out or grades from it until it is migrated.
     not_migrated: bool = False
     dropped: tuple[str, ...] = ()
-    # The keys this `grading_config.yml` itself states: its run settings are the
-    # template's part of the assignment layer until they move to `assignments.yml`.
-    declared: frozenset[str] = field(default=frozenset(), compare=False)
     # `{run key: layer}` - where each run setting's value came from (`with_run_settings`).
     sources: tuple[tuple[str, str], ...] = field(default=(), compare=False)
 
@@ -1046,32 +1041,6 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
     rather than by each of the handout, the sheet, the receipts and the site making their
     own guess about what was meant."""
     via = values.get("submit_via", "assignment_repo")
-    if via == "external" and values.get("visibility", "private") != "private":
-        # Nothing is created, so there is nothing for a visibility to describe.
-        values["visibility"] = "private"
-        dropped.append(
-            Dropped(
-                GRADING_FILE,
-                "visibility",
-                "`visibility:` says nothing about an assignment handed in off GitHub - "
-                "no repo is created for it - ignored",
-            )
-        )
-    if (
-        via == "shared_dropbox_repo"
-        and values.get("visibility", "private") != "private"
-    ):
-        # Corrected rather than obeyed - see the `shared_dropbox_repo` note beside
-        # `course.SUBMIT_VIA`.
-        values["visibility"] = "private"
-        dropped.append(
-            Dropped(
-                GRADING_FILE,
-                "visibility",
-                "`visibility:` is not read for a shared drop box - one repo holds the "
-                "whole semester's work, so v1 keeps it private - ignored",
-            )
-        )
     if via == "shared_dropbox_repo":
         for key in ("autograde", "completion_check", "grader_pdf"):
             if values.get(key):
@@ -1096,32 +1065,16 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 # `runs_completion_check`, so the whole "is this hand-marked?" answer is
                 # settled at the parse.
                 values[key] = False
-    if via != "external" and values.get("submit_url"):
-        values["submit_url"] = ""
-        dropped.append(
-            Dropped(
-                GRADING_FILE,
-                "submit_url",
-                "`submit_url:` is only read for `submit_via: external` - ignored",
-            )
-        )
 
 
-def _late_pair(values: dict) -> None:
-    """The late-work default is a PAIR, and a file that states half of it gets no half.
-
-    `late_window_days` and `late_penalty_per_day` describe one rule, so the standard
-    (10% a day for 10 days) only stands behind a file that says nothing about late work at
-    all. A file naming just one of them has stated a rule of its own - `late_window_days:
-    3` with no penalty is three days late accepted free, and a penalty with no window is a
-    rate nothing is collected to spend it on - and completing it from the syllabus would
-    grade a semester by a sentence nobody wrote."""
-    declared = [
-        key for key in ("late_window_days", "late_penalty_per_day") if key in values
-    ]
-    if len(declared) == 1:
-        values.setdefault("late_window_days", None)
-        values.setdefault("late_penalty_per_day", None)
+# What a template's `grading_config.yml` reads: every setting but the run settings, which
+# are how ONE semester runs the assignment and live in its `assignments.yml` (decision
+# 0009). A run key still written here is NOT_MIGRATED.
+TEMPLATE_KEYS = tuple(k for k in SPEC_KEYS if k not in settings.RUN_KEYS)
+RUN_KEYS_HOME = (
+    f"it is set per semester in {CONFIG_REPO}/{ASSIGNMENTS_FILE}, where the migration "
+    f"moves it"
+)
 
 
 def parse_grading_spec(text: str) -> GradingSpec:
@@ -1140,18 +1093,22 @@ def parse_grading_spec(text: str) -> GradingSpec:
     # starter at all - the completion check off, the runnable format gone - and say nothing.
     if "format" in data and "formats" not in data:
         raise NotMigrated("format", "formats", GRADING_FILE)
+    # A run setting here is refused WHOLE too: read without it, the assignment would run
+    # on the semester's defaults instead of the rule this file wrote, and say nothing.
+    for key in settings.RUN_KEYS:
+        if key in data:
+            raise NotMigrated(
+                key, ASSIGNMENTS_FILE, GRADING_FILE, moved_text(key, RUN_KEYS_HOME)
+            )
     dropped: list[str] = []
     data = refuse_renamed(data, GRADING_FILE, dropped)
-    values = read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
-    # A refused value states nothing (the field's default stands, and the cascade answers
-    # the run keys) - except a late key, which still states the pair (`_late_pair`).
-    values = {k: v for k, v in values.items() if v is not None or k in LATE_PAIR}
-    _late_pair(values)
-    declared = frozenset(values)
+    values = read_settings(data, TEMPLATE_KEYS, GRADING_FILE, dropped)
+    # A refused value states nothing: the field's default stands.
+    values = {k: v for k, v in values.items() if v is not None}
     _cross_check(values, dropped)
     for line in dropped:
         log_err(line)
-    return GradingSpec(**values, dropped=tuple(dropped), declared=declared)
+    return GradingSpec(**values, dropped=tuple(dropped))
 
 
 def with_run_settings(
@@ -1159,19 +1116,13 @@ def with_run_settings(
 ) -> GradingSpec:
     """`spec` with every run setting at its EFFECTIVE value (`settings.effective_all`) and
     `sources` saying which layer gave it. Without a semester, the semester's layers are
-    empty. The shape rules the parse applies to the file hold for what the cascade brings
-    too, silently - a course default of `public` says nothing about an assignment that
-    creates no repo of its own."""
-    template = {
-        key: getattr(spec, key) for key in settings.RUN_KEYS if key in spec.declared
-    }
-    resolved = settings.effective_all(
-        semester_org, slug, course_org=course_org, template=template
-    )
+    empty. The shape rules hold for what the cascade brings, silently - a course default
+    of `public` says nothing about an assignment that creates no repo of its own."""
+    resolved = settings.effective_all(semester_org, slug, course_org=course_org)
     values = {key: value for key, (value, _) in resolved.items()}
     if not creates_unit_repos(spec.submit_via):
         values["visibility"] = "private"
-    if spec.submit_via != "external":
+    if spec.submit_via != "external" or not values["submit_url"]:
         values["submit_url"] = ""
     return replace(
         spec,
@@ -1337,9 +1288,9 @@ def grading_spec_faults(
                 fires,
                 f"{exc} - the whole file is refused, so the assignment is not handed "
                 f"out or graded until it is",
-                field="format",
-                lineno=key_lines(text).get(("format",)),
-                fix="run the migration, which rewrites it to the new name",
+                field=exc.old,
+                lineno=key_lines(text).get((exc.old,)),
+                fix="run the migration, which rewrites it",
                 code=NOT_MIGRATED,
             )
         ], None
@@ -1376,9 +1327,7 @@ def grading_spec_faults(
         if isinstance(dropped, Dropped)
     ]
     if handed_out:
-        faults += _visibility_faults(
-            spec, slug, template, course_org, lines, fires, handed_out
-        )
+        faults += _visibility_faults(spec, slug, semester_org, fires, handed_out)
     if releases_solution and not spec.can_hold_solution:
         # A moment that will pass and do nothing. `provision_all` refuses to push the
         # model answer where there is no repo of the unit's own to put it in, or none the
@@ -1403,8 +1352,9 @@ def grading_spec_faults(
                 fix="remove `solution_datetime:` from this assignment's entry in "
                 f"{CONFIG_REPO}/schedule.yml - the model answer stays on this "
                 "template's `solution` branch, which is where the instructors read "
-                "it - or give this assignment a private repo per unit here "
-                "(`submit_via: assignment_repo`, `visibility: private`)",
+                "it - or give this assignment a private repo per unit "
+                f"(`submit_via: assignment_repo` here, `visibility: private` in "
+                f"{CONFIG_REPO}/{ASSIGNMENTS_FILE})",
                 plain=f"{slug} has a solution shown date in this semester's schedule, "
                 f"but its settings give it no private repo to put the solution in.",
                 consequence="the solution shown date passes and no solution is "
@@ -1440,10 +1390,8 @@ def grading_config_faults(
     """Every assignment this semester's plan declares, and everything in its definition that
     will not grade as written.
 
-    `fires` is the moment the value is USED: the assignment's `grading_datetime`, and its
-    due date where it declares none (which is what `schedule.grading_cutoff_datetime` resolves the freeze to
-    anyway). An assignment with neither has no moment, and its faults simply sit in the
-    issue.
+    `fires` is the moment the value is USED: the assignment's late cutoff
+    (`schedule.grading_cutoff_datetime`).
 
     `listing` is the SEMESTER's repos keyed by name, off the one listing the tick already
     holds, and it is read for one check: an assignment whose `visibility:` no longer
@@ -1504,9 +1452,7 @@ def grading_config_faults(
 def _visibility_faults(
     spec: GradingSpec,
     slug: str,
-    template: str,
-    course_org: str,
-    lines: dict[tuple[str, ...], int],
+    semester_org: str,
     fires: datetime | None,
     rows: list[dict],
 ) -> list[ConfigFault]:
@@ -1532,22 +1478,24 @@ def _visibility_faults(
     if not wrong:
         return []
     return [
-        _spec_fault(
-            slug,
-            template,
-            course_org,
-            fires,
+        # In the SEMESTER's assignments.yml, where the setting lives (decision 0009): free
+        # to change until the first hand out, and a drift report afterwards.
+        ConfigFault(
+            f"assignments.{slug}",
             # A COUNT and never a name: a submission repo is `<slug>-<handle>`, and this
             # sentence is repeated into a public run log, a digest issue and an email.
             f"`visibility: {spec.visibility}` does not describe the repos this assignment "
             f"handed out - {len(wrong)} of {len(rows)} are not {spec.visibility}. The "
             f"value is read when each repo is CREATED, so editing it afterwards moves "
             f"nothing on its own",
+            fires=fires,
             field="visibility",
-            lineno=lines.get(("visibility",)),
-            fix=f"set `visibility:` back to what those repos are, or make each of them "
-            f"{spec.visibility} by hand from its GitHub Settings - the toolkit never "
-            f"re-opens a repo it has already created",
+            file=ASSIGNMENTS_FILE,
+            in_org=semester_org,
+            fix_text=f"set this assignment's `visibility:` in {ASSIGNMENTS_FILE} back to "
+            f"what those repos are, or make each of them {spec.visibility} by hand from "
+            f"its GitHub Settings - the toolkit never re-opens a repo it has already "
+            f"created",
             plain=f"{slug}'s settings say its repos are {spec.visibility}, but "
             f"{len(wrong)} of {len(rows)} handed out in this semester are not.",
             consequence="those repos stay as they are, and the pages the toolkit "
@@ -2013,7 +1961,7 @@ def sheet_spec(
     entry = sched.assignments.get(key)
     return SheetSpec(
         slug=slug,
-        title=gspec.title or (entry.title if entry else "") or slug,
+        title=gspec.title or slug,
         is_group=is_group,
         submit_via=gspec.submit_via,
         visibility=gspec.visibility,
@@ -2023,12 +1971,10 @@ def sheet_spec(
         autograde=gspec.autograde,
         completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(
-            schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days)
-        ),
+        cutoff_display=_display_moment(schedule.grading_cutoff_datetime(sched, key)),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
         cutoff_long=_display_long(
-            schedule.grading_cutoff_datetime(sched, key, gspec.late_window_days),
+            schedule.grading_cutoff_datetime(sched, key),
             sched.timezone,
         ),
         due_at=entry.due_datetime if entry else None,
@@ -3530,9 +3476,92 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
             key,
             name,
             gspec,
-            resolve_is_group(force=False, template_type=gspec.type),
+            gspec.is_group,
         )
     return specs
+
+
+def marks_return_record(name: str) -> str:
+    """The fire-once record of an assignment whose marks automation has returned."""
+    return records.path("marks_returned", f"{name}.json")
+
+
+def marks_due(
+    course_org: str, semester_org: str, sched, now: datetime
+) -> tuple[list[ConfigFault], list[str]]:
+    """The assignments whose `marks_return_datetime` has come and whose marks automation
+    has not returned yet: `(faults, ready)`. `ready` is the schedule keys whose sheet has a
+    mark for every unit - Return marks goes out for them. Each other one is a fault that
+    says how many units are unmarked (a count, never a unit), and it is asked again every
+    tick until the sheet is complete or the date is removed.
+
+    Only an assignment past its moment costs a read: its marker, then its sheet."""
+    faults: list[ConfigFault] = []
+    ready: list[str] = []
+    specs: dict[str, SheetSpec] | None = None
+    for key, entry in sorted(sched.assignments.items()):
+        when = entry.marks_return_datetime
+        if when is None or when > now:
+            continue
+        name = schedule.semester_name(key, entry)
+        if get_file_content(semester_org, CONFIG_REPO, marks_return_record(name)):
+            continue
+        if specs is None:
+            specs = sheet_specs(course_org, sched)
+        text = get_file_content(semester_org, CONFIG_REPO, sheet_path(name))
+        try:
+            sheet = parse_sheet(text) if text else None
+        except SheetUnreadable:
+            sheet = None  # the sheet's own digest says why
+        units = ((sheet or {}).get(specs[name].container_key) or {}) if sheet else {}
+        unmarked = len(_not_marked(specs[name], sheet)) if sheet else 0
+        if sheet and units and not unmarked:
+            ready.append(key)
+            continue
+        counted = (
+            f"{unmarked} of {len(units)} unit(s) unmarked"
+            if units
+            else "its grading sheet has no units yet"
+        )
+        faults.append(
+            ConfigFault(
+                f"assignments.{key}",
+                f"marks were due at {when:%Y-%m-%d %H:%M}; {counted} - they are "
+                f"returned automatically on the first tick after every unit is marked",
+                fires=when,
+                # One mail, not the missed-moment ladder: waiting is the whole remedy,
+                # and the maintainer has nothing to do about an unfinished sheet.
+                ceiling=Severity.WARNING,
+                field="marks_return_datetime",
+                lineno=schedule.line_of(entry.lines, "marks_return_datetime"),
+                file=schedule.SCHEDULE_PATH,
+                fix_text=f"finish marking {sheet_path(name)}, or remove "
+                "`marks_return_datetime:` to return the marks by hand",
+                plain=f"Marks were due today; {unmarked} units unmarked."
+                if units
+                else "Marks were due today; the grading sheet has no units yet.",
+                consequence="the marks are not returned until every unit is marked",
+            )
+        )
+    return faults, ready
+
+
+def record_marks_returned(
+    semester_org: str, sched, keys: list[str], now: datetime
+) -> bool:
+    """Write the fire-once marker of each assignment in `keys`."""
+    ok = True
+    for key in keys:
+        name = schedule.semester_name(key, sched.assignments[key])
+        body = json.dumps({"returned": now.isoformat()}, indent=2) + "\n"
+        ok &= put_file(
+            semester_org,
+            CONFIG_REPO,
+            marks_return_record(name),
+            body.encode(),
+            f"Marks returned for {key} at its marks_return_datetime",
+        )
+    return ok
 
 
 def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:

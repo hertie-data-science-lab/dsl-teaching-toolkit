@@ -6,6 +6,7 @@ without touching gh/git.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from datetime import date
 from pathlib import Path
@@ -2428,7 +2429,7 @@ def test_a_patch_refuses_to_choose_between_two_entries_on_one_template(
 
     assert rc == 1 and commits == []
     err = capsys.readouterr().err
-    assert "assignment-2-resit" in err and "say which" in err
+    assert "assignment-2-resit" in err and "nothing acts on one of them by hand" in err
 
 
 def test_a_patch_told_which_entry_acts_on_that_entrys_hand_out(monkeypatch):
@@ -2974,8 +2975,8 @@ def test_a_student_choice_handout_opens_no_feedback_issue(
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.parse_grading_spec(
-            "visibility: student_choice\n"
+        lambda org, template, **_: dataclasses.replace(
+            grades.parse_grading_spec(""), visibility="student_choice"
         ),
     )
     monkeypatch.setattr(
@@ -3002,7 +3003,9 @@ def test_a_public_handout_opens_no_feedback_issue(
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.parse_grading_spec("visibility: public\n"),
+        lambda org, template, **_: dataclasses.replace(
+            grades.parse_grading_spec(""), visibility="public"
+        ),
     )
     monkeypatch.setattr(
         assign, "ensure_semester_template", lambda *a, **k: "assignment-1"

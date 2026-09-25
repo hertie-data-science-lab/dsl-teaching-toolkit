@@ -641,25 +641,6 @@ def assignment_slug(template: str) -> str:
     return re.sub(r"-[fs]\d{4}$", "", template)
 
 
-def resolve_is_group(*, force: bool, template_type: str | None) -> bool:
-    """The SINGLE precedence for group-vs-individual, shared by every resolver.
-
-    An explicit force (the Release assignment button's `type: group` / `--group`) wins;
-    else the assignment's OWN declaration - `type:` in the template's `grading_config.yml`,
-    passed as `template_type` ("group"/"individual", or None when the file says nothing);
-    else individual. Pure: each caller passes what it already holds, so no consumer
-    re-derives its own precedence (and none re-trusts student-writable teams.csv to decide
-    the kind).
-
-    The semester's `schedule.yml` used to sit between the two and no longer does. The two
-    files are orthogonal now - schedule.yml is WHEN, grading_config.yml is WHAT - and a
-    semester that could override the shape got one assignment provisioned per student while
-    its own grading config, its team cap and its Join-team form all said per team."""
-    if force:
-        return True
-    return str(template_type or "").strip().lower() == "group"
-
-
 def coerce_date(value: object) -> date | None:
     """A YAML date/datetime or an ISO `YYYY-MM-DD` string -> a `date` (None if unparseable).
     Date-level only (whole-day). The single canonical date coercion: `active_today` here and

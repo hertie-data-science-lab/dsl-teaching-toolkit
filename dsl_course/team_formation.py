@@ -130,7 +130,7 @@ class Window:
 
     key: str
     name: str
-    # What a student calls this assignment: `gspec.title or entry.title or name`, the same
+    # What a student calls this assignment: `gspec.title or name`, the same
     # chain `grades.sheet_spec` walks for the gradebook's header. The mail is addressed to
     # a person, so it names the assignment the way the course site and the brief do rather
     # than by the slug the plan is keyed on.
@@ -260,7 +260,7 @@ def open_windows(
                 name=name,
                 # The gradebook's chain (`grades.sheet_spec`), so the mail, the sheet and
                 # the site all call the assignment one thing.
-                title=spec.title or entry.title or name,
+                title=spec.title or name,
                 closes=closes,
                 sizes=tuple(sorted((t, len(m)) for t, m in groups.items())),
                 waiting=waiting,
@@ -303,16 +303,15 @@ def window_faults(
 def _fault(sched: schedule.Schedule, window: Window) -> ConfigFault:
     """The fault for one window, filed on the line that decided when it SHUTS.
 
-    An explicit `grading_datetime` is that line where the entry sets one, and the due date
-    where it does not (`schedule.formation_window` closes on the grading pin). Naming the
-    key that actually decided is what makes the deep link land where somebody would edit
-    to give the semester more time.
+    The due date's line: the window closes at the late cutoff, due + `late_window_days`
+    (`schedule.formation_window`), so the due date is the line in this file that decides
+    it.
 
     FLOORED at WARNING once the window has been open for `WARN_AFTER_OPEN` (`warn_from`):
     the ladder off `fires` stays as it is, and only lifts the fault above that floor.
     """
     entry = sched.assignments[window.key]
-    field = "grading_datetime" if entry.grading_datetime is not None else "due_datetime"
+    field = "due_datetime"
     return ConfigFault(
         f"assignments.{window.key}",
         _what(window),

@@ -127,10 +127,8 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
     )
     assert seen["formats"] == ["py"]
     assert seen["submit_via"] == "shared_dropbox_repo"
-    # The two run boxes are passed on unanswered: the file writes them commented and the
-    # cascade answers them at read time.
-    assert seen["team_formation"] == SENTINEL
-    assert seen["visibility"] == SENTINEL
+    # No run box at all: how a semester runs it is that semester's assignments.yml.
+    assert "team_formation" not in seen and "visibility" not in seen
 
 
 def test_the_console_s_new_assignment_leaves_unanswered_boxes_to_the_cascade():
@@ -147,17 +145,18 @@ def test_the_console_s_new_assignment_leaves_unanswered_boxes_to_the_cascade():
         )
     )
     argv = REGISTRY["assignment.create"].argv(request)
-    for flag in ("--formats", "--team-formation", "--submit-via", "--visibility"):
+    for flag in ("--formats", "--submit-via"):
         assert argv[argv.index(flag) + 1] == SENTINEL
+    assert "--team-formation" not in argv and "--visibility" not in argv
 
 
 def test_an_answer_on_the_form_beats_the_course_default(monkeypatch):
     seen = _run_new_assignment(
         monkeypatch,
-        ["--formats", "qmd", "--visibility", "public"],
-        {"formats": "py", "visibility": "private"},
+        ["--formats", "qmd", "--submit-via", "external"],
+        {"formats": "py", "submit_via": "assignment_repo"},
     )
-    assert seen["formats"] == ["qmd"] and seen["visibility"] == "public"
+    assert seen["formats"] == ["qmd"] and seen["submit_via"] == "external"
 
 
 # ------------------------------------------------ what a new semester is seeded with

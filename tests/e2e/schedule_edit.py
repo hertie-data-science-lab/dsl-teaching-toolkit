@@ -85,6 +85,32 @@ def remove_block(text: str, run_id: str) -> str:
     return _rejoin(lines, text)
 
 
+# The semester's run settings (decision 0009): the harness fences its assignments' blocks
+# into it exactly as into schedule.yml.
+ASSIGNMENTS_PATH = "assignments.yml"
+
+
+def with_assignments_key(text: str) -> str:
+    """`text` with a top-level `assignments:` for a block to go under - appended where the
+    file (or the seeded skeleton, all comments) has none."""
+    if any(line.rstrip() == _ASSIGNMENTS for line in text.splitlines()):
+        return text
+    return (text.rstrip("\n") + "\n\n" if text.strip() else "") + _ASSIGNMENTS + "\n"
+
+
+def put_instance(semester: str, text: str, sha: str) -> bool:
+    """Write the edited `assignments.yml` back, refusing if it moved since it was read (a
+    new file when `sha` is empty)."""
+    return gh_contents.put_file(
+        semester,
+        course.CONFIG_REPO,
+        ASSIGNMENTS_PATH,
+        text.encode(),
+        "e2e: fenced test assignment settings",
+        expected_sha=sha or None,
+    )
+
+
 def put_schedule(semester: str, text: str, sha: str) -> bool:
     """Write the edited schedule back, refusing if it moved since it was read.
 

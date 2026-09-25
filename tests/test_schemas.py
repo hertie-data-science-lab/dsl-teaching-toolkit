@@ -32,12 +32,18 @@ def _enum(schema: dict, *path: str) -> list:
 def test_file_schema_enums_are_the_engine_constants():
     spec = schemas.grading_config_schema()
     assert _enum(spec, "properties", "type") == list(course.ASSIGNMENT_TYPES)
-    assert _enum(spec, "properties", "team_formation") == list(course.TEAM_FORMATIONS)
     assert _enum(spec, "properties", "submit_via") == list(course.SUBMIT_VIA)
-    assert _enum(spec, "properties", "visibility") == list(course.VISIBILITIES)
     listed = spec["properties"]["formats"]["oneOf"][0]
     assert _enum(listed, "items") == list(course.FORMATS)
-    assert set(spec["properties"]) == set(grades.SPEC_KEYS)
+    # The template's keys: never a run setting, which is the semester's.
+    assert set(spec["properties"]) == set(grades.TEMPLATE_KEYS)
+    assert not set(spec["properties"]) & set(settings.RUN_KEYS)
+    instance = schemas.assignments_schema()["properties"]
+    assert set(instance["defaults"]["properties"]) == set(settings.RUN_KEYS)
+    block = instance["assignments"]["additionalProperties"]
+    assert set(block["properties"]) == set(settings.INSTANCE_KEYS)
+    assert _enum(block, "properties", "team_formation") == list(course.TEAM_FORMATIONS)
+    assert _enum(block, "properties", "visibility") == list(course.VISIBILITIES)
 
     sched = schemas.schedule_schema()
     top = sched["properties"]
@@ -68,9 +74,9 @@ def test_file_schema_enums_are_the_engine_constants():
 def test_op_arg_enums_are_the_engine_constants():
     create = REGISTRY["assignment.create"].args_schema["properties"]
     assert create["submit_via"]["enum"] == list(course.SUBMIT_VIA)
-    assert create["visibility"]["enum"] == list(course.VISIBILITIES)
     assert create["type"]["enum"] == list(course.ASSIGNMENT_TYPES)
-    assert create["team_formation"]["enum"] == list(course.TEAM_FORMATIONS)
+    # New assignment asks nothing a semester decides.
+    assert not set(create) & set(settings.RUN_KEYS)
     materials = REGISTRY["materials.create"].args_schema["properties"]
     assert materials["public_dirs"]["enum"] == list(course.PUBLIC_DIRS)
     assert materials["public_types"]["enum"] == list(course.PUBLIC_TYPES)

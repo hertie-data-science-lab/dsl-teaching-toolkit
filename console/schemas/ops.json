@@ -276,11 +276,6 @@
             "description": "File or folder on the template's main",
             "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
             "type": "string"
-          },
-          "slug": {
-            "description": "The schedule.yml assignment key, when two share a template",
-            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
-            "type": "string"
           }
         },
         "required": [
@@ -306,11 +301,6 @@
           "course_source_repo": {
             "description": "The course-org assignment template repo",
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
-            "type": "string"
-          },
-          "slug": {
-            "description": "The schedule.yml assignment key, when two share a template",
-            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
             "type": "string"
           }
         },
@@ -632,25 +622,10 @@
             ],
             "type": "string"
           },
-          "team_formation": {
-            "enum": [
-              "self_select",
-              "assigned"
-            ],
-            "type": "string"
-          },
           "type": {
             "enum": [
               "individual",
               "group"
-            ],
-            "type": "string"
-          },
-          "visibility": {
-            "enum": [
-              "private",
-              "public",
-              "student_choice"
             ],
             "type": "string"
           }

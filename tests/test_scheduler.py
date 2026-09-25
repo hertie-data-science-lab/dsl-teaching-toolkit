@@ -28,10 +28,12 @@ from dsl_course import (
     roster,
     scheduler,
     seed,
+    settings,
     source_digest,
 )
 from dsl_course import collect as collect_mod
 from dsl_course import faults as faults_mod
+from dsl_course import grades as grades_mod
 from dsl_course import issues as issues_mod
 from dsl_course.collect import Target
 from dsl_course.faults import ConfigFault, Unusable
@@ -110,18 +112,47 @@ def cadence_calls(monkeypatch):
     return calls
 
 
+# `{schedule key: late_window_days}` the semester's assignments.yml gives, for the
+# schedules `_assignments` builds (`_due(..., grading_day=)`). Reset per test.
+_WINDOWS: dict[str, int] = {}
+
+
 @pytest.fixture(autouse=True)
 def _grading_spec_defaults(monkeypatch):
-    """The cutoff is read out of each template's grading_config.yml (`late_window_days`), which is
-    real gh I/O. Answered with `late_window_days: 0` - the assignment that takes nothing
-    after the deadline, so the cutoff IS the due date and every test below keeps measuring
-    the behaviour it was written for. Spelt out rather than left to the spec's own default,
-    which is the Hertie ten-day window; the tests that are ABOUT the window declare their
-    own spec."""
+    """The late cutoff is the due date plus the effective `late_window_days`
+    (`settings`). Answered here with an institution window of 0 - the assignment that
+    takes nothing after the deadline, so the cutoff IS the due date and every test below
+    keeps measuring the behaviour it was written for; the tests that are ABOUT the window
+    declare their own (`_window`, `_due(..., grading_day=)`). The spec read itself is
+    real gh I/O, answered with the defaults."""
+    _WINDOWS.clear()
+    _institution_window(monkeypatch, 0)
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: (
+            yaml.safe_dump(
+                {
+                    "assignments": {
+                        k: {"late_window_days": v} for k, v in _WINDOWS.items()
+                    }
+                }
+            )
+            if _WINDOWS
+            else None
+        ),
+    )
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
         lambda org, template, **_: GradingSpec(late_window_days=0),
+    )
+
+
+def _institution_window(monkeypatch, days: int | None) -> None:
+    ours = settings.institution_defaults()
+    monkeypatch.setattr(
+        settings, "institution_defaults", lambda: {**ours, "late_window_days": days}
     )
 
 
@@ -1584,19 +1615,23 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
 
 
 def _assignments(**entries: AssignmentEntry) -> Schedule:
-    return Schedule(assignments=dict(entries))
+    """A schedule of `entries`; one built by `_due(..., grading_day=)` has its late
+    window in the semester's assignments.yml (`_WINDOWS`)."""
+    for slug, entry in entries.items():
+        if getattr(entry, "window", None) is not None:
+            _WINDOWS[slug] = entry.window
+    return Schedule(org="Semester-f2026", assignments=dict(entries))
 
 
 def _due(day: int, grading_day: int | None = None) -> AssignmentEntry:
-    return AssignmentEntry(
+    """Due at the end of `day`; `grading_day` = its late cutoff, as a late window of
+    `grading_day - day` days in assignments.yml."""
+    entry = AssignmentEntry(
         course_source_repo="a-f2026",
         due_datetime=datetime(2026, 10, day, 23, 59, 59, tzinfo=BERLIN),
-        grading_datetime=(
-            datetime(2026, 10, grading_day, 23, 59, 59, tzinfo=BERLIN)
-            if grading_day is not None
-            else None
-        ),
     )
+    entry.window = None if grading_day is None else grading_day - day
+    return entry
 
 
 def test_due_snapshots_only_passed_deadlines_in_deadline_order():
@@ -1614,8 +1649,9 @@ def test_due_snapshots_only_passed_deadlines_in_deadline_order():
     ]
 
 
-def test_due_snapshots_uses_the_explicit_grading_datetime_when_set():
-    # grading_datetime wins over due_datetime, and snapshot + autograde must agree on it.
+def test_due_snapshots_uses_the_assignment_s_own_late_window():
+    # assignments.yml's window for this assignment sets the cutoff, and snapshot +
+    # autograde must agree on it.
     sched = _assignments(**{"assignment-1": _due(13, grading_day=15)})
     assert (
         scheduler.due_snapshots(
@@ -1640,12 +1676,8 @@ def test_due_snapshots_empty_without_assignments():
 
 
 def _window(monkeypatch, days: int | None) -> None:
-    """Declare a late window in the template's grading_config.yml, as a real course does."""
-    monkeypatch.setattr(
-        scheduler,
-        "load_grading_spec",
-        lambda org, template, **_: GradingSpec(late_window_days=days),
-    )
+    """Declare a late window every assignment runs by, as the institution's policy does."""
+    _institution_window(monkeypatch, days)
 
 
 def test_the_freeze_waits_for_the_end_of_the_declared_late_window(monkeypatch):
@@ -1667,7 +1699,7 @@ def test_the_freeze_waits_for_the_end_of_the_declared_late_window(monkeypatch):
     assert deadline.startswith("2026-10-20T23:59:59")
 
 
-def test_an_explicit_grading_datetime_beats_the_declared_window(monkeypatch):
+def test_the_assignment_s_own_window_beats_the_default_one(monkeypatch):
     _window(monkeypatch, 7)
     sched = _assignments(**{"assignment-1": _due(13, grading_day=15)})
     ((_slug, deadline),) = scheduler.due_snapshots(
@@ -1691,7 +1723,6 @@ def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
     _window(monkeypatch, 7)
     sched = _assignments(**{"assignment-1": _due(13)})
     refreshed = _no_sheet_refresh(monkeypatch)
-    _window(monkeypatch, 7)  # _no_sheet_refresh re-stubs the spec reader
     monkeypatch.setattr(scheduler, "_assignment_template", lambda *a: "assignment-1")
     monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
     monkeypatch.setattr(scheduler, "snapshot_assignment", lambda *a, **k: None)
@@ -2241,22 +2272,18 @@ def test_run_dry_run_autogrades_nothing(monkeypatch):
     assert graded == []
 
 
-def test_run_autogrades_at_the_explicit_grading_deadline(monkeypatch):
-    # `grading_datetime` overrides `due_datetime`, and snapshot + autograde must agree on
+def test_run_autogrades_at_the_late_cutoff(monkeypatch):
+    # The cutoff (due + the assignment's window), and snapshot + autograde must agree on
     # that one instant.
     _only_snapshots_taken(monkeypatch)
     graded = _stub_collect(monkeypatch, marked=set(), templates={"assignment-1-f2026"})
-    entry = AssignmentEntry(
-        course_source_repo="a-f2026",
-        due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-        grading_datetime=datetime(2026, 10, 15, 23, 59, 59, tzinfo=BERLIN),
-    )
+    entry = _due(13, grading_day=15)
     monkeypatch.setattr(
         scheduler.schedule,
         "load",
         lambda semester: _assignments(**{"assignment-1": entry}),
     )
-    # past grading_datetime (10-15) but well before what due_datetime alone would imply
+    # past the cutoff (10-15), two days after the due date
     assert (
         scheduler.run(
             "Course-Org", "Semester-f2026", datetime(2026, 10, 16, tzinfo=timezone.utc)
@@ -4583,3 +4610,132 @@ def test_the_dry_run_ends_with_its_decisions_and_a_real_run_takes_none(
     assert out.rindex("PREVIEW  [") < out.index(line)
     scheduler.run("Course-Org", "Semester-Org", now, dry_run=False, autograde=False)
     assert asked == [True]
+
+
+# ------------------------------------------------ marks back at marks_return_datetime
+
+
+def _marks_entry() -> AssignmentEntry:
+    return AssignmentEntry(
+        course_source_repo="a-f2026",
+        due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        marks_return_datetime=datetime(2026, 10, 27, 12, 0, tzinfo=BERLIN),
+    )
+
+
+_AFTER_MARKS = datetime(2026, 10, 28, tzinfo=timezone.utc)
+
+
+def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
+    """The two reads `grades.marks_due` makes: the fire-once marker and the sheet."""
+    reads: list[str] = []
+    sheet = yaml.safe_dump(
+        {"submissions": {h: {"score_individual": v} for h, v in scores.items()}}
+    )
+
+    def get(org, repo, path, ref=""):
+        reads.append(path)
+        if "marks-returned" in path:
+            return '{"returned": "x"}' if marker else None
+        return sheet
+
+    monkeypatch.setattr(grades_mod, "get_file_content", get)
+    monkeypatch.setattr(
+        grades_mod,
+        "sheet_specs",
+        lambda course, sched: {
+            "assignment-1": grades_mod.SheetSpec(
+                slug="assignment-1", title="A1", is_group=False
+            )
+        },
+    )
+    return reads
+
+
+def test_a_fully_marked_sheet_is_ready_at_its_marks_return_datetime(monkeypatch):
+    _sheet_reads(monkeypatch, {"ada-l": 7, "bo-b": 9})
+    sched = _assignments(**{"assignment-1": _marks_entry()})
+    assert grades_mod.marks_due("C", "S", sched, _AFTER_MARKS) == ([], ["assignment-1"])
+    # Before the moment nothing is read at all.
+    reads = _sheet_reads(monkeypatch, {"ada-l": 7})
+    before = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    assert grades_mod.marks_due("C", "S", sched, before) == ([], [])
+    assert reads == []
+
+
+def test_an_unfinished_sheet_is_a_fault_that_counts_and_names_nobody(monkeypatch):
+    _sheet_reads(monkeypatch, {"ada-l": 7, "bo-b": None, "cy-c": ""})
+    sched = _assignments(**{"assignment-1": _marks_entry()})
+    faults, ready = grades_mod.marks_due("C", "S", sched, _AFTER_MARKS)
+    assert ready == []
+    (fault,) = faults
+    assert "2 of 3 unit(s) unmarked" in fault.what
+    assert fault.plain == "Marks were due today; 2 units unmarked."
+    assert fault.field == "marks_return_datetime"
+    for handle in ("ada-l", "bo-b", "cy-c"):
+        assert handle not in fault.what and handle not in fault.plain
+
+
+def test_a_returned_assignment_reads_no_sheet_and_raises_nothing(monkeypatch):
+    reads = _sheet_reads(monkeypatch, {"ada-l": None}, marker=True)
+    sched = _assignments(**{"assignment-1": _marks_entry()})
+    assert grades_mod.marks_due("C", "S", sched, _AFTER_MARKS) == ([], [])
+    assert reads == [grades_mod.marks_return_record("assignment-1")]
+
+
+def test_the_tick_returns_a_complete_sheet_once_and_records_it(monkeypatch):
+    _stub_snapshots(monkeypatch, existing={"assignment-1"})
+    _no_sheet_refresh(monkeypatch)
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda semester: _assignments(**{"assignment-1": _marks_entry()}),
+    )
+    monkeypatch.setattr(scheduler, "marks_due", lambda *a: ([], ["assignment-1"]))
+    sent: list[tuple] = []
+    recorded: list[list[str]] = []
+    monkeypatch.setattr(
+        scheduler,
+        "distribute",
+        lambda org, notify, dry_run: sent.append((org, notify, dry_run)) or 0,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "record_marks_returned",
+        lambda org, sched, keys, now: recorded.append(keys) or True,
+    )
+    assert scheduler.run("Course-Org", "Semester-f2026", _AFTER_MARKS) == 0
+    assert sent == [("Semester-f2026", True, False)]
+    assert recorded == [["assignment-1"]]
+    # A preview sends nothing and records nothing.
+    sent.clear()
+    recorded.clear()
+    scheduler.run("Course-Org", "Semester-f2026", _AFTER_MARKS, dry_run=True)
+    assert sent == [] and recorded == []
+
+
+def test_the_tick_sends_nothing_for_an_unfinished_sheet_and_files_the_fault(
+    monkeypatch,
+):
+    _stub_snapshots(monkeypatch, existing={"assignment-1"})
+    _no_sheet_refresh(monkeypatch)
+    _sheet_reads(monkeypatch, {"ada-l": 7, "bo-b": None})
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda semester: _assignments(**{"assignment-1": _marks_entry()}),
+    )
+    monkeypatch.setattr(
+        scheduler, "distribute", lambda *a, **k: pytest.fail("nothing is sent")
+    )
+    filed: list = []
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda org, course, faults, *a, **k: (
+            filed.extend(faults) or source_digest.DigestResult()
+        ),
+    )
+    assert scheduler.run("Course-Org", "Semester-f2026", _AFTER_MARKS) == 0
+    (fault,) = [f for f in filed if f.field == "marks_return_datetime"]
+    assert "1 of 2 unit(s) unmarked" in fault.what

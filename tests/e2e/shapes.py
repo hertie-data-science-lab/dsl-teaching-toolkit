@@ -10,12 +10,13 @@ same semester. Each gets its own slug - `<namespace>-<shape name>` - which keeps
 inside the one namespace `cleanup` sweeps, and keeps the five apart everywhere a name is
 the key: the schedule entry, the grading sheet, the snapshot, the gradebook section.
 
-The shape reaches the engine through the template's `grading_config.yml` on the solution
-branch, which is the one place any of it is declared. The New assignment form writes most
-of it from its own boxes; `configure` below writes what the form cannot say (`submit_url`)
-and states the rest outright, so the file the run hands out under is this table's and not
-the form's. The edits are pure text - `read_config` and `write_config` are the only part
-that talks to GitHub, exactly as in `schedule_edit`.
+The shape reaches the engine through two files (decision 0009). `submit_via` is the
+template's `grading_config.yml` on the solution branch: the New assignment form writes it,
+and `configure` below states it outright, so the file the run hands out under is this
+table's and not the form's. `visibility` and `submit_url` are how the SEMESTER runs the
+assignment: `run_settings` gives them, and the pipeline writes them into the semester's
+`assignments.yml`. The edits are pure text - `read_config` and `write_config` are the only
+part that talks to GitHub, exactly as in `schedule_edit`.
 """
 
 from __future__ import annotations
@@ -165,22 +166,22 @@ def set_setting(text: str, key: str, value: str) -> str:
 
 
 def configure(text: str, shape: Shape) -> str:
-    """The seeded `grading_config.yml` as an instructor would leave it for `shape`.
+    """The seeded `grading_config.yml` as an instructor would leave it for `shape`: its
+    `submit_via`, stated outright rather than trusted to the dropdown the run clicked.
+    Idempotent, so a config the form already got right comes back byte for byte and the
+    harness commits nothing."""
+    return set_setting(text, "submit_via", shape.submit_via)
 
-    Every value the shape is made of is written HERE, including the two the New assignment
-    form also asks for: the form's boxes are one way to say it and this file is the only
-    thing the engine reads, so the run states the shape outright rather than trusting the
-    dropdown it clicked. Idempotent, so a config the form already got right comes back
-    byte for byte and the harness commits nothing.
 
-    `visibility` is written only where the shape has one: `external` and `shared` carry no
-    per-unit repo for it to describe, the parser drops the key there, and the scaffold
-    leaves the line commented out for exactly that reason."""
-    out = set_setting(text, "submit_via", shape.submit_via)
+def run_settings(shape: Shape) -> dict[str, str]:
+    """What the semester's `assignments.yml` says for `shape`: its `visibility` where it has
+    one (`external` and `shared` carry no per-unit repo for it to describe) and its
+    `submit_url` where it is handed in elsewhere."""
+    out = {}
     if shape.visibility:
-        out = set_setting(out, "visibility", shape.visibility)
+        out["visibility"] = shape.visibility
     if shape.submit_url:
-        out = set_setting(out, "submit_url", shape.submit_url)
+        out["submit_url"] = shape.submit_url
     return out
 
 

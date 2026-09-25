@@ -665,7 +665,6 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
             ["ipynb"],
             "group",
             name="Neural networks: from scratch",
-            team_formation="assigned",
             submit_via="external",
             autograde=True,
         )
@@ -676,17 +675,17 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert (
         spec.title == "Neural networks: from scratch"
     )  # the colon survives the round trip
-    assert (spec.type, spec.team_formation) == ("group", "assigned")
+    assert spec.type == "group"
     assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
-    # Asked for: live. Not asked for: commented at the course's value, so the cascade
-    # (and not a stamped copy of today's default) answers it at read time.
-    assert "team_formation" in spec.declared
-    assert not {"max_team_size", "late_window_days", "late_penalty_per_day"} & (
-        spec.declared
-    )
+    # No run setting is written at all, live or commented: they are each semester's
+    # assignments.yml, and the cascade answers them at read time.
     text = written["grading_config.yml"]
-    assert "\n# late_window_days: 7 " in text
-    assert "# this course's default (dsl-course.yml); set here to override" in text
+    assert not any(
+        line.lstrip("# ").startswith(f"{key}:")
+        for line in text.splitlines()
+        for key in settings.RUN_KEYS
+    )
+    assert "semester-config/assignments.yml" in text
     resolved = grades.with_run_settings(spec, "Org")
     assert (resolved.max_team_size, resolved.late_window_days) == (3, 7)
     assert dict(resolved.sources)["late_window_days"] == "course"
@@ -698,7 +697,6 @@ def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkey
     written = _solution_files(monkeypatch)
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb"], "group") == 0
     text = written["grading_config.yml"]
-    assert "\n# late_window_days: 10 " in text and "institution default" in text
     monkeypatch.setattr(
         settings,
         "_assignments_text",
@@ -731,89 +729,6 @@ def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monke
     assert "github" not in text
     spec = grades.parse_grading_spec(text)
     assert spec.submit_via == "assignment_repo" and spec.dropped == ()
-
-
-def test_the_submit_url_line_is_seeded_commented_on_every_shape(fake, monkeypatch):
-    # `submit_url` is the one thing the toolkit is ever told about a handover it does not
-    # see, and it is not a form input - so the seeded file is where an instructor finds it.
-    # COMMENTED even on the shape that uses it: the value seeded is a placeholder, and a
-    # live line carrying it would put a `Submit on ...` button in front of a whole semester
-    # pointing at a page nobody created.
-    written = _solution_files(monkeypatch)
-    for number, via in (("1", "external"), ("2", "assignment_repo")):
-        assert (
-            scaffold.scaffold_assignment("Org", number, "f2026", [], submit_via=via)
-            == 0
-        )
-        text = written["grading_config.yml"]
-        assert "\n# submit_url: https://" in text
-        spec = grades.parse_grading_spec(text)
-        assert spec.submit_url == "" and spec.dropped == ()
-
-
-def test_a_seeded_submit_url_uncommented_but_unanswered_is_refused(fake, monkeypatch):
-    # The next thing an instructor does to that line is uncomment it. Until they also
-    # replace the placeholder, the site shows the brief and no button.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
-        == 0
-    )
-    live = written["grading_config.yml"].replace("# submit_url:", "submit_url:")
-    spec = grades.parse_grading_spec(live)
-    assert spec.submit_url == ""
-    assert [d.field for d in spec.dropped] == ["submit_url"]
-
-
-def test_the_visibility_box_lands_in_the_file_the_handout_reads(fake, monkeypatch):
-    # Box 10, and the last one the form can ever have. It is read when each student's repo
-    # is CREATED, so the answer given here is the only chance to give it - and the seeded
-    # line is live, because `private` is a real answer and not an absence.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment("Org", "1", "f2026", [], visibility="public") == 0
-    )
-    public = written["grading_config.yml"]
-    assert "\nvisibility: public" in public
-    spec = grades.parse_grading_spec(public)
-    assert spec.visibility == "public" and spec.dropped == ()
-    assert not spec.has_receipts_issue  # derived, never declared
-
-
-def test_student_choice_lands_in_the_file_and_names_the_word_it_writes(
-    fake, monkeypatch
-):
-    # The third answer box 10 offers. It has to survive the round trip as the WORD - the
-    # handout branches on it, and a value the scaffold wrote and the reader then refused
-    # would hand out repos nobody chose.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment(
-            "Org", "1", "f2026", [], visibility="student_choice"
-        )
-        == 0
-    )
-    text = written["grading_config.yml"]
-    assert "\nvisibility: student_choice" in text
-    spec = grades.parse_grading_spec(text)
-    assert spec.visibility == "student_choice" and spec.dropped == ()
-    assert spec.visibility_is_students and not spec.has_receipts_issue
-    # And the seeded line teaches its own vocabulary: every value the reader takes is
-    # named in the comment beside it, or the file offers an instructor two of three.
-    (line,) = [ln for ln in text.splitlines() if ln.startswith("visibility:")]
-    assert all(word in line for word in course.VISIBILITIES)
-
-
-def test_the_visibility_line_is_commented_where_no_repo_is_created(fake, monkeypatch):
-    # `visibility:` describes a repo and `external` creates none - the parse drops it
-    # there - so a live line would be a setting that reads as if it did something.
-    written = _solution_files(monkeypatch)
-    assert (
-        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
-        == 0
-    )
-    assert "\n# visibility: private" in written["grading_config.yml"]
-    assert grades.parse_grading_spec(written["grading_config.yml"]).dropped == ()
 
 
 def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypatch):
@@ -909,24 +824,20 @@ def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypat
         assert "grader_pdf: false" in text
 
 
-def test_a_course_with_no_defaults_gets_the_toolkit_late_policy(fake, monkeypatch):
-    # Nothing is asserted on the course's behalf except late work, which the toolkit
-    # itself has a policy for (the Hertie syllabus rule): the file a grader opens carries
-    # the numbers the assignment will be graded by rather than a pair of comments and a
-    # default read from somewhere else. The team cap nobody declared stays a comment.
+def test_a_course_with_no_defaults_gets_the_institution_late_policy(fake, monkeypatch):
+    # The template states no late rule: the assignment is graded by the institution's
+    # until a semester or the course says otherwise.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(settings, "course_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
-    text = written["grading_config.yml"]
-    spec = grades.parse_grading_spec(text)
+    spec = grades.with_run_settings(
+        grades.parse_grading_spec(written["grading_config.yml"]), "Org"
+    )
     assert (spec.late_window_days, spec.late_penalty_per_day) == (
         policy.defaults()["late_window_days"],
         policy.defaults()["late_penalty_per_day"],
     )
-    assert spec.max_team_size is None
-    assert "# max_team_size:" in text
-    assert f"late_window_days: {policy.defaults()['late_window_days']}" in text
-    assert f"late_penalty_per_day: {policy.defaults()['late_penalty_per_day']}" in text
+    assert dict(spec.sources)["late_window_days"] == "institution"
 
 
 @pytest.mark.parametrize(
@@ -1502,15 +1413,8 @@ def test_a_copied_assignment_says_which_boxes_it_ignored(origins, monkeypatch, c
     )
     assert made["assignment-1-f2026"] == "Assignment 1: Neural networks from scratch"
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "were ignored" in l]
-    assert "boxes 5-10" in line
-    for field in (
-        "format",
-        "type",
-        "team_formation",
-        "submit_via",
-        "autograde",
-        "visibility",
-    ):
+    assert "boxes 5-8" in line
+    for field in ("format", "type", "submit_via", "autograde"):
         assert field in line
     assert (
         "https://github.com/Org/assignment-1-f2026/blob/solution/grading_config.yml"

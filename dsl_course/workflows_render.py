@@ -43,8 +43,6 @@ from .course import (
     SOLUTION_WARNING,
     STARTER_FORMATS,
     SUBMIT_VIA,
-    TEAM_FORMATIONS,
-    VISIBILITIES,
     semester_of,
 )
 
@@ -1005,10 +1003,6 @@ on:
     inputs:
 {_choice_input("semester_org", "Semester org (submissions)", semester_orgs)}
 {_assignment_input(assignments or [])}
-      slug:
-        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
-        required: false
-        default: ""
       preview:
         description: "Preview - show what WOULD be refreshed"
         type: boolean
@@ -1023,11 +1017,9 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          SLUG: ${{{{ inputs.slug }}}}
           PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --refresh-only)
-          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
 {_PREVIEW_GATE}
           python3 -m dsl_course.collect "${{args[@]}}"
 """
@@ -1878,23 +1870,15 @@ def render_new_assignment(assignments: list[str] | None = None) -> str:
 
     TEN boxes, and between them they are the whole assignment: everything but `formats`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
-    grading sheet, the receipts and the Join-team form all read. A run setting the form
-    does not ask - the team cap, the late window, the penalty - or one left at
-    `COURSE_DEFAULT_CHOICE` is written into that same file COMMENTED, at the value the
-    cascade gives it, so it can be set there per assignment afterwards.
+    grading sheet, the receipts and the Join-team form all read. How a semester RUNS it -
+    team formation, max team size, the late rule, visibility - is not asked: it is that
+    semester's `assignments.yml`.
 
     `copy_from` is the box that asks for none of it: last year's template arrives whole,
-    and the `grading_config.yml` that comes with it is the definition, so boxes 5-10 are
+    and the `grading_config.yml` that comes with it is the definition, so boxes 5-8 are
     ignored. It is box 4 for that reason - GitHub renders these top to bottom and the
-    answer that voids the rest belongs above them, not after the six boxes it voids. The
-    name and the number are asked for either way: they name the repo and describe it.
-
-    GitHub caps a workflow_dispatch at 10 inputs and `visibility` is the tenth, so this
-    form is now FULL: nothing may be added to it again. Every further setting belongs in
-    the `grading_config.yml` the scaffold writes - a file the instructor can revise once
-    the brief exists - and not in a form filled in before it has even been written.
-    `visibility` earned the last box because it cannot be revised afterwards: it is read
-    when each student's repo is CREATED, and editing it later moves nothing."""
+    answer that voids the rest belongs above them, not after the boxes it voids. The
+    name and the number are asked for either way: they name the repo and describe it."""
     return f"""name: New assignment
 
 on:
@@ -1909,16 +1893,14 @@ on:
       semester:
         description: "3. Semester, e.g. f2026 or s2026 - creates assignment-<number>-<semester>"
         required: true
-{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-10 are then ignored", assignments or [])}
+{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-8 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
-{_choice_input("team_formation", f"7. Group only: self_select = students use the Join team form; assigned = you write teams.csv. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's", [COURSE_DEFAULT_CHOICE, *TEAM_FORMATIONS], COURSE_DEFAULT_CHOICE, required=False)}
-{_choice_input("submit_via", f"8. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's default, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
+{_choice_input("submit_via", f"7. Where students hand in. assignment_repo = they push to their repo and the late cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class): no repo is created, the brief and a submit link appear on the site; shared_dropbox_repo = one private repo for the whole semester, each student pushes into their own folder, peers can read it. {COURSE_DEFAULT_CHOICE} = the course's default, else assignment_repo", [COURSE_DEFAULT_CHOICE, *SUBMIT_VIA], COURSE_DEFAULT_CHOICE, required=False)}
       autograde:
-        description: "9. Also run hidden tests at the late cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
+        description: "8. Also run hidden tests at the late cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
-{_choice_input("visibility", f"10. Who may read each student's repo. private = the student and the instructors; public = the whole internet, for portfolio work such as a hackathon; student_choice = private, but the student is its admin and may publish it once the grading cutoff has passed. Read when the repo is created: editing it later changes nothing. {COURSE_DEFAULT_CHOICE} = the course's default, else the institution policy's", [COURSE_DEFAULT_CHOICE, *VISIBILITIES], COURSE_DEFAULT_CHOICE, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1933,15 +1915,12 @@ on:
           COPY_FROM: ${{{{ inputs.copy_from }}}}
           FORMATS: ${{{{ inputs.formats }}}}
           TYPE: ${{{{ inputs.type }}}}
-          TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
-          VISIBILITY: ${{{{ inputs.visibility }}}}
           AUTOGRADE: ${{{{ inputs.autograde }}}}
         run: |
           gh auth setup-git
           args=(--org "$ORG" --number "$NUMBER" --semester "$SEMESTER" --name "$NAME" \\
-            --formats "$FORMATS" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
-            --submit-via "$SUBMIT_VIA" --visibility "$VISIBILITY" \\
+            --formats "$FORMATS" --type "$TYPE" --submit-via "$SUBMIT_VIA" \\
             --autograde "$AUTOGRADE")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
@@ -1974,10 +1953,6 @@ on:
       path:
         description: "File or folder on the template's default branch to push (e.g. starter.ipynb, or data/)"
         required: true
-      slug:
-        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
-        required: false
-        default: ""
       overwrite:
         description: "Replace the file even where the student has already changed it (their work on that file is lost)"
         type: boolean
@@ -1997,13 +1972,11 @@ on:
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           PATH_INPUT: ${{{{ inputs.path }}}}
-          SLUG: ${{{{ inputs.slug }}}}
           OVERWRITE: ${{{{ inputs.overwrite }}}}
           PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
           args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --patch-path "$PATH_INPUT")
-          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
 {_PREVIEW_GATE}
           python3 -m dsl_course.assign "${{args[@]}}"

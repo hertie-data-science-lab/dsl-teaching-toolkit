@@ -55,9 +55,11 @@ on:
     branches: [main]
     paths:
       - schedule.yml
+      - assignments.yml
   pull_request:
     paths:
       - schedule.yml
+      - assignments.yml
   workflow_dispatch:
 
 # contents: write covers both things this job does to the repo it runs in: checking it
@@ -76,9 +78,12 @@ jobs:
     steps:
       # Pinned to full commit SHAs: these steps share a job with DSL_BOT_TOKEN, and a
       # mutable tag is whatever the tag currently points at. Comment = the version.
+      # Two commits deep: the one before is what the push changed schedule.yml FROM, so
+      # the run can say which entries have just gained a `solution_datetime:`.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           path: semester
+          fetch-depth: 2
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           repository: __CENTRAL__
@@ -143,7 +148,9 @@ jobs:
           # org skipped all of it: those steps have no status function in their `if:`, so
           # a failed step above them means they never run, and a push that dropped an
           # entry went unreported because an unrelated API call came back empty.
-          args=(--file ../semester/schedule.yml --validate)
+          # Empty on the repo's first commit: every solution date is then new.
+          git -C ../semester show HEAD~1:schedule.yml > previous-schedule.yml 2>/dev/null || : > previous-schedule.yml
+          args=(--file ../semester/schedule.yml --validate --previous previous-schedule.yml)
           if [ -n "$COURSE_ORG" ]; then
             args+=(--check-sources "$COURSE_ORG" --annotate --comment-file comment.txt)
           fi

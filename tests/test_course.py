@@ -83,17 +83,6 @@ def test_assignment_slug_drops_only_a_trailing_semester_suffix():
     assert course.assignment_slug("assignment-1") == "assignment-1"
 
 
-def test_resolve_is_group_precedence():
-    # force wins over the assignment's own declaration
-    assert course.resolve_is_group(force=True, template_type="individual") is True
-    # else grading_config.yml's `type:` - the only other rung there is
-    assert course.resolve_is_group(force=False, template_type="group") is True
-    assert course.resolve_is_group(force=False, template_type="individual") is False
-    # else individual
-    assert course.resolve_is_group(force=False, template_type=None) is False
-    assert course.resolve_is_group(force=False, template_type="") is False
-
-
 def test_the_shared_drop_box_is_named_off_the_template_and_carries_no_handle():
     # `<slug>-submissions`, never the bare slug (that is the frozen semester TEMPLATE), and
     # never a `<slug>-<handle>`: it is the one submission-repo name a public log may print.

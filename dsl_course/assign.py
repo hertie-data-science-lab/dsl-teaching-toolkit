@@ -1250,11 +1250,6 @@ def main() -> int:
         f"assignment's schedule.yml entry, as `solution_datetime:`.",
     )
 
-    parser.add_argument(
-        "--slug",
-        default="",
-        help="Which assignment in the semester's schedule.yml this is, when two of them hand out from the same template (each with its own semester_dest_repo). Leave empty otherwise.",
-    )
     # The PATCH mode: `--patch-path` switches this CLI from handing an assignment out to
     # correcting one that is already out. A flag rather than a subcommand, because
     # `python3 -m dsl_course.assign --course-org ...` is a frozen public contract - every
@@ -1294,7 +1289,6 @@ def main() -> int:
                 args.template,
                 args.semester_org,
                 args.patch_path,
-                slug=args.slug,
                 overwrite=args.overwrite,
                 dry_run=args.preview,
             )
@@ -1305,7 +1299,6 @@ def main() -> int:
             roster_path=args.roster,
             solution=when == SOLUTION_NOW,
             dry_run=args.preview,
-            slug=args.slug,
             # ONE listing of the semester for this press, taken here because there is no
             # tick above to have taken it: every repo question below is answered off it,
             # and None (it could not be read) falls back to a probe per repo.
@@ -1626,8 +1619,9 @@ def provision_all(
     gspec = load_grading_spec(course_org, template)
     if gspec.not_migrated:
         log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (`format:` is now "
-            f"`formats:`) - run the migration; nothing is handed out"
+            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
+            f"setting that moved to assignments.yml) - run the migration; nothing is "
+            f"handed out"
         )
         return 1, False
     # The assignment's own grading_config.yml is the only declaration there is.

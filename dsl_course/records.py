@@ -25,6 +25,9 @@ RECORDS = {
     "snapshots": "snapshots",
     "autograde": "autograde",
     "solutions": "solutions",
+    # one marker per assignment whose marks automation returned at its
+    # `marks_return_datetime` (`grades.marks_due`)
+    "marks_returned": "marks-returned",
     "gradebook": "gradebook",
     "distributed": "gradebook/distributed.csv",
     "team_formation": "team-formation",
@@ -36,6 +39,9 @@ RECORDS = {
     # the org's `.github`, only while `migrate` has its Actions paused: what each repo was
     # set to before, so the unpause restores exactly that
     "migration_pause": "migration-pause.json",
+    # the course org's `.github`: the run settings `migrate` took out of each template,
+    # for its semesters' `assignments.yml`
+    "migration_run_keys": "migration-run-keys.json",
     # materials repos: the toolkit describing itself, never released
     "maintaining": "MAINTAINING.md",
     "syllabus_sample": "SYLLABUS.md.sample",

@@ -28,7 +28,7 @@ from conftest import repo_row
 
 from dsl_course import collect, course, gh_contents, ghcli, grades, settings
 from dsl_course.collect import Target
-from dsl_course.faults import Severity
+from dsl_course.faults import NotMigrated, Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
@@ -81,37 +81,59 @@ def test_parse_grading_spec_defaults_and_overrides():
     assert [d for d in spec.dropped if "max_auto" in d]
 
 
+def _instance_faults(block: str) -> list[str]:
+    """What `assignments.yml` says about one assignment block's values."""
+    return [
+        f.what for f in settings.parse_instance(f"assignments:\n  a:\n{block}").faults
+    ]
+
+
+def _resolved(monkeypatch, spec_text: str, block: str) -> grades.GradingSpec:
+    """The template `spec_text` with the run settings `block` gives assignment `a` in the
+    semester's assignments.yml - what every reader is handed."""
+    monkeypatch.setattr(
+        settings, "_assignments_text", lambda org: f"assignments:\n  a:\n{block}"
+    )
+    return grades.with_run_settings(
+        collect.parse_grading_spec(spec_text), "C", "Sem", "a"
+    )
+
+
 def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
     spec = collect.parse_grading_spec(
         "title: Neural networks\n"
         "submit_via: external\n"
         "questions:\n  Q1: 15\n  Q2: 1.5\n"
-        "late_window_days: 7\n"
-        "late_penalty_per_day: 10%\n"
     )
     assert spec.title == "Neural networks"
     assert spec.submit_via == "external" and spec.submit_external
     # TEXT, not numbers: the maxima are only ever displayed, and `1.5` must read back as
     # the course wrote it rather than as this module's idea of how to print a float.
     assert spec.questions == {"Q1": "15", "Q2": "1.5"}
-    assert spec.late_window_days == 7
-    assert spec.late_penalty_per_day == "10%"
+
+
+@pytest.mark.parametrize("key", settings.RUN_KEYS)
+def test_a_run_setting_in_the_template_is_not_migrated(key):
+    # Refused WHOLE: read without it, the assignment would run on the semester's defaults
+    # instead of the rule the file wrote.
+    with pytest.raises(NotMigrated) as exc:
+        collect.parse_grading_spec(f"{key}: 3\n")
+    assert "assignments.yml" in str(exc.value)
 
 
 def test_the_group_shape_reads_off_type_and_team_formation():
     # `none` is the answer an INDIVIDUAL assignment gives, and not a value anyone writes:
     # the Join-team form refuses a slug on it, so a group assignment that forgot the key
     # must not fall into it.
-    individual = collect.parse_grading_spec("team_formation: assigned\n")
+    individual = dataclasses.replace(
+        collect.parse_grading_spec(""), team_formation="assigned"
+    )
     assert not individual.is_group
     assert individual.team_formation_resolved == "none"
     group = collect.parse_grading_spec("type: group\n")
     assert group.is_group and group.team_formation_resolved == "self_select"
-    assigned = collect.parse_grading_spec("type: group\nteam_formation: assigned\n")
+    assigned = dataclasses.replace(group, team_formation="assigned")
     assert assigned.team_formation_resolved == "assigned"
-    assert (
-        collect.parse_grading_spec("type: group\nmax_team_size: 3\n").max_team_size == 3
-    )
 
 
 def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
@@ -128,17 +150,18 @@ def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(capsys):
-    spec = collect.parse_grading_spec("visibility: internal\n")
+def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(monkeypatch):
+    spec = _resolved(monkeypatch, "", "    visibility: internal\n")
     assert spec.visibility == "private"
-    assert "is not one of private/public/student_choice" in capsys.readouterr().err
+    (said,) = _instance_faults("    visibility: internal\n")
+    assert "is not one of private/public/student_choice" in said
 
 
 def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
     # The handout creates a world-readable repo for it, so the value stands - and the one
     # thing that follows from it is derived, never declared: marks and receipts have
     # nowhere private to go, so the gradebook carries them instead.
-    spec = collect.parse_grading_spec("visibility: public\n")
+    spec = dataclasses.replace(collect.parse_grading_spec(""), visibility="public")
     assert spec.visibility == "public" and spec.submit_shape == "assignment-repo-public"
     assert not spec.has_receipts_issue
     assert spec.collects_commits and spec.creates_unit_repos
@@ -150,7 +173,9 @@ def test_student_choice_is_read_back_and_hands_the_flag_to_the_student(capsys):
     # afterwards. One predicate answers that, in `course.py` and nowhere else, so every
     # exemption `student_choice` earns asks the same question. No Submission receipts issue either:
     # a thread in a repo the student may publish tomorrow is a publishable mark.
-    spec = collect.parse_grading_spec("visibility: student_choice\n")
+    spec = dataclasses.replace(
+        collect.parse_grading_spec(""), visibility="student_choice"
+    )
     assert spec.visibility == "student_choice"
     assert spec.submit_shape == "assignment-repo-student-choice"
     assert spec.visibility_is_students
@@ -198,13 +223,12 @@ def test_shared_collects_commits_without_a_repo_per_unit(capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_a_shared_drop_box_is_private_whatever_the_file_says(capsys):
+def test_a_shared_drop_box_is_private_whatever_the_semester_says(monkeypatch):
     # One repo holds the whole semester's work and no student can opt out of being in it.
-    spec = collect.parse_grading_spec(
-        "submit_via: shared_dropbox_repo\nvisibility: public\n"
+    spec = _resolved(
+        monkeypatch, "submit_via: shared_dropbox_repo\n", "    visibility: public\n"
     )
     assert spec.visibility == "private"
-    assert "one repo holds the whole semester's work" in capsys.readouterr().err
 
 
 def test_a_shared_assignment_is_hand_marked_whatever_the_file_says(capsys):
@@ -239,14 +263,15 @@ def test_a_shared_notebook_assignment_runs_no_completion_check_either(capsys):
     )
 
 
-def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(capsys):
+def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(monkeypatch):
     # `submit_url` is the address of the place work is handed in INSTEAD of GitHub, so a
     # shape that collects commits has no use for it - the same drop `assignment_repo` gets.
-    spec = collect.parse_grading_spec(
-        "submit_via: shared_dropbox_repo\nsubmit_url: https://moodle.example.edu/x\n"
+    spec = _resolved(
+        monkeypatch,
+        "submit_via: shared_dropbox_repo\n",
+        "    submit_url: https://moodle.example.edu/x\n",
     )
     assert spec.submit_url == ""
-    assert "only read for `submit_via: external`" in capsys.readouterr().err
 
 
 def test_a_submit_via_the_engine_cannot_act_on_is_refused_as_a_typo(capsys):
@@ -288,19 +313,18 @@ def test_the_legacy_github_spelling_reads_as_assignment_repo_with_no_warning(cap
     assert spec.submit_shape == canonical.submit_shape == "assignment-repo-private"
 
 
-def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(capsys):
+def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(monkeypatch):
     # Nothing is created for an external assignment, so there is nothing for a visibility
     # to describe - and leaving `public` standing there would read as a promise.
-    spec = collect.parse_grading_spec("submit_via: external\nvisibility: public\n")
+    spec = _resolved(monkeypatch, "submit_via: external\n", "    visibility: public\n")
     assert spec.visibility == "private"
-    assert "no repo is created for it" in capsys.readouterr().err
 
 
-def test_submit_url_is_read_for_external_only_and_https_only(capsys):
+def test_submit_url_is_read_for_external_only_and_https_only(monkeypatch):
     url = "https://moodle.example.edu/mod/assign/view.php?id=42"
-    spec = collect.parse_grading_spec(f"submit_via: external\nsubmit_url: {url}\n")
+    spec = _resolved(monkeypatch, "submit_via: external\n", f"    submit_url: {url}\n")
     assert spec.submit_url == url and spec.submit_host == "moodle.example.edu"
-    assert capsys.readouterr().err == ""
+    assert _instance_faults(f"    submit_url: {url}\n") == []
     # The site's button is the one link that sends a whole semester somewhere off the
     # strength of one hand-typed line: https, or no button at all.
     # And the seeded line uncommented but not answered is the same refusal: a button
@@ -312,14 +336,18 @@ def test_submit_url_is_read_for_external_only_and_https_only(capsys):
         "moodle.edu",
         placeholder,
     ):
-        spec = collect.parse_grading_spec(f"submit_via: external\nsubmit_url: {bad}\n")
-        assert spec.submit_url == "" and spec.submit_host == ""
-        assert "is not a filled-in `https://` address" in capsys.readouterr().err
+        settings.semester_blocks.cache_clear()
+        spec = _resolved(
+            monkeypatch, "submit_via: external\n", f"    submit_url: {bad}\n"
+        )
+        assert not spec.submit_url and spec.submit_host == ""
+        (said,) = _instance_faults(f"    submit_url: {bad}\n")
+        assert "is not a filled-in `https://` address" in said
     # And it describes a handover the toolkit does not see, so on any other shape it is a
     # line pointing students away from the repo they are supposed to push to.
-    spec = collect.parse_grading_spec(f"submit_url: {url}\n")
+    settings.semester_blocks.cache_clear()
+    spec = _resolved(monkeypatch, "", f"    submit_url: {url}\n")
     assert spec.submit_url == ""
-    assert "only read for `submit_via: external`" in capsys.readouterr().err
 
 
 def test_a_setting_the_toolkit_does_not_read_is_flagged_by_name(capsys):
@@ -343,25 +371,19 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
     # Faculty hand-edit this file and an hourly cron reads it: one bad line must cost the
     # field it sits on, never the parse.
     spec = collect.parse_grading_spec(
-        "title: Bayes\nsubmit_via: moodle\nquestions: 50\nlate_window_days: a week\n"
-        "max_team_size: lots\ntype: gruop\n"
+        "title: Bayes\nsubmit_via: moodle\nquestions: 50\ntype: gruop\n"
     )
     assert spec.title == "Bayes"
     assert spec.submit_via == "assignment_repo"  # the safe default, not the typo
     assert spec.type == "individual"
     assert spec.questions is None
-    assert spec.late_window_days is None
-    assert spec.max_team_size is None
     err = capsys.readouterr().err
-    for field in (
-        "submit_via",
-        "questions",
-        "late_window_days",
-        "max_team_size",
-        "type",
-    ):
+    for field in ("submit_via", "questions", "type"):
         assert field in err
-    assert len(spec.dropped) == 5
+    assert len(spec.dropped) == 3
+    # The run settings' readers refuse the same way in assignments.yml.
+    said = _instance_faults("    late_window_days: a week\n    max_team_size: lots\n")
+    assert len(said) == 2
 
 
 def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into(
@@ -379,15 +401,15 @@ def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into
     assert "title" in capsys.readouterr().err
 
 
-def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
+def test_a_bare_late_penalty_number_is_refused_out_loud():
     # `penalty_rate` refuses a bare 10 - neither 1000% nor, silently, 10%. Refusing it
     # without a word meant every late mark in that semester lost its deduction and every
     # receipt showed no percentage, on a green run.
-    spec = collect.parse_grading_spec("late_penalty_per_day: 10\n")
-    assert spec.late_penalty_per_day is None
-    err = capsys.readouterr().err
-    assert "late_penalty_per_day: 10" in err
-    assert "`10%` or `0.1`" in err
+    read = settings.parse_instance("assignments:\n  a:\n    late_penalty_per_day: 10\n")
+    assert read.blocks["a"]["late_penalty_per_day"] is None
+    (said,) = [f.what for f in read.faults]
+    assert "late_penalty_per_day: 10" in said
+    assert "`10%` or `0.1`" in said
 
 
 @pytest.mark.parametrize(
@@ -401,21 +423,25 @@ def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
         ("150%", "more than 100% a day"),
     ],
 )
-def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says, capsys):
+def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says):
     # One number multiplies every late mark in the semester. `-10%` ADDED marks for being
     # late and `150%` took more than the work was worth, both on a green run.
-    spec = collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")
-    assert spec.late_penalty_per_day is None
-    err = capsys.readouterr().err
-    assert says in err
-    assert "no late penalty is applied" in err
+    read = settings.parse_instance(
+        f"assignments:\n  a:\n    late_penalty_per_day: '{typed}'\n"
+    )
+    assert read.blocks["a"]["late_penalty_per_day"] is None
+    (said,) = [f.what for f in read.faults]
+    assert says in said
+    assert "no late penalty is applied" in said
 
 
-def test_a_penalty_rate_that_parses_is_kept_exactly_as_typed(capsys):
+def test_a_penalty_rate_that_parses_is_kept_exactly_as_typed():
     for typed in ("10%", "0.1", "5.5%", "0%", "100%"):
-        spec = collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")
-        assert spec.late_penalty_per_day == typed
-    assert capsys.readouterr().err == ""
+        read = settings.parse_instance(
+            f"assignments:\n  a:\n    late_penalty_per_day: '{typed}'\n"
+        )
+        assert read.blocks["a"]["late_penalty_per_day"] == typed
+        assert read.faults == ()
 
 
 def test_score_from_junit_counts_only_clean_passes():
@@ -1572,7 +1598,7 @@ def test_collect_refuses_to_choose_between_two_entries_on_one_template(
     )
     assert collect.collect("Course", "assignment-2-f2026", "Semester") == 1
     err = capsys.readouterr().err
-    assert "assignment-2-resit" in err and "say which" in err
+    assert "assignment-2-resit" in err and "nothing acts on one of them by hand" in err
 
 
 def test_collect_told_which_entry_keys_everything_on_that_entry(monkeypatch):
@@ -1606,7 +1632,7 @@ def test_the_sheet_refresh_refuses_the_same_ambiguity(monkeypatch, capsys):
         collect.refresh_assignment_sheet("Course", "assignment-2-f2026", "Semester")
         == 1
     )
-    assert "say which" in capsys.readouterr().err
+    assert "nothing acts on one of them by hand" in capsys.readouterr().err
 
 
 def test_collect_looks_teams_up_by_the_schedule_key_not_the_semester_name(monkeypatch):
@@ -3448,23 +3474,6 @@ def test_strip_student_test_rigging_survives_a_symlink_cycle(tmp_path):
 # --------------------------------------------------- single group resolver (fix 3)
 
 
-@pytest.mark.parametrize(
-    "force,template_type,expected",
-    [
-        (True, None, True),  # force (button / --group) wins
-        (True, "individual", True),  # ... over the assignment's own declaration
-        (False, "group", True),  # grading_config.yml decides
-        (False, "individual", False),
-        (False, None, False),  # nothing declared -> individual
-        (False, "GROUP", True),  # the vocabulary is case- and space-insensitive
-    ],
-)
-def test_resolve_is_group_precedence(force, template_type, expected):
-    assert (
-        collect.resolve_is_group(force=force, template_type=template_type) is expected
-    )
-
-
 # ------------------------------------------- explicit fire-once sentinel (fix 4)
 
 
@@ -3659,19 +3668,19 @@ def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
 BERLIN = ZoneInfo("Europe/Berlin")
 DUE = datetime(2026, 10, 4, 23, 59, tzinfo=BERLIN)
 GRADING_YML = (
-    "title: Neural networks\n"
-    "autograde: false\n"
-    "questions:\n  Q1: 15\n  Q2: 10\n"
-    "late_window_days: 7\n"
-    "late_penalty_per_day: 10%\n"
+    "title: Neural networks\nautograde: false\nquestions:\n  Q1: 15\n  Q2: 10\n"
 )
+# The semester's late rule for the sheet tests, in its assignments.yml.
+LATE_YML = "defaults:\n  late_window_days: 7\n  late_penalty_per_day: 10%\n"
 
 
 def _sched(**kw) -> Schedule:
     entry = collect.schedule.AssignmentEntry(
         course_source_repo="assignment-1-f2026", due_datetime=DUE, **kw
     )
-    return Schedule(assignments={"assignment-1": entry}, timezone="Europe/Berlin")
+    return Schedule(
+        assignments={"assignment-1": entry}, timezone="Europe/Berlin", org="Semester"
+    )
 
 
 def _sheet_env(
@@ -3697,6 +3706,7 @@ def _sheet_env(
     `private` assignment - every test here but one - looks like.
     `write_ok=False` refuses the sheet write, which is what a lost compare-and-swap is."""
     written: list[tuple[str, str]] = []
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: LATE_YML)
     monkeypatch.setattr(
         collect,
         "listing_by_name",
@@ -4117,8 +4127,16 @@ def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
 def _canonical(status: str, units: list[str]) -> str:
     """A sheet exactly as the toolkit would write it - the starting point for asking what
     a grader's own save is allowed to look like."""
-    gspec = collect.parse_grading_spec(GRADING_YML)
-    spec = grades.sheet_spec(_sched(), "assignment-1", "assignment-1", gspec, False)
+    gspec = dataclasses.replace(
+        collect.parse_grading_spec(GRADING_YML),
+        late_window_days=7,
+        late_penalty_per_day="10%",
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(settings, "_assignments_text", lambda org: LATE_YML)
+        settings.semester_blocks.cache_clear()
+        spec = grades.sheet_spec(_sched(), "assignment-1", "assignment-1", gspec, False)
+    settings.semester_blocks.cache_clear()
     sheet = grades.merge_sheet(
         None, spec, [(u, [u]) for u in units], {u: {"days_late": "0"} for u in units}
     )
@@ -4438,7 +4456,9 @@ def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
 ):
     # An in-class paper quiz: handed out after its due date, marks typed in later. Nothing
     # is collected, so nothing waits on the freeze - Distribute sends from an open sheet.
-    from tests.test_grades import _EXTERNAL_GRADING, ROSTER_ADA, _distribute
+    from tests.test_grades import ROSTER_ADA, _distribute
+
+    _EXTERNAL_GRADING = "title: Neural networks\nsubmit_via: external\n"
 
     written = _sheet_env(monkeypatch, targets=SOLO_TARGETS, grading=_EXTERNAL_GRADING)
     assert collect.sync_sheet(
@@ -4733,20 +4753,28 @@ def test_the_header_facts_come_from_the_two_files_that_own_them(monkeypatch):
     ((_path, text),) = written
     assert "GRADING SHEET · assignment-1 · Neural networks · INSTRUCTOR-OWNED" in text
     assert "individual assignment · 25 points (Q1 15, Q2 10) · autograde off" in text
-    # The cutoff is the due date plus the template's late window, rendered like the due
-    # date - there is no `grading_datetime` in this schedule.
+    # The cutoff is the due date plus the semester's late window, rendered like the due
+    # date.
     assert (
         "due Sun 4 Oct 2026 23:59 · late work to Sun 11 Oct 2026 23:59 at 10%/day"
         in text
     )
 
 
-def test_an_explicit_grading_datetime_wins_over_the_late_window(monkeypatch):
+def test_an_assignment_s_own_window_moves_the_cutoff(monkeypatch):
     written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: (
+            LATE_YML + "assignments:\n  assignment-1:\n    late_window_days: 4\n"
+            "    late_penalty_per_day: 10%\n"
+        ),
+    )
     collect.sync_sheet(
         "Course",
         "Semester",
-        _sched(grading_datetime=datetime(2026, 10, 8, 12, 0, tzinfo=BERLIN)),
+        _sched(),
         "assignment-1",
         "assignment-1",
         "assignment-1-f2026",
@@ -4755,7 +4783,7 @@ def test_an_explicit_grading_datetime_wins_over_the_late_window(monkeypatch):
         units=[("ada-l", ["ada-l"])],
     )
     ((_path, text),) = written
-    assert "late work to Thu 8 Oct 2026 12:00 at 10%/day" in text
+    assert "late work to Thu 8 Oct 2026 23:59 at 10%/day" in text
 
 
 @pytest.mark.parametrize(
@@ -5901,32 +5929,36 @@ def test_a_definition_that_is_not_valid_yaml_is_one_fault_for_the_whole_file():
     assert "none of it is read" in fault.what and fault.fires == GRADES_AT
 
 
-def _sched_one_assignment(grading=None):
+def _sched_one_assignment():
     from dsl_course.schedule import AssignmentEntry
 
     return Schedule(
         assignments={
             "a3": AssignmentEntry(
-                course_source_repo="assignment-3-f2026",
-                due_datetime=DUE_AT,
-                grading_datetime=grading,
+                course_source_repo="assignment-3-f2026", due_datetime=DUE_AT
             )
-        }
+        },
+        org="Semester-Org",
     )
 
 
-def _collect_configs(monkeypatch, text=BROKEN_CONFIG, grading=None, legacy=None):
+def _collect_configs(monkeypatch, text=BROKEN_CONFIG, legacy=None):
     monkeypatch.setattr(grades, "_grading_text", lambda course, template: text)
     monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: legacy)
     found: list = []
     grades.grading_config_faults(
-        "Course-Org", "Semester-Org", _sched_one_assignment(grading), found, {}
+        "Course-Org", "Semester-Org", _sched_one_assignment(), found, {}
     )
     return found
 
 
-def test_the_grading_moment_is_the_deadline_and_the_due_date_stands_in(monkeypatch):
-    assert _collect_configs(monkeypatch, grading=GRADES_AT)[0].fires == GRADES_AT
+def test_the_grading_moment_is_the_late_cutoff(monkeypatch):
+    # Due plus the institution's 10 days, or the semester's own window.
+    assert _collect_configs(monkeypatch)[0].fires == DUE_AT + timedelta(days=10)
+    monkeypatch.setattr(
+        settings, "_assignments_text", lambda org: "defaults:\n  late_window_days: 0\n"
+    )
+    settings.semester_blocks.cache_clear()
     assert _collect_configs(monkeypatch)[0].fires == DUE_AT
 
 
@@ -5966,6 +5998,22 @@ def test_a_template_that_could_not_be_read_reports_none_of_them(monkeypatch):
 HANDED_OUT = datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN_TZ)
 
 
+def _split_run_keys(monkeypatch, config: str) -> None:
+    """`config` as two files: its run settings in the semester's assignments.yml (block
+    `a3`), the rest as the template's grading_config.yml."""
+    run = [ln for ln in config.splitlines() if ln.split(":")[0] in settings.RUN_KEYS]
+    rest = "".join(f"{ln}\n" for ln in config.splitlines() if ln not in run)
+    monkeypatch.setattr(grades, "_grading_text", lambda course, template: rest)
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    block = "".join(f"    {ln}\n" for ln in run)
+    monkeypatch.setattr(
+        settings,
+        "_assignments_text",
+        lambda org: f"assignments:\n  a3:\n{block}" if block else None,
+    )
+    settings.semester_blocks.cache_clear()
+
+
 def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=None):
     """`grading_config_faults` over one handed-out assignment and the tick's listing.
 
@@ -5973,8 +6021,7 @@ def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=No
     None."""
     from dsl_course.schedule import AssignmentEntry
 
-    monkeypatch.setattr(grades, "_grading_text", lambda course, template: config)
-    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    _split_run_keys(monkeypatch, config)
     sched = Schedule(
         assignments={
             "a3": AssignmentEntry(
@@ -5983,7 +6030,8 @@ def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=No
                 due_datetime=DUE_AT,
                 handout_datetime=handed_out,
             )
-        }
+        },
+        org="Semester-Org",
     )
     found: list = []
     listing = None if rows is None else {r["name"]: r for r in rows}
@@ -6010,8 +6058,10 @@ def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
     # A COUNT and never a name: this sentence reaches a public run log, a digest issue and
     # an email alike, and a submission repo is `<slug>-<handle>`.
     assert "ada" not in fault.what + fault.fix()
-    # It bites when the assignment is graded, like every other value in this file.
-    assert fault.fires == DUE_AT
+    # It bites when the assignment is graded (the late cutoff), like every other value.
+    assert fault.fires == DUE_AT + timedelta(days=10)
+    # ...and names the file the setting lives in now.
+    assert fault.file == "assignments.yml"
 
 
 def test_a_private_assignment_whose_repos_are_public_is_the_same_fault(monkeypatch):
@@ -6071,10 +6121,7 @@ def test_a_scheduled_solution_for_repos_that_are_not_private_is_a_fault(monkeypa
     # nothing else would ever notice they disagree.
     from dsl_course.schedule import AssignmentEntry
 
-    monkeypatch.setattr(
-        grades, "_grading_text", lambda course, template: "visibility: public\n"
-    )
-    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    _split_run_keys(monkeypatch, "visibility: public\n")
     sched = Schedule(
         assignments={
             "a3": AssignmentEntry(
@@ -6082,7 +6129,8 @@ def test_a_scheduled_solution_for_repos_that_are_not_private_is_a_fault(monkeypa
                 due_datetime=DUE_AT,
                 solution_datetime=DUE_AT,
             )
-        }
+        },
+        org="Semester-Org",
     )
     found: list = []
     grades.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
@@ -6145,13 +6193,7 @@ def test_the_listings_own_word_is_what_is_compared(monkeypatch):
     # than something this has to have an opinion about.
     spec = dataclasses.replace(grades.parse_grading_spec(""), visibility="private")
     (fault,) = grades._visibility_faults(
-        spec,
-        "a3",
-        "assignment-3-f2026",
-        "Course-Org",
-        {},
-        DUE_AT,
-        [repo_row("a3-ada", visibility="internal")],
+        spec, "a3", "Semester-Org", DUE_AT, [repo_row("a3-ada", visibility="internal")]
     )
     assert "1 of 1 are not private" in fault.what
 
