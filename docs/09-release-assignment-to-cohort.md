@@ -186,8 +186,9 @@ is what distributes the fix.
    would. This button only distributes what is already there.
 2. Course org → `.github` → **Actions** → **Patch released assignment**. Inputs:
    `semester_org`, `course_source_repo` (the template), `path` (a file, or a folder to push
-   whole), `overwrite` (default **off**) and `preview` (default **on**). A template two
-   schedule entries hand out from is refused, naming both.
+   whole), `overwrite` (default **off**), `assignment` and `preview` (default **on**). Leave
+   `assignment` empty unless two schedule entries hand out from the template: then give
+   the key of the one to patch (left empty, the run is refused, naming both).
 3. Preview first: it counts the repos it would touch and writes nothing.
 
 What a real run does:

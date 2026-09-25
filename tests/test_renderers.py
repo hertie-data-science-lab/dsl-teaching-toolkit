@@ -374,7 +374,7 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
         ["Semester-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org", "course_source_repo", "preview"}
+    assert set(inp) == {"semester_org", "course_source_repo", "assignment", "preview"}
     assert inp["preview"]["default"] is True
     assert "dsl_course.collect" in rendered and "--refresh-only" in rendered
     assert "--deadline" not in rendered

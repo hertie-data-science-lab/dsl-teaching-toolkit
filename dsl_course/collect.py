@@ -3214,7 +3214,9 @@ def refresh_assignment_sheet(
     sched = schedule.load(semester_org)
     # `slug` arrives as the SCHEDULE KEY (which of two entries handing out from this one
     # template) and is consumed here; from the next line on it means the semester-side name.
-    target = schedule.resolve_target(sched, template, slug)
+    target = schedule.resolve_target(
+        sched, template, slug, remedy=schedule.NAME_THE_ENTRY
+    )
     if isinstance(target, str):
         log_err(target)
         return 1
@@ -3274,7 +3276,9 @@ def collect(
     sched = schedule.load(semester_org)
     # As in `provision_all`: the parameter is the SCHEDULE KEY, consumed here, and `slug`
     # then means the semester-side name for the rest of the run.
-    target = schedule.resolve_target(sched, template, slug)
+    target = schedule.resolve_target(
+        sched, template, slug, remedy=schedule.NAME_THE_ENTRY
+    )
     if isinstance(target, str):
         log_err(target)
         return 1
@@ -3727,14 +3731,29 @@ def main() -> int:
         action="store_true",
         help="Refresh the grading sheet now and stop - no snapshot, no grading, no freeze",
     )
+    parser.add_argument(
+        "--assignment",
+        default="",
+        metavar="KEY",
+        help="The schedule.yml assignments key, needed only when two entries hand out "
+        "from this template.",
+    )
     add_preview_flag(parser, "Report what would be collected; write nothing (default).")
     args = parser.parse_args()
     if args.refresh_only:
         return refresh_assignment_sheet(
-            args.course_org, args.template, args.semester_org, dry_run=args.preview
+            args.course_org,
+            args.template,
+            args.semester_org,
+            dry_run=args.preview,
+            slug=args.assignment,
         )
     return collect(
-        args.course_org, args.template, args.semester_org, dry_run=args.preview
+        args.course_org,
+        args.template,
+        args.semester_org,
+        dry_run=args.preview,
+        slug=args.assignment,
     )
 
 

@@ -263,6 +263,11 @@
       "args_schema": {
         "additionalProperties": false,
         "properties": {
+          "assignment": {
+            "description": "The schedule.yml assignments key, when two entries share the template",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          },
           "course_source_repo": {
             "description": "The course-org assignment template repo",
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
@@ -298,6 +303,11 @@
       "args_schema": {
         "additionalProperties": false,
         "properties": {
+          "assignment": {
+            "description": "The schedule.yml assignments key, when two entries share the template",
+            "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
+            "type": "string"
+          },
           "course_source_repo": {
             "description": "The course-org assignment template repo",
             "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",

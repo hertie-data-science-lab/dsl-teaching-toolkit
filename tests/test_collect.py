@@ -1598,7 +1598,7 @@ def test_collect_refuses_to_choose_between_two_entries_on_one_template(
     )
     assert collect.collect("Course", "assignment-2-f2026", "Semester") == 1
     err = capsys.readouterr().err
-    assert "assignment-2-resit" in err and "nothing acts on one of them by hand" in err
+    assert "(assignment-2, assignment-2-resit)" in err and "`assignment`" in err
 
 
 def test_collect_told_which_entry_keys_everything_on_that_entry(monkeypatch):
@@ -1632,7 +1632,33 @@ def test_the_sheet_refresh_refuses_the_same_ambiguity(monkeypatch, capsys):
         collect.refresh_assignment_sheet("Course", "assignment-2-f2026", "Semester")
         == 1
     )
-    assert "nothing acts on one of them by hand" in capsys.readouterr().err
+    assert "(assignment-2, assignment-2-resit)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("flags", "mode"), [(["--refresh-only"], "refresh"), ([], "collect")]
+)
+def test_the_assignment_flag_reaches_both_modes(monkeypatch, flags, mode):
+    # Collect now (the button and the console op) names the schedule key when two
+    # entries share the template.
+    seen: dict = {}
+    monkeypatch.setattr(
+        collect,
+        "refresh_assignment_sheet",
+        lambda *a, **kw: seen.update(kw, mode="refresh") or 0,
+    )
+    monkeypatch.setattr(
+        collect, "collect", lambda *a, **kw: seen.update(kw, mode="collect") or 0
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["collect", "--course-org", "Course", "--course-source-repo",
+         "assignment-2-f2026", "--semester-org", "Semester",
+         "--assignment", "assignment-2-resit", *flags],
+    )  # fmt: skip
+    assert collect.main() == 0
+    assert (seen["mode"], seen["slug"]) == (mode, "assignment-2-resit")
 
 
 def test_collect_looks_teams_up_by_the_schedule_key_not_the_semester_name(monkeypatch):

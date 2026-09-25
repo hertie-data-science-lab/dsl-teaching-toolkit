@@ -180,6 +180,11 @@ def _args(properties: dict | None = None, required: tuple[str, ...] = ()) -> dic
 
 
 _TEMPLATE = _string(REPO_PATTERN, "The course-org assignment template repo")
+# Which schedule entry, when two hand out from one template; refused naming both when
+# absent then (`schedule.resolve_target`), not needed otherwise.
+_ENTRY = _string(
+    KEY_PATTERN, "The schedule.yml assignments key, when two entries share the template"
+)
 _DEPLOY_FIELDS = {
     "course_source_repo": _string(REPO_PATTERN, "Course-org repo to release from"),
     "course_source_path": _string(PATH_PATTERN, "Path(s), comma-separated"),
@@ -243,15 +248,21 @@ def _handout(request: Request) -> list[str]:
     return argv
 
 
+def _entry(request: Request) -> list[str]:
+    return (
+        ["--assignment", _a(request, "assignment")] if _a(request, "assignment") else []
+    )
+
+
 def _patch(request: Request) -> list[str]:
     argv = [*_assign_base(request), "--patch-path", _a(request, "path")]
     if _a(request, "overwrite"):
         argv.append("--overwrite")
-    return argv
+    return [*argv, *_entry(request)]
 
 
 def _collect(request: Request) -> list[str]:
-    return [*_assign_base(request), "--refresh-only"]
+    return [*_assign_base(request), "--refresh-only", *_entry(request)]
 
 
 def _grades(request: Request) -> list[str]:
@@ -501,6 +512,7 @@ _OPS = (
                 "course_source_repo": _TEMPLATE,
                 "path": _string(PATH_PATTERN, "File or folder on the template's main"),
                 "overwrite": _boolean("Replace a file the student has changed"),
+                "assignment": _ENTRY,
             },
             required=("course_source_repo", "path"),
         ),
@@ -518,7 +530,7 @@ _OPS = (
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
         args_schema=_args(
-            {"course_source_repo": _TEMPLATE},
+            {"course_source_repo": _TEMPLATE, "assignment": _ENTRY},
             required=("course_source_repo",),
         ),
         help="Bring the marking sheet up to date with the latest submissions.",
@@ -528,7 +540,7 @@ _OPS = (
         preview_flag="--preview",
         real_flag="--no-preview",
         via=f"{VIA_WORKFLOW}collect-submissions.yml",
-        inputs=("semester_org", "course_source_repo", "preview"),
+        inputs=("semester_org", "course_source_repo", "assignment", "preview"),
     ),
     Operation(
         name="grades.return",

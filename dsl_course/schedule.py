@@ -1765,6 +1765,14 @@ def assignment_pages_by_key(
     return {p.key: p for p in assignment_pages(semester_org, sched, templates) if p.key}
 
 
+# The remedy a manual run that CAN say which entry gives (Update every copy, Collect now):
+# the workflow box, the console op argument and the CLI flag all spell `assignment`.
+NAME_THE_ENTRY = (
+    "name the one you mean as `assignment` (the schedule.yml key; `--assignment` on the "
+    "command line)"
+)
+
+
 def resolve_target(
     sched: Schedule,
     repo: str,
