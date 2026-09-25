@@ -152,6 +152,11 @@ class FakeGitHub:
     ):
         tree = self.tree(org, repo, branch or "main")
         before = dict(tree)
+        # gh_contents.move_files' own rule: a target that differs refuses the commit.
+        if any(
+            tree.get(new, tree.get(old)) != tree.get(old) for old, new in moves.items()
+        ):
+            return False
         for old, new in moves.items():
             if old in tree:
                 tree.setdefault(new, tree[old])
@@ -558,6 +563,20 @@ def test_an_unconvertible_people_yml_stops_before_anything_is_written(
     fake.tree(SEM, OLD_CONFIG_REPO)["people.yml"] = b"people:\n  course_admins: []\n"
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     assert "cannot be converted faithfully" in capsys.readouterr().err
+    assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
+
+
+def test_a_record_already_at_its_new_path_with_other_bytes_stops_the_layout(
+    fake, semester, monkeypatch, capsys
+):
+    tree = fake.tree(SEM, OLD_CONFIG_REPO)
+    tree[".system/autograde/a1/_graded.json"] = b'{"ok": false}\n'
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert "layout did not verify - stopped here" in capsys.readouterr().err
+    tree = fake.tree(SEM, CONFIG_REPO)
+    # Both versions kept, nothing else of the layout written.
+    assert tree["autograde/a1/_graded.json"] == b'{"ok": true}\n'
+    assert tree[".system/autograde/a1/_graded.json"] == b'{"ok": false}\n'
     assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
 
 

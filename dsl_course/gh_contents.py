@@ -540,13 +540,28 @@ def move_files(
     binary moves as safely as text and the file at the new path is the old one exactly -
     which is what a fire-once marker needs, since a copy that differed would be a second
     marker. A move whose source is absent is skipped (already moved); one whose target
-    already exists removes the source only. Same no-op rule as `put_files`: nothing to do
-    is no commit. Returns False on a failed read or any failed leg of the commit."""
+    already holds the same bytes removes the source only. A target that holds DIFFERENT
+    bytes refuses the whole commit before anything is written, naming both paths: moving
+    would lose one of the two versions. Same no-op rule as `put_files`: nothing to do is
+    no commit. Returns False on a failed read, a refused move or any failed leg of the
+    commit."""
     try:
         branch = branch or default_branch(org, repo)
         live = repo_blob_entries(org, repo, branch)
     except RuntimeError as exc:
         log_err(f"could not read {org}/{repo} before writing to it: {exc}")
+        return False
+    clashes = [
+        (old, new)
+        for old, new in moves.items()
+        if old in live and new in live and live[old][0] != live[new][0]
+    ]
+    for old, new in clashes:
+        log_err(
+            f"{org}/{repo}: both {old} and {new} exist and differ - keep one by hand; "
+            f"nothing was written"
+        )
+    if clashes:
         return False
     tree: list[dict[str, Any]] = []
     gone = {path: None for path in delete if path in live}
