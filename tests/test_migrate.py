@@ -87,6 +87,7 @@ class FakeGitHub:
         self.paused_at_commit: list[bool] = []
         self.puts: list[tuple[str, str, bool]] = []
         self.fail_rename = False
+        self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
         self.run_after_pause: tuple[str, str] | None = None
         self.clock = "Thu, 24 Sep 2026 10:00:00 GMT"  # GitHub's, in its Date header
         self.central_runs: dict[
@@ -235,7 +236,8 @@ class FakeGitHub:
                 return 1, "HTTP 403: Forbidden"
             new = (org, fields["name"])
             self.repos[new] = self.repos.pop(key)
-            self.redirects[key] = fields["name"]
+            if self.redirect_renames:
+                self.redirects[key] = fields["name"]
             if key in self.actions:  # a repo keeps its settings across a rename
                 self.actions[new] = self.actions.pop(key)
             return 0, ""
@@ -475,6 +477,16 @@ def test_a_failed_step_stops_and_says_the_org_is_still_paused(
     )
     # Nothing but the record of what the settings were.
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT] and semester == []
+
+
+def test_a_rename_whose_old_name_does_not_redirect_stops(
+    fake, semester, monkeypatch, capsys
+):
+    fake.redirect_renames = False
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert f"{SEM}/{OLD_CONFIG_REPO} does not redirect to {CONFIG_REPO}" in err
+    assert "rename repos did not verify - stopped here" in err
 
 
 def test_a_crash_mid_run_says_the_org_is_still_paused(

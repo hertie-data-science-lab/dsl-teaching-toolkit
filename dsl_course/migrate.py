@@ -474,6 +474,17 @@ def _rename(org: str, old: str, new: str) -> bool:
     return code == 0
 
 
+def _redirects(org: str, old: str, new: str) -> bool:
+    """Whether `org/old` answers as `org/new`: GitHub's 301 from a renamed repo's old
+    name, which gh follows. What keeps the old URLs in mails and bookmarks working."""
+    code, out = gh("api", f"repos/{org}/{old}")
+    try:
+        name = json.loads(out).get("name") if code == 0 else None
+    except (json.JSONDecodeError, AttributeError):
+        name = None
+    return name == new
+
+
 def _yaml(text: str | None) -> dict:
     data = yaml.safe_load(text or "") if text else None
     return data if isinstance(data, dict) else {}
@@ -807,6 +818,7 @@ class Semester:
         self.org, self.course = org, course_org
         self.people = ""
         self.pause = Pause(org, self.targets, course_org)
+        self.renamed_now: dict[str, str] = {}  # old -> new, renamed by this run
 
     def config(self) -> str:
         """The config repo under whichever name it has right now."""
@@ -833,12 +845,27 @@ class Semester:
                 return False
             if not _rename(self.org, old, new):
                 return False
+            self.renamed_now[old] = new
         return True
 
     def renamed(self) -> bool:
         """No repo left under an old name. A repo that never existed (a semester with
         no `welcome`) has nothing to rename."""
         return not self.renames_left()
+
+    def rename_verified(self) -> bool:
+        """Renamed, and each old name this run renamed redirects to its new one."""
+        if not self.renamed():
+            return False
+        stale = [
+            o for o, n in self.renamed_now.items() if not _redirects(self.org, o, n)
+        ]
+        for old in stale:
+            log_err(
+                f"{self.org}/{old} does not redirect to {self.renamed_now[old]} - old "
+                f"links to it are broken"
+            )
+        return not stale
 
     # layout -------------------------------------------------------------------
     def instructors_text(self, old: str) -> str | None:
@@ -1036,7 +1063,7 @@ class Semester:
                     f"rename {o} -> {n}" for o, n in self.renames_left().items()
                 ],
                 do=self.rename,
-                verify=self.renamed,
+                verify=self.rename_verified,
                 rollback="rename each repo back in its Settings (the old name is free)",
             ),
             Step(
