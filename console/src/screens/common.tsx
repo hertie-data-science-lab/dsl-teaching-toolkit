@@ -52,7 +52,7 @@ export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
   return { courseOrg: p.course.org, cohortOrg: p.cohort.org, where: p.cohort.termLabel };
 }
 
-/** Check now: refresh the status and re-run every check (cohort.check). */
+/** Check now: refresh the status and re-run every check (semester.check). */
 export function CheckNow({ small, p, label }: { small?: boolean; p?: Pick<CohortProps, 'course' | 'cohort'>; label?: string }) {
   if (!p) return <Soon label="Check now" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />;
   return <OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />;

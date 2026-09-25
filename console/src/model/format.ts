@@ -137,8 +137,8 @@ export const RELEASE_WORD: Record<ReleaseState, string> = {
 
 /** Registry op names as the operations list names them. */
 export const OP_LABEL: Record<string, string> = {
-  'cohort.check': 'Check',
-  'cohort.preview_automation': 'Preview the next automatic run',
+  'semester.check': 'Check',
+  'semester.preview_automation': 'Preview the next automatic run',
   'release.now': 'Release',
   'release.early': 'Release early',
   'release.rerun': 'Release again',
@@ -151,13 +151,13 @@ export const OP_LABEL: Record<string, string> = {
   'roster.send_codes': 'Send new codes',
   'site.update': 'Update site',
   'access.check': 'Check instructor access',
-  'cohort.archive': 'Archive',
+  'semester.archive': 'Archive',
   'course.publish_website': 'Publish website',
   'assignment.derive_starter': 'Derive student version',
   'assignment.generate_syllabus': 'Generate syllabus',
   'materials.create': 'New materials',
   'assignment.create': 'New assignment',
-  'cohort.bootstrap': 'New semester',
+  'semester.bootstrap': 'New semester',
   'teams.open_window': 'Email students without a team',
 };
 
