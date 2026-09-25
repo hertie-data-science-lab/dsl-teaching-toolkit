@@ -2314,11 +2314,18 @@ def worst_severity(faults: list[SourceFault], now: datetime) -> Severity | None:
     return max((f.severity(now) for f in faults), default=None)
 
 
-def solution_notices(before: Schedule | None, after: Schedule) -> list[ConfigFault]:
+def solution_notices(before: dict, after: Schedule) -> list[ConfigFault]:
     """One informational fault for each assignment that has just GAINED a
-    `solution_datetime:` (absent in `before`, the file as it was). Never a verdict: the
-    push is fine; the person who made it is told, once, what the date will do."""
-    was = before.assignments if before is not None else {}
+    `solution_datetime:` - absent from `before`, the file as it was, read as plain YAML so
+    an entry the parser would have dropped there still counts as what it said. Never a
+    verdict: the push is fine; the person who made it is told, once, what the date will
+    do."""
+    raw = before.get("assignments") if isinstance(before, dict) else None
+    was = {
+        str(slug): entry
+        for slug, entry in (raw.items() if isinstance(raw, dict) else ())
+        if isinstance(entry, dict)
+    }
     return [
         ConfigFault(
             f"assignments.{slug}",
@@ -2331,7 +2338,7 @@ def solution_notices(before: Schedule | None, after: Schedule) -> list[ConfigFau
         )
         for slug, entry in after.assignments.items()
         if entry.solution_datetime is not None
-        and (slug not in was or was[slug].solution_datetime is None)
+        and (slug not in was or was[slug].get("solution_datetime") is None)
     ]
 
 
@@ -2658,9 +2665,13 @@ def main() -> int:
     # well-formed entry with the wrong date, but a count that is one short is visible.
     print(_validate_report(sched, source_name))
     if args.previous is not None:
-        before, _ = load_file(args.previous)
+        try:
+            before = yaml.safe_load(Path(args.previous).read_text())
+        except (OSError, yaml.YAMLError):
+            before = None
         # A previous file nobody can read says nothing about what is new: no notices.
-        for note in solution_notices(before, sched) if before is not None else []:
+        notes = solution_notices(before, sched) if isinstance(before, dict) else []
+        for note in notes:
             at = f",line={note.lineno}" if note.lineno else ""
             print(f"::notice file={SCHEDULE_PATH}{at}::{note.line()}", file=sys.stderr)
     if sched.unparseable:

@@ -3015,15 +3015,24 @@ assignments:
 
 def test_only_an_entry_that_has_just_gained_a_solution_date_is_noticed():
     after = parse(yaml.safe_load(_WITH_SOLUTION))
-    before = parse(
-        yaml.safe_load(
-            _WITH_SOLUTION.replace("    solution_datetime: 2026-10-16T09:00\n", "")
-        )
+    before = yaml.safe_load(
+        _WITH_SOLUTION.replace("    solution_datetime: 2026-10-16T09:00\n", "")
     )
     (note,) = schedule.solution_notices(before, after)
     assert note.where == "assignments.a1" and note.field == "solution_datetime"
     assert course.SOLUTION_WARNING in note.what
-    assert schedule.solution_notices(after, after) == []
+    assert schedule.solution_notices(yaml.safe_load(_WITH_SOLUTION), after) == []
+
+
+def test_an_entry_the_old_file_could_not_run_is_not_noticed_as_new():
+    # Two entries on one template, their repo names in an assignments.yml the old file is
+    # read without: parsed, the second is dropped. Read as written, it already carried
+    # its solution date, so nothing is new.
+    shared = _WITH_SOLUTION.replace("course_source_repo: t2", "course_source_repo: t1")
+    before = yaml.safe_load(shared)
+    assert (
+        schedule.solution_notices(before, parse(yaml.safe_load(_WITH_SOLUTION))) == []
+    )
 
 
 def _validate(monkeypatch, tmp_path, capsys, previous: str | None) -> str:

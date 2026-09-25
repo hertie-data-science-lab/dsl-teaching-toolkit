@@ -139,7 +139,7 @@ jobs:
           # What the push (or the pull request) changed schedule.yml FROM, so the run can
           # say which entries have just gained a `solution_datetime:`. None on a manual
           # run or a new branch: then nothing is said.
-          BEFORE: ${{ github.event.before || github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
           set +e
           # The PARSE runs first and unconditionally. It is the verdict about the file
