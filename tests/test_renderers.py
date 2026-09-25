@@ -285,6 +285,13 @@ def test_the_release_and_syllabus_dropdowns_default_to_the_newest_materials_repo
         assert inp["default"] == "course-materials-f2026"
 
 
+def test_publish_site_prefers_a_materials_repo_when_no_name_carries_a_term():
+    inp = workflow_inputs(
+        workflows_render.render_publish_site(["lecture-code", "slides"], ["slides"])
+    )
+    assert inp["source_repo"]["default"] == "slides"
+
+
 def test_publish_site_without_a_materials_repo_defaults_to_the_first_option():
     inp = workflow_inputs(
         workflows_render.render_publish_site(["lecture-code", "slides-f2026"])

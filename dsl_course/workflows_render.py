@@ -2151,8 +2151,8 @@ def render_publish_site(
     # published from - the latest materials repo. `_newest` alone picked the
     # alphabetically last option of the newest year (`lecture-code-f2026`), and a faculty
     # member clicking Run with the defaults wiped a live site's materials.
-    default = _newest_materials(source_repos, materials) or (
-        source_repos[0] if source_repos else None
+    default = _newest_materials(source_repos, materials) or next(
+        iter([*(materials or []), *source_repos]), None
     )
     return f"""name: Publish course website
 
