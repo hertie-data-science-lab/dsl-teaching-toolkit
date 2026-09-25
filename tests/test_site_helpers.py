@@ -467,16 +467,31 @@ def test_a_declared_syllabus_is_pinned_under_any_name(monkeypatch):
         assert link.name == "E1282_syllabus.pdf", deploy
 
 
-def test_nothing_is_pinned_until_the_declared_file_has_landed(monkeypatch):
-    # Not by a name that merely looks like one, either: a screenshot is not the syllabus.
-    assert (
-        _syllabus(
-            monkeypatch,
-            [_intro(_deploy("SYLLABUS.md"))],
-            ("lectures/01/pics/ids-syllabus-2024.png", "SYLLABUS-draft.pdf"),
-        )
-        is None
+def test_undeclared_and_absent_falls_back_to_a_root_syllab_file(monkeypatch):
+    # Nothing declared and no SYLLABUS.md: the old root-file rule still pins, the exact
+    # `syllabus.*` stem first - never a screenshot inside a folder.
+    tree = (
+        "lectures/01/pics/ids-syllabus-2024.png",
+        "SYLLABUS-draft.pdf",
+        "Syllabus.pdf",
     )
+    link = _syllabus(monkeypatch, [_intro(_deploy("Syllabus.pdf"))], tree)
+    assert link.name == "Syllabus.pdf"
+    link = _syllabus(monkeypatch, [], tree[:2])
+    assert link.name == "SYLLABUS-draft.pdf"
+    assert _syllabus(monkeypatch, [], tree[:1]) is None
+
+
+def test_a_declared_syllabus_is_never_second_guessed(monkeypatch):
+    declared = materials.Declared(syllabus="E1282.pdf", declared=True)
+    releases = [_intro(_deploy("readings/01"))]
+    assert _syllabus(monkeypatch, releases, ("syllabus-old.pdf",), declared) is None
+
+
+def test_an_off_plan_copy_of_the_syllabus_is_pinned(monkeypatch):
+    # Released by hand: no entry names it, but it sits where the default says.
+    link = _syllabus(monkeypatch, [], ("SYLLABUS.md", "syllabus-old.pdf"))
+    assert link.name == "SYLLABUS.md"
 
 
 def test_a_deck_carries_its_asset_folders_with_it():
@@ -879,18 +894,30 @@ def test_a_semester_gets_a_tab_per_kind_it_has_rows_of():
     assert "permalink: /drop-ins/" in semester["drop-ins.md"]
     assert "title: Drop-ins" in semester["drop-ins.md"]
     assert "All Materials" in semester["materials.md"]
-    # The tab of a kind with no rows is retired, so a stale one leaves the site.
-    assert set(site_repo.retired_kind_pages(["lab", "drop-in"])) == {
-        "lectures.md",
-        "readings.md",
-        "exams.md",
-        "others.md",
-    }
+    assert "permalink: /other/" in site_repo.theme_pages(True, ["other"])["other.md"]
+    assert "title: Other" in site_repo.theme_pages(True, ["other"])["other.md"]
     # A public course site keeps its own pages: /materials/ is its readings page.
     public = site_repo.theme_pages(semester=False)
     assert "readings.md" not in public
     assert "layout: readings" in public["materials.md"]
     assert "layout: lectures" in public["lectures.md"]
+
+
+def test_a_tab_with_no_rows_is_retired_only_when_the_sync_wrote_it(tmp_path):
+    written = site_repo.theme_pages(
+        semester=True, kinds=["lecture", "readings", "exam"]
+    )
+    for name in ("lectures.md", "readings.md"):
+        (tmp_path / name).write_text(written[name])
+    # An older sync's page, and one a person made by hand under a tab's name.
+    (tmp_path / "labs.md").write_text(
+        "---\nlayout: labs\ntitle: Labs\npermalink: /labs/\n---\n"
+    )
+    (tmp_path / "exams.md").write_text("---\ntitle: Exam rules\n---\nBring a pen.\n")
+    assert set(site_repo.retired_kind_pages(["lecture"], tmp_path)) == {
+        "readings.md",
+        "labs.md",
+    }
 
 
 def test_every_page_states_its_own_access_rule():

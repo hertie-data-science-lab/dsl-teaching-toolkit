@@ -445,7 +445,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
     "flag",
     [
         "unreleased",
-        "silent",
+        "off_schedule",
         "handout_pending",
         "tbc",
         "dateless",

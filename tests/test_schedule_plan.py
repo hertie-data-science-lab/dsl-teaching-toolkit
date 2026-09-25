@@ -6,7 +6,7 @@ from where its first copy lands. Nothing is read off a folder name beyond that s
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from dsl_course import schedule_plan
@@ -156,12 +156,70 @@ def test_an_entry_that_copies_nothing_yet_is_a_lecture_until_it_says_otherwise()
     assert _kind(kind="lab") == ("lab", False)
 
 
-def test_the_week_counts_from_the_semester_start():
-    start = date(2026, 9, 7)
-    assert schedule_plan.week_of(_at(7), start) == 1
-    assert schedule_plan.week_of(_at(13), start) == 1
-    assert schedule_plan.week_of(_at(14), start) == 2
-    assert schedule_plan.week_of(date(2026, 9, 6), start) is None
-    assert schedule_plan.week_of(_at(7), None) is None
-    (row,) = _rows([Release("l", _at(22), [])], start=start)
-    assert row.week == 3
+def test_a_label_carries_its_number_at_either_end():
+    for label, n in {
+        "lecture_03": 3,
+        "lab-09": 9,
+        "01_lab": 1,
+        "readings 12": 12,
+        "course-intro": None,
+        "week3": 3,
+    }.items():
+        assert schedule_plan.label_number(label) == n, label
+
+
+def _shown(rows):
+    return [(sr.row.key, sr.number, [r.key for r in sr.readings]) for sr in rows]
+
+
+def test_numbers_come_from_the_entry_then_the_label_then_the_position():
+    rows = _rows(
+        [
+            Release("intro", _at(1), [Deploy("cm", "lectures/a")]),
+            Release("lecture-09", _at(2), [Deploy("cm", "lectures/b")]),
+            Release("guest", _at(3), [Deploy("cm", "lectures/c")], number=20),
+            Release("wrap-up", _at(4), [Deploy("cm", "lectures/d")]),
+        ]
+    )
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("intro", 1, []),
+        ("lecture-09", 9, []),
+        ("guest", 20, []),
+        ("wrap-up", 4, []),
+    ]
+
+
+def test_a_silent_entry_is_no_row_and_renumbers_nothing():
+    # Maths: a silent setup copy and a silent quiz between the lectures.
+    rows = _rows(
+        [
+            Release("a", _at(1), [Deploy("cm", "lectures/a")]),
+            Release("setup", _at(2), [Deploy("cm", "m4ds")], show_on_site=False),
+            Release("b", _at(3), [Deploy("cm", "lectures/b")]),
+        ]
+    )
+    assert _shown(schedule_plan.site_rows(rows)) == [("a", 1, []), ("b", 2, [])]
+
+
+def test_untitled_readings_attach_to_the_next_shown_lecture():
+    rows = _rows(
+        [
+            Release("r1", _at(1), [Deploy("cm", "readings/01")], show_on_site=False),
+            Release("l1", _at(3), [Deploy("cm", "lectures/01")]),
+            Release(
+                "r2",
+                _at(4),
+                [Deploy("cm", "readings/02")],
+                title="Attention, further",
+                show_on_site=False,
+            ),
+            Release("r3", _at(9), [Deploy("cm", "readings/03")]),
+        ]
+    )
+    # A titled one is its own (unnumbered, off-schedule) row; one no lecture follows is
+    # its own numbered row.
+    assert _shown(schedule_plan.site_rows(rows)) == [
+        ("l1", 1, ["r1"]),
+        ("r2", None, []),
+        ("r3", 3, []),
+    ]

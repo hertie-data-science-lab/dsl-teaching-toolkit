@@ -13,9 +13,14 @@ and writes it to `.system/SYLLABUS.sessions.md` (never released to students);
 the course team pastes what they want.
 
 Readings are read from the COURSE org's source repos, not from what has been released: a
-syllabus is written before the term starts, when nothing has shipped yet. Every entry of
-kind `readings`, from any repo, is listed under the first lecture on or after its date
-(readings ship ahead of their session); one after the last lecture closes the list.
+syllabus is written before the term starts, when nothing has shipped yet. Sessions, their
+numbers and the readings under each are the website's own rows
+(`schedule_plan.site_rows`): an untitled readings entry, from any repo, sits under the
+first lecture on or after its date; any other readings entry closes the list under
+"Further readings".
+
+`--course-source-repo` names the materials repo the block is written into
+(`.system/SYLLABUS.sessions.md`); it no longer limits where readings are read from.
 
 Usage:
     python3 -m dsl_course.syllabus --course-org COURSE --semester-org SEMESTER \\
@@ -42,7 +47,7 @@ from .log import (
 from .materials import read as read_materials
 from .readings import demote_headings, readings_block
 from .repos import default_branch
-from .schedule_plan import PlannedRow, planned_rows
+from .schedule_plan import PlannedRow, planned_rows, site_rows
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.
@@ -80,44 +85,39 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
 def build(course_org: str, semester_org: str) -> tuple[str, int]:
     """The syllabus's sessions section as markdown, plus how many sessions it holds.
 
-    Sessions are the schedule's shown lecture entries, from `schedule_plan.planned_rows`,
-    the rows the website reads, so the two cannot disagree about what a session is called.
-    Readings attach by date (see the module docstring)."""
+    Sessions are the shown lecture rows of `schedule_plan.site_rows`, numbered as the
+    website numbers them, so the two cannot disagree about what session 3 is called."""
     sched = schedule.load(semester_org)
     rows = planned_rows(sched, lambda repo: read_materials(course_org, repo).kinds)
-    lectures = [r for r in rows if r.shown and r.kind == "lecture"]
-    readings: dict[int, list[PlannedRow]] = {}
-    for r in rows:
-        if r.kind == "readings":
-            at = next(
-                (i for i, lec in enumerate(lectures) if lec.when >= r.when),
-                len(lectures),
-            )
-            readings.setdefault(at, []).append(r)
+    shown = site_rows(rows)
+    lectures = [sr for sr in shown if sr.row.shown and sr.row.kind == "lecture"]
+    further = [sr.row for sr in shown if sr.row.kind == "readings"]
     trees: dict[str, tuple[str, ...]] = {}
 
-    out = ["## Course sessions and readings", ""]
-    for i in range(len(lectures) + 1):
-        if i < len(lectures):
-            row = lectures[i]
-            out.append(
-                f"### Session {i + 1}{f': {row.subtitle}' if row.subtitle else ''}"
-            )
-            out.append("")
-            if row.details:
-                out.append(f"*Learning objectives.* {' '.join(row.details.split())}")
-                out.append("")
-        elif readings.get(i):
-            out.append("### Further readings")
-            out.append("")
-        for r in readings.get(i, []):
+    def readings(entries: list[PlannedRow]) -> list[str]:
+        out = []
+        for r in entries:
             text = _readings_for(course_org, r, trees)
             if text:
                 # The teaching team's own headings and ordering kept verbatim - a
                 # syllabus's `Required Readings` / `Optional Readings` split is theirs to
                 # make - but pushed below the session heading above them.
-                out.append(demote_headings(text, _READINGS_SHIFT))
-                out.append("")
+                out += [demote_headings(text, _READINGS_SHIFT), ""]
+        return out
+
+    out = ["## Course sessions and readings", ""]
+    for sr in lectures:
+        row = sr.row
+        out += [
+            f"### Session {sr.number}{f': {row.subtitle}' if row.subtitle else ''}",
+            "",
+        ]
+        if row.details:
+            out += [f"*Learning objectives.* {' '.join(row.details.split())}", ""]
+        out += readings(sr.readings)
+    tail = readings(further)
+    if tail:
+        out += ["### Further readings", "", *tail]
     return "\n".join(out).rstrip() + "\n", len(lectures)
 
 

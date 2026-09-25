@@ -398,8 +398,10 @@ def tab_word(word: str) -> str:
 def kind_tab(kind: dict) -> _ThemePage:
     """The tab page listing one kind's rows: `lecture` -> Lectures at `/lectures/`, the
     permalinks every existing site already has."""
-    slug_ = tab_word(kind["key"])
-    title = tab_word(kind["label"])
+    # `other` is where an unknown kind lands: its tab says so, whatever the row label.
+    other = kind["key"] == policy.FALLBACK_KIND
+    slug_ = "other" if other else tab_word(kind["key"])
+    title = "Other" if other else tab_word(kind["label"])
     return _ThemePage(
         f"{slug_}.md",
         "kind",
@@ -417,15 +419,30 @@ def kind_pages(present: Iterable[str]) -> tuple[_ThemePage, ...]:
     return tuple(kind_tab(k) for k in policy.kinds() if k["key"] in wanted)
 
 
-def retired_kind_pages(present: Iterable[str]) -> tuple[str, ...]:
+# The shape of a tab page this sync (or an earlier one) wrote: its own front matter,
+# in its own order. A page someone made by hand does not start like this.
+_WRITTEN_TAB = re.compile(
+    r"\A---\nlayout: (kind|lectures|labs|readings)\ntitle: .*\npermalink: /"
+)
+
+
+def retired_kind_pages(present: Iterable[str], site_wd: Path) -> tuple[str, ...]:
     """The tab files of every content kind this semester has NO rows of, for
-    `SitePlan.retire`: a tab that lists nothing goes."""
+    `SitePlan.retire`: a tab that lists nothing goes - but only a page the sync wrote,
+    never one made by hand under the same name."""
     wanted = set(present)
-    return tuple(
-        kind_tab(k).file
-        for k in policy.kinds()
-        if not k["system"] and k["key"] not in wanted
-    )
+    out = []
+    for k in policy.kinds():
+        if k["system"] or k["key"] in wanted:
+            continue
+        page = site_wd / kind_tab(k).file
+        try:
+            text = page.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _WRITTEN_TAB.match(text):
+            out.append(page.name)
+    return tuple(out)
 
 
 def _site_pages(semester: bool, kinds: Iterable[str] = ()) -> tuple[_ThemePage, ...]:

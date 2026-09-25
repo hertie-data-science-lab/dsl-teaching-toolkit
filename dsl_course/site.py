@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import stat
 import sys
@@ -73,6 +74,7 @@ from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .grades import load_grading_spec, spoken_day, team_cap, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
+from .materials import DEFAULT_SYLLABUS, alias_kind
 from .materials import read as read_materials
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -82,7 +84,13 @@ from .repos import (
     has_denied_component,
     has_never_material_component,
 )
-from .schedule_plan import PlannedRow, deploy_dest, deploy_section, planned_rows
+from .schedule_plan import (
+    PlannedRow,
+    deploy_dest,
+    deploy_section,
+    planned_rows,
+    site_rows,
+)
 from .site_repo import (
     PUBLISH_CONFIG,
     Link,
@@ -527,18 +535,28 @@ def _landed(
 
 def _row_landed(
     semester_org: str,
-    row: PlannedRow,
+    deploys: tuple[schedule.Deploy, ...],
     allow: frozenset[str],
     hosted: Hosted,
     live_repos: frozenset[str],
+    readings: bool,
 ) -> list[_Landed]:
-    """Everything the row's copies have landed, in plan order; a copy into a repo the
-    semester does not have yet has landed nothing."""
+    """Everything these copies have landed, in plan order. A copy into a repo the semester
+    does not have yet has landed nothing, and a copy that lands INSIDE another copy of the
+    same row (a lab's `solutions/`) is already listed by that one."""
+    dests = [(d.semester_dest_repo, deploy_dest(d)) for d in deploys]
+
+    def inside(repo: str, path: str) -> bool:
+        return any(
+            r == repo and p != path and (not p or path.startswith(f"{p}/"))
+            for r, p in dests
+        )
+
     out = []
-    for deploy in row.deploys:
-        if deploy.semester_dest_repo not in live_repos:
+    for deploy, (repo, path) in zip(deploys, dests, strict=True):
+        if repo not in live_repos or inside(repo, path):
             continue
-        landed = _landed(semester_org, deploy, allow, hosted, row.kind == "readings")
+        landed = _landed(semester_org, deploy, allow, hosted, readings)
         if landed is not None:
             out.append(landed)
     return out
@@ -837,34 +855,60 @@ def _kind_label(kind: str) -> str:
     return next((k["label"] for k in policy.kinds() if k["key"] == kind), kind)
 
 
+# The section label an attached readings entry's links are filed under, so the Readings
+# tab can pick them off a lecture's row whatever the folder is called.
+READINGS_LINKS = "readings"
+
+
+@dataclass
+class _Row:
+    """Everything one `_lectures` file says, gathered before it is written."""
+
+    kind: str
+    subtitle: str = ""
+    details: str = ""
+    when: date | datetime | None = None  # None: an off-plan folder, on its tab only
+    number: int | None = None
+    tbc: bool = False
+    off_schedule: bool = False
+    landed: list[_Landed] = field(default_factory=list)
+    readings: list[_Landed] = field(default_factory=list)
+    readings_pending: bool = False
+    dests: list[str] = field(default_factory=list)
+    order: str = ""  # an off-plan row's place on its tab
+
+
 def _row_entry(
-    semester_org: str,
-    row: PlannedRow,
-    number: int,
-    landed: list[_Landed],
-    live_repos: frozenset[str] = frozenset(),
+    semester_org: str, row: _Row, live_repos: frozenset[str] = frozenset()
 ) -> str:
-    """One `_lectures` row: a `releases:` entry, of any kind.
+    """One `_lectures` row, of any kind.
 
-    `title` is the kind's label and the row's number within its kind ("Lecture 3",
-    "Lab 3"); `subtitle` and `details` are the entry's `title:` and `details:`, omitted when
-    empty so the templates can test for them. `number` and `week` are the row's own
-    position ("Week N" counts from `semester_start`); `kind` names it and `type` repeats
-    it for templates that have not moved to `kind` yet.
+    `title` is the kind's label and the row's number ("Lecture 3", "Lab 9"; the label
+    alone when unnumbered); `subtitle` and `details` are the entry's `title:` and
+    `details:`, omitted when empty. `kind` names it and `type` repeats it for templates
+    that have not moved to `kind` yet. `tabs` are the kind tabs that list it: a lecture
+    carrying its week's readings is on the Readings tab too, under the same name.
 
-    `landed` is what the entry's copies have landed (`_row_landed`), each copy's links
-    under its section. EMPTY is the not-yet-released row: no links, `unreleased: true`, and
-    a line naming where the copies will land. A readings row inlines the text of any
-    reading-list overlay it landed. `silent: true` marks a `show_on_site: false` row,
-    which the schedule and the Updates box leave out; its kind's tab still lists it."""
-    title = f"{_kind_label(row.kind)} {number}"
+    Nothing landed (its own copies or its readings) is the not-yet-released row:
+    `unreleased: true` and a line naming where the copies will land. `readings_pending`:
+    readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
+    row, left off the schedule and the Updates box. `undated`: an off-plan folder."""
+    label = _kind_label(row.kind)
+    title = f"{label} {row.number}" if row.number is not None else label
     # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - faculty repeat the identifier as readily in the plan as in a README.
     subtitle, details = row_name(row.subtitle, title), row.details
-    reading_list = _reading_list(semester_org, landed) if landed else ""
-    links = links_block([(item.section, item.links) for item in landed])
+    own = row.landed if row.kind == "readings" else []
+    reading_list = _reading_list(semester_org, [*own, *row.readings])
+    links = links_block(
+        [(item.section, item.links) for item in row.landed]
+        + [(READINGS_LINKS, item.links) for item in row.readings]
+    )
+    tabs = [row.kind]
+    if row.kind != "readings" and (row.readings or row.readings_pending):
+        tabs.append("readings")
     flags, body = "", ""
-    if not landed:
+    if not row.landed and not row.readings:
         flags = "unreleased: true\n"
         where = ", ".join(_dest_link(semester_org, d, live_repos) for d in row.dests)
         # Italic, with the lead in bold: this is the one line on an unreleased row.
@@ -878,24 +922,121 @@ def _row_entry(
     # row still fires exactly when its entry says.
     if row.tbc:
         flags += "tbc: true\n"
-    if not row.shown:
-        flags += "silent: true\n"
+    if row.off_schedule:
+        flags += "off_schedule: true\n"
+    if row.readings_pending:
+        flags += "readings_pending: true\n"
+    if row.when is None:
+        flags += f'undated: true\norder: "{q(row.order)}"\n'
     return (
         f"---\n"
         f"kind: {row.kind}\n"
         f"type: {row.kind}\n"  # the key the pinned theme reads, until its next release
-        f"number: {number}\n"
-        + (f"week: {row.week}\n" if row.week is not None else "")
-        + f"date: {iso_when(row.when)}\n"
-        f'title: "{q(title)}"\n'
+        + (f"number: {row.number}\n" if row.number is not None else "")
+        + (f"date: {iso_when(row.when)}\n" if row.when is not None else "")
+        + f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
         + _details(details)
+        + f"tabs: [{', '.join(tabs)}]\n"
         + flags
         + (block("reading_list", reading_list) if reading_list else "")
         + f"{links}\n"
         f"---\n"
         f"{body}\n"
     )
+
+
+def _row_filename(row: _Row, key: str, taken: dict[str, str]) -> str:
+    """The row's file: `row_file` when numbered (`session-03.md`, `lab-09.md`), else
+    named for its entry or folder; a number two entries share gets the second's key."""
+    prefix = row_file(1, row.kind).rsplit("-", 1)[0]
+    name = (
+        row_file(row.number, row.kind)
+        if row.number is not None
+        else f"{prefix}-{slug(key)}.md"
+    )
+    if name in taken:
+        name = f"{name[:-3]}-{slug(key)}.md"
+    return name
+
+
+def _offplan_folders(
+    semester_org: str, rows: list[PlannedRow], live_repos: frozenset[str]
+) -> list[tuple[str, str, str]]:
+    """`(repo, folder path, kind)` for every released folder of a kind-named section
+    (`lectures/`, `labs/`, `readings/`, ..., or a repo so named) that no entry copies:
+    material released outside the plan (the manual workflow, a semester with no
+    `releases:`). Decision 0013: it keeps a row, on its kind's tab."""
+    copies = [(d.semester_dest_repo, deploy_dest(d)) for r in rows for d in r.deploys]
+
+    def covered(repo: str, folder: str) -> bool:
+        return any(
+            r == repo
+            and (
+                not p
+                or p == folder
+                or folder.startswith(f"{p}/")
+                or p.startswith(f"{folder}/")
+            )
+            for r, p in copies
+        )
+
+    found: dict[tuple[str, str], str] = {}
+    for repo in sorted(live_repos):
+        _branch, blobs = _repo_tree(semester_org, repo)
+        for path in blobs:
+            parts = path.split("/")
+            if len(parts) >= 3 and (kind := alias_kind(parts[0])):
+                folder = "/".join(parts[:2])
+            elif len(parts) >= 2 and (kind := alias_kind(repo)):
+                folder = parts[0]
+            else:
+                continue
+            if not _publishable(path) or covered(repo, folder):
+                continue
+            found.setdefault((repo, folder), kind)
+    return [(repo, folder, kind) for (repo, folder), kind in found.items()]
+
+
+def _offplan_rows(
+    semester_org: str,
+    rows: list[PlannedRow],
+    allow: frozenset[str],
+    hosted: Hosted,
+    live_repos: frozenset[str],
+) -> list[tuple[str, _Row]]:
+    """`(key, row)` for each off-plan folder: unnumbered, undated, named for its folder. A
+    readings folder joins the lecture folder of the same `NN_` ordinal, as such folders
+    always did; the rest are rows of their own."""
+
+    def land(repo: str, folder: str, readings: bool) -> list[_Landed]:
+        deploy = schedule.Deploy("", folder, repo)
+        return _row_landed(semester_org, (deploy,), allow, hosted, live_repos, readings)
+
+    folders = _offplan_folders(semester_org, rows, live_repos)
+    lectures = {
+        session_number(f.rsplit("/", 1)[-1]): (repo, f)
+        for repo, f, kind in folders
+        if kind == "lecture" and session_number(f.rsplit("/", 1)[-1]) is not None
+    }
+    joined: dict[tuple[str, str], list[_Landed]] = {}
+    out = []
+    for repo, folder, kind in folders:
+        n = session_number(folder.rsplit("/", 1)[-1])
+        if kind == "readings" and n in lectures:
+            joined.setdefault(lectures[n], []).extend(land(repo, folder, True))
+            continue
+        name = re.sub(r"^0*\d+_", "", folder.rsplit("/", 1)[-1])
+        row = _Row(
+            kind,
+            subtitle=name.replace("-", " ").replace("_", " ").strip().capitalize(),
+            landed=land(repo, folder, kind == "readings"),
+            order=f"{repo}/{folder}",
+        )
+        out.append(((repo, folder), row))
+    for key, row in out:
+        row.readings = joined.get(key, [])
+    return [(folder.rsplit("/", 1)[-1], row) for (_repo, folder), row in out]
 
 
 def _site_rows(
@@ -905,24 +1046,51 @@ def _site_rows(
     hosted: Hosted,
     live_repos: frozenset[str],
 ) -> tuple[dict[str, str], list[str]]:
-    """The `_lectures` collection - one file per row, numbered within its kind in date
-    order (`row_file`) - and the kinds it holds rows of.
+    """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`),
+    plus the off-plan folders' rows - and the kind tabs it needs.
 
     Every row the schedule shows is written, released or not, so the whole term reads as
-    a syllabus from the day it is written. A silent row (`show_on_site: false`) is written
-    only once something has landed, and never when all it landed is root files - the
-    syllabus a `course-intro` entry ships is a course document, not a row."""
-    out: dict[str, str] = {}
-    numbers: dict[str, int] = {}
-    for row in rows:
-        landed = _row_landed(semester_org, row, allow, hosted, live_repos)
-        if not row.shown and all(item.root_file for item in landed):
-            continue
-        n = numbers[row.kind] = numbers.get(row.kind, 0) + 1
-        out[row_file(n, row.kind)] = _row_entry(
-            semester_org, row, n, landed, live_repos
+    a syllabus from the day it is written. A silent readings row is written only once
+    something has landed, and never when all it landed is root files."""
+    built: list[tuple[str, _Row]] = []
+    for sr in site_rows(rows):
+        r = sr.row
+        landed = _row_landed(
+            semester_org, r.deploys, allow, hosted, live_repos, r.kind == "readings"
         )
-    return out, list(numbers)
+        if not r.shown and all(item.root_file for item in landed):
+            continue
+        readings = []
+        pending = False
+        for attached in sr.readings:
+            got = _row_landed(
+                semester_org, attached.deploys, allow, hosted, live_repos, True
+            )
+            readings += got
+            pending = pending or not got
+        row = _Row(
+            r.kind,
+            subtitle=r.subtitle,
+            details=r.details,
+            when=r.when,
+            number=sr.number,
+            tbc=r.tbc,
+            off_schedule=not r.shown,
+            landed=landed,
+            readings=readings,
+            readings_pending=pending,
+            dests=r.dests,
+        )
+        built.append((r.key, row))
+    built += _offplan_rows(semester_org, rows, allow, hosted, live_repos)
+    out: dict[str, str] = {}
+    tabs: dict[str, None] = {}
+    for key, row in built:
+        out[_row_filename(row, key, out)] = _row_entry(semester_org, row, live_repos)
+        tabs[row.kind] = None
+        if row.kind != "readings" and (row.readings or row.readings_pending):
+            tabs["readings"] = None
+    return out, list(tabs)
 
 
 def _declared_syllabus(
@@ -934,34 +1102,56 @@ def _declared_syllabus(
 ) -> Link | None:
     """The syllabus released to this semester, or None - the home page then shows no line.
 
-    By declaration: each source repo's `materials.yml` `syllabus:` (default `SYLLABUS.md`),
-    followed through the copy that ships it (a copy of that file, of a folder holding it,
-    or of the whole repo) to where it landed. The first one that has landed, in plan
-    order, is pinned - as its hosted copy when the course publishes it, else the GitHub
-    blob."""
+    Decision 0013 item 5, in order:
+    1. each source repo's declared syllabus (`materials.yml` `syllabus:`, default
+       `SYLLABUS.md`), followed through the copy that ships it (that file, a folder
+       holding it, the whole repo) to where it landed;
+    2. the same file at its own path in a released repo (a copy made off the plan);
+    3. when no repo declares one: a root file whose name contains `syllab`, an exact
+       `syllabus.*` stem first.
+    Pinned as its hosted copy when the course publishes it, else the GitHub blob."""
+
+    def link(repo: str, path: str) -> Link:
+        branch, _blobs = _repo_tree(semester_org, repo)
+        return _file_link(
+            semester_org, repo, branch, path, path.rsplit("/", 1)[-1], hosted
+        )
+
+    declared: dict[str, None] = {}
+    any_declared = False
     for release in sched.releases:
         for d in release.deploy:
+            decl = read_materials(course_org, d.course_source_repo)
+            declared[decl.syllabus] = None
+            any_declared = any_declared or decl.declared
             if d.semester_dest_repo not in live_repos:
                 continue
-            declared = read_materials(course_org, d.course_source_repo).syllabus
             src, dest = d.course_source_path.strip("/"), deploy_dest(d)
-            if src == declared:
+            if src == decl.syllabus:
                 path = dest
-            elif not src or declared.startswith(f"{src}/"):
-                path = f"{dest}/{declared[len(src) :].lstrip('/')}".strip("/")
+            elif not src or decl.syllabus.startswith(f"{src}/"):
+                path = f"{dest}/{decl.syllabus[len(src) :].lstrip('/')}".strip("/")
             else:
                 continue
-            branch, blobs = _repo_tree(semester_org, d.semester_dest_repo)
+            if path in _repo_tree(semester_org, d.semester_dest_repo)[1]:
+                return link(d.semester_dest_repo, path)
+    declared.setdefault(DEFAULT_SYLLABUS, None)
+    for repo in sorted(live_repos):
+        blobs = _repo_tree(semester_org, repo)[1]
+        for path in declared:
             if path in blobs:
-                return _file_link(
-                    semester_org,
-                    d.semester_dest_repo,
-                    branch,
-                    path,
-                    path.rsplit("/", 1)[-1],
-                    hosted,
-                )
-    return None
+                return link(repo, path)
+    if any_declared:
+        return None
+    fallback = None
+    for repo in sorted(live_repos):
+        for path in _repo_tree(semester_org, repo)[1]:
+            if "/" in path or "syllab" not in path.lower():
+                continue
+            if path.rsplit(".", 1)[0].lower() == "syllabus":
+                return link(repo, path)
+            fallback = fallback or link(repo, path)
+    return fallback
 
 
 def member_digest(semester_org: str, handle: str) -> str:
@@ -1614,7 +1804,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
         planned = planned_rows(
             sched, lambda repo: read_materials(course_org, repo).kinds
         )
-        live = frozenset(content_repos)
+        # The repos the release plan names or a released session was found in: never a
+        # student's repo, whose folder names would reach this public site.
+        live = frozenset(indexable)
         rows, present = _site_rows(semester_org, planned, allow, hosted, live)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
@@ -1757,7 +1949,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 "_events": event_entries,
             },
             # The tab of a kind this semester has no rows of goes.
-            retire=retired_kind_pages(present),
+            retire=retired_kind_pages(present, site_wd),
             commit="site: sync from org structure",
             title="Student site",
         )

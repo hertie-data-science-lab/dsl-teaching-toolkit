@@ -9,18 +9,32 @@ layout: page
 {% include open_in.html %}
 
 {% comment %}
-One tab per row kind the semester has (Lectures, Labs, Readings, Drop-ins, ...): the page's
-own `kind` selects its rows out of the _lectures collection, in date order, each through
-the shared session block. A readings row's inlined reading list sits where a row's
-details do. A silent row (`show_on_site: false`) is listed here once it has landed; only
-the schedule and the Updates box leave it out.
+One tab per row kind the semester has (Lectures, Labs, Readings, Drop-ins, ...). The page's
+own `kind` selects every row whose `tabs` name it: a lecture carrying its week's readings
+is on the Readings tab too, under the same name, showing only its reading links. Dated
+rows come in date order, then the rows of folders released outside the plan (`undated`).
+An `events:` row of the same kind (an exam) is listed after them.
 {% endcomment %}
-{% assign entries = site.lectures | where: "kind", page.kind | sort: 'date' %}
+{% assign rows = site.lectures | where_exp: "entry", "entry.tabs contains page.kind" %}
+{% assign dated = rows | where_exp: "entry", "entry.undated != true" | sort: 'date' %}
+{% assign undated = rows | where: "undated", true | sort: 'order' %}
+{% assign entries = dated | concat: undated %}
 {% for entry in entries %}
+{% assign only = nil %}
+{% if page.kind == "readings" and entry.kind != "readings" %}{% assign only = "reading" %}{% endif %}
 <section class="session">
-{% capture citations %}{% if entry.reading_list %}<div class="reading-list markdown-content">{{ entry.reading_list | markdownify }}</div>{% endif %}{% endcapture %}
-{% include session_entry.html entry=entry extra=citations %}
+{% capture citations %}{% if entry.reading_list %}<div class="reading-list markdown-content">{{ entry.reading_list | markdownify }}</div>{% endif %}{% if page.kind == "readings" and entry.readings_pending and entry.unreleased != true %}<p class="session-note"><em>Readings for this session are not yet released.</em></p>{% endif %}{% endcapture %}
+{% include session_entry.html entry=entry section=only extra=citations %}
 </section>
 {% unless forloop.last %}<hr class="session-rule"/>{% endunless %}
 {% endfor %}
-{% if entries.size == 0 %}<p>Nothing released yet.</p>{% endif %}
+{% assign events = site.events | where: "kind", page.kind | sort: 'date' %}
+{% for event in events %}
+{% if entries.size > 0 or forloop.index > 1 %}<hr class="session-rule"/>{% endif %}
+<section class="session">
+<h2 class="session-title">{{ event.title }}</h2>
+<p>{{ event.date | date: site.dateformat }}{% if event.tbc %} <b>(TBC)</b>{% endif %}</p>
+{%- include schedule_details.html details=event.details -%}
+</section>
+{% endfor %}
+{% if entries.size == 0 and events.size == 0 %}<p>Nothing released yet.</p>{% endif %}

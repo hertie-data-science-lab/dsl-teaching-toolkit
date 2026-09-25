@@ -9,8 +9,9 @@ touches GitHub or renders anything - `site` turns rows into pages, `syllabus` in
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from . import schedule
@@ -55,13 +56,15 @@ def entry_kind(
     return DEFAULT_KIND, True
 
 
-def week_of(when: date | datetime, start: date | None) -> int | None:
-    """The teaching week a date falls in, counted from `semester_start` (week 1 is the
-    seven days from it); None before the start or when the semester names no start."""
-    if start is None:
-        return None
-    day = when.date() if isinstance(when, datetime) else when
-    return (day - start).days // 7 + 1 if day >= start else None
+# A label's own number: trailing (`lecture_03`, `lab-9`, `s5`) or leading (`01_lab`), as
+# the console has always read it.
+_LABEL_NUMBER = re.compile(r"0*(\d+)$|^0*(\d+)[-_ ]")
+
+
+def label_number(label: str) -> int | None:
+    """The number a label carries (`lecture_03` -> 3, `01_lab` -> 1), or None."""
+    m = _LABEL_NUMBER.search(label.strip())
+    return int(m.group(1) or m.group(2)) if m else None
 
 
 @dataclass
@@ -80,7 +83,7 @@ class PlannedRow:
     subtitle: str = ""
     details: str = ""
     shown: bool = True
-    week: int | None = None
+    number: int | None = None  # the entry's own `number:`
     deploys: tuple[schedule.Deploy, ...] = ()
 
     @property
@@ -112,8 +115,48 @@ def planned_rows(
                 subtitle=release.title,
                 details=release.details,
                 shown=release.show_on_site,
-                week=week_of(release.when, sched.semester_start),
+                number=release.number,
                 deploys=tuple(release.deploy),
             )
         )
     return rows
+
+
+@dataclass
+class SiteRow:
+    """One row the site shows: an entry, its number, and the untitled readings entries
+    that attach to it (a lecture's week's readings)."""
+
+    row: PlannedRow
+    number: int | None
+    readings: list[PlannedRow] = field(default_factory=list)
+
+
+def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
+    """The rows the site shows, in date order (decision 0013).
+
+    - An untitled `readings` entry attaches to the first SHOWN lecture on or after its
+      date; a titled one, or one no lecture follows, is its own row.
+    - A silent (`show_on_site: false`) entry is no row, unless it is readings: those are
+      rows of the Readings tab, unnumbered.
+    - A shown row's number: the entry's `number:`, else its label's number, else its
+      position among the shown rows of its kind. The syllabus reads the same numbers."""
+    lectures = [r for r in rows if r.shown and r.kind == "lecture"]
+    attached: dict[str, list[PlannedRow]] = {}
+    own = []
+    for r in rows:
+        if r.kind == "readings" and not r.subtitle:
+            host = next((lec for lec in lectures if lec.when >= r.when), None)
+            if host is not None:
+                attached.setdefault(host.key, []).append(r)
+                continue
+        if r.shown or r.kind == "readings":
+            own.append(r)
+    out, position = [], {}
+    for r in own:
+        number = None
+        if r.shown:
+            position[r.kind] = position.get(r.kind, 0) + 1
+            number = r.number or label_number(r.key) or position[r.kind]
+        out.append(SiteRow(r, number, attached.get(r.key, [])))
+    return out

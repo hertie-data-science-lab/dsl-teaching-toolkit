@@ -1,0 +1,38 @@
+SYLLABUS.md
+labs/01_deep-learning-in-public-policy/Lab_Session_1.ipynb
+labs/01_deep-learning-in-public-policy/Lab_session_1_Introduction_to_pandas.ipynb
+labs/01_deep-learning-in-public-policy/NOTES.md
+labs/02_deep-neural-networks-1/Lab_Session_2.ipynb
+labs/03_deep-neural-networks-2/Lab_Session_3.ipynb
+labs/04_computer-vision-1-cnns/Lab_Session_4.ipynb
+labs/05_computer-vision-2-modern-cnns/Lab_Session_5.ipynb
+labs/06_sequence-methods-and-time-series/Lab_session_6_&_7.ipynb
+lectures/01_deep-learning-in-public-policy/Session1_E1394_DL_preLecture.pdf
+lectures/01_deep-learning-in-public-policy/Session1_demo_deck.html
+lectures/01_deep-learning-in-public-policy/Session1_demo_deck_files/deck.css
+lectures/01_deep-learning-in-public-policy/Session1_demo_deck_files/figure.svg
+lectures/02_deep-neural-networks-1/Session2_E1394_DL.pdf
+lectures/03_deep-neural-networks-2/Session3_E1394_DL_Lecture.pdf
+lectures/04_computer-vision-1-cnns/Session4_E1394_DL_preLecture.pdf
+lectures/05_computer-vision-2-modern-cnns/Session5_E1394_DL_Lecture.pdf
+lectures/06_sequence-methods-and-time-series/Session6_E1394_DL_Lecture.pdf
+lectures/06_sequence-methods-and-time-series/Session6_E1394_DL_preLecture.pdf
+lectures/07_natural-language-processing-1/Session7_E1394_DL_preLecture.pdf
+lectures/08_nlp-2-encoder-decoder-and-attention/Session8_E1394_DL SECOND SESSION.pdf
+lectures/08_nlp-2-encoder-decoder-and-attention/Session8_E1394_DL.pdf
+readings/01_deep-learning-in-public-policy/READINGS.md
+readings/02_deep-neural-networks-1/READINGS.md
+readings/03_deep-neural-networks-2/READINGS.md
+readings/04_computer-vision-1-cnns/Kerner, H., Tseng, G., Becker-Reshef, I., Nakalembe, C., Barker, B., Munshell, B., Paliyam, M. and Hosseini, M., 2020. Rapid Response Crop Maps in Data Sparse Regions. arXiv preprin.pdf
+readings/04_computer-vision-1-cnns/READINGS.md
+readings/05_computer-vision-2-modern-cnns/1512.02325v5.pdf
+readings/05_computer-vision-2-modern-cnns/READINGS.md
+readings/05_computer-vision-2-modern-cnns/U-Net_ Convolutional Networks for Biomedical Image Segmentation.pdf
+readings/08_nlp-2-encoder-decoder-and-attention/Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn - An Image is Worth 16x16 Words Transformers for Image Recognition at Scale.pdf
+readings/08_nlp-2-encoder-decoder-and-attention/Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin - Attention Is All You Need.pdf
+readings/08_nlp-2-encoder-decoder-and-attention/Jacob Devlin, Ming-Wei Chang, Kenton Lee, Kristina Toutanova - BERT Pre-training of Deep Bidirectional Transformers for Language Understanding.pdf
+readings/08_nlp-2-encoder-decoder-and-attention/READINGS.md
+readings/09_further-topics/Gawlikowski.pdf
+readings/09_further-topics/references.bib
+readings/09_further-topics/seminar-notes.md
+readings/11_deep-learning-in-practice/midterm-guide.pdf

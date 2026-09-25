@@ -106,7 +106,11 @@ TREE = (
     "lectures/02_week-2/slides.pdf",
     "readings/01_week-1/READINGS.md",
     "readings/01_week-1/schmidhuber-1997.pdf",
+    "readings/extra/attention.pdf",
     "clinic/notes.pdf",
+    "exams/mock.pdf",
+    # Released outside the plan (no entry copies it): an undated row on the Labs tab.
+    "labs/02_week-2/Lab_Session_2.ipynb",
 )
 
 # What this course's `publish.yml` declares, through the real parser: rendered decks and
@@ -239,12 +243,21 @@ SCHEDULE = schedule.Schedule(
             "SYLLABUS.md",
             show_on_site=False,
         ),
-        # Silent readings, a week ahead: on the Readings tab only, reading list inlined.
+        # Silent untitled readings, a week ahead: attached to lecture 1 (its list inlined,
+        # and lecture 1 listed on the Readings tab).
         _release(
             "readings-1",
             datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
             "readings/01_week-1",
             show_on_site=False,
+        ),
+        # A titled silent readings entry: its own unnumbered row, on the Readings tab only.
+        _release(
+            "extra-reading",
+            datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
+            "readings/extra",
+            show_on_site=False,
+            title="Attention, further",
         ),
         # A drop-in whose one copy is a single file outside any session folder.
         _release(
@@ -263,11 +276,26 @@ SCHEDULE = schedule.Schedule(
             details="Perceptrons, activation functions and the chain rule.",
         ),
         _release("lab-1", datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN), "labs/01_week-1"),
+        # Its readings are still to come: readings_pending on lecture 2.
+        _release(
+            "readings-2",
+            datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
+            "readings/02_week-2",
+            show_on_site=False,
+        ),
         _release(
             "lecture-2",
             datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
             "lectures/02_week-2",
             title="Backpropagation",
+        ),
+        # An exam kind: the Exams tab, which also lists the `events:` exams. Dated early,
+        # so it stays out of the Updates box the CI job checks (the seven newest).
+        _release(
+            "mock-exam",
+            datetime(2026, 8, 25, 10, 0, tzinfo=BERLIN),
+            "exams/mock.pdf",
+            kind="exam",
         ),
         # Nothing shipped -> unreleased, and the row names where it will land.
         _release(
