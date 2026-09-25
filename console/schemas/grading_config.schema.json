@@ -34,9 +34,28 @@
     },
     "questions": {
       "additionalProperties": {
-        "type": [
-          "string",
-          "number"
+        "oneOf": [
+          {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "points": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              }
+            },
+            "type": "object"
+          }
         ]
       },
       "type": "object"

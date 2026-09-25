@@ -705,6 +705,7 @@ def _distribute(
     exported: str | None = None,
     preview_issues: list[dict] | None = None,
     assignment: str | None = None,
+    include_feedback: bool = False,
 ) -> dict:
     """`distribute` over a local semester-config clone, writing to nothing.
 
@@ -819,7 +820,11 @@ def _distribute(
         )[1],
     )
     effects["rc"] = grades.distribute(
-        "SEMESTER", notify=notify, dry_run=dry_run, assignment=assignment
+        "SEMESTER",
+        notify=notify,
+        dry_run=dry_run,
+        assignment=assignment,
+        include_feedback=include_feedback,
     )
     return effects
 
@@ -2777,3 +2782,117 @@ def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
     assert grades.dispatch_refusal("C", "sem", "a1") == ""
     assert "not due" in grades.dispatch_refusal("C", "Sem", "a2")
     assert "not a semester" in grades.dispatch_refusal("C", "Other", "a1")
+
+
+# ------------------------------------------------------------- per-question feedback
+
+_QUESTIONS_GRADING = _GRADING_YML + "questions:\n  Q1: 30\n  Q2: 20\n"
+_QUESTION_SHEET = """\
+submissions:
+  ada-l:
+    info:
+      submitted: '2026-10-03T22:14+02:00'
+      days_late: 0
+    adjustment_individual:
+    feedback_individual: |
+      Clean derivation.
+    notes_not_shared_with_students: chased by email
+    score_individual:
+      Q1: 25
+      Q2: 18
+    feedback_per_question:
+      Q1:
+      Q2: |
+        The bound is loose.
+        Tighten it with the second lemma.
+"""
+
+
+def test_per_question_feedback_reaches_the_gradebook_under_each_question(
+    tmp_path, monkeypatch
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _QUESTION_SHEET},
+        grading=_QUESTIONS_GRADING,
+    )
+    ((_repo, files, _d),) = out["gradebooks"]
+    book = yaml.safe_load(files["grades.yml"])["assignments"]["assignment-1"]
+    # a blank cell is not sent
+    assert book[grades.QUESTION_FEEDBACK_KEY] == {
+        "Q2": "The bound is loose.\nTighten it with the second lemma."
+    }
+    readme = files["README.md"]
+    assert "Clean derivation." in readme
+    assert (
+        "- **Q2:** The bound is loose.\n  Tighten it with the second lemma." in readme
+    )
+    assert "**Q1:**" not in readme
+
+
+def test_the_marks_email_lists_overall_then_per_question_feedback(
+    tmp_path, monkeypatch
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _QUESTION_SHEET},
+        grading=_QUESTIONS_GRADING,
+        include_feedback=True,
+    )
+    ((message,),) = out["outbox"]
+    body = message[2]
+    assert body.index("Clean derivation.") < body.index("Q2: The bound is loose.")
+
+
+def test_a_teams_per_question_feedback_reaches_every_member():
+    spec = grades.SheetSpec(
+        slug="a1", title="A1", is_group=True, questions={"Q1": "5", "Q2": "5"}
+    )
+    block = {
+        "feedback_group": "Good.",
+        "members": {"ada-l": {}, "ben-k": {}},
+        "score_group": {"Q1": "4", "Q2": "5"},
+        grades.QUESTION_FEEDBACK_KEY: {"Q2": "Neat proof.", "Q1": None},
+    }
+    for handle in ("ada-l", "ben-k"):
+        view = grades.student_view(spec, "alpha", block, handle)
+        assert view[grades.QUESTION_FEEDBACK_KEY] == {"Q2": "Neat proof."}
+
+
+def test_per_question_feedback_keeps_the_declared_order_and_a_mistyped_name():
+    spec = grades.SheetSpec(
+        slug="a1", title="A1", is_group=False, questions={"Q1": "5", "Q2": "5"}
+    )
+    said = grades.question_feedback(spec, {"Q3": "typo", "Q2": "b", "Q1": "a"})
+    assert list(said) == ["Q1", "Q2", "Q3"]
+
+
+def test_a_question_may_name_the_file_it_is_marked_from():
+    spec = grades.parse_grading_spec(
+        "formats: [ipynb, latex]\n"
+        "questions:\n"
+        "  Q1: 10\n"
+        "  Q2: {points: 5, file: starter.tex}\n"
+    )
+    assert spec.format == "ipynb"  # the runnable one
+    assert spec.questions == {"Q1": "10", "Q2": "5"}
+    assert spec.question_files == {"Q2": "starter.tex"}
+    assert spec.dropped == ()
+
+
+@pytest.mark.parametrize(
+    "entry", ["{points: 5, file: ../secret.tex}", "{points: 5, file: /etc/x}"]
+)
+def test_a_question_file_outside_the_submission_is_refused(entry):
+    spec = grades.parse_grading_spec(f"questions:\n  Q1: 10\n  Q2: {entry}\n")
+    assert spec.question_files is None
+    assert spec.questions == {"Q1": "10", "Q2": "5"}  # still marked, from the runnable
+    assert any("not a file inside the submission" in line for line in spec.dropped)
+
+
+def test_an_unknown_key_on_a_question_is_named_and_ignored():
+    spec = grades.parse_grading_spec("questions:\n  Q1: {points: 5, weight: 2}\n")
+    assert spec.questions == {"Q1": "5"}
+    assert any("`weight:`" in line for line in spec.dropped)

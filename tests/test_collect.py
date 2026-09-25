@@ -4478,14 +4478,13 @@ def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
     assert not any("info" in row for row in rows.values())
     assert not grades.sheet_is_frozen(text)
 
-    blank = "  ada-l:\n    score_individual:\n"
+    blank = "    notes_not_shared_with_students:\n    score_individual:\n  ben-k:"
     assert text.count(blank) == 1
+    marked = blank.replace("score_individual:", "score_individual: 17")
     out = _distribute(
         monkeypatch,
         tmp_path,
-        sheets={
-            "assignment-1": text.replace(blank, "  ada-l:\n    score_individual: 17\n")
-        },
+        sheets={"assignment-1": text.replace(blank, marked)},
         grading=_EXTERNAL_GRADING,
         roster_rows=ROSTER_ADA + "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-abd\n",
     )

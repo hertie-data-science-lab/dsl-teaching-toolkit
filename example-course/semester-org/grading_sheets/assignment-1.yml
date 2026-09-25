@@ -8,28 +8,28 @@
 #
 # Auto-filled by the toolkit: nothing. This assignment is submitted outside GitHub, so there is
 # no `info:` block and no late arithmetic.
-# You fill in: score_individual, adjustment_individual, feedback_individual,
-# notes_not_shared_with_students. Anything you type is never touched. Nothing reaches a student
-# until you run Distribute grades. YAML comments you add are not preserved when the toolkit
-# rewrites the file.
+# You fill in: adjustment_individual, feedback_individual, notes_not_shared_with_students,
+# score_individual. Anything you type is never touched. Nothing reaches a student until you run
+# Distribute grades. YAML comments you add are not preserved when the toolkit rewrites the
+# file.
 # -------------------------------------------------------------------------------------------
 submissions:
   anna-adams:
-    score_individual: 88
     adjustment_individual:
     feedback_individual: |
       Clear, correct solution.
       Watch the vectorised edge cases.
     notes_not_shared_with_students:
+    score_individual: 88
   ben-baker:
-    score_individual: 80
     adjustment_individual: -6
     feedback_individual: |
       Right idea; the proof in Q3 is incomplete.
     notes_not_shared_with_students: resubmission agreed by email
+    score_individual: 80
   carla-cohen:
-    score_individual: 91
     adjustment_individual:
     feedback_individual: |
       Excellent throughout.
     notes_not_shared_with_students:
+    score_individual: 91

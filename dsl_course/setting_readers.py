@@ -11,6 +11,7 @@ setting falls back to: None for a run setting, so the next layer of the cascade
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from pathlib import PurePosixPath
 from typing import Self
 from urllib.parse import urlsplit
 
@@ -214,12 +215,35 @@ def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
     return False
 
 
+# What one `questions:` entry may carry when it is a mapping rather than a bare maximum.
+QUESTION_KEYS = ("points", "file")
+
+
+def _question_points(name: str, entry: object, where: str, dropped: list[str]) -> str:
+    """One question's maximum AS TEXT: `Q1: 15`, or `Q1: {points: 15, file: ...}`."""
+    if isinstance(entry, dict):
+        extra = [str(k) for k in entry if str(k) not in QUESTION_KEYS]
+        if extra:
+            dropped.append(
+                Dropped(
+                    where,
+                    "questions",
+                    f"`questions: {name}:` has {', '.join(f'`{k}:`' for k in extra)}, "
+                    f"which is not {' or '.join(QUESTION_KEYS)} - ignored",
+                    QUESTION_KEYS,
+                )
+            )
+        entry = entry.get("points")
+    return "" if entry is None else str(entry).strip()
+
+
 def _questions(value: object, where: str, dropped: list[str]) -> dict[str, str] | None:
     """`questions:` as {name: maximum AS TEXT}.
 
     Text, because the maxima are only ever DISPLAYED - beside each blank in the sheet, and
     in its header - and a course that writes `1.5` must read back what it wrote. Anything
-    that is not a mapping is dropped with a warning rather than half-read."""
+    that is not a mapping is dropped with a warning rather than half-read. The file a
+    question is marked from is `question_files`."""
     if not isinstance(value, dict):
         dropped.append(
             Dropped(
@@ -230,11 +254,48 @@ def _questions(value: object, where: str, dropped: list[str]) -> dict[str, str] 
         )
         return None
     questions = {
-        str(name).strip(): ("" if points is None else str(points).strip())
-        for name, points in value.items()
+        str(name).strip(): _question_points(str(name).strip(), entry, where, dropped)
+        for name, entry in value.items()
         if str(name).strip()
     }
     return questions or None
+
+
+def _inside_submission(path: str) -> bool:
+    """Whether `path` names a file inside a submission: relative, no `..`, no backslash."""
+    parts = PurePosixPath(path).parts
+    return (
+        bool(parts)
+        and not path.startswith("/")
+        and ".." not in parts
+        and "\\" not in path
+    )
+
+
+def question_files(value: object, where: str, dropped: list[str]) -> dict[str, str]:
+    """`{question: the submission file it is marked from}`, for each `questions:` entry
+    that names one (`Q3: {points: 10, file: report.tex}`). A question that names none is
+    marked from the runnable format's file. A path that leaves the submission is refused
+    and the question falls back to the runnable file."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, str] = {}
+    for name, entry in value.items():
+        if not isinstance(entry, dict) or not str(entry.get("file") or "").strip():
+            continue
+        path = str(entry["file"]).strip()
+        if not _inside_submission(path):
+            dropped.append(
+                Dropped(
+                    where,
+                    "questions",
+                    f"`questions: {name}: file: {path}` is not a file inside the "
+                    f"submission - ignored, so it is marked from the runnable file",
+                )
+            )
+            continue
+        out[str(name).strip()] = path
+    return out
 
 
 def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:

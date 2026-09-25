@@ -488,9 +488,21 @@ _SPEC_TYPES = {
             {"type": "string"},
         ]
     },
+    # `Q1: 15`, or `Q1: {points: 15, file: report.tex}` for a question marked from a
+    # file other than the runnable starter.
     "questions": {
         "type": "object",
-        "additionalProperties": {"type": ["string", "number"]},
+        "additionalProperties": {
+            "oneOf": [
+                {"type": ["string", "number"]},
+                _obj(
+                    {
+                        "points": {"type": ["string", "number"]},
+                        "file": {"type": "string"},
+                    }
+                ),
+            ]
+        },
     },
     "late_window_days": {"type": "integer"},
     "late_penalty_per_day": {"type": ["string", "number"]},
