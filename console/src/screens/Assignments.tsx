@@ -32,7 +32,7 @@ function nextDate(a: Assignment, tz: string, year: number): string {
   }
 }
 
-/** Joined students in no team of `slug`, as the Teams tab counts them; null until both files are read. */
+/** Joined students in no team of `slug` (teams.csv keys on its semester-side name), as the Teams tab counts them; null until both files are read. */
 function teamless(p: ReadyProps, slug: string): number | null {
   const roster = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
   const teams = p.files.file(p.cohort.org, CONFIG_REPO, 'teams.csv');
@@ -40,7 +40,7 @@ function teamless(p: ReadyProps, slug: string): number | null {
   const joined = roster.kind === 'ready' ? parseRoster(roster.text).rows.filter((s) => s.handle) : [];
   const placed = new Set(
     (teams.kind === 'ready' ? readTable(teams.text).rows : [])
-      .filter((r) => (r.assignment ?? '').trim() === slug && (r.github_handle ?? '').trim())
+      .filter((r) => (r.assignment ?? '').trim() === sheetName(p, slug) && (r.github_handle ?? '').trim())
       .map((r) => r.github_handle.trim().toLowerCase()),
   );
   return joined.filter((s) => !placed.has(s.handle.toLowerCase())).length;

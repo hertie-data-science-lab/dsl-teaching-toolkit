@@ -237,6 +237,8 @@ export function TeamsTab(p: TabProps) {
   const [save, runSave, setSave] = useSave(env);
   const file = p.files.file(p.cohort.org, CONFIG_REPO, 'teams.csv');
   const roster = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
+  // teams.csv keys on the semester-side name, as the mark sheet does (`schedule.semester_name`).
+  const teamsKey = sheetName(p, a.slug);
   const layers = assignmentSettings(p, a.slug);
   const size = layers ? resolve('max_team_size', layers) : null;
   const formation = layers ? resolve('team_formation', layers) : null;
@@ -245,7 +247,7 @@ export function TeamsTab(p: TabProps) {
   const table = file.kind === 'ready' ? readTable(file.text) : { header: TEAMS_HEADER, rows: [] };
   const base: TeamsState = { teams: [] };
   for (const r of table.rows) {
-    if ((r.assignment ?? '').trim() !== a.slug) continue;
+    if ((r.assignment ?? '').trim() !== teamsKey) continue;
     const name = (r.team ?? '').trim();
     let t = base.teams.find((x) => x.name === name);
     if (!t) base.teams.push((t = { name, members: [] }));
@@ -276,11 +278,11 @@ export function TeamsTab(p: TabProps) {
   const over = cur.teams.filter((t) => t.members.length > maxSize);
   const doSave = async () => {
     if (over.length) return setSave({ kind: 'bad', text: `${over.map((t) => t.name).join(', ')} ${over.length > 1 ? 'have' : 'has'} more than ${maxSize} members.` });
-    const others = table.rows.filter((r) => (r.assignment ?? '').trim() !== a.slug);
-    const mine = cur.teams.flatMap((t) => (t.members.length ? t.members : ['']).map((h) => ({ assignment: a.slug, team: t.name, github_handle: h })));
+    const others = table.rows.filter((r) => (r.assignment ?? '').trim() !== teamsKey);
+    const mine = cur.teams.flatMap((t) => (t.members.length ? t.members : ['']).map((h) => ({ assignment: teamsKey, team: t.name, github_handle: h })));
     const header = table.header.length ? table.header : TEAMS_HEADER;
     const text = writeTable({ header, rows: [...others, ...mine.filter((r) => r.github_handle)] });
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${teamsKey}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) setDraft(null);
   };
   // As the engine's formation window: hand out to the late cutoff (due + the late window).
