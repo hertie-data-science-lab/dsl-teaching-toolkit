@@ -1,13 +1,18 @@
-// Course details (`.github/dsl-course.yml`): design/inputs.md "Set up a course" and the
-// revision brief's section 2 defaults. The admins list is edited as rows beside this form.
+// Course details (`.github/dsl-course.yml`): design/inputs.md "Set up a course". The admins
+// list is edited as rows beside this form. "Defaults for this course's assignments" is the
+// course layer of the cascade (decision 0009 rule 5): each field shows the institution's
+// value in grey, the one that applies when it is left empty.
 
-import { FORMATS, SUBMIT, VISIBILITY } from './grading';
+import { institutionLayer, resolve, SOURCES, type Layers, type RunKey } from '../model/cascade';
+import { DEFAULT_FORMATS, DEFAULT_TIMEZONE } from '../model/policy';
+import { FORMATS, SUBMIT, formatWord } from './grading';
+import { runTiers } from './runSettings';
 import type { Tiers } from './types';
 
 const opt = (value: string, label: string) => ({ value, label });
-const PENALTY = /^(\d+(\.\d+)?%|0?\.\d+|0|1(\.0+)?)$/;
 
-export const TIMEZONES = ['Europe/Berlin', 'Europe/London', 'Europe/Paris', 'UTC', 'America/New_York'];
+/** Timezones the schedule offers: the institution's first. */
+export const TIMEZONES = [...new Set([DEFAULT_TIMEZONE, 'Europe/London', 'Europe/Paris', 'UTC', 'America/New_York'])];
 
 export const ABOUT: Tiers = {
   course_name: { tier: 'ask', label: 'Course name', reason: 'Appears on every semester’s student site.' },
@@ -15,18 +20,20 @@ export const ABOUT: Tiers = {
   course_description: { tier: 'default', label: 'Description', widget: 'markdown', reason: 'One paragraph. Students see it on every semester’s student site home page.' },
 };
 
-export const ASSIGNMENT_DEFAULTS: Tiers = {
-  late_window_days: {
-    tier: 'default', label: 'Late window, days', widget: 'number', default: 10, defaultLabel: 'default: 10', reason: 'Late work is accepted for this many days after the due date.',
-    check: (x, v) => (x !== undefined && !v.late_penalty_per_day ? 'Set both or neither.' : null),
-  },
-  late_penalty_per_day: {
-    tier: 'default', label: 'Late penalty per day', default: '10%', defaultLabel: 'default: 10%',
-    check: (x, v) => (x !== undefined && !PENALTY.test(String(x)) ? 'Write a percentage (10%) or a fraction (0.1).' : x !== undefined && v.late_window_days === undefined ? 'Set both or neither.' : null),
-  },
-  max_team_size: { tier: 'default', label: 'Max team size', widget: 'number', default: 5, defaultLabel: 'default: 5' },
-  formats: { tier: 'default', label: 'Default format', widget: 'select', options: [opt('', 'Jupyter notebook (the toolkit’s default)'), ...FORMATS.map(([v, l]) => opt(v, l))] },
-  submit_via: { tier: 'default', label: 'Default place to submit', widget: 'select', options: [opt('', 'Their own repo (the toolkit’s default)'), ...SUBMIT.map(([v, l]) => opt(v, l))] },
-  team_formation: { tier: 'default', label: 'Default team formation', widget: 'select', options: [opt('', 'Students form their own (the toolkit’s default)'), opt('self_select', 'Students form their own'), opt('assigned', 'You assign them')] },
-  visibility: { tier: 'default', label: 'Default visibility', widget: 'select', options: [opt('', 'Private (the toolkit’s default)'), ...Object.entries(VISIBILITY).map(([v, l]) => opt(v, l))] },
-};
+/** The run keys the course layer may state (dsl_course.schema.json: no submit link, a per-semester fact). */
+export const COURSE_RUN_KEYS: RunKey[] = ['late_window_days', 'late_penalty_per_day', 'max_team_size', 'team_formation', 'visibility'];
+
+const onlyInstitution = (): Layers => Object.fromEntries(SOURCES.map((s) => [s, s === 'institution' ? institutionLayer() : {}])) as Layers;
+
+/** Defaults for this course's assignments: the run keys over the institution's values, then the two template keys New assignment starts from. */
+export function courseDefaultTiers(): Tiers {
+  const inst = onlyInstitution();
+  return {
+    ...runTiers((k) => resolve(k, inst), COURSE_RUN_KEYS),
+    formats: {
+      tier: 'default', label: 'Format a new assignment starts with', widget: 'select', defaultLabel: `institution default: ${formatWord(DEFAULT_FORMATS[0])}`,
+      options: [opt('', `Default (${formatWord(DEFAULT_FORMATS[0])})`), ...FORMATS.map(([v, l]) => opt(v, l))],
+    },
+    submit_via: { tier: 'default', label: 'Where a new assignment’s students submit', widget: 'select', options: [opt('', `Default (${SUBMIT[0][1].toLowerCase()})`), ...SUBMIT.map(([v, l]) => opt(v, l))] },
+  };
+}

@@ -23,6 +23,8 @@ export const NAMES: Names = names;
 export const CONFIG_REPO = NAMES.config_repo;
 export const JOIN_REPO = NAMES.join_repo;
 export const INSTRUCTORS_FILE = NAMES.instructors_file;
+/** The semester's run settings for its assignments (decision 0010 rule 5). */
+export const ASSIGNMENTS_FILE = NAMES.assignments_file;
 export const REGISTRY_FILE = NAMES.registry_file;
 export const STATUS_PATH = NAMES.records.status;
 export const OUTCOMES_DIR = NAMES.records.outcomes;

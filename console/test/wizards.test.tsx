@@ -11,7 +11,8 @@ import { StaticFiles } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { validateArgs } from '../src/ops/adapter';
-import { NewAssignmentScreen, FormatPicker, extrasOf, initialValues, naDone, S1, S2, withExtras } from '../src/screens/NewAssignment';
+import { FormatPicker } from '../src/forms/FormatPicker';
+import { NewAssignmentScreen, extrasOf, initialValues, naDone, S1, S2, withExtras } from '../src/screens/NewAssignment';
 import { NewCohortScreen, cardsDone, nkDone } from '../src/screens/NewCohort';
 import { NewCourseScreen, ncDone, ncOrg } from '../src/screens/NewCourse';
 import { NewMaterialsScreen } from '../src/screens/NewMaterials';
@@ -31,7 +32,6 @@ import { FakeGitHub, fileBody, json } from './fake';
 const NOW = Date.parse('2026-09-23T10:00:00+02:00');
 const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
 const COHORT_ORG = 'hertie-dsl-demo-f2026';
-const D = { lateDays: '10', latePct: '10%', teamSize: '5' };
 const course: Course = {
   org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: ['a-example'],
   cohorts: [{ org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' }], meta: { assignment_defaults: { max_team_size: 5 } },
@@ -108,17 +108,17 @@ describe('which step a wizard opens at', () => {
 
 describe('conditional fields', () => {
   it('asks only what the template is: no run setting, which is each semester\'s', () => {
-    const t = assignmentWork(D);
+    const t = assignmentWork();
     const team = layout(t, { ...initialValues(null, 'f2026'), type: 'group', submit_via: 'external' });
     expect(team.main.map((i) => i.key)).toEqual(['type', 'submit_via']);
     expect(team.main.flatMap((i) => i.under)).toEqual([]);
     expect(team.advanced).toEqual([]);
     for (const k of ['team_formation', 'max_team_size', 'submit_url', 'visibility']) expect(t).not.toHaveProperty(k);
-    expect(assignmentMarking(D)).not.toHaveProperty('late_window_days');
+    expect(assignmentMarking()).not.toHaveProperty('late_window_days');
   });
 
   it('refuses tests for a drop box and a written report, and shows the tests folder only when tests run', () => {
-    const t = assignmentMarking(D);
+    const t = assignmentMarking();
     const base = initialValues(null, 'f2026');
     expect(autogradeBlock(base)).toBeNull();
     expect(t.autograde.forced?.({ ...base, submit_via: 'shared_dropbox_repo' })?.reason).toMatch(/shared drop box/);
@@ -274,7 +274,7 @@ describe('the wizard screens', () => {
 
   it('New cohort counts the three cards from the cohort’s own files', () => {
     const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n', [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role\n' });
-    expect(cardsDone(files, COHORT_ORG)).toEqual({ staff: true, schedule: false, students: false });
+    expect(cardsDone(files, COHORT_ORG)).toEqual({ staff: true, schedule: false, students: false, defaults: false });
   });
 
   it('New assignment asks what it is first, with the next free number and the derived repo', () => {

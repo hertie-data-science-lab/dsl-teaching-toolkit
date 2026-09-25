@@ -5,7 +5,8 @@ import type { GhRepo } from '../github/client';
 import { termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, assignmentIdent, fmtDay } from '../model/format';
-import { FORMATS, formatsList } from '../tiers/grading';
+import { DEFAULT_FORMATS } from '../model/policy';
+import { formatWord, formatsList } from '../tiers/grading';
 import { Crumbs, Help, Loading, ghUrl } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { CourseHeaderActions, StateChip, courseView } from './Course';
@@ -120,7 +121,6 @@ export function MaterialsIndexScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- templates
 
-const FORMAT_WORD = Object.fromEntries(FORMATS);
 
 export function TemplatesIndexScreen(p: CourseProps) {
   const { course, files } = p;
@@ -148,7 +148,7 @@ export function TemplatesIndexScreen(p: CourseProps) {
               const y = f.kind === 'ready' ? new YamlText(f.text) : null;
               const cfg = y && !y.errors.length ? obj(y.toJS()) : {};
               const title = cfg.title ? String(cfg.title) : '';
-              const how = y && !y.errors.length ? [cfg.type === 'group' ? 'In teams' : 'Alone', FORMAT_WORD[formatsList(cfg.formats)[0] ?? 'ipynb'] ?? formatsList(cfg.formats)[0]] : [];
+              const how = y && !y.errors.length ? [cfg.type === 'group' ? 'In teams' : 'Alone', formatWord(formatsList(cfg.formats)[0] ?? DEFAULT_FORMATS[0])] : [];
               const term = termLabel(t.repo);
               const cohorts = scheduledIn(t.repo);
               return (

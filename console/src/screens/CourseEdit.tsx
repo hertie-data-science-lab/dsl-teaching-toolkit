@@ -12,7 +12,7 @@ import { SchemaForm, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { ABOUT, ASSIGNMENT_DEFAULTS } from '../tiers/course';
+import { ABOUT, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
 import { publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
@@ -178,7 +178,7 @@ export function DetailsScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, ASSIGNMENT_DEFAULTS, d.defaults) };
+  const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, courseDefaultTiers(), d.defaults) };
   const doSave = async () => {
     setWarning('');
     if (!y || file.kind !== 'ready') return;
@@ -204,7 +204,7 @@ export function DetailsScreen(p: CourseProps) {
       </div>
       <Help title="Course admins and defaults" doc="01-setup-course-org.md">
         <p>Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
-        <p>These are the course’s defaults. Every one can be overridden per assignment or per semester.</p>
+        <p>These are the course’s defaults. Left empty, the institution’s value in grey applies. Each semester can set its own, and each assignment its own.</p>
       </Help>
       {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
       {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
@@ -223,8 +223,8 @@ export function DetailsScreen(p: CourseProps) {
               <AdminRows admins={d.admins} id="cda" onChange={(admins) => set({ admins })} />
             </div>
             <div class="form-section">
-              <h3>Assignment defaults</h3>
-              <SchemaForm id="cdx" schema={null} tiers={ASSIGNMENT_DEFAULTS} values={d.defaults} onChange={(v) => set({ defaults: v })} />
+              <h3>Defaults for this course’s assignments</h3>
+              <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers()} values={d.defaults} onChange={(v) => set({ defaults: v })} />
             </div>
             <div class="form-section">
               <h3>Site links</h3>

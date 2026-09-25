@@ -174,7 +174,8 @@ describe('S16 and S10 assignments', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2' })} />);
     expect(out).toContain('class="lifeline"');
     expect(out).toMatch(/<li class="now" aria-current="step">.*?Open/);
-    expect(out).toContain('Late work until');
+    expect(out).toContain('How this semester runs it');
+    expect(out).toContain('Late cutoff');
     expect(out).toContain('Update every copy');
     expect(out).toContain('Collect now');
     expect(out).toContain('Assignment template ready.');
@@ -329,7 +330,7 @@ describe('S2 course and S17 template', () => {
     expect(t).toContain('Marking of Assignment 3 cannot start.');
     expect(t).toContain('assignment-3-f2026');
     expect(t).toContain('course-materials-f2026');
-    expect(t).toContain('10% per day, up to 10 days');
+    expect(t).toContain('10 days at 10% a day this course’s default');
     expect(t).toContain('Fall 2026');
   });
   it('reads grading_config.yml into the tiered form and marks the bad value', () => {
