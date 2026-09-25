@@ -4,7 +4,7 @@
 
 import { termOf } from '../model/discovery';
 import { kebab } from '../model/format';
-import { DEFAULT_FORMATS } from '../model/policy';
+import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import type { Values } from '../tiers/types';
 
 /** The lab's bot: an owner of every course and semester org until the console app replaces it. */
@@ -141,7 +141,7 @@ export function assignmentArgs(v: Values): Record<string, unknown> {
   const base = { name: v.name, number: v.number === undefined ? undefined : String(v.number), semester: v.term };
   if (v.copy_from) return { ...base, copy_from: v.copy_from };
   const group = v.type === 'group';
-  const submit = v.submit_via ?? 'assignment_repo';
+  const submit = v.submit_via ?? SUBMIT_VIA_DEFAULT;
   return {
     ...base,
     type: group ? 'group' : 'individual',

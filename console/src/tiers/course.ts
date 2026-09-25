@@ -4,7 +4,8 @@
 // value in grey, the one that applies when it is left empty.
 
 import { COURSE_RUN_KEYS, institutionLayer, resolve, SOURCES, type Layers } from '../model/cascade';
-import { DEFAULT_FORMATS, DEFAULT_TIMEZONE } from '../model/policy';
+import { labelOf } from '../model/labels';
+import { DEFAULT_FORMATS, DEFAULT_TIMEZONE, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { FORMATS, SUBMIT, formatWord } from './grading';
 import { runTiers } from './runSettings';
 import type { Tiers } from './types';
@@ -32,6 +33,6 @@ export function courseDefaultTiers(): Tiers {
       tier: 'default', label: 'Format a new assignment starts with', widget: 'select', defaultLabel: `institution default: ${formatWord(DEFAULT_FORMATS[0])}`,
       options: [opt('', `Default (${formatWord(DEFAULT_FORMATS[0])})`), ...FORMATS.map(([v, l]) => opt(v, l))],
     },
-    submit_via: { tier: 'default', label: 'Where a new assignment’s students submit', widget: 'select', options: [opt('', `Default (${SUBMIT[0][1].toLowerCase()})`), ...SUBMIT.map(([v, l]) => opt(v, l))] },
+    submit_via: { tier: 'default', label: 'Where a new assignment’s students submit', widget: 'select', options: [opt('', `Default (${labelOf('submit_via', SUBMIT_VIA_DEFAULT).toLowerCase()})`), ...SUBMIT.map(([v, l]) => opt(v, l))] },
   };
 }

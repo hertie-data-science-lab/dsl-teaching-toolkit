@@ -15,6 +15,7 @@ import { YamlText, deepEqual, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
 import { ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_REPO } from './names';
 import assignmentsSchema from '../../schemas/assignments.schema.json';
+import { labelMap, labelOf } from './labels';
 import { DEFAULTS, penaltyRate } from './policy';
 import { validator } from './validate';
 
@@ -33,13 +34,14 @@ export interface Effective {
   source: Source;
 }
 
-export const TEAM_FORMATION: Record<string, string> = { self_select: 'Students form their own', assigned: 'You assign them' };
-export const VISIBILITY: Record<string, string> = { private: 'Private', public: 'Public', student_choice: 'Student’s choice' };
 
 const ENUMS = (assignmentsSchema.properties.defaults.properties as unknown as Record<string, { enum?: string[] }>);
 /** The closed vocabularies, as the exported schema lists them (`setting_readers._one_of`). */
 export const TEAM_FORMATIONS: string[] = ENUMS.team_formation.enum ?? [];
 export const VISIBILITIES: string[] = ENUMS.visibility.enum ?? [];
+/** Their words, from the engine's labels export. */
+export const TEAM_FORMATION = labelMap('team_formation', TEAM_FORMATIONS);
+export const VISIBILITY = labelMap('visibility', VISIBILITIES);
 
 /** The placeholder the scaffold seeds in a submit link (`course.SETTING_PLACEHOLDER`, not exported). */
 const SETTING_PLACEHOLDER = 'CHANGE-ME';
@@ -157,9 +159,9 @@ export function valueWord(key: RunKey, v: unknown): string {
   if (v === null || v === undefined || v === '') return key === 'late_penalty_per_day' ? 'no penalty' : key === 'late_window_days' ? 'no late work' : 'not set';
   switch (key) {
     case 'team_formation':
-      return Object.hasOwn(TEAM_FORMATION, String(v)) ? TEAM_FORMATION[String(v)] : String(v);
+      return labelOf('team_formation', String(v));
     case 'visibility':
-      return Object.hasOwn(VISIBILITY, String(v)) ? VISIBILITY[String(v)] : String(v);
+      return labelOf('visibility', String(v));
     case 'late_window_days':
       return v === 0 ? 'no late work' : `${String(v)} day${v === 1 ? '' : 's'}`;
     case 'late_penalty_per_day':

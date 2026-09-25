@@ -43,6 +43,12 @@ export const HANDLE_RE = pattern('actor');
 /** A GitHub organisation name, as the engine's request schema spells it. */
 export const ORG_NAME_RE = pattern('course_org');
 
+/** Where a template's students submit when it says nothing: the toolkit's shape default
+ * (`setting_readers.READERS['submit_via']`), not a policy value, which policy.json does not export. */
+export const SUBMIT_VIA_DEFAULT = 'assignment_repo';
+/** Every place students may submit, in the schema's order. */
+export const SUBMIT_VIA_KEYS: string[] = gradingSchema.properties.submit_via.enum;
+
 /** Every format a template may list, in the schema's order. */
 export const FORMAT_KEYS: string[] = (gradingSchema.properties.formats.oneOf[0] as { items: { enum: string[] } }).items.enum;
 

@@ -2,6 +2,7 @@
 // the runnable one (listed first: autograde and the completion check read it; decision 0009
 // rule 10). Used by New assignment and the template's Settings form.
 
+import { SOURCE_WORD } from '../model/cascade';
 import { DEFAULT_FORMATS } from '../model/policy';
 import { FORMATS, formatWord } from '../tiers/grading';
 import type { Values } from '../tiers/types';
@@ -12,7 +13,9 @@ export function runnableFirst(formats: string[], f: string): string[] {
   return formats.includes(f) ? [f, ...formats.filter((x) => x !== f)] : formats;
 }
 
-export function FormatPicker({ v, set, id = 'na' }: { v: Values; set: (v: Values) => void; id?: string }) {
+/** `fallback`: what applies when the template lists none, and whose it is (the course's, else the institution's). */
+export function FormatPicker({ v, set, id = 'na', fallback }: { v: Values; set: (v: Values) => void; id?: string; fallback?: { formats: string[]; source: 'course' | 'institution' } }) {
+  const dflt = fallback ?? { formats: DEFAULT_FORMATS, source: 'institution' as const };
   const formats = (v.formats as string[] | undefined) ?? [];
   const auto = v.autograde === 'true' && !autogradeBlock(v);
   const offs = FORMATS.map(([f]) => formatBlock(formats, f, auto)).filter((x): x is string => !!x);
@@ -20,7 +23,7 @@ export function FormatPicker({ v, set, id = 'na' }: { v: Values; set: (v: Values
   const runnable = formats.filter((f) => f !== 'none');
   return (
     <div class="field">
-      <span class="label">What students hand in <span class="default">institution default: {DEFAULT_FORMATS.map(formatWord).join(' + ')}</span></span>
+      <span class="label">What students hand in <span class="default">{SOURCE_WORD[dflt.source]}: {dflt.formats.map(formatWord).join(' + ')}</span></span>
       <div class="fmt-grid">
         {FORMATS.map(([f, label]) => {
           const why = formatBlock(formats, f, auto);

@@ -5,23 +5,18 @@
 // works on a flat model; `toConfig` turns it back into the file's shape.
 
 import { questionFile, questionPoints, questionsFromRows } from '../model/marks';
-import { FORMAT_KEYS } from '../model/policy';
+import { helpOf, labelOf } from '../model/labels';
+import { FORMAT_KEYS, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/policy';
 import { opt, type Tiers, type Values } from './types';
 
 export { VISIBILITY } from '../model/cascade';
 
-const FORMAT_LABEL: Record<string, string> = {
-  ipynb: 'Jupyter notebook', py: 'Python files', rmd: 'R Markdown', qmd: 'Quarto', latex: 'LaTeX', none: 'No starter file',
-};
-/** Every format a template may list (the schema's), with its label. */
-export const FORMATS: [string, string][] = FORMAT_KEYS.map((k) => [k, FORMAT_LABEL[k] ?? k]);
-export const formatWord = (f: string) => FORMAT_LABEL[f] ?? f;
+/** Every format a template may list (the schema's), with the engine's label. */
+export const FORMATS: [string, string][] = FORMAT_KEYS.map((k) => [k, labelOf('formats', k)]);
+export const formatWord = (f: string) => labelOf('formats', f);
 
-export const SUBMIT: [string, string, string][] = [
-  ['assignment_repo', 'Their own repo', 'Private to the student and instructors.'],
-  ['shared_dropbox_repo', 'A shared drop box', 'One repo for the class; each student has a folder.'],
-  ['external', 'Elsewhere', 'Moodle, Kaggle or in class. The repo carries the brief only.'],
-];
+/** Every place students may submit: value, label and help, from the engine's labels. */
+export const SUBMIT: [string, string, string][] = SUBMIT_VIA_KEYS.map((k) => [k, labelOf('submit_via', k), helpOf('submit_via', k)]);
 
 /** A `formats:` value as a list: the file may spell a list or one comma-separated string. */
 export function formatsList(v: unknown): string[] {
@@ -38,7 +33,7 @@ export function fromConfig(cfg: Record<string, unknown>): Values {
   return {
     title: s('title'),
     type: s('type') ?? 'individual',
-    submit_via: s('submit_via') === 'github' ? 'assignment_repo' : (s('submit_via') ?? 'assignment_repo'),
+    submit_via: s('submit_via') === 'github' ? SUBMIT_VIA_DEFAULT : (s('submit_via') ?? SUBMIT_VIA_DEFAULT),
     formats: formatsList(cfg.formats),
     autograde: bool(cfg.autograde),
     tests: s('tests'),
@@ -72,8 +67,8 @@ export function settingsTiers(): Tiers {
       options: [opt('individual', 'Alone', 'One repo per student. The default.'), opt('group', 'In teams', 'One repo per team; teams form before hand out.')],
     },
     submit_via: {
-      tier: 'default', label: 'Where students submit', widget: 'radio', default: 'assignment_repo', defaultLabel: 'default: their own repo', reason: 'Decides what marking reads.',
-      options: SUBMIT.map(([v, l, s]) => opt(v, l, v === 'assignment_repo' ? `${s} The default.` : s)),
+      tier: 'default', label: 'Where students submit', widget: 'radio', default: SUBMIT_VIA_DEFAULT, defaultLabel: `default: ${labelOf('submit_via', SUBMIT_VIA_DEFAULT).toLowerCase()}`, reason: 'Decides what marking reads.',
+      options: SUBMIT.map(([v, l, s]) => opt(v, l, v === SUBMIT_VIA_DEFAULT ? `${s} The default.` : s)),
     },
     autograde: {
       tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off',
@@ -110,6 +105,15 @@ export interface QuestionRow {
 export function questionRows(q: unknown): QuestionRow[] {
   if (!q || typeof q !== 'object') return [];
   return Object.entries(q as Record<string, unknown>).map(([name, v]) => ({ name, points: questionPoints(v) == null ? '' : String(questionPoints(v)), file: questionFile(v) ?? '' }));
+}
+
+/** Why a question's file is refused, as `setting_readers._inside_submission` refuses it: a path that
+ *  leaves the submission (`..`, a leading `/`, a backslash). Null when it is fine or blank. */
+export function questionFileError(file: string): string | null {
+  const t = file.trim();
+  if (!t) return null;
+  const parts = t.split('/').filter((x) => x && x !== '.');
+  return !parts.length || t.startsWith('/') || parts.includes('..') || t.includes('\\') ? `${t} is not a file inside the submission.` : null;
 }
 
 /** The table's rows as `questions:` (model/marks `questionsFromRows`, with the file column). */

@@ -17,6 +17,7 @@ import {
 import { addDays, fmtWhen } from '../model/format';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
+import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
 import { validator } from '../model/validate';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
@@ -28,8 +29,6 @@ import type { ReadyProps } from './types';
 
 const validSchedule = validator(scheduleSchema);
 
-/** What the engine does with a solution date: the hand-out's warning (course.SOLUTION_WARNING). */
-export const SOLUTION_WARNING = 'Pushes the model answer and rubric into every student’s repo. This is not returning marks, and cannot be undone for reuse.';
 
 /** The semester's layers for `key` (empty for its defaults), read from the files as they are now. */
 export function semesterLayers(p: Pick<ReadyProps, 'files' | 'course' | 'cohort'>, doc: Block, key = ''): Layers {

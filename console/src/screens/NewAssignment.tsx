@@ -12,7 +12,8 @@ import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { validator } from '../model/validate';
 import { createAssignment } from '../ops/defs';
 import { FormatPicker } from '../forms/FormatPicker';
-import { DEFAULT_FORMATS } from '../model/policy';
+import { labelOf } from '../model/labels';
+import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
 import { formatWord, formatsList, toConfig } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentWhat, assignmentWork } from '../tiers/wizard';
@@ -53,7 +54,7 @@ export function initialValues(meta: Record<string, unknown> | null, term: string
   const s = (k: string, d: string) => (typeof ad[k] === 'string' && ad[k] ? String(ad[k]) : d);
   const course = formatsList(ad.formats);
   return {
-    term, type: 'individual', submit_via: s('submit_via', 'assignment_repo'),
+    term, type: 'individual', submit_via: s('submit_via', SUBMIT_VIA_DEFAULT),
     formats: course.length ? course : [...DEFAULT_FORMATS], autograde: 'false', completion_check: 'auto', grader_pdf: false,
   };
 }
@@ -106,6 +107,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const vv: Values = { ...v, number };
   const repo = templateRepo(number, term);
   const title = `Assignment ${number}${v.name ? `: ${String(v.name)}` : ''}`;
+  const courseFormats = formatsList(((course.meta?.assignment_defaults ?? {}) as Record<string, unknown>).formats);
   const copying = !!v.copy_from;
   const runs = env?.ops.runs.value.length ?? 0;
   const tpl = useLive(env ? async () => ({ repo, r: await checkTemplate(env.client, course.org, repo) }) : null, [repo, runs, asked]);
@@ -171,7 +173,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     ) : (
       <>
         {createdNote}
-        {step === 3 ? <FormatPicker v={vv} set={setV} /> : null}
+        {step === 3 ? <FormatPicker v={vv} set={setV} fallback={courseFormats.length ? { formats: courseFormats, source: 'course' } : undefined} /> : null}
         <SchemaForm id={`na${step}`} schema={null} tiers={tiers} values={vv} onChange={setV} />
       </>
     );
@@ -185,7 +187,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     heading = created ? 'Created' : 'Check and create';
     const w = effective(tiers3, effective(tiers2, vv));
     const fmts = ((w.formats as string[]) ?? []).map(formatWord).join(' + ');
-    const submit = { assignment_repo: 'Their own repo', shared_dropbox_repo: 'A shared drop box, private', external: 'Elsewhere' }[String(w.submit_via)] ?? '';
+    const submit = w.submit_via ? labelOf('submit_via', String(w.submit_via)) : '';
     const def = createAssignment(courseScope(p), repo, title, assignmentArgs(vv));
     const extrasPending = created && !copying && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
     const ready = created && allOk(tplNow?.checks) && !extrasPending;
