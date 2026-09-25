@@ -88,6 +88,8 @@ class FakeGitHub:
         self.commits: list[tuple[str, str, str, str]] = []
         self.paused_at_commit: list[bool] = []
         self.puts: list[tuple[str, str, bool]] = []
+        self.dispatches: list[tuple[str, dict]] = []  # (org/repo, the fields sent)
+        self.fail_dispatch = False
         self.fail_rename = False
         self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
         self.run_after_pause: tuple[str, str] | None = None
@@ -210,6 +212,11 @@ class FakeGitHub:
         key = (org, self._name(org, name))
         if "--include" in args:
             return 0, f"HTTP/2.0 200 OK\nDate: {self.clock}\n\n{{}}"
+        if parts[3:] == ["dispatches"] and method == "POST":
+            if self.fail_dispatch:
+                return 1, "HTTP 422: Unprocessable"
+            self.dispatches.append((f"{org}/{name}", fields))
+            return 0, ""
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
                 on = fields["enabled"] == "true"
@@ -459,9 +466,11 @@ def test_a_preview_prints_the_plan_and_writes_nothing(
     # The pause names every repo whose workflows act on the semester, the course's too.
     assert f"disable Actions in {SEM}/{OLD_CONFIG_REPO}, {SEM}/{OLD_JOIN_REPO}" in out
     assert f"{SEM}/sem-f2026.github.io, {COURSE}/.github" in out
+    assert f"dispatch Sync membership for {SEM} in {COURSE}/.github" in out
     assert "PREVIEW - nothing was written" in out
     assert _state(fake) == before
     assert fake.commits == [] and fake.puts == [] and semester == []
+    assert fake.dispatches == []
 
 
 def test_a_real_run_migrates_every_step_once_with_actions_off(
@@ -510,6 +519,27 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     assert all(fake.paused_at_commit[1:-1]) and not fake.paused_at_commit[-1]
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
     assert semester == ["join", "config", "profile", "status"]
+    # The ticks the pause dropped, dispatched once Actions are back, scoped to this
+    # semester exactly as its semester-config push would send them.
+    assert fake.dispatches == [
+        (
+            f"{COURSE}/.github",
+            {
+                "event_type": "scheduled-release",
+                "client_payload[semester_org]": SEM,
+                "client_payload[driver]": CONFIG_REPO,
+            },
+        ),
+        (
+            f"{COURSE}/.github",
+            {"event_type": "sync-membership", "client_payload[semester_org]": SEM},
+        ),
+    ]
+    out = capsys.readouterr().out
+    assert (
+        f"dispatched Scheduled release for {SEM}: https://github.com/{COURSE}/.github/"
+        "actions/workflows/scheduled-release.yml?query=event%3Arepository_dispatch"
+    ) in out
     layout = [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT]
     assert [(c[0], c[1]) for c in layout] == [(SEM, CONFIG_REPO), (SEM, ".github")]
 
@@ -528,6 +558,7 @@ def test_a_second_run_finds_every_step_already_migrated(
     # paused, nothing written, status.json not rewritten.
     assert out.count("already migrated") == 16
     assert fake.commits == commits and fake.puts == puts and semester == []
+    assert len(fake.dispatches) == 2  # nothing paused, so nothing was dropped
 
 
 def test_a_failed_step_stops_and_says_the_org_is_still_paused(
@@ -543,8 +574,20 @@ def test_a_failed_step_stops_and_says_the_org_is_still_paused(
     assert not fake.enabled(SEM, OLD_CONFIG_REPO) and not fake.enabled(
         COURSE, ".github"
     )
-    # Nothing but the record of what the settings were.
+    # Nothing but the record of what the settings were; nothing dispatched into a pause.
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT] and semester == []
+    assert fake.dispatches == []
+
+
+def test_a_dispatch_that_fails_is_named_and_the_org_is_still_migrated(
+    fake, semester, monkeypatch, capsys
+):
+    fake.fail_dispatch = True
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    err = capsys.readouterr().err
+    assert f"could not dispatch Scheduled release for {SEM}" in err
+    assert "the next tick catches up" in err
+    assert all(fake.enabled(*key) for key in fake.workflow_repos())
 
 
 def test_a_rename_whose_old_name_does_not_redirect_stops(
@@ -900,6 +943,16 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
     assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
+    assert fake.dispatches == [
+        (
+            f"{COURSE}/.github",
+            {"event_type": "scheduled-release", "client_payload[driver]": "migrate"},
+        ),
+        (
+            f"{COURSE}/.github",
+            {"event_type": "sync-membership", "client_payload[all_semesters]": "true"},
+        ),
+    ]
 
     commits, puts = list(fake.commits), list(fake.puts)
     course.clear()

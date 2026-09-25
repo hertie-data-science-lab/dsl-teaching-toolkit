@@ -18,7 +18,9 @@ run that stopped part-way resumes where it stopped. An archived semester is neve
 The pause is GitHub's own switch: Actions are DISABLED on every repo of the org that runs
 workflows, for the window, and enabled again at the end. (An org variable cannot do this:
 on GitHub Free org variables do not reach private repos, and the workflows already live in
-an org carry no gate until they are re-rendered.)
+an org carry no gate until they are re-rendered.) GitHub drops, rather than queues, what
+fires into a disabled repo, so the unpause dispatches one Scheduled release and one Sync
+membership in its place.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
 status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
@@ -39,7 +41,7 @@ from pathlib import Path
 
 import yaml
 
-from . import policy, records, schedule, seed, status
+from . import cadence, policy, records, schedule, seed, status
 from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
 from .course import (
@@ -667,9 +669,10 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
                     f"Rollback: {step.rollback}"
                 )
                 return 1
+            log_ok(f"{step.name}: done and verified")
             if step.bracket == "unpause":
                 paused = False
-            log_ok(f"{step.name}: done and verified")
+                pause.catch_up()
     except Exception as exc:
         log_err(f"{step.name}: stopped by an error - {exc}")
         return 1
@@ -687,14 +690,81 @@ PAUSE_RECORD = records.path("migration_pause")
 PAUSE_COMMIT = "migrate: record the Actions settings paused"
 
 
+MEMBERSHIP_WORKFLOW = "sync-membership.yml"
+# What a course migration's Scheduled release names as its driver (the run log prints it).
+MIGRATE_DRIVER = "migrate"
+
+
+@dataclass(frozen=True)
+class Tick:
+    """One dispatch the pause dropped, sent again after the unpause: a `repository_dispatch`
+    into the course's `.github` with the payload its own driver sends."""
+
+    event: str
+    workflow: str
+    payload: tuple[str, ...]  # gh api field flags, `-f`/`-F` then `key=value`
+    what: str
+
+
+def lost_ticks(semester_org: str | None) -> list[Tick]:
+    """The Scheduled release and the Sync membership a pause drops: for one semester, what
+    its `semester-config` push sends; for a course, what the ds01 timers send - every
+    semester."""
+    if semester_org:
+        who = f"client_payload[semester_org]={semester_org}"
+        return [
+            Tick(
+                "scheduled-release",
+                cadence.WORKFLOW_FILE,
+                ("-f", who, "-f", f"client_payload[driver]={CONFIG_REPO}"),
+                f"Scheduled release for {semester_org}",
+            ),
+            Tick(
+                "sync-membership",
+                MEMBERSHIP_WORKFLOW,
+                ("-f", who),
+                f"Sync membership for {semester_org}",
+            ),
+        ]
+    return [
+        Tick(
+            "scheduled-release",
+            cadence.WORKFLOW_FILE,
+            ("-f", f"client_payload[driver]={MIGRATE_DRIVER}"),
+            "Scheduled release for every semester",
+        ),
+        Tick(
+            "sync-membership",
+            MEMBERSHIP_WORKFLOW,
+            ("-F", "client_payload[all_semesters]=true"),
+            "Sync membership for every semester",
+        ),
+    ]
+
+
+def _runs_url(course_org: str, workflow: str) -> str:
+    """Where a dispatched run shows up: a `repository_dispatch` answers with no run id."""
+    return (
+        f"https://github.com/{course_org}/.github/actions/workflows/{workflow}"
+        "?query=event%3Arepository_dispatch"
+    )
+
+
 class Pause:
     """The migration's pause of one org: every repo whose workflows act on it switched
     off, and - in `<org>/.github/.system/migration-pause.json`, written BEFORE anything is
     switched - what each was set to, so the unpause restores exactly that and a run that
     stops (or is interrupted) can always be resumed or released by hand."""
 
-    def __init__(self, org: str, targets: Callable[[], list[tuple[str, str]]]) -> None:
+    def __init__(
+        self,
+        org: str,
+        targets: Callable[[], list[tuple[str, str]]],
+        course_org: str = "",
+        semester_org: str | None = None,
+    ) -> None:
         self.org, self.targets = org, targets
+        self.course_org, self.semester_org = course_org or org, semester_org
         self.saved: dict[str, dict] = {}  # "org/repo" -> its setting before the pause
         self.started = ""
 
@@ -807,6 +877,30 @@ class Pause:
                 return False
         return True
 
+    # after the unpause ---------------------------------------------------------
+    def catch_up(self) -> None:
+        """Dispatch what the pause dropped, and say where each run shows up. Not waited
+        for, and never a failure of the migration: the org is migrated by now, and the
+        next tick (at most 15 minutes, the next hour for membership) covers a miss."""
+        for tick in lost_ticks(self.semester_org):
+            url = _runs_url(self.course_org, tick.workflow)
+            code, out = gh(
+                "api",
+                "--method",
+                "POST",
+                f"repos/{self.course_org}/.github/dispatches",
+                "-f",
+                f"event_type={tick.event}",
+                *tick.payload,
+            )
+            if code == 0:
+                log_ok(f"dispatched {tick.what}: {url}")
+            else:
+                log_err(
+                    f"could not dispatch {tick.what} ({out[:200]}) - the next tick "
+                    f"catches up; the runs: {url}"
+                )
+
     def steps(self) -> tuple[Step, Step]:
         names = lambda: ", ".join(f"{o}/{r}" for o, r in self.targets())
         pause = Step(
@@ -824,7 +918,14 @@ class Pause:
         unpause = Step(
             "unpause automation",
             done=lambda: self.record() is None,
-            plan=lambda: [f"restore the recorded Actions settings in {names()}"],
+            plan=lambda: [
+                f"restore the recorded Actions settings in {names()}",
+                *(
+                    f"dispatch {t.what} in {self.course_org}/.github (the tick the "
+                    f"pause dropped)"
+                    for t in lost_ticks(self.semester_org)
+                ),
+            ],
             do=self.restore,
             verify=self.restored,
             rollback="restore Actions in each repo by hand (see the line below)",
@@ -936,7 +1037,7 @@ class Semester:
     def __init__(self, org: str, course_org: str) -> None:
         self.org, self.course = org, course_org
         self.people = ""
-        self.pause = Pause(org, self.targets)
+        self.pause = Pause(org, self.targets, course_org, org)
         self.renamed_now: dict[str, str] = {}  # old -> new, renamed by this run
 
     def config(self) -> str:
