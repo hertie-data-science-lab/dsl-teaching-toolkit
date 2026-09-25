@@ -34,11 +34,12 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    - `public_dirs` / `public_types` (optional) fill in that `publish.yml`: which folders,
      and which file types out of them, the semester site may **host publicly** so they open
      rendered in a browser instead of showing as source on GitHub. Both default to
-     publishing nothing. Everything unmatched stays private to enrolled students, exactly
+     publishing nothing. "lectures" and "readings" mean the folders of that kind (the
+     folder names below), not folders of that name. Everything unmatched stays private to enrolled students, exactly
      as today; `solution/`, `tests/`, grading files and `.env` are never hosted whatever
      you write. Edit `publish.yml` afterwards - no workflow rewrites it, and it applies to
      every semester of this course ([11](11-configure-cohort-site.md)).
-   - `copy_from` (optional) starts the new repo as an existing `course-materials-*` instead
+   - `copy_from` (optional) starts the new repo as an existing materials repo instead
      of as the skeleton - every branch, every file, the whole history. Your content arrives
      as you left it; only `.system/` and the workflows are
      rewritten. This is how a course carries forward from one year to the next.

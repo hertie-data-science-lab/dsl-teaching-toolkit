@@ -24,6 +24,7 @@ import json
 import sys
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from . import settings
@@ -67,7 +68,7 @@ from .discovery import central_ref_for, discover_assignments, discover_semesters
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
-from .materials import MATERIALS_TOPIC
+from .materials import MATERIALS_TOPIC, alias_kind
 from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
 from .repos import (
@@ -730,40 +731,47 @@ public:
 """
 
 
-def publish_patterns(dirs: str, types: str) -> list[str]:
-    """The `public:` patterns the two New materials repo answers mean.
+def publish_patterns(dirs: str, types: str, folders: Iterable[str]) -> list[str]:
+    """The `public:` patterns the two New materials repo answers mean, for a repo whose
+    top-level folders are `folders`.
 
     Two axes because the pair faculty actually have in mind is "which of my folders" and
     "how much of them": a deck is worth rendering and the readings under it are the
     licensed material, so the directories answer carries `everything except readings` and
-    the types answer defaults to the two formats a browser opens by itself.
+    the types answer defaults to the two formats a browser opens by itself. "Lectures" and
+    "readings" are KINDS: the folders the alias table (`materials.alias_kind`) names so,
+    never a literal folder name.
 
     `(nothing public)` is no patterns at all rather than a pattern matching nothing: the
     seeded file then withholds by saying nothing, the way `.releaseignore` does, and a
     course that never answers the question publishes nothing."""
+    kinds = {folder: alias_kind(folder) for folder in sorted(set(folders))}
     if dirs == NOTHING_PUBLIC:
         return []
-    root = f"{PUBLIC_LECTURES}/**" if dirs == PUBLIC_LECTURES else "**"
+    if dirs == PUBLIC_LECTURES:
+        roots = [f"{f}/**" for f, kind in kinds.items() if kind == "lecture"]
+    else:
+        roots = ["**"]
     if types == PUBLIC_ALL_FILES:
-        patterns = [root]
+        patterns = roots
     else:
         exts = ["html"] if types == PUBLIC_HTML else ["html", "pdf"]
-        patterns = [f"{root}/*.{ext}" for ext in exts]
+        patterns = [f"{root}/*.{ext}" for root in roots for ext in exts]
     if dirs == PUBLIC_EXCEPT_READINGS:
         # Last, because the last matching pattern wins - a `!` written above the pattern
         # it is meant to carve out of does nothing at all.
-        patterns.append("!readings/**")
+        patterns += [f"!{f}/**" for f, kind in kinds.items() if kind == "readings"]
     return patterns
 
 
-def _publish_stub(dirs: str, types: str) -> str:
+def _publish_stub(dirs: str, types: str, folders: Iterable[str]) -> str:
     """The seeded `publish.yml` for one pair of answers - the chosen patterns live, the
     examples below them commented out.
 
     A course that answered `(nothing public)` gets the same file with every line a
     comment, for the reason `_RELEASEIGNORE_STUB` is seeded inert: it exists to be FOUND,
     and a file nobody knows about is one nobody uses."""
-    chosen = [f'  - "{p}"' for p in publish_patterns(dirs, types)]
+    chosen = [f'  - "{p}"' for p in publish_patterns(dirs, types, folders)]
     examples = list(PUBLISH_EXAMPLES)
     if not chosen:
         examples.insert(0, '  # - "lectures/**/*.html"')
@@ -1117,10 +1125,14 @@ def scaffold_materials(
             f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
             "labs/01_session-1/.gitkeep": b"",
             RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
-            # The other half of the same question: `.releaseignore` says what leaves this
-            # repo at all, `publish.yml` what the semester site then hosts in the open.
-            PUBLISH_FILE: _publish_stub(public_dirs, public_types).encode(),
         }
+        # The other half of the same question: `.releaseignore` says what leaves this
+        # repo at all, `publish.yml` what the semester site then hosts in the open -
+        # written for the folders the skeleton actually has.
+        folders = {path.split("/")[0] for path in user_files if "/" in path}
+        user_files[PUBLISH_FILE] = _publish_stub(
+            public_dirs, public_types, folders
+        ).encode()
         # One commit for the skeleton: they all carried the same subject anyway, so
         # writing them one at a time opened a repo faculty then author by hand with a
         # column of identical `init: materials skeleton` lines.

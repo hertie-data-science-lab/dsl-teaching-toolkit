@@ -1755,6 +1755,7 @@ def test_a_failed_branch_policy_clear_is_reported(monkeypatch, capsys):
 
 # ------------------------------------------------------------------- publish.yml
 
+SKELETON = ("lectures", "labs", "readings")
 PUBLISH_TABLE = [
     (course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF, []),
     (course.PUBLIC_LECTURES, course.PUBLIC_HTML, ["lectures/**/*.html"]),
@@ -1784,7 +1785,24 @@ def test_the_two_form_answers_map_to_the_patterns_they_promise(dirs, types, expe
     # The whole of what the two dropdowns do. The `!` line comes LAST on the
     # except-readings answers, because the last matching pattern wins - written above the
     # pattern it carves out of, it would do nothing at all.
-    assert scaffold.publish_patterns(dirs, types) == expected
+    assert scaffold.publish_patterns(dirs, types, SKELETON) == expected
+
+
+def test_the_patterns_follow_the_folders_by_kind():
+    # "Lectures" and "readings" are kinds: a repo whose folders are called something else
+    # by the alias table still gets patterns that match them, and one without a lecture
+    # folder publishes nothing under "lectures".
+    folders = ["Lecture", "literature", "labs", "datasets"]
+    assert scaffold.publish_patterns(
+        course.PUBLIC_LECTURES, course.PUBLIC_HTML, folders
+    ) == ["Lecture/**/*.html"]
+    assert scaffold.publish_patterns(
+        course.PUBLIC_EXCEPT_READINGS, course.PUBLIC_ALL_FILES, folders
+    ) == ["**", "!literature/**"]
+    assert (
+        scaffold.publish_patterns(course.PUBLIC_LECTURES, course.PUBLIC_HTML, ["labs"])
+        == []
+    )
 
 
 def test_the_seeded_publish_file_declares_the_patterns_it_was_asked_for():
@@ -1793,13 +1811,17 @@ def test_the_seeded_publish_file_declares_the_patterns_it_was_asked_for():
     # file the site cannot read at all, and the failure would be a silent no-op. The
     # except-readings answer is the one that needs both.
     declared = yaml.safe_load(
-        scaffold._publish_stub(course.PUBLIC_EXCEPT_READINGS, course.PUBLIC_HTML_PDF)
+        scaffold._publish_stub(
+            course.PUBLIC_EXCEPT_READINGS, course.PUBLIC_HTML_PDF, SKELETON
+        )
     )
     assert declared["public"] == ["**/*.html", "**/*.pdf", "!readings/**"]
 
 
 def test_the_seeded_publish_file_is_instructor_owned_and_explains_itself():
-    body = scaffold._publish_stub(course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF)
+    body = scaffold._publish_stub(
+        course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF, SKELETON
+    )
     assert body.startswith("# INSTRUCTOR-OWNED")
     # Seeded inert when nothing was asked for, like `.releaseignore`: it exists to be
     # found, and a publish list nobody knows about is one nobody uses.
