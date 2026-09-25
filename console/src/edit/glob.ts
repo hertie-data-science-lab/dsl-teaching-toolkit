@@ -19,7 +19,15 @@ function toRegex(glob: string): string {
       i += slashAfter ? 2 : 1;
     } else if (c === '*') out += '[^/]*';
     else if (c === '?') out += '[^/]';
-    else out += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    else if (c === '[' && glob.indexOf(']', i + 2) > i) {
+      // A character class, `!` or `^` negating it, as gitignore reads one.
+      const end = glob.indexOf(']', i + 2);
+      let body = glob.slice(i + 1, end);
+      const neg = body[0] === '!' || body[0] === '^';
+      if (neg) body = body.slice(1);
+      out += `[${neg ? '^' : ''}${body.replace(/\\/g, '\\\\')}]`;
+      i = end;
+    } else out += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   }
   return out;
 }

@@ -84,7 +84,7 @@ export function CourseScreen(p: CourseProps) {
       </div>
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
       <Help title="What lives in a course" doc="02-add-materials-to-course.md">
-        <p>Materials live here privately until a scheduled release copies them to a semester. Some folders can be withheld, or published openly on the public website.</p>
+        <p>Materials live here privately until a scheduled release copies them to a semester. Some folders can be withheld from students, and decks hosted on the student site.</p>
         <p>One assignment template per assignment. Students get a copy at hand out; marking reads its solution branch.</p>
       </Help>
       <div class="stack">

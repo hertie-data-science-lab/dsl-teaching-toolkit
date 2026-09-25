@@ -1,31 +1,55 @@
 // What happens to each file of a materials repo, from its `publish.yml` public patterns and
-// its root `.releaseignore`: withheld files never reach students (and so are never public),
-// files matching a public pattern are also published openly, the rest are released to
-// students only. Both lists use gitignore syntax (`./glob`).
+// its root `.releaseignore`: withheld files never reach students (and so are never hosted),
+// files matching a public pattern are also hosted openly on the student site, the rest are
+// released to students only. Both lists use gitignore syntax (`./glob`).
 //
-// Mirrors the engine: `repos.NEVER_MATERIAL` names are never copied out at all (withheld);
-// `repos.PUBLICATION_DENYLIST` paths are released but never published, whatever a pattern
-// says; a public `<stem>.html` deck also publishes its `<stem>_files/` bundle
-// (`site._public_selection`, `site._bundle_prefix`).
+// The engine's rule, `materials.hosted_paths`, with its lists read from
+// `schemas/materials.json`: never-material names are never copied out at all (withheld);
+// denylisted paths are released but never hosted, whatever a pattern says; a hosted deck
+// also hosts its `<stem>_files/` and the asset folders beside it. The same file carries
+// cases the engine answered, and the tests hold this function to them.
 
+import rules from '../../schemas/materials.json';
 import { compile, matchRules, type Rule } from './glob';
 
 export type Badge = 'public' | 'withheld' | 'released' | 'never_public';
 
 export const BADGE_WORD: Record<Badge, string> = {
-  public: 'published openly', withheld: 'withheld', released: 'released to students', never_public: 'released to students, never published',
+  public: 'hosted on the student site', withheld: 'withheld', released: 'released to students', never_public: 'released to students, never hosted',
 };
 
+/** An fnmatch pattern (`.env.*`) as a whole-name regex. */
+const fnmatch = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
 /** `repos.PUBLICATION_DENYLIST`, matched per path component, case-insensitively. */
-const DENYLIST = [/^solutions?$/, /^grading_config\.yml$/, /^grading\.yml$/, /^tests$/, /^\.env$/, /^\.env\..*$/, /^\.git$/];
+const DENYLIST = rules.denylist.map(fnmatch);
 /** `repos.NEVER_MATERIAL`, matched per path component, case-insensitively. */
-const NEVER_MATERIAL = new Set(['.ds_store', '.gitkeep', 'thumbs.db', 'desktop.ini', '__pycache__', '.ipynb_checkpoints']);
+const NEVER_MATERIAL = new Set(rules.never_material.map((x) => x.toLowerCase()));
 
 const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
 export const neverMaterial = (path: string) => parts(path).some((x) => NEVER_MATERIAL.has(x));
 export const denylisted = (path: string) => parts(path).some((x) => DENYLIST.some((re) => re.test(x)));
 const publishable = (path: string) => !denylisted(path) && !neverMaterial(path);
-const DECK = /\.html?$/i;
+const isDeck = (path: string) => {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  return name.includes('.') && rules.deck_extensions.includes(name.slice(name.lastIndexOf('.') + 1).toLowerCase());
+};
+
+/** `materials.bundle_prefixes`: the folders a deck's assets sit in, beside it. */
+export function bundlePrefixes(deck: string): string[] {
+  const folder = deck.includes('/') ? `${deck.slice(0, deck.lastIndexOf('/'))}/` : '';
+  return [`${deck.slice(0, deck.lastIndexOf('.'))}_files/`, ...rules.bundle_dirs.map((d) => `${folder}${d}/`)];
+}
+
+/** `materials.hosted_paths`: the paths the public patterns host, bundles included. */
+export function hostedPaths(files: string[], publicLines: string[]): Set<string> {
+  const pub = publicLines.map(compile).filter((r): r is Rule => r !== null);
+  const open = new Set(files.filter((f) => publishable(f) && matchRules(pub, f)));
+  for (const deck of [...open].filter(isDeck)) {
+    const prefixes = bundlePrefixes(deck);
+    for (const f of files) if (prefixes.some((x) => f.startsWith(x)) && publishable(f)) open.add(f);
+  }
+  return open;
+}
 
 export interface Badged {
   badges: Record<string, Badge>;
@@ -49,12 +73,8 @@ function unmatched(rules: { line: string; rule: Rule }[], files: string[]): stri
 /** Each file's badge, and the rules that match nothing. */
 export function badgeFiles(files: string[], publicLines: string[], withheldLines: string[]): Badged {
   const pub = rulesOf(publicLines), ign = rulesOf(withheldLines);
-  const pubRules = pub.map((r) => r.rule), ignRules = ign.map((r) => r.rule);
-  const open = new Set(files.filter((f) => publishable(f) && matchRules(pubRules, f)));
-  for (const deck of [...open].filter((f) => DECK.test(f))) {
-    const prefix = `${deck.slice(0, deck.lastIndexOf('.'))}_files/`;
-    for (const f of files) if (f.startsWith(prefix) && publishable(f)) open.add(f);
-  }
+  const ignRules = ign.map((r) => r.rule);
+  const open = hostedPaths(files, publicLines);
   const badges: Record<string, Badge> = {};
   for (const f of files)
     badges[f] = neverMaterial(f) || matchRules(ignRules, f) ? 'withheld' : open.has(f) ? 'public' : denylisted(f) ? 'never_public' : 'released';

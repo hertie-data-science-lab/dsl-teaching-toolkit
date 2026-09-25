@@ -326,7 +326,7 @@ describe('editing screens', () => {
   });
   it('materials settings previews what is public and what is withheld', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
-    expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ok">published openly<\/span>/);
+    expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ok">hosted on the student site<\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span>/);
     expect(out).toContain('Write the session list');
   });
@@ -334,7 +334,7 @@ describe('editing screens', () => {
     const none = new StaticFiles({ [`${COURSE_ORG}/course-materials-f2026/publish.yml`]: 'public: []\n' }, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
     const out = html(<MaterialsScreen {...cp} files={none} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">SYLLABUS.md<\/span><span class="chip ">released to students<\/span>/);
-    expect(out).not.toContain('published openly</span><a');
+    expect(out).not.toContain("hosted on the student site</span><a");
     expect(out).not.toContain('class="file-list"');
   });
   it('the public website asks for the confirmation the engine’s missing preview needs', () => {
