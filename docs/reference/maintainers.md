@@ -805,8 +805,8 @@ semester on `main`, run the e2e there, then - on the user's go-ahead, outside te
 hours - migrate every live real org and Promote in the same window (with ds01's switch to
 `all_semesters`). `.project/build/migration-runbook.md` holds the order.
 
-**The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, nothing
-written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
+**The tool.** `python -m dsl_course.migrate <org>` previews (the default: the plan, with
+every move, delete and re-rendered file per step, nothing written); `--no-preview` runs it. Course org first, then each of its live semesters. Per
 step: do, verify, stop on the first failure naming the rollback. A step already done says
 "already migrated"; a second run writes nothing, not even status.json. A missing repo or
 file reads as "not migrated yet", never as an error.
@@ -818,7 +818,10 @@ every content repo and template with a release workflow. Before anything is swit
 repo's own setting (`enabled`, `allowed_actions`) is recorded in
 `<org>/.github/.system/migration-pause.json`; the unpause restores exactly that (a repo that
 was off stays off), reads it back and deletes the record. Verified by reading the setting
-back and by no run having started since, nor being queued or running. From the pause to
+back and by no run having started since the pause (by GitHub's clock, the `Date` header),
+nor being unfinished (queued, in progress, waiting, requested, pending) - in those repos or
+as the central Deploy / Promote of the course's tier. An org with no workflow repo counts as
+paused. From the pause to
 the verified unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded
 repos and the record. A semester waits until its course's migration is complete (no course
 record left, its Actions on) - or resumes its own stopped run (its record is there) - so no
@@ -830,20 +833,21 @@ re-render writes what the checkout says, and the org's next Refresh writes what 
 says.
 
 Semester steps: preflight (topic, not archived, course complete, no run queued or running),
-pause, rename repos, layout (records into `.system/`, `people.yml` -> `instructors.yml`
+pause, rename repos (each old name must redirect), layout (records into `.system/`, `people.yml` -> `instructors.yml`
 checked against the old file before anything is committed, the seeded skeleton replaced by
 the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
 (`schedule.yml`, re-read with this engine: zero `NOT_MIGRATED`), topic, re-render (drift
-checked over the dispatchers, README, pointer, lock, join files and org READMEs), unpause,
-status. Course steps: preflight (not archived), pause, registry (also a `semesters.yml`
+checked over the dispatchers, README, pointer, lock, join files and org READMEs), status,
+unpause (status.json first, so re-enabled workflows never race it). A move never overwrites:
+a target holding other bytes refuses the whole commit, naming both paths. Course steps: preflight (not archived), pause, registry (also a `semesters.yml`
 still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, template keys
 (`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
 re-read with `parse_grading_spec` - course-owned, so here rather than per semester),
-materials files, re-render (Refresh actions from the checkout), unpause, status. The
-`dsl-course.yml` keys step strips `org`, `org_name`, `cohort_defaults` and
-`semester_defaults` (each with its block) and rewrites `assignment_defaults` `format:`;
-its verify re-reads the file with the engine's own rules (`sync_faculty.retired_course_faults`)
-and expects no `NOT_MIGRATED`.
+materials files, re-render (Refresh actions from the checkout; drift checked in `.github`,
+every content repo and every live template), status, unpause. The `dsl-course.yml` keys
+step strips `org`, `org_name`, `cohort_defaults` and `semester_defaults` (each with its
+block) and rewrites `assignment_defaults` `format:`; its verify re-reads the file with the
+engine's own rules (`sync_faculty.retired_course_faults`) and expects no `NOT_MIGRATED`.
 `grading_datetime` is left for B2. Tested only against a stubbed GitHub
 (`tests/test_migrate.py`).
 
