@@ -1944,7 +1944,8 @@ def origins(tmp_path, monkeypatch) -> BareOrigins:
 
 
 def _policy(*patterns: str) -> dict[str, tuple]:
-    return {"materials": (site.parse_patterns("\n".join(patterns)),)}
+    """Patterns of a source repo released whole into `materials`."""
+    return {"materials": (materials.Feed(patterns, (("", ""),)),)}
 
 
 def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
@@ -2173,7 +2174,41 @@ def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
     # The `code` destination is not one of this semester's content repos, so it is not asked
     # about at all.
     assert asked == [("Course-Org", "course-materials-f2026", "publish.yml")]
-    assert policies["materials"][0].check_file("lectures/01_a/slides.html").include
+    assert policies["materials"] == (
+        materials.Feed(("lectures/**/*.html",), (("lectures/01_a", "lectures/01_a"),)),
+    )
+
+
+def test_a_renamed_copy_is_hosted_by_the_pattern_written_for_its_source(
+    monkeypatch, origins, tmp_path
+):
+    # The instructor writes `publish.yml` against their own repo, as the console previews
+    # it. A release that renames `lectures/01_a` to `week-1` in the semester still hosts
+    # the deck, and a pattern written for the SEMESTER's name no longer matches.
+    monkeypatch.setattr(
+        site, "yaml_file", lambda *a: {"public": ["lectures/**/*.html"]}
+    )
+    sched = Schedule(
+        releases=[
+            Release(
+                "s1",
+                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
+                deploy=[
+                    Deploy(
+                        "course-materials-f2026", "lectures/01_a", "materials", "week-1"
+                    )
+                ],
+            )
+        ]
+    )
+    policies = site._publish_policies("Course-Org", sched, ["materials"])
+    tree = {"week-1/slides.html": "deck", "week-1/slides_files/a.css": "css"}
+    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, policies)
+    assert served == [
+        "materials/week-1/slides.html",
+        "materials/week-1/slides_files/a.css",
+    ]
+    assert hosted["materials"] == frozenset(tree)
 
 
 def test_a_shared_assignment_names_the_real_drop_box_and_the_reader_s_folder(

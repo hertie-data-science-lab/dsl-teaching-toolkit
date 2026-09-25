@@ -68,3 +68,66 @@ def test_folder_keys_and_aliases_match_whatever_the_case():
     assert materials.infer_kind("Quiz", {"quiz": "exam"}) == "exam"
     assert materials.alias_kind("LABS") == "lab"
     assert materials.alias_kind("code") is None
+
+
+# ---------------------------------------------------------------- publish.yml
+
+
+def test_a_deck_carries_its_asset_folders_with_it():
+    assert materials.bundle_prefixes("lectures/01_lecture/deck.html") == (
+        "lectures/01_lecture/deck_files/",
+        "lectures/01_lecture/media/",
+        "lectures/01_lecture/libs/",
+        "lectures/01_lecture/images/",
+    )
+
+
+def test_a_hosted_deck_takes_a_media_folder_but_not_a_neighbours():
+    # Maths keeps its deck assets in `media/` beside the deck.
+    paths = (
+        "lectures/01_lecture/deck.html",
+        "lectures/01_lecture/media/fig.png",
+        "lectures/01_lecture/notes.pdf",
+        "lectures/02_lecture/media/other.png",
+    )
+    assert materials.hosted_paths(paths, ["**/*.html"]) == {
+        "lectures/01_lecture/deck.html",
+        "lectures/01_lecture/media/fig.png",
+    }
+
+
+def test_a_denylisted_bundle_file_stays_home():
+    paths = ("l/deck.html", "l/deck_files/solutions/a.js", "l/deck_files/b.js")
+    assert materials.hosted_paths(paths, ["l/*.html"]) == {
+        "l/deck.html",
+        "l/deck_files/b.js",
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "pairs", "source"),
+    [
+        ("week-1/a.html", [("lectures/01", "week-1")], "lectures/01/a.html"),
+        ("week-1", [("lectures/01/a.html", "week-1")], "lectures/01/a.html"),
+        # A whole-repo copy, spelt any of the ways faculty write it.
+        ("lectures/01/a.html", [(".", "/")], "lectures/01/a.html"),
+        ("01/a.html", [("lectures", "")], "lectures/01/a.html"),
+        # The longest semester prefix wins; a sibling that only shares letters does not.
+        ("x/y/a.pdf", [("src", "x"), ("deep", "x/y")], "deep/a.pdf"),
+        ("week-10/a.pdf", [("lectures/01", "week-1")], None),
+    ],
+)
+def test_a_semester_path_goes_back_to_its_source(path, pairs, source):
+    assert materials.source_path(path, pairs) == source
+
+
+def test_each_copy_is_judged_by_the_repo_it_came_from():
+    feeds = (
+        materials.Feed(("lectures/**/*.html",), (("lectures/01", "s1/lecture"),)),
+        materials.Feed(("src/**",), (("src", "s1/code"),)),
+    )
+    paths = ("s1/lecture/a.html", "s1/lecture/b.pdf", "s1/code/x.py", "extra/c.html")
+    # `extra/` came by hand: judged as named, by every feed's patterns.
+    assert materials.hosted_copy(paths, feeds) == {"s1/lecture/a.html", "s1/code/x.py"}
+    feeds += (materials.Feed(("extra/**",), (("other", "elsewhere"),)),)
+    assert "extra/c.html" in materials.hosted_copy(paths, feeds)

@@ -717,11 +717,10 @@ _PUBLISH_STUB = f"""\
 # rewritten by the toolkit, so anything you put here stays.
 #
 # What the semester site hosts PUBLICLY, so a rendered deck opens in a browser instead of
-# showing as source on GitHub. Same syntax as .gitignore, relative to this repo - or,
-# strictly, to the semester's copy, so a release that renames a path with semester_dest_path
-# needs the pattern written the way the SEMESTER repo has it. Anything unmatched stays
+# showing as source on GitHub. Same syntax as .gitignore, relative to this repo, also
+# where a release renames a path with semester_dest_path. Anything unmatched stays
 # exactly as it is today: enrolled students open it on GitHub. A deck's
-# <name>_files/ bundle follows its deck. solution/, tests/, grading files and .env are
+# <name>_files/, media/, libs/ and images/ folders follow it. solution/, tests/, grading files and .env are
 # never copied whatever is written here. Applies to every semester of this course. Edit,
 # then press Sync site (or wait for the next release / daily sync) - a file that does not
 # parse stops the sync and is reported, rather than quietly publishing nothing. Full rules:
