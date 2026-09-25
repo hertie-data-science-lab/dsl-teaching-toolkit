@@ -10,6 +10,10 @@ describe('the publish.yml rule', () => {
       expect([...hostedPaths(c.paths, c.public)].sort()).toEqual(c.hosted);
     });
 
+  it('reads an escaped bracket as itself', () => {
+    expect([...hostedPaths(['a[b]/x.pdf', 'ab/x.pdf'], ['a\\[b]/*'])]).toEqual(['a[b]/x.pdf']);
+  });
+
   it('badges a withheld file withheld, whatever publishes it', () => {
     const b = badgeFiles(['lectures/a.html', 'lectures/a_files/x.js'], ['**'], ['lectures/a.html']).badges;
     expect(b).toEqual({ 'lectures/a.html': 'withheld', 'lectures/a_files/x.js': 'public' });

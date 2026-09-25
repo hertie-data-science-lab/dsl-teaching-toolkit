@@ -17,6 +17,9 @@ function toRegex(glob: string): string {
       const slashAfter = glob[i + 2] === '/';
       out += slashAfter ? '(?:.*/)?' : '.*';
       i += slashAfter ? 2 : 1;
+    } else if (c === '\\' && i + 1 < glob.length) {
+      // An escaped character is itself (`\[` is a literal bracket).
+      out += glob[++i].replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
     } else if (c === '*') out += '[^/]*';
     else if (c === '?') out += '[^/]';
     else if (c === '[' && glob.indexOf(']', i + 2) > i) {

@@ -40,9 +40,19 @@ export function bundlePrefixes(deck: string): string[] {
   return [`${deck.slice(0, deck.lastIndexOf('.'))}_files/`, ...rules.bundle_dirs.map((d) => `${folder}${d}/`)];
 }
 
+/** `materials.publish_lines`: a negated folder (`!labs/sub/`) excludes its whole subtree, whatever matched before. */
+export function publishLines(lines: string[]): string[] {
+  return lines.map((line) => {
+    const body = line.trim();
+    if (!body.startsWith('!') || !body.endsWith('/') || !body.replace(/[!/]/g, '')) return line;
+    const folder = body.slice(1).replace(/\/+$/, '');
+    return folder.replace(/^\/+/, '').includes('/') ? `!${folder}/**` : `!**/${folder}/**`;
+  });
+}
+
 /** `materials.hosted_paths`: the paths the public patterns host, bundles included. */
 export function hostedPaths(files: string[], publicLines: string[]): Set<string> {
-  const pub = publicLines.map(compile).filter((r): r is Rule => r !== null);
+  const pub = publishLines(publicLines).map(compile).filter((r): r is Rule => r !== null);
   const open = new Set(files.filter((f) => publishable(f) && matchRules(pub, f)));
   for (const deck of [...open].filter(isDeck)) {
     const prefixes = bundlePrefixes(deck);
