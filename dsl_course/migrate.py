@@ -1523,7 +1523,7 @@ class Course:
                         )
                     ]
                 ),
-                do=lambda: seed.refresh(self.org) == 0,
+                do=lambda: seed.refresh(self.org, course_only=True) == 0,
                 verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
             ),

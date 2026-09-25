@@ -792,10 +792,15 @@ def course(fake, monkeypatch):
     )
     _course_renders(fake, monkeypatch)
     calls: list[str] = []
+    # "refresh" is the course-only re-render; a refresh that would go on into the
+    # semesters (not yet migrated) records itself differently, and fails every assert.
     monkeypatch.setattr(
         migrate.seed,
         "refresh",
-        lambda org: calls.append("refresh") or _render_course(fake, org),
+        lambda org, *, course_only=False: (
+            calls.append("refresh" if course_only else "refresh with semesters")
+            or _render_course(fake, org)
+        ),
     )
     monkeypatch.setattr(
         migrate.status,
@@ -923,7 +928,7 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     monkeypatch.setattr(
         migrate.seed,
         "refresh",
-        lambda org: _render(fake, org, ".github", COURSE_WORKFLOWS),
+        lambda org, **k: _render(fake, org, ".github", COURSE_WORKFLOWS),
     )
     assert _main(monkeypatch, COURSE, "--no-preview") == 1
     err = capsys.readouterr().err
@@ -932,6 +937,36 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     assert "course-materials-f2026/.system/MAINTAINING.md" in err
     assert f"assignment-1-f2026/{migrate.TEMPLATE_WORKFLOWS[0]}" in err
     assert f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired)" in err
+
+
+def test_a_course_stopped_at_the_re_render_finishes_on_the_next_run(
+    fake, course, monkeypatch, capsys
+):
+    # The state the rehearsal left: the pause recorded, the six steps up to the materials
+    # done, the re-render failed. The next run skips the five work steps, re-renders the
+    # course alone, writes the status and restores Actions from the pause record.
+    rendered = migrate.seed.refresh
+    monkeypatch.setattr(migrate.seed, "refresh", lambda org, **k: 1)
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    assert "re-render did not verify - stopped here" in capsys.readouterr().err
+    assert migrate.PAUSE_RECORD in fake.tree(COURSE, ".github")
+    assert not fake.enabled(COURSE, ".github")
+    assert course == []
+
+    monkeypatch.setattr(migrate.seed, "refresh", rendered)
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    out = capsys.readouterr().out
+    for step in (
+        "registry",
+        ".system/ in .github",
+        "dsl-course.yml keys",
+        "template keys",
+        "materials files",
+    ):
+        assert f"[skip] {step}: already migrated" in out
+    assert course == ["refresh", "status"]
+    assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
+    assert all(fake.enabled(*key) for key in fake.workflow_repos())
 
 
 @pytest.mark.parametrize(
