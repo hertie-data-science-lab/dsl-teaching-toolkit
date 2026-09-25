@@ -6848,3 +6848,52 @@ def test_a_shared_assignment_posts_no_receipts(monkeypatch):
         is_group=False,
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
     ).written
+
+
+# ------------------------------------------------ the file a tagged question is marked from
+
+
+def test_a_tagged_questions_file_is_read_as_its_compiled_pdf_when_there_is_one(
+    tmp_path,
+):
+    (tmp_path / "starter.tex").write_text("\\documentclass{article}")
+    assert collect.tagged_copy(tmp_path, "starter.tex") == (
+        "starter.tex",
+        b"\\documentclass{article}",
+    )
+    (tmp_path / "starter.pdf").write_bytes(b"%PDF-1.7")
+    assert collect.tagged_copy(tmp_path, "starter.tex") == ("starter.pdf", b"%PDF-1.7")
+    assert collect.tagged_copy(tmp_path, "missing.tex") is None
+
+
+def test_a_tagged_file_behind_a_symlinked_folder_is_not_read(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "report.tex").write_text("not the student's")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "docs").symlink_to(outside)
+    assert collect.tagged_copy(sub, "docs/report.tex") is None
+
+
+def test_the_grader_copies_include_each_tagged_questions_file(monkeypatch):
+    _checkout(
+        monkeypatch,
+        {"submission.ipynb": _QUESTION_NB, "report/starter.tex": "\\section{A}"},
+    )
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: False)
+
+    collect.export_grader_documents(
+        "Semester",
+        "a1",
+        "a1",
+        False,
+        "2026-10-13",
+        False,
+        files=("report/starter.tex",),
+    )
+
+    assert written[".system/autograde/a1/alice.report_starter.tex"] == b"\\section{A}"
+    assert ".system/autograde/a1/alice.ipynb" in written
