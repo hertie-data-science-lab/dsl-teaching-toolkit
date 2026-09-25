@@ -75,7 +75,6 @@ from .grades import load_grading_spec, spoken_day, team_cap, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
 from .materials import (
     DECK_EXTENSIONS,
-    DEFAULT_SYLLABUS,
     Feed,
     alias_kind,
     hosted_copy,
@@ -90,6 +89,7 @@ from .repos import (
 )
 from .schedule_plan import (
     PlannedRow,
+    declared_syllabus,
     deploy_dest,
     deploy_section,
     planned_rows,
@@ -1066,58 +1066,19 @@ def _declared_syllabus(
     live_repos: frozenset[str],
     hosted: Hosted,
 ) -> Link | None:
-    """The syllabus released to this semester, or None - the home page then shows no line.
-
-    Decision 0013 item 5, in order:
-    1. each source repo's declared syllabus (`materials.yml` `syllabus:`, default
-       `SYLLABUS.md`), followed through the copy that ships it (that file, a folder
-       holding it, the whole repo) to where it landed;
-    2. the same file at its own path in a released repo (a copy made off the plan);
-    3. when no repo declares one: a root file whose name contains `syllab`, an exact
-       `syllabus.*` stem first.
-    Pinned as its hosted copy when the course publishes it, else the GitHub blob."""
-
-    def link(repo: str, path: str) -> Link:
-        branch, _blobs = _repo_tree(semester_org, repo)
-        return _file_link(
-            semester_org, repo, branch, path, path.rsplit("/", 1)[-1], hosted
-        )
-
-    declared: dict[str, None] = {}
-    any_declared = False
-    for release in sched.releases:
-        for d in release.deploy:
-            decl = read_materials(course_org, d.course_source_repo)
-            declared[decl.syllabus] = None
-            any_declared = any_declared or decl.declared
-            if d.semester_dest_repo not in live_repos:
-                continue
-            src, dest = d.course_source_path.strip("/"), deploy_dest(d)
-            if src == decl.syllabus:
-                path = dest
-            elif not src or decl.syllabus.startswith(f"{src}/"):
-                path = f"{dest}/{decl.syllabus[len(src) :].lstrip('/')}".strip("/")
-            else:
-                continue
-            if path in _repo_tree(semester_org, d.semester_dest_repo)[1]:
-                return link(d.semester_dest_repo, path)
-    declared.setdefault(DEFAULT_SYLLABUS, None)
-    for repo in sorted(live_repos):
-        blobs = _repo_tree(semester_org, repo)[1]
-        for path in declared:
-            if path in blobs:
-                return link(repo, path)
-    if any_declared:
+    """The syllabus released to this semester (`schedule_plan.declared_syllabus`) as the
+    home page's link, or None - the home page then shows no line."""
+    found = declared_syllabus(
+        sched,
+        live_repos,
+        lambda repo: _repo_tree(semester_org, repo)[1],
+        lambda repo: read_materials(course_org, repo),
+    )
+    if found is None:
         return None
-    fallback = None
-    for repo in sorted(live_repos):
-        for path in _repo_tree(semester_org, repo)[1]:
-            if "/" in path or "syllab" not in path.lower():
-                continue
-            if path.rsplit(".", 1)[0].lower() == "syllabus":
-                return link(repo, path)
-            fallback = fallback or link(repo, path)
-    return fallback
+    repo, path = found
+    branch, _blobs = _repo_tree(semester_org, repo)
+    return _file_link(semester_org, repo, branch, path, path.rsplit("/", 1)[-1], hosted)
 
 
 def member_digest(semester_org: str, handle: str) -> str:
