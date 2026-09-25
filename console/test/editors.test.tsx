@@ -11,7 +11,8 @@ import { YamlText } from '../src/edit/yamlText';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
-import { finalGrade, penaltyRate, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
+import { penaltyRate } from '../src/model/policy';
+import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { blankDraft, draftErrors, freshId, readDraft, writeDraft, type ArchiveDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -228,7 +229,7 @@ describe('the operation panel', () => {
 
   it('shows the return-marks channels, the always-on ones locked', () => {
     const env = saveEnv(new FakeGitHub());
-    env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-2', title: 'Assignment 2: Regression', template: 'assignment-2-f2026', units: 48, group: false, when: 'Marking' }, 40));
+    env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-2', title: 'Assignment 2: Regression', template: 'assignment-2-f2026', units: 48, group: false, when: 'Marking' }, 40, 'assignment-2'));
     const out = render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>);
     expect(out).toContain('Update each student’s marks repo<span class="always">always</span>');
     expect(out).toContain('Email students whose marks changed');

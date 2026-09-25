@@ -13,7 +13,7 @@ import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { Crumbs, Help, ProblemCards } from '../ui/bits';
 import { asgSummary } from './Cohort';
 import { MarksTab, TeamsTab } from './Marking';
-import { AssignmentRun, SemesterDefaults } from './RunSettings';
+import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { scheduleFile } from '../model/cascade';
 import { WithStatus, cohortCrumbs, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -191,7 +191,7 @@ function Overview(p: TabProps) {
   const scope = cohortScope(p);
   const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand' };
   const sharers = sharedBy(p, a.template);
-  const shared = sharers.length > 1 ? `${sharers.join(' and ')} use the same assignment template, so the engine cannot tell which to act on; run it from GitHub per entry, or give each its own template.` : null;
+  const shared = sharers.length > 1 ? `${sharers.join(' and ')} share one assignment template; Collect now and Update every copy come back when each has its own template.` : null;
   const tree = p.files.tree(p.course.org, a.template);
   const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
   return (
@@ -268,14 +268,14 @@ function Overview(p: TabProps) {
               cur === 4 ? (
                 <>
                   <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
-                  <div class="sa-op"><span class="opname">Return marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled)} small /></div>
+                  <div class="sa-op"><span class="opname">Return marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug))} small /></div>
                 </>
               ) : null)}
             {row(cur === 5 ? 'now' : 'later', 'Returned', cur === 5 ? 'Marks are with students. Changed marks can be returned again.' : 'Opens after marks are returned. Changed marks can then be returned again.',
               cur === 5 ? (
                 <>
                   <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
-                  <div class="sa-op"><span class="opname">Return changed marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled)} small label="Return changed marks" /></div>
+                  <div class="sa-op"><span class="opname">Return changed marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug))} small label="Return changed marks" /></div>
                 </>
               ) : null)}
           </ul>

@@ -125,12 +125,13 @@ export function collect(s: Scope, a: AsgRef): OpDef {
   };
 }
 
-export function returnMarks(s: Scope, a: AsgRef, marked: number): OpDef {
+/** `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by. */
+export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string): OpDef {
   return {
     ...base(s, 'grades.return', a.slug), name: 'Return marks', title: a.title, where: 'Marking',
     intro: 'Sends each student their marks and feedback for this assignment, beside the ones already returned. Your private notes stay private.',
     verb: `Return marks to ${marked} ${a.group ? 'teams' : 'students'}`, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
-    args: { assignment: a.slug }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
+    args: { assignment: name }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
   };
 }
 

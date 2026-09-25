@@ -8,9 +8,10 @@ import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { ASSIGNMENT_WORD, assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
-import { NOTES_KEY, cellValue, finalGrade, gradebookWrites, penaltyRate, penaltyText, questionFile, questionPoints, readSheet, returnedOn, round, scoreTotal, type Unit } from '../model/marks';
+import { NOTES_KEY, cellValue, finalGrade, gradebookWrites, penaltyText, questionFile, questionPoints, readSheet, returnedOn, round, scoreTotal, type Unit } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
-import { assignmentSettings } from './RunSettings';
+import { assignmentSettings, sheetName } from './RunSettings';
+import { penaltyRate } from '../model/policy';
 import { parseRoster } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
@@ -47,7 +48,8 @@ export function MarksTab(p: TabProps) {
   // Folds, by unit: `m:<unit>` hides a team's members, `q:<unit>` shows its feedback per question.
   const [folds, setFolds] = useState<Record<string, boolean>>({});
   const [save, runSave, setSave] = useSave(env);
-  const path = `grading_sheets/${a.slug}.yml`;
+  const name = sheetName(p, a.slug);
+  const path = `grading_sheets/${name}.yml`;
   const file = p.files.file(p.cohort.org, CONFIG_REPO, path);
   const text = file.kind === 'ready' ? file.text : null;
   const parsed = useMemo(() => {
@@ -65,7 +67,7 @@ export function MarksTab(p: TabProps) {
   const head = (
     <div class="page-head">
       <div><h1>{assignmentTitle(a)}</h1><p class="lede">{a.marks.filled} of {a.marks.total} marked. Totals and late penalties are worked out for you.</p></div>
-      <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled)} /></div>
+      <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name)} /></div>
     </div>
   );
   const top = <>{head}{p.tabs}</>;
@@ -376,7 +378,7 @@ const LEDGER = LEDGER_PATH;
 function OverviewRow(p: ReadyProps & { a: Assignment; hasSheet: boolean; writes: Map<string, string> | null }) {
   const { a, status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
-  const path = `${SHEETS}/${a.slug}.yml`;
+  const path = `${SHEETS}/${sheetName(p, a.slug)}.yml`;
   const changed = p.hasSheet ? p.files.lastChange(p.cohort.org, CONFIG_REPO, path) : null;
   const sheet = a.returned && p.hasSheet ? p.files.file(p.cohort.org, CONFIG_REPO, path) : null;
   const text = sheet?.kind === 'ready' ? sheet.text : null;
@@ -401,7 +403,7 @@ function MarksOverview(p: ReadyProps) {
   const ledger = p.files.file(p.cohort.org, CONFIG_REPO, LEDGER);
   const writes = ledger.kind === 'ready' ? gradebookWrites(ledger.text) : ledger.kind === 'loading' ? null : new Map<string, string>();
   const returned = list.filter((a) => a.returned).length;
-  const toMark = list.reduce((n, a) => n + (sheets.has(`${a.slug}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
+  const toMark = list.reduce((n, a) => n + (sheets.has(`${sheetName(p, a.slug)}.yml`) ? a.marks.total - a.marks.filled : 0), 0);
   return (
     <>
       <Crumbs items={cohortCrumbs(p, 'Marks')} />
@@ -426,7 +428,7 @@ function MarksOverview(p: ReadyProps) {
           <div class="table-wrap">
             <table class="grid" style="min-width:820px">
               <thead><tr><th>Assignment</th><th>State</th><th>Marked</th><th>Returned</th><th>Gradebooks last updated</th><th>Last change</th></tr></thead>
-              <tbody>{list.map((a) => <OverviewRow {...p} a={a} hasSheet={sheets.has(`${a.slug}.yml`)} writes={writes} />)}</tbody>
+              <tbody>{list.map((a) => <OverviewRow {...p} a={a} hasSheet={sheets.has(`${sheetName(p, a.slug)}.yml`)} writes={writes} />)}</tbody>
             </table>
           </div>
           <p class="footnote" style="margin-top:8px">Gradebooks last updated: the newest write to this assignment’s students’ gradebooks. Every return rewrites every student’s gradebook, so this date moves forward for all returned assignments whenever any assignment is returned. Last change: the newest edit to the mark sheet.</p>

@@ -170,7 +170,7 @@ describe('the marks grid: teams > students > questions', () => {
   });
 
   it('returns marks for this assignment only', () => {
-    const d = defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-3', title: 'x', template: 'assignment-3-f2026', units: 1, group: true, when: 'Marking' }, 1);
+    const d = defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-3', title: 'x', template: 'assignment-3-f2026', units: 1, group: true, when: 'Marking' }, 1, 'assignment-3');
     expect(d.args).toEqual({ assignment: 'assignment-3' });
   });
 });
