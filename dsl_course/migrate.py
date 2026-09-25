@@ -39,7 +39,7 @@ from pathlib import Path
 
 import yaml
 
-from . import records, schedule, seed, status
+from . import policy, records, schedule, seed, status
 from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
 from .course import (
@@ -269,6 +269,36 @@ def course_config_keys(text: str) -> str:
                 line = formats_line(line, indent.group(1))
         out.append(line)
     return "\n".join(out)
+
+
+# The course's old per-semester defaults: stripped by `course_config_keys`. Their two
+# settings now live in each semester's `schedule.yml`, with the policy's as the default.
+OLD_SEMESTER_BLOCKS = ("cohort_defaults", "semester_defaults")
+
+
+def lost_semester_values(meta: dict, defaults: dict) -> list[str]:
+    """`block.key: value (policy: default)` for each `timezone` / `archive.grace_days` of
+    an old semester-defaults block in `meta` (a parsed `dsl-course.yml`) that differs from
+    the policy's `defaults`: what stripping the block would lose."""
+    out = []
+    for block in OLD_SEMESTER_BLOCKS:
+        raw = meta.get(block)
+        if not isinstance(raw, dict):
+            continue
+        archive = raw.get("archive")
+        found = {
+            "timezone": (raw.get("timezone"), defaults["timezone"]),
+            "archive.grace_days": (
+                archive.get("grace_days") if isinstance(archive, dict) else None,
+                defaults["archive"]["grace_days"],
+            ),
+        }
+        out += [
+            f"{block}.{key}: {value} (policy: {want})"
+            for key, (value, want) in found.items()
+            if value is not None and str(value).strip() != str(want)
+        ]
+    return out
 
 
 def registry_keys(text: str) -> str:
@@ -1252,6 +1282,20 @@ class Course:
         text = get_file_content(self.org, ".github", COURSE_CONFIG)
         return text, (course_config_keys(text) if text is not None else None)
 
+    def lost_values(self) -> list[str]:
+        """What stripping this course's old semester-defaults block would lose, each
+        value named for a person to carry by hand before the migration strips it."""
+        text, _ = self.meta_text()
+        lost = lost_semester_values(_yaml(text), policy.defaults())
+        for value in lost:
+            log_err(
+                f"{self.org}/.github/{COURSE_CONFIG}: `{value}` differs from the policy - "
+                f"carry it by hand into each live semester's {CONFIG_REPO}/"
+                f"{schedule.SCHEDULE_PATH} (`timezone:` / `archive: grace_days:`), then "
+                f"delete it from {COURSE_CONFIG} and run again. Nothing was written."
+            )
+        return lost
+
     def meta_done(self) -> bool:
         text, new = self.meta_text()
         return text == new
@@ -1517,6 +1561,8 @@ def preflight(org: str) -> Course | Semester | None:
             log_err(f"{org}/.github is archived - an archived course is never touched")
             return None
         target: Course | Semester = Course(org)
+        if target.lost_values():
+            return None
     elif topics & {OLD_SEMESTER_TOPIC, SEMESTER_TOPIC}:
         config = listing.get(CONFIG_REPO) or listing.get(OLD_CONFIG_REPO)
         if (

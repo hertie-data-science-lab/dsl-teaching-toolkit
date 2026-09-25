@@ -934,6 +934,39 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     assert f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired)" in err
 
 
+@pytest.mark.parametrize(
+    "block",
+    [
+        "cohort_defaults:\n  timezone: America/New_York\n",
+        "semester_defaults:\n  archive:\n    auto: true\n    grace_days: 30\n",
+    ],
+    ids=["timezone", "grace-days"],
+)
+def test_a_semester_default_that_differs_from_the_policy_stops_before_any_write(
+    fake, course, monkeypatch, capsys, block
+):
+    tree = fake.tree(COURSE, ".github")
+    tree["dsl-course.yml"] = f"course_name: X\n{block}".encode()
+    before = _state(fake)
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert "differs from the policy - carry it by hand" in err
+    assert "semester-config/schedule.yml" in err
+    assert _state(fake) == before and fake.commits == [] and fake.puts == []
+
+
+def test_a_semester_default_equal_to_the_policy_is_stripped(fake, course, monkeypatch):
+    zone = migrate.policy.defaults()["timezone"]
+    grace = migrate.policy.defaults()["archive"]["grace_days"]
+    fake.tree(COURSE, ".github")["dsl-course.yml"] = (
+        f"course_name: X\nsemester_defaults:\n  timezone: {zone}\n"
+        f"  archive:\n    auto: false\n    grace_days: {grace}\n"
+    ).encode()
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    meta = yaml.safe_load(fake.tree(COURSE, ".github")["dsl-course.yml"])
+    assert meta == {"course_name": "X"}
+
+
 def test_a_registry_already_renamed_but_keyed_the_old_way_is_rewritten(
     fake, course, monkeypatch
 ):
