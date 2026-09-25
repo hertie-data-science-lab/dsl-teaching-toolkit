@@ -171,6 +171,17 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).toContain('The penalty is 5% of the total per late day.');
   });
 
+  it('reads a renamed entry’s mark sheet by its semester-side name', () => {
+    const files = filesWith({
+      [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-2:\n    semester_dest_repo: assignment-2-resit\n`,
+      [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`]: 'submissions: {}\n',
+      [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2-resit.yml`]: SOLO_SHEET,
+    });
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks', files })} />);
+    expect(out).toContain('aria-label="Q1 (out of 10) for carla-c"');
+    expect(out).toContain('grading_sheets/assignment-2-resit.yml');
+  });
+
   it('returns marks for this assignment only', () => {
     const d = defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'assignment-3', title: 'x', template: 'assignment-3-f2026', units: 1, group: true, when: 'Marking' }, 1, 'assignment-3');
     expect(d.args).toEqual({ assignment: 'assignment-3' });

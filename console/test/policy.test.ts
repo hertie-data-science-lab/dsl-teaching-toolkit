@@ -7,7 +7,8 @@ import { parse } from 'yaml';
 import SKELETON from '../../templates/semester-config/assignments.yml?raw';
 import policy from '../schemas/policy.json';
 import { YamlText } from '../src/edit/yamlText';
-import { effectiveWord, institutionLayer, lateWord, layersOf, resolve, usableBlock, writeBlock, type Layers } from '../src/model/cascade';
+import { effectiveWord, institutionLayer, lateWord, layersOf, readSetting, resolve, semesterName, usableBlock, writeBlock, type Layers } from '../src/model/cascade';
+import { questionFileError, questionsValue } from '../src/tiers/grading';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, HANDLE_RE, ORG_NAME_RE, penaltyRate } from '../src/model/policy';
 import { assignmentsAfterSchedule } from '../src/screens/RunSettings';
 
@@ -108,6 +109,63 @@ describe('the cascade', () => {
     expect(effectiveWord('max_team_size', resolve('max_team_size', l))).toBe('up to 2, set for this assignment');
     expect(effectiveWord('late_window_days', resolve('late_window_days', l))).toBe('5 days, this semester’s default');
     expect(effectiveWord('visibility', resolve('visibility', l))).toBe('Private, institution default');
+  });
+});
+
+describe('the readers, as setting_readers reads each value', () => {
+  it('reads a negative late window as 0, and refuses a window that is not a whole number', () => {
+    expect(readSetting('late_window_days', -3)).toBe(0);
+    expect(readSetting('late_window_days', '4')).toBe(4);
+    expect(readSetting('late_window_days', 2.5)).toBeUndefined();
+    expect(readSetting('late_window_days', 'ten')).toBeUndefined();
+    expect(resolve('late_window_days', layersOf({}, { defaults: { late_window_days: -3, late_penalty_per_day: '5%' } }))).toEqual({ value: 0, source: 'semester' });
+  });
+
+  it('refuses a submit link that is not a filled-in https:// address', () => {
+    expect(readSetting('submit_url', 'https://moodle.example.org/a/1')).toBe('https://moodle.example.org/a/1');
+    expect(readSetting('submit_url', 'HTTPS://moodle.example.org/')).toBe('HTTPS://moodle.example.org/');
+    expect(readSetting('submit_url', 'https://moodle.example.org/CHANGE-ME')).toBeUndefined();
+    expect(readSetting('submit_url', 'https://')).toBeUndefined();
+    expect(readSetting('submit_url', 'http://moodle.example.org/')).toBeUndefined();
+  });
+
+  it('gives the course layer no submit link', () => {
+    const l = layersOf({ submit_url: 'https://moodle.example.org/', max_team_size: 4 }, {});
+    expect(l.course).toEqual({ max_team_size: 4 });
+  });
+
+  it('lower-cases the enums and checks them against the schema’s lists, not a label map', () => {
+    expect(readSetting('team_formation', ' Assigned ')).toBe('assigned');
+    expect(readSetting('visibility', 'PUBLIC')).toBe('public');
+    expect(readSetting('visibility', 'constructor')).toBeUndefined();
+    expect(readSetting('team_formation', 'toString')).toBeUndefined();
+  });
+
+  it('accepts a team size written as text, and refuses 0 or a fraction', () => {
+    expect(readSetting('max_team_size', '4')).toBe(4);
+    expect(readSetting('max_team_size', 0)).toBeUndefined();
+    expect(readSetting('max_team_size', 3.5)).toBeUndefined();
+    expect(usableBlock({ max_team_size: '4', visibility: 'Private' })).toEqual({ max_team_size: 4, visibility: 'private' });
+  });
+
+  it('names an assignment’s semester-side artefacts by its semester_dest_repo, else its key', () => {
+    expect(semesterName({ assignments: { 'assignment-1': { semester_dest_repo: 'assignment-1-resit' } } }, 'assignment-1')).toBe('assignment-1-resit');
+    expect(semesterName({ assignments: { 'assignment-1': { semester_dest_repo: 'not a repo' } } }, 'assignment-1')).toBe('assignment-1');
+    expect(semesterName({}, 'assignment-2')).toBe('assignment-2');
+  });
+});
+
+describe('questions', () => {
+  it('keeps a question’s file when it is renamed, and drops file: when the file is cleared', () => {
+    const was = { Q1: { points: 5, file: 'report.tex' } };
+    expect(questionsValue([{ name: 'Part A', points: '5', file: 'report.tex' }], was)).toEqual({ 'Part A': { points: 5, file: 'report.tex' } });
+    expect(questionsValue([{ name: 'Q1', points: '5', file: '' }], was)).toEqual({ Q1: 5 });
+  });
+
+  it('refuses a file outside the submission, as the engine does', () => {
+    expect(questionFileError('report.tex')).toBeNull();
+    expect(questionFileError('write-up/report.tex')).toBeNull();
+    for (const bad of ['../secret.tex', '/etc/passwd', 'a\\b.tex', 'a/../b.tex']) expect(questionFileError(bad)).toContain('is not a file inside the submission');
   });
 });
 
