@@ -1338,14 +1338,15 @@ def resolve_answers(answers: dict[str, str], defaults: dict) -> dict[str, str]:
         ("course", defaults),
         ("institution", {**_SHAPE_ANSWERS, **settings.institution_defaults()}),
     ]
-    return {
-        key: (
-            str(settings.resolve(key, stack)[0])
-            if value == COURSE_DEFAULT_CHOICE
-            else value
+    out = {}
+    for key, value in answers.items():
+        if value == COURSE_DEFAULT_CHOICE:
+            value = settings.resolve(key, stack)[0]
+        # `formats` is a tuple on every layer; the box's answer is the typed string.
+        out[key] = (
+            ",".join(value) or NO_STARTER if isinstance(value, tuple) else str(value)
         )
-        for key, value in answers.items()
-    }
+    return out
 
 
 def _not_a_format(problem: str) -> ValueError:

@@ -85,7 +85,8 @@ from .grades import (
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .profile_readme import profile_files, update_profile_readme
 from .repos import default_branch, repo_missing, set_repo_topics
-from .settings import ASSIGNMENT_DEFAULTS_KEY, RENAMED_SETTINGS
+from .setting_readers import RENAMED_SETTINGS
+from .settings import ASSIGNMENT_DEFAULTS_KEY
 from .sync_faculty import retired_course_faults
 from .welcome import (
     config_system_files,

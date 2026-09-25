@@ -55,12 +55,12 @@ from .schedule import (
     KNOWN_ROW_KINDS,
     KNOWN_TOP_LEVEL,
 )
+from .setting_readers import SPEC_KEYS
 from .settings import (
     ASSIGNMENT_DEFAULTS_KEY,
     COURSE_DEFAULT_KEYS,
     RUN_KEYS,
     SOURCES,
-    SPEC_KEYS,
 )
 from .teams import FIELDS as TEAMS_FIELDS
 

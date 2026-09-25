@@ -110,8 +110,7 @@ from .repos import (
     repo_is_archived,
     set_repo_topics,
 )
-from .settings import (
-    LATE_PAIR,
+from .setting_readers import (
     SPEC_KEYS,
     Dropped,
     as_decimal,
@@ -119,6 +118,7 @@ from .settings import (
     read_settings,
     refuse_renamed,
 )
+from .settings import LATE_PAIR
 
 GRADEBOOK_DIR = records.path(
     "gradebook"

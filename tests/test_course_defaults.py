@@ -27,7 +27,11 @@ def test_the_four_new_assignment_boxes_can_be_set_course_wide():
         "team_formation": "assigned",
         "visibility": "public",
     }
-    assert settings.parse_assignment_defaults(block) == block
+    assert settings.parse_assignment_defaults(block) == {**block, "formats": ("py",)}
+    # Read back as the box types it.
+    assert scaffold.resolve_answers({"formats": SENTINEL}, {"formats": ("py",)}) == {
+        "formats": "py"
+    }
 
 
 def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
@@ -39,7 +43,7 @@ def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
 
 def test_a_course_default_format_is_a_list_of_starters_as_the_box_takes(capsys):
     got = settings.parse_assignment_defaults({"formats": "ipynb, py"})
-    assert got == {"formats": "ipynb,py"}
+    assert got == {"formats": ("ipynb", "py")}
     # An unusable answer is dropped, so the toolkit's ipynb applies - never `none`.
     for bad in ("ipnb", "none,py", ""):
         assert settings.parse_assignment_defaults({"formats": bad}) == {}

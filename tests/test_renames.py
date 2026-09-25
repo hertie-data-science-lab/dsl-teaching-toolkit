@@ -502,7 +502,7 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
 
 def test_a_course_default_under_the_old_format_key_is_not_read():
     assert settings.parse_assignment_defaults({"format": "py"}) == {}
-    assert settings.parse_assignment_defaults({"formats": "py"}) == {"formats": "py"}
+    assert settings.parse_assignment_defaults({"formats": "py"}) == {"formats": ("py",)}
 
 
 # ------------------------------------------------ preview (dry_run, write) and notify
