@@ -163,6 +163,9 @@ def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
 # layout are theirs. Each returns the text unchanged when there is nothing to rewrite.
 
 _TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*):")
+# A key whose value is a block scalar (`details: >-`, `- notes: |`): group 1 runs up to the
+# key, so its length is the key's column; every line indented deeper is the scalar's text.
+_BLOCK_SCALAR = re.compile(r"^(\s*(?:-\s+)?)[^\s#:][^:]*:\s*[|>][-+0-9]*\s*(?:#.*)?$")
 
 
 def split_comment(text: str) -> tuple[str, str]:
@@ -186,7 +189,12 @@ def schedule_keys(text: str) -> str:
     `kind:` on the entries of `releases:` and `events:` (an assignment's `type:` is its
     individual/group shape and stays)."""
     out, section = [], ""
+    scalar: int | None = None  # the column of the key whose block scalar this is in
     for line in text.split("\n"):
+        if scalar is not None and (not line.strip() or _indent(line) > scalar):
+            out.append(line)  # prose, however it reads
+            continue
+        scalar = None
         if top := _TOP_KEY.match(line):
             section = top.group(1)
         line = re.sub(
@@ -194,6 +202,8 @@ def schedule_keys(text: str) -> str:
         )
         if section in ("releases", "events"):
             line = re.sub(r"^(\s+(?:-\s+)?)type:", r"\1kind:", line)
+        if block := _BLOCK_SCALAR.match(line):
+            scalar = len(block.group(1))
         out.append(line)
     return "\n".join(out)
 
@@ -376,8 +386,19 @@ def fix_header(text: str, ref: str) -> str:
 # ------------------------------------------------------------------ GitHub, narrowly
 
 
+# `{org: {repo name: listing row}}`: each org is listed once, and listed again only after
+# a step has written (`_forget`) - a rename or a topic changes what the listing says.
+_LISTINGS: dict[str, dict[str, dict]] = {}
+
+
 def _listing(org: str) -> dict[str, dict]:
-    return {row["name"]: row for row in list_org_repos(org)}
+    if org not in _LISTINGS:
+        _LISTINGS[org] = {row["name"]: row for row in list_org_repos(org)}
+    return _LISTINGS[org]
+
+
+def _forget() -> None:
+    _LISTINGS.clear()
 
 
 def _topics(listing: dict[str, dict]) -> set[str]:
@@ -585,7 +606,9 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
                 log(f"  [skip] {step.name}: already migrated")
                 continue
             log_step(step.name)
-            if not step.do() or not step.verify():
+            done_ok = step.do()
+            _forget()
+            if not done_ok or not step.verify():
                 log_err(
                     f"{step.name} did not verify - stopped here. "
                     f"Rollback: {step.rollback}"
@@ -946,7 +969,7 @@ class Semester:
         return not (moves or files or deletes or old_pointer)
 
     def layout_plan(self) -> list[str]:
-        moves, _, deletes, old_pointer = self.layout_work()
+        moves, files, deletes, old_pointer = self.layout_work()
         out = [
             f"move {len(moves)} record file(s) under {records.SYSTEM_DIR}/ (one commit)"
         ]
@@ -954,7 +977,8 @@ class Semester:
             out.append(
                 f"{OLD_PEOPLE_FILE} -> {INSTRUCTORS_FILE} (one list, a role each)"
             )
-        out.append(f"write the course pointer to {records.path('pointer')}")
+        if records.path("pointer") in files:
+            out.append(f"write the course pointer to {records.path('pointer')}")
         samples = [p for p in deletes if p.endswith(SAMPLE_SUFFIX)]
         if samples:
             out.append(f"delete {len(samples)} *{SAMPLE_SUFFIX} file(s)")
@@ -1506,15 +1530,16 @@ def main() -> int:
     parser.add_argument("org", help="The course org or semester org to migrate")
     add_preview_flag(parser, "Print the plan and write nothing (default).")
     args = parser.parse_args()
+    _forget()
     try:
         target = preflight(args.org)
+        if target is None:
+            return 1
+        course = target.course if isinstance(target, Semester) else args.org
+        ref = central_ref_for(course)
     except RuntimeError as exc:
         log_err(f"preflight could not read {args.org}: {exc}")
         return 1
-    if target is None:
-        return 1
-    course = target.course if isinstance(target, Semester) else args.org
-    ref = central_ref_for(course)
     log(f"  central ref of the course: {ref}")
     _warn_drift(course, ref)
     return run(args.org, target.steps(), args.preview, target.pause)

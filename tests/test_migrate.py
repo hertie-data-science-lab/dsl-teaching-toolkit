@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from dsl_course import migrate, records, repos
+from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
     INSTRUCTORS_FILE,
@@ -264,6 +265,7 @@ def fake(monkeypatch):
     # The checkout is the pinned ref, unless a test says otherwise.
     monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(migrate, "_LISTINGS", {})
     return f
 
 
@@ -648,6 +650,7 @@ def test_a_repo_that_is_not_there_reads_as_empty_not_as_an_error(fake, semester)
     assert migrate._files(SEM, CONFIG_REPO) == {}
     fake.list_org_repos = lambda org: [{"name": CONFIG_REPO, "archived": False}]
     migrate.list_org_repos = fake.list_org_repos
+    migrate._forget()
     assert migrate._files(SEM, CONFIG_REPO) == {}
 
 
@@ -954,6 +957,66 @@ def test_a_ctrl_c_after_the_pause_names_the_paused_repos(
     err = capsys.readouterr().err
     assert f"Actions are still DISABLED in: {SEM}/{OLD_CONFIG_REPO}, " in err
     assert f"{COURSE}/.github" in err and migrate.PAUSE_RECORD in err
+
+
+def test_a_preview_lists_each_org_once(fake, semester, monkeypatch):
+    listed: list[str] = []
+    real = migrate.list_org_repos
+    monkeypatch.setattr(
+        migrate, "list_org_repos", lambda org: listed.append(org) or real(org)
+    )
+    assert _main(monkeypatch, SEM) == 0
+    assert sorted(listed) == [COURSE, SEM]
+
+
+def test_a_junk_central_ref_is_reported_not_raised(fake, semester, monkeypatch, capsys):
+    def junk(org):
+        raise MissingCentralRef("central_ref `nope` is not a ref of the toolkit")
+
+    monkeypatch.setattr(migrate, "central_ref_for", junk)
+    assert _main(monkeypatch, SEM) == 1
+    assert "central_ref `nope` is not a ref" in capsys.readouterr().err
+
+
+def test_the_pointer_is_planned_only_when_it_will_be_written(
+    fake, semester, monkeypatch, capsys
+):
+    fake.tree(SEM, OLD_CONFIG_REPO)[records.path("pointer")] = b"course: C\n"
+    assert _main(monkeypatch, SEM) == 0
+    assert "write the course pointer" not in capsys.readouterr().out
+
+
+def test_a_type_line_inside_a_block_scalar_is_prose_and_stays():
+    text = (
+        "releases:\n"
+        "  s1:\n"
+        "    type: lecture\n"
+        "    details: >-\n"
+        "      Bring a laptop.\n"
+        "      type: whatever you like\n"
+        "\n"
+        "      cohort_dest_repo: said in prose\n"
+        "    event_datetime: 2026-10-01T09:00\n"
+        "events:\n"
+        "  - notes: |  # a list entry\n"
+        "      type: exam\n"
+        "    type: exam\n"
+    )
+    assert migrate.schedule_keys(text) == (
+        "releases:\n"
+        "  s1:\n"
+        "    kind: lecture\n"
+        "    details: >-\n"
+        "      Bring a laptop.\n"
+        "      type: whatever you like\n"
+        "\n"
+        "      cohort_dest_repo: said in prose\n"
+        "    event_datetime: 2026-10-01T09:00\n"
+        "events:\n"
+        "  - notes: |  # a list entry\n"
+        "      type: exam\n"
+        "    kind: exam\n"
+    )
 
 
 def test_a_checkout_that_is_not_the_pinned_ref_is_named_by_file(
