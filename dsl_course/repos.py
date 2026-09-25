@@ -492,6 +492,25 @@ class Converged(NamedTuple):
     failures: int = 0
 
 
+def current_description(said: str, tier: str | None = None) -> str | None:
+    """The wording a repo described as `said` should carry now, or None when it already
+    does (or is not one we wrote). `tier` as in `converge_descriptions`."""
+    said = said.strip()
+    superseded = SUPERSEDED_DESCRIPTIONS | (
+        SUPERSEDED_COURSE_DESCRIPTIONS
+        if tier == "course"
+        else SUPERSEDED_SEMESTER_DESCRIPTIONS
+    )
+    return superseded.get(said) or next(
+        (
+            said[: -len(old)] + new
+            for old, new in SUPERSEDED_DESCRIPTION_ENDINGS.items()
+            if said.endswith(old)
+        ),
+        None,
+    )
+
+
 def converge_descriptions(
     org: str, repos: list[dict], tier: str | None = None
 ) -> Converged:
@@ -516,25 +535,12 @@ def converge_descriptions(
     A failed PATCH is a line, not an exception; whether it reds the run is the caller's
     call (see seed._converge_org_metadata).
     """
-    superseded = SUPERSEDED_DESCRIPTIONS | (
-        SUPERSEDED_COURSE_DESCRIPTIONS
-        if tier == "course"
-        else SUPERSEDED_SEMESTER_DESCRIPTIONS
-    )
     changed = 0
     failures = 0
     for repo in repos:
         if repo.get("archived"):
             continue  # GitHub refuses the PATCH; a frozen semester logged one failure a night
-        said = (repo.get("description") or "").strip()
-        want = superseded.get(said) or next(
-            (
-                said[: -len(old)] + new
-                for old, new in SUPERSEDED_DESCRIPTION_ENDINGS.items()
-                if said.endswith(old)
-            ),
-            None,
-        )
+        want = current_description(repo.get("description") or "", tier)
         if not want:
             continue
         code, _ = gh(

@@ -54,7 +54,7 @@ describe('the request', () => {
     expect(buildRequest('a', { op: 'assignment.derive_starter', courseOrg: COURSE, cohortOrg: COHORT, args: { course_source_repo: 'assignment-3-f2026' }, preview: true }).semester_org).toBeUndefined();
     expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: false })).toThrow(RequestInvalid);
     expect(() => buildRequest('a', { op: 'release.early', courseOrg: COURSE, cohortOrg: COHORT, args: { entry: '-rf' }, preview: false })).toThrow(/pattern/);
-    expect(() => buildRequest('a', { op: 'cohort.check', courseOrg: COURSE, args: {}, preview: false })).toThrow(/needs a semester/);
+    expect(() => buildRequest('a', { op: 'semester.check', courseOrg: COURSE, args: {}, preview: false })).toThrow(/needs a semester/);
     expect(() => buildRequest('a', { op: 'site.update', courseOrg: COURSE, cohortOrg: COHORT, args: {}, preview: true })).toThrow(/no preview/);
   });
 });
@@ -146,7 +146,7 @@ describe('the gate', () => {
   });
 
   it('shuts the verb again when an option changes after the preview', async () => {
-    const e = engine({ annotation: { ...publicOutcome, op: 'cohort.archive' } });
+    const e = engine({ annotation: { ...publicOutcome, op: 'semester.archive' } });
     const s = run(e);
     s.open(defs.archive(scope, 'Sun 31 Jan 2027', false));
     await s.start('preview');
@@ -183,7 +183,7 @@ describe('the gate', () => {
   });
 
   it('sends force only when archiving early is ticked', async () => {
-    const e = engine({ annotation: { ...publicOutcome, op: 'cohort.archive' } });
+    const e = engine({ annotation: { ...publicOutcome, op: 'semester.archive' } });
     const s = run(e);
     s.open(defs.archive(scope, 'Sun 31 Jan 2027', false));
     s.setChecked(true);
@@ -201,7 +201,7 @@ describe('the gate', () => {
     const p = s.start('run');
     await new Promise((r) => setTimeout(r, 0));
     s.open(defs.updateSite(scope));
-    expect(s.current.value?.def.op).toBe('cohort.check');
+    expect(s.current.value?.def.op).toBe('semester.check');
     expect(s.notice.value).toContain('One operation at a time');
     release();
     await new Promise((r) => setTimeout(r, 0));

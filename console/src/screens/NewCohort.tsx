@@ -1,5 +1,5 @@
 // New semester (`#new-semester-1..3`): create the semester's org on GitHub, set it up (the
-// `cohort.bootstrap` operation, through the course's Console), then Instructors, Schedule and
+// `semester.bootstrap` operation, through the course's Console), then Instructors, Schedule and
 // Students as three cards that open their editors and come back. Revision brief v2 section 7.
 
 import { useEnv } from '../env';

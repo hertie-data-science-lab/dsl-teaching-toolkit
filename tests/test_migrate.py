@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from dsl_course import discovery, migrate, records, repos
+from dsl_course import discovery, migrate, records, repos, scaffold
 from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
@@ -23,6 +23,7 @@ from dsl_course.course import (
 )
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.gh_contents import blob_sha
+from dsl_course.welcome import template
 
 SEM, COURSE = "Sem-f2026", "Course-E1"
 WORKFLOW = {".github/workflows/any.yml": b"on: push\n"}
@@ -88,17 +89,20 @@ class FakeGitHub:
         self.commits: list[tuple[str, str, str, str]] = []
         self.paused_at_commit: list[bool] = []
         self.puts: list[tuple[str, str, bool]] = []
+        self.dispatches: list[tuple[str, dict]] = []  # (org/repo, the fields sent)
+        self.fail_dispatch = False
         self.fail_rename = False
         self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
         self.run_after_pause: tuple[str, str] | None = None
-        self.clock = "Thu, 24 Sep 2026 10:00:00 GMT"  # GitHub's, in its Date header
+        self.run_after_pause_state = "in_progress"
         self.central_runs: dict[
             str, list[str]
         ] = {}  # the toolkit's: workflow -> states
 
     def add(self, org, name, files=None, *, topics=(), archived=False, template=False,
-            branches=None):  # fmt: skip
+            branches=None, description=""):  # fmt: skip
         self.repos[(org, name)] = {
+            "description": description,
             "archived": archived,
             "topics": list(topics),
             "isTemplate": template,
@@ -133,6 +137,7 @@ class FakeGitHub:
         return [
             {
                 "name": n,
+                "description": r["description"],
                 "archived": r["archived"],
                 "topics": r["topics"],
                 "isTemplate": r["isTemplate"],
@@ -192,7 +197,9 @@ class FakeGitHub:
         for i, a in enumerate(args):
             if a in ("-f", "-F"):
                 key, value = args[i + 1].split("=", 1)
-                fields[key] = value
+                # gh's own rule: -f sends a string, -F a typed value (true is a boolean).
+                typed = {"true": True, "false": False}.get(value, value)
+                fields[key] = typed if a == "-F" else value
         route, _, query = path.partition("?")
         parts = route.split("/")
         if parts[0] != "repos":
@@ -207,11 +214,14 @@ class FakeGitHub:
         if self._repo(org, name) is None:
             return 1, "gh: Not Found (HTTP 404)"
         key = (org, self._name(org, name))
-        if "--include" in args:
-            return 0, f"HTTP/2.0 200 OK\nDate: {self.clock}\n\n{{}}"
+        if parts[3:] == ["dispatches"] and method == "POST":
+            if self.fail_dispatch:
+                return 1, "HTTP 422: Unprocessable"
+            self.dispatches.append((f"{org}/{name}", fields))
+            return 0, ""
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
-                on = fields["enabled"] == "true"
+                on = fields["enabled"] is True
                 was = self.setting(*key)
                 allowed = fields.get("allowed_actions", was["allowed_actions"])
                 self.actions[key] = {
@@ -220,7 +230,9 @@ class FakeGitHub:
                 }
                 self.puts.append((*key, on))
                 if not on and self.run_after_pause == key:
-                    self.runs.setdefault(key, []).append(("9999-12-31T00:00:00Z", "x"))
+                    self.runs.setdefault(key, []).append(
+                        ("9999-12-31T00:00:00Z", self.run_after_pause_state)
+                    )
                 return 0, ""
             state = self.setting(*key)
             body = {"enabled": state["enabled"]}
@@ -228,17 +240,22 @@ class FakeGitHub:
                 body["allowed_actions"] = state["allowed_actions"]
             return 0, json.dumps(body)
         if parts[3:] == ["actions", "runs"]:
-            runs = self.runs.get(key, [])
-            if query.startswith("status="):
-                state = query.split("=", 1)[1]
-                return 0, str(sum(s == state for _, s in runs))
-            since = query.split("%3E%3D", 1)[1]
-            return 0, str(sum(at >= since for at, _ in runs))
+            params = dict(p.split("=", 1) for p in query.split("&"))
+            since = params.get("created", "%3E%3D").split("%3E%3D", 1)[1]
+            state = params.get("status")
+            return 0, str(
+                sum(
+                    at >= since and state in (None, s)
+                    for at, s in self.runs.get(key, [])
+                )
+            )
         if len(parts) == 3 and method == "PATCH":
             if self.fail_rename:
                 return 1, "HTTP 403: Forbidden"
             new = (org, fields["name"])
             self.repos[new] = self.repos.pop(key)
+            if "description" in fields:
+                self.repos[new]["description"] = fields["description"]
             if self.redirect_renames:
                 self.redirects[key] = fields["name"]
             if key in self.actions:  # a repo keeps its settings across a rename
@@ -453,9 +470,11 @@ def test_a_preview_prints_the_plan_and_writes_nothing(
     # The pause names every repo whose workflows act on the semester, the course's too.
     assert f"disable Actions in {SEM}/{OLD_CONFIG_REPO}, {SEM}/{OLD_JOIN_REPO}" in out
     assert f"{SEM}/sem-f2026.github.io, {COURSE}/.github" in out
+    assert f"dispatch Sync membership for {SEM} in {COURSE}/.github" in out
     assert "PREVIEW - nothing was written" in out
     assert _state(fake) == before
     assert fake.commits == [] and fake.puts == [] and semester == []
+    assert fake.dispatches == []
 
 
 def test_a_real_run_migrates_every_step_once_with_actions_off(
@@ -504,6 +523,27 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     assert all(fake.paused_at_commit[1:-1]) and not fake.paused_at_commit[-1]
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
     assert semester == ["join", "config", "profile", "status"]
+    # The ticks the pause dropped, dispatched once Actions are back, scoped to this
+    # semester exactly as its semester-config push would send them.
+    assert fake.dispatches == [
+        (
+            f"{COURSE}/.github",
+            {
+                "event_type": "scheduled-release",
+                "client_payload[semester_org]": SEM,
+                "client_payload[driver]": CONFIG_REPO,
+            },
+        ),
+        (
+            f"{COURSE}/.github",
+            {"event_type": "sync-membership", "client_payload[semester_org]": SEM},
+        ),
+    ]
+    out = capsys.readouterr().out
+    assert (
+        f"dispatched Scheduled release for {SEM}: https://github.com/{COURSE}/.github/"
+        "actions/workflows/scheduled-release.yml?query=event%3Arepository_dispatch"
+    ) in out
     layout = [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT]
     assert [(c[0], c[1]) for c in layout] == [(SEM, CONFIG_REPO), (SEM, ".github")]
 
@@ -522,6 +562,7 @@ def test_a_second_run_finds_every_step_already_migrated(
     # paused, nothing written, status.json not rewritten.
     assert out.count("already migrated") == 16
     assert fake.commits == commits and fake.puts == puts and semester == []
+    assert len(fake.dispatches) == 2  # nothing paused, so nothing was dropped
 
 
 def test_a_failed_step_stops_and_says_the_org_is_still_paused(
@@ -537,8 +578,48 @@ def test_a_failed_step_stops_and_says_the_org_is_still_paused(
     assert not fake.enabled(SEM, OLD_CONFIG_REPO) and not fake.enabled(
         COURSE, ".github"
     )
-    # Nothing but the record of what the settings were.
+    # Nothing but the record of what the settings were; nothing dispatched into a pause.
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT] and semester == []
+    assert fake.dispatches == []
+
+
+def test_a_dispatch_that_fails_is_named_and_the_org_is_still_migrated(
+    fake, semester, monkeypatch, capsys
+):
+    fake.fail_dispatch = True
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    err = capsys.readouterr().err
+    assert f"could not dispatch Scheduled release for {SEM}" in err
+    assert "the next tick catches up" in err
+    assert all(fake.enabled(*key) for key in fake.workflow_repos())
+
+
+def test_the_rename_brings_an_old_description_to_the_current_wording(
+    fake, semester, monkeypatch, capsys
+):
+    old = (
+        "[visible to instructors only]: Everything you configure for this cohort is here "
+        "- student roster, teams, term schedule, and marking. Students never see it, and "
+        "no PII leaves this repo."
+    )
+    want = repos.current_description(old, "semester")
+    assert want and "semester" in want
+    fake._repo(SEM, OLD_CONFIG_REPO)["description"] = old
+    assert _main(monkeypatch, SEM) == 0
+    assert f"-   description -> {want}" in capsys.readouterr().out
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert fake._repo(SEM, CONFIG_REPO)["description"] == want
+
+
+def test_the_re_render_plan_lists_what_it_deletes(fake, semester, monkeypatch, capsys):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    fake.tree(SEM, JOIN_REPO)[migrate.RETIRED_JOIN_FORMS[0]] = b"old form"
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM) == 0
+    assert (
+        f"-   {JOIN_REPO}/{migrate.RETIRED_JOIN_FORMS[0]} (retired: deleted)"
+        in capsys.readouterr().out
+    )
 
 
 def test_a_rename_whose_old_name_does_not_redirect_stops(
@@ -578,31 +659,20 @@ def test_a_run_that_starts_after_the_pause_stops_it(
     fake.run_after_pause = (COURSE, ".github")
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     err = capsys.readouterr().err
-    assert f"a run started after the pause in {COURSE}/.github" in err
+    assert f"a workflow run is queued or running in {COURSE}/.github" in err
     assert "wait for it to finish, then re-run the migration" in err
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT]
 
 
-def test_the_pause_starts_at_githubs_clock_not_the_laptops(
+def test_a_run_dispatched_with_the_pause_that_has_finished_passes_it(
     fake, semester, monkeypatch, capsys
 ):
-    # A run created seconds after GitHub's pause moment: a laptop clock a day ahead would
-    # have counted it as before the pause.
-    fake.runs[(COURSE, ".github")] = [("2026-09-24T10:00:05Z", "completed")]
-    assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert (
-        f"a run started after the pause in {COURSE}/.github" in capsys.readouterr().err
-    )
-
-
-def test_an_unreadable_github_clock_stops_the_pause(
-    fake, semester, monkeypatch, capsys
-):
-    fake.clock = "not a date"
-    assert _main(monkeypatch, SEM, "--no-preview") == 1
-    err = capsys.readouterr().err
-    assert "could not read GitHub's clock" in err
-    assert fake.commits == [] and fake.puts == []
+    # The rehearsal's Sync membership, dispatched in the same second as the pause and
+    # finished before the verify read the runs: it wrote nothing after the pause.
+    fake.run_after_pause = (COURSE, ".github")
+    fake.run_after_pause_state = "completed"
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert "queued or running" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("state", migrate.LIVE_RUN_STATES)
@@ -651,6 +721,25 @@ def test_a_status_that_fails_twice_says_both_times_the_org_is_paused(
         assert "status did not verify - stopped here" in err
         assert f"Actions are still DISABLED in: {SEM}/{OLD_CONFIG_REPO}" in err
     assert not fake.enabled(SEM, CONFIG_REPO)
+
+
+def test_a_semester_re_render_that_failed_off_the_files_is_run_again(
+    fake, semester, monkeypatch, capsys
+):
+    # Every file written, the team lock sync failed: done reads as the verify only once
+    # the window is closed, so the rerun re-renders rather than skipping.
+    synced = migrate.sync_team_lock
+    monkeypatch.setattr(
+        migrate,
+        "sync_team_lock",
+        lambda c, s: synced(c, s) and SimpleNamespace(ok=False),
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert "re-render did not verify - stopped here" in capsys.readouterr().err
+    semester.clear()
+    monkeypatch.setattr(migrate, "sync_team_lock", synced)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert semester == ["join", "config", "profile", "status"]
 
 
 def test_an_archived_semester_is_never_touched(fake, semester, monkeypatch, capsys):
@@ -736,6 +825,216 @@ def test_a_record_already_at_its_new_path_with_other_bytes_stops_the_layout(
     assert tree["autograde/a1/_graded.json"] == b'{"ok": true}\n'
     assert tree[".system/autograde/a1/_graded.json"] == b'{"ok": false}\n'
     assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
+
+
+def test_an_outcome_of_a_renamed_op_takes_the_new_id(
+    fake, semester, monkeypatch, capsys
+):
+    record = {"schema": "dsl.outcome/1", "op": "cohort.check", "conclusion": "done"}
+    tree = fake.tree(SEM, OLD_CONFIG_REPO)
+    tree[".dsl/outcomes/cohort.check.json"] = json.dumps(record).encode()
+    tree[".system/outcomes/cohort.archive.json"] = b"not json"
+    assert _main(monkeypatch, SEM) == 0
+    out = capsys.readouterr().out
+    assert "rename 2 console outcome record(s) to the new op id" in out
+    assert (
+        "-   .dsl/outcomes/cohort.check.json -> .system/outcomes/semester.check.json"
+        in out
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = fake.tree(SEM, CONFIG_REPO)
+    assert not [p for p in tree if "outcomes/cohort." in p]
+    moved = json.loads(tree[".system/outcomes/semester.check.json"])
+    assert moved == {**record, "op": "semester.check"}
+    assert tree[".system/outcomes/semester.archive.json"] == b"not json"
+    # The other records moved by blob, as before.
+    assert (
+        tree[".system/outcomes/release.now.json"]
+        == OLD_RECORDS[".dsl/outcomes/release.now.json"]
+    )
+
+
+SEEDED_SCHEDULE = """# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This cohort's schedule + auto-release plan. Instructors edit it directly.
+#
+# - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
+# Our cohort meets on Tuesdays.
+timezone: Europe/Berlin
+archive:
+  title: Cohort archived      # optional - the row's Title column
+  details: >-
+    This cohort is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
+"""
+
+
+def test_seeded_text_takes_the_new_names_and_the_instructors_words_are_listed(
+    fake, semester, monkeypatch, capsys
+):
+    config = fake.tree(SEM, OLD_CONFIG_REPO)
+    config["schedule.yml"] = SEEDED_SCHEDULE.encode()
+    fake.tree(SEM, OLD_JOIN_REPO)["README.md"] = (
+        b"Open a [Join course](https://github.com/Sem-f2026/welcome/issues/new/choose)"
+        b" issue.\nThe whole cohort reads this.\n"
+    )
+    fake.tree(SEM, ".github")["profile/README.md"] = (
+        b"Enrol in [`welcome`](https://github.com/Sem-f2026/welcome/issues/new/choose).\n"
+        b"Instructors: `classroom-config/people.yml`.\n"
+    )
+    assert _main(monkeypatch, SEM) == 0
+    out = capsys.readouterr().out
+    assert "old repo names and seeded wording rewritten in:" in out
+    assert f"-   {CONFIG_REPO}/schedule.yml" in out
+    assert f"-   {JOIN_REPO}/README.md" in out
+    assert "wording for the instructor to review (left as it is):" in out
+    # By line, never quoted: a person's words may name someone.
+    assert f"-   {CONFIG_REPO}/schedule.yml: line(s) 6" in out
+    assert f"-   {JOIN_REPO}/README.md: line(s) 2" in out
+    assert "Tuesdays" not in out and "whole cohort" not in out
+
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    text = fake.tree(SEM, CONFIG_REPO)["schedule.yml"].decode()
+    assert "# This semester's schedule + auto-release plan." in text
+    assert "example-course/semester-org/schedule.yml" in text
+    assert "  title: Semester archived      # optional" in text
+    assert "    This semester is archived on {date}: every repository" in text
+    assert "# Our cohort meets on Tuesdays." in text  # theirs, left
+    instructors = fake.tree(SEM, CONFIG_REPO)[INSTRUCTORS_FILE].decode()
+    assert (
+        "# This semester's own instructors: its instructors and teaching" in instructors
+    )
+    join = fake.tree(SEM, JOIN_REPO)["README.md"].decode()
+    assert "https://github.com/Sem-f2026/join/issues/new/choose" in join
+    assert "The whole cohort reads this." in join
+    profile = fake.tree(SEM, ".github")["profile/README.md"].decode()
+    assert "[`join`](https://github.com/Sem-f2026/join/issues/new/choose)" in profile
+    assert "`semester-config/instructors.yml`" in profile
+    layout = [c[1] for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT]
+    assert layout == [CONFIG_REPO, ".github", JOIN_REPO]
+
+    commits = list(fake.commits)
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert fake.commits == commits
+
+
+def test_a_course_s_seeded_text_takes_the_new_names(fake, course, monkeypatch, capsys):
+    tree = fake.tree(COURSE, ".github")
+    tree["dsl-course.yml"] = (
+        b"course_name: X\n"
+        b"# This is the persistent COURSE org - it spans many cohorts (years). Cohorts are\n"
+        b"# registered separately in .github/cohort-courses-pages.yml.\n"
+        b"# Our cohorts are small.\n"
+    )
+    solution = fake.tree(COURSE, "assignment-1-f2026", "solution")
+    solution["grading_config.yml"] = (
+        b"# INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's "
+        b"schedule.yml.\nformat: ipynb\n"
+    )
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "seeded wording rewritten in .github/dsl-course.yml" in out
+    assert "rewritten in assignment-1-f2026@solution/grading_config.yml" in out
+    assert "-   .github/dsl-course.yml: line(s) 4" in out
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    meta = fake.tree(COURSE, ".github")["dsl-course.yml"].decode()
+    assert "it spans many semesters (years). Semesters are" in meta
+    assert "# registered separately in .github/semesters.yml." in meta
+    assert "# Our cohorts are small." in meta
+    grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
+    assert grading.decode().splitlines()[0] == scaffold._GRADING_STAMP
+    assert (
+        COURSE,
+        "assignment-1-f2026",
+        "solution",
+        migrate.TEXT_COMMIT,
+    ) in fake.commits
+
+
+def test_every_new_seeded_line_is_the_current_templates():
+    # The new side of the table is what Bootstrap semester / New assignment / a new
+    # course seed today: a template reworded later fails here, not in a migrated org.
+    current = set(
+        "\n".join(
+            [
+                migrate.semester_scaffold(SEM, "schedule.yml", "main"),
+                migrate.semester_scaffold(SEM, INSTRUCTORS_FILE, "main"),
+                template("course/dsl-course.yml"),
+                scaffold._GRADING_STAMP,
+            ]
+        ).split("\n")
+    )
+    missing = [
+        new for new in migrate.seeded_wording("main").values() if new not in current
+    ]
+    assert missing == []
+
+
+def test_the_renames_are_mechanical_and_leave_other_words():
+    org = "Sem-f2026"
+    text = (
+        f"https://github.com/{org}/welcome/issues and "
+        f"[`welcome`](https://github.com/{org}/welcome/issues/new/choose) and "
+        f"https://github.com/{org}/classroom-config/blob/main/people.yml and "
+        f"https://github.com/{org}/welcome-x and "
+        "`classroom-config/people.yml` and classroom-config-2 and "
+        "https://github.com/hertie-dl-f2025/welcome/issues and "
+        "https://github.com/some-other-org/welcome and "
+        "https://github.com/some-other-org/classroom-config and "
+        "old-classroom-config and old-cohort-courses-pages.yml and "
+        "the `welcome` lecture and .github/cohort-courses-pages.yml"
+    )
+    want = (
+        f"https://github.com/{org}/join/issues and "
+        f"[`join`](https://github.com/{org}/join/issues/new/choose) and "
+        f"https://github.com/{org}/semester-config/blob/main/instructors.yml and "
+        f"https://github.com/{org}/welcome-x and "
+        "`semester-config/instructors.yml` and classroom-config-2 and "
+        # Another org's links resolve where they are (an archived org is never
+        # migrated); a name inside another, or a plain word, is not a repo name.
+        "https://github.com/hertie-dl-f2025/welcome/issues and "
+        "https://github.com/some-other-org/welcome and "
+        "https://github.com/some-other-org/classroom-config and "
+        "old-classroom-config and old-cohort-courses-pages.yml and "
+        "the `welcome` lecture and .github/cohort-courses-pages.yml"
+    )
+    assert migrate.renamed(text, org) == want
+    assert migrate.renamed(want, org) == want
+    # The registry's old name, only where the course's own dsl-course.yml says it.
+    registry = migrate.renamed(text, org, registry=True)
+    assert registry.endswith("old-cohort-courses-pages.yml and the `welcome` lecture "
+                             "and .github/semesters.yml")  # fmt: skip
+
+
+def test_a_filled_in_instructors_yml_keeps_no_seeded_cohort_line():
+    # The seeded example block stays in a filled-in file; its photo line is the
+    # toolkit's wording, not the instructor's.
+    old = (
+        '#       photo: "/_images/pp/jane.jpg" # optional. Either (1) a relative path to '
+        "an image committed under `_images/pp/` in this cohort's site repo,\n"
+    )
+    assert migrate.review_lines(migrate.seeded_yaml(old, "main", SEM)) == []
+
+
+def test_the_re_render_is_planned_to_run_while_work_is_left_above(
+    fake, course, monkeypatch, capsys
+):
+    # Every file already current, one step above with work: the re-render still runs,
+    # because the pause record will exist by the time it is reached.
+    tree = fake.tree(COURSE, ".github")
+    del tree["cohort-courses-pages.yml"]
+    tree["semesters.yml"] = b"semesters:\n- Sem-f2026\n"
+    _render_course(fake, COURSE)
+    assert _main(monkeypatch, COURSE) == 0
+    out = capsys.readouterr().out
+    assert "re-render: runs after the steps above" in out
+    assert "re-render: already migrated" not in out
+
+
+def test_a_replaced_seeded_line_keeps_its_line_ending():
+    old = "# This cohort's own instructors/TAs\r\nplain: 1\r\n"
+    new = migrate.seeded_yaml(old, "main", SEM)
+    assert new.startswith("# This semester's own instructors:")
+    assert new.split("\n")[0].endswith("one list.\r")
 
 
 def test_the_seeded_skeleton_becomes_the_new_skeleton(fake, semester, monkeypatch):
@@ -863,12 +1162,22 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
     assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
+    assert fake.dispatches == [
+        (
+            f"{COURSE}/.github",
+            {"event_type": "scheduled-release", "client_payload[driver]": "migrate"},
+        ),
+        (
+            f"{COURSE}/.github",
+            {"event_type": "sync-membership", "client_payload[all_semesters]": True},
+        ),
+    ]
 
     commits, puts = list(fake.commits), list(fake.puts)
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 18
+    assert capsys.readouterr().out.count("already migrated") == 20
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -936,7 +1245,25 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     assert f"course-materials-f2026/{migrate.RELEASE_WORKFLOWS[0]}" in err
     assert "course-materials-f2026/.system/MAINTAINING.md" in err
     assert f"assignment-1-f2026/{migrate.TEMPLATE_WORKFLOWS[0]}" in err
-    assert f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired)" in err
+    assert (
+        f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired: deleted)" in err
+    )
+
+
+def test_a_renamed_org_workflow_is_planned_as_a_deletion_and_verified_gone(
+    fake, course, monkeypatch, capsys
+):
+    old = ".github/workflows/archive-cohort.yml"
+    fake.tree(COURSE, ".github")[old] = b"old button"
+    assert _main(monkeypatch, COURSE) == 0
+    capsys.readouterr()
+    migrate._forget()
+    # Once the registry is migrated the re-render's plan names it; a refresh that leaves
+    # it behind does not verify.
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert f".github/{old} (retired: deleted)" in err
+    assert "re-render did not verify" in err
 
 
 def test_a_course_stopped_at_the_re_render_finishes_on_the_next_run(
@@ -961,12 +1288,36 @@ def test_a_course_stopped_at_the_re_render_finishes_on_the_next_run(
         ".system/ in .github",
         "dsl-course.yml keys",
         "template keys",
+        "seeded text",
         "materials files",
     ):
         assert f"[skip] {step}: already migrated" in out
     assert course == ["refresh", "status"]
     assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
+
+
+def test_a_course_re_render_that_failed_off_the_files_is_run_again(
+    fake, course, monkeypatch, capsys
+):
+    # The rehearsal: every file written, but the refresh failed at something no file
+    # shows (the repo secrets). The rerun must not read the re-render as done.
+    rendered = migrate.seed.refresh
+    monkeypatch.setattr(
+        migrate.seed, "refresh", lambda org, **k: rendered(org, **k) or 1
+    )
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    assert "re-render did not verify - stopped here" in capsys.readouterr().err
+    assert course == ["refresh"]
+
+    monkeypatch.setattr(migrate.seed, "refresh", rendered)
+    assert _main(monkeypatch, COURSE) == 0
+    assert migrate.RERUN_NOTE in capsys.readouterr().out
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    out = capsys.readouterr().out
+    assert "[skip] re-render" not in out
+    assert course == ["refresh", "refresh", "status"]
+    assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
 
 
 @pytest.mark.parametrize(

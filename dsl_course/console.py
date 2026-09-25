@@ -50,7 +50,7 @@ _REFRESH_FAILED = {
 }
 
 # The op that archives the semester's semester-config, where its own record would go.
-_ARCHIVE_OP = "cohort.archive"
+_ARCHIVE_OP = "semester.archive"
 
 _FALLBACK = {
     "done": "Finished.",

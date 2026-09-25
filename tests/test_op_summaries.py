@@ -238,7 +238,7 @@ def test_every_real_op_has_a_sentence_to_fall_back_on():
     missing = [
         name
         for name, op in REGISTRY.items()
-        if op.workflow is None and op.name != "cohort.preview_automation"
+        if op.workflow is None and op.name != "semester.preview_automation"
         if not op.done_text
     ]
     assert missing == []
@@ -246,12 +246,12 @@ def test_every_real_op_has_a_sentence_to_fall_back_on():
 
 def test_semester_check_writes_status_json():
     assert (
-        REGISTRY["cohort.check"].argv(
+        REGISTRY["semester.check"].argv(
             request_mod.parse_request(
                 json.dumps(
                     {
                         "schema": "dsl.request/1",
-                        "op": "cohort.check",
+                        "op": "semester.check",
                         "actor": "prof",
                         "course_org": COURSE,
                         "semester_org": SEMESTER,

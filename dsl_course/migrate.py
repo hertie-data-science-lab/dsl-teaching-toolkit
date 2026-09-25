@@ -18,7 +18,9 @@ run that stopped part-way resumes where it stopped. An archived semester is neve
 The pause is GitHub's own switch: Actions are DISABLED on every repo of the org that runs
 workflows, for the window, and enabled again at the end. (An org variable cannot do this:
 on GitHub Free org variables do not reach private repos, and the workflows already live in
-an org carry no gate until they are re-rendered.)
+an org carry no gate until they are re-rendered.) GitHub drops, rather than queues, what
+fires into a disabled repo, so the unpause dispatches one Scheduled release and one Sync
+membership in its place.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
 status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
@@ -33,13 +35,11 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timezone
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import yaml
 
-from . import policy, records, schedule, seed, status
+from . import cadence, policy, records, schedule, seed, status
 from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
 from .course import (
@@ -89,12 +89,18 @@ from .grades import (
 )
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .profile_readme import profile_files, update_profile_readme
-from .repos import default_branch, repo_missing, set_repo_topics
+from .repos import (
+    current_description,
+    default_branch,
+    repo_missing,
+    set_repo_topics,
+)
 from .scaffold import materials_system_files
 from .setting_readers import RENAMED_SETTINGS
 from .settings import ASSIGNMENT_DEFAULTS_KEY
 from .sync_faculty import retired_course_faults
 from .welcome import (
+    RETIRED_JOIN_FORMS,
     config_system_files,
     join_files,
     refresh_config_system_files,
@@ -141,9 +147,19 @@ MATERIALS_MOVES = {
 # The semester's pointer to its course org, before it moved into semester-config.
 OLD_POINTER_REPO = ".github"
 REPO_RENAMES = {OLD_CONFIG_REPO: CONFIG_REPO, OLD_JOIN_REPO: JOIN_REPO}
+# The console op ids that said `cohort` (decision 0012). A semester's outcome record is
+# named by its op id and carries it in `op`, which status.json's `operations` repeats.
+OP_RENAMES = {
+    f"cohort.{name}": f"semester.{name}"
+    for name in ("check", "preview_automation", "archive", "bootstrap")
+}
+OUTCOMES_DIR = records.path("outcomes")
 SAMPLE_SUFFIX = ".sample"
 WORKFLOWS_DIR = ".github/workflows/"
 LAYOUT_COMMIT = "migrate: layout"
+TEXT_COMMIT = "migrate: seeded text"
+PROFILE_README = "profile/README.md"
+JOIN_README = "README.md"
 KEYS_COMMIT = "migrate: keys"
 
 
@@ -157,6 +173,28 @@ def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
             elif path == old:
                 out[path] = new
     return out
+
+
+def renamed_outcome(path: str) -> str | None:
+    """The path an outcome record at `path` takes under its op's new id, or None when
+    `path` is no record of a renamed op."""
+    for old, new in OP_RENAMES.items():
+        if path == f"{OUTCOMES_DIR}/{old}.json":
+            return f"{OUTCOMES_DIR}/{new}.json"
+    return None
+
+
+def outcome_text(text: str, op: str) -> bytes:
+    """An outcome record's text with its `op` set to `op`, in `write_private`'s layout. A
+    record that does not parse is carried over as it is."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return text.encode()
+    if not isinstance(data, dict):
+        return text.encode()
+    data["op"] = op
+    return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode()
 
 
 def move_lines(moves: dict[str, str], table: dict[str, str]) -> list[str]:
@@ -429,6 +467,232 @@ def fix_header(text: str, ref: str) -> str:
     return "\n".join(out)
 
 
+# ------------------------------------------------------------------ seeded text
+# Repo names and paths that moved (decisions 0010 and 0012), inside text the toolkit
+# seeded: rewritten directly - a link to an old name is not a wording choice. Only the
+# org's OWN repos: a link into another org (an archived semester, never migrated) still
+# resolves where it is. A bare name counts only as a whole name, never inside another
+# (`old-classroom-config`), and `welcome` only as a link to this org's repo (it is also a
+# word). Longest first, so a path is not caught by its repo's name alone.
+_WHOLE = r"(?<![\w./-])"
+_END = r"(?![\w-])"
+
+
+def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, str]]:
+    """The rewrites for text in `org`; `registry` adds the course registry's old file
+    name, which only the course's own `dsl-course.yml` names."""
+    site = rf"github\.com/{re.escape(org)}/"
+    out = [
+        (
+            re.compile(
+                rf"({site}){OLD_CONFIG_REPO}(/blob/[^/\s]+/){re.escape(OLD_PEOPLE_FILE)}"
+                r"(?![\w.])"
+            ),
+            rf"\g<1>{CONFIG_REPO}\g<2>{INSTRUCTORS_FILE}",
+        ),
+        (re.compile(rf"({site}){OLD_CONFIG_REPO}{_END}"), rf"\g<1>{CONFIG_REPO}"),
+        (
+            re.compile(
+                rf"\[`{OLD_JOIN_REPO}`\]\((https?://{site}){OLD_JOIN_REPO}{_END}"
+            ),
+            rf"[`{JOIN_REPO}`](\g<1>{JOIN_REPO}",
+        ),
+        (re.compile(rf"({site}){OLD_JOIN_REPO}{_END}"), rf"\g<1>{JOIN_REPO}"),
+        (
+            re.compile(
+                rf"{_WHOLE}{OLD_CONFIG_REPO}/{re.escape(OLD_PEOPLE_FILE)}(?![\w.])"
+            ),
+            f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
+        ),
+        (re.compile(rf"{_WHOLE}{OLD_CONFIG_REPO}{_END}"), CONFIG_REPO),
+    ]
+    if registry:
+        out.append(
+            (
+                re.compile(rf"(?<![\w-]){re.escape(OLD_SEMESTERS_PATH)}"),
+                SEMESTERS_PATH,
+            )
+        )
+    return out
+
+
+# Words a person may have written: listed for review, never rewritten.
+_OLD_WORD = re.compile(r"(?i)\bcohorts?\b")
+
+
+def renamed(text: str, org: str, *, registry: bool = False) -> str:
+    """`text` in `org` with every old repo name and path of `text_renames` rewritten."""
+    for old, new in text_renames(org, registry=registry):
+        text = old.sub(new, text)
+    return text
+
+
+def seeded_wording(ref: str) -> dict[str, str]:
+    """`{line as the old templates seeded it: the new template's line}`, for the seeded
+    lines that said `cohort` or named a deleted sample. A line still exactly as seeded is
+    the toolkit's wording, not the instructor's, so it takes the new one. The new side is
+    held to the current templates by `tests/test_migrate.py`."""
+    schedule_example = _worked_example(ref, schedule.SCHEDULE_PATH)
+    return {
+        # semester-config/schedule.yml
+        "# This cohort's schedule + auto-release plan. Instructors edit it directly.": (
+            "# This semester's schedule + auto-release plan. Instructors edit it directly."
+        ),
+        "# - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/"
+        "blob/main/schedule.yml": f"# - worked example: {schedule_example}",
+        "#   releases:     entries that DEPLOY materials (course org -> this cohort org)": (
+            "#   releases:     entries that DEPLOY materials (course org -> this semester "
+            "org)"
+        ),
+        "# What follows is a SKELETON: uncomment and fill what you want. For a full "
+        "worked term -": (
+            "# What follows is a SKELETON: uncomment and fill what you want. For a full "
+            "worked semester -"
+        ),
+        "# a real release plan, a group project, exams - see `schedule.yml.sample`.": (
+            "# a real release plan, a group project, exams - see the worked example above."
+        ),
+        "# semester_start:                   # OPTIONAL - default: inferred from the "
+        "cohort tag (f2026 -> 1 Sep 2026)": (
+            "# semester_start:                   # OPTIONAL - default: inferred from the "
+            "semester tag (f2026 -> 1 Sep 2026)"
+        ),
+        "#         cohort_dest_repo:         # OPTIONAL - default: materials": (
+            "#         semester_dest_repo:         # OPTIONAL - default: materials"
+        ),
+        "#         cohort_dest_path:         # OPTIONAL - default: mirrors "
+        "course_source_path": (
+            "#         semester_dest_path:         # OPTIONAL - default: mirrors "
+            "course_source_path"
+        ),
+        "#         cohort_dest_repo:": "#         semester_dest_repo:",
+        "#         cohort_dest_path:": "#         semester_dest_path:",
+        "#     cohort_dest_repo:             # OPTIONAL - default: the slug above (here "
+        "assignment-1)": (
+            "#     semester_dest_repo:             # OPTIONAL - default: the slug above "
+            "(here assignment-1)"
+        ),
+        "  title: Cohort archived      # optional - the row's Title column": (
+            "  title: Semester archived      # optional - the row's Title column"
+        ),
+        '  show_on_site: true          # a "Cohort archived" row on the site\'s Schedule '
+        "tab, also sends a notice email 14 days out": (
+            '  show_on_site: true          # a "Semester archived" row on the site\'s '
+            "Schedule tab, also sends a notice email 14 days out"
+        ),
+        "    This cohort is archived on {date}: every repository in it becomes "
+        "read-only. You keep read access, so you can still fork or clone anything you "
+        "want to keep working on into your own account.": (
+            "    This semester is archived on {date}: every repository in it becomes "
+            "read-only. You keep read access, so you can still fork or clone anything "
+            "you want to keep working on into your own account."
+        ),
+        # semester-config/people.yml, now instructors.yml
+        "# This cohort's own instructors/TAs": (
+            "# This semester's own instructors: its instructors and teaching assistants, "
+            "one list."
+        ),
+        "# - the SSOT for who is emailed when this cohort needs attention (see `email` "
+        "below).": (
+            "# - the SSOT for who is emailed when this semester needs attention (see "
+            "`email` below)."
+        ),
+        "#                                     # notifications about this cohort go "
+        "here. Private: not shown on the cohort site unless the entry adds "
+        "`show_email: true`": (
+            "#                                     # notifications about this semester "
+            "go here. Private: not shown on the semester site unless the entry adds "
+            "`show_email: true`"
+        ),
+        '#       photo: "/_images/pp/jane.jpg" # optional. Either (1) a relative path to '
+        "an image committed under `_images/pp/` in this cohort's site repo,": (
+            '#     photo: "/_images/pp/jane.jpg"   # optional. Either (1) a relative path '
+            "to an image committed under `_images/pp/` in this semester's site repo,"
+        ),
+        # a template's grading_config.yml (its first line)
+        "# INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's "
+        "schedule.yml.": (
+            "# INSTRUCTOR-OWNED - defines the assignment. Dates live in the semester's "
+            "schedule.yml."
+        ),
+        # the course's dsl-course.yml
+        "#   # else.) Cohorts inherit this; setting it in a cohort's own file does "
+        "nothing.": (
+            "#   # else.) Semesters inherit this; setting it in a semester's own file "
+            "does nothing."
+        ),
+        "# course_description: One or two sentences, on ONE line - the blurb on every "
+        "cohort site.": (
+            "# course_description: One or two sentences, on ONE line - the blurb on "
+            "every semester site."
+        ),
+        "# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, "
+        "link ONLY": (
+            "# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER "
+            "sites, link ONLY"
+        ),
+        "#   # WHICH of those files the cohort site hosts publicly, so an HTML deck "
+        "opens rendered": (
+            "#   # WHICH of those files the semester site hosts publicly, so an HTML deck "
+            "opens rendered"
+        ),
+        "# `course_name`, `course_code` and `course_description` are what reach the "
+        "cohort": (
+            "# `course_name`, `course_code` and `course_description` are what reach the "
+            "semester"
+        ),
+        "# websites. Editing them here re-syncs every cohort site already bootstrapped "
+        "from this": (
+            "# websites. Editing them here re-syncs every semester site already "
+            "bootstrapped from this"
+        ),
+        "# This is the persistent COURSE org - it spans many cohorts (years). Cohorts "
+        "are": (
+            "# This is the persistent COURSE org - it spans many semesters (years). "
+            "Semesters are"
+        ),
+    }
+
+
+def seeded_yaml(text: str, ref: str, org: str, *, registry: bool = False) -> str:
+    """A seeded YAML file in `org` with every line still exactly as the old template
+    seeded it replaced by the new template's (`seeded_wording`, the line ending kept), and
+    the old repo names renamed in its comment lines (`renamed`). Values and the
+    instructor's own comments are otherwise theirs."""
+    wording = seeded_wording(ref)
+    out = []
+    for line in text.split("\n"):
+        if line.rstrip() in wording:
+            line = wording[line.rstrip()] + ("\r" if line.endswith("\r") else "")
+        elif line.lstrip().startswith("#"):
+            line = renamed(line, org, registry=registry)
+        out.append(line)
+    return "\n".join(out)
+
+
+def review_lines(text: str) -> list[int]:
+    """The line numbers of `text` that still say `cohort`: a person's words, for them to
+    reword - listed, never rewritten, and never quoted (they may name someone)."""
+    return [n for n, line in enumerate(text.split("\n"), 1) if _OLD_WORD.search(line)]
+
+
+def review_plan(texts: dict[str, str]) -> list[str]:
+    """The plan's "wording for the instructor to review" block for `texts` (`{"repo/path":
+    the text as the step leaves it}`), or nothing when none says `cohort`."""
+    found = {
+        where: lines for where, text in texts.items() if (lines := review_lines(text))
+    }
+    if not found:
+        return []
+    return [
+        "wording for the instructor to review (left as it is):",
+        *(
+            f"  {where}: line(s) {', '.join(map(str, lines))}"
+            for where, lines in found.items()
+        ),
+    ]
+
+
 # ------------------------------------------------------------------ GitHub, narrowly
 
 
@@ -541,10 +805,13 @@ def _alive(targets: list[tuple[str, str]]) -> list[str]:
     return out
 
 
-def _rename(org: str, old: str, new: str) -> bool:
-    code, out = gh(
-        "api", "--method", "PATCH", f"repos/{org}/{old}", "-f", f"name={new}"
-    )
+def _rename(org: str, old: str, new: str, description: str | None = None) -> bool:
+    """Rename `org/old` to `new`, and - in the same PATCH - bring its description to the
+    current wording when it still carries a superseded one."""
+    fields = ["-f", f"name={new}"]
+    if description:
+        fields += ["-f", f"description={description}"]
+    code, out = gh("api", "--method", "PATCH", f"repos/{org}/{old}", *fields)
     if code != 0:
         log_err(f"could not rename {org}/{old} to {new}: {out[:200]}")
     return code == 0
@@ -564,28 +831,6 @@ def _redirects(org: str, old: str, new: str) -> bool:
 def _yaml(text: str | None) -> dict:
     data = yaml.safe_load(text or "") if text else None
     return data if isinstance(data, dict) else {}
-
-
-def _github_now(org: str) -> str:
-    """GitHub's clock, from the `Date` header of a read: the moment the runs' own
-    `created` times are compared with, whatever the laptop's clock says. Raises when
-    there is no header to read."""
-    code, out = gh("api", "--include", f"repos/{org}/.github")
-    stamp = next(
-        (
-            line.split(":", 1)[1].strip()
-            for line in out.splitlines()
-            if line.lower().startswith("date:")
-        ),
-        "",
-    )
-    try:
-        when = parsedate_to_datetime(stamp) if code == 0 else None
-    except (TypeError, ValueError):
-        when = None
-    if when is None:
-        raise RuntimeError(f"could not read GitHub's clock from {org}/.github")
-    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _with_workflows(org: str, candidates: list[str]) -> list[tuple[str, str]]:
@@ -614,6 +859,9 @@ class Step:
     # "pause" / "unpause" bracket the work. With no work left the pause is skipped; the
     # unpause always asks the repos, so a run that stopped paused is always released.
     bracket: str = ""
+    # Runs whenever a step before it has work (the re-render: see RERUN_NOTE), so the
+    # plan never calls it "already migrated" then.
+    after_work: bool = False
 
 
 def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
@@ -637,11 +885,16 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
             return idle and s.done() if s.bracket == "unpause" else done(s)
 
         log_step(f"Migration plan for {org}")
+        pending = False  # a work step above has work
         for step in steps:
-            if planned(step):
+            if step.after_work and pending:
+                log(f"  {step.name}: runs after the steps above")
+            elif planned(step):
                 log(f"  {step.name}: already migrated")
                 continue
-            log(f"  {step.name}:")
+            else:
+                log(f"  {step.name}:")
+            pending = pending or not step.bracket
             for line in step.plan():
                 log(f"    - {line}")
         if preview:
@@ -667,9 +920,10 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
                     f"Rollback: {step.rollback}"
                 )
                 return 1
+            log_ok(f"{step.name}: done and verified")
             if step.bracket == "unpause":
                 paused = False
-            log_ok(f"{step.name}: done and verified")
+                pause.catch_up()
     except Exception as exc:
         log_err(f"{step.name}: stopped by an error - {exc}")
         return 1
@@ -687,16 +941,82 @@ PAUSE_RECORD = records.path("migration_pause")
 PAUSE_COMMIT = "migrate: record the Actions settings paused"
 
 
+MEMBERSHIP_WORKFLOW = "sync-membership.yml"
+# What a course migration's Scheduled release names as its driver (the run log prints it).
+MIGRATE_DRIVER = "migrate"
+
+
+@dataclass(frozen=True)
+class Tick:
+    """One dispatch the pause dropped, sent again after the unpause: a `repository_dispatch`
+    into the course's `.github` with the payload its own driver sends."""
+
+    event: str
+    workflow: str
+    payload: tuple[str, ...]  # gh api field flags, `-f`/`-F` then `key=value`
+    what: str
+
+
+def lost_ticks(semester_org: str | None) -> list[Tick]:
+    """The Scheduled release and the Sync membership a pause drops: for one semester, what
+    its `semester-config` push sends; for a course, what the ds01 timers send - every
+    semester."""
+    if semester_org:
+        who = f"client_payload[semester_org]={semester_org}"
+        return [
+            Tick(
+                "scheduled-release",
+                cadence.WORKFLOW_FILE,
+                ("-f", who, "-f", f"client_payload[driver]={CONFIG_REPO}"),
+                f"Scheduled release for {semester_org}",
+            ),
+            Tick(
+                "sync-membership",
+                MEMBERSHIP_WORKFLOW,
+                ("-f", who),
+                f"Sync membership for {semester_org}",
+            ),
+        ]
+    return [
+        Tick(
+            "scheduled-release",
+            cadence.WORKFLOW_FILE,
+            ("-f", f"client_payload[driver]={MIGRATE_DRIVER}"),
+            "Scheduled release for every semester",
+        ),
+        Tick(
+            "sync-membership",
+            MEMBERSHIP_WORKFLOW,
+            ("-F", "client_payload[all_semesters]=true"),
+            "Sync membership for every semester",
+        ),
+    ]
+
+
+def _runs_url(course_org: str, workflow: str) -> str:
+    """Where a dispatched run shows up: a `repository_dispatch` answers with no run id."""
+    return (
+        f"https://github.com/{course_org}/.github/actions/workflows/{workflow}"
+        "?query=event%3Arepository_dispatch"
+    )
+
+
 class Pause:
     """The migration's pause of one org: every repo whose workflows act on it switched
     off, and - in `<org>/.github/.system/migration-pause.json`, written BEFORE anything is
     switched - what each was set to, so the unpause restores exactly that and a run that
     stops (or is interrupted) can always be resumed or released by hand."""
 
-    def __init__(self, org: str, targets: Callable[[], list[tuple[str, str]]]) -> None:
+    def __init__(
+        self,
+        org: str,
+        targets: Callable[[], list[tuple[str, str]]],
+        course_org: str = "",
+        semester_org: str | None = None,
+    ) -> None:
         self.org, self.targets = org, targets
+        self.course_org, self.semester_org = course_org or org, semester_org
         self.saved: dict[str, dict] = {}  # "org/repo" -> its setting before the pause
-        self.started = ""
 
     def record(self) -> dict[str, dict] | None:
         text = get_file_content(self.org, ".github", PAUSE_RECORD)
@@ -744,9 +1064,6 @@ class Pause:
         return not alive
 
     def pause(self) -> bool:
-        # Read first: a clock that cannot be read stops the pause before anything is
-        # written or switched.
-        self.started = _github_now(self.org)
         saved = self.record()
         if saved is None:
             saved = {f"{o}/{r}": _actions_state(o, r) for o, r in self.targets()}
@@ -765,18 +1082,8 @@ class Pause:
         if not self.disabled():
             log_err("Actions did not read back as disabled")
             return False
-        since = f"created=%3E%3D{self.started}"
-        late = [
-            "/".join(self._live(k))
-            for k in self.saved
-            if self.started and _run_count(*self._live(k), since)
-        ]
-        if late:
-            log_err(
-                f"a run started after the pause in {', '.join(late)} - wait for it "
-                f"to finish, then re-run the migration"
-            )
-            return False
+        # Only a run still going counts, whenever it started: one dispatched in the same
+        # second as the pause that has since finished wrote nothing after it.
         return self.quiet(list(self.saved))
 
     # the unpause step --------------------------------------------------------
@@ -801,6 +1108,30 @@ class Pause:
                 return False
         return True
 
+    # after the unpause ---------------------------------------------------------
+    def catch_up(self) -> None:
+        """Dispatch what the pause dropped, and say where each run shows up. Not waited
+        for, and never a failure of the migration: the org is migrated by now, and the
+        next tick (at most 15 minutes, the next hour for membership) covers a miss."""
+        for tick in lost_ticks(self.semester_org):
+            url = _runs_url(self.course_org, tick.workflow)
+            code, out = gh(
+                "api",
+                "--method",
+                "POST",
+                f"repos/{self.course_org}/.github/dispatches",
+                "-f",
+                f"event_type={tick.event}",
+                *tick.payload,
+            )
+            if code == 0:
+                log_ok(f"dispatched {tick.what}: {url}")
+            else:
+                log_err(
+                    f"could not dispatch {tick.what} ({out[:200]}) - the next tick "
+                    f"catches up; the runs: {url}"
+                )
+
     def steps(self) -> tuple[Step, Step]:
         names = lambda: ", ".join(f"{o}/{r}" for o, r in self.targets())
         pause = Step(
@@ -818,7 +1149,14 @@ class Pause:
         unpause = Step(
             "unpause automation",
             done=lambda: self.record() is None,
-            plan=lambda: [f"restore the recorded Actions settings in {names()}"],
+            plan=lambda: [
+                f"restore the recorded Actions settings in {names()}",
+                *(
+                    f"dispatch {t.what} in {self.course_org}/.github (the tick the "
+                    f"pause dropped)"
+                    for t in lost_ticks(self.semester_org)
+                ),
+            ],
             do=self.restore,
             verify=self.restored,
             rollback="restore Actions in each repo by hand (see the line below)",
@@ -880,13 +1218,28 @@ def _drift(org: str, wanted: dict[str, dict[str, bytes]]) -> list[str]:
     return out
 
 
-def _no_drift(drift: list[str]) -> bool:
-    """The re-render's verify: nothing left differing, else each file named."""
-    if drift:
+def _retired(org: str, repo: str, paths: tuple[str, ...]) -> list[str]:
+    """`repo/path (retired: deleted)` for each of `paths` still in `org/repo`: what the
+    re-render deletes, listed in the plan beside what it writes."""
+    live = _files(org, repo)
+    return [f"{repo}/{p} (retired: deleted)" for p in paths if p in live]
+
+
+def _no_drift(drift: list[str], *, quiet: bool = False) -> bool:
+    """The re-render's verify: nothing left differing, else each file named (unless
+    `quiet`)."""
+    if drift and not quiet:
         log_err(
             f"{len(drift)} file(s) still differ from this checkout: {', '.join(drift)}"
         )
     return not drift
+
+
+# A re-render also writes what no file shows (a repo secret, a label, a description), so
+# its verify cannot read all of it back. A pause record left by a stopped run means that
+# run may have stopped at the re-render: inside the window it is never "already
+# migrated", and it runs again - it is idempotent. Outside the window, done IS the verify.
+RERUN_NOTE = "run it again: a pause record says the last run stopped inside the window"
 
 
 def _schedule_clean(text: str | None, *, quiet: bool = False) -> bool:
@@ -922,7 +1275,7 @@ class Semester:
     def __init__(self, org: str, course_org: str) -> None:
         self.org, self.course = org, course_org
         self.people = ""
-        self.pause = Pause(org, self.targets)
+        self.pause = Pause(org, self.targets, course_org, org)
         self.renamed_now: dict[str, str] = {}  # old -> new, renamed by this run
 
     def config(self) -> str:
@@ -942,13 +1295,26 @@ class Semester:
         names = set(_listing(self.org))
         return {old: new for old, new in REPO_RENAMES.items() if old in names}
 
+    def description(self, repo: str) -> str | None:
+        """The current wording for `repo`'s description, when it still says an old one."""
+        row = _listing(self.org).get(repo) or {}
+        return current_description(row.get("description") or "", "semester")
+
+    def rename_plan(self) -> list[str]:
+        out = []
+        for old, new in self.renames_left().items():
+            out.append(f"rename {old} -> {new}")
+            if want := self.description(old):
+                out.append(f"  description -> {want}")
+        return out
+
     def rename(self) -> bool:
         names = set(_listing(self.org))
         for old, new in self.renames_left().items():
             if new in names:
                 log_err(f"{self.org} has both {old} and {new} - resolve by hand")
                 return False
-            if not _rename(self.org, old, new):
+            if not _rename(self.org, old, new, self.description(old)):
                 return False
             self.renamed_now[old] = new
         return True
@@ -959,7 +1325,8 @@ class Semester:
         return not self.renames_left()
 
     def rename_verified(self) -> bool:
-        """Renamed, and each old name this run renamed redirects to its new one."""
+        """Renamed, each old name this run renamed redirecting to its new one, and each
+        description in the current wording."""
         if not self.renamed():
             return False
         stale = [
@@ -970,7 +1337,10 @@ class Semester:
                 f"{self.org}/{old} does not redirect to {self.renamed_now[old]} - old "
                 f"links to it are broken"
             )
-        return not stale
+        worded = [n for n in self.renamed_now.values() if self.description(n)]
+        for new in worded:
+            log_err(f"{self.org}/{new}: the description still has its old wording")
+        return not stale and not worded
 
     # layout -------------------------------------------------------------------
     def instructors_text(self, old: str) -> str | None:
@@ -987,11 +1357,55 @@ class Semester:
         new = people_to_instructors(old)
         if new is None:
             return None
-        new = fix_header(new, ref)
+        new = seeded_yaml(fix_header(new, ref), ref, self.org)
         try:
             return new if same_people(old, new) else None
         except yaml.YAMLError:
             return None
+
+    def text_files(self) -> list[tuple[str, str, bool]]:
+        """`(repo, path, is YAML)` for each seeded text the layout step rewrites."""
+        return [
+            (self.config(), schedule.SCHEDULE_PATH, True),
+            (self.config(), INSTRUCTORS_FILE, True),
+            (self.join(), JOIN_README, False),
+            (".github", PROFILE_README, False),
+        ]
+
+    def texts(self) -> dict[tuple[str, str], tuple[str, str]]:
+        """`{(repo, path): (text now, text after the layout step)}` for each seeded text
+        that is there."""
+        ref = central_ref_for(self.course)
+        out = {}
+        for repo, path, is_yaml in self.text_files():
+            text = get_file_content(self.org, repo, path)
+            if text is not None:
+                out[repo, path] = (
+                    text,
+                    seeded_yaml(text, ref, self.org)
+                    if is_yaml
+                    else renamed(text, self.org),
+                )
+        return out
+
+    def text_work(self) -> dict[str, dict[str, bytes]]:
+        """`{repo: {path: new bytes}}` for each seeded text the layout still rewrites."""
+        out: dict[str, dict[str, bytes]] = {}
+        for (repo, path), (text, new) in self.texts().items():
+            if new != text:
+                out.setdefault(repo, {})[path] = new.encode()
+        return out
+
+    def outcome_work(self, live: dict[str, str]) -> dict[str, str]:
+        """`{path now: path under the new op id}` for each outcome record of a renamed op,
+        wherever the layout's moves put it first."""
+        moves = fold(set(live), SEMESTER_MOVES)
+        out = {}
+        for path in sorted(live):
+            new = renamed_outcome(moves.get(path, path))
+            if new:
+                out[path] = new
+        return out
 
     def layout_work(self) -> tuple[dict, dict, list, bool]:
         """(moves, files, deletes, old pointer present) for semester-config."""
@@ -1000,6 +1414,14 @@ class Semester:
         moves = fold(set(live), SEMESTER_MOVES)
         deletes = sorted(p for p in live if p.endswith(SAMPLE_SUFFIX))
         files: dict[str, bytes] = {}
+        for old, new in self.outcome_work(live).items():
+            # Rewritten, not moved: the record names its op. One this engine already
+            # wrote under the new id is the newer record, and is kept.
+            moves.pop(old, None)
+            deletes.append(old)
+            if new not in live:
+                text = get_file_content(self.org, repo, old) or ""
+                files[new] = outcome_text(text, Path(new).stem)
         if OLD_PEOPLE_FILE in live:
             deletes.append(OLD_PEOPLE_FILE)
             if INSTRUCTORS_FILE not in live:
@@ -1017,7 +1439,7 @@ class Semester:
         if not self.renamed():
             return False
         moves, files, deletes, old_pointer = self.layout_work()
-        return not (moves or files or deletes or old_pointer)
+        return not (moves or files or deletes or old_pointer or self.text_work())
 
     def layout_plan(self) -> list[str]:
         moves, files, deletes, old_pointer = self.layout_work()
@@ -1035,13 +1457,35 @@ class Semester:
             )
         if records.path("pointer") in files:
             out.append(f"write the course pointer to {records.path('pointer')}")
+        outcomes = self.outcome_work(_files(self.org, repo))
+        if outcomes:
+            out.append(
+                f"rename {len(outcomes)} console outcome record(s) to the new op id"
+            )
+            out += [f"  {old} -> {new}" for old, new in outcomes.items()]
         samples = [p for p in deletes if p.endswith(SAMPLE_SUFFIX)]
         if samples:
             out.append(f"delete {len(samples)} *{SAMPLE_SUFFIX} file(s)")
             out += [f"  {p}" for p in samples]
         if old_pointer:
             out.append(f"delete {OLD_POINTER_REPO}/{COURSE_CONFIG} (the old pointer)")
-        return out
+        texts = self.texts()
+        work = self.text_work()
+        if work:
+            out.append("old repo names and seeded wording rewritten in:")
+            out += [
+                f"  {REPO_RENAMES.get(r, r)}/{path}"
+                for r, paths in work.items()
+                for path in paths
+            ]
+        final = {
+            f"{REPO_RENAMES.get(r, r)}/{p}": new for (r, p), (_, new) in texts.items()
+        }
+        if files.get(INSTRUCTORS_FILE):
+            final[f"{CONFIG_REPO}/{INSTRUCTORS_FILE}"] = files[
+                INSTRUCTORS_FILE
+            ].decode()
+        return out + review_plan(final)
 
     def layout(self) -> bool:
         repo = self.config()
@@ -1055,22 +1499,44 @@ class Semester:
             return False
         self.before = _files(self.org, repo)
         self.people = get_file_content(self.org, repo, OLD_PEOPLE_FILE) or ""
+        text = self.text_work()
         if not move_files(
-            self.org, repo, moves, LAYOUT_COMMIT, files=files, delete=deletes
+            self.org,
+            repo,
+            moves,
+            LAYOUT_COMMIT,
+            files={**text.pop(repo, {}), **files},
+            delete=deletes,
         ):
             return False
-        if old_pointer:
-            return move_files(
-                self.org, OLD_POINTER_REPO, {}, LAYOUT_COMMIT, delete=[COURSE_CONFIG]
-            )
-        return True
+        if (old_pointer or OLD_POINTER_REPO in text) and not move_files(
+            self.org,
+            OLD_POINTER_REPO,
+            {},
+            LAYOUT_COMMIT,
+            files=text.pop(OLD_POINTER_REPO, {}),
+            delete=[COURSE_CONFIG] if old_pointer else [],
+        ):
+            return False
+        return all(
+            move_files(self.org, other, {}, LAYOUT_COMMIT, files=written)
+            for other, written in text.items()
+        )
 
     def layout_verified(self) -> bool:
         repo = self.config()
         live = _files(self.org, repo)
         before = getattr(self, "before", live)
-        # Every marker at its new path, byte for byte, and nowhere else.
+        # Every marker at its new path, byte for byte, and nowhere else. An outcome record
+        # of a renamed op is rewritten (it names its op): it must be at its new path.
+        renamed = self.outcome_work(before)
+        for old, new in renamed.items():
+            if old in live or new not in live:
+                log_err(f"{repo}: an outcome record did not arrive at {new}")
+                return False
         for old, new in fold(set(before), SEMESTER_MOVES).items():
+            if old in renamed:
+                continue
             if old in live or live.get(new) != before[old]:
                 log_err(f"{repo}: a record did not arrive intact at {new}")
                 return False
@@ -1142,7 +1608,9 @@ class Semester:
             JOIN_REPO: join_files(self.org),
             ".github": profile_files(self.org, central_ref=ref),
         }
-        return _drift(self.org, wanted)
+        return _drift(self.org, wanted) + _retired(
+            self.org, JOIN_REPO, RETIRED_JOIN_FORMS
+        )
 
     def ready_to_render(self) -> bool:
         """Every step before the re-render done: only then does this engine's render of
@@ -1154,8 +1622,12 @@ class Semester:
             and self.topic_done()
         )
 
+    def rerendered(self, *, quiet: bool = False) -> bool:
+        """The re-render's verify: every step before it done, and no drift."""
+        return self.ready_to_render() and _no_drift(self.drift(), quiet=quiet)
+
     def rerender_done(self) -> bool:
-        return self.ready_to_render() and not self.drift()
+        return self.pause.record() is None and self.rerendered(quiet=True)
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
@@ -1173,9 +1645,7 @@ class Semester:
             Step(
                 "rename repos",
                 done=self.renamed,
-                plan=lambda: [
-                    f"rename {o} -> {n}" for o, n in self.renames_left().items()
-                ],
+                plan=self.rename_plan,
                 do=self.rename,
                 verify=self.rename_verified,
                 rollback="rename each repo back in its Settings (the old name is free)",
@@ -1186,7 +1656,10 @@ class Semester:
                 plan=self.layout_plan,
                 do=self.layout,
                 verify=self.layout_verified,
-                rollback=f"git revert the '{LAYOUT_COMMIT}' commit(s) in {repo} and .github",
+                rollback=(
+                    f"git revert the '{LAYOUT_COMMIT}' commit(s) in {repo}, "
+                    f"{self.org}/.github and {self.org}/{JOIN_REPO}"
+                ),
             ),
             Step(
                 "keys",
@@ -1218,6 +1691,7 @@ class Semester:
                     [
                         "re-write every SYSTEM-OWNED file that differs:",
                         *(f"  {path}" for path in self.drift()),
+                        *([RERUN_NOTE] if self.pause.record() is not None else []),
                     ]
                     if self.ready_to_render()
                     else [
@@ -1228,7 +1702,8 @@ class Semester:
                     ]
                 ),
                 do=self.rerender,
-                verify=lambda: _no_drift(self.drift()),
+                verify=self.rerendered,
+                after_work=True,
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             # status.json before the unpause: re-enabled workflows never race it.
@@ -1365,6 +1840,50 @@ class Course:
             log_err(f"{repo}@{SOLUTION_BRANCH}/{GRADING_FILE} is still NOT_MIGRATED")
         return not self.templates_left() and not bad
 
+    # seeded text -----------------------------------------------------------
+    def texts(self) -> dict[tuple[str, str, str], tuple[str, str]]:
+        """`{(repo, branch, path): (text now, text after this step)}` for `dsl-course.yml`
+        and each live template's `grading_config.yml` (on its solution branch)."""
+        ref = central_ref_for(self.org)
+        where = [(".github", "", COURSE_CONFIG)]
+        where += [(r, SOLUTION_BRANCH, GRADING_FILE) for r in self.templates()]
+        out = {}
+        for repo, branch, path in where:
+            text = get_file_content(self.org, repo, path, ref=branch)
+            if text is not None:
+                # The registry's old name is the course's own, named in its own file.
+                registry = path == COURSE_CONFIG
+                out[repo, branch, path] = (
+                    text,
+                    seeded_yaml(text, ref, self.org, registry=registry),
+                )
+        return out
+
+    def text_work(self) -> dict[tuple[str, str], dict[str, bytes]]:
+        out: dict[tuple[str, str], dict[str, bytes]] = {}
+        for (repo, branch, path), (text, new) in self.texts().items():
+            if new != text:
+                out.setdefault((repo, branch), {})[path] = new.encode()
+        return out
+
+    def text_plan(self) -> list[str]:
+        where = lambda repo, branch, path: (
+            f"{repo}@{branch}/{path}" if branch else f"{repo}/{path}"
+        )
+        out = [
+            f"old repo names and seeded wording rewritten in {where(r, b, p)}"
+            for (r, b), files in self.text_work().items()
+            for p in files
+        ]
+        final = {where(*key): new for key, (_, new) in self.texts().items()}
+        return out + review_plan(final)
+
+    def rewrite_text(self) -> bool:
+        return all(
+            move_files(self.org, repo, {}, TEXT_COMMIT, files=files, branch=branch)
+            for (repo, branch), files in self.text_work().items()
+        )
+
     # materials ---------------------------------------------------------------
     def materials_moves(self) -> dict[str, dict[str, str]]:
         return {
@@ -1411,17 +1930,20 @@ class Course:
         for row in templates:
             if not row.get("archived"):
                 wanted[row["name"]] = hosted(row["name"], TEMPLATE_WORKFLOWS)
-        retired = [
-            f"{repo}/{p} (retired)"
+        retired = _retired(self.org, ".github", seed.RETIRED_GITHUB_WORKFLOWS) + [
+            line
             for repo in wanted
             if repo != ".github"
-            for p in RETIRED_WORKFLOWS
-            if p in _files(self.org, repo)
+            for line in _retired(self.org, repo, RETIRED_WORKFLOWS)
         ]
         return _drift(self.org, wanted) + retired
 
+    def rerendered(self, *, quiet: bool = False) -> bool:
+        """The re-render's verify: the registry migrated, and no drift."""
+        return self.registry_done() and _no_drift(self.drift(), quiet=quiet)
+
     def rerender_done(self) -> bool:
-        return self.registry_done() and not self.drift()
+        return self.pause.record() is None and self.rerendered(quiet=True)
 
     def work_done(self) -> bool:
         """Every step of the course's migration done - what a semester waits for."""
@@ -1490,6 +2012,17 @@ class Course:
                 ),
             ),
             Step(
+                "seeded text",
+                done=lambda: not self.text_work(),
+                plan=self.text_plan,
+                do=self.rewrite_text,
+                verify=lambda: not self.text_work(),
+                rollback=(
+                    f"git revert the '{TEXT_COMMIT}' commit in {dotgithub} and on each "
+                    f"template's {SOLUTION_BRANCH} branch"
+                ),
+            ),
+            Step(
                 "materials files",
                 done=lambda: not self.materials_moves(),
                 plan=lambda: [
@@ -1514,6 +2047,7 @@ class Course:
                     [
                         "Refresh actions from this checkout; these files differ now:",
                         *(f"  {path}" for path in self.drift()),
+                        *([RERUN_NOTE] if self.pause.record() is not None else []),
                     ]
                     if self.registry_done()
                     else [
@@ -1524,7 +2058,8 @@ class Course:
                     ]
                 ),
                 do=lambda: seed.refresh(self.org, course_only=True) == 0,
-                verify=lambda: _no_drift(self.drift()),
+                verify=self.rerendered,
+                after_work=True,
                 rollback="the rollbacks of the steps above, in reverse",
             ),
             _status_step(self.org, None),

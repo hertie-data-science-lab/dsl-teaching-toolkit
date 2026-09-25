@@ -47,7 +47,7 @@ DISPATCH = "dispatch"
 COURSE = "course"
 # The op scope and the `semester.*` op ids are what the console matches on (ops.json).
 SEMESTER = "semester"
-BOOTSTRAP_OP = "cohort.bootstrap"
+BOOTSTRAP_OP = "semester.bootstrap"
 INLINE = "inline"
 VIA_WORKFLOW = "workflow:"
 
@@ -420,7 +420,7 @@ def _release(name: str, help_text: str, args_schema: dict) -> Operation:
 
 _OPS = (
     Operation(
-        name="cohort.check",
+        name="semester.check",
         runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
@@ -432,7 +432,7 @@ _OPS = (
         argv=_status_refresh,
     ),
     Operation(
-        name="cohort.preview_automation",
+        name="semester.preview_automation",
         runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
@@ -627,7 +627,7 @@ _OPS = (
         real_flag="--no-preview",
     ),
     Operation(
-        name="cohort.archive",
+        name="semester.archive",
         runs_as=DISPATCH,
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,

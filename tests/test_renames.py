@@ -658,7 +658,7 @@ def test_every_console_op_acts_only_when_asked_and_says_so():
         real = command(op, Request(op.name, "prof", "C", "S", args, False))
         preview = command(op, Request(op.name, "prof", "C", "S", args, True))
         assert "--preview" in preview, op.name
-        if op.name == "cohort.preview_automation":
+        if op.name == "semester.preview_automation":
             assert "--no-preview" not in real
         else:
             assert real[-1] == "--no-preview", op.name
@@ -683,7 +683,7 @@ def test_every_op_with_a_preview_acts_only_when_told_no_preview():
         if op.preview_flag:
             assert op.preview_flag == "--preview", op.name
             assert op.real_flag in ("--no-preview", None), op.name
-    assert REGISTRY["cohort.preview_automation"].real_flag is None
+    assert REGISTRY["semester.preview_automation"].real_flag is None
 
 
 def test_distribute_says_notify_and_only_false_holds_the_mail():
@@ -816,7 +816,7 @@ def test_archive_is_the_documented_entry_point_and_runs_teardown(monkeypatch):
 
     monkeypatch.setattr(teardown, "main", lambda: 7)
     assert archive.main() == 7
-    assert REGISTRY["cohort.archive"].module == "archive"
+    assert REGISTRY["semester.archive"].module == "archive"
     assert "python3 -m dsl_course.archive" in ALL_RENDERED["archive_semester"]
 
 

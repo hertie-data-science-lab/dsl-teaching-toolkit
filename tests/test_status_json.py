@@ -1160,7 +1160,7 @@ def test_write_reads_the_roster_as_it_is_now(monkeypatch):
 
 
 def test_check_setup_still_reports_a_write_that_did_not_land(monkeypatch):
-    # cohort.check runs `status --no-preview`: its Outcome must say failed, unlike the
+    # semester.check runs `status --no-preview`: its Outcome must say failed, unlike the
     # nightly refresh, which only warns.
     _stub_write(monkeypatch, _render(), results=(False, False))
     monkeypatch.setattr(

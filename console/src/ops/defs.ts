@@ -16,7 +16,7 @@ const base = (s: Scope, op: string, key: string) => ({ op, key, courseOrg: s.cou
 
 export function checkNow(s: Scope): OpDef {
   return {
-    ...base(s, 'cohort.check', 'cohort'), name: 'Check now', title: 'Every check', where: s.where,
+    ...base(s, 'semester.check', 'cohort'), name: 'Check now', title: 'Every check', where: s.where,
     intro: 'Re-reads every file and re-runs every check now instead of at the next automatic check.',
     verb: 'Check now', running: 'Checking everything', cancel: 'Stop', args: {},
   };
@@ -24,7 +24,7 @@ export function checkNow(s: Scope): OpDef {
 
 export function previewNext(s: Scope): OpDef {
   return {
-    ...base(s, 'cohort.preview_automation', 'cohort'), name: 'Preview the next automatic run', title: 'The next automatic run', where: s.where,
+    ...base(s, 'semester.preview_automation', 'cohort'), name: 'Preview the next automatic run', title: 'The next automatic run', where: s.where,
     intro: 'Shows what automation would release, hand out or collect at its next check, and why anything would not happen.',
     verb: 'Preview the next run', running: 'Previewing the next run', cancel: 'Stop', args: {},
   };
@@ -161,7 +161,7 @@ export function checkAccess(s: Scope): OpDef {
 
 export function archive(s: Scope, scheduled: string | null, passed: boolean): OpDef {
   return {
-    ...base(s, 'cohort.archive', 'cohort'), name: 'Archive', title: s.where, where: scheduled ? `Scheduled ${scheduled}` : 'Not scheduled',
+    ...base(s, 'semester.archive', 'cohort'), name: 'Archive', title: s.where, where: scheduled ? `Scheduled ${scheduled}` : 'Not scheduled',
     intro: 'Every repo becomes read-only. Students keep access. Nothing is deleted.',
     verb: `Archive ${s.where}`, running: `Archiving ${s.where}`, cancel: 'Stop; repos already archived stay archived', args: {},
     needsCheck: passed ? undefined : { label: 'Archive before the scheduled date', sub: scheduled ? `Needed because ${scheduled} has not passed.` : 'Needed because no archive date has passed.', arg: 'force' },
@@ -208,7 +208,7 @@ export function generateSyllabus(s: Scope, repo: string): OpDef {
 
 export function bootstrapCohort(s: Scope & { cohortOrg: string }, courseName: string): OpDef {
   return {
-    ...base(s, 'cohort.bootstrap', s.cohortOrg), name: 'Set up', title: `${courseName}, ${s.where}`, where: s.cohortOrg,
+    ...base(s, 'semester.bootstrap', s.cohortOrg), name: 'Set up', title: `${courseName}, ${s.where}`, where: s.cohortOrg,
     intro: 'Makes the student site, the join form and the semester’s settings in the new org. It takes about a minute.',
     verb: `Set up ${s.where}`, running: `Setting up ${s.where}`, cancel: 'Stop; what is already made stays and a second run finishes it', args: {},
   };

@@ -755,7 +755,8 @@ Promote.
 | request field `cohort_org`; op args `cohort_dest_repo`, `cohort_dest_path`, `tag`, `format`, `include_solution` | `semester_org`; `semester_dest_repo`, `semester_dest_path`, `semester`, `formats`, `solution_datetime: now` | `dsl.request/1` (the console) |
 | CLI `--cohort-org`, `--all-cohorts`, `--list-cohorts`, `--cohort-dest-repo`, `--cohort-dest-path`, `--cohort`, `--tag`, `--format`, `--solution` | `--semester-org`, `--all-semesters`, `--list-semesters`, `--semester-dest-repo`, `--semester-dest-path`, `--semester`, `--semester`, `--formats`, `--solution-datetime now` | every CLI; rendered workflows use the new ones |
 | workflow inputs `cohort_org`, `cohort_dest_repo`, `cohort_dest_path`, `tag`, `semester_tag`, `format`, `include_solution` | `semester_org`, `semester_dest_repo`, `semester_dest_path`, `semester`, `semester`, `formats`, `solution_datetime` | rendered workflows (Refresh actions re-renders them) |
-| workflow names Archive cohort, Bootstrap cohort, Check cohort setup, Propagate cohort edits | Archive semester, Bootstrap semester, Check semester setup, Propagate semester edits | display names only; the workflow FILE paths are unchanged |
+| workflow names Archive cohort, Bootstrap cohort, Check cohort setup, Propagate cohort edits | Archive semester, Bootstrap semester, Check semester setup, Propagate semester edits | display names |
+| workflow files `archive-cohort.yml`, `bootstrap-cohort.yml`, `check-cohort-setup.yml`, `propagate-cohort.yml` | `archive-semester.yml`, `bootstrap-semester.yml`, `check-semester-setup.yml`, `propagate-semester.yml` | course `.github`; Refresh actions writes the new file and deletes the old one (`seed.RETIRED_GITHUB_WORKFLOWS`) |
 | `status.json` `cohort`, `cohorts`, `cohort.term`, `cohort.term_label`, assignment `late_until` | `semester`, `semesters`, `semester.key`, `semester.label`, `grading_cutoff_datetime` | `dsl.status/1` (rewritten by the engine; the console follows) |
 | config repo description "...configure for this cohort ... term schedule..." | "...configure for this semester ... schedule..." | converged by the existing `SUPERSEDED_SEMESTER_DESCRIPTIONS` chain |
 | copy "cohort", "term", "tag"; "staff", "teaching team"; "grading cutoff", "the cutoff" | "semester"; "instructors"; "late cutoff" | logs, mails, forms, docs |
@@ -791,9 +792,7 @@ Promote.
 | status `inputs` key `assignments.lock.yml` | `.system/assignments.lock.yml` | `dsl.status/1` |
 | toolkit `templates/classroom-config/`, `templates/welcome/`, `templates/cohort/` | `templates/semester-config/`, `templates/join/`, `templates/semester/` | this repo only |
 
-Not renamed here, deliberately: the frozen doc filenames, the workflow FILE paths
-(`archive-cohort.yml`, `bootstrap-cohort.yml`, `propagate-cohort.yml`,
-`check-cohort-setup.yml`), the digest issue titles (so `people.yml has entries the sync
+Not renamed here, deliberately: the frozen doc filenames, the digest issue titles (so `people.yml has entries the sync
 cannot use` keeps its old word), the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
 name (not a CLI), and the site's `files/materials/` dest.
@@ -818,9 +817,9 @@ every content repo and template with a release workflow. Before anything is swit
 repo's own setting (`enabled`, `allowed_actions`) is recorded in
 `<org>/.github/.system/migration-pause.json`; the unpause restores exactly that (a repo that
 was off stays off), reads it back and deletes the record. Verified by reading the setting
-back and by no run having started since the pause (by GitHub's clock, the `Date` header),
-nor being unfinished (queued, in progress, waiting, requested, pending) - in those repos or
-as the central Deploy / Promote of the course's tier. An org with no workflow repo counts as
+back and by no run unfinished (queued, in progress, waiting, requested, pending),
+whenever it started - in those repos or as the central Deploy / Promote of the course's
+tier. A run dispatched with the pause that has since finished wrote nothing after it. An org with no workflow repo counts as
 paused. From the pause to
 the verified unpause, any way out - a failed step, an error, a Ctrl-C - names the recorded
 repos and the record. A semester waits until its course's migration is complete (no course
@@ -854,6 +853,37 @@ block) and rewrites `assignment_defaults` `format:`; its verify re-reads the fil
 engine's own rules (`sync_faculty.retired_course_faults`) and expects no `NOT_MIGRATED`.
 `grading_datetime` is left for B2. Tested only against a stubbed GitHub
 (`tests/test_migrate.py`).
+
+What the demo rehearsal (2026-09-25) changed, one line each:
+
+- **No lost tick.** GitHub drops what fires into a disabled repo, so after the unpause the
+  tool dispatches one Scheduled release and one Sync membership into the course's `.github`
+  (a semester's: scoped to it, as its `semester-config` push sends them; a course's: every
+  semester, as the ds01 timers do) and prints where each run shows up, without waiting.
+- **The pause verify** counts only unfinished runs, whenever they started (the separate
+  "started after the pause" count, and the GitHub clock it read, are gone).
+- **A step's done is its verify.** The re-render's verify and its done read the same
+  things; and while a pause record says a run stopped inside the window, the re-render is
+  never "already migrated" (it also writes what no file shows, such as repo secrets);
+  the plan says "runs after the steps above" whenever a step above has work.
+- **Seeded text.** The semester layout step rewrites the old repo names and paths - the
+  org's own repos only, as whole names (`migrate.text_renames`) - in `join/README.md`,
+  `.github/profile/README.md`, `schedule.yml` and `instructors.yml`, and replaces each line still exactly as the old template
+  seeded it with the new template's (`migrate.seeded_wording`); a course's own "seeded
+  text" step does the same for `dsl-course.yml` and each template's `grading_config.yml`.
+  Any other line that says "cohort" is the instructor's: listed by line number in the plan
+  under "wording for the instructor to review", never rewritten. The course profile README
+  is wholly generated, so its re-render already writes the new names.
+- **Op ids** `cohort.check`, `cohort.preview_automation`, `cohort.archive`,
+  `cohort.bootstrap` are `semester.*`; the layout step rewrites each `.system/outcomes/`
+  record of an old id under the new one (its `op` too), and the status step's
+  `operations` follow.
+- **Workflow files** `*-cohort*.yml` are `*-semester*.yml`; Refresh actions deletes the old
+  file as it writes the new (`seed.RETIRED_GITHUB_WORKFLOWS`), and the course re-render's
+  plan and verify name any still there.
+- **The plan names every deletion** (samples, the old pointer, retired workflows and join
+  forms), and the rename step sets each renamed repo's description to the current wording
+  in the same PATCH (`repos.current_description`).
 
 ## Working conventions
 

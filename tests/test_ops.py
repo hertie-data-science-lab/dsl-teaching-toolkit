@@ -42,8 +42,8 @@ CONTRACT_REQUEST = {
 }
 
 CONTRACT_OPS = {
-    "cohort.check",
-    "cohort.preview_automation",
+    "semester.check",
+    "semester.preview_automation",
     "release.now",
     "release.early",
     "release.rerun",
@@ -56,13 +56,13 @@ CONTRACT_OPS = {
     "roster.send_codes",
     "site.update",
     "access.check",
-    "cohort.archive",
+    "semester.archive",
     "course.publish_website",
     "assignment.derive_starter",
     "assignment.generate_syllabus",
     "materials.create",
     "assignment.create",
-    "cohort.bootstrap",
+    "semester.bootstrap",
     # Added after the contract's first list: Open team formation, shipped 23 Sep.
     "teams.open_window",
 }
@@ -111,7 +111,7 @@ def _all_flags(name: str, args: dict, semester: str | None = SEMESTER) -> set[st
     ("name", "rendered", "args"),
     [
         (
-            "cohort.archive",
+            "semester.archive",
             workflows_render.render_archive_semester([SEMESTER]),
             {"force": True},
         ),
@@ -268,7 +268,7 @@ def test_a_course_op_accepts_any_term_instructors_team(monkeypatch):
 
 def test_bootstrap_needs_course_admin(monkeypatch):
     req = parse_request(
-        json.dumps(_request(op="cohort.bootstrap", preview=False, args={}))
+        json.dumps(_request(op="semester.bootstrap", preview=False, args={}))
     )
     monkeypatch.setattr(
         request_mod, "get_team_members", _teams({(SEMESTER, "instructors"): {"prof"}})
@@ -531,7 +531,7 @@ def test_scheduler_decisions_become_reasons(monkeypatch, capsys, engine):
 
     monkeypatch.setattr(scheduler, "main", fake_main)
     rc, body, _ = _main(
-        monkeypatch, capsys, _request(op="cohort.preview_automation", args={})
+        monkeypatch, capsys, _request(op="semester.preview_automation", args={})
     )
     assert rc == 0 and body["conclusion"] == "previewed"
     assert body["reasons"] == [
@@ -587,7 +587,7 @@ def test_a_real_archive_is_not_a_broken_run(monkeypatch, capsys, engine):
         outcome_mod, "put_file", lambda *a, **k: False
     )  # semester-config is read-only now
     rc, body, _ = _main(
-        monkeypatch, capsys, _request(op="cohort.archive", args={}, preview=False)
+        monkeypatch, capsys, _request(op="semester.archive", args={}, preview=False)
     )
     assert rc == 0 and body["conclusion"] == "done"
 

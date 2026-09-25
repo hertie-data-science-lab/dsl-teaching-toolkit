@@ -31,14 +31,14 @@ export function opSpec(name: string): OpSpec {
 export const GATED = new Set([
   'assignment.handout_now',
   'grades.return',
-  'cohort.archive',
+  'semester.archive',
   'assignment.update_copies',
   'roster.send_codes',
   'course.publish_website',
 ]);
 
 /** An op that is itself a look, never a change: it always runs as a preview. */
-export const PREVIEW_ONLY = new Set(['cohort.preview_automation']);
+export const PREVIEW_ONLY = new Set(['semester.preview_automation']);
 
 export type OpMode = 'gated' | 'preview' | 'direct' | 'previewOnly';
 
