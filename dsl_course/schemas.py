@@ -1,8 +1,8 @@
 """Export the console's contracts as JSON Schema: `python -m dsl_course.schemas --out DIR`.
 
 Three wire shapes (`dsl.request/1`, `dsl.outcome/1`, `dsl.status/1`), the operations
-registry (`ops.json`), the engine's names (`names.json`) and institution policy
-(`policy.json`), and one schema per instructor-owned file the console edits. Every
+registry (`ops.json`), the engine's names (`names.json`), the words for its values
+(`labels.json`) and institution policy (`policy.json`), and one schema per instructor-owned file the console edits. Every
 enum and every key set is READ off the constant the engine itself parses with, so a value
 added to the engine reaches the console's forms with no second edit; the committed copies
 under `console/schemas/` are held to a fresh export by `tests/test_schemas.py`.
@@ -28,6 +28,8 @@ from .course import (
     INSTRUCTOR_ROLES,
     INSTRUCTORS_FILE,
     JOIN_REPO,
+    LABELS,
+    SOLUTION_WARNING,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
@@ -89,7 +91,9 @@ PEOPLE_ENTRY_KEYS = (
 )
 PEOPLE_REQUIRED = ("github_handle", "role", "email")
 COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
-COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url")
+# Course cards, instructors and TAs alike: what `site_repo._people_from_meta` reads, the
+# optional start/end bounding when a card shows.
+COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url", "start", "end")
 # dsl-course.yml keys beyond `people` and `assignment_defaults`.
 COURSE_TOP_KEYS = (
     "course_name",
@@ -539,6 +543,7 @@ def dsl_course_schema() -> dict:
         {
             "course_admins": {"type": "array", "items": admin},
             "instructors": {"type": "array", "items": card},
+            "teaching_assistants": {"type": "array", "items": card},
         }
     )
     defaults = _obj(_keys((*COURSE_DEFAULT_KEYS, *ASKED_DEFAULT_KEYS), _SPEC_TYPES))
@@ -575,6 +580,12 @@ def names_json() -> dict:
     }
 
 
+def labels_json() -> dict:
+    """The words the console shows for the engine's values (`course.LABELS`) and the
+    solution warning every surface offering `solution_datetime: now` carries."""
+    return {"solution_warning": SOLUTION_WARNING, **LABELS}
+
+
 def all_schemas() -> dict[str, dict]:
     """Every exported file, by its name under the output directory."""
     return {
@@ -583,6 +594,7 @@ def all_schemas() -> dict[str, dict]:
         "status.schema.json": status_schema(),
         "ops.json": ops_json(),
         "names.json": names_json(),
+        "labels.json": labels_json(),
         # The institution policy the engine runs on (`policy.load`): the defaults, kinds,
         # site block, contact and licences, so the console holds no literal of its own.
         "policy.json": policy.load(),

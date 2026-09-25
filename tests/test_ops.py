@@ -123,7 +123,7 @@ def _all_flags(name: str, args: dict, semester: str | None = SEMESTER) -> set[st
             {
                 "course_source_repo": "assignment-1-f2026",
                 "path": "a.ipynb",
-                "slug": "a1",
+                "assignment": "a1",
                 "overwrite": True,
             },
         ),
@@ -132,7 +132,7 @@ def _all_flags(name: str, args: dict, semester: str | None = SEMESTER) -> set[st
             workflows_render.render_collect_submissions(
                 [SEMESTER], ["assignment-1-f2026"]
             ),
-            {"course_source_repo": "assignment-1-f2026", "slug": "a1"},
+            {"course_source_repo": "assignment-1-f2026", "assignment": "a1"},
         ),
     ],
 )
@@ -160,6 +160,11 @@ def test_a_workflow_op_dispatches_inputs_its_workflow_declares():
     }
     real = Request(op.name, "prof", COURSE, SEMESTER, req.args, False)
     assert op_inputs(op, command(op, real))["preview"] == "false"
+    # The schedule key, for a template two entries share, rides as its own input.
+    keyed = Request(
+        op.name, "prof", COURSE, SEMESTER, {**req.args, "assignment": "a2-resit"}, True
+    )
+    assert op_inputs(op, command(op, keyed))["assignment"] == "a2-resit"
 
 
 def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():

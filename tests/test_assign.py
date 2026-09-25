@@ -2429,7 +2429,7 @@ def test_a_patch_refuses_to_choose_between_two_entries_on_one_template(
 
     assert rc == 1 and commits == []
     err = capsys.readouterr().err
-    assert "assignment-2-resit" in err and "nothing acts on one of them by hand" in err
+    assert "(assignment-2, assignment-2-resit)" in err and "`assignment`" in err
 
 
 def test_a_patch_told_which_entry_acts_on_that_entrys_hand_out(monkeypatch):
@@ -2505,6 +2505,20 @@ def test_the_release_button_lists_the_semester_once_for_itself(monkeypatch):
 def test_an_explicit_flag_reaches_both_modes(monkeypatch, flag, want):
     assert _cli(monkeypatch, flag)["dry_run"] is want
     assert _cli(monkeypatch, flag, "--patch-path", "starter.py")["dry_run"] is want
+
+
+def test_the_assignment_flag_picks_the_entry_to_patch(monkeypatch):
+    # The Patch button and the console's Update every copy name the schedule key when two
+    # entries share the template; without it the patch refuses, naming both.
+    seen = _cli(monkeypatch, "--patch-path", "starter.py", "--assignment", "a2-resit")
+    assert (seen["mode"], seen["slug"]) == ("patch", "a2-resit")
+    assert _cli(monkeypatch, "--patch-path", "starter.py")["slug"] == ""
+
+
+def test_the_assignment_flag_is_refused_on_a_hand_out(monkeypatch):
+    # Which of two entries hands out is the schedule's answer, not the button's.
+    with pytest.raises(SystemExit):
+        _cli(monkeypatch, "--assignment", "a2-resit")
 
 
 def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):

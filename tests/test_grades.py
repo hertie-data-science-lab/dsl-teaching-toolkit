@@ -1268,8 +1268,12 @@ def test_a_second_dry_run_rewrites_the_preview_rather_than_opening_another(
         preview_issues=store,
     )
     ((issue),) = store
-    assert "- **assignment-1** · `ada-l` (Ada) · 45 (new)" in issue["body"]
-    assert "43" not in issue["body"]
+    body = issue["body"]
+    assert "- **assignment-1** · `ada-l` (Ada) · 45 (new)" in body
+    # The first run's line is gone, not kept beside the new one. Matched on the line, not
+    # on a bare "43", which any run id or date in the body can carry.
+    assert "`ada-l` (Ada) · 43" not in body
+    assert body.count("`ada-l` (Ada) ·") == 1
 
 
 def test_the_preview_counts_unmarked_questions_per_student(tmp_path, monkeypatch):

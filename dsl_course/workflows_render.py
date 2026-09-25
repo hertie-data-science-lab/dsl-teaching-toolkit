@@ -1003,6 +1003,10 @@ on:
     inputs:
 {_choice_input("semester_org", "Semester org (submissions)", semester_orgs)}
 {_assignment_input(assignments or [])}
+      assignment:
+        description: "Only if two schedule.yml entries share this template: the one to act on (its key)"
+        required: false
+        default: ""
       preview:
         description: "Preview - show what WOULD be refreshed"
         type: boolean
@@ -1017,9 +1021,11 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
           SEMESTER_ORG: ${{{{ inputs.semester_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          ASSIGNMENT: ${{{{ inputs.assignment }}}}
           PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --refresh-only)
+          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
 {_PREVIEW_GATE}
           python3 -m dsl_course.collect "${{args[@]}}"
 """
@@ -1972,6 +1978,10 @@ on:
         description: "Replace the file even where the student has already changed it (their work on that file is lost)"
         type: boolean
         default: false
+      assignment:
+        description: "Only if two schedule.yml entries share this template: the one to act on (its key)"
+        required: false
+        default: ""
       preview:
         description: "Preview - count the repos that would be patched, write nothing"
         type: boolean
@@ -1988,11 +1998,13 @@ on:
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           PATH_INPUT: ${{{{ inputs.path }}}}
           OVERWRITE: ${{{{ inputs.overwrite }}}}
+          ASSIGNMENT: ${{{{ inputs.assignment }}}}
           PREVIEW: ${{{{ inputs.preview }}}}
         run: |
           gh auth setup-git
           args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --semester-org "$SEMESTER_ORG" --patch-path "$PATH_INPUT")
           [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
+          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
 {_PREVIEW_GATE}
           python3 -m dsl_course.assign "${{args[@]}}"
 """

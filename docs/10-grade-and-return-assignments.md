@@ -135,7 +135,8 @@ repo's, so it would accuse the entire semester of one student's late push), and
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
    issue. Late pushes refresh both, quarter-hourly, until the cutoff.
 3. **Collect submissions** (button) does that refresh now instead of waiting. It never
-   freezes anything.
+   freezes anything. Its `assignment` box names the schedule key only when two entries
+   share the template.
 4. **Type the marks.** Anything you write is kept forever - including keys you invent, and
    rows for students who have left. Delete a key and it stays deleted.
 5. **The late cutoff** (the due date plus the late window) freezes the

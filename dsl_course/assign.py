@@ -691,7 +691,9 @@ def patch_released(
     Counts only in the log: this runs in the course org's PUBLIC `.github`, and one
     `<slug>-<handle>` line there publishes who is in the semester."""
     sched = schedule.load(semester_org)
-    target = schedule.resolve_target(sched, template, slug)
+    target = schedule.resolve_target(
+        sched, template, slug, remedy=schedule.NAME_THE_ENTRY
+    )
     if isinstance(target, str):
         log_err(target)
         return 1
@@ -1268,6 +1270,13 @@ def main() -> int:
         action="store_true",
         help="Patch mode: replace the file even where the student has changed it.",
     )
+    parser.add_argument(
+        "--assignment",
+        default="",
+        metavar="KEY",
+        help="Patch mode: the schedule.yml assignments key, needed only when two entries "
+        "hand out from this template.",
+    )
     # Both modes preview unless told `--no-preview` (decision 0012): handing out creates a
     # repo per student, and patching commits into every one of them.
     add_preview_flag(
@@ -1275,6 +1284,11 @@ def main() -> int:
         "List the repos that would be created or patched; change nothing (default).",
     )
     args = parser.parse_args()
+    if args.assignment and not args.patch_path:
+        parser.error(
+            "--assignment picks the entry to patch; a hand out of a template two "
+            "entries share belongs to the schedule"
+        )
     when = args.solution_datetime.strip().lower()
     if when not in ("", SOLUTION_NOW):
         parser.error(
@@ -1291,6 +1305,7 @@ def main() -> int:
                 args.template,
                 args.semester_org,
                 args.patch_path,
+                slug=args.assignment,
                 overwrite=args.overwrite,
                 dry_run=args.preview,
             )
