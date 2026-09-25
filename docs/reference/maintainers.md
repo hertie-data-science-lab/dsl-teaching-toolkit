@@ -746,7 +746,7 @@ Promote.
 | `cohort_dest_repo:`, `cohort_dest_path:` | `semester_dest_repo:`, `semester_dest_path:` | `schedule.yml` assignment and `deploy:` entries |
 | `org:`, `org_name:` | removed: the org is the repo owner, the display name is `course_name` | course org `dsl-course.yml`; stripped by the tool |
 | `cohort_defaults:`, `semester_defaults:` | removed: a semester's `timezone` and `archive.grace_days` are its own `schedule.yml` facts, defaulting to `policy.yml` | course org `dsl-course.yml`; stripped by the tool |
-| CLI `bootstrap_course --org-name`; Bootstrap Course Org input `org_name` | `--course-name`; input `course_name` | the toolkit's own workflow (the console's New course wizard follows in WP-B4) |
+| CLI `bootstrap_course --org-name`; Bootstrap Course Org input `org_name` | `--course-name`; input `course_name` | the toolkit's own workflow and the console's New course wizard |
 | `course.DEFAULT_MAX_TEAM_SIZE`, `DEFAULT_LATE_*`, `grades.course_assignment_defaults`, `parse_assignment_defaults` | `policy.defaults()`; `settings.course_defaults`, `settings.parse_assignment_defaults` | this repo only |
 | `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `semester-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
 | `format:` (one word) | `formats:` (a list; the first is the runnable one) | `grading_config.yml` on a template's `solution` branch; `assignment_defaults:` in `dsl-course.yml` |

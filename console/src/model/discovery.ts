@@ -73,7 +73,7 @@ export async function discoverCourse(client: GitHubClient, org: string, known?: 
   cohorts.sort((a, b) => b.term.slice(1).localeCompare(a.term.slice(1)) || a.term.localeCompare(b.term));
   return {
     org,
-    name: str(meta?.course_name) || str(meta?.org_name) || org,
+    name: str(meta?.course_name) || org,
     code: str(meta?.course_code),
     description: str(meta?.course_description),
     write: repo.permissions?.push === true,
@@ -245,7 +245,7 @@ export async function discoverEstate(client: GitHubClient, who: { kind: TokenKin
   await Promise.all(
     [...new Set([...bare, ...invitedBare].map((s) => s.courseOrg).filter((c) => c && !byOrg.has(c.toLowerCase())))].map(async (c) => {
       const meta = await readMeta(client, c).catch(() => null);
-      names.set(c, str(meta?.course_name) || str(meta?.org_name));
+      names.set(c, str(meta?.course_name));
     }),
   );
   const roles = new Map<string, Role>();

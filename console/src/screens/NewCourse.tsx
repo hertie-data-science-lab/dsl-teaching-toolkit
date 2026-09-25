@@ -6,9 +6,9 @@ import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
-import { SchemaForm, effective, fieldErrors } from '../forms/Form';
+import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
-import { ABOUT, ASSIGNMENT_DEFAULTS, SEMESTER_DEFAULTS } from '../tiers/course';
+import { ABOUT, ASSIGNMENT_DEFAULTS } from '../tiers/course';
 import type { Values } from '../tiers/types';
 import { COURSE_ORG } from '../tiers/wizard';
 import { CheckLine, Crumbs, Help } from '../ui/bits';
@@ -32,7 +32,6 @@ export interface NcDraft {
   course_name?: string;
   course_code?: string;
   org?: string; // set only when the instructor edits the derived name
-  org_name?: string;
   course_description?: string;
   admins: Admin[];
   orgVerified?: string;
@@ -40,7 +39,6 @@ export interface NcDraft {
   detailsSaved?: string;
   defaultsSaved?: string;
   defaults?: Values;
-  cohort?: Values;
   links?: string;
 }
 
@@ -97,7 +95,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     if (!env) return;
     setErr(null);
     try {
-      const r = await runBootstrap(env.client, { org, orgName: d.org_name || d.course_name || org, code: d.course_code ?? '', admins: d.admins.map((a) => a.github_handle) }, setRun);
+      const r = await runBootstrap(env.client, { org, courseName: d.course_name || org, code: d.course_code ?? '', admins: d.admins.map((a) => a.github_handle) }, setRun);
       if (r.conclusion !== 'success') setErr('The set-up run did not finish cleanly. Open it on GitHub to see why; running it again is safe.');
       files.refresh(org, COURSE_REPO, 'dsl-course.yml');
       setupLive.run();
@@ -128,13 +126,12 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   } else if (step === 2) {
     title = 'Course details';
     const ready = setUp ? allOk(setUp) : false;
-    const about: Values = { course_name: d.course_name, course_code: d.course_code, course_description: d.course_description, org_name: d.org_name };
-    const tiers = { ...ABOUT, org_name: { ...ABOUT.org_name, placeholder: d.course_name, defaultLabel: 'default: the course name' } };
+    const about: Values = { course_name: d.course_name, course_code: d.course_code, course_description: d.course_description };
     const errs = fieldErrors(null, ABOUT, about);
     const running = run !== null && run.state !== 'completed';
     body = (
       <>
-        <SchemaForm id="nc2" schema={null} tiers={tiers} values={about} onChange={(v) => set({ course_name: v.course_name as string, course_code: v.course_code as string, course_description: v.course_description as string, org_name: v.org_name as string })} />
+        <SchemaForm id="nc2" schema={null} tiers={ABOUT} values={about} onChange={(v) => set({ course_name: v.course_name as string, course_code: v.course_code as string, course_description: v.course_description as string })} />
         <div class="field">
           <span class="label">Course admins <span class="default">default: you</span></span>
           <p class="footnote">Course admins keep every button for this course across years. They can differ from a given semester’s instructors, who are set per semester under Instructors.</p>
@@ -157,7 +154,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     );
     foot = ready ? (
       <button class="btn" type="button" disabled={Object.keys(errs).length > 0 || save.kind === 'busy' || !before} onClick={async () => {
-        const after = { ...before!, about: { ...before!.about, course_name: d.course_name, course_code: d.course_code, course_description: d.course_description || undefined, ...(d.org_name ? { org_name: d.org_name } : {}) }, admins: d.admins };
+        const after = { ...before!, about: { ...before!.about, course_name: d.course_name, course_code: d.course_code, course_description: d.course_description || undefined }, admins: d.admins };
         if (await writeCourse(after, 'write the course details')) {
           set({ setUp: org, detailsSaved: org });
           go(3);
@@ -169,14 +166,12 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   } else if (step === 3) {
     title = 'Defaults';
     const defaults = d.defaults ?? before?.defaults ?? {};
-    const cohort = d.cohort ?? before?.cohort ?? { archive_auto: true };
     const links = d.links ?? before?.links ?? '';
     const errs = fieldErrors(null, ASSIGNMENT_DEFAULTS, defaults);
     body = (
       <>
         <p>These are the course’s defaults. Every one can be overridden per assignment or per semester.</p>
         <div class="form-section"><h3>Assignment defaults</h3><SchemaForm id="ncx" schema={null} tiers={ASSIGNMENT_DEFAULTS} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
-        <div class="form-section"><h3>Semester defaults</h3><p class="footnote">Written into each new semester’s schedule when it is set up.</p><SchemaForm id="ncc" schema={null} tiers={SEMESTER_DEFAULTS} values={cohort} onChange={(v) => set({ cohort: v })} /></div>
         <div class="form-section">
           <h3>Site links</h3>
           <div class="field">
@@ -190,7 +185,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     );
     foot = (
       <button class="btn" type="button" disabled={Object.keys(errs).length > 0 || save.kind === 'busy' || !before} onClick={async () => {
-        const after = { ...before!, defaults, cohort: effective(SEMESTER_DEFAULTS, cohort), links };
+        const after = { ...before!, defaults, links };
         if (deepEqual(after, before) || (await writeCourse(after, 'set the course defaults'))) {
           set({ defaultsSaved: org });
           go(4);

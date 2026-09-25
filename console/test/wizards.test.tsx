@@ -213,10 +213,10 @@ describe('what the wizards send', () => {
   });
 
   it('sends the central set-up its hidden inputs and refuses a bad handle before dispatching', () => {
-    expect(bootstrapInputs({ org: 'hertie-deep-learning-e2345', orgName: 'Deep Learning', code: 'E2345', admins: ['a-example', ' b-sample '] })).toEqual({
-      org: 'hertie-deep-learning-e2345', org_name: 'Deep Learning', course_code: 'E2345', set_secret: 'true', admin: 'a-example,b-sample', central_ref: 'release',
+    expect(bootstrapInputs({ org: 'hertie-deep-learning-e2345', courseName: 'Deep Learning', code: 'E2345', admins: ['a-example', ' b-sample '] })).toEqual({
+      org: 'hertie-deep-learning-e2345', course_name: 'Deep Learning', course_code: 'E2345', set_secret: 'true', admin: 'a-example,b-sample', central_ref: 'release',
     });
-    expect(() => bootstrapInputs({ org: 'hertie-x', orgName: 'X', code: 'E1', admins: ['--bad'] })).toThrow(/admin handle/);
+    expect(() => bootstrapInputs({ org: 'hertie-x', courseName: 'X', code: 'E1', admins: ['--bad'] })).toThrow(/admin handle/);
   });
 });
 
@@ -232,7 +232,7 @@ describe('live checks against GitHub', () => {
         return json({ id: 77, status: polls > 1 ? 'completed' : 'in_progress', conclusion: polls > 1 ? 'success' : null, html_url: 'https://github.com/run/77' });
       });
     const seen: string[] = [];
-    const r = await runBootstrap(client(gh), { org: 'hertie-deep-learning-e2345', orgName: 'Deep Learning', code: 'E2345', admins: ['a-example'] }, (x) => seen.push(x.state), { pollMs: 0, sleep: async () => {} });
+    const r = await runBootstrap(client(gh), { org: 'hertie-deep-learning-e2345', courseName: 'Deep Learning', code: 'E2345', admins: ['a-example'] }, (x) => seen.push(x.state), { pollMs: 0, sleep: async () => {} });
     expect(r).toMatchObject({ runId: 77, state: 'completed', conclusion: 'success' });
     expect(seen).toEqual(['queued', 'running', 'completed']);
     const body = gh.seen.find((x) => x.method === 'POST')!.body as { ref: string; inputs: Record<string, string>; return_run_details: boolean };

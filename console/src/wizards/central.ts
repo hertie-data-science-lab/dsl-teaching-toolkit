@@ -14,7 +14,7 @@ const HANDLE_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
 export interface BootstrapCourse {
   org: string;
-  orgName: string;
+  courseName: string;
   code: string;
   admins: string[];
 }
@@ -26,12 +26,12 @@ export interface BootstrapCourse {
 export function bootstrapInputs(b: BootstrapCourse): Record<string, string> {
   const errors: string[] = [];
   if (!ORG_RE.test(b.org)) errors.push('the org name');
-  if (!b.orgName.trim() || /[\x00-\x1f]/.test(b.orgName)) errors.push('the course name');
+  if (!b.courseName.trim() || /[\x00-\x1f]/.test(b.courseName)) errors.push('the course name');
   if (!b.code.trim() || /[\x00-\x1f]/.test(b.code)) errors.push('the course code');
   const admins = b.admins.map((a) => a.trim()).filter(Boolean);
   if (admins.some((a) => !HANDLE_RE.test(a))) errors.push('a course admin handle');
   if (errors.length) throw new Error(`Check ${errors.join(', ')}.`);
-  return { org: b.org, org_name: b.orgName.trim(), course_code: b.code.trim(), set_secret: 'true', admin: admins.join(','), central_ref: 'release' };
+  return { org: b.org, course_name: b.courseName.trim(), course_code: b.code.trim(), set_secret: 'true', admin: admins.join(','), central_ref: 'release' };
 }
 
 export interface CentralRun {

@@ -117,12 +117,18 @@ describe('an org on old names', () => {
     expect(await courseLeftovers(client(done), 'c')).toEqual([]);
   });
 
-  it('reads the course files too: a cohorts: registry key or cohort_defaults: is not migrated', async () => {
+  it('reads the course files too: a cohorts: registry key or a retired dsl-course.yml key is not migrated', async () => {
     const gh = new FakeGitHub()
       .on('GET', '/repos/c/.github/git/trees/HEAD', { tree: [{ path: 'semesters.yml', type: 'blob', sha: 'a' }, { path: 'dsl-course.yml', type: 'blob', sha: 'b' }] })
       .on('GET', '/repos/c/.github/contents/semesters.yml', fileBody('semesters.yml', 'cohorts:\n  - s\n'))
-      .on('GET', '/repos/c/.github/contents/dsl-course.yml', fileBody('dsl-course.yml', 'course_name: X\ncohort_defaults:\n  timezone: UTC\n'));
-    expect((await courseLeftovers(client(gh), 'c')).map((l) => l.old)).toEqual(['cohorts:', 'cohort_defaults:']);
+      .on(
+        'GET',
+        '/repos/c/.github/contents/dsl-course.yml',
+        fileBody('dsl-course.yml', 'org: c\norg_name: X\ncourse_name: X\ncohort_defaults:\n  timezone: UTC\nsemester_defaults:\n  timezone: UTC\n'),
+      );
+    const left = await courseLeftovers(client(gh), 'c');
+    expect(left.map((l) => l.old)).toEqual(['cohorts:', 'org:', 'org_name:', 'cohort_defaults:', 'semester_defaults:']);
+    expect(notMigratedText(left[1])).toBe('NOT_MIGRATED: `org:` is no longer read - run the migration');
   });
 
   it('a check GitHub does not answer fails, rather than passing as migrated', async () => {
