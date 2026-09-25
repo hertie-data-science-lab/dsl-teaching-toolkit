@@ -43,26 +43,24 @@ The site's schedule table has four columns, and every block below fills them wit
 
 Use this for releasing teaching materials, code, datasets, anything else.
 
-Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours, and never shown to students: the site names a row by its ordinal (`Session 1`, `Lab 1`), taken from the session folder the deploy lands in, plus your `title:` if you give one. Each entry holds:
+Each entry is one row on the semester site, in date order. The label is yours (`lecture-1`, `bonus-dataset`) and never shown to students: the site names the row by its kind and its number among that kind's rows (`Lecture 3`, `Lab 3`, `Drop-in 1`), plus your `title:` if you give one. "Week N" counts from `semester_start`. Folder names mean nothing to the row: an `NN_` prefix is harmless, never needed. Each entry holds:
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows, and the default fire time for this entry's deploys |
 | `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
-| `kind` | no | inferred from where the deploys land | `lecture` / `lab` / `readings` - which row this entry belongs to. Only needed when the destination path cannot say it (lab material that does not land under `labs/`); `readings` claims no row of its own - so a `title:` or `details:` written beside it has no row to appear on, and **Validate schedule** says so (write them on the entry that raises the session's row instead). The declaration travels with this entry's own deploy destination, so that destination must name the session's folder (`clinics/03_week-3`) rather than a parent holding it. An unrecognised value is flagged by **Validate schedule** and the row is placed as if you had declared none |
-| `title` | no | - | the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the schedule, Lectures, Materials and Labs tabs |
-| `details` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown in the schedule's Details column AND under the session heading on the Lectures, Labs and Readings tabs; may run to several paragraphs (use a `>` or `\|` block) |
+| `kind` | no | inferred | the row's kind: one of the institution's kinds (Hertie: `lecture`, `lab`, `readings`, `exam`, `drop-in`, `other`). Left out, it is inferred once from the folder the first copy lands in: `labs`/`lab`/`tutorials` -> lab, `readings`/`reading`/`literature` -> readings, anything else -> lecture, or the source repo's own `materials.yml` aliases ([02](02-add-materials-to-course.md#materialsyml)). The console shows the inferred kind for you to confirm. An unknown value is flagged by **Validate schedule** and shown as `other`. Each kind gets its own tab on the site |
+| `title` | no | - | the session's name, shown beside the row's name ("Lecture 1 / Probability Theory") on the schedule and its kind's tab |
+| `details` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown in the schedule's Details column AND under the row's heading on its kind's tab; may run to several paragraphs (use a `>` or `\|` block) |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
-| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry raises no row of its own and never sets an existing row's date or name (it still contributes where its files will land). For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
+| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, the row stays off the schedule and the Updates box, and appears on its kind's tab once its files have landed; see [Silent releases](#silent-releases) |
 
 
 NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:`, not here.
 
 ### Silent releases
 
-Most weeks a session's readings ride the lecture's own entry and ship on its clock. Give them their own entry - because they go out a week ahead, say - and by default that entry announces itself: readings land in the same site row as that session's lecture, and the row takes the **earliest** date and title of every entry touching it. So a readings entry dated the 15th silently moves "Session 4" from the 22nd to the 15th, and can rename it.
-
-`show_on_site: false` is the opt-out. The entry deploys exactly as written and tells the schedule nothing:
+A week's readings often go out ahead of the lecture. Give them their own entry with `show_on_site: false`: it deploys exactly as written and stays off the schedule, and once the files have landed its row is listed on the Readings tab, reading list and all.
 
 ```yaml
   readings-4:
@@ -73,13 +71,9 @@ Most weeks a session's readings ride the lecture's own entry and ship on its clo
         course_source_path: readings/04_week-4
 ```
 
-The files still reach students on the 15th, and still appear on session 4's row once released - what is withheld is the entry's claim on the schedule, not its content. The same applies to any release that is not an occasion: an errata drop, a dataset added mid-term.
+An unreleased silent entry shows nowhere. One that lands only root files (a `course-intro` shipping `SYLLABUS.md`) raises no row at all: the file is a course document, pinned on the home page and listed on All Materials. The generated syllabus lists every readings entry, silent or not, under the first lecture on or after its date.
 
-What is *not* withheld is where the files are going: session 4's row still names `materials/readings/04_week-4` among the paths its materials will appear at, and is flagged as having a reading list pending, so an unreleased session can say readings are coming.
-
-A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan).
-
-NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the semester up front publishes the whole semester. Until its files ship the row carries no links and says so (*"**Materials for session 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then picks up the links on release. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
+NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the semester up front publishes the whole semester. Until its files ship the row carries no links and says so (*"**Materials for lecture 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then links whatever its copies landed: a file as itself, a folder as GitHub shows it. An entry with several copies is one row linking all of them. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
 
 Nested under `deploy:` we have the following:
 
