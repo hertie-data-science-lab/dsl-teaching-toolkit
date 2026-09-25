@@ -3,7 +3,7 @@
 // course layer of the cascade (decision 0009 rule 5): each field shows the institution's
 // value in grey, the one that applies when it is left empty.
 
-import { institutionLayer, resolve, SOURCES, type Layers, type RunKey } from '../model/cascade';
+import { COURSE_RUN_KEYS, institutionLayer, resolve, SOURCES, type Layers } from '../model/cascade';
 import { DEFAULT_FORMATS, DEFAULT_TIMEZONE } from '../model/policy';
 import { FORMATS, SUBMIT, formatWord } from './grading';
 import { runTiers } from './runSettings';
@@ -20,8 +20,6 @@ export const ABOUT: Tiers = {
   course_description: { tier: 'default', label: 'Description', widget: 'markdown', reason: 'One paragraph. Students see it on every semester’s student site home page.' },
 };
 
-/** The run keys the course layer may state (dsl_course.schema.json: no submit link, a per-semester fact). */
-export const COURSE_RUN_KEYS: RunKey[] = ['late_window_days', 'late_penalty_per_day', 'max_team_size', 'team_formation', 'visibility'];
 
 const onlyInstitution = (): Layers => Object.fromEntries(SOURCES.map((s) => [s, s === 'institution' ? institutionLayer() : {}])) as Layers;
 
