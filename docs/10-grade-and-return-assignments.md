@@ -132,7 +132,7 @@ repo's, so it would accuse the entire semester of one student's late push), and
    freezes anything.
 4. **Type the marks.** Anything you write is kept forever - including keys you invent, and
    rows for students who have left. Delete a key and it stays deleted.
-5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
+5. **The late cutoff** (the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
 6. **Distribute grades** (button), `preview` first. The preview writes no grades and sends
    no mail. It prints the counts, and posts who gets what - each changed grade, who is

@@ -255,7 +255,7 @@ Live example: [`example-course/semester-org/schedule.yml`](../example-course/sem
 `semester-config/schedule.yml` - the semester plan: the **auto-release plan** the scheduler
 runs, and the **dates** that drive the website and grading. Times are read in `timezone`
 (default `Europe/Berlin`) unless given an offset; a bare **release** date = 00:00, a bare
-**due_datetime**/`grading_datetime` date = 23:59:59, a bare **events** date shows as 09:00. Times are
+**due_datetime** date = 23:59:59, a bare **events** date shows as 09:00. Times are
 honoured to within about 15 minutes, so pin a release AHEAD of the class, not at it
 ([what drives the scheduler](07-schedule-releases.md#what-drives-the-scheduler)).
 
@@ -271,7 +271,6 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 | Action | Does | Fields |
 |--------|------|--------|
 | `deploy` | copy a source path → a semester repo | `course_source_repo`, `course_source_path`, `semester_dest_repo` (default `materials`), `semester_dest_path` (default: mirror). A list, or a single mapping for one copy |
-| `assignment` | one private repo per onboarded student - or per team, when the template's `grading_config.yml` says `type: group` | the template repo name |
 
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
 and it is the default fire time), `title` and `details` (optional - the session's name,
@@ -279,9 +278,8 @@ shown beside its ordinal, and a sentence about it in the schedule's Details colu
 the Lectures tab), `kind` (optional - which row it belongs to), and the `deploy`
 actions. A deploy item may carry its own `deploy_datetime` to ship earlier or later than
 the calendar event.
-An assignment's whole lifecycle (handout_datetime/due_datetime/grading_datetime), grading
-included, lives under `assignments:` below - an `assignment:` action is also supported
-here, for handing out by hand.
+An assignment's dates (handout_datetime/due_datetime/solution_datetime/marks_return_datetime)
+live under `assignments:` below; how the semester runs it is `assignments.yml`.
 Anything that ships nothing - an exam, a clinic, a guest lecture - goes under `events:`.
 Uncertain dates:
 `tbc: true` beside a date = provisional, shown "(TBC)" but fires; `event_datetime: tbc`
@@ -355,30 +353,25 @@ assignments:
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `due_datetime` | **yes** | - (entry dropped without it) | what students see; bare date = 23:59:59 |
-| `title` | no | the template README's `# ` heading | the assignment's name, beside the slug on the site. Declared here it shows from day one; the README fallback only appears at hand-out |
 | `details` | no | - | a sentence about it, in the Details column of both its rows |
 | `show_on_site` | no | `true` | `false` and the site says nothing about it - it still hands out, snapshots and grades |
 | `tbc` | no | `false` | both rows marked "(TBC)". Display only - nothing about the deadline moves |
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
-| `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
+| `marks_return_datetime` | no | - | marks go back automatically once every unit is marked. Internal unless `show_on_site: true` |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
 | `solution_datetime` | no | never | pushes the template's `solution/` into every provisioned repo. Must be after `handout_datetime` |
-| `semester_dest_repo` | no | the slug | the semester-side name: student/team repos (`<name>-<handle>`), the frozen semester template, the teams.csv key, snapshots and grades |
 
-Timing only. `type:` and `max_team_size:` are no longer accepted here - they live in the assignment's own `grading_config.yml` on the course template's `solution` branch, and **Validate schedule** flags them here by name.
+Timing only. The late cutoff is `due_datetime` plus `late_window_days`, computed. How the semester runs each assignment - late rule, teams, visibility, submit link, `semester_dest_repo` - is `semester-config/assignments.yml` ([07](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment)); its title and shape are the template's `grading_config.yml`.
 
 ```yaml
 semester_start: 2026-09-07
 semester_end: 2026-12-18
 assignments:                          # each assignment's WHOLE lifecycle, keyed by slug
   assignment-1:                       # students SEE this slug: it names their repo (`assignment-1-<handle>`)
-    title: Linear regression          # optional: the name shown beside the slug
     handout_datetime: 2026-09-22T09:00  # optional: provision one repo per student (or per
                                         # team - the template's grading_config.yml decides), automatic
-    due_datetime: 2026-10-13            # what students see
-    grading_datetime: 2026-10-15        # optional: the grading pin - snapshot freezes and the
-                                        # autograder fires (once). Default = due_datetime
-                                        # plus the template's late_window_days.
+    due_datetime: 2026-10-13            # what students see; the late cutoff is this
+                                        # plus late_window_days (assignments.yml)
   assignment-4-project:                 # group or not is the template's grading_config.yml's
     due_datetime: 2026-11-27            # business, along with its team cap - not this file's
 ```
@@ -469,9 +462,8 @@ fully read goes red and opens an issue naming the bad entry.
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
 | `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
-| `grading_datetime:` unparseable | kept - grading falls back to the end of the late window (`due_datetime` plus the template's `late_window_days`; the due date itself with no window) |
+| `title:`, `grading_datetime:`, `semester_dest_repo:` on an assignment | NOT_MIGRATED - the entry is dropped until the migration moves them |
 | `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
-| `type:` / `max_team_size:` on an assignment | kept, and reported as moved to its `grading_config.yml` |
 | unknown `type:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |
 
 Verify with `python3 -m dsl_course.schedule --semester-org <SEMESTER> --validate`. Full account:

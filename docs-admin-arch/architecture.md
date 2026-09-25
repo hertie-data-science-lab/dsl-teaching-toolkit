@@ -345,12 +345,12 @@ flowchart LR
   s --> r["`releases:
 label → event_datetime + deploy list`"]
   s --> a["`assignments:
-slug → handout / due / grading`"]
+slug → handout / due / solution / marks`"]
   s --> e["`events:
 exam · special_event`"]
   r -->|"deploy_datetime"| dep["deploy.deploy_many"]
   a -->|"handout_datetime"| asg["assign"]
-  a -->|"grading_datetime"| col["snapshot → autograde"]
+  a -->|"due + late_window_days"| col["snapshot → autograde"]
   r --> site["site rows"]
   a --> site
   e --> site
@@ -359,7 +359,7 @@ exam · special_event`"]
 | Block | Key fields | Fires |
 | --- | --- | --- |
 | `releases.<label>` | `event_datetime`, `deploy[]` of `course_source_repo` + `course_source_path` (required), `semester_dest_repo` (default `materials`), `semester_dest_path` (default: mirror), `deploy_datetime` | a deploy per entry |
-| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due + the template's `late_window_days`), `handout_datetime`, `solution_datetime` (default: never), `semester_dest_repo` (default: the slug), `title` | handout, then snapshot + autograde. TIMING ONLY - the shape and the team cap live in the template's `grading_config.yml` |
+| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `handout_datetime`, `solution_datetime` (default: never), `marks_return_datetime` | handout, snapshot + autograde at the computed late cutoff (due + `late_window_days`), marks returned. TIMING ONLY - the run settings (late rule, teams, visibility, `semester_dest_repo`) are `assignments.yml`; the title and shape are the template's `grading_config.yml` |
 | `events.<label>` | `type` (`exam` \| `special_event`), `title`, `event_datetime` | nothing - display-only site rows |
 
   `enrolment:` was a fourth block, mailing the codes on a window. A push to `students.csv`
@@ -404,8 +404,8 @@ semester's releases nor any other semester's.
 
 Each tick, per semester:
 
-1. **Freeze passed deadlines** - for every assignment whose grading deadline (`grading_datetime`,
-   else `due_datetime`) has passed and has no snapshot yet, record the commit each submission
+1. **Freeze passed deadlines** - for every assignment whose late cutoff (`due_datetime` plus
+   `late_window_days`) has passed and has no snapshot yet, record the commit each submission
    repo is at into `semester-config/.system/snapshots/<name>.csv` (`repo,sha,recorded_at`).
 2. **Fire every action whose time has arrived** - each deploy at its `deploy_datetime` (else its
    entry's `event_datetime`), and assignment handouts at `handout_datetime` (synthesised into the

@@ -29,8 +29,6 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         starters, and nothing else. Two that would land on one graded filename are
         refused (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
-      - `team_formation` (group only: `self_select` = students use the join repo's
-        **Join team** form; `assigned` = you write `semester-config/teams.csv`)
       - `submit_via` = where students hand in. `assignment_repo` = they push to their
         repo, and the cutoff, the receipts and the late window apply; `external` = handed
         in elsewhere (Moodle, Kaggle, in class), so **no repo is created**: the brief and
@@ -40,20 +38,13 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
-      - `visibility` = who may read each student's repo: `private` (default), `public`, or
-        `student_choice` (private, and the student is its admin: theirs to publish once the
-        grading cutoff has passed). Read when the repo is created, so editing it afterwards
-        moves nothing
-   - Everything else - the team cap, the late window, the penalty, and `team_formation`
-     or `visibility` left at `(course default)` - takes the nearest default: this
-     assignment's own setting, else the semester's `semester-config/assignments.yml`
-     (coming with the next release), else the course's `assignment_defaults:` in
-     `.github/dsl-course.yml`, else the institution's (Hertie: teams of 5,
-     `late_penalty_per_day: 10%` of the grade per day started, `late_window_days: 10`).
-     New assignment writes these into `grading_config.yml` commented out, showing the
-     value and where it comes from; uncomment a line to set it for this assignment. A
-     course default applies to every assignment that does not set its own, from the next
-     run on. Write `late_window_days: 0` to accept nothing after the deadline.
+   - How each semester RUNS it - how teams form, the max team size, the late window and
+     penalty, who may read the repos, an external submit link - is not asked here and
+     never written into `grading_config.yml` (a run setting there is `NOT_MIGRATED`). It
+     is that semester's `semester-config/assignments.yml`, else the course's
+     `assignment_defaults:` in `.github/dsl-course.yml`, else the institution's (Hertie:
+     teams of 5, `late_penalty_per_day: 10%` per day started, `late_window_days: 10`).
+     See [07](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment).
    - this creates **`assignment-1-f2026`** with two branches of stubs for you to replace:
 
    | Branch | Holds | Who sees it |
@@ -160,8 +151,7 @@ content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are derived; anything els
 
 A value the toolkit cannot use costs that field and nothing else - grading falls back to
 the default, silently, which is how `submit_via: emial` turned a semester's late arithmetic
-off for a semester. From 24 hours before the assignment's `grading_datetime` (its due date
-where it declares none) each such value opens the semester's *assignment grading_config.yml
+off for a semester. From 24 hours before the assignment's late cutoff each such value opens the semester's *assignment grading_config.yml
 has values that will not grade as written* issue and emails whoever wrote the line, louder
 as the moment approaches. Earlier than that nothing is said.
 
@@ -170,7 +160,8 @@ reads that file, so the assignment grades as if it declared nothing at all.
 
 ### Where the work goes, and who sees it
 
-Two settings in `grading_config.yml`, and everything else follows from them.
+`submit_via` in `grading_config.yml`, and `submit_url` and `visibility` in each semester's
+`assignments.yml`; everything else follows from them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -196,9 +187,10 @@ its `schedule.yml` entry asks for a solution release anyway). Students who want 
 a `private` assignment publish a copy under their own account (the gradebook README tells
 them how); the org's copy stays private.
 
-`visibility` is read when each repo is **created**. Editing it after the assignment has
-gone out changes nothing on GitHub, so the semester's *grading_config.yml* digest reports the
-disagreement until the line and the repos say the same thing again. `student_choice` is
+`visibility` is read when each repo is **created**: change it before the first hand out.
+Editing it afterwards changes nothing on GitHub, so the semester's *grading_config.yml*
+digest reports the disagreement until `assignments.yml` and the repos say the same thing
+again. `student_choice` is
 exempt from that check - a mixture is what it is for - and is checked against the ORG
 instead: it needs **Allow members to change repository visibilities** ON and **Allow
 members to delete or transfer repositories** OFF (semester org → Settings → Member
@@ -246,9 +238,6 @@ in - exists only where there is a private repo of the student's own to put it in
 feedback go to the private `grades-<handle>` gradebook for every shape alike, which is
 [Grade and return assignments](10-grade-and-return-assignments.md).
 
-`submit_url` is not a form box: **New assignment** seeds a commented line for it in
-`grading_config.yml`, and you fill it in there. `visibility` is box 10 on that form, which
-is GitHub's cap of ten inputs - every further setting lives in `grading_config.yml` only.
 
 ### Group vs individual assignments
 
@@ -257,24 +246,22 @@ is GitHub's cap of ten inputs - every further setting lives in `grading_config.y
 
 > The shape is set in ONE place: `type: individual | group` in the assignment's own
 > `grading_config.yml`, on the template's `solution` branch. **New assignment** writes it
-> from the button, and you edit it there afterwards. The semester's `schedule.yml` used to be
-> able to override it and no longer can - `type:` and `max_team_size:` there are now
-> unrecognised keys that **Validate schedule** flags.
+> from the button, and you edit it there afterwards. How teams form and how big they may
+> be are each semester's, in its `assignments.yml`:
 >
 >```yaml
-># in the template's solution branch: grading_config.yml
->type: group
->team_formation: self_select   # or `assigned`, and you write teams.csv
->max_team_size: 4
+># semester-config/assignments.yml
+>assignments:
+>  assignment-4-project:
+>    team_formation: self_select   # or `assigned`, and you write teams.csv
+>    max_team_size: 4
 >```
 >
-> `team_formation` and `max_team_size` are also what the **Join team** form in each
-> semester's `join` repo answers on. The form runs in a public repo and cannot read this
-> file, so the toolkit mirrors those two values into each semester's
-> `semester-config/.system/assignments.lock.yml` and the form reads that. Editing them here is
-> enough: the mirror catches up on the next **Sync membership**, **Release assignment** or
-> nightly **Refresh actions**. Until this template exists, its schedule entry is locked to
-> "no teams", so nobody can form one for it.
+> Those two are what the **Join team** form in each semester's `join` repo answers on. The
+> form runs in a public repo and cannot read either file, so the toolkit mirrors them into
+> `semester-config/.system/assignments.lock.yml` and the form reads that. The mirror
+> catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh
+> actions**. Until this template exists, its schedule entry is locked to "no teams".
 
 > **Deadlines aren't set here.** The due date students see is *per semester*, in that semester's `schedule.yml` - see [Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines).
 

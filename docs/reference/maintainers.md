@@ -442,12 +442,17 @@ A run setting (`settings.RUN_KEYS`: `team_formation`, `max_team_size`, `late_win
 | `institution` | `policy.yml` | `defaults.<key>` |
 
 The late pair is one rule: a layer stating either half answers both, the other half none.
-An absent `assignments.yml` leaves its two layers empty. Until WP-B2 moves them, a run key
-the template's `grading_config.yml` declares sits in the assignment layer, below the
-`assignments.yml` block, so New assignment writes a run key live only when its box was
-answered, and otherwise commented with its current value and source. A read of
+An absent `assignments.yml` leaves its two layers empty. A template's `grading_config.yml`
+states no run setting: one written there refuses the whole file as `NOT_MIGRATED`
+(`grades.TEMPLATE_KEYS` is what it reads). `settings.parse_instance` is the one parser of
+`assignments.yml`; `schedule.load` hands it to `schedule.parse`, which takes each entry's
+`semester_dest_repo` from it and carries its faults (and one per block for a key the plan
+does not name) beside the plan's, so they ride the `schedule.yml` digest and file in
+status.json as `ASSIGNMENTS`. The late cutoff has one resolver,
+`schedule.grading_cutoff_datetime`: due + the effective `late_window_days`. A read of
 `dsl-course.yml` or `assignments.yml` that fails other than with a 404 raises and is not
-cached; a value a reader refuses states nothing, and the next layer answers.
+cached (an `assignments.yml` that is not YAML raises `Unusable`); a value a reader refuses
+states nothing, and the next layer answers.
 `grades.load_grading_spec(course, template, semester_org=, slug=)`
 hands every reader the effective values, with `GradingSpec.sources`; `status.json` carries
 them per assignment (`settings`). `settings` is the only module that reads
@@ -469,6 +474,9 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
    still stripped off a template whose refresh has not reached it yet.
 
 ## The clean break in `schedule.yml`
+
+(History. Since decision 0009, `team_formation` and `max_team_size` live in each semester's
+`assignments.yml`, not the template - see [Migration](#migration).)
 
 `type:` and `max_team_size:` were accepted on an assignment entry and BEAT the template's
 own `grading_config.yml`. They are gone from `KNOWN_ASSIGNMENT` and from `AssignmentEntry`:
@@ -507,7 +515,7 @@ with the faults would never match and every run would open a new issue, so these
 
 | issue title | file | where it lives |
 | --- | --- | --- |
-| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | semester `semester-config` |
+| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` and `assignments.yml` | semester `semester-config` |
 | `people.yml has entries the sync cannot use` | `instructors.yml` | semester `semester-config` |
 | `students.csv has rows the toolkit cannot use` | `students.csv` | semester `semester-config` |
 | `teams.csv has rows the toolkit cannot use` | `teams.csv` | semester `semester-config` |
@@ -750,6 +758,13 @@ Promote.
 | `course.DEFAULT_MAX_TEAM_SIZE`, `DEFAULT_LATE_*`, `grades.course_assignment_defaults`, `parse_assignment_defaults` | `policy.defaults()`; `settings.course_defaults`, `settings.parse_assignment_defaults` | this repo only |
 | `classroom-config/people.yml` (`people:` -> `instructors:` / `teaching_assistants:`) | `semester-config/instructors.yml` (one `instructors:` list, `role: instructor \| teaching_assistant` on every entry) | semester org |
 | `format:` (one word) | `formats:` (a list; the first is the runnable one) | `grading_config.yml` on a template's `solution` branch; `assignment_defaults:` in `dsl-course.yml` |
+| `team_formation:`, `max_team_size:`, `late_window_days:`, `late_penalty_per_day:`, `visibility:`, `submit_url:` in a template | `semester-config/assignments.yml` (`defaults:` or `assignments.<key>`) | `grading_config.yml`; the course step strips them into `.github/.system/migration-run-keys.json`, each semester's keys step writes what differs from the defaults |
+| `schedule.yml` `assignments.<k>.title` | the template's `title:` | stripped by the tool |
+| `schedule.yml` `assignments.<k>.grading_datetime` | none: the late cutoff is due + `late_window_days`; where they differed the tool writes the whole days as `late_window_days` (and the penalty beside it) | stripped by the tool |
+| `schedule.yml` `assignments.<k>.semester_dest_repo` (and `cohort_dest_repo`) | `assignments.yml` `assignments.<k>.semester_dest_repo` | moved by the tool |
+| `schedule.yml` `releases.<l>.assignment`, top-level `enrolment:` | none (a hand out is `handout_datetime`; codes go out on a push to students.csv) | stripped by the tool |
+| New assignment inputs `team_formation`, `visibility`; CLI `scaffold --team-formation`, `--visibility` | none: each semester's `assignments.yml` | the workflow and the console op |
+| CLI `collect --group`, `--deadline`, `--slug`; `assign --slug`; Collect / Patch input `slug`; op arg `slug` | none: the schedule names the entry; a template two entries share is refused, naming them | every caller |
 | dispatch payload `cohort_org` | `semester_org` | the semester dispatchers (re-rendered by Refresh actions) |
 | dispatch payload `all_cohorts` | `all_semesters` | **ds01-infra's membership timer must switch at Promote.** Until then Sync membership reads `all_cohorts` as a deprecated alias (a log line, no fault) - the one dispatch exception |
 | request field `cohort_org`; op args `cohort_dest_repo`, `cohort_dest_path`, `tag`, `format`, `include_solution` | `semester_org`; `semester_dest_repo`, `semester_dest_path`, `semester`, `formats`, `solution_datetime: now` | `dsl.request/1` (the console) |
@@ -835,7 +850,9 @@ Semester steps: preflight (topic, not archived, course complete, no run queued o
 pause, rename repos (each old name must redirect), layout (records into `.system/`, `people.yml` -> `instructors.yml`
 checked against the old file before anything is committed, the seeded skeleton replaced by
 the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
-(`schedule.yml`, re-read with this engine: zero `NOT_MIGRATED`), topic, re-render (drift
+(`schedule.yml` loses the keys that left it and `assignments.yml` gains what they and the
+templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), topic,
+re-render (drift
 checked over the dispatchers, README, pointer, lock, join files and org READMEs), status,
 unpause (status.json first, so re-enabled workflows never race it). A move never overwrites:
 a target holding other bytes refuses the whole commit, naming both paths. Course steps: preflight (not archived; no `cohort_defaults` / `semester_defaults`
@@ -843,7 +860,9 @@ a target holding other bytes refuses the whole commit, naming both paths. Course
 hand into every live semester's `schedule.yml`), pause, registry (also a `semesters.yml`
 still keyed `cohorts:`), `.system/` in `.github`, `dsl-course.yml` keys, template keys
 (`grading_config.yml` `format:` -> `formats:` on each template's `solution` branch,
-re-read with `parse_grading_spec` - course-owned, so here rather than per semester),
+and the run settings out, recorded first in `.github/.system/migration-run-keys.json` for
+the semesters, re-read with `parse_grading_spec` - course-owned, so here rather than per
+semester),
 materials files, re-render (Refresh actions from the checkout, the course's own repos only -
 no semester; with no `DSL_BOT_TOKEN` on the laptop the repo secret is left, with a note, to
 the org's next Refresh actions; drift checked in `.github`, every content repo and every
@@ -851,7 +870,7 @@ live template), status, unpause. The `dsl-course.yml` keys
 step strips `org`, `org_name`, `cohort_defaults` and `semester_defaults` (each with its
 block) and rewrites `assignment_defaults` `format:`; its verify re-reads the file with the
 engine's own rules (`sync_faculty.retired_course_faults`) and expects no `NOT_MIGRATED`.
-`grading_datetime` is left for B2. Tested only against a stubbed GitHub
+Tested only against a stubbed GitHub
 (`tests/test_migrate.py`).
 
 What the demo rehearsal (2026-09-25) changed, one line each:
