@@ -50,6 +50,11 @@ function jsOf(n: unknown): unknown {
   return n === undefined ? null : n;
 }
 
+/** `v` without its blank values (undefined, null, ''): what a form states. */
+export function compact(v: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined && x !== null && x !== ''));
+}
+
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if ((a === null || a === undefined) && (b === null || b === undefined)) return true;

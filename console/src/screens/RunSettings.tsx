@@ -5,17 +5,15 @@
 // the keys the instructor set.
 
 import { useState } from 'preact/hooks';
-import assignmentsSchema from '../../schemas/assignments.schema.json';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
-import { invalidText, useSave } from '../edit/save';
-import { YamlText, deepEqual, obj, type Path } from '../edit/yamlText';
+import { invalidText, saveSteps, useSave, type SaveState, type Step } from '../edit/save';
+import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import {
-  RUN_KEYS, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, usableBlock, writeBlock,
-  type Block, type Layers, type RunKey, type YamlFile,
+  REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
+  validAssignments, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
 } from '../model/cascade';
-import type { Files } from '../model/files';
 import { addDays, fmtWhen } from '../model/format';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
@@ -28,7 +26,6 @@ import { SaveBar } from '../ui/edit';
 import { gradingConfig, tzOf, yearOf } from './common';
 import type { ReadyProps } from './types';
 
-const validAssignments = validator(assignmentsSchema);
 const validSchedule = validator(scheduleSchema);
 
 /** What the engine does with a solution date: the hand-out's warning (course.SOLUTION_WARNING). */
@@ -44,6 +41,13 @@ export function assignmentSettings(p: Pick<ReadyProps, 'files' | 'course' | 'coh
   const f = assignmentsFile(p.files, p.cohort.org);
   if (f === 'loading' || f === null) return f === null ? semesterLayers(p, {}, key) : null;
   return semesterLayers(p, f.doc, key);
+}
+
+/** The semester-side name of the assignment with schedule key `key` (`schedule.semester_name`): what its mark
+ *  sheet and Return marks key on. The key while assignments.yml is still being read. */
+export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string): string {
+  const f = assignmentsFile(p.files, p.cohort.org);
+  return f && f !== 'loading' ? semesterName(f.doc, key) : key;
 }
 
 const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
@@ -63,7 +67,7 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
   const before = toValues(rawBlock(f.doc, ['defaults']));
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
-  const dirty = draft !== null && !deepEqual(clean(draft), clean(before));
+  const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
   const doSave = async () => {
     if (f.error) return;
     if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
@@ -86,8 +90,6 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
     </section>
   );
 }
-
-const clean = (v: Values): Values => Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined && x !== '' && x !== null));
 
 // ------------------------------------------------------------------ one assignment's run settings
 
@@ -188,19 +190,17 @@ export function assignmentsAfterSchedule(af: YamlFile, added: { key: string; run
 
 // ------------------------------------------------------------------ the Overview form
 
+/** `semester_dest_repo` as `settings.parse_instance` checks it, in its words. */
+export function repoNameError(v: unknown): Record<string, string> {
+  const t = typeof v === 'string' ? v.trim() : v == null ? '' : String(v);
+  return t && !REPO_NAME_RE.test(t) ? { semester_dest_repo: 'Not a repo name (letters, digits, `.`, `_`, `-`); the schedule key names the repos instead.' } : {};
+}
+
 /** The late cutoff a due date and a late window give: due + N days, as the engine computes it. */
 export function cutoffOf(dueDate: string, dueTime: string, days: unknown): string | null {
   if (!dueDate || typeof days !== 'number' || !Number.isInteger(days)) return null;
   const day = addDays(dueDate, days);
   return dueTime ? `${day}T${dueTime}` : day;
-}
-
-export function scheduleFile(files: Files, org: string): YamlFile | 'loading' | null {
-  const f = files.file(org, CONFIG_REPO, 'schedule.yml');
-  if (f.kind === 'loading') return 'loading';
-  if (f.kind !== 'ready') return null;
-  const y = new YamlText(f.text);
-  return { text: f.text, sha: f.sha, doc: y.errors.length ? {} : obj(y.toJS()), error: y.errors[0] ?? null };
 }
 
 const T = (label: string, widget: FieldTier['widget'], extra: Partial<FieldTier> = {}): FieldTier => ({ tier: 'default', label, widget, ...extra });
@@ -251,7 +251,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const tz = tzOf(p.status), year = yearOf(p.now, tz);
   const [timing, setTiming] = useState<AssignmentDraft | null>(null);
   const [run, setRun] = useState<Values | null>(null);
-  const [save, runSave, setSave] = useSave(env);
+  const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   const sf = scheduleFile(p.files, p.cohort.org);
   const af = assignmentsFile(p.files, p.cohort.org);
   if (sf === 'loading' || af === 'loading') return <section class="panel section"><h2>How this semester runs it</h2><Loading what="Reading the schedule and assignments.yml" /></section>;
@@ -272,27 +272,29 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
   const solutionOff = vis !== 'private' ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
   const tErr = draftErrors(d);
-  const rErr = runErrors(keys, layers, r);
+  const rErr = { ...runErrors(keys, layers, r), ...repoNameError(r.semester_dest_repo) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
-  const dirtyR = run !== null && !deepEqual(clean(run), clean(beforeRun));
+  const dirtyR = run !== null && !deepEqual(compact(run), compact(beforeRun));
   const change = (patch: Partial<AssignmentDraft>) => { setTiming({ ...d, ...patch }); setSave({ kind: 'idle' }); };
   const doSave = async () => {
     if (Object.keys(tErr).length || Object.keys(rErr).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    // The schedule first: a block in assignments.yml for a key the schedule does not name is a problem.
+    // Both files are built and checked before either is written; then the schedule goes
+    // first, since a block in assignments.yml for a key the schedule does not name is a problem.
+    let first: Step | null = null, second: Step | null = null;
     if (dirtyT) {
       const y = new YamlText(sf.text);
       writeDraft(y, { ...d, solutionOn: d.solutionOn && !solutionOff }, sf.doc);
       if (!validSchedule(y.toJS())) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
-      if (!(await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: edit ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] }))) return;
-      setTiming(null);
+      first = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: edit ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     }
     if (dirtyR) {
-      if (!afOk) return setSave({ kind: 'bad', text: `Not saved: ${ASSIGNMENTS_FILE} could not be read.` });
+      if (!afOk) return setSave({ kind: 'bad', text: `Not saved: ${ASSIGNMENTS_FILE} could not be read, so nothing was written.` });
       const y = new YamlText(af!.text);
       writeBlock(y, path, beforeRun, r, [...RUN_KEYS, 'semester_dest_repo']);
       if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-      if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, y.text, af!.sha, { message: `assignments: edit ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] })) setRun(null);
+      second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text: y.text, sha: af!.sha, opts: { message: `assignments: edit ${a.slug}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     }
+    if (await saveSteps(env, setSave, first, second, 'Dates saved; run settings not saved', () => setTiming(null))) setRun(null);
   };
   const repoName = typeof r.semester_dest_repo === 'string' ? r.semester_dest_repo : '';
   return (
@@ -312,6 +314,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
             <summary>Advanced <span class={`cnt${repoName ? ' changed' : ''}`}>({repoName ? '1 changed' : 'none changed'})</span></summary>
             <div class="fold-body">
               <Field id="ov-repo" k="semester_dest_repo" values={r} value={r.semester_dest_repo} set={(k, v) => { setRun({ ...r, [k]: v }); setSave({ kind: 'idle' }); }}
+                error={rErr.semester_dest_repo}
                 t={{ tier: 'advanced', label: 'Repo name in this semester', placeholder: a.slug, defaultLabel: `default: ${a.slug}`, reason: 'What this semester’s repos are called. Change it before the first hand out.' }} />
             </div>
           </details>

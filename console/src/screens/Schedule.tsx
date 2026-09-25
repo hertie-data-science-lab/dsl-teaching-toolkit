@@ -4,13 +4,13 @@ import { useMemo, useState } from 'preact/hooks';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import { useEnv } from '../env';
 import { compileAll, matchRules } from '../edit/glob';
-import { invalidText, useSave } from '../edit/save';
+import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, fmtDay, fmtTime, fmtWhen, releaseIdent, sortKey } from '../model/format';
 import { parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  ARCHIVE_GRACE_DAYS, blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
+  blankDraft, blockOf, draftErrors, freshId, readDraft, slugOfTemplate, writeDraft,
   type AssignmentDraft, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Release } from '../model/types';
@@ -27,16 +27,14 @@ import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortCrumbs, cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
-import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, type Layers } from '../model/cascade';
+import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import assignmentsSchema from '../../schemas/assignments.schema.json';
 import { RunRows, applicableKeys, assignmentsAfterSchedule, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
-import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 const validSchedule = validator(scheduleSchema);
-const validAssignments = validator(assignmentsSchema);
 
 /** What the student site shows in the Details cell. */
 function Details({ r }: { r: Row }) {
@@ -343,7 +341,7 @@ function View(p: ReadyProps) {
     p.prefill && p.entry === 'new' ? { new: { ...(blankDraft('handout', { repo: '' }) as AssignmentDraft), template: p.prefill } } : {},
   );
   const [removed, setRemoved] = useState<Record<string, Block>>({});
-  const [save, runSave, setSave] = useSave(env);
+  const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
   const doc = sf?.doc ?? {};
@@ -370,11 +368,18 @@ function View(p: ReadyProps) {
     return Object.values(all).filter((t) => t === tpl).length;
   };
   const errorsOf = (d: Draft) => draftErrors(d, { templateUsers });
+  // A new entry's run settings, only those its template has (teams only for a team assignment).
+  const newRunFor = (d: Draft | undefined): Values => {
+    if (!d || d.kind !== 'assignments') return {};
+    const cfg = d.template ? gradingConfig(p, d.template) : {};
+    const keys: string[] = applicableKeys(cfg, cfg.type === 'group');
+    return Object.fromEntries(Object.entries(newRun).filter(([k]) => keys.includes(k)));
+  };
   const newRunErrors = (d: Draft): Record<string, string> => {
     if (d.kind !== 'assignments') return {};
     const cfg = d.template ? gradingConfig(p, d.template) : {};
     const af = assignmentsFile(p.files, p.cohort.org);
-    return runErrors(applicableKeys(cfg, cfg.type === 'group'), semesterLayers(p, af && af !== 'loading' ? af.doc : {}), newRun);
+    return runErrors(applicableKeys(cfg, cfg.type === 'group'), semesterLayers(p, af && af !== 'loading' ? af.doc : {}), newRunFor(d));
   };
   const allErrors = dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length || (k === 'new' && Object.keys(newRunErrors(drafts[k])).length));
 
@@ -395,30 +400,36 @@ function View(p: ReadyProps) {
       } else writeDraft(y, d, doc);
     }
     for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
-    const out = y.toJS();
-    if (!validSchedule(out)) {
+    if (!validSchedule(y.toJS())) {
       setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
       return;
     }
-    const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
-    if (!ok) return;
-    // assignments.yml follows the schedule: the new entry's run settings, and no block left for a removed one.
+    // assignments.yml follows the schedule (the new entry's run settings; no block left for a
+    // removed one). It is built and checked BEFORE the schedule is written, so a refusal
+    // writes nothing.
     const newAsg = newId && drafts.new?.kind === 'assignments' ? newId : null;
+    const run = newRunFor(drafts.new);
     const gone = Object.entries(removed).filter(([, b]) => b === 'assignments').map(([id]) => id);
-    const af = assignmentsFile(p.files, p.cohort.org);
-    if ((newAsg && Object.keys(newRun).length) || gone.length) {
-      if (!af || af === 'loading' || af.error) return setSave({ kind: 'bad', text: `The schedule is saved, but ${ASSIGNMENTS_FILE} could not be read, so ${newAsg ? 'the run settings were not written' : 'the removed entry’s block is still there'}.` });
-      const text = assignmentsAfterSchedule(af, newAsg ? { key: newAsg, run: newRun } : null, gone);
+    let second: Step | null = null;
+    if ((newAsg && Object.keys(run).length) || gone.length) {
+      const af = assignmentsFile(p.files, p.cohort.org);
+      if (!af || af === 'loading' || af.error) return setSave({ kind: 'bad', text: `Not saved: ${ASSIGNMENTS_FILE} could not be read, so nothing was written.` });
+      const text = assignmentsAfterSchedule(af, newAsg ? { key: newAsg, run } : null, gone);
       if (text !== null) {
         if (!validAssignments(parse(text) ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-        if (!(await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, af.sha, { message: `assignments: ${newAsg ? `add ${newAsg}` : `remove ${gone.join(', ')}`}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] }))) return;
+        second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, sha: af.sha, opts: { message: `assignments: ${newAsg ? `add ${newAsg}` : `remove ${gone.join(', ')}`}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
       }
     }
-    setDrafts({});
-    setRemoved({});
-    setNewRun({});
-    if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
+    const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${Object.keys(removed).join(', ')}` : `${dirty} changes`;
+    const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the Instructor Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
+    // Once the schedule is written its drafts are gone, whatever happens to assignments.yml:
+    // a retry must not add the entry a second time.
+    await saveSteps(env, setSave, first, second, newAsg ? 'Entry saved without its run settings' : 'Entry removed, but its block is still in assignments.yml', () => {
+      setDrafts({});
+      setRemoved({});
+      setNewRun({});
+      if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
+    });
   };
 
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
