@@ -149,6 +149,13 @@ MATERIALS_MOVES = {
 # The semester's pointer to its course org, before it moved into semester-config.
 OLD_POINTER_REPO = ".github"
 REPO_RENAMES = {OLD_CONFIG_REPO: CONFIG_REPO, OLD_JOIN_REPO: JOIN_REPO}
+# The console op ids that said `cohort` (decision 0012). A semester's outcome record is
+# named by its op id and carries it in `op`, which status.json's `operations` repeats.
+OP_RENAMES = {
+    f"cohort.{name}": f"semester.{name}"
+    for name in ("check", "preview_automation", "archive", "bootstrap")
+}
+OUTCOMES_DIR = records.path("outcomes")
 SAMPLE_SUFFIX = ".sample"
 WORKFLOWS_DIR = ".github/workflows/"
 LAYOUT_COMMIT = "migrate: layout"
@@ -165,6 +172,28 @@ def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
             elif path == old:
                 out[path] = new
     return out
+
+
+def renamed_outcome(path: str) -> str | None:
+    """The path an outcome record at `path` takes under its op's new id, or None when
+    `path` is no record of a renamed op."""
+    for old, new in OP_RENAMES.items():
+        if path == f"{OUTCOMES_DIR}/{old}.json":
+            return f"{OUTCOMES_DIR}/{new}.json"
+    return None
+
+
+def outcome_text(text: str, op: str) -> bytes:
+    """An outcome record's text with its `op` set to `op`, in `write_private`'s layout. A
+    record that does not parse is carried over as it is."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return text.encode()
+    if not isinstance(data, dict):
+        return text.encode()
+    data["op"] = op
+    return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode()
 
 
 def move_lines(moves: dict[str, str], table: dict[str, str]) -> list[str]:
@@ -1141,6 +1170,17 @@ class Semester:
         except yaml.YAMLError:
             return None
 
+    def outcome_work(self, live: dict[str, str]) -> dict[str, str]:
+        """`{path now: path under the new op id}` for each outcome record of a renamed op,
+        wherever the layout's moves put it first."""
+        moves = fold(set(live), SEMESTER_MOVES)
+        out = {}
+        for path in sorted(live):
+            new = renamed_outcome(moves.get(path, path))
+            if new:
+                out[path] = new
+        return out
+
     def layout_work(self) -> tuple[dict, dict, list, bool]:
         """(moves, files, deletes, old pointer present) for semester-config."""
         repo = self.config()
@@ -1148,6 +1188,14 @@ class Semester:
         moves = fold(set(live), SEMESTER_MOVES)
         deletes = sorted(p for p in live if p.endswith(SAMPLE_SUFFIX))
         files: dict[str, bytes] = {}
+        for old, new in self.outcome_work(live).items():
+            # Rewritten, not moved: the record names its op. One this engine already
+            # wrote under the new id is the newer record, and is kept.
+            moves.pop(old, None)
+            deletes.append(old)
+            if new not in live:
+                text = get_file_content(self.org, repo, old) or ""
+                files[new] = outcome_text(text, Path(new).stem)
         if OLD_PEOPLE_FILE in live:
             deletes.append(OLD_PEOPLE_FILE)
             if INSTRUCTORS_FILE not in live:
@@ -1183,6 +1231,12 @@ class Semester:
             )
         if records.path("pointer") in files:
             out.append(f"write the course pointer to {records.path('pointer')}")
+        outcomes = self.outcome_work(_files(self.org, repo))
+        if outcomes:
+            out.append(
+                f"rename {len(outcomes)} console outcome record(s) to the new op id"
+            )
+            out += [f"  {old} -> {new}" for old, new in outcomes.items()]
         samples = [p for p in deletes if p.endswith(SAMPLE_SUFFIX)]
         if samples:
             out.append(f"delete {len(samples)} *{SAMPLE_SUFFIX} file(s)")
@@ -1217,8 +1271,16 @@ class Semester:
         repo = self.config()
         live = _files(self.org, repo)
         before = getattr(self, "before", live)
-        # Every marker at its new path, byte for byte, and nowhere else.
+        # Every marker at its new path, byte for byte, and nowhere else. An outcome record
+        # of a renamed op is rewritten (it names its op): it must be at its new path.
+        renamed = self.outcome_work(before)
+        for old, new in renamed.items():
+            if old in live or new not in live:
+                log_err(f"{repo}: an outcome record did not arrive at {new}")
+                return False
         for old, new in fold(set(before), SEMESTER_MOVES).items():
+            if old in renamed:
+                continue
             if old in live or live.get(new) != before[old]:
                 log_err(f"{repo}: a record did not arrive intact at {new}")
                 return False

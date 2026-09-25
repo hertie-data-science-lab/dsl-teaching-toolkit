@@ -850,6 +850,33 @@ def test_a_record_already_at_its_new_path_with_other_bytes_stops_the_layout(
     assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
 
 
+def test_an_outcome_of_a_renamed_op_takes_the_new_id(
+    fake, semester, monkeypatch, capsys
+):
+    record = {"schema": "dsl.outcome/1", "op": "cohort.check", "conclusion": "done"}
+    tree = fake.tree(SEM, OLD_CONFIG_REPO)
+    tree[".dsl/outcomes/cohort.check.json"] = json.dumps(record).encode()
+    tree[".system/outcomes/cohort.archive.json"] = b"not json"
+    assert _main(monkeypatch, SEM) == 0
+    out = capsys.readouterr().out
+    assert "rename 2 console outcome record(s) to the new op id" in out
+    assert (
+        "-   .dsl/outcomes/cohort.check.json -> .system/outcomes/semester.check.json"
+        in out
+    )
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = fake.tree(SEM, CONFIG_REPO)
+    assert not [p for p in tree if "outcomes/cohort." in p]
+    moved = json.loads(tree[".system/outcomes/semester.check.json"])
+    assert moved == {**record, "op": "semester.check"}
+    assert tree[".system/outcomes/semester.archive.json"] == b"not json"
+    # The other records moved by blob, as before.
+    assert (
+        tree[".system/outcomes/release.now.json"]
+        == OLD_RECORDS[".dsl/outcomes/release.now.json"]
+    )
+
+
 def test_the_seeded_skeleton_becomes_the_new_skeleton(fake, semester, monkeypatch):
     skeleton = (
         "# INSTRUCTOR-OWNED\n#\n# people:\n#   instructors:\n#     - github_handle: x\n"
