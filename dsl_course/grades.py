@@ -3090,17 +3090,39 @@ def _readme_section(title: str, view: dict) -> str:
     parts = [f"## {title}" + (f"\n{_readme_grade_line(view, grade)}" if grade else "")]
     if not is_blank(view.get("feedback")):
         parts.append(str(view["feedback"]).strip())
-    if not is_blank(view.get("team_feedback")):
-        label = f"**Team feedback (shared with {view.get('team', 'your team')}):**"
-        lines = str(view["team_feedback"]).strip().split("\n")
+    per_question = "\n".join(
+        _question_item(name, text)
+        for name, text in (view.get(QUESTION_FEEDBACK_KEY) or {}).items()
+    )
+    team = view.get("team")
+    if not is_blank(view.get("team_feedback")) or (team and per_question):
+        # A team's per-question feedback is the team's, so it sits inside the quote that
+        # says who else has read it.
+        label = f"**Team feedback (shared with {team or 'your team'}):**"
+        lines = str(view.get("team_feedback") or "").strip().split("\n")
         quoted = [f"> {label} {lines[0]}".rstrip()]
         quoted += [f"> {line}".rstrip() for line in lines[1:]]
+        if team and per_question:
+            quoted += [
+                ">",
+                *(f"> {line}".rstrip() for line in per_question.split("\n")),
+            ]
         parts.append("\n".join(quoted))
-    if per_question := view.get(QUESTION_FEEDBACK_KEY):
-        parts.append(
-            "\n".join(_question_item(name, text) for name, text in per_question.items())
-        )
+    if per_question and not team:
+        parts.append(per_question)
     return "\n\n".join(parts)
+
+
+def _undeclared_feedback(spec: SheetSpec, units: dict) -> int:
+    """How many units' `feedback_per_question` names a question `spec` does not declare."""
+    declared = set(spec.questions or {})
+    return sum(
+        1
+        for block in units.values()
+        if isinstance(block, dict)
+        and isinstance(said := block.get(QUESTION_FEEDBACK_KEY), dict)
+        and any(str(q) not in declared and not is_blank(t) for q, t in said.items())
+    )
 
 
 def _question_item(name: str, text: str) -> str:
@@ -4545,6 +4567,11 @@ def _preview(
         partly = sum(1 for blank in not_marked[slug].values() if blank)
         if partly:
             log(f"    {partly} unit(s) have unmarked questions")
+        if stray := _undeclared_feedback(spec, units):
+            log(
+                f"    WARNING: {stray} unit(s) give feedback on a question the "
+                f"assignment does not declare - it is sent under the name typed"
+            )
         if slug in exported and slug not in columns:
             log(f"  {SEMESTER_CSV_NAME}: would gain column {slug}")
     if counts["unknown"]:

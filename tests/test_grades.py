@@ -3053,3 +3053,31 @@ def test_an_unknown_key_on_a_question_is_named_and_ignored():
     spec = grades.parse_grading_spec("questions:\n  Q1: {points: 5, weight: 2}\n")
     assert spec.questions == {"Q1": "5"}
     assert any("`weight:`" in line for line in spec.dropped)
+
+
+def test_a_teams_per_question_feedback_sits_in_the_shared_quote():
+    view = {
+        "final_grade": "9",
+        "team": "alpha",
+        "team_feedback": "Good.",
+        grades.QUESTION_FEEDBACK_KEY: {"Q2": "Neat proof."},
+    }
+    section = grades._readme_section("A1", view)
+    assert (
+        "> **Team feedback (shared with alpha):** Good.\n>\n> - **Q2:** Neat proof."
+        in section
+    )
+
+
+def test_the_preview_counts_feedback_on_an_undeclared_question(
+    tmp_path, monkeypatch, capsys
+):
+    sheet = _QUESTION_SHEET.replace("      Q1:\n", "      Q9: stray\n")
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=_QUESTIONS_GRADING,
+        dry_run=True,
+    )
+    assert "WARNING: 1 unit(s) give feedback on a question" in capsys.readouterr().out
