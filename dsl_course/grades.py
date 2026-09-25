@@ -1951,8 +1951,38 @@ def _display_long(at: datetime | None, tz_name: str = "") -> str:
     return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
 
 
+@cache
+def readme_heading(course_org: str, template: str) -> str:
+    """The template README's first `# ` heading, or "" - the name an assignment has when
+    its `grading_config.yml` gives no `title:`. Read once per template per process; a
+    read that fails is no heading. tests/conftest.py clears it."""
+    if not course_org or not template:
+        return ""
+    try:
+        text = get_file_content(course_org, template, "README.md") or ""
+    except RuntimeError:
+        return ""
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return ""
+
+
+def assignment_title(
+    course_org: str, template: str, spec: GradingSpec, slug: str
+) -> str:
+    """What an assignment is called on a sheet, in status and in mail: the template's
+    `title:`, else its README heading, else the slug."""
+    return spec.title or readme_heading(course_org, template) or slug
+
+
 def sheet_spec(
-    sched: schedule.Schedule, key: str, slug: str, gspec: GradingSpec, is_group: bool
+    sched: schedule.Schedule,
+    key: str,
+    slug: str,
+    gspec: GradingSpec,
+    is_group: bool,
+    title: str = "",
 ) -> SheetSpec:
     """What the sheet needs to know about this assignment, gathered from the two files
     that own it: `grading_config.yml` on the template's solution branch, and the semester's
@@ -1961,7 +1991,7 @@ def sheet_spec(
     entry = sched.assignments.get(key)
     return SheetSpec(
         slug=slug,
-        title=gspec.title or slug,
+        title=title or gspec.title or slug,
         is_group=is_group,
         submit_via=gspec.submit_via,
         visibility=gspec.visibility,
@@ -3477,6 +3507,7 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
             name,
             gspec,
             gspec.is_group,
+            assignment_title(course_org, entry.course_source_repo, gspec, name),
         )
     return specs
 
@@ -3513,21 +3544,32 @@ def marks_due(
             sheet = parse_sheet(text) if text else None
         except SheetUnreadable:
             sheet = None  # the sheet's own digest says why
-        units = ((sheet or {}).get(specs[name].container_key) or {}) if sheet else {}
-        unmarked = len(_not_marked(specs[name], sheet)) if sheet else 0
-        if sheet and units and not unmarked:
+        spec = specs[name]
+        units = ((sheet or {}).get(spec.container_key) or {}) if sheet else {}
+        blank = _not_marked(spec, sheet) if sheet else {}
+        if sheet and units and not blank:
             ready.append(key)
             continue
-        counted = (
-            f"{unmarked} of {len(units)} unit(s) unmarked"
-            if units
-            else "its grading sheet has no units yet"
+        # A blank unit with no submission is not a marking backlog: counted apart.
+        absent = sum(
+            1
+            for unit in blank
+            if spec.collects_commits
+            and isinstance(units.get(unit), dict)
+            and is_blank((units[unit].get(INFO_KEY) or {}).get("submitted"))
         )
+        since = f"{when:%a %d %b %Y}"
+        if units:
+            counted = f"{len(blank)} of {len(units)} unit(s) unmarked"
+            if absent:
+                counted += f" ({absent} with no submission)"
+        else:
+            counted = "its grading sheet has no units yet"
         faults.append(
             ConfigFault(
                 f"assignments.{key}",
-                f"marks were due at {when:%Y-%m-%d %H:%M}; {counted} - they are "
-                f"returned automatically on the first tick after every unit is marked",
+                f"marks due since {since}; {counted} - they are returned "
+                f"automatically on the first tick after every unit is marked",
                 fires=when,
                 # One mail, not the missed-moment ladder: waiting is the whole remedy,
                 # and the maintainer has nothing to do about an unfinished sheet.
@@ -3537,9 +3579,7 @@ def marks_due(
                 file=schedule.SCHEDULE_PATH,
                 fix_text=f"finish marking {sheet_path(name)}, or remove "
                 "`marks_return_datetime:` to return the marks by hand",
-                plain=f"Marks were due today; {unmarked} units unmarked."
-                if units
-                else "Marks were due today; the grading sheet has no units yet.",
+                plain=f"Marks due since {since}; {counted}.",
                 consequence="the marks are not returned until every unit is marked",
             )
         )
@@ -3914,6 +3954,7 @@ def distribute(
     *,
     receipt_note: bool = False,
     include_feedback: bool = False,
+    assignment: str | None = None,
 ) -> int:
     """Send every mark a grader has written where it has to go: each student's private
     gradebook, the registrar's export, and an email saying there is something new to read.
@@ -3929,13 +3970,14 @@ def distribute(
     writes. Every one of those is skipped when `distributed.csv` says the same content has
     already gone out, which is what makes a correction to one grade reach one student.
 
-    There is no assignment to scope a run to, and the button no longer offers one. It
-    narrowed the feedback comments and only ever those: a student's gradebook is the whole
-    of what they have been given and is rendered from every sheet in the repo on every run,
-    so it stays a pure function of the sheets rather than flip-flopping between a scoped
-    and an unscoped write and re-mailing a semester each way. Rendering it from one selected
-    sheet is what silently deleted every other assignment from every gradebook it touched.
-    The registrar's export is the same file for the same reason.
+    A student's gradebook is the whole of what they have been given, so it is never
+    rendered from one selected sheet alone: that silently deleted every other assignment
+    from every gradebook it touched. Unscoped, every sheet is rendered. `assignment` (a
+    semester-side name) scopes a run to that assignment's marks: the gradebook is rendered
+    from its sheet plus the sheets ALREADY RETURNED - the assignments the registrar's
+    export already carries a column for, which is what the last real run told students -
+    so nothing already given is taken away and nothing not yet returned goes out. The
+    registrar's export is rendered from the same books.
 
     A preview - the default - writes no grades and sends nothing: it prints the counts a
     grader checks before pressing it for real, and posts the per-student detail as an
@@ -3974,6 +4016,17 @@ def distribute(
                 f"assignment (which creates its grading sheet) first"
             )
             return 1
+        if assignment:
+            if assignment not in sheets:
+                log_err(f"{assignment} has no grading sheet in {SHEETS_DIR}/")
+                return 1
+            _told, returned = _told_grades(wd)
+            sheets = {
+                name: sheet
+                for name, sheet in sheets.items()
+                if name == assignment or name in returned
+            }
+            log(f"  returning {assignment} (with {len(sheets) - 1} already returned)")
         specs = sheet_specs(course_org, sched)
         sources: dict[str, tuple[SheetSpec, dict]] = {}
         for slug, sheet in sheets.items():
@@ -4652,6 +4705,12 @@ def main() -> int:
         action="store_true",
         help="Put the markers' feedback text into each student's email.",
     )
+    p.add_argument(
+        "--assignment",
+        default="",
+        help="Return this assignment only (its semester-side name), beside the ones "
+        "already returned. Default: every sheet.",
+    )
     # Default ON: the rendered workflow passes --preview / --no-preview explicitly, so a
     # bare local invocation cannot send by accident.
     add_preview_flag(
@@ -4669,6 +4728,7 @@ def main() -> int:
             dry_run=args.preview,
             receipt_note=args.receipt_note,
             include_feedback=args.include_feedback,
+            assignment=args.assignment or None,
         )
     except RuntimeError as exc:
         log_err(str(exc))

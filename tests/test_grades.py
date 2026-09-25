@@ -704,6 +704,7 @@ def _distribute(
     due: datetime = _DUE_PASSED,
     exported: str | None = None,
     preview_issues: list[dict] | None = None,
+    assignment: str | None = None,
 ) -> dict:
     """`distribute` over a local semester-config clone, writing to nothing.
 
@@ -817,7 +818,9 @@ def _distribute(
             [m[0] for m in msgs[:sent]],
         )[1],
     )
-    effects["rc"] = grades.distribute("SEMESTER", notify=notify, dry_run=dry_run)
+    effects["rc"] = grades.distribute(
+        "SEMESTER", notify=notify, dry_run=dry_run, assignment=assignment
+    )
     return effects
 
 
@@ -841,6 +844,42 @@ def test_a_real_run_reaches_every_channel_and_posts_no_comment(tmp_path, monkeyp
     assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[grades.SEMESTER_CSV_NAME]
     # and the email
     assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_a_scoped_return_sends_that_assignment_beside_those_already_returned(
+    tmp_path, monkeypatch
+):
+    # a1 comes due and is complete; a2 is marked in part and not returned; a0 went out
+    # last week (the registrar export has its column). The run returns a1 only, and every
+    # gradebook still shows a0: nothing already given is taken away.
+    half = _SHEET.replace("score_individual: 43", "score_individual: 20")
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-0": _SHEET, "assignment-1": _SHEET, "assignment-2": half},
+        exported=(
+            "hertie_email,name,github_handle,assignment-0\nada@uni.edu,Ada,ada-l,43\n"
+        ),
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 0
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert (
+        "assignment-0" in files["grades.yml"] and "assignment-1" in files["grades.yml"]
+    )
+    assert "assignment-2" not in files["grades.yml"]
+    ((_cfg, cfg_files, _d2),) = out["config"]
+    header = cfg_files[grades.SEMESTER_CSV_NAME].splitlines()[0]
+    assert header.endswith("assignment-0,assignment-1")
+    # distribute never writes a sheet, scoped or not.
+    assert not [p for p in cfg_files if p.startswith(grades.SHEETS_DIR)]
+
+
+def test_a_scoped_return_of_an_assignment_with_no_sheet_sends_nothing(
+    tmp_path, monkeypatch
+):
+    out = _distribute(monkeypatch, tmp_path, assignment="nope")
+    assert out["rc"] == 1 and out["gradebooks"] == [] and out["outbox"] == []
 
 
 def test_the_done_line_is_the_spec_counts_in_the_spec_order(

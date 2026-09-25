@@ -176,6 +176,7 @@ def _clear_process_memos():
     schedule._schedule_text.cache_clear()
     schedule._repo_paths.cache_clear()
     grades._grading_text.cache_clear()
+    grades.readme_heading.cache_clear()
     settings.course_defaults.cache_clear()
     settings._assignments_text.cache_clear()
     settings.semester_blocks.cache_clear()

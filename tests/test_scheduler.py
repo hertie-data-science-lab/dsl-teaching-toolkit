@@ -4670,7 +4670,10 @@ def test_an_unfinished_sheet_is_a_fault_that_counts_and_names_nobody(monkeypatch
     assert ready == []
     (fault,) = faults
     assert "2 of 3 unit(s) unmarked" in fault.what
-    assert fault.plain == "Marks were due today; 2 units unmarked."
+    # Said once, with the day it fell due - not "today" on every tick - and the blank
+    # units nobody handed in for counted apart (these carry no submission at all).
+    assert fault.plain.startswith("Marks due since ")
+    assert "2 of 3 unit(s) unmarked (2 with no submission)" in fault.plain
     assert fault.field == "marks_return_datetime"
     for handle in ("ada-l", "bo-b", "cy-c"):
         assert handle not in fault.what and handle not in fault.plain
@@ -4697,7 +4700,9 @@ def test_the_tick_returns_a_complete_sheet_once_and_records_it(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "distribute",
-        lambda org, notify, dry_run: sent.append((org, notify, dry_run)) or 0,
+        lambda org, notify, dry_run, assignment: (
+            sent.append((org, notify, dry_run, assignment)) or 0
+        ),
     )
     monkeypatch.setattr(
         scheduler,
@@ -4705,7 +4710,8 @@ def test_the_tick_returns_a_complete_sheet_once_and_records_it(monkeypatch):
         lambda org, sched, keys, now: recorded.append(keys) or True,
     )
     assert scheduler.run("Course-Org", "Semester-f2026", _AFTER_MARKS) == 0
-    assert sent == [("Semester-f2026", True, False)]
+    # Scoped: this assignment's marks only, never another sheet's.
+    assert sent == [("Semester-f2026", True, False, "assignment-1")]
     assert recorded == [["assignment-1"]]
     # A preview sends nothing and records nothing.
     sent.clear()

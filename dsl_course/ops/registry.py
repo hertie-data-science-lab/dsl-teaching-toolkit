@@ -262,6 +262,8 @@ def _grades(request: Request) -> list[str]:
         argv.append("--receipt-note")
     if _a(request, "include_feedback"):
         argv.append("--include-feedback")
+    if _a(request, "assignment"):
+        argv += ["--assignment", _a(request, "assignment")]
     return argv
 
 
@@ -540,6 +542,9 @@ _OPS = (
                     "Post a note on each Submission receipts issue"
                 ),
                 "include_feedback": _boolean("Put the feedback text in the email"),
+                "assignment": _string(
+                    REPO_PATTERN, "Only this assignment (its repo name); empty = all"
+                ),
             }
         ),
         help="Return marks and feedback to students.",

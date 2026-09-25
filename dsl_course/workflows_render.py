@@ -1142,8 +1142,8 @@ def render_distribute_grades(semester_orgs: list[str]) -> str:
 # private grades-<handle> repo, the registrar export, and (unless silenced) an email saying
 # there is something new to read. Nothing is posted into a submission repo, and nothing is
 # said twice - a re-run after one correction reaches one student.
-# There is no assignment to pick: every run rebuilds every gradebook from every sheet,
-# which is what keeps a gradebook the whole of a student's marks.
+# `assignment` empty returns every sheet; named, it returns that assignment's marks only,
+# and each gradebook still shows every assignment already returned.
 # Preview first; it writes no grades, sends no mail, and posts who gets what as a
 # "Distribute grades preview" issue in semester-config. Needs the GRAPH_* secrets to mail.
 
@@ -1151,6 +1151,10 @@ on:
   workflow_dispatch:
     inputs:
 {_semester_dropdown(semester_orgs)}
+      assignment:
+        description: "Only this assignment (its repo name, e.g. assignment-2); empty = every one"
+        required: false
+        default: ""
       preview:
         description: "Preview who gets what, as an issue in semester-config - push no grades, send nothing"
         type: boolean
@@ -1179,6 +1183,7 @@ on:
           NOTIFY: ${{{{ inputs.notify }}}}
           RECEIPT_NOTE: ${{{{ inputs.receipt_note }}}}
           INCLUDE_FEEDBACK: ${{{{ inputs.include_feedback }}}}
+          ASSIGNMENT: ${{{{ inputs.assignment }}}}
 {_MAIL_ENV}
         run: |
           args=(--semester-org "$SEMESTER_ORG")
@@ -1186,6 +1191,7 @@ on:
           [ "$NOTIFY" = "false" ] && args+=(--no-notify)
           [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
           [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
+          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
           python3 -m dsl_course.grades distribute "${{args[@]}}"
 """
 

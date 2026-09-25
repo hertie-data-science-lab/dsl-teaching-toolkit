@@ -1637,7 +1637,9 @@ def _release_phase(
             for line in describe(release, now):
                 log(f"    PREVIEW  [{release.label}] {line}")
         for key in marks_ready:
-            log(f"    PREVIEW  [{key}] return marks (marks_return_datetime reached)")
+            log(
+                f"    PREVIEW  [{key}] return {key}'s marks (marks_return_datetime reached)"
+            )
         decisions = dry_run_decisions(
             course_org, semester_org, sched, due, now, listing
         )
@@ -1698,16 +1700,21 @@ def _release_phase(
 def _return_marks(
     semester_org: str, sched: schedule.Schedule, ready: list[str], now: datetime
 ) -> int:
-    """Return marks (`grades.distribute`, semester-wide as the button is) for the
-    assignments whose `marks_return_datetime` has come with every unit marked, then mark
-    each one returned so the next tick does not ask again. Returns the error count."""
+    """Return marks (`grades.distribute`, scoped to the one assignment) for each
+    assignment whose `marks_return_datetime` has come with every unit marked, then mark it
+    returned so the next tick does not ask again. Returns the error count."""
     if not ready:
         return 0
-    log_step(f"marks_return_datetime reached, every unit marked: {', '.join(ready)}")
-    if distribute(semester_org, notify=True, dry_run=False):
-        log_err("Return marks failed - retried on the next tick")
-        return 1
-    return 0 if record_marks_returned(semester_org, sched, ready, now) else 1
+    errors = 0
+    for key in ready:
+        name = schedule.semester_name(key, sched.assignments[key])
+        log_step(f"marks_return_datetime reached for {key}, every unit marked")
+        if distribute(semester_org, notify=True, dry_run=False, assignment=name):
+            log_err(f"Return marks for {key} failed - retried on the next tick")
+            errors += 1
+        elif not record_marks_returned(semester_org, sched, [key], now):
+            errors += 1
+    return errors
 
 
 def _request_site_sync(course_org: str, semester_org: str) -> int:
