@@ -21,6 +21,7 @@ import yaml
 
 from .course import FORMATS, TEAM_FORMATIONS, VISIBILITIES
 from .schema_check import validate
+from .setting_readers import READERS
 
 DEFAULT_PATH = Path(__file__).with_name("policy.default.yml")
 OVERRIDE_PATH = Path(__file__).resolve().parents[1] / "policy.yml"
@@ -31,9 +32,20 @@ SYSTEM_KINDS = ("assignment", "term", "archive")
 FALLBACK_KIND = "other"
 # The blocks an override merges key by key; every other block it names replaces ours whole.
 MERGED = ("defaults", "institution")
+# The defaults a course or a semester can also write: each is read by the same reader as
+# those layers (`setting_readers`), and must come back unchanged - a default no course
+# could write (`max_team_size: -3`, `late_penalty_per_day: 100.9%`) is refused.
+READ_DEFAULTS = (
+    "late_window_days",
+    "late_penalty_per_day",
+    "max_team_size",
+    "visibility",
+    "team_formation",
+    "formats",
+)
 
 _HEX = "^#[0-9a-fA-F]{6}$"
-# `10%` or a fraction `0.1`: the two spellings `grades.penalty_fault` accepts.
+# `10%` or a fraction `0.1`: the two spellings `setting_readers.penalty_fault` accepts.
 _PENALTY = r"^(?:(?:100|[0-9]{1,2})(?:\.[0-9]+)?%|0?\.[0-9]+|0)$"
 _WHOLE = {"type": "integer"}
 
@@ -147,11 +159,21 @@ def merge(base: dict, override: dict) -> dict:
 
 
 def _problems(policy: dict) -> list[str]:
-    """What the JSON Schema subset cannot say: unique kinds, the system kinds present,
-    a non-empty licence list, a zone the tz database knows."""
+    """What the JSON Schema subset cannot say: each default as its layer's reader reads
+    it, unique kinds, the system kinds present, a non-empty licence list, a zone the tz
+    database knows."""
     out = validate(policy, SCHEMA, "policy")
     if out:
         return out
+    ours = policy["defaults"]
+    days = READERS["late_window_days"]
+    read = [(key, READERS[key], ours[key]) for key in READ_DEFAULTS]
+    read.append(("archive.grace_days", days, ours["archive"]["grace_days"]))
+    for key, reader, value in read:
+        refused: list[str] = []
+        want = tuple(value) if isinstance(value, list) else value
+        if reader(value, "policy", refused) != want or refused:
+            out.append(f"policy.defaults.{key}: `{value}` is not a usable value")
     keys = [kind["key"] for kind in policy["kinds"]]
     if len(keys) != len(set(keys)):
         out.append("policy.kinds: each key may appear once")
@@ -168,7 +190,7 @@ def _problems(policy: dict) -> list[str]:
             )
     if not policy["licences"]:
         out.append("policy.licences: at least one (the first is the default)")
-    if not policy["defaults"]["formats"]:
+    if not ours["formats"]:
         out.append("policy.defaults.formats: at least one starter format")
     try:
         ZoneInfo(policy["defaults"]["timezone"])

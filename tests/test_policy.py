@@ -48,10 +48,9 @@ def test_the_shipped_policy_carries_hertie_values():
     assert "@" in shipped["contact"]
 
 
-def test_the_toolkit_repo_carries_no_override():
-    """The checkout runs on the shipped values, so `load` is the default file."""
-    assert not policy.OVERRIDE_PATH.exists()
-    assert policy.load() == policy.read(override=None)
+def test_the_shipped_default_validates():
+    """`read` raises on a policy that does not validate; the shipped file is one."""
+    assert policy._problems(policy.read(override=None)) == []
 
 
 def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
@@ -82,6 +81,10 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
     [
         ({"defaults": {"late_penalty_per_day": "10"}}, "late_penalty_per_day"),
         ({"defaults": {"late_penalty_per_day": "150%"}}, "late_penalty_per_day"),
+        ({"defaults": {"late_penalty_per_day": "100.9%"}}, "late_penalty_per_day"),
+        ({"defaults": {"max_team_size": -3}}, "max_team_size"),
+        ({"defaults": {"late_window_days": -10}}, "late_window_days"),
+        ({"defaults": {"archive": {"grace_days": -60}}}, "grace_days"),
         ({"defaults": {"visibility": "internal"}}, "visibility"),
         ({"defaults": {"timezone": "Mars/Olympus"}}, "timezone"),
         ({"defaults": {"typo": 1}}, "typo"),
