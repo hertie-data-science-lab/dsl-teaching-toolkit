@@ -116,6 +116,7 @@ from .setting_readers import (
     Dropped,
     as_decimal,
     penalty_fault,
+    question_files,
     read_settings,
     refuse_renamed,
 )
@@ -146,6 +147,7 @@ _STARTER_README = (
     "| `final_grade` | Your mark for that assignment. This is the authoritative one. |\n"
     "| `score` | Individual assignments only: the marks behind that total. |\n"
     "| `feedback` | Your marker's feedback on your own work. |\n"
+    "| `feedback_per_question` | Feedback on each question, where there is any. |\n"
     "| `submitted`, `days_late`, `penalty` | When your work was recorded, and what any "
     "late days cost. |\n"
     "| `team` | Group assignments only: the team you submitted with. |\n"
@@ -177,6 +179,10 @@ SHEETS_DIR = "grading_sheets"
 INFO_KEY = "info"  # the toolkit-owned block inside a unit's entry
 NOTES_KEY = "notes_not_shared_with_students"
 INFO_COMMENT = "toolkit-owned, shown for information only - nothing is declared here"
+# One feedback cell per declared question, beside the overall `feedback_*`: the team's on a
+# group sheet, the student's on an individual one. Always written where `questions:`
+# exist, all optional; a blank cell is never sent.
+QUESTION_FEEDBACK_KEY = "feedback_per_question"
 _SCORE_COMMENT = "yours: the question names and maxima come from grading_config.yml"
 _SEP = " · "  # what separates the facts on one header line
 # Inline comments line up at one column across the whole sheet, so the maxima read as a
@@ -300,6 +306,9 @@ class SheetSpec(_Shape):
     # never do is open a Submission receipts issue in a student's repo (`may_open_receipts_issue`).
     shape_known: bool = True
     questions: dict[str, str] | None = None
+    # The questions marked from a file other than the runnable one, named beside each
+    # question's maximum so a grader knows which file to open.
+    question_files: dict[str, str] | None = None
     late_window_days: int | None = None
     late_penalty_per_day: str | None = None
     autograde: bool = False
@@ -363,7 +372,9 @@ def _blank_person() -> dict:
 
 
 def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) -> dict:
-    """One unit's entry, brand new: the toolkit's facts first, then the grader's blanks.
+    """One unit's entry, brand new: the toolkit's facts first, then the grader's blanks,
+    nested as the marking grid is - the team's (or the student's) own cells, then the
+    members, then the questions (the score and the per-question feedback).
 
     `info` is what the toolkit knows about this unit RIGHT NOW. A block created during a
     refresh - a student who onboarded after the handout, or a sheet the toolkit is writing
@@ -377,12 +388,14 @@ def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) 
     block: dict = {}
     if spec.collects_commits:
         block[INFO_KEY] = _fresh_info(spec) | (info or {})
-    block[spec.score_key] = _blank_score(spec)
     if spec.is_group:
         block[spec.feedback_key] = None
         block["members"] = {handle: _blank_person() for handle in members}
     else:
         block.update(_blank_person())
+    block[spec.score_key] = _blank_score(spec)
+    if spec.questions:
+        block[QUESTION_FEEDBACK_KEY] = {question: None for question in spec.questions}
     return block
 
 
@@ -737,10 +750,11 @@ def _you_fill_in_sentence(spec: SheetSpec) -> str:
         if spec.questions
         else ""
     )
-    fields = [f"{spec.score_key}{qualifier}"]
-    if spec.is_group:
-        fields.append(spec.feedback_key)
+    fields = [spec.feedback_key] if spec.is_group else []
     fields += ["adjustment_individual", "feedback_individual", NOTES_KEY]
+    fields.append(f"{spec.score_key}{qualifier}")
+    if spec.questions:
+        fields.append(f"{QUESTION_FEEDBACK_KEY} (optional, one per question)")
     return (
         f"You fill in: {', '.join(fields)}. Anything you type is never touched. Nothing "
         f"reaches a student until you run Distribute grades. YAML comments you add are "
@@ -832,7 +846,12 @@ def _annotate(body: str, spec: SheetSpec) -> str:
         elif score_indent is not None:
             question = stripped.split(":", 1)[0].strip("'\"")
             if question in (spec.questions or {}):
-                line = _with_comment(line, f"/{spec.questions[question]}")
+                marked_from = (spec.question_files or {}).get(question)
+                line = _with_comment(
+                    line,
+                    f"/{spec.questions[question]}"
+                    + (f"{_SEP}{marked_from}" if marked_from else ""),
+                )
         out.append(line)
     return "\n".join(out) + "\n"
 
@@ -968,6 +987,9 @@ class GradingSpec(_Shape):
     # The starter formats, in order; the FIRST is the runnable one (see `format`).
     formats: tuple[str, ...] = ()
     questions: dict[str, str] | None = None
+    # `{question: submission file}` for the questions marked from a file other than the
+    # runnable format's (`questions: Q3: {points: 10, file: report.tex}`).
+    question_files: dict[str, str] | None = None
     # The institution's late rule unless a nearer layer says otherwise, so an assignment
     # nobody has written a late policy for is still graded by the one the syllabi state.
     # A layer that declares ONE of the two leaves the other empty (`settings.resolve`).
@@ -1104,6 +1126,10 @@ def parse_grading_spec(text: str) -> GradingSpec:
     dropped: list[str] = []
     data = refuse_renamed(data, GRADING_FILE, dropped)
     values = read_settings(data, TEMPLATE_KEYS, GRADING_FILE, dropped)
+    if values.get("questions"):
+        values["question_files"] = (
+            question_files(data.get("questions"), GRADING_FILE, dropped) or None
+        )
     # A refused value states nothing: the field's default stands.
     values = {k: v for k, v in values.items() if v is not None}
     _cross_check(values, dropped)
@@ -1997,6 +2023,7 @@ def sheet_spec(
         submit_via=gspec.submit_via,
         visibility=gspec.visibility,
         questions=gspec.questions,
+        question_files=gspec.question_files,
         late_window_days=gspec.late_window_days,
         late_penalty_per_day=gspec.late_penalty_per_day,
         autograde=gspec.autograde,
@@ -2356,6 +2383,7 @@ STUDENT_VIEW_KEYS = (
     "score",  # individual assignments only: what the grader typed, per question or flat
     "max_points",  # the declared maxima summed, so a 40 reads as "40 / 50"
     "feedback",  # feedback_individual
+    QUESTION_FEEDBACK_KEY,  # per question: the student's own, or the team's
     "submitted",  # info.submitted, as a person reads a date
     "days_late",  # info.days_late
     "penalty",  # what those days cost, e.g. "-20%"
@@ -2497,6 +2525,23 @@ def _submitted_display(value: object, external: bool = False) -> str:
     return day if "T" not in text and " " not in text else f"{day} {moment:%H:%M}"
 
 
+def question_feedback(spec: SheetSpec, value: object) -> dict[str, str]:
+    """The per-question feedback worth sending: the filled cells, in the order the
+    assignment declares its questions, then any other question as the grader typed it
+    (a mistyped name still reaches the student under the name it was given)."""
+    if not isinstance(value, dict):
+        return {}
+    said = {
+        str(name): str(text).strip()
+        for name, text in value.items()
+        if not is_blank(text) and not isinstance(text, dict)
+    }
+    declared = [name for name in (spec.questions or {}) if name in said]
+    return {
+        name: said[name] for name in [*declared, *sorted(set(said) - set(declared))]
+    }
+
+
 def _allowlisted(fields: dict) -> dict:
     """`fields` reduced to the student-visible keys, in STUDENT_VIEW_KEYS order, blanks
     dropped. Every student-facing value in this module passes through here."""
@@ -2552,6 +2597,9 @@ def student_view(
             ),
             "max_points": total_points(spec),
             "feedback": person.get("feedback_individual"),
+            QUESTION_FEEDBACK_KEY: question_feedback(
+                spec, block.get(QUESTION_FEEDBACK_KEY)
+            ),
             "submitted": _submitted_display(
                 info.get("submitted"), not spec.collects_commits
             ),
@@ -3042,13 +3090,45 @@ def _readme_section(title: str, view: dict) -> str:
     parts = [f"## {title}" + (f"\n{_readme_grade_line(view, grade)}" if grade else "")]
     if not is_blank(view.get("feedback")):
         parts.append(str(view["feedback"]).strip())
-    if not is_blank(view.get("team_feedback")):
-        label = f"**Team feedback (shared with {view.get('team', 'your team')}):**"
-        lines = str(view["team_feedback"]).strip().split("\n")
+    per_question = "\n".join(
+        _question_item(name, text)
+        for name, text in (view.get(QUESTION_FEEDBACK_KEY) or {}).items()
+    )
+    team = view.get("team")
+    if not is_blank(view.get("team_feedback")) or (team and per_question):
+        # A team's per-question feedback is the team's, so it sits inside the quote that
+        # says who else has read it.
+        label = f"**Team feedback (shared with {team or 'your team'}):**"
+        lines = str(view.get("team_feedback") or "").strip().split("\n")
         quoted = [f"> {label} {lines[0]}".rstrip()]
         quoted += [f"> {line}".rstrip() for line in lines[1:]]
+        if team and per_question:
+            quoted += [
+                ">",
+                *(f"> {line}".rstrip() for line in per_question.split("\n")),
+            ]
         parts.append("\n".join(quoted))
+    if per_question and not team:
+        parts.append(per_question)
     return "\n\n".join(parts)
+
+
+def _undeclared_feedback(spec: SheetSpec, units: dict) -> int:
+    """How many units' `feedback_per_question` names a question `spec` does not declare."""
+    declared = set(spec.questions or {})
+    return sum(
+        1
+        for block in units.values()
+        if isinstance(block, dict)
+        and isinstance(said := block.get(QUESTION_FEEDBACK_KEY), dict)
+        and any(str(q) not in declared and not is_blank(t) for q, t in said.items())
+    )
+
+
+def _question_item(name: str, text: str) -> str:
+    """One question's feedback as a list item, a multi-line text kept inside it."""
+    first, *rest = str(text).strip().split("\n")
+    return "\n".join([f"- **{name}:** {first}", *(f"  {line}" for line in rest)])
 
 
 def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) -> str:
@@ -3808,7 +3888,13 @@ def _hold_undecided(
 # The view keys a GRADER writes. The rest - `max_points`, `submitted`, `days_late` - are
 # the toolkit's facts about the assignment and fill in on their own, so a book carrying
 # only those has changed without there being anything for a student to read.
-_GRADER_KEYS = ("final_grade", "score", "feedback", "team_feedback")
+_GRADER_KEYS = (
+    "final_grade",
+    "score",
+    "feedback",
+    QUESTION_FEEDBACK_KEY,
+    "team_feedback",
+)
 
 
 def _has_mark(book: dict[str, dict]) -> bool:
@@ -3890,6 +3976,100 @@ def _commit_record(
     return False
 
 
+# The commit message of the record written before the emails go (`_record_before_mail`).
+INTENT_MESSAGE = "grades: record the emails about to be sent"
+
+
+def _reachable(handles: list[str], students: list[roster.Student] | None) -> list[str]:
+    """The handles the roster gives an email address - the ones a notification can go to."""
+    emails = {
+        s.github_handle.casefold()
+        for s in students or []
+        if s.github_handle and s.hertie_email
+    }
+    return [h for h in handles if h.casefold() in emails]
+
+
+def _record_before_mail(
+    semester_org: str,
+    record: Distributed,
+    pending: list[str],
+    live: dict[str, str],
+    now: str,
+    registrar: bytes | None,
+) -> bool:
+    """Commit `distributed.csv` with every pending address marked told BEFORE the mail
+    goes, so a record commit that fails after the send can never mail anybody twice:
+    without this the next run, and the scheduler's automatic return every quarter-hour,
+    re-mailed everyone. The final commit (`_final_record`) resets the row of an address
+    whose mail failed or raised, so only a runner killed between the two commits loses a
+    notification (the gradebook still holds the marks).
+
+    The registrar export goes in the same commit: the gradebooks are written by now, and
+    a scoped return refuses while `distributed.csv` has rows and the export is missing
+    (`_already_returned`), so a run that died after this commit would otherwise wedge
+    every later one."""
+    intent = dict(record)
+    for handle in pending:
+        intent[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
+    writes = {DISTRIBUTED_PATH: dump_distributed(intent).encode()}
+    if registrar is not None:
+        writes[SEMESTER_CSV_NAME] = registrar
+    return _commit_record(
+        semester_org,
+        writes,
+        f"{INTENT_MESSAGE} ({len(pending)} notification(s))",
+        [],
+    )
+
+
+def _final_record(
+    semester_org: str,
+    record: Distributed,
+    registrar: bytes | None,
+    *,
+    marker: str | None,
+    now: str,
+    counts: dict[str, int],
+    delete: list[str],
+) -> bool:
+    """The registrar's export and the record of what went out, in ONE commit - together
+    with the retired files this semester is migrating off, so the old and the new can
+    never both be present for a reader to choose between - and, for a scoped return,
+    `marker`'s returned record."""
+    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
+    if registrar is None:
+        # `roster.load` answers None for a roster it could not READ and [] for one with no
+        # rows, and the export is one row per ENROLLED student - so regenerating it from
+        # either would commit a header line over the file a registrar transcribes grades
+        # from. Leaving it is the only safe answer; the run goes red and the next one
+        # rebuilds it.
+        log_err(
+            f"the roster is empty or could not be read - {SEMESTER_CSV_NAME} left as it is"
+        )
+    else:
+        writes[SEMESTER_CSV_NAME] = registrar
+    if marker:
+        # Returned, in the same commit as the record of it: the automatic return at
+        # `marks_return_datetime` does not ask again.
+        writes[marks_return_record(marker)] = (
+            json.dumps({"returned": now}, indent=2) + "\n"
+        ).encode()
+    recorded = _commit_record(
+        semester_org,
+        writes,
+        f"grades: distribute ({counts['gradebooks']} gradebook(s), "
+        f"{counts['emails']} email(s))",
+        delete,
+    )
+    if not recorded:
+        log_err(
+            f"grades were sent but {DISTRIBUTED_PATH} could not be written - the "
+            f"emails were recorded before they went, so the next run re-sends none"
+        )
+    return recorded
+
+
 def _returned_units(
     specs: dict[str, SheetSpec],
     sheets: dict[str, dict],
@@ -3953,7 +4133,8 @@ def _post_returned_notes(
 
 def feedback_text(book: dict[str, dict], titles: dict[str, str]) -> str:
     """The feedback in one student's gradebook, as plain text for an email: one paragraph
-    per assignment that has any. "" when there is none."""
+    per assignment that has any - the overall feedback, then each question's. "" when
+    there is none."""
     parts: list[str] = []
     for slug in sorted(book):
         view = book[slug]
@@ -3961,6 +4142,10 @@ def feedback_text(book: dict[str, dict], titles: dict[str, str]) -> str:
             str(view[key]).strip()
             for key in ("feedback", "team_feedback")
             if not is_blank(view.get(key))
+        ]
+        said += [
+            f"{name}: {text}"
+            for name, text in (view.get(QUESTION_FEEDBACK_KEY) or {}).items()
         ]
         if said:
             parts.append(f"{titles.get(slug) or slug}:\n" + "\n\n".join(said))
@@ -4216,62 +4401,72 @@ def distribute(
             return 1
         return return_summary(counts, len(pending) if notify else 0, dry_run=True)
 
-    failed_mail, told = (
-        _email_updates(
+    # Only a student the roster can reach is recorded before the mail: a withdrawn one
+    # (no roster email) is never mailed, and a row for them would be a commit about nobody.
+    reachable = _reachable(pending, students) if notify else []
+    # What the final commit writes, whatever happens between here and there.
+    registrar = render_registrar_csv(students, books).encode() if students else None
+    if reachable and not _record_before_mail(
+        semester_org, record, reachable, live, now, registrar
+    ):
+        log_err(
+            f"{DISTRIBUTED_PATH} could not be written before the emails went, so none "
+            f"was sent - the next run sends them"
+        )
+        return return_summary(counts, 0, dry_run=False, code=1)
+
+    def finish(failed_mail: int, told: list[str], raised: bool = False) -> bool:
+        """The final record: `told` as told, and every other address back as it was, so
+        an email that did not go is retried by the next Return marks run. A run that
+        `raised` never marks the assignment returned."""
+        for handle in told:
+            record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
+        counts["emails"] = len(told)
+        return _final_record(
             semester_org,
-            pending,
-            dry_run=False,
-            feedback=(
-                {h: feedback_text(books[h], titles) for h in pending}
-                if include_feedback
+            record,
+            registrar,
+            # Held back when not one email went (a token fault, no mail configured):
+            # the automatic return then asks again, and the reset rows mean it cannot
+            # mail anybody twice. One refused address in a class that was mailed does
+            # not hold it back, or it would re-fire every quarter-hour.
+            marker=(
+                assignment
+                if assignment
+                and not raised
+                and not counts["failed"]
+                and not (failed_mail and not told)
                 else None
             ),
+            now=now,
+            counts=counts,
+            delete=[*([NOTIFIED_PATH] if migrating else []), *retired],
         )
-        if notify and pending
-        else (0, [])
-    )
-    counts["emails"] = len(told)
-    if receipt_note:
-        counts["receipt_notes"] = _post_returned_notes(
-            semester_org, _returned_units(specs, sheets, books, live), listed
-        )
-    for handle in told:
-        record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
 
-    # 3. The registrar's export and the record of what went out, in ONE commit - together
-    #    with the retired files this semester is migrating off, so the old and the new can
-    #    never both be present for a reader to choose between.
-    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
-    if not students:
-        # `roster.load` answers None for a roster it could not READ and [] for one with no
-        # rows, and the export is one row per ENROLLED student - so regenerating it from
-        # either would commit a header line over the file a registrar transcribes grades
-        # from. Leaving it is the only safe answer; the run goes red and the next one
-        # rebuilds it.
-        log_err(
-            f"roster in {semester_org} is empty or could not be read - "
-            f"{SEMESTER_CSV_NAME} left as it is"
-        )
-    else:
-        writes[SEMESTER_CSV_NAME] = render_registrar_csv(students, books).encode()
-    if assignment and not counts["failed"] and not failed_mail:
-        # Returned, in the same commit as the record of it: the automatic return at
-        # `marks_return_datetime` does not ask again.
-        writes[marks_return_record(assignment)] = (
-            json.dumps({"returned": now}, indent=2) + "\n"
-        ).encode()
-    recorded = _commit_record(
-        semester_org,
-        writes,
-        f"grades: distribute ({counts['gradebooks']} gradebook(s), "
-        f"{counts['emails']} email(s))",
-        [*([NOTIFIED_PATH] if migrating else []), *retired],
-    )
-    if not recorded:
-        log_err(
-            f"grades were sent but {DISTRIBUTED_PATH} could not be written - the "
-            f"next run re-posts and re-emails what it cannot see was already sent"
-        )
+    failed_mail, told = 0, []
+    try:
+        if notify and pending:
+            failed_mail, told = _email_updates(
+                semester_org,
+                pending,
+                dry_run=False,
+                feedback=(
+                    {h: feedback_text(books[h], titles) for h in pending}
+                    if include_feedback
+                    else None
+                ),
+            )
+        if receipt_note:
+            counts["receipt_notes"] = _post_returned_notes(
+                semester_org, _returned_units(specs, sheets, books, live), listed
+            )
+    except BaseException:
+        # The send raised (a Graph token fault) or something after it did: whatever was
+        # not confirmed sent counts as not sent, and the record is still made, so the
+        # rows written before the mail are reset rather than left claiming it went.
+        finish(len(reachable) - len(told), told, raised=True)
+        raise
+    recorded = finish(failed_mail, told)
     # The dry run's preview is out of date once anything has gone out. Not a reason to red
     # the run: a preview left open is closed by the next real one.
     close_issues_titled(f"{semester_org}/{CONFIG_REPO}", PREVIEW_TITLE, PREVIEW_SENT)
@@ -4372,6 +4567,11 @@ def _preview(
         partly = sum(1 for blank in not_marked[slug].values() if blank)
         if partly:
             log(f"    {partly} unit(s) have unmarked questions")
+        if stray := _undeclared_feedback(spec, units):
+            log(
+                f"    WARNING: {stray} unit(s) give feedback on a question the "
+                f"assignment does not declare - it is sent under the name typed"
+            )
         if slug in exported and slug not in columns:
             log(f"  {SEMESTER_CSV_NAME}: would gain column {slug}")
     if counts["unknown"]:

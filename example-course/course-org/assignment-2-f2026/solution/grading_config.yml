@@ -6,7 +6,8 @@ formats: [ipynb]              # ipynb | py | rmd | qmd | latex | none - the star
 
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
 #   Q1: 15                    # each blank in the grading sheet. The total is their sum;
-#   Q2: 10                    # there is no `points:` field anywhere.
+#   Q2: 10                    # there is no other total anywhere.
+#   Q3: {points: 5, file: starter.tex}   # marked from another starter than the first
 
 autograde: true               # runs the hidden tests below at the cutoff
 tests: tests                  # where they live on THIS solution branch

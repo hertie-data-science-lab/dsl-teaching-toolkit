@@ -531,3 +531,31 @@ def test_an_rmd_grader_copy_keeps_the_front_matter_and_the_question_only():
     assert "answer <- 1" in filtered.text
     assert "library(tidyverse)" not in filtered.text
     assert "stopifnot" not in filtered.text
+
+
+def test_a_latex_write_up_derives_with_percent_fences():
+    source = (
+        "\\section{Task}\n"
+        "% BEGIN SOLUTION\n"
+        "The estimator is unbiased.\n"
+        "% END SOLUTION\n"
+        "\\end{document}\n"
+    )
+    out = derive.strip_source("solution/starter.tex", source)
+    assert out.replaced == 1
+    assert "unbiased" not in out.text
+    assert derive.TEX_PLACEHOLDER in out.text
+    assert derive.derivable_sources(["solution/starter.tex"]) == [
+        "solution/starter.tex"
+    ]
+
+
+def test_an_unfenced_write_up_is_refused_naming_the_latex_fence(monkeypatch, capsys):
+    _Repo({"solution/report.tex": "\\section{A}\nThe answer.\n"}).install(monkeypatch)
+    out = derive.derive_student_version("Course", "assignment-1-f2026", True)
+    assert out == 1
+    assert out.reasons[0]["text"] == (
+        "solution/report.tex has no % BEGIN SOLUTION region, so the starter would be "
+        "the model answer."
+    )
+    assert "no `% BEGIN SOLUTION` region - NOT written" in capsys.readouterr().err

@@ -120,6 +120,10 @@ repos nothing else is looking for. To change the shape, edit `grading_config.yml
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), marked per team in the grading sheet's `teams:` block, with one `adjustment_individual` per member.
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), marked in the sheet's `submissions:` block.
 
+The sheet written at hand-out nests as the marking grid does: each team's own cells, then
+its members, then the questions (`score_*` and one optional `feedback_per_question` cell
+each, the team's on a group sheet). See [10](10-grade-and-return-assignments.md).
+
 ## Group assignments: creating the teams
 
 Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).

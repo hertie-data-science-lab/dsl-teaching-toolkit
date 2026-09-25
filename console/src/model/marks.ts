@@ -67,6 +67,33 @@ export function num(v: unknown): number | null {
 
 const blank = (v: unknown) => v === null || v === undefined || String(v).trim() === '';
 
+const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** One `questions:` entry's maximum: `Q1: 15`, or `Q1: {points: 15, file: report.tex}`. */
+export function questionPoints(entry: unknown): unknown {
+  return isMap(entry) ? (entry.points ?? null) : entry;
+}
+
+/** The submission file a question is marked from, when it names one. */
+export function questionFile(entry: unknown): string | null {
+  return isMap(entry) && typeof entry.file === 'string' && entry.file.trim() ? entry.file : null;
+}
+
+/** The `questions:` value the template form writes from its rows: each name with its points,
+ *  and a question that was a mapping (`{points, file}`) stays one, so `file:` survives a save. */
+export function questionsFromRows(rows: [string, string][], was: unknown): Record<string, unknown> | undefined {
+  const old = isMap(was) ? was : {};
+  const kept = rows.filter(([name]) => name.trim());
+  if (!kept.length) return undefined;
+  return Object.fromEntries(
+    kept.map(([name, n]) => {
+      const points = n === '' ? null : Number.isFinite(Number(n)) ? Number(n) : n;
+      const before = old[name.trim()];
+      return [name.trim(), isMap(before) ? { ...before, points } : points];
+    }),
+  );
+}
+
 /** What a score cell adds up to; null when there is nothing to add or a value is not a number. */
 export function scoreTotal(score: unknown, questions?: Record<string, unknown> | null): number | null {
   if (!score || typeof score !== 'object') return num(score);

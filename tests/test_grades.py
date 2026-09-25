@@ -705,6 +705,9 @@ def _distribute(
     exported: str | None = None,
     preview_issues: list[dict] | None = None,
     assignment: str | None = None,
+    include_feedback: bool = False,
+    intent_ok: bool = True,
+    send_error: Exception | None = None,
 ) -> dict:
     """`distribute` over a local semester-config clone, writing to nothing.
 
@@ -748,6 +751,7 @@ def _distribute(
         "comments": [],
         "gradebooks": [],
         "config": [],
+        "intent": [],
         "outbox": [],
         "issues": [],
         "gradebook_calls": [],
@@ -794,6 +798,10 @@ def _distribute(
         org, repo, files, message, *, delete=(), create_only=False, person=False
     ):
         target = "config" if repo == grades.CONFIG_REPO else "gradebooks"
+        if target == "config" and message.startswith(grades.INTENT_MESSAGE):
+            # The record of the emails about to go, committed before they are sent.
+            effects["intent"].append({k: v.decode() for k, v in files.items()})
+            return intent_ok
         if target == "gradebooks":
             # The repo is named after the student, so the write has to be marked as one:
             # without it, a gradebook GitHub could not read published its own name.
@@ -810,17 +818,26 @@ def _distribute(
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_semester", course_name)
-    monkeypatch.setattr(
-        grades.mailer,
-        "send_bulk",
-        lambda msgs, dry_run=False, sample=None: (
-            effects["outbox"].append(msgs),
-            [m[0] for m in msgs[:sent]],
-        )[1],
-    )
-    effects["rc"] = grades.distribute(
-        "SEMESTER", notify=notify, dry_run=dry_run, assignment=assignment
-    )
+
+    def fake_send_bulk(msgs, dry_run=False, sample=None):
+        if send_error is not None:
+            raise send_error
+        effects["outbox"].append(msgs)
+        return [m[0] for m in msgs[:sent]]
+
+    monkeypatch.setattr(grades.mailer, "send_bulk", fake_send_bulk)
+    try:
+        effects["rc"] = grades.distribute(
+            "SEMESTER",
+            notify=notify,
+            dry_run=dry_run,
+            assignment=assignment,
+            include_feedback=include_feedback,
+        )
+    except Exception as exc:
+        if send_error is None:
+            raise
+        effects["raised"] = exc
     return effects
 
 
@@ -2777,3 +2794,290 @@ def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
     assert grades.dispatch_refusal("C", "sem", "a1") == ""
     assert "not due" in grades.dispatch_refusal("C", "Sem", "a2")
     assert "not a semester" in grades.dispatch_refusal("C", "Other", "a1")
+
+
+# ------------------------------------------------ the record written before the emails
+
+
+def test_the_emails_are_recorded_before_they_are_sent(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path)
+    ((intent),) = out["intent"]
+    assert ",email," in intent[grades.DISTRIBUTED_PATH]
+    assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_a_lost_final_record_re_mails_nobody(tmp_path, monkeypatch):
+    # The register's case: the mail went and `distributed.csv` would not land. Every
+    # following run (and the automatic return, every quarter-hour) mailed everyone again.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        put_files_ok=lambda files: grades.DISTRIBUTED_PATH not in files,
+    )
+    assert first["rc"] == 1 and first["outbox"]
+    ((intent),) = first["intent"]
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=intent[grades.DISTRIBUTED_PATH],
+    )
+    assert again["outbox"] == []
+
+
+def test_no_email_goes_when_the_record_before_it_cannot_be_written(
+    tmp_path, monkeypatch
+):
+    out = _distribute(monkeypatch, tmp_path, intent_ok=False)
+    assert out["rc"] == 1
+    assert out["outbox"] == [] and out["config"] == []
+
+
+_TWO_SHEET = (
+    _SHEET
+    + """\
+  ben-k:
+    score_individual: 40
+    adjustment_individual:
+    feedback_individual:
+    notes_not_shared_with_students:
+"""
+)
+_TWO_ROSTER = ROSTER_ADA + "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-abd\n"
+
+
+def test_one_refused_address_does_not_hold_back_the_returned_record(
+    tmp_path, monkeypatch
+):
+    # A refused address in a class that was mailed would otherwise keep the automatic
+    # return asking, and failing, every quarter-hour; its row stays untold, so the next
+    # Return marks run retries it.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+        assignment="assignment-1",
+        sent=1,
+    )
+    assert out["rc"] == 1
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
+    record = cfg_files[grades.DISTRIBUTED_PATH]
+    assert "ada-l,,email," in record and "ben-k,,email," not in record
+
+
+def test_no_email_sent_at_all_leaves_the_assignment_to_be_returned_again(
+    tmp_path, monkeypatch
+):
+    # Every send failed (no mail configured, a token fault): the automatic return asks
+    # again, and the rows are reset, so it cannot mail anybody twice.
+    out = _distribute(monkeypatch, tmp_path, assignment="assignment-1", sent=0)
+    assert out["rc"] == 1
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert grades.marks_return_record("assignment-1") not in cfg_files
+    assert ",email," not in cfg_files[grades.DISTRIBUTED_PATH]
+
+
+def test_a_send_that_raises_resets_the_recorded_rows(tmp_path, monkeypatch):
+    # `_send_via_graph` raises on a token failure. Before, the rows recorded before the
+    # mail stayed "told": the next run said "No new marks to return" and nobody was
+    # ever mailed.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        assignment="assignment-1",
+        send_error=RuntimeError("Graph token refused"),
+    )
+    assert "raised" in first
+    ((intent),) = first["intent"]
+    assert ",email," in intent[grades.DISTRIBUTED_PATH]
+    ((_cfg, cfg_files, _d),) = first["config"]
+    assert ",email," not in cfg_files[grades.DISTRIBUTED_PATH]
+    assert grades.marks_return_record("assignment-1") not in cfg_files
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        assignment="assignment-1",
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_a_scoped_return_that_died_after_the_first_record_is_not_wedged(
+    tmp_path, monkeypatch
+):
+    # The first record carries the registrar export: a scoped run refuses while
+    # `distributed.csv` has rows and the export is missing.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        assignment="assignment-1",
+        put_files_ok=lambda files: grades.DISTRIBUTED_PATH not in files,
+    )
+    ((intent),) = first["intent"]
+    assert grades.SEMESTER_CSV_NAME in intent
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=intent[grades.DISTRIBUTED_PATH],
+        exported=intent[grades.SEMESTER_CSV_NAME],
+        assignment="assignment-1",
+    )
+    assert again["rc"] == 0
+    ((_cfg, cfg_files, _d),) = again["config"]
+    assert grades.marks_return_record("assignment-1") in cfg_files
+
+
+def test_a_student_with_no_roster_email_is_not_recorded_before_the_mail(
+    tmp_path, monkeypatch
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        roster_rows="\n,Ada,enrolled,ada-l,42,dsl-abc\n",
+    )
+    assert out["gradebooks"]  # marked and written ...
+    assert out["intent"] == [] and out["outbox"] == []  # ... and nobody to tell
+
+
+# ------------------------------------------------------------- per-question feedback
+
+_QUESTIONS_GRADING = _GRADING_YML + "questions:\n  Q1: 30\n  Q2: 20\n"
+_QUESTION_SHEET = """\
+submissions:
+  ada-l:
+    info:
+      submitted: '2026-10-03T22:14+02:00'
+      days_late: 0
+    adjustment_individual:
+    feedback_individual: |
+      Clean derivation.
+    notes_not_shared_with_students: chased by email
+    score_individual:
+      Q1: 25
+      Q2: 18
+    feedback_per_question:
+      Q1:
+      Q2: |
+        The bound is loose.
+        Tighten it with the second lemma.
+"""
+
+
+def test_per_question_feedback_reaches_the_gradebook_under_each_question(
+    tmp_path, monkeypatch
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _QUESTION_SHEET},
+        grading=_QUESTIONS_GRADING,
+    )
+    ((_repo, files, _d),) = out["gradebooks"]
+    book = yaml.safe_load(files["grades.yml"])["assignments"]["assignment-1"]
+    # a blank cell is not sent
+    assert book[grades.QUESTION_FEEDBACK_KEY] == {
+        "Q2": "The bound is loose.\nTighten it with the second lemma."
+    }
+    readme = files["README.md"]
+    assert "Clean derivation." in readme
+    assert (
+        "- **Q2:** The bound is loose.\n  Tighten it with the second lemma." in readme
+    )
+    assert "**Q1:**" not in readme
+
+
+def test_the_marks_email_lists_overall_then_per_question_feedback(
+    tmp_path, monkeypatch
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _QUESTION_SHEET},
+        grading=_QUESTIONS_GRADING,
+        include_feedback=True,
+    )
+    ((message,),) = out["outbox"]
+    body = message[2]
+    assert body.index("Clean derivation.") < body.index("Q2: The bound is loose.")
+
+
+def test_a_teams_per_question_feedback_reaches_every_member():
+    spec = grades.SheetSpec(
+        slug="a1", title="A1", is_group=True, questions={"Q1": "5", "Q2": "5"}
+    )
+    block = {
+        "feedback_group": "Good.",
+        "members": {"ada-l": {}, "ben-k": {}},
+        "score_group": {"Q1": "4", "Q2": "5"},
+        grades.QUESTION_FEEDBACK_KEY: {"Q2": "Neat proof.", "Q1": None},
+    }
+    for handle in ("ada-l", "ben-k"):
+        view = grades.student_view(spec, "alpha", block, handle)
+        assert view[grades.QUESTION_FEEDBACK_KEY] == {"Q2": "Neat proof."}
+
+
+def test_per_question_feedback_keeps_the_declared_order_and_a_mistyped_name():
+    spec = grades.SheetSpec(
+        slug="a1", title="A1", is_group=False, questions={"Q1": "5", "Q2": "5"}
+    )
+    said = grades.question_feedback(spec, {"Q3": "typo", "Q2": "b", "Q1": "a"})
+    assert list(said) == ["Q1", "Q2", "Q3"]
+
+
+def test_a_question_may_name_the_file_it_is_marked_from():
+    spec = grades.parse_grading_spec(
+        "formats: [ipynb, latex]\n"
+        "questions:\n"
+        "  Q1: 10\n"
+        "  Q2: {points: 5, file: starter.tex}\n"
+    )
+    assert spec.format == "ipynb"  # the runnable one
+    assert spec.questions == {"Q1": "10", "Q2": "5"}
+    assert spec.question_files == {"Q2": "starter.tex"}
+    assert spec.dropped == ()
+
+
+@pytest.mark.parametrize(
+    "entry", ["{points: 5, file: ../secret.tex}", "{points: 5, file: /etc/x}"]
+)
+def test_a_question_file_outside_the_submission_is_refused(entry):
+    spec = grades.parse_grading_spec(f"questions:\n  Q1: 10\n  Q2: {entry}\n")
+    assert spec.question_files is None
+    assert spec.questions == {"Q1": "10", "Q2": "5"}  # still marked, from the runnable
+    assert any("not a file inside the submission" in line for line in spec.dropped)
+
+
+def test_an_unknown_key_on_a_question_is_named_and_ignored():
+    spec = grades.parse_grading_spec("questions:\n  Q1: {points: 5, weight: 2}\n")
+    assert spec.questions == {"Q1": "5"}
+    assert any("`weight:`" in line for line in spec.dropped)
+
+
+def test_a_teams_per_question_feedback_sits_in_the_shared_quote():
+    view = {
+        "final_grade": "9",
+        "team": "alpha",
+        "team_feedback": "Good.",
+        grades.QUESTION_FEEDBACK_KEY: {"Q2": "Neat proof."},
+    }
+    section = grades._readme_section("A1", view)
+    assert (
+        "> **Team feedback (shared with alpha):** Good.\n>\n> - **Q2:** Neat proof."
+        in section
+    )
+
+
+def test_the_preview_counts_feedback_on_an_undeclared_question(
+    tmp_path, monkeypatch, capsys
+):
+    sheet = _QUESTION_SHEET.replace("      Q1:\n", "      Q9: stray\n")
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=_QUESTIONS_GRADING,
+        dry_run=True,
+    )
+    assert "WARNING: 1 unit(s) give feedback on a question" in capsys.readouterr().out

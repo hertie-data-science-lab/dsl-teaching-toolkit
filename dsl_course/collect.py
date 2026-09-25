@@ -112,7 +112,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from functools import cache
 from operator import itemgetter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from . import course, grades, records, roster, schedule, sync_teams, teams
@@ -2925,6 +2925,49 @@ def _export_document(source: Path, env: dict) -> tuple[str, bytes] | None:
     return None if own_source is None else (GRADER_SOURCE, own_source)
 
 
+def tagged_copies(folder: Path, name: str) -> list[tuple[str, bytes]]:
+    """The reading copies of a file a question is marked from (`questions: Q3: {file:
+    ...}`): `[(the file name it is archived under, its bytes)]`, empty when the submission
+    has no such regular file. A `.tex` also brings its compiled `.pdf` when one is
+    committed beside it - the PDF to read, the source to check it against. Never rendered
+    here: nothing a student wrote is executed for it. A file past the archive cap is
+    named in the log and not archived.
+
+    `name` is the template's, but every directory on the way is the student's, so a path
+    that resolves outside the checkout is refused like a symlink."""
+    candidates = [name]
+    if PurePosixPath(name).suffix.lower() == ".tex":
+        candidates.insert(0, str(PurePosixPath(name).with_suffix(".pdf")))
+    root = folder.resolve()
+    out: list[tuple[str, bytes]] = []
+    for candidate in candidates:
+        path = folder / candidate
+        if not path.parent.resolve().is_relative_to(root):
+            log_err("  ! a question's file is outside the submission - not read")
+            return []
+        data = _result_bytes(f"the question file {candidate}", path, ARCHIVE_MAX_BYTES)
+        if data is not None:
+            out.append((candidate.replace("/", "_"), data))
+    return out
+
+
+def _archive_tagged(
+    semester_org: str, slug: str, target_key: str, folder: Path, files: tuple[str, ...]
+) -> None:
+    """Archive the file each tagged question is marked from, beside the grader copy, as
+    `<unit>.<file>`. Missing files are simply not archived: the grader opens the repo."""
+    for name in files:
+        for archived, content in tagged_copies(folder, name):
+            put_file(
+                semester_org,
+                CONFIG_REPO,
+                f"{autograde_path(slug)}/{target_key}.{archived}",
+                content,
+                f"autograde: {slug}/{target_key} question file",
+                person=True,
+            )
+
+
 def _grader_document_for(
     semester_org: str,
     repo: str,
@@ -2934,8 +2977,12 @@ def _grader_document_for(
     snapshot: str | None,
     env: dict,
     path: str = "",
+    files: tuple[str, ...] = (),
 ) -> str:
     """Archive one submission's grader copy. Returns one of the GRADER_* verdicts.
+
+    `files` are the submission files the tagged questions are marked from; each is
+    archived as it was submitted (`tagged_copies`), beside the copy of the runnable one.
 
     `path` is the unit's own folder inside `repo` (`Target.path`), and only a shared drop
     box has one: the repo is the whole semester's, so a picker let loose on the checkout
@@ -2959,6 +3006,7 @@ def _grader_document_for(
         folder = wd / path if path else wd
         if not folder.is_dir():
             return GRADER_NONE  # nothing pushed into this unit's folder at all
+        _archive_tagged(semester_org, slug, target_key, folder, files)
         picked = pick_grader_document(folder)
         if picked is None:
             return GRADER_NONE
@@ -3016,8 +3064,10 @@ def export_grader_documents(
     deadline: str,
     dry_run: bool,
     shared: bool = False,
+    files: tuple[str, ...] = (),
 ) -> None:
-    """Archive a reading copy of every submission, filtered to its hand-marked questions.
+    """Archive a reading copy of every submission, filtered to its hand-marked questions,
+    and the file each tagged question is marked from (`files`).
 
     Opt-in per assignment (`grader_pdf: true` in the template's `grading_config.yml`) and
     deliberately NOT behind `autograde:`: it is the questions a PERSON marks that the
@@ -3051,6 +3101,7 @@ def export_grader_documents(
             None if snapshots is None else snapshots.get(target.key),
             env,
             target.path,
+            files,
         )
         tally[verdict] = tally.get(verdict, 0) + 1
     log_ok(
@@ -3295,7 +3346,14 @@ def collect(
         return 1
     if gspec.grader_pdf:
         export_grader_documents(
-            semester_org, slug, key, is_group, deadline, dry_run, gspec.submit_shared
+            semester_org,
+            slug,
+            key,
+            is_group,
+            deadline,
+            dry_run,
+            gspec.submit_shared,
+            tuple(dict.fromkeys((gspec.question_files or {}).values())),
         )
 
     def freeze_sheet(

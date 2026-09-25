@@ -105,6 +105,20 @@ Grading reads whatever is actually in the repo, so a student who works in a note
 `py` assignment still grades, and `none` - which stands alone in the box - is the raw-repo
 option.
 
+**Several formats, one sheet.** The first format is the runnable one: the autograder and
+the completion check run it and nothing else. A question marked from another file names it
+in `grading_config.yml`; the rest are marked from the runnable one:
+
+```yaml
+formats: [ipynb, latex]
+questions:
+  Q1: 10
+  Q2: {points: 5, file: starter.tex}   # the write-up, hand-marked
+```
+
+The sheet shows the file beside that question's maximum, and the grader's reading copy
+archives it (its compiled `.pdf` when one is committed). One total across all questions.
+
 ### One notebook, not two: derive the starter
 
 Keeping the starter on `main` and the answer on `solution` by hand means writing the same
@@ -127,6 +141,7 @@ Three ways to say it, and you can mix them in one file:
 | `### BEGIN SOLUTION` … `### END SOLUTION` | anywhere in a code cell, script or Rmd | `pass  # YOUR CODE HERE`, at the same indent (`# YOUR CODE HERE` outside Python) |
 | a cell tagged `solution` | a whole notebook cell | the cell's heading, then `_YOUR ANSWER HERE_` - so `### Question 2 (3 points)` survives |
 | `solution=TRUE` | an Rmd/qmd chunk option | the chunk, its name and its other options, with `# YOUR CODE HERE` for a body |
+| `% BEGIN SOLUTION` … `% END SOLUTION` | a `.tex` file | `% YOUR ANSWER HERE` |
 
 Then run **Derive student version** (course org → `.github` → Actions), pick the template,
 and untick `preview`. It reads `solution/` on the `solution` branch, strips the fences, and
@@ -144,8 +159,8 @@ Three things it refuses to do, because each one publishes the answer:
   so a worked example in the brief still shows its output.
 
 `preview` is on by default and prints the file list and the counts, never a line of the
-content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are derived; anything else under
-`solution/` stays where it is.
+content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py`, `.R` and `.tex` are derived; anything else
+under `solution/` stays where it is.
 
 ### A value `grading_config.yml` cannot be read for
 

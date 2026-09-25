@@ -11,7 +11,7 @@ import { YamlText } from '../src/edit/yamlText';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from '../src/model/files';
-import { finalGrade, penaltyRate, readSheet, scoreTotal } from '../src/model/marks';
+import { finalGrade, penaltyRate, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { blankDraft, draftErrors, freshId, readDraft, writeDraft, type ArchiveDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -187,6 +187,20 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(finalGrade(null, 0.1, 1, 5)).toBeNull();
   });
 
+  it('reads a question given as {points, file} and keeps file: on a save', () => {
+    expect(questionPoints({ points: 5, file: 'report.tex' })).toBe(5);
+    expect(questionPoints(10)).toBe(10);
+    expect(questionFile({ points: 5, file: 'report.tex' })).toBe('report.tex');
+    expect(questionFile(10)).toBeNull();
+    const was = { Q1: 10, Q2: { points: 5, file: 'report.tex' } };
+    expect(questionsFromRows([['Q1', '12'], ['Q2', '6'], ['Q3', '']], was)).toEqual({
+      Q1: 12,
+      Q2: { points: 6, file: 'report.tex' },
+      Q3: null,
+    });
+    expect(questionsFromRows([[' ', '1']], was)).toBeUndefined();
+  });
+
   it('reads a team sheet into units and people with their paths', () => {
     const text = 'teams:\n  team-alpha:\n    info:\n      days_late: 1\n    score_group:\n      Q1: 14\n    feedback_group: Good\n    members:\n      anna-a:\n        adjustment_individual: 4\n';
     const s = readSheet(text, parse(text));
@@ -237,8 +251,7 @@ const groupStatus: Status = {
   assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true }],
 };
 const ready: Loaded = { kind: 'ready', status: groupStatus, sha: 's', stale: [] };
-const files = new StaticFiles(
-  {
+const FILES: Record<string, string> = {
     [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n',
     [`${COHORT_ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n',
     [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\nassignment-3,team-alpha,ben-b\n',
@@ -248,10 +261,9 @@ const files = new StaticFiles(
     [`${COURSE_ORG}/.github/dsl-course.yml`]: '# INSTRUCTOR-OWNED\norg: hertie-dsl-demo-course-e1234\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\nassignment_defaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n',
     [`${COURSE_ORG}/course-materials-f2026/publish.yml`]: 'public:\n  - "lectures/**/*.html"\n',
     [`${COURSE_ORG}/course-materials-f2026/.releaseignore`]: 'solutions/\n',
-  },
-  {},
-  { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html', 'labs/01/solutions/a.py'] },
-);
+};
+const TREES = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html', 'labs/01/solutions/a.py'] };
+const files = new StaticFiles(FILES, {}, TREES);
 const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files, now: NOW, ...over });
 const html = (v: preact.VNode) => render(v);
 
@@ -285,6 +297,17 @@ describe('editing screens', () => {
     expect(out).toContain('−20%');
     expect(out).toContain('<td class="calc">28.2</td>');
     expect(out).toContain('Return marks to 0 students');
+  });
+  it('marks reads a question marked from another file by its points', () => {
+    const tagged = new StaticFiles(
+      { ...FILES, [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'questions:\n  Q1: 15\n  Q2: {points: 25, file: report.tex}\n' },
+      {},
+      TREES,
+    );
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks', files: tagged })} />);
+    expect(out).toContain('Total / 40');
+    expect(out).toContain('/ 25 · report.tex');
+    expect(out).not.toContain('[object Object]');
   });
   it('archive offers Preview and the gated verb', () => {
     const out = html(<ArchiveScreen {...props()} />);
