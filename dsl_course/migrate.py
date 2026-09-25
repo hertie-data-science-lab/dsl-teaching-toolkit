@@ -63,6 +63,7 @@ from .course import (
     RETIRED_COURSE_KEYS,
     SEMESTER_TOPIC,
     SOLUTION_BRANCH,
+    SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
     pages_repo,
@@ -660,13 +661,17 @@ def fix_header(text: str, ref: str) -> str:
 
 # ------------------------------------------------------------------ seeded text
 # Repo names and paths that moved (decisions 0010 and 0012), inside text the toolkit
-# seeded: rewritten directly - a link to an old name is not a wording choice. Only the
+# seeded: rewritten directly - a link to an old name is not a wording choice (and
+# `semester-config/people.yml`, which never existed: an earlier pass renamed the repo
+# of a path it missed at a sentence's end). Only the
 # org's OWN repos: a link into another org (an archived semester, never migrated) still
 # resolves where it is. A bare name counts only as a whole name, never inside another
 # (`old-classroom-config`), and `welcome` only as a link to this org's repo (it is also a
 # word). Longest first, so a path is not caught by its repo's name alone.
 _WHOLE = r"(?<![\w./-])"
 _END = r"(?![\w-])"
+# A file name's end: a full stop that ends the sentence is not `people.yml.sample`.
+_FILE_END = r"(?!\w|\.\w)"
 
 
 def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, str]]:
@@ -677,7 +682,7 @@ def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, 
         (
             re.compile(
                 rf"({site}){OLD_CONFIG_REPO}(/blob/[^/\s]+/){re.escape(OLD_PEOPLE_FILE)}"
-                r"(?![\w.])"
+                rf"{_FILE_END}"
             ),
             rf"\g<1>{CONFIG_REPO}\g<2>{INSTRUCTORS_FILE}",
         ),
@@ -691,7 +696,8 @@ def text_renames(org: str, *, registry: bool = False) -> list[tuple[re.Pattern, 
         (re.compile(rf"({site}){OLD_JOIN_REPO}{_END}"), rf"\g<1>{JOIN_REPO}"),
         (
             re.compile(
-                rf"{_WHOLE}{OLD_CONFIG_REPO}/{re.escape(OLD_PEOPLE_FILE)}(?![\w.])"
+                rf"{_WHOLE}(?:{OLD_CONFIG_REPO}|{CONFIG_REPO})/"
+                rf"{re.escape(OLD_PEOPLE_FILE)}{_FILE_END}"
             ),
             f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
         ),
@@ -724,7 +730,27 @@ def seeded_wording(ref: str) -> dict[str, str]:
     the toolkit's wording, not the instructor's, so it takes the new one. The new side is
     held to the current templates by `tests/test_migrate.py`."""
     schedule_example = _worked_example(ref, schedule.SCHEDULE_PATH)
-    return {
+    submit_via = (
+        "assignment_repo (they push to their repo) | external (handed in elsewhere: "
+        "Moodle, Kaggle, in class - no repo is created) | shared_dropbox_repo (one "
+        "private repo for the whole {}, each student pushes into their own folder, "
+        "peers can read it)"
+    )
+    hand_marked = "hand-marked: a drop box is one repo for the whole {}"
+    # A template's grading_config.yml lines, as New assignment wrote them (`scaffold.
+    # _setting`: `key: value` padded to column 29, then the comment).
+    template_lines = {
+        f"{f'submit_via: {shape}':<29} # {submit_via.format('cohort')}": (
+            f"{f'submit_via: {shape}':<29} # {submit_via.format('semester')}"
+        )
+        for shape in SUBMIT_VIA
+    } | {
+        f"{f'{key}: false':<29} # {hand_marked.format('cohort')}": (
+            f"{f'{key}: false':<29} # {hand_marked.format('semester')}"
+        )
+        for key in ("autograde", "completion_check", "grader_pdf")
+    }
+    return template_lines | {
         # semester-config/schedule.yml
         "# This cohort's schedule + auto-release plan. Instructors edit it directly.": (
             "# This semester's schedule + auto-release plan. Instructors edit it directly."
@@ -802,6 +828,9 @@ def seeded_wording(ref: str) -> dict[str, str]:
             "schedule.yml."
         ),
         # the course's dsl-course.yml
+        "  # cohort's own teaching team (instructors & TAs) goes in that cohort's": (
+            "  # semester's own teaching team (instructors & TAs) goes in that semester's"
+        ),
         "#   # else.) Cohorts inherit this; setting it in a cohort's own file does "
         "nothing.": (
             "#   # else.) Semesters inherit this; setting it in a semester's own file "
@@ -840,12 +869,70 @@ def seeded_wording(ref: str) -> dict[str, str]:
     }
 
 
+# The course `dsl-course.yml`'s people header as the old template seeded it: a block,
+# because the new one is two lines longer. The last line in both spellings a live course
+# carries: as seeded, and as the first rehearsal's rename left it.
+OLD_PEOPLE_HEADER = """\
+# ---------------------------------------------------------------------------
+# People. Two DIFFERENT things live under the `people:` key below - don't
+# confuse them:
+#
+#   course_admins        GRANTS ACCESS. The single source of truth for course-wide
+#                        admin rights - the `course-admin` team here, mirrored into
+#                        every cohort org. A handle added any other way is reverted
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
+#
+#   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
+#                        the OPTIONAL public open-courseware course website (the
+#                        "Publish course website" action). They grant NO GitHub
+#                        access. TAs are NOT declared here - they change every
+#                        cohort, so a cohort's whole teaching team (instructors &
+#                        TAs, their GitHub access AND their cohort-site cards) is
+#                        declared PER COHORT in that cohort's classroom-config/people.yml.
+# ---------------------------------------------------------------------------
+"""
+
+
+def seeded_blocks() -> list[tuple[list[str], str]]:
+    """`[(the old block's lines, the new template's block)]`, each old spelling once."""
+    new = template("course/people-header.yml")
+    old = OLD_PEOPLE_HEADER.rstrip("\n")
+    return [
+        (variant.split("\n"), new)
+        for variant in (
+            old,
+            old.replace(
+                f"{OLD_CONFIG_REPO}/{OLD_PEOPLE_FILE}.",
+                f"{CONFIG_REPO}/{OLD_PEOPLE_FILE}.",
+            ),
+        )
+    ]
+
+
+def _replace_block(text: str, old: list[str], new: str) -> str:
+    """`text` with its first run of lines equal to `old` (line endings aside) replaced by
+    `new`, in the line ending of the run's first line."""
+    lines = text.split("\n")
+    bare = [line.rstrip("\r") for line in lines]
+    for i in range(len(bare) - len(old) + 1):
+        if bare[i : i + len(old)] == old:
+            eol = "\r" if lines[i].endswith("\r") else ""
+            lines[i : i + len(old)] = [
+                line + eol for line in new.rstrip("\n").split("\n")
+            ]
+            break
+    return "\n".join(lines)
+
+
 def seeded_yaml(text: str, ref: str, org: str, *, registry: bool = False) -> str:
-    """A seeded YAML file in `org` with every line still exactly as the old template
-    seeded it replaced by the new template's (`seeded_wording`, the line ending kept), and
-    the old repo names renamed in its comment lines (`renamed`). Values and the
-    instructor's own comments are otherwise theirs."""
+    """A seeded YAML file in `org` with every block (`seeded_blocks`) and every line
+    (`seeded_wording`) still exactly as the old template seeded it replaced by the new
+    template's (the line ending kept), and the old repo names renamed in its comment
+    lines (`renamed`). Values and the instructor's own comments are otherwise theirs."""
     wording = seeded_wording(ref)
+    for old, new in seeded_blocks():
+        text = _replace_block(text, old, new)
     out = []
     for line in text.split("\n"):
         if line.rstrip() in wording:

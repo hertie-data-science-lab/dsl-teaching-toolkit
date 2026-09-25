@@ -20,6 +20,7 @@ from dsl_course.course import (
     OLD_JOIN_REPO,
     OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
+    SUBMIT_VIA,
 )
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.gh_contents import blob_sha
@@ -1003,7 +1004,18 @@ def test_every_new_seeded_line_is_the_current_templates():
                 migrate.semester_scaffold(SEM, "schedule.yml", "main"),
                 migrate.semester_scaffold(SEM, INSTRUCTORS_FILE, "main"),
                 template("course/dsl-course.yml"),
+                template("course/people-cards.yml"),
                 scaffold._GRADING_STAMP,
+                *(
+                    scaffold._grading_config(
+                        title="t",
+                        kind="individual",
+                        submit_via=shape,
+                        formats=["ipynb"],
+                        autograde=True,
+                    )
+                    for shape in SUBMIT_VIA
+                ),
             ]
         ).split("\n")
     )
@@ -1011,6 +1023,9 @@ def test_every_new_seeded_line_is_the_current_templates():
         new for new in migrate.seeded_wording("main").values() if new not in current
     ]
     assert missing == []
+    assert [new for _, new in migrate.seeded_blocks()] == [
+        template("course/people-header.yml")
+    ] * 2
 
 
 def test_the_renames_are_mechanical_and_leave_other_words():
@@ -1021,6 +1036,8 @@ def test_the_renames_are_mechanical_and_leave_other_words():
         f"https://github.com/{org}/classroom-config/blob/main/people.yml and "
         f"https://github.com/{org}/welcome-x and "
         "`classroom-config/people.yml` and classroom-config-2 and "
+        "in classroom-config/people.yml. and semester-config/people.yml and "
+        "classroom-config/people.yml.sample and "
         "https://github.com/hertie-dl-f2025/welcome/issues and "
         "https://github.com/some-other-org/welcome and "
         "https://github.com/some-other-org/classroom-config and "
@@ -1033,6 +1050,10 @@ def test_the_renames_are_mechanical_and_leave_other_words():
         f"https://github.com/{org}/semester-config/blob/main/instructors.yml and "
         f"https://github.com/{org}/welcome-x and "
         "`semester-config/instructors.yml` and classroom-config-2 and "
+        # A full stop ends the sentence, not the file name; the path an earlier pass
+        # half-renamed is renamed whole.
+        "in semester-config/instructors.yml. and semester-config/instructors.yml and "
+        "semester-config/people.yml.sample and "
         # Another org's links resolve where they are (an archived org is never
         # migrated); a name inside another, or a plain word, is not a repo name.
         "https://github.com/hertie-dl-f2025/welcome/issues and "
@@ -2050,3 +2071,36 @@ def test_hold_takes_a_course_org_only(fake, semester, monkeypatch, capsys):
     assert _main(monkeypatch, "--hold", SEM, "--no-preview") == 1
     assert "is not a course org" in capsys.readouterr().err
     assert fake.commits == []
+
+
+@pytest.mark.parametrize("repo", [OLD_CONFIG_REPO, CONFIG_REPO])
+@pytest.mark.parametrize("eol", ["\n", "\r\n"])
+def test_the_old_people_header_becomes_the_current_one_as_a_block(repo, eol):
+    # As seeded, and as the first rehearsal's rename left it (`semester-config/people.yml`,
+    # a path that never existed).
+    old = migrate.OLD_PEOPLE_HEADER.replace(
+        "classroom-config/people.yml.", f"{repo}/people.yml."
+    )
+    text = ("course_name: X\n\n" + old + "people:\n  course_admins: []\n").replace(
+        "\n", eol
+    )
+    new = migrate.seeded_yaml(text, "main", COURSE)
+    header = template("course/people-header.yml")
+    assert new == (
+        "course_name: X\n\n" + header + "people:\n  course_admins: []\n"
+    ).replace("\n", eol)
+    assert migrate.review_lines(new) == []
+
+
+def test_a_template_s_seeded_lines_take_the_semester_wording():
+    for shape in SUBMIT_VIA:
+        new = scaffold._grading_config(
+            title="t",
+            kind="individual",
+            submit_via=shape,
+            formats=["ipynb"],
+            autograde=True,
+        )
+        old = new.replace("whole semester", "whole cohort")
+        assert "whole cohort" in old
+        assert migrate.seeded_yaml(old, "main", COURSE) == new
