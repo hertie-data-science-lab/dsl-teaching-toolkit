@@ -717,14 +717,44 @@ def test_a_move_carries_the_blob_and_its_mode_and_deletes_the_source(monkeypatch
     assert sum(1 for args, _ in calls if "PATCH" in args) == 1
 
 
-def test_a_move_whose_target_exists_only_removes_the_source(monkeypatch):
+def test_a_move_whose_target_is_identical_only_removes_the_source(monkeypatch):
     calls = _git(
         monkeypatch,
-        {"old.json": ("a-sha", "100644"), ".system/old.json": ("b-sha", "100644")},
+        {"old.json": ("a-sha", "100644"), ".system/old.json": ("a-sha", "100644")},
     )
     assert gh_contents.move_files("org", "repo", {"old.json": ".system/old.json"}, "m")
     tree = _posted(calls)[0]["tree"]
     assert tree == [{"path": "old.json", "mode": "100644", "type": "blob", "sha": None}]
+
+
+def test_a_move_whose_target_differs_refuses_the_whole_commit(monkeypatch, capsys):
+    calls = _git(
+        monkeypatch,
+        {
+            "a.json": ("a-sha", "100644"),
+            "old.json": ("a-sha", "100644"),
+            ".system/old.json": ("b-sha", "100644"),
+        },
+    )
+    moves = {"a.json": ".system/a.json", "old.json": ".system/old.json"}
+    assert gh_contents.move_files("org", "repo", moves, "m", delete=["a.json"]) is False
+    # Refused before any write: the move that could land does not land either.
+    assert _posted(calls) == []
+    assert not any("PATCH" in args for args, _ in calls)
+    err = capsys.readouterr().err
+    assert "org/repo: 1 move(s) onto a file that differs (under .system)" in err
+    # The paths can carry a handle: per-person log only.
+    assert "old.json" not in err
+
+
+def test_a_move_whose_target_is_absent_moves(monkeypatch):
+    calls = _git(monkeypatch, {"old.json": ("a-sha", "100644")})
+    assert gh_contents.move_files("org", "repo", {"old.json": ".system/old.json"}, "m")
+    tree = _posted(calls)[0]["tree"]
+    assert tree == [
+        {"path": ".system/old.json", "mode": "100644", "type": "blob", "sha": "a-sha"},
+        {"path": "old.json", "mode": "100644", "type": "blob", "sha": None},
+    ]
 
 
 def test_nothing_to_move_is_no_commit(monkeypatch):

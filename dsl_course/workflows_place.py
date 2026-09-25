@@ -46,6 +46,25 @@ NEVER_IN_STUDENT_REPOS = tuple(
 )
 
 
+def content_workflow_files(
+    semester_orgs: list[str],
+    assignments: list[str],
+    repo: str,
+    central_ref: str,
+    *,
+    workflows: tuple[str, ...],
+) -> dict[str, bytes]:
+    """`{path: bytes}` of the run-from-repo workflows `repo` hosts (`workflows`), as
+    `push_content_workflows` writes them - what a drift check compares with."""
+    render = {
+        RELEASE_MATERIALS: lambda: render_release(semester_orgs, repo),
+        RELEASE_ASSIGNMENT: lambda: render_provision(semester_orgs, assignments, repo),
+    }
+    return {
+        path: for_placement(render[path](), central_ref).encode() for path in workflows
+    }
+
+
 def push_content_workflows(
     org: str,
     repo: str,
@@ -74,17 +93,12 @@ def push_content_workflows(
 
     Returns 1 if that commit didn't land, so refresh can report a run that didn't
     converge. It is all-or-nothing: put_files moves the branch once, at the end."""
-    render = {
-        RELEASE_MATERIALS: lambda: render_release(semester_orgs, repo),
-        RELEASE_ASSIGNMENT: lambda: render_provision(semester_orgs, assignments, repo),
-    }
     if not put_files(
         org,
         repo,
-        {
-            path: for_placement(render[path](), central_ref).encode()
-            for path in workflows
-        },
+        content_workflow_files(
+            semester_orgs, assignments, repo, central_ref, workflows=workflows
+        ),
         "ci: refresh release workflows",
         delete=RETIRED_WORKFLOWS,
     ):

@@ -11,6 +11,7 @@ import io
 import json
 from collections.abc import Iterable
 from functools import cache
+from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
@@ -523,6 +524,39 @@ def put_files(
     return _commit_tree(org, repo, branch, tree, message, person)
 
 
+def move_clashes(shas: dict[str, str], moves: dict[str, str]) -> list[tuple[str, str]]:
+    """The `(old, new)` of `moves` whose source and target both exist in `shas` (`{path:
+    blob sha}`) with different bytes: a move that would lose one of two versions."""
+    return [
+        (old, new)
+        for old, new in moves.items()
+        if old in shas and new in shas and shas[old] != shas[new]
+    ]
+
+
+def refuse_clashes(
+    org: str, repo: str, shas: dict[str, str], moves: dict[str, str]
+) -> bool:
+    """Whether `moves` must be refused in `org/repo` (`move_clashes`), saying so when it
+    must. The public line gives a count and the folders; the paths, which can carry a
+    person's handle, go to the per-person log."""
+    clashes = move_clashes(shas, moves)
+    if not clashes:
+        return False
+    folders = sorted(
+        {
+            "/".join(PurePosixPath(new).parts[:-1][:2]) or "the root"
+            for _, new in clashes
+        }
+    )
+    log_err_person(
+        f"{org}/{repo}: {len(clashes)} move(s) onto a file that differs (under "
+        f"{', '.join(folders)}) - keep one version by hand; nothing was written",
+        "; ".join(f"both {old} and {new} exist and differ" for old, new in clashes),
+    )
+    return True
+
+
 def move_files(
     org: str,
     repo: str,
@@ -540,13 +574,18 @@ def move_files(
     binary moves as safely as text and the file at the new path is the old one exactly -
     which is what a fire-once marker needs, since a copy that differed would be a second
     marker. A move whose source is absent is skipped (already moved); one whose target
-    already exists removes the source only. Same no-op rule as `put_files`: nothing to do
-    is no commit. Returns False on a failed read or any failed leg of the commit."""
+    already holds the same bytes removes the source only. A target that holds DIFFERENT
+    bytes refuses the whole commit before anything is written, naming both paths: moving
+    would lose one of the two versions. Same no-op rule as `put_files`: nothing to do is
+    no commit. Returns False on a failed read, a refused move or any failed leg of the
+    commit."""
     try:
         branch = branch or default_branch(org, repo)
         live = repo_blob_entries(org, repo, branch)
     except RuntimeError as exc:
         log_err(f"could not read {org}/{repo} before writing to it: {exc}")
+        return False
+    if refuse_clashes(org, repo, {p: entry[0] for p, entry in live.items()}, moves):
         return False
     tree: list[dict[str, Any]] = []
     gone = {path: None for path in delete if path in live}

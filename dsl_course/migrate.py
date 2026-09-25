@@ -21,8 +21,8 @@ on GitHub Free org variables do not reach private repos, and the workflows alrea
 an org carry no gate until they are re-rendered.)
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, topic, re-render,
-unpause, status. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
-template keys, materials files, re-render, unpause, status.
+status, unpause. Course org: preflight, pause, registry, .system/, dsl-course.yml keys,
+template keys, materials files, re-render, status, unpause.
 """
 
 from __future__ import annotations
@@ -33,12 +33,13 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import yaml
 
-from . import records, schedule, seed, status
+from . import policy, records, schedule, seed, status
 from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
 from .course import (
@@ -64,6 +65,9 @@ from .discovery import (
     OLD_SEMESTERS_PATH,
     SEMESTERS_PATH,
     central_ref_for,
+    discover_assignment_repos,
+    discover_content_repos,
+    discover_semesters,
     list_org_repos,
 )
 from .faults import NOT_MIGRATED, NotMigrated
@@ -72,6 +76,7 @@ from .gh_contents import (
     get_file_content,
     load_yaml_lines,
     move_files,
+    refuse_clashes,
     repo_blob_shas,
 )
 from .ghcli import gh, git
@@ -85,6 +90,7 @@ from .grades import (
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .profile_readme import profile_files, update_profile_readme
 from .repos import default_branch, repo_missing, set_repo_topics
+from .scaffold import materials_system_files
 from .setting_readers import RENAMED_SETTINGS
 from .settings import ASSIGNMENT_DEFAULTS_KEY
 from .sync_faculty import retired_course_faults
@@ -95,6 +101,12 @@ from .welcome import (
     refresh_join_workflows,
     refresh_semester_pointer,
     template,
+)
+from .workflows_place import (
+    RELEASE_WORKFLOWS,
+    RETIRED_WORKFLOWS,
+    TEMPLATE_WORKFLOWS,
+    content_workflow_files,
 )
 
 # ------------------------------------------------------------------ the old layout
@@ -147,11 +159,29 @@ def fold(live: set[str], table: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def move_lines(moves: dict[str, str], table: dict[str, str]) -> list[str]:
+    """The plan's lines for `moves` (from `fold(..., table)`): one per entry of `table` it
+    uses - a file as `old -> new`, a folder as `old -> new (N file(s))`. Never the files
+    inside a folder: a record's name can carry a person's handle."""
+    out = []
+    for old, new in table.items():
+        if old.endswith("/"):
+            count = sum(path.startswith(old) for path in moves)
+            if count:
+                out.append(f"  {old} -> {new} ({count} file(s))")
+        elif old in moves:
+            out.append(f"  {old} -> {new}")
+    return out
+
+
 # ------------------------------------------------------------------ key rewrites
 # Line rewrites, not YAML round trips: these are instructor files, and their comments and
 # layout are theirs. Each returns the text unchanged when there is nothing to rewrite.
 
 _TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*):")
+# A key whose value is a block scalar (`details: >-`, `- notes: |`): group 1 runs up to the
+# key, so its length is the key's column; every line indented deeper is the scalar's text.
+_BLOCK_SCALAR = re.compile(r"^(\s*(?:-\s+)?)[^\s#:][^:]*:\s*[|>][-+0-9]*\s*(?:#.*)?$")
 
 
 def split_comment(text: str) -> tuple[str, str]:
@@ -175,7 +205,12 @@ def schedule_keys(text: str) -> str:
     `kind:` on the entries of `releases:` and `events:` (an assignment's `type:` is its
     individual/group shape and stays)."""
     out, section = [], ""
+    scalar: int | None = None  # the column of the key whose block scalar this is in
     for line in text.split("\n"):
+        if scalar is not None and (not line.strip() or _indent(line) > scalar):
+            out.append(line)  # prose, however it reads
+            continue
+        scalar = None
         if top := _TOP_KEY.match(line):
             section = top.group(1)
         line = re.sub(
@@ -183,6 +218,8 @@ def schedule_keys(text: str) -> str:
         )
         if section in ("releases", "events"):
             line = re.sub(r"^(\s+(?:-\s+)?)type:", r"\1kind:", line)
+        if block := _BLOCK_SCALAR.match(line):
+            scalar = len(block.group(1))
         out.append(line)
     return "\n".join(out)
 
@@ -232,6 +269,36 @@ def course_config_keys(text: str) -> str:
                 line = formats_line(line, indent.group(1))
         out.append(line)
     return "\n".join(out)
+
+
+# The course's old per-semester defaults: stripped by `course_config_keys`. Their two
+# settings now live in each semester's `schedule.yml`, with the policy's as the default.
+OLD_SEMESTER_BLOCKS = ("cohort_defaults", "semester_defaults")
+
+
+def lost_semester_values(meta: dict, defaults: dict) -> list[str]:
+    """`block.key: value (policy: default)` for each `timezone` / `archive.grace_days` of
+    an old semester-defaults block in `meta` (a parsed `dsl-course.yml`) that differs from
+    the policy's `defaults`: what stripping the block would lose."""
+    out = []
+    for block in OLD_SEMESTER_BLOCKS:
+        raw = meta.get(block)
+        if not isinstance(raw, dict):
+            continue
+        archive = raw.get("archive")
+        found = {
+            "timezone": (raw.get("timezone"), defaults["timezone"]),
+            "archive.grace_days": (
+                archive.get("grace_days") if isinstance(archive, dict) else None,
+                defaults["archive"]["grace_days"],
+            ),
+        }
+        out += [
+            f"{block}.{key}: {value} (policy: {want})"
+            for key, (value, want) in found.items()
+            if value is not None and str(value).strip() != str(want)
+        ]
+    return out
 
 
 def registry_keys(text: str) -> str:
@@ -365,8 +432,19 @@ def fix_header(text: str, ref: str) -> str:
 # ------------------------------------------------------------------ GitHub, narrowly
 
 
+# `{org: {repo name: listing row}}`: each org is listed once, and listed again only after
+# a step has written (`_forget`) - a rename or a topic changes what the listing says.
+_LISTINGS: dict[str, dict[str, dict]] = {}
+
+
 def _listing(org: str) -> dict[str, dict]:
-    return {row["name"]: row for row in list_org_repos(org)}
+    if org not in _LISTINGS:
+        _LISTINGS[org] = {row["name"]: row for row in list_org_repos(org)}
+    return _LISTINGS[org]
+
+
+def _forget() -> None:
+    _LISTINGS.clear()
 
 
 def _topics(listing: dict[str, dict]) -> set[str]:
@@ -420,22 +498,47 @@ def _set_actions(org: str, repo: str, state: dict) -> bool:
     return code == 0
 
 
-def _run_count(org: str, repo: str, query: str) -> int:
+def _run_count(org: str, repo: str, query: str, workflow: str = "") -> int:
+    """How many runs of `org/repo` (of its `workflow` file only, when named) match
+    `query`. Raises when GitHub cannot say."""
+    scope = f"workflows/{workflow}/" if workflow else ""
     code, out = gh(
-        "api", f"repos/{org}/{repo}/actions/runs?{query}", "--jq", ".total_count"
+        "api",
+        f"repos/{org}/{repo}/actions/{scope}runs?{query}",
+        "--jq",
+        ".total_count",
     )
     if code != 0 or not out.strip().isdigit():
         raise RuntimeError(f"could not list the runs of {org}/{repo}: {out[:200]}")
     return int(out.strip())
 
 
+# Every state a run is in before it has finished.
+LIVE_RUN_STATES = ("queued", "in_progress", "waiting", "requested", "pending")
+# The central toolkit's workflows that re-render the orgs of a tier: one of them running
+# while the migration writes is the 422 race (two writers on one branch). All three are
+# checked whatever the org's tier: a deploy may have picked its orgs before a tier flip.
+CENTRAL_REFRESHERS = ("deploy-main.yml", "deploy-preview.yml", "promote.yml")
+
+
 def _alive(targets: list[tuple[str, str]]) -> list[str]:
-    """The target repos with a run queued or in progress."""
-    return [
+    """The target repos with a run not yet finished, and each central deploy not yet
+    finished."""
+    out = [
         f"{org}/{repo}"
         for org, repo in targets
-        if any(_run_count(org, repo, f"status={s}") for s in ("in_progress", "queued"))
+        if any(_run_count(org, repo, f"status={s}") for s in LIVE_RUN_STATES)
     ]
+    central_org, central_repo = CENTRAL.split("/", 1)
+    out += [
+        f"{CENTRAL} ({workflow})"
+        for workflow in CENTRAL_REFRESHERS
+        if any(
+            _run_count(central_org, central_repo, f"status={s}", workflow)
+            for s in LIVE_RUN_STATES
+        )
+    ]
+    return out
 
 
 def _rename(org: str, old: str, new: str) -> bool:
@@ -447,13 +550,42 @@ def _rename(org: str, old: str, new: str) -> bool:
     return code == 0
 
 
+def _redirects(org: str, old: str, new: str) -> bool:
+    """Whether `org/old` answers as `org/new`: GitHub's 301 from a renamed repo's old
+    name, which gh follows. What keeps the old URLs in mails and bookmarks working."""
+    code, out = gh("api", f"repos/{org}/{old}")
+    try:
+        name = json.loads(out).get("name") if code == 0 else None
+    except (json.JSONDecodeError, AttributeError):
+        name = None
+    return name == new
+
+
 def _yaml(text: str | None) -> dict:
     data = yaml.safe_load(text or "") if text else None
     return data if isinstance(data, dict) else {}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _github_now(org: str) -> str:
+    """GitHub's clock, from the `Date` header of a read: the moment the runs' own
+    `created` times are compared with, whatever the laptop's clock says. Raises when
+    there is no header to read."""
+    code, out = gh("api", "--include", f"repos/{org}/.github")
+    stamp = next(
+        (
+            line.split(":", 1)[1].strip()
+            for line in out.splitlines()
+            if line.lower().startswith("date:")
+        ),
+        "",
+    )
+    try:
+        when = parsedate_to_datetime(stamp) if code == 0 else None
+    except (TypeError, ValueError):
+        when = None
+    if when is None:
+        raise RuntimeError(f"could not read GitHub's clock from {org}/.github")
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _with_workflows(org: str, candidates: list[str]) -> list[tuple[str, str]]:
@@ -500,9 +632,13 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
         def done(s: Step) -> bool:
             return idle if s.bracket == "pause" else s.done()
 
+        def planned(s: Step) -> bool:
+            # A run that pauses unpauses too, whatever the repos say before it starts.
+            return idle and s.done() if s.bracket == "unpause" else done(s)
+
         log_step(f"Migration plan for {org}")
         for step in steps:
-            if done(step):
+            if planned(step):
                 log(f"  {step.name}: already migrated")
                 continue
             log(f"  {step.name}:")
@@ -511,6 +647,10 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
         if preview:
             log_ok("PREVIEW - nothing was written. Run again with --no-preview.")
             return 0
+        if pause.record() is not None:
+            # A run that stopped paused: Actions are off from here on, whatever is left.
+            paused = True
+            pause.load()
         for step in steps:
             if step.bracket == "pause" and not idle:
                 paused = True
@@ -519,7 +659,9 @@ def run(org: str, steps: list[Step], preview: bool, pause: Pause) -> int:
                 log(f"  [skip] {step.name}: already migrated")
                 continue
             log_step(step.name)
-            if not step.do() or not step.verify():
+            done_ok = step.do()
+            _forget()
+            if not done_ok or not step.verify():
                 log_err(
                     f"{step.name} did not verify - stopped here. "
                     f"Rollback: {step.rollback}"
@@ -585,8 +727,12 @@ class Pause:
 
     # the pause step ---------------------------------------------------------
     def disabled(self) -> bool:
+        """Recorded, and every recorded repo off. An org with no workflow repo records
+        `{}`: nothing to switch off is paused."""
         saved = self.record()
-        return bool(saved) and not any(_actions_enabled(*self._live(k)) for k in saved)
+        return saved is not None and not any(
+            _actions_enabled(*self._live(k)) for k in saved
+        )
 
     def quiet(self, keys: list[str]) -> bool:
         alive = _alive([self._live(k) for k in keys])
@@ -598,6 +744,9 @@ class Pause:
         return not alive
 
     def pause(self) -> bool:
+        # Read first: a clock that cannot be read stops the pause before anything is
+        # written or switched.
+        self.started = _github_now(self.org)
         saved = self.record()
         if saved is None:
             saved = {f"{o}/{r}": _actions_state(o, r) for o, r in self.targets()}
@@ -610,7 +759,6 @@ class Pause:
             ):
                 return False
         self.saved = saved
-        self.started = _now()
         return all(_set_actions(*self._live(k), OFF) for k in saved)
 
     def paused(self) -> bool:
@@ -720,6 +868,27 @@ def _status_step(course_org: str, semester_org: str | None) -> Step:
     )
 
 
+def _drift(org: str, wanted: dict[str, dict[str, bytes]]) -> list[str]:
+    """`repo/path` for every file of `wanted` (`{repo: {path: bytes}}`) that `org` does
+    not hold byte for byte."""
+    out = []
+    for repo, want in wanted.items():
+        live = _files(org, repo)
+        out += [
+            f"{repo}/{p}" for p, body in want.items() if live.get(p) != blob_sha(body)
+        ]
+    return out
+
+
+def _no_drift(drift: list[str]) -> bool:
+    """The re-render's verify: nothing left differing, else each file named."""
+    if drift:
+        log_err(
+            f"{len(drift)} file(s) still differ from this checkout: {', '.join(drift)}"
+        )
+    return not drift
+
+
 def _schedule_clean(text: str | None, *, quiet: bool = False) -> bool:
     """`schedule.yml` read by this engine with no NOT_MIGRATED fault; each one found is
     named (unless `quiet`), for a person to fix by hand."""
@@ -754,6 +923,7 @@ class Semester:
         self.org, self.course = org, course_org
         self.people = ""
         self.pause = Pause(org, self.targets)
+        self.renamed_now: dict[str, str] = {}  # old -> new, renamed by this run
 
     def config(self) -> str:
         """The config repo under whichever name it has right now."""
@@ -780,12 +950,27 @@ class Semester:
                 return False
             if not _rename(self.org, old, new):
                 return False
+            self.renamed_now[old] = new
         return True
 
     def renamed(self) -> bool:
         """No repo left under an old name. A repo that never existed (a semester with
         no `welcome`) has nothing to rename."""
         return not self.renames_left()
+
+    def rename_verified(self) -> bool:
+        """Renamed, and each old name this run renamed redirects to its new one."""
+        if not self.renamed():
+            return False
+        stale = [
+            o for o, n in self.renamed_now.items() if not _redirects(self.org, o, n)
+        ]
+        for old in stale:
+            log_err(
+                f"{self.org}/{old} does not redirect to {self.renamed_now[old]} - old "
+                f"links to it are broken"
+            )
+        return not stale
 
     # layout -------------------------------------------------------------------
     def instructors_text(self, old: str) -> str | None:
@@ -835,18 +1020,25 @@ class Semester:
         return not (moves or files or deletes or old_pointer)
 
     def layout_plan(self) -> list[str]:
-        moves, _, deletes, old_pointer = self.layout_work()
+        moves, files, deletes, old_pointer = self.layout_work()
+        repo = self.config()
         out = [
-            f"move {len(moves)} record file(s) under {records.SYSTEM_DIR}/ (one commit)"
+            (
+                f"move {len(moves)} record file(s) under {records.SYSTEM_DIR}/ in "
+                f"{repo} (one commit)"
+            ),
+            *move_lines(moves, SEMESTER_MOVES),
         ]
         if OLD_PEOPLE_FILE in deletes:
             out.append(
                 f"{OLD_PEOPLE_FILE} -> {INSTRUCTORS_FILE} (one list, a role each)"
             )
-        out.append(f"write the course pointer to {records.path('pointer')}")
+        if records.path("pointer") in files:
+            out.append(f"write the course pointer to {records.path('pointer')}")
         samples = [p for p in deletes if p.endswith(SAMPLE_SUFFIX)]
         if samples:
             out.append(f"delete {len(samples)} *{SAMPLE_SUFFIX} file(s)")
+            out += [f"  {p}" for p in samples]
         if old_pointer:
             out.append(f"delete {OLD_POINTER_REPO}/{COURSE_CONFIG} (the old pointer)")
         return out
@@ -950,18 +1142,20 @@ class Semester:
             JOIN_REPO: join_files(self.org),
             ".github": profile_files(self.org, central_ref=ref),
         }
-        out = []
-        for repo, want in wanted.items():
-            live = _files(self.org, repo)
-            out += [
-                f"{repo}/{p}"
-                for p, body in want.items()
-                if live.get(p) != blob_sha(body)
-            ]
-        return out
+        return _drift(self.org, wanted)
+
+    def ready_to_render(self) -> bool:
+        """Every step before the re-render done: only then does this engine's render of
+        the semester (its schedule, its lock) read files that are there."""
+        return (
+            self.renamed()
+            and self.layout_done()
+            and self.keys_done()
+            and self.topic_done()
+        )
 
     def rerender_done(self) -> bool:
-        return self.renamed() and self.layout_done() and not self.drift()
+        return self.ready_to_render() and not self.drift()
 
     def rerender(self) -> bool:
         ref = central_ref_for(self.course)
@@ -983,7 +1177,7 @@ class Semester:
                     f"rename {o} -> {n}" for o, n in self.renames_left().items()
                 ],
                 do=self.rename,
-                verify=self.renamed,
+                verify=self.rename_verified,
                 rollback="rename each repo back in its Settings (the old name is free)",
             ),
             Step(
@@ -999,8 +1193,8 @@ class Semester:
                 done=self.keys_done,
                 plan=lambda: [
                     (
-                        f"{schedule.SCHEDULE_PATH}: cohort_dest_* -> semester_dest_*, "
-                        f"type -> kind on releases and events"
+                        f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: cohort_dest_* -> "
+                        f"semester_dest_*, type -> kind on releases and events"
                     )
                 ],
                 do=self.keys,
@@ -1020,13 +1214,26 @@ class Semester:
             Step(
                 "re-render",
                 done=self.rerender_done,
-                plan=lambda: ["re-write every SYSTEM-OWNED file that differs"],
+                plan=lambda: (
+                    [
+                        "re-write every SYSTEM-OWNED file that differs:",
+                        *(f"  {path}" for path in self.drift()),
+                    ]
+                    if self.ready_to_render()
+                    else [
+                        (
+                            "re-write every SYSTEM-OWNED file that differs (listed once "
+                            "the steps above have run)"
+                        )
+                    ]
+                ),
                 do=self.rerender,
-                verify=lambda: not self.drift(),
+                verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            self.pause.steps()[1],
+            # status.json before the unpause: re-enabled workflows never race it.
             _status_step(self.course, self.org),
+            self.pause.steps()[1],
         ]
 
 
@@ -1074,6 +1281,20 @@ class Course:
     def meta_text(self) -> tuple[str | None, str | None]:
         text = get_file_content(self.org, ".github", COURSE_CONFIG)
         return text, (course_config_keys(text) if text is not None else None)
+
+    def lost_values(self) -> list[str]:
+        """What stripping this course's old semester-defaults block would lose, each
+        value named for a person to carry by hand before the migration strips it."""
+        text, _ = self.meta_text()
+        lost = lost_semester_values(_yaml(text), policy.defaults())
+        for value in lost:
+            log_err(
+                f"{self.org}/.github/{COURSE_CONFIG}: `{value}` differs from the policy - "
+                f"carry it by hand into each live semester's {CONFIG_REPO}/"
+                f"{schedule.SCHEDULE_PATH} (`timezone:` / `archive: grace_days:`), then "
+                f"delete it from {COURSE_CONFIG} and run again. Nothing was written."
+            )
+        return lost
 
     def meta_done(self) -> bool:
         text, new = self.meta_text()
@@ -1154,6 +1375,13 @@ class Course:
         }
 
     def move_materials(self) -> bool:
+        """Every repo's moves checked before the first is written: a clash in one repo
+        must not land after another's commit."""
+        work = self.materials_moves()
+        if any(
+            refuse_clashes(self.org, r, _files(self.org, r), m) for r, m in work.items()
+        ):
+            return False
         return all(
             move_files(self.org, repo, moves, LAYOUT_COMMIT)
             for repo, moves in self.materials_moves().items()
@@ -1161,9 +1389,36 @@ class Course:
 
     # re-render ---------------------------------------------------------------
     def drift(self) -> list[str]:
-        want = seed.github_workflow_files(self.org, central_ref_for(self.org))
-        live = _files(self.org, ".github")
-        return [p for p, body in want.items() if live.get(p) != blob_sha(body)]
+        """Every file the course re-render (`seed.refresh`) writes that is not what this
+        checkout renders: the `.github` workflows, each content repo's release workflows
+        (and a materials repo's system files), each live template's hand-out workflow -
+        and a retired workflow still lying in a content repo or template."""
+        ref = central_ref_for(self.org)
+        semesters = discover_semesters(self.org)
+        templates = discover_assignment_repos(self.org)
+        assignments = [r["name"] for r in templates]
+
+        def hosted(repo: str, workflows: tuple[str, ...]) -> dict[str, bytes]:
+            return content_workflow_files(
+                semesters, assignments, repo, ref, workflows=workflows
+            )
+
+        wanted = {".github": seed.github_workflow_files(self.org, ref)}
+        for repo in discover_content_repos(self.org):
+            wanted[repo] = hosted(repo, RELEASE_WORKFLOWS)
+            if repo.startswith(MATERIALS_REPO_PREFIX):
+                wanted[repo] |= materials_system_files(self.org, repo)
+        for row in templates:
+            if not row.get("archived"):
+                wanted[row["name"]] = hosted(row["name"], TEMPLATE_WORKFLOWS)
+        retired = [
+            f"{repo}/{p} (retired)"
+            for repo in wanted
+            if repo != ".github"
+            for p in RETIRED_WORKFLOWS
+            if p in _files(self.org, repo)
+        ]
+        return _drift(self.org, wanted) + retired
 
     def rerender_done(self) -> bool:
         return self.registry_done() and not self.drift()
@@ -1198,7 +1453,8 @@ class Course:
                     (
                         f"move {len(self.dotgithub_moves())} file(s) under "
                         f"{records.SYSTEM_DIR}/"
-                    )
+                    ),
+                    *move_lines(self.dotgithub_moves(), COURSE_MOVES),
                 ],
                 do=lambda: move_files(
                     self.org, ".github", self.dotgithub_moves(), LAYOUT_COMMIT
@@ -1237,8 +1493,15 @@ class Course:
                 "materials files",
                 done=lambda: not self.materials_moves(),
                 plan=lambda: [
-                    f"{repo}: move {len(m)} system file(s) under {records.SYSTEM_DIR}/"
+                    line
                     for repo, m in self.materials_moves().items()
+                    for line in (
+                        (
+                            f"{repo}: move {len(m)} system file(s) under "
+                            f"{records.SYSTEM_DIR}/"
+                        ),
+                        *move_lines(m, MATERIALS_MOVES),
+                    )
                 ],
                 do=self.move_materials,
                 verify=lambda: not self.materials_moves(),
@@ -1247,13 +1510,25 @@ class Course:
             Step(
                 "re-render",
                 done=self.rerender_done,
-                plan=lambda: ["Refresh actions from this checkout"],
+                plan=lambda: (
+                    [
+                        "Refresh actions from this checkout; these files differ now:",
+                        *(f"  {path}" for path in self.drift()),
+                    ]
+                    if self.registry_done()
+                    else [
+                        (
+                            "Refresh actions from this checkout (the files are listed once "
+                            "the registry step has run)"
+                        )
+                    ]
+                ),
                 do=lambda: seed.refresh(self.org) == 0,
-                verify=lambda: not self.drift(),
+                verify=lambda: _no_drift(self.drift()),
                 rollback="the rollbacks of the steps above, in reverse",
             ),
-            self.pause.steps()[1],
             _status_step(self.org, None),
+            self.pause.steps()[1],
         ]
 
 
@@ -1286,6 +1561,8 @@ def preflight(org: str) -> Course | Semester | None:
             log_err(f"{org}/.github is archived - an archived course is never touched")
             return None
         target: Course | Semester = Course(org)
+        if target.lost_values():
+            return None
     elif topics & {OLD_SEMESTER_TOPIC, SEMESTER_TOPIC}:
         config = listing.get(CONFIG_REPO) or listing.get(OLD_CONFIG_REPO)
         if (
@@ -1313,10 +1590,16 @@ def preflight(org: str) -> Course | Semester | None:
         course_on = parent.pause.record() is None and all(
             _actions_enabled(o, r) for o, r in parent.targets()
         )
-        if not parent.work_done() or not (course_on or resuming):
+        if not parent.work_done() or parent.pause.record() is not None:
             log_err(
-                f"{course} is not fully migrated, or another migration under it is "
-                f"in flight - finish that first (run the migration on {course}), then "
+                f"{course} is not fully migrated - finish that first: "
+                f"`python -m dsl_course.migrate {course} --no-preview`, then this semester"
+            )
+            return None
+        if not (course_on or resuming):
+            log_err(
+                f"another semester's migration under {course} is in flight (the course's "
+                f"Actions are off, with no pause record of {org}'s) - let it finish, then "
                 f"this semester"
             )
             return None
@@ -1374,15 +1657,16 @@ def main() -> int:
     parser.add_argument("org", help="The course org or semester org to migrate")
     add_preview_flag(parser, "Print the plan and write nothing (default).")
     args = parser.parse_args()
+    _forget()
     try:
         target = preflight(args.org)
+        if target is None:
+            return 1
+        course = target.course if isinstance(target, Semester) else args.org
+        ref = central_ref_for(course)
     except RuntimeError as exc:
         log_err(f"preflight could not read {args.org}: {exc}")
         return 1
-    if target is None:
-        return 1
-    course = target.course if isinstance(target, Semester) else args.org
-    ref = central_ref_for(course)
     log(f"  central ref of the course: {ref}")
     _warn_drift(course, ref)
     return run(args.org, target.steps(), args.preview, target.pause)

@@ -10,7 +10,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from dsl_course import migrate, records, repos
+from dsl_course import discovery, migrate, records, repos
+from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
     INSTRUCTORS_FILE,
@@ -20,6 +21,7 @@ from dsl_course.course import (
     OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
 )
+from dsl_course.faults import NOT_MIGRATED
 from dsl_course.gh_contents import blob_sha
 
 SEM, COURSE = "Sem-f2026", "Course-E1"
@@ -87,7 +89,12 @@ class FakeGitHub:
         self.paused_at_commit: list[bool] = []
         self.puts: list[tuple[str, str, bool]] = []
         self.fail_rename = False
+        self.redirect_renames = True  # GitHub's 301 from a renamed repo's old name
         self.run_after_pause: tuple[str, str] | None = None
+        self.clock = "Thu, 24 Sep 2026 10:00:00 GMT"  # GitHub's, in its Date header
+        self.central_runs: dict[
+            str, list[str]
+        ] = {}  # the toolkit's: workflow -> states
 
     def add(self, org, name, files=None, *, topics=(), archived=False, template=False,
             branches=None):  # fmt: skip
@@ -152,6 +159,12 @@ class FakeGitHub:
     ):
         tree = self.tree(org, repo, branch or "main")
         before = dict(tree)
+        # gh_contents.move_files' own rule: a target that differs refuses the commit.
+        if any(
+            old in tree and new in tree and tree[old] != tree[new]
+            for old, new in moves.items()
+        ):
+            return False
         for old, new in moves.items():
             if old in tree:
                 tree.setdefault(new, tree[old])
@@ -185,9 +198,17 @@ class FakeGitHub:
         if parts[0] != "repos":
             raise AssertionError(f"unexpected gh call {args}")
         org, name = parts[1], parts[2]
+        if f"{org}/{name}" == migrate.CENTRAL and parts[3:5] == [
+            "actions",
+            "workflows",
+        ]:
+            state = query.split("=", 1)[1]
+            return 0, str(self.central_runs.get(parts[5], []).count(state))
         if self._repo(org, name) is None:
             return 1, "gh: Not Found (HTTP 404)"
         key = (org, self._name(org, name))
+        if "--include" in args:
+            return 0, f"HTTP/2.0 200 OK\nDate: {self.clock}\n\n{{}}"
         if parts[3:] == ["actions", "permissions"]:
             if method == "PUT":
                 on = fields["enabled"] == "true"
@@ -218,7 +239,8 @@ class FakeGitHub:
                 return 1, "HTTP 403: Forbidden"
             new = (org, fields["name"])
             self.repos[new] = self.repos.pop(key)
-            self.redirects[key] = fields["name"]
+            if self.redirect_renames:
+                self.redirects[key] = fields["name"]
             if key in self.actions:  # a repo keeps its settings across a rename
                 self.actions[new] = self.actions.pop(key)
             return 0, ""
@@ -245,11 +267,62 @@ def fake(monkeypatch):
     # The checkout is the pinned ref, unless a test says otherwise.
     monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(migrate, "_LISTINGS", {})
     return f
 
 
 def _render(f, org, repo, files):
     f.move_files(org, repo, {}, "ci: refresh", files=files)
+    return 0
+
+
+MATERIALS_SYSTEM = {".system/MAINTAINING.md": b"g", ".system/SYLLABUS.md.sample": b"s"}
+
+
+def _hosted(repo, workflows):
+    return {path: f"{repo} {path}".encode() for path in workflows}
+
+
+def _course_renders(fake, monkeypatch):
+    """What the course re-render writes, read off the fake org, for `Course.drift` (the
+    names migrate imports) and for the stubbed `seed.refresh` (`_render_course`)."""
+    monkeypatch.setattr(
+        migrate.seed, "github_workflow_files", lambda org, ref: COURSE_WORKFLOWS
+    )
+    monkeypatch.setattr(migrate, "discover_semesters", lambda org: [SEM])
+    monkeypatch.setattr(
+        migrate,
+        "discover_content_repos",
+        lambda org: sorted(
+            r["name"]
+            for r in fake.list_org_repos(org)
+            if r["name"].startswith("course-materials-")
+        ),
+    )
+    monkeypatch.setattr(
+        migrate,
+        "discover_assignment_repos",
+        lambda org: [r for r in fake.list_org_repos(org) if r["isTemplate"]],
+    )
+    monkeypatch.setattr(
+        migrate,
+        "content_workflow_files",
+        lambda sems, names, repo, ref, *, workflows: _hosted(repo, workflows),
+    )
+    monkeypatch.setattr(
+        migrate, "materials_system_files", lambda org, repo: MATERIALS_SYSTEM
+    )
+
+
+def _render_course(fake, org):
+    _render(fake, org, ".github", COURSE_WORKFLOWS)
+    for row in fake.list_org_repos(org):
+        name = row["name"]
+        if name.startswith("course-materials-"):
+            files = {**_hosted(name, migrate.RELEASE_WORKFLOWS), **MATERIALS_SYSTEM}
+            _render(fake, org, name, files)
+        elif row["isTemplate"] and not row["archived"]:
+            _render(fake, org, name, _hosted(name, migrate.TEMPLATE_WORKFLOWS))
     return 0
 
 
@@ -260,12 +333,11 @@ def _migrated_course(fake, monkeypatch):
         {"semesters.yml": b"semesters:\n- Sem-f2026\n", **COURSE_WORKFLOWS},
         topics=["dsl-course-hub"],
     )
-    fake.add(
-        COURSE, "course-materials-f2026", {".system/MAINTAINING.md": b"g", **WORKFLOW}
-    )
-    monkeypatch.setattr(
-        migrate.seed, "github_workflow_files", lambda org, ref: COURSE_WORKFLOWS
-    )
+    fake.add(COURSE, "course-materials-f2026", WORKFLOW)
+    _course_renders(fake, monkeypatch)
+    _render_course(fake, COURSE)
+    fake.commits.clear()
+    fake.paused_at_commit.clear()
 
 
 @pytest.fixture
@@ -368,7 +440,16 @@ def test_a_preview_prints_the_plan_and_writes_nothing(
     out = capsys.readouterr().out
     assert f"rename {OLD_CONFIG_REPO} -> {CONFIG_REPO}" in out
     assert f"rename {OLD_JOIN_REPO} -> {JOIN_REPO}" in out
-    assert "move 10 record file(s) under .system/" in out
+    assert f"move 10 record file(s) under .system/ in {OLD_CONFIG_REPO}" in out
+    # Per step, the writes it would make: each move, each delete, each re-rendered file -
+    # a record folder by its file count, never by the names inside it.
+    assert "-   assignments.lock.yml -> .system/assignments.lock.yml" in out
+    assert "-   autograde/ -> .system/autograde/ (2 file(s))" in out
+    assert "someone" not in out
+    assert "-   grading_sheets/a1.yml.sample" in out
+    # The re-render reads the migrated layout: listed only once the steps above have run.
+    assert "differs (listed once the steps above have run)" in out
+    assert "unpause automation:\n    - restore the recorded Actions settings" in out
     # The pause names every repo whose workflows act on the semester, the course's too.
     assert f"disable Actions in {SEM}/{OLD_CONFIG_REPO}, {SEM}/{OLD_JOIN_REPO}" in out
     assert f"{SEM}/sem-f2026.github.io, {COURSE}/.github" in out
@@ -414,10 +495,13 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     assert "    kind: lecture" in schedule and "    kind: exam" in schedule
     assert fake._repo(SEM, ".github")["topics"] == [SEMESTER_TOPIC]
     # The pause record is written first, while everything still runs; every commit after
-    # it landed with Actions off everywhere, until the restore (the record's removal and
-    # the status check come after it); and all are back on now.
+    # it - status.json included - landed with Actions off everywhere, until the restore
+    # (the record's removal comes after it); and all are back on now.
     assert fake.commits[0][3] == migrate.PAUSE_COMMIT
-    assert all(fake.paused_at_commit[1:-2]) and not any(fake.paused_at_commit[-2:])
+    assert fake.commits[-2][3] == "ci: refresh" and fake.commits[-1][3] == (
+        migrate.PAUSE_COMMIT
+    )
+    assert all(fake.paused_at_commit[1:-1]) and not fake.paused_at_commit[-1]
     assert all(fake.enabled(*key) for key in fake.workflow_repos())
     assert semester == ["join", "config", "profile", "status"]
     layout = [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT]
@@ -457,6 +541,16 @@ def test_a_failed_step_stops_and_says_the_org_is_still_paused(
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT] and semester == []
 
 
+def test_a_rename_whose_old_name_does_not_redirect_stops(
+    fake, semester, monkeypatch, capsys
+):
+    fake.redirect_renames = False
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert f"{SEM}/{OLD_CONFIG_REPO} does not redirect to {CONFIG_REPO}" in err
+    assert "rename repos did not verify - stopped here" in err
+
+
 def test_a_crash_mid_run_says_the_org_is_still_paused(
     fake, semester, monkeypatch, capsys
 ):
@@ -489,11 +583,74 @@ def test_a_run_that_starts_after_the_pause_stops_it(
     assert [c[3] for c in fake.commits] == [migrate.PAUSE_COMMIT]
 
 
-def test_a_run_in_progress_refuses_the_migration(fake, semester, monkeypatch, capsys):
-    fake.runs[(SEM, OLD_JOIN_REPO)] = [("2026-09-24T09:00:00Z", "in_progress")]
+def test_the_pause_starts_at_githubs_clock_not_the_laptops(
+    fake, semester, monkeypatch, capsys
+):
+    # A run created seconds after GitHub's pause moment: a laptop clock a day ahead would
+    # have counted it as before the pause.
+    fake.runs[(COURSE, ".github")] = [("2026-09-24T10:00:05Z", "completed")]
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert (
+        f"a run started after the pause in {COURSE}/.github" in capsys.readouterr().err
+    )
+
+
+def test_an_unreadable_github_clock_stops_the_pause(
+    fake, semester, monkeypatch, capsys
+):
+    fake.clock = "not a date"
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert "could not read GitHub's clock" in err
+    assert fake.commits == [] and fake.puts == []
+
+
+@pytest.mark.parametrize("state", migrate.LIVE_RUN_STATES)
+def test_a_run_not_yet_finished_refuses_the_migration(
+    fake, semester, monkeypatch, capsys, state
+):
+    fake.runs[(SEM, OLD_JOIN_REPO)] = [("2026-09-24T09:00:00Z", state)]
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     assert f"queued or running in {SEM}/{OLD_JOIN_REPO}" in capsys.readouterr().err
     assert fake.commits == [] and fake.puts == []
+
+
+@pytest.mark.parametrize("workflow", migrate.CENTRAL_REFRESHERS)
+def test_any_central_deploy_in_flight_refuses_the_migration(
+    fake, semester, monkeypatch, capsys, workflow
+):
+    # Whatever tier the course runs: a deploy may have picked its orgs before a flip.
+    fake.central_runs[workflow] = ["waiting"]
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert f"{migrate.CENTRAL} ({workflow})" in capsys.readouterr().err
+    assert fake.commits == [] and fake.puts == []
+
+
+def test_only_the_re_render_left_lists_its_files(fake, semester, monkeypatch, capsys):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    fake.tree(SEM, JOIN_REPO)[".github/workflows/onboard.yml"] = b"stale"
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM) == 0
+    assert f"-   {JOIN_REPO}/.github/workflows/onboard.yml" in capsys.readouterr().out
+
+
+def test_a_status_that_fails_twice_says_both_times_the_org_is_paused(
+    fake, semester, monkeypatch, capsys
+):
+    bad = json.dumps({"semester": {}, "problems": [{"code": NOT_MIGRATED}]}).encode()
+    monkeypatch.setattr(
+        migrate.status,
+        "refresh",
+        lambda course, sem=None: _render(
+            fake, sem, CONFIG_REPO, {records.path("status"): bad}
+        ),
+    )
+    for _ in range(2):
+        assert _main(monkeypatch, SEM, "--no-preview") == 1
+        err = capsys.readouterr().err
+        assert "status did not verify - stopped here" in err
+        assert f"Actions are still DISABLED in: {SEM}/{OLD_CONFIG_REPO}" in err
+    assert not fake.enabled(SEM, CONFIG_REPO)
 
 
 def test_an_archived_semester_is_never_touched(fake, semester, monkeypatch, capsys):
@@ -513,7 +670,12 @@ def test_a_semester_waits_for_its_whole_course(
         # Off with no record of this semester's: another run holds the course.
         fake.actions[(COURSE, ".github")] = {"enabled": False, "allowed_actions": None}
     assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert f"{COURSE} is not fully migrated" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    if unfinished == "registry":
+        assert f"{COURSE} is not fully migrated" in err
+        assert f"`python -m dsl_course.migrate {COURSE} --no-preview`" in err
+    else:
+        assert f"another semester's migration under {COURSE} is in flight" in err
     assert fake.puts == [] and fake.enabled(COURSE, "course-materials-f2026")
 
 
@@ -529,6 +691,7 @@ def test_a_repo_that_is_not_there_reads_as_empty_not_as_an_error(fake, semester)
     assert migrate._files(SEM, CONFIG_REPO) == {}
     fake.list_org_repos = lambda org: [{"name": CONFIG_REPO, "archived": False}]
     migrate.list_org_repos = fake.list_org_repos
+    migrate._forget()
     assert migrate._files(SEM, CONFIG_REPO) == {}
 
 
@@ -558,6 +721,20 @@ def test_an_unconvertible_people_yml_stops_before_anything_is_written(
     fake.tree(SEM, OLD_CONFIG_REPO)["people.yml"] = b"people:\n  course_admins: []\n"
     assert _main(monkeypatch, SEM, "--no-preview") == 1
     assert "cannot be converted faithfully" in capsys.readouterr().err
+    assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
+
+
+def test_a_record_already_at_its_new_path_with_other_bytes_stops_the_layout(
+    fake, semester, monkeypatch, capsys
+):
+    tree = fake.tree(SEM, OLD_CONFIG_REPO)
+    tree[".system/autograde/a1/_graded.json"] = b'{"ok": false}\n'
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    assert "layout did not verify - stopped here" in capsys.readouterr().err
+    tree = fake.tree(SEM, CONFIG_REPO)
+    # Both versions kept, nothing else of the layout written.
+    assert tree["autograde/a1/_graded.json"] == b'{"ok": true}\n'
+    assert tree[".system/autograde/a1/_graded.json"] == b'{"ok": false}\n'
     assert [c for c in fake.commits if c[3] == migrate.LAYOUT_COMMIT] == []
 
 
@@ -606,18 +783,19 @@ def course(fake, monkeypatch):
     fake.add(
         COURSE,
         "course-materials-f2026",
-        {"MAINTAINING.md": b"guide", "SYLLABUS.md.sample": b"s", "SYLLABUS.md": b"x"},
+        {
+            "MAINTAINING.md": b"guide",
+            "SYLLABUS.md.sample": b"s",
+            "SYLLABUS.md": b"x",
+            migrate.RELEASE_WORKFLOWS[0]: b"old",
+        },
     )
-    monkeypatch.setattr(
-        migrate.seed, "github_workflow_files", lambda org, ref: COURSE_WORKFLOWS
-    )
+    _course_renders(fake, monkeypatch)
     calls: list[str] = []
     monkeypatch.setattr(
         migrate.seed,
         "refresh",
-        lambda org: (
-            calls.append("refresh") or _render(fake, org, ".github", COURSE_WORKFLOWS)
-        ),
+        lambda org: calls.append("refresh") or _render_course(fake, org),
     )
     monkeypatch.setattr(
         migrate.status,
@@ -645,6 +823,9 @@ def test_a_course_preview_writes_nothing(fake, course, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "cohort-courses-pages.yml -> semesters.yml" in out
     assert "assignment-1-f2026@solution/grading_config.yml: format: -> formats:" in out
+    assert f"-   .github/.last-refresh -> {records.path('heartbeat')}" in out
+    assert "-   MAINTAINING.md -> .system/MAINTAINING.md" in out
+    assert "(the files are listed once the registry step has run)" in out
     assert f"disable Actions in {COURSE}/.github, {COURSE}/assignment-1-f2026" in out
     assert _state(fake) == before and fake.puts == [] and course == []
 
@@ -671,8 +852,11 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         ".system/MAINTAINING.md",
         ".system/SYLLABUS.md.sample",
         "SYLLABUS.md",
+        *migrate.RELEASE_WORKFLOWS,
     }
-    assert all(fake.paused_at_commit[1:-2]) and fake.enabled(COURSE, ".github")
+    template = fake.tree(COURSE, "assignment-1-f2026")
+    assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
+    assert all(fake.paused_at_commit[1:-1]) and fake.enabled(COURSE, ".github")
     assert course == ["refresh", "status"]
 
     commits, puts = list(fake.commits), list(fake.puts)
@@ -681,6 +865,106 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     assert capsys.readouterr().out.count("already migrated") == 18
     assert course == [] and fake.commits == commits and fake.puts == puts
+
+
+def test_a_course_with_no_workflow_repo_passes_the_pause(
+    fake, course, monkeypatch, capsys
+):
+    for repo in (".github", "assignment-1-f2026", "course-materials-f2026"):
+        tree = fake.tree(COURSE, repo)
+        for path in [p for p in tree if p.startswith(".github/workflows/")]:
+            del tree[path]
+    assert fake.workflow_repos() == []  # genuinely nothing to pause
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert migrate.PAUSE_RECORD not in fake.tree(COURSE, ".github")
+    assert [c[3] for c in fake.commits].count(migrate.PAUSE_COMMIT) == 2
+    assert course == ["refresh", "status"]
+
+
+def test_an_unmigrated_course_is_planned_with_the_real_registry_reader(
+    fake, course, monkeypatch, capsys
+):
+    # The registry read the engine does (NOT_MIGRATED on the old file), over the fake:
+    # nothing that needs the new registry may run before the registry step.
+    monkeypatch.setattr(discovery, "get_file_content", fake.get_file_content)
+    monkeypatch.setattr(migrate, "discover_semesters", discovery.discover_semesters)
+    monkeypatch.setattr(
+        migrate.seed,
+        "github_workflow_files",
+        lambda org, ref: discovery.discover_semesters(org) and COURSE_WORKFLOWS,
+    )
+    assert _main(monkeypatch, COURSE) == 0
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    assert "NOT_MIGRATED" not in capsys.readouterr().err
+
+
+def test_a_materials_clash_in_one_repo_writes_no_other(
+    fake, course, monkeypatch, capsys
+):
+    fake.add(
+        COURSE,
+        "course-materials-g2026",
+        {"MAINTAINING.md": b"one", ".system/MAINTAINING.md": b"two"},
+    )
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert "materials files did not verify - stopped here" in err
+    assert "course-materials-g2026: 1 move(s) onto a file that differs" in err
+    assert "MAINTAINING.md" in fake.tree(COURSE, "course-materials-f2026")
+    assert not [c for c in fake.commits if c[1].startswith("course-materials-")]
+
+
+def test_the_course_re_render_is_checked_in_every_repo_it_writes(
+    fake, course, monkeypatch, capsys
+):
+    # A refresh that re-renders `.github` only: the content repo and the template still
+    # differ, and a retired workflow is still in the template - the verify names each.
+    fake.tree(COURSE, "assignment-1-f2026")[migrate.RETIRED_WORKFLOWS[0]] = b"old"
+    monkeypatch.setattr(
+        migrate.seed,
+        "refresh",
+        lambda org: _render(fake, org, ".github", COURSE_WORKFLOWS),
+    )
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert "re-render did not verify" in err
+    assert f"course-materials-f2026/{migrate.RELEASE_WORKFLOWS[0]}" in err
+    assert "course-materials-f2026/.system/MAINTAINING.md" in err
+    assert f"assignment-1-f2026/{migrate.TEMPLATE_WORKFLOWS[0]}" in err
+    assert f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired)" in err
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "cohort_defaults:\n  timezone: America/New_York\n",
+        "semester_defaults:\n  archive:\n    auto: true\n    grace_days: 30\n",
+    ],
+    ids=["timezone", "grace-days"],
+)
+def test_a_semester_default_that_differs_from_the_policy_stops_before_any_write(
+    fake, course, monkeypatch, capsys, block
+):
+    tree = fake.tree(COURSE, ".github")
+    tree["dsl-course.yml"] = f"course_name: X\n{block}".encode()
+    before = _state(fake)
+    assert _main(monkeypatch, COURSE, "--no-preview") == 1
+    err = capsys.readouterr().err
+    assert "differs from the policy - carry it by hand" in err
+    assert "semester-config/schedule.yml" in err
+    assert _state(fake) == before and fake.commits == [] and fake.puts == []
+
+
+def test_a_semester_default_equal_to_the_policy_is_stripped(fake, course, monkeypatch):
+    zone = migrate.policy.defaults()["timezone"]
+    grace = migrate.policy.defaults()["archive"]["grace_days"]
+    fake.tree(COURSE, ".github")["dsl-course.yml"] = (
+        f"course_name: X\nsemester_defaults:\n  timezone: {zone}\n"
+        f"  archive:\n    auto: false\n    grace_days: {grace}\n"
+    ).encode()
+    assert _main(monkeypatch, COURSE, "--no-preview") == 0
+    meta = yaml.safe_load(fake.tree(COURSE, ".github")["dsl-course.yml"])
+    assert meta == {"course_name": "X"}
 
 
 def test_a_registry_already_renamed_but_keyed_the_old_way_is_rewritten(
@@ -785,6 +1069,68 @@ def test_a_ctrl_c_after_the_pause_names_the_paused_repos(
     err = capsys.readouterr().err
     assert f"Actions are still DISABLED in: {SEM}/{OLD_CONFIG_REPO}, " in err
     assert f"{COURSE}/.github" in err and migrate.PAUSE_RECORD in err
+
+
+def test_a_preview_lists_each_org_once(fake, semester, monkeypatch):
+    listed: list[str] = []
+    real = migrate.list_org_repos
+    monkeypatch.setattr(
+        migrate, "list_org_repos", lambda org: listed.append(org) or real(org)
+    )
+    assert _main(monkeypatch, SEM) == 0
+    assert sorted(listed) == [COURSE, SEM]
+
+
+def test_a_junk_central_ref_is_reported_not_raised(fake, course, monkeypatch, capsys):
+    # A course org's preflight reads no ref: the first read of it is main's own.
+    def junk(org):
+        raise MissingCentralRef("central_ref `nope` is not a ref of the toolkit")
+
+    monkeypatch.setattr(migrate, "central_ref_for", junk)
+    assert migrate.preflight(COURSE) is not None
+    assert _main(monkeypatch, COURSE) == 1
+    assert "central_ref `nope` is not a ref" in capsys.readouterr().err
+
+
+def test_the_pointer_is_planned_only_when_it_will_be_written(
+    fake, semester, monkeypatch, capsys
+):
+    fake.tree(SEM, OLD_CONFIG_REPO)[records.path("pointer")] = b"course: C\n"
+    assert _main(monkeypatch, SEM) == 0
+    assert "write the course pointer" not in capsys.readouterr().out
+
+
+def test_a_type_line_inside_a_block_scalar_is_prose_and_stays():
+    text = (
+        "releases:\n"
+        "  s1:\n"
+        "    type: lecture\n"
+        "    details: >-\n"
+        "      Bring a laptop.\n"
+        "      type: whatever you like\n"
+        "\n"
+        "      cohort_dest_repo: said in prose\n"
+        "    event_datetime: 2026-10-01T09:00\n"
+        "events:\n"
+        "  - notes: |  # a list entry\n"
+        "      type: exam\n"
+        "    type: exam\n"
+    )
+    assert migrate.schedule_keys(text) == (
+        "releases:\n"
+        "  s1:\n"
+        "    kind: lecture\n"
+        "    details: >-\n"
+        "      Bring a laptop.\n"
+        "      type: whatever you like\n"
+        "\n"
+        "      cohort_dest_repo: said in prose\n"
+        "    event_datetime: 2026-10-01T09:00\n"
+        "events:\n"
+        "  - notes: |  # a list entry\n"
+        "      type: exam\n"
+        "    kind: exam\n"
+    )
 
 
 def test_a_checkout_that_is_not_the_pinned_ref_is_named_by_file(
